@@ -195,6 +195,7 @@
     <button class="step" data-p="library"><span class="n">2</span><span><b>보관함</b><span class="d">받은 영상 · 촬영 원본</span></span><span class="count" id="libCount"></span></button>
     <button class="step" data-p="points"><span class="n">3</span><span><b>편집점</b><span class="d">대사 · 컷 · 하이라이트</span></span></button>
     <button class="step" data-p="cut"><span class="n">4</span><span><b>편집실</b><span class="d">가편집 자동 세팅</span></span></button>
+    <button class="step" data-p="thumb"><span class="n">5</span><span><b>썸네일</b><span class="d">자동 후보 · 누끼</span></span></button>
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
@@ -252,6 +253,11 @@
       <div class="bar"><div class="sp"></div><button class="btn" id="btnOpenOut">완성본 폴더</button></div>
       <div class="grid" id="edList"></div>
       <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
+    </section>
+    <section class="panel" id="p-thumb">
+      <div class="phead"><div><h1>썸네일</h1><p>영상에서 선명한 장면을 골라 후보를 자동으로 만들어요. 고른 후보를 포토샵처럼 고치고(글자·도형·누끼), 유튜브용 이미지로 저장해요.</p></div></div>
+      <div class="grid" id="thList"></div>
+      <div class="card empty" id="thEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
     </section>
   </div>
 </div>
@@ -347,7 +353,7 @@ function renderLocal() {
   document.querySelectorAll(".lchk").forEach(c => c.onchange = sync);
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
-  renderEdList();
+  renderEdList(); renderThList();
   if (remote.length) renderRemote();
   sync();
 }
@@ -393,6 +399,19 @@ $("btnCopy").onclick = async () => {
 };
 
 /* 4. 러프컷 */
+function renderThList() {
+  const list = state.local;
+  $("thEmpty").style.display = list.length ? "none" : "block";
+  const key = JSON.stringify(list.map(v => v.name));
+  if ($("thList").dataset.key === key) return;
+  $("thList").dataset.key = key;
+  $("thList").innerHTML = list.map(v => { const id = ytId(v.name); return `
+    <div class="vid" data-th="${esc(v.name)}">
+      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">썸네일 만들기 →</div></div>
+    </div>`; }).join("");
+  document.querySelectorAll("[data-th]").forEach(el => el.onclick = () => { location.href = "/thumb?name=" + encodeURIComponent(el.dataset.th); });
+}
 function renderEdList() {
   const list = state.local.filter(v => v.analyzed);
   $("edEmpty").style.display = list.length ? "none" : "block";

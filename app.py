@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import core
 import editor
+import thumb
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
 LOG, JOB = [], {"name": None, "result": None, "error": None}
@@ -191,6 +192,22 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path == "/":
             return self._send(200, (core.APP_DIR / "ui.html").read_bytes(), "text/html; charset=utf-8")
+        if u.path == "/thumb":
+            return self._send(200, (core.APP_DIR / "thumb.html").read_bytes(), "text/html; charset=utf-8")
+        if u.path == "/frame":
+            p = thumb.grab(q["name"][0], float(q["t"][0]))
+            return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path.startswith("/asset/"):
+            p = (thumb.ASSETS / Path(u.path).name).resolve()
+            ctype = "image/png" if p.suffix == ".png" else "image/jpeg"
+            return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/thumb/open":
+            n = q["name"][0]
+            rec = editor.recommend(n)
+            return self._send(200, {"docs": thumb.load_docs(n), "hooks": [editor._hook(r) for r in rec["shorts"]],
+                                    "keywords": sorted({k for r in rec["shorts"] for k in r["keywords"]}),
+                                    "title": n, "info": editor.media_info(n),
+                                    "cached": (core.adir(n) / "frames" / "candidates.json").exists()})
         if u.path == "/editor":
             return self._send(200, (core.APP_DIR / "editor.html").read_bytes(), "text/html; charset=utf-8")
         if u.path == "/media":
@@ -249,6 +266,32 @@ class Handler(BaseHTTPRequestHandler):
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
+        if path == "/api/thumb/frames":
+            ok = start_job("장면 고르기", lambda: thumb.frame_candidates(b["name"]))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path == "/api/thumb/cut":
+            def do_cut():
+                src = b["src"]
+                if src.startswith("/frame"):
+                    qq = parse_qs(urlparse(src).query)
+                    sp = thumb.grab(qq["name"][0], float(qq["t"][0]))
+                else:
+                    sp = (thumb.ASSETS / Path(urlparse(src).path).name).resolve()
+                out = thumb.remove_bg(sp, b.get("kind", "hq"))
+                log("  누끼 완료")
+                return {"cut": thumb.asset_url(out), "src": src}
+            ok = start_job("누끼 따기", do_cut)
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path == "/api/thumb/upload":
+            ext = "png" if b["data"].startswith("data:image/png") else "jpg"
+            return self._send(200, {"url": thumb.asset_url(thumb.save_upload(b["data"], ext))})
+        if path == "/api/thumb/save":
+            thumb.save_docs(b["name"], b["docs"])
+            return self._send(200, {"ok": True})
+        if path == "/api/thumb/export":
+            out = thumb.export_image(b["name"], b["data"], b.get("fmt", "jpg"), b.get("label", "썸네일"))
+            log(f"썸네일 저장 · {out.name}")
+            return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/edit/save":
             editor.save_project(b["name"], b["project"])
             return self._send(200, {"ok": True})

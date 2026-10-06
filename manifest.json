@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
-  "notes": "자동 가편집, 쇼츠 화면 구성(박스·블러·원본 자르기), 도형, 대사 단위 컷 편집",
+  "version": "1.5.0",
+  "notes": "썸네일 도구 추가 (자동 후보·포토샵식 편집·누끼)",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }

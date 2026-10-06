@@ -197,6 +197,7 @@
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)">↶</button>
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
     <button class="ic" id="help" title="단축키">⌨</button>
+    <button class="btn" id="toThumb" title="이 영상으로 썸네일 만들기">썸네일 만들기</button>
     <span class="pill" id="busy"><span id="busyTxt">내보내는 중</span><span class="bar"><i id="busyBar"></i></span><span id="busyPct"></span></span>
     <button class="btn pri" id="exportBtn">내보내기</button>
   </div>
@@ -1080,6 +1081,7 @@ $("bBack").onclick = () => { pause(); seek(T - 1 / FPS); }; $("bFwd").onclick = 
 $("bPrevEdit").onclick = () => { const p = edits().filter(t => t < T - 0.05); seek(p.length ? p[p.length - 1] : 0); };
 $("bNextEdit").onclick = () => { const n = edits().find(t => t > T + 0.05); if (n !== undefined) seek(n); };
 $("undo").onclick = undo; $("redo").onclick = redo;
+$("toThumb").onclick = () => { clearTimeout(saveTimer); fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, project: P }) }).then(() => location.href = "/thumb?name=" + encodeURIComponent(NAME)); };
 $("help").onclick = () => $("helpModal").classList.add("show"); $("helpClose").onclick = () => $("helpModal").classList.remove("show");
 $("back").onclick = () => { clearTimeout(saveTimer); fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, project: P }) }).then(() => location.href = "/"); };
 document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit(); S.format = b.dataset.v; changed(); layoutFrame(); });
