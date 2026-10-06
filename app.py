@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import core
 import editor
+import qa
 import style
 import thumb
 
@@ -166,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
         if rng and rng.startswith("bytes="):
             a, _, b = rng[6:].partition("-")
             start = int(a) if a else max(0, size - int(b))
-            end = int(b) if a and b else size - 1
+            end = min(int(b) if a and b else size - 1, start + (8 << 20) - 1)  # 8MB씩: 편집실이 영상 여러 개를 열어도 연결이 막히지 않게
             self.send_response(206)
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         else:
@@ -225,10 +226,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/thumbs.jpg":
             p = core.adir(q["name"][0]) / "thumbs2.jpg"
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
-        if u.path == "/api/edit/file":  # 편집실 미디어 (보관함 영상·가져온 음악/이미지)
+        if u.path == "/api/edit/file":  # 편집실 미디어 (보관함 영상·가져온 음악/이미지, proxy=1 이면 미리보기 파일)
             p = editor.media_path(q["f"][0], q.get("src", ["videos"])[0]).resolve()
             if not p.exists() or p.parent not in (core.VIDEOS.resolve(), editor.ASSETS.resolve()):
                 return self._send(404, {"error": "not found"})
+            if q.get("proxy") and editor.proxy_path(p.name, q.get("src", ["videos"])[0]).exists():
+                return self._file(editor.proxy_path(p.name, q.get("src", ["videos"])[0]), "video/mp4")
             return self._file(p, mimetypes.guess_type(p.name)[0] or "application/octet-stream")
         if u.path == "/api/edit/media":
             try:
@@ -236,10 +239,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"error": f"미디어를 열지 못했어요 · {e}"})
         if u.path == "/api/edit/thumbs.jpg":
-            p = editor.thumbs_file(q["f"][0], q.get("src", ["videos"])[0])
+            f, src = q["f"][0], q.get("src", ["videos"])[0]
+            p = editor.thumbs_file(f, src)
+            if not p.exists() and editor.media_path(f, src).exists() and Path(f).suffix.lower() not in editor.AUDIO_EXTS:
+                editor.thumbs(f, src)  # 처음 보는 미디어는 그 자리에서 만듦
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/edit/library":
             return self._send(200, editor.library())
+        if u.path == "/api/edit/backups":
+            return self._send(200, {"backups": editor.backups(q["name"][0])})
         if u.path == "/api/edit/autoseq":
             n = q["name"][0]
             return self._send(200, {"sequences": editor.auto_sequences(n, editor.media_info(n))})
@@ -329,9 +337,35 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path in ("/api/edit/restore", "/api/edit/freeze"):
+            try:
+                if path == "/api/edit/restore":
+                    return self._send(200, {"project": editor.restore_backup(b["name"], b["file"])})
+                return self._send(200, editor.freeze_frame(b.get("src", "videos"), b["file"], float(b["t"])))
+            except Exception as e:
+                return self._send(400, {"error": str(e)})
+        if path == "/api/edit/qa":  # 내보낸 영상 자동 검수
+            f = (core.OUT / Path(b["file"]).name).resolve()
+            if core.OUT.resolve() not in f.parents or not f.exists():
+                return self._send(404, {"ok": False, "error": "검수할 파일을 찾지 못했어요"})
+            ok = start_job("영상 검수", lambda: qa.check_video(f, b.get("format")))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path == "/api/edit/proxy":
+            ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/edit/cancel":
             editor.cancel_export()
             return self._send(200, {"ok": True})
+        if path == "/api/edit/autoseq":  # 배운 스타일로 자동 가편집 (새 편집본으로 추가)
+            n, sname = b["name"], b.get("style")
+            st = next((x for x in style.list_styles() if x["name"] == sname), None)
+            if sname and not st:
+                return self._send(404, {"error": "스타일을 찾지 못했어요"})
+            kinds = tuple(b.get("kinds") or ("long", "shorts"))
+            seqs = editor.auto_sequences(n, editor.media_info(n), st["params"] if st else None, kinds)
+            for q in seqs:
+                q["name"] = f"{sname} 스타일 가편집" + ("" if q["format"] == "long" else " · " + q["name"]) if sname else q["name"]
+            return self._send(200, {"sequences": seqs, "params": st["params"] if st else None})
         if path == "/api/open":
             try:
                 open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])
