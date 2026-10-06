@@ -2268,7 +2268,8 @@ async function renderRec() {
   });
   $("recRebuild").onclick = async () => {
     // 자동으로 만든 가편집(표시가 있거나, 예전 프로젝트면 원래 이름 그대로인 것)만 바꿈 · 사용자가 만든 편집본은 그대로
-    const isAuto = q => q.auto === "rough" || (!("auto" in q) && (q.name === "롱폼 가편집" || /^쇼츠 \d+ · /.test(q.name)));
+    // 예전(표시 없는) 자동 가편집만 이름으로 판단 — 복사본은 사용자 것 (복제·이름 바꾸기는 auto: "user" 로 표시)
+    const isAuto = q => q.auto === "rough" || (!("auto" in q) && (q.name === "롱폼 가편집" || /^쇼츠 \d+ · /.test(q.name)) && !/복사본( \d+)?$/.test(q.name));
     const n = P.sequences.filter(isAuto).length;
     if (!confirm(`자동으로 만든 가편집 ${n}개를 처음 상태로 다시 만들까요?\n(복제하거나 이름을 바꾼 편집본, 직접 만든 편집본은 그대로 남아요)`)) return;
     let j = null;
@@ -2986,8 +2987,8 @@ async function renderBin() {
     ${others.map(v => `<div class="item" data-n="${esc(v.name)}"><span class="sw" style="background:#555"></span><span class="nm">${esc(niceName(v.name))}</span><span class="st">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div>`).join("")}`;
   document.querySelectorAll("[data-seq]").forEach(el => el.onclick = () => switchSeq(el.dataset.seq));
   document.querySelectorAll(".bin [data-n]").forEach(el => el.onclick = () => leaveTo("/editor?name=" + encodeURIComponent(el.dataset.n)));
-  $("seqDup").onclick = () => { commit("편집본 복제"); const c = JSON.parse(JSON.stringify(S)); c.id = nid(); delete c.auto; c.name = uniqSeqName(S.name + " 복사본"); P.sequences.splice(P.sequences.indexOf(S) + 1, 0, c); switchSeq(c.id); };
-  $("seqRen").onclick = () => { const n = prompt("편집본 이름", S.name); if (n && n.trim() && n.trim() !== S.name) { commit("이름 바꾸기"); S.name = uniqSeqName(n.trim()); delete S.auto; changed(); } };
+  $("seqDup").onclick = () => { commit("편집본 복제"); const c = JSON.parse(JSON.stringify(S)); c.id = nid(); c.auto = "user"; c.name = uniqSeqName(S.name + " 복사본"); P.sequences.splice(P.sequences.indexOf(S) + 1, 0, c); switchSeq(c.id); };
+  $("seqRen").onclick = () => { const n = prompt("편집본 이름", S.name); if (n && n.trim() && n.trim() !== S.name) { commit("이름 바꾸기"); S.name = uniqSeqName(n.trim()); S.auto = "user"; changed(); } };
   $("seqDel").onclick = () => {
     if (P.sequences.length <= 1) return toast("편집본이 하나뿐이라 지울 수 없어요");
     if (!confirm(`"${S.name}" 편집본을 지울까요? (Ctrl+Z로 되돌릴 수 있어요)`)) return;

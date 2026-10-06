@@ -31,6 +31,11 @@ def gray_at(path, t, w=64, h=36):
     return float(np.frombuffer(r.stdout, np.uint8).mean())
 
 
+def frame_count(path):
+    r = subprocess.run([FF, "-v", "error", "-i", str(path), "-map", "0:v", "-f", "framecrc", "-"], capture_output=True, **core.NO_WINDOW)
+    return sum(1 for ln in r.stdout.decode("utf-8", "replace").splitlines() if ln.startswith("0,"))
+
+
 def duration(path):
     import re
     r = core.run([FF, "-hide_banner", "-i", str(path)])
@@ -81,6 +86,7 @@ class ExportTransitions(unittest.TestCase):
         mp4 = sorted(self.out.glob(f"*{typ}_{align}_{track}*.mp4"))
         self.assertTrue(mp4, "내보낸 영상이 없어요")
         self.assertAlmostEqual(duration(mp4[0]), 8.0, delta=0.15)
+        self.assertEqual(frame_count(mp4[0]), 240, "전환 구간에서 프레임이 빠지면 뒤쪽 화면·소리 싱크가 밀려요")
         return mp4[0]
 
     def test_dip_black_center_v1(self):  # Ctrl+D 기본 전환 · 가운데(4초)는 검정
@@ -97,6 +103,12 @@ class ExportTransitions(unittest.TestCase):
 
     def test_wipe_start_v2_over_v1(self):
         self.export("wipe", "start", "V2")
+
+    def test_dissolve_center_v1(self):  # 1.8.0 에서 되던 경우도 프레임 수 그대로
+        self.export("dissolve", "center")
+
+    def test_white_center_v2_over_v1(self):
+        self.export("white", "center", "V2")
 
     def test_black_center_shorts(self):
         p = self.export("black", "center", fmt="shorts")

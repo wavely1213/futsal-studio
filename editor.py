@@ -1542,7 +1542,9 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             chain.append(f"fps={fps}")
             if pre_pad > 1e-3:
                 chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
-        chain += [f"tpad=stop_mode=clone:stop_duration={dur + 1:.3f}", f"trim=end_frame={n}", "setpts=PTS-STARTPTS"]
+        # 끝에 setpts 를 다시 붙이지 않음: 앞의 fps 가 0 부터 이어 붙인 시각이라 필요 없고, 붙이면 프레임 속도 정보가 지워져(1/0)
+        # xfade 가 'Conversion failed' 로 실패함 (검정·흰색 전환, 위 트랙 전환)
+        chain += [f"tpad=stop_mode=clone:stop_duration={dur + 1:.3f}", f"trim=end_frame={n}"]
         if md["kind"] != "image":
             chain += _color_filters(it)
         out = lab("s")
@@ -1667,9 +1669,14 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         return b
 
     def norm(x):
-        # setpts 뒤엔 프레임 속도 정보가 비어(1/0) xfade·blend 가 실패함 → fps 로 다시 고정 (프레임은 이미 이 격자라 그대로)
         y = lab("p")
-        fc.append(f"[{x}]format=yuv420p,setsar=1,fps={fps}[{y}]")
+        fc.append(f"[{x}]format=yuv420p,setsar=1[{y}]")
+        return y
+
+    def exact(x):
+        # xfade 는 입력이 끝날 때 마지막 프레임을 하나 빠뜨리기도 함 → 마지막 장면으로 채워 정확히 n 프레임 (뒤 구간과 소리 싱크 유지)
+        y = lab("e")
+        fc.append(f"[{x}]tpad=stop_mode=clone:stop_duration={2 / fps:.4f},trim=end_frame={n}[{y}]")
         return y
 
     near = lambda u, v: abs(u - v) < 0.5 / fps  # noqa: E731
@@ -1705,7 +1712,7 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             else:
                 Y = norm(put(comp, layer(b, t0, t0 + dur)))
                 fc.append(f"[{solid(typ)}][{Y}]xfade=transition=fade:duration={dur:.4f}:offset=0[{out}]")
-            comp = out
+            comp = exact(out)
             continue
         below = comp or base()
         c1, c2 = lab("x"), lab("x")
@@ -1723,7 +1730,7 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             fc.append(f"[{mid_l}][{col}]blend=all_expr='A*(1-(1-abs(2*{P}-1)))+B*(1-abs(2*{P}-1))'[{out}]")
         else:
             fc.append(f"[{Xf}][{Yf}]blend=all_expr='A*(1-{P})+B*{P}'[{out}]")
-        comp = out
+        comp = exact(out)
     if comp is None:
         comp = base()
     final = lab("v")
