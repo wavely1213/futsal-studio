@@ -1005,8 +1005,12 @@ function entry(it) {
   let e = POOL.get(key);
   if (e && e.mid !== it.media) { killEntry(e); e = null; }
   if (!e && !rv && md.kind !== "image") { // 같은 미디어의 놀고 있는 재생기를 다시 씀 (컷마다 새 재생기를 만들지 않게)
-    // 같은 트랙 것을 먼저 · 다른 트랙 것은 바로 앞 화면에서 안 쓴 것만 (그 트랙이 곧 다시 쓸 재생기를 빼앗지 않게)
-    for (const x of POOL.values()) if (x.mid === it.media && x.audio === audio && !x.rv && x.ufr !== FRN && !x.pre && (x.it.track === it.track || (!e && x.ufr < FRN - 1))) { e = x; if (x.it.track === it.track) break; }
+    // 이 클립이 쓰던 것(다른 트랙으로 옮긴 조각) → 같은 트랙 것 → 다른 트랙 것은 바로 앞 화면에서 안 쓴 것만 (그 트랙이 곧 다시 쓸 재생기를 빼앗지 않게)
+    let best = 0;
+    for (const x of POOL.values()) if (x.mid === it.media && x.audio === audio && !x.rv && x.ufr !== FRN && !x.pre) {
+      const r = x.it.id === it.id ? 3 : x.it.track === it.track ? 2 : x.ufr < FRN - 1 ? 1 : 0;
+      if (r > best) { best = r; e = x; if (r === 3) break; }
+    }
     if (e) { POOL.delete(e.key); e.key = key; POOL.set(key, e); }
   }
   if (e) { e.it = it; e.ufr = FRN; if (e.audio && e.gn && e.busId !== it.track && actx) { e.gn.disconnect(); e.busId = it.track; e.gn.connect(bus(it.track).g); } return e; }
