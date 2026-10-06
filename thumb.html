@@ -155,6 +155,25 @@
   .cands.short { grid-template-columns: 1fr 1fr 1fr; }
   .designs .d { width: 96px; }
   .selbox .csel { position: absolute; background: rgba(45,140,235,.35); outline: 1px solid rgba(120,190,255,.9); pointer-events: none; }
+  .pvbody { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; margin-top: 14px; background: #0f0f0f; padding: 18px; border-radius: 8px; }
+  .pvc { display: flex; flex-direction: column; gap: 6px; }
+  .pvc canvas { border-radius: 10px; display: block; }
+  .pvc .tt { font-size: 13px; font-weight: 700; color: #f1f1f1; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pvc .ch { font-size: 11.5px; color: #aaa; }
+  .pvc .lab { font-size: 11px; color: var(--accent); }
+  .pvrow { display: flex; gap: 10px; }
+  .pvwrap { position: relative; }
+  .pvwrap .dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.8); color: #fff; font-size: 11px; padding: 1px 4px; border-radius: 4px; font-weight: 700; }
+  .safe { position: absolute; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(255,60,60,.28) 0 8px, rgba(255,60,60,.12) 8px 16px); outline: 1px dashed rgba(255,120,120,.9); color: #fff; font-size: 11px; padding: 3px 5px; text-shadow: 0 1px 2px #000; }
+  .ruler { position: absolute; background: #1c1c1c; z-index: 4; display: none; cursor: default; }
+  .ruler.h { left: 18px; top: 0; width: calc(100% - 18px); height: 18px; border-bottom: 1px solid #333; cursor: s-resize; }
+  .ruler.v { top: 18px; left: 0; height: calc(100% - 18px); width: 18px; border-right: 1px solid #333; cursor: e-resize; }
+  .stage.rulers .ruler { display: block; }
+  .rcorner { position: absolute; left: 0; top: 0; width: 18px; height: 18px; background: #1c1c1c; z-index: 4; display: none; }
+  .stage.rulers .rcorner { display: block; }
+  .uguide { position: absolute; background: #00d1ff; pointer-events: auto; z-index: 3; }
+  .uguide.v { width: 1px; cursor: ew-resize; box-shadow: 0 0 0 2px transparent; } .uguide.h { height: 1px; cursor: ns-resize; }
+  .uguide.v::after { content: ""; position: absolute; left: -3px; right: -3px; top: 0; bottom: 0; } .uguide.h::after { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; }
 </style>
 </head>
 <body>
@@ -167,6 +186,8 @@
     <div class="sp"></div>
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)">↶</button>
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
+    <button class="ic" id="safeBtn" title="가려지는 영역 보기 (쇼츠 버튼·제목 / 재생시간 표시)">▦</button>
+    <button class="btn" id="pvBtn" title="유튜브 목록 크기로 미리보기">👀 목록 미리보기</button>
     <button class="ic" id="help" title="단축키 (F1)">⌨</button>
     <span class="pill" id="busy"><span id="busyTxt">작업 중</span><span class="bar"><i id="busyBar"></i></span></span>
     <select class="s" id="exFmt" style="width:auto"><option value="jpg">JPG (유튜브용)</option><option value="png">PNG</option></select>
@@ -194,6 +215,7 @@
   <div class="stage" id="stage">
     <div class="wrap" id="wrap"><canvas id="cv"></canvas><div id="ui"><div class="brushcur" id="bcur"></div></div></div>
     <span class="zoomtag" id="zoomtag">100%</span>
+    <canvas class="ruler h" id="rulH"></canvas><canvas class="ruler v" id="rulV"></canvas><div class="rcorner"></div>
   </div>
 
   <div class="right">
@@ -216,6 +238,11 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal" id="pvModal"><div class="box" style="width:auto;max-width:94vw">
+  <h3 style="margin:0 0 4px">목록 미리보기 <span class="hint">실제로 사람들이 보는 크기예요. 작은 크기에서도 글자가 읽히고 얼굴이 보이는지 확인하세요.</span></h3>
+  <div id="pvBody" class="pvbody"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="pvClose">닫기</button></div>
+</div></div>
 <div class="modal" id="helpModal"><div class="box">
   <h3 style="margin:0 0 4px">단축키 <span class="hint">포토샵과 같게 맞췄어요 (Mac은 Ctrl 대신 ⌘)</span></h3>
   <div class="keys" style="margin-top:12px">
@@ -236,6 +263,7 @@
     <kbd>Ctrl + / −</kbd><span>확대 / 축소 (Alt+휠)</span><kbd>Ctrl+0 / Ctrl+1</kbd><span>화면 맞춤 / 100%</span>
     <kbd>Ctrl+Z</kbd><span>되돌리기 (Shift: 다시)</span><kbd>Ctrl+S</kbd><span>저장</span>
     <kbd>Ctrl+Shift+S</kbd><span>이미지로 내보내기</span><kbd>더블클릭 / Enter</kbd><span>글자 바로 고치기 (Esc 확정)</span>
+    <kbd>Ctrl+R</kbd><span>눈금자 (끌어서 안내선 만들기)</span><kbd>Ctrl+;</kbd><span>안내선 보이기/숨기기</span>
     <kbd>레이어 두 번 클릭</kbd><span>레이어 스타일 창</span><kbd>숫자칸 이름 끌기</kbd><span>값 미세 조절</span>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="helpClose">닫기</button></div>
@@ -565,7 +593,7 @@ function applyView() {
 }
 let rq = 0;
 function renderAll() { if (rq) return; rq = requestAnimationFrame(() => { rq = 0; paint(); }); }
-function paint() { if (!D) return; renderDoc(ctx, D.doc, RS); drawSel(); if (editing) placeInline(); }
+function paint() { if (!D) return; renderDoc(ctx, D.doc, RS); drawSel(); if (editing) placeInline(); if (typeof drawSafe === "function") { drawSafe(); drawRulers(); drawUserGuides(); } }
 function toCanvas(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / Z, y: (e.clientY - r.top) / Z }; }
 
 /* ---------- 도형 계산 ---------- */
@@ -1095,7 +1123,7 @@ stage.addEventListener("dblclick", e => {
   if (l && l.type === "text") { selIds = [l.id]; startEdit(l, true); }
 });
 function snapCands(ls) {
-  const ids = new Set(ls.map(l => l.id)), xs = [0, W / 2, W], ys = [0, H / 2, H];
+  const ids = new Set(ls.map(l => l.id)), gd = D.doc.guides || { v: [], h: [] }, xs = [0, W / 2, W, ...(showGuidesU ? gd.v : [])], ys = [0, H / 2, H, ...(showGuidesU ? gd.h : [])];
   for (const l of D.doc.layers) { if (ids.has(l.id) || l.hidden) continue; const b = bbox([l]); if (b.w >= W * 0.98 && b.h >= H * 0.98) continue; xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h); }
   return { xs, ys };
 }
@@ -1186,14 +1214,14 @@ function startTransform(e, handle) {
 }
 function startPan(e) {
   const x0 = e.clientX, y0 = e.clientY, px = PX, py = PY; stage.classList.add("pan"); fitMode = false;
-  const mv = ev => { PX = px + ev.clientX - x0; PY = py + ev.clientY - y0; wrap.style.left = PX + "px"; wrap.style.top = PY + "px"; };
+  const mv = ev => { PX = px + ev.clientX - x0; PY = py + ev.clientY - y0; wrap.style.left = PX + "px"; wrap.style.top = PY + "px"; drawRulers(); drawUserGuides(); };
   const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); if (!spaceDown && tool !== "hand") stage.classList.remove("pan"); };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
 stage.addEventListener("wheel", e => {
   e.preventDefault(); const r = stage.getBoundingClientRect();
   if (e.ctrlKey || e.metaKey || e.altKey) setZoom(Z * Math.exp(-e.deltaY * 0.0018), e.clientX - r.left, e.clientY - r.top);
-  else { fitMode = false; PX -= e.shiftKey ? e.deltaY : e.deltaX; PY -= e.shiftKey ? 0 : e.deltaY; wrap.style.left = PX + "px"; wrap.style.top = PY + "px"; }
+  else { fitMode = false; PX -= e.shiftKey ? e.deltaY : e.deltaX; PY -= e.shiftKey ? 0 : e.deltaY; wrap.style.left = PX + "px"; wrap.style.top = PY + "px"; drawRulers(); drawUserGuides(); }
 }, { passive: false });
 stage.addEventListener("mousemove", e => {
   const b = $("bcur");
@@ -1521,7 +1549,7 @@ addEventListener("keydown", e => {
     if (mod && code === "KeyS") { e.preventDefault(); e.shiftKey ? exportImg() : saveNow(); }
     return;
   }
-  if ($("helpModal").classList.contains("show") && e.key === "Escape") { $("helpModal").classList.remove("show"); return; }
+  if (e.key === "Escape" && document.querySelector(".modal.show")) { document.querySelectorAll(".modal.show").forEach(m => m.classList.remove("show")); return; }
   if (e.key === " ") { e.preventDefault(); if (!spaceDown) { spaceDown = true; stage.classList.add("pan"); } return; }
   if (mod) {
     const k = { KeyZ: () => (e.shiftKey ? redo() : undo()), KeyY: redo, KeyT: startXform, KeyJ: dupLayers, KeyD: () => select([]),
@@ -1529,6 +1557,7 @@ addEventListener("keydown", e => {
       KeyS: () => (e.shiftKey ? exportImg() : saveNow().then(() => toast("저장했어요"))),
       Equal: () => zoomStep(1), NumpadAdd: () => zoomStep(1), Minus: () => zoomStep(-1), NumpadSubtract: () => zoomStep(-1), Digit0: fitView, Numpad0: fitView, Digit1: () => setZoom(1),
       BracketRight: () => (e.shiftKey ? toEdge(true) : moveLayers(1)), BracketLeft: () => (e.shiftKey ? toEdge(false) : moveLayers(-1)),
+      KeyR: toggleRulers, Semicolon: () => { showGuidesU = !showGuidesU; drawUserGuides(); toast(showGuidesU ? "안내선 보임" : "안내선 숨김"); },
       Comma: () => { if (!selIds.length) return; commit("숨기기"); selLs().forEach(l => (l.hidden = !l.hidden)); changed(); } }[code];
     if (code === "KeyV") { pasteHandled = false; setTimeout(() => { if (!pasteHandled && CLIP) pasteLayers(e.shiftKey); }, 80); return; }
     if (k) { e.preventDefault(); k(); }
@@ -1784,6 +1813,70 @@ async function exportImg() {
   if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
 }
 $("exportBtn").onclick = exportImg;
+
+/* ---------- 눈금자 · 안내선 (Ctrl+R / Ctrl+;) ---------- */
+let showRulers = false, showGuidesU = true;
+const guidesOf = () => (D.doc.guides = D.doc.guides || { v: [], h: [] });
+function drawRulers() {
+  if (!showRulers || !D) return;
+  for (const [id, horiz] of [["rulH", true], ["rulV", false]]) {
+    const c = $(id), len = horiz ? c.clientWidth : c.clientHeight; if (!len) continue;
+    c.width = horiz ? len : 18; c.height = horiz ? 18 : len; const g = c.getContext("2d");
+    g.fillStyle = "#1c1c1c"; g.fillRect(0, 0, c.width, c.height); g.strokeStyle = "#666"; g.fillStyle = "#8a8a8a"; g.font = "9px sans-serif";
+    const off = (horiz ? PX : PY) - 18, step = [10, 25, 50, 100, 200, 500].find(s => s * Z >= 60) || 1000;
+    const a0 = Math.floor(-off / Z / step) * step, a1 = (len - off) / Z;
+    g.beginPath();
+    for (let a = a0; a <= a1; a += step / 5) {
+      const p = Math.round(off + a * Z) + 0.5, big = Math.abs(a / step - Math.round(a / step)) < 1e-6;
+      if (horiz) { g.moveTo(p, big ? 0 : 12); g.lineTo(p, 18); if (big) g.fillText(Math.round(a), p + 2, 9); }
+      else { g.moveTo(big ? 0 : 12, p); g.lineTo(18, p); if (big) { g.save(); g.translate(9, p + 2); g.rotate(-Math.PI / 2); g.fillText(Math.round(a), -24, 0); g.restore(); } }
+    }
+    g.stroke();
+  }
+}
+function drawUserGuides() {
+  $("ui").querySelectorAll(".uguide").forEach(e => e.remove()); if (!D || !showGuidesU) return; const gd = guidesOf();
+  gd.v.forEach((x, i) => { const e = document.createElement("div"); e.className = "uguide v"; e.dataset.g = "v" + i; Object.assign(e.style, { left: x * Z + "px", top: -PY + "px", height: stage.clientHeight + "px" }); $("ui").appendChild(e); });
+  gd.h.forEach((y, i) => { const e = document.createElement("div"); e.className = "uguide h"; e.dataset.g = "h" + i; Object.assign(e.style, { top: y * Z + "px", left: -PX + "px", width: stage.clientWidth + "px" }); $("ui").appendChild(e); });
+}
+function dragGuide(kind, idx, e) {
+  const gd = guidesOf(), before = snapshot(); let i = idx;
+  if (i < 0) { gd[kind].push(0); i = gd[kind].length - 1; showGuidesU = true; }
+  const mv = ev => { const q = toCanvas(ev); gd[kind][i] = Math.round(kind === "v" ? q.x : q.y); drawUserGuides(); readout(ev, `${kind === "v" ? "X" : "Y"} ${gd[kind][i]}px`); };
+  const up = ev => {
+    removeEventListener("mousemove", mv); removeEventListener("mouseup", up); hideReadout();
+    const r = stage.getBoundingClientRect();
+    if ((kind === "v" ? ev.clientX - r.left : ev.clientY - r.top) < 18) gd[kind].splice(i, 1);  // 눈금자로 되돌리면 삭제
+    if (before !== snapshot()) { pushUndo(before, "안내선"); scheduleSave(); } drawUserGuides();
+  };
+  mv(e); addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+$("rulH").addEventListener("mousedown", e => { e.preventDefault(); e.stopPropagation(); dragGuide("h", -1, e); });
+$("rulV").addEventListener("mousedown", e => { e.preventDefault(); e.stopPropagation(); dragGuide("v", -1, e); });
+$("ui").addEventListener("mousedown", e => { const g = e.target.closest(".uguide"); if (!g || tool !== "move") return; e.stopPropagation(); dragGuide(g.dataset.g[0], +g.dataset.g.slice(1), e); });
+function toggleRulers() { showRulers = !showRulers; stage.classList.toggle("rulers", showRulers); drawRulers(); toast(showRulers ? "눈금자 · 눈금자에서 캔버스로 끌면 안내선이 생겨요 (다시 눈금자로 끌면 지워져요)" : "눈금자 숨김"); }
+
+/* ---------- 목록 미리보기 · 가려지는 영역 ---------- */
+function snap(w) { const c = newCanvas(w, Math.round(w * H / W)); renderDoc(c.getContext("2d"), D.doc, w / W); return c; }
+$("pvBtn").onclick = () => {
+  if (!D) return; if (editing) endEdit();
+  const title = esc(($("aL1") && $("aL1").value ? $("aL1").value + " " + ($("aL2").value || "") : niceName(NAME)).trim()), dur = mmss(INFO.duration || 0);
+  const card = (w, lab, small) => `<div class="pvc" style="width:${w}px"><div class="lab">${lab}</div><div class="pvwrap" data-pv="${w}">${H > W ? "" : `<span class="dur">${dur}</span>`}</div>${small ? "" : `<div class="tt">${title}</div><div class="ch">풋살사관학교 · 조회수 1.2만회</div>`}</div>`;
+  $("pvBody").innerHTML = H > W
+    ? card(220, "쇼츠 탭 (큰 카드)") + card(160, "홈 쇼츠 줄") + card(110, "검색 · 작게", true)
+    : card(360, "홈 화면 (PC)") + card(246, "검색 결과") + `<div class="pvrow">${card(168, "다음 동영상 (옆 목록)", true)}${card(120, "아주 작게", true)}</div>`;
+  $("pvBody").querySelectorAll("[data-pv]").forEach(el => el.prepend(snap(+el.dataset.pv)));
+  $("pvModal").classList.add("show");
+};
+$("pvClose").onclick = () => $("pvModal").classList.remove("show");
+let showSafe = false;
+function drawSafe() {
+  $("ui").querySelectorAll(".safe").forEach(e => e.remove()); if (!showSafe || !D) return;
+  const box = (x, y, w, h, t) => { const d = document.createElement("div"); d.className = "safe"; d.textContent = t; Object.assign(d.style, { left: x * W * Z + "px", top: y * H * Z + "px", width: w * W * Z + "px", height: h * H * Z + "px" }); $("ui").appendChild(d); };
+  if (H > W) { box(0.86, 0.42, 0.14, 0.45, "좋아요·댓글 버튼"); box(0, 0.8, 0.84, 0.2, "제목·채널 이름"); box(0, 0, 1, 0.07, "위쪽 메뉴"); }
+  else box(0.86, 0.86, 0.14, 0.14, "재생시간");
+}
+$("safeBtn").onclick = () => { showSafe = !showSafe; $("safeBtn").classList.toggle("on", showSafe); drawSafe(); toast(showSafe ? "빨간 빗금 = 유튜브 화면에서 가려지는 곳이에요. 중요한 글자·얼굴은 피하세요" : "가려지는 영역 숨김"); };
 $("back").onclick = () => { clearTimeout(saveTimer); post("/api/thumb/save", { name: NAME, docs: cleanDocs() }).then(() => (location.href = "/")); };
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 
