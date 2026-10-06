@@ -185,6 +185,29 @@ class HwErrors(unittest.TestCase):
         self.assertTrue(editor._hw_fail("[h264_amf @ 0x1] DLL amfrt64.dll failed to open\n", "h264_amf"))
 
 
+class KenBurns(ExportBase):
+    def test_scale_animation_moves_smoothly(self):
+        """확대만 움직임(켄 번스): 선이 미리보기 자리와 반 칸 남짓 안 (예전 yuv420 겹치기는 0칸·2칸씩 건너뛰어 1칸 넘게 어긋남)."""
+        mk = self.assets / "mark.mp4"
+        r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30:d=2,drawbox=x=500:y=0:w=4:h=720:c=white:t=fill",
+                      "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", str(mk)])
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        md = {"id": "mark", "kind": "video", "src": "assets", "file": "mark.mp4", "dur": 2.0, "w": 1280, "h": 720, "fps": 30.0, "audio": False}
+        import numpy as np
+        for s0, s1 in ((100, 112), (80, 90)):
+            it = dict(item("v", "mark", "V1", 0, 0, 1), fx={"scale": {"v": s0, "k": [{"t": 0, "v": s0}, {"t": 1, "v": s1}]}})
+            out, _ = self.export(self.proj(f"켄 번스 {s0}", [it], info={"duration": 1.0, "width": 1280, "height": 720, "fps": 30.0}, media=[md]))
+            raw = subprocess.run([FF, "-v", "error", "-i", str(core.OUT / out[0]), "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True).stdout
+            ims = np.frombuffer(raw, np.uint8).reshape(-1, 720, 1280).astype(float)
+            s = (s0 + (s1 - s0) * np.arange(len(ims)) / 30) / 100
+            ex = 640 + (502 - 640) * s - 0.5
+            row = ims[:, 300:420, :].mean(axis=1)
+            w = np.clip(row - 40, 0, None)
+            xs = (w * np.arange(1280)).sum(axis=1) / w.sum(axis=1)
+            self.assertEqual(len(ims), 30)
+            self.assertLess(float(np.abs(xs - ex).max()), 0.6, f"{s0}→{s1}%: {np.round(xs - ex, 2).tolist()}")
+
+
 class Thumbs(unittest.TestCase):
     def test_sparse_keyframes(self):
         """키프레임이 맨 앞 하나뿐인 영상: 썸네일 칸들이 같은 그림만 반복되지 않음."""

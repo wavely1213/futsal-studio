@@ -1626,6 +1626,37 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
                 chain += [f"scale={zw}:{zh}", f"crop={W}:{H}:{ox}:{oy}:exact=1"]
                 fc.append(f"[{src}]" + ",".join(chain) + f"[{fg}]")
                 return ("full", fg)
+        dx, dy = cx - ax, cy - ay
+        # 움직이는 확대·이동(켄 번스·옆으로 흐르기): 짝수 크기 + 반올림한 자리 → 가운데가 반 칸씩 흔들리지 않고 1칸씩 부드럽게
+        ev = (s_anim or px_anim or py_anim) and not rot
+        CX, CY = f"({ax:.4f}+({px})+{S}*{dx:.4f})", f"({ay:.4f}+({py})+{S}*{dy:.4f})"  # 그림 중심 = 기준점 + 이동 + 배율·(중심-기준점)
+        if ev and not has_op and bg is None and md["kind"] != "image":
+            # 매 프레임 화면을 다 덮으면 겹치지 않고 프레임마다 키우고 잘라냄 (yuv420 겹치기는 2칸씩 건너뛰어 떨림 · 더 빠름)
+            ps, pp = param(it, "scale"), param(it, "pos")
+            zw0, zh0 = (0, 0) if s_anim else (_even(bw * float(sx)), _even(bh * float(sx)))
+            cover = s_anim or (zw0 >= W and zh0 >= H)
+            for f in range(n):
+                m = i_mt(it, t0 + f / fps)
+                s_ = float(kf_at(ps, m)) / 100 if s_anim else float(sx)
+                p_ = kf_at(pp, m)
+                qx = float(p_[0]) * W - W / 2 if px_anim else float(px)
+                qy = float(p_[1]) * H - H / 2 if py_anim else float(py)
+                zw, zh = (2 * math.floor(max(W, bw * s_) / 2 + 0.5), 2 * math.floor(max(H, bh * s_) / 2 + 0.5)) if s_anim else (zw0, zh0)
+                ox = -math.floor(ax + qx + s_ * dx - zw / 2 + 0.5)
+                oy = -math.floor(ay + qy + s_ * dy - zh / 2 + 0.5)
+                if not (cover and bw * s_ >= W - 0.01 and bh * s_ >= H - 0.01 and -1 <= ox <= zw - W + 1 and -1 <= oy <= zh - H + 1):
+                    cover = False
+                    break
+            if cover:
+                if s_anim:  # 화면보다 작아지지 않게 (crop 이 화면 밖을 읽지 않음 · 1칸 넘치면 crop 이 안쪽으로 맞춤)
+                    zw, zh = f"2*floor(max({W},{bw}*{S})/2+0.5)", f"2*floor(max({H},{bh}*{S})/2+0.5)"
+                    chain.append(f"scale=w='{zw}':h='{zh}':eval=frame")
+                else:
+                    zw, zh = zw0, zh0
+                    chain.append(f"scale={zw}:{zh}")
+                chain.append(f"crop={W}:{H}:x='-floor({CX}-({zw})/2+0.5)':y='-floor({CY}-({zh})/2+0.5)':exact=1")
+                fc.append(f"[{src}]" + ",".join(chain) + f"[{fg}]")
+                return ("full", fg)
         if motion:
             if rot:  # 회전할 때만 투명 바탕이 필요
                 chain.append("format=rgba")
@@ -1634,15 +1665,19 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
                 fw, fh = D, D
             else:
                 fw, fh = bw, bh
+            ww, hh = fw, fh
             if s_anim:
-                chain.append(f"scale=w='max(2,{fw}*{S})':h='max(2,{fh}*{S})':eval=frame")
+                ww, hh = (f"2*floor(max(2,{fw}*{S})/2+0.5)", f"2*floor(max(2,{fh}*{S})/2+0.5)") if ev else (f"max(2,{fw}*{S})", f"max(2,{fh}*{S})")
+                chain.append(f"scale=w='{ww}':h='{hh}':eval=frame")
             elif abs(float(sx) - 1) > 1e-6:
-                chain.append(f"scale={_even(fw * float(sx))}:{_even(fh * float(sx))}")
+                ww, hh = _even(fw * float(sx)), _even(fh * float(sx))
+                chain.append(f"scale={ww}:{hh}")
             # 기준점이 위치에 오도록: 중심 = 기준점 + 이동 + R·S·(중심-기준점)
-            dx, dy = cx - ax, cy - ay
             if rot:
                 X = f"({ax:.2f}+({px})+{S}*(cos({R})*{dx:.2f}-sin({R})*{dy:.2f})-{fw}*{S}/2)"
                 Y = f"({ay:.2f}+({py})+{S}*(sin({R})*{dx:.2f}+cos({R})*{dy:.2f})-{fh}*{S}/2)"
+            elif ev:  # 위 잘라내기와 같은 자리
+                X, Y = f"floor({CX}-({ww})/2+0.5)", f"floor({CY}-({hh})/2+0.5)"
             else:
                 X = f"({ax:.2f}+({px})+{S}*{dx:.2f}-{fw}*{S}/2)"
                 Y = f"({ay:.2f}+({py})+{S}*{dy:.2f}-{fh}*{S}/2)"
@@ -1659,11 +1694,11 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             else:
                 chain.append(f"colorchannelmixer=aa={op_const:.4f}")
         fc.append(f"[{src}]" + (",".join(chain) or "null") + f"[{fg}]")
-        # 위치가 움직이면 yuv444 로 겹침 → 1칸씩 움직임 (yuv420 은 2칸씩 건너뛰어 느린 이동이 떨려 보임 · RGBA 보다는 빠름)
-        ofmt = "yuv444" if (px_anim or py_anim) and "format=rgba" not in chain else "auto"
+        # 크기·위치가 움직이면 yuv444 로 겹침 → 1칸씩 움직임 (yuv420 은 2칸씩 건너뛰어 느린 이동·켄 번스가 떨려 보임 · RGBA 보다는 빠름)
+        ofmt = "yuv444" if (s_anim or px_anim or py_anim) and "format=rgba" not in chain else "auto"
         if bg:
             ly = lab("y")
-            fc.append(f"[{bgl}][{fg}]overlay=x='{X}':y='{Y}':eval=frame:format={ofmt},format=yuv420p[{ly}]")
+            overlay(bgl, fg, X, Y, ofmt, ly)
             return ("full", ly)
         if full_plain and not has_op:
             return ("full", fg)
@@ -1680,9 +1715,17 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         x, y = ("0", "0") if lay[0] == "full" else (lay[2], lay[3])
         if push:
             x = f"({x})+({push})"
-        ofmt = lay[4] if len(lay) > 4 else "auto"
-        fc.append(f"[{comp}][{lay[1]}]overlay=x='{x}':y='{y}':eval=frame:format={ofmt},format=yuv420p[{out}]")
+        overlay(comp, lay[1], x, y, lay[4] if len(lay) > 4 else "auto", out)
         return out
+
+    def overlay(main, top, x, y, ofmt, out):
+        if ofmt == "yuv444":
+            # 바탕은 이웃값으로 늘리고(neighbor) 평균으로 줄임(area) → 겹친 곳 밖은 원래 값 그대로 (기본 변환은 색이 살짝 번짐)
+            m = lab("m")
+            fc.append(f"[{main}]scale=flags=neighbor,format=yuv444p[{m}]")
+            fc.append(f"[{m}][{top}]overlay=x='{x}':y='{y}':eval=frame:format=yuv444,scale=flags=area,format=yuv420p[{out}]")
+        else:
+            fc.append(f"[{main}][{top}]overlay=x='{x}':y='{y}':eval=frame:format={ofmt},format=yuv420p[{out}]")
 
     def base():
         b = lab("k")
