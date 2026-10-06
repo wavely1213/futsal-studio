@@ -12,6 +12,7 @@ import time
 import traceback
 import uuid
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutTimeout
 from pathlib import Path
 from urllib.parse import quote
 
@@ -1666,8 +1667,9 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         return b
 
     def norm(x):
+        # setpts 뒤엔 프레임 속도 정보가 비어(1/0) xfade·blend 가 실패함 → fps 로 다시 고정 (프레임은 이미 이 격자라 그대로)
         y = lab("p")
-        fc.append(f"[{x}]format=yuv420p,setsar=1[{y}]")
+        fc.append(f"[{x}]format=yuv420p,setsar=1,fps={fps}[{y}]")
         return y
 
     near = lambda u, v: abs(u - v) < 0.5 / fps  # noqa: E731
@@ -2314,7 +2316,7 @@ def export(name, proj, opts, log):
                 try:
                     audio = fut.result(timeout=0.4)
                     break
-                except TimeoutError:
+                except (TimeoutError, FutTimeout):  # Python 3.10 이하는 둘이 다른 오류
                     prog(87 + 11 * astate["frac"], "소리 마무리 중 · 소리 크기 맞추는 중")
             prog(98, "마무리 중")
             # 영상·소리를 그대로 합치기만 (다시 인코딩 없음)
