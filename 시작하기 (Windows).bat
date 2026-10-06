@@ -16,7 +16,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 echo 구성요소를 확인하는 중...
 ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements.txt || (echo 설치 실패 & pause & exit /b 1)
-start "" ".venv\Scripts\pythonw.exe" app.py
+start "" ".venv\Scripts\pythonw.exe" updater.py --launch
 echo.
 echo 완료! 앱 창이 열립니다. 다음부터는 바탕화면의 "풋살사관학교 스튜디오" 아이콘으로 실행하세요.
 timeout /t 4 >nul

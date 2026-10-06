@@ -1,5 +1,7 @@
-yt-dlp
+yt-dlp[default]
 faster-whisper
 imageio-ffmpeg
 pywebview
 pillow
+onnxruntime
+numpy

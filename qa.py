@@ -14,7 +14,9 @@ def _t(s):
     return f"{s // 60:02d}:{s % 60:02d}"
 
 
-def check_video(path, fmt=None):
+def check_video(path, fmt=None, master=None, run=None):
+    """fmt: 내보낸 편집본 형식 (내보내기를 누를 때의 값) · master: 그때의 소리 크기 설정 {normalize, lufs}
+    run: 멈추기(✕)로 끌 수 있는 실행 함수 (편집실은 editor.run_killable)."""
     path = str(path)
     items = []
 
@@ -22,9 +24,9 @@ def check_video(path, fmt=None):
         items.append({"lv": lv, "title": title, "msg": msg, "t": t})
 
     core.set_progress(label="영상 검수 중", pct=None, detail="화면·소리 살펴보는 중")
-    r = core.run([core.ffmpeg(), "-hide_banner", "-i", path,
-                  "-vf", "blackdetect=d=0.4:pix_th=0.08,freezedetect=n=-55dB:d=2.5",
-                  "-af", "silencedetect=n=-45dB:d=1.2,ebur128=peak=true", "-f", "null", "-"])
+    r = (run or core.run)([core.ffmpeg(), "-hide_banner", "-i", path,
+                           "-vf", "blackdetect=d=0.4:pix_th=0.08,freezedetect=n=-55dB:d=2.5",
+                           "-af", "silencedetect=n=-45dB:d=1.2,ebur128=peak=true", "-f", "null", "-"])
     err = r.stderr or ""
     m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
     dur = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
@@ -75,7 +77,16 @@ def check_video(path, fmt=None):
         I = re.findall(r"I:\s+(-?[\d.]+) LUFS", err)
         P = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)
         lufs, peak = (float(I[-1]) if I else None), (float(P[-1]) if P else None)
-        if lufs is not None:
+        norm = bool(master) and master.get("normalize", True)
+        if lufs is not None and norm:  # 소리 크기 맞추기를 켠 영상: 정한 목표대로 됐는지
+            tgt = min(-9.0, max(-24.0, float(master.get("lufs") or -14.0)))
+            if abs(lufs - tgt) > 2:
+                add("warn", "소리 크기", f"{lufs:.1f} LUFS — 목표 {tgt:g} LUFS와 달라요.")
+            elif abs(tgt + 14) > 3:
+                add("ok", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})대로 맞췄어요. 유튜브는 -14 근처로 맞춰 틀어요.")
+            else:
+                add("ok", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})대로 맞췄어요.")
+        elif lufs is not None:
             if lufs < -18:
                 add("warn", "소리가 작아요", f"{lufs:.1f} LUFS — 유튜브 기준(-14 근처)보다 작아요. 내보내기에서 '소리 크기 맞추기'를 켜세요.")
             elif lufs > -10:

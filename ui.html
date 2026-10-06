@@ -192,6 +192,49 @@
     .ev { grid-template-columns: 52px 1fr; }
     .ev .tag { display: none; }
   }
+  /* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */
+  .up-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+  .up-col { display: grid; gap: 16px; min-width: 0; }
+  .up-card { padding: 16px; min-width: 0; }
+  .up-card h3 { margin: 0 0 10px; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+  .up-card h3 .sp { flex: 1; }
+  .up-card h3 .btn { padding: 5px 12px; font-size: 13px; }
+  .up-cnt { font-size: 12px; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .up-cnt.over { color: var(--danger); }
+  .up-in { display: block; width: 100%; border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; line-height: 1.6; }
+  textarea.up-in { min-height: 110px; resize: vertical; }
+  #upDesc { min-height: 320px; }
+  .up-in:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .up-cands { display: grid; gap: 6px; margin-bottom: 10px; }
+  .up-cands button { display: flex; gap: 10px; align-items: baseline; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+  .up-cands button:hover { background: var(--surface-2); }
+  .up-cands button.on { border-color: var(--brand); background: var(--brand-soft); }
+  .up-cands .k { color: var(--ink-3); font-size: 12px; font-weight: 700; }
+  .up-cands .c { margin-left: auto; padding-left: 8px; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+  .up-chs > div { display: flex; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .up-chs > div:last-child { border-bottom: 0; }
+  .up-chs .t { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink-2); min-width: 52px; }
+  .up-chs .m { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--brand); white-space: nowrap; }
+  .up-thumb .pic img { display: block; width: 100%; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); }
+  .up-thumb .pic.tall img { width: auto; max-width: 100%; max-height: 280px; margin: 0 auto; }
+  .up-sub, .up-hint { color: var(--ink-3); font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+  .up-ok { color: var(--brand); font-size: 13px; font-weight: 700; }
+  .up-bad { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
+  .up-thumb .btn { margin-top: 10px; }
+  .up-notes { display: grid; gap: 6px; margin-bottom: 14px; }
+  .up-notes:empty { display: none; }
+  .up-note { background: var(--peak-soft); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+  .up-acts { display: grid; gap: 8px; }
+  .up-meta { color: var(--ink-3); font-size: 12px; margin: -8px 0 14px; overflow-wrap: anywhere; }
+  .up-meta:empty { display: none; }
+  @media (max-width: 860px) { .up-grid { grid-template-columns: 1fr; } }
+  /* 7단계가 되면서 작은 창(960×640)에서 사이드바가 넘침 → 낮은 창에서는 단계 간격을 조금 줄이고, 그래도 넘치면 사이드바만 스크롤 */
+  @media (min-width: 861px) { .side { overflow-y: auto; } }
+  @media (min-width: 861px) and (max-height: 720px) {
+    .side { padding-top: 14px; padding-bottom: 12px; }
+    .brand { padding-bottom: 10px; }
+    .step { padding-top: 7px; padding-bottom: 7px; }
+  }
 </style>
 </head>
 <body>
@@ -204,6 +247,7 @@
     <button class="step" data-p="cut"><span class="n">4</span><span><b>편집실</b><span class="d">가편집 자동 세팅</span></span></button>
     <button class="step" data-p="thumb"><span class="n">5</span><span><b>썸네일</b><span class="d">자동 후보 · 누끼</span></span></button>
     <button class="step" data-p="style"><span class="n">6</span><span><b>스타일 배우기</b><span class="d">잘 나가는 유튜버 편집 따라하기</span></span></button>
+    <button class="step" data-p="upload"><span class="n">7</span><span><b>올리기</b><span class="d">제목 · 설명 · 챕터 · 태그</span></span></button>
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
@@ -237,6 +281,7 @@
       <div class="bar">
         <button class="btn" id="btnOpenVideos">촬영 원본 넣기</button>
         <div class="sp"></div>
+        <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
         <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
       </div>
@@ -279,6 +324,51 @@
       <div class="phead"><div><h1>썸네일</h1><p>영상에서 선명한 장면을 골라 후보를 자동으로 만들어요. 고른 후보를 포토샵처럼 고치고(글자·도형·누끼), 유튜브용 이미지로 저장해요.</p></div></div>
       <div class="grid" id="thList"></div>
       <div class="card empty" id="thEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
+    </section>
+    <!-- 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) -->
+    <section class="panel" id="p-upload">
+      <div class="phead"><div><h1>올리기</h1><p>유튜브에 올릴 제목 후보·설명·챕터·태그를 영상 내용으로 만들어 드려요. 고쳐 쓴 뒤 칸마다 복사해서 유튜브 스튜디오에 붙여 넣으세요.</p></div></div>
+      <div class="bar">
+        <select class="sel" id="upVid" title="올릴 영상"></select>
+        <select class="sel" id="upSrc" title="원본 영상을 그대로 올릴지, 편집실에서 만든 편집본을 올릴지 골라요"></select>
+        <div class="sp"></div>
+        <button class="btn" id="upTpl" title="설명에 매번 들어가는 틀(출연 소개·링크 등)을 메모장으로 열어 고쳐요">설명 틀 고치기</button>
+        <button class="btn primary" id="upMake">올리기 키트 만들기</button>
+      </div>
+      <div class="up-meta" id="upMeta"></div>
+      <div class="up-notes" id="upNotes"></div>
+      <div class="up-grid" id="upBody" style="display:none">
+        <div class="up-col">
+          <div class="card up-card">
+            <h3>제목<span class="sp"></span><span class="up-cnt" id="upTitleCnt"></span><button class="btn" data-upcopy="title">복사</button></h3>
+            <div class="up-cands" id="upCands"></div>
+            <input class="up-in" id="upTitle" spellcheck="false" placeholder="제목 (후보를 누르거나 직접 써 주세요)">
+          </div>
+          <div class="card up-card">
+            <h3>설명<span class="sp"></span><span class="up-cnt" id="upDescCnt"></span><button class="btn" data-upcopy="desc">복사</button></h3>
+            <textarea class="up-in" id="upDesc" spellcheck="false"></textarea>
+          </div>
+          <div class="card up-card">
+            <h3>태그<span class="sp"></span><span class="up-cnt" id="upTagsCnt"></span><button class="btn" data-upcopy="tags">복사</button></h3>
+            <textarea class="up-in" id="upTags" spellcheck="false"></textarea>
+            <p class="up-hint">쉼표로 나눠요. 스튜디오의 '자세히 보기 → 태그' 칸에 그대로 붙여 넣으면 돼요.</p>
+          </div>
+        </div>
+        <div class="up-col">
+          <div class="card up-card up-thumb" id="upThumb"></div>
+          <div class="card up-card">
+            <h3>챕터<span class="sp"></span><button class="btn" data-upcopy="chapters" id="upChCopy">복사</button></h3>
+            <div class="up-chs" id="upChs"></div>
+          </div>
+          <div class="card up-card up-acts">
+            <button class="btn primary" id="upStudio">업로드 페이지 열기</button>
+            <button class="btn" id="upAsk" title="받아쓰기 요약과 지금 초안을 담은 질문을 복사해요. claude.ai 대화창에 붙여 넣으면 돼요 (무료)">Claude에게 물어볼 내용 복사</button>
+            <button class="btn" id="upFile">파일 위치 열기</button>
+            <p class="up-hint" id="upSaved"></p>
+          </div>
+        </div>
+      </div>
+      <div class="card empty" id="upEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
     </section>
   </div>
 </div>
@@ -388,7 +478,49 @@ function fillSelect(id, list) {
 $("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요"); };
 $("btnAnalyze").onclick = () => {
   const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
+  const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
+  if (again && !confirm(`이미 편집점을 찾은 영상이 ${again}개 있어요.\n다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); });
+};
+
+/* 2-1. 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 → 이어서 편집점 찾기 (서버에서 한 작업으로) */
+const BUNDLE_JOB = "한 영상으로 묶기";
+function bundleMark(on) { try { on ? sessionStorage.setItem("bundleJob", "1") : sessionStorage.removeItem("bundleJob"); } catch (e) {} }
+function bundleMarked() { try { return sessionStorage.getItem("bundleJob") === "1"; } catch (e) { return false; } }
+function bundleDone(res) {
+  bundleMark(false);
+  if (!res || !res.name) return;
+  document.querySelectorAll(".lchk:checked").forEach(c => (c.checked = false));
+  const nm = `'${res.name.replace(/\.[^.]+$/, "")}'`;
+  if (res.analyze_error) {
+    toast(`${nm}(으)로 묶었어요 · 저장 공간 ${res.added} 더 씀 · 편집점 찾기는 하지 못했어요. 작업 기록을 확인해 주세요`);
+    $("drawer").classList.add("open");
+    return;
+  }
+  toast(`${nm}(으)로 묶고 편집점·1차 가편집까지 만들었어요 · 저장 공간 ${res.added} 더 씀`);
+  go("cut");
+}
+function syncBundle(busy) {
+  const n = document.querySelectorAll(".lchk:checked").length;
+  $("btnBundle").disabled = busy || n < 2;
+  $("btnBundle").textContent = n >= 2 ? `한 영상으로 묶기 (${n})` : "한 영상으로 묶기";
+  // 편집실·썸네일에 다녀와 화면이 새로 열려도, 묶는 중이면 끝날 때 알림을 이어서 보여 줌
+  if (pending === bundleDone) bundleMark(true);
+  else if (busy && !pending && state.job === BUNDLE_JOB && bundleMarked()) pending = bundleDone;
+}
+// 다녀오는 사이에 이미 끝났으면 결과만 알려 줌
+if (bundleMarked()) api("/api/state?since=999999999").then(s => {
+  if (s.job) return;
+  if (s.result && s.result.mode && s.result.added) bundleDone(s.result); else bundleMark(false);
+}).catch(() => {});
+$("btnBundle").onclick = () => {
+  const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
+  if (names.length < 2) return;
+  const mb = state.local.filter(v => names.includes(v.name)).reduce((s, v) => s + v.size_mb, 0);
+  const size = mb >= 1000 ? (mb / 1000).toFixed(1) + "GB" : Math.max(1, Math.round(mb)) + "MB";
+  const t = prompt(`고른 영상 ${names.length}개를 찍은 순서대로 이어서 한 영상으로 만들고, 이어서 편집점까지 찾아요.\n원본은 그대로 두고 새 파일이 하나 생겨서, 저장 공간을 원본만큼(약 ${size}) 더 써요.\n\n묶은 영상 이름을 정해 주세요`, "촬영본");
+  if (t === null) return;
+  job("/api/bundle", { names, title: t.trim() || "촬영본", model: segVal("modelSeg") }, bundleDone);
 };
 
 /* 6. 스타일 배우기 */
@@ -490,6 +622,7 @@ function sync() {
   const nl = document.querySelectorAll(".lchk:checked").length;
   $("btnAnalyze").disabled = busy || !nl;
   if ($("btnLearn")) syncStyle();
+  if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
 }
 function job(path, body, done) {
@@ -553,6 +686,7 @@ $("btnLog").onclick = () => $("drawer").classList.toggle("open");
 $("btnLogClose").onclick = () => $("drawer").classList.remove("open");
 async function checkUpdate(manual) {
   const u = await api("/api/update/check");
+  if (u.notice) { toast(u.notice); if (u.notice_warn) $("drawer").classList.add("open"); }  // 방금 업데이트·되돌림 결과 (켜진 뒤 한 번)
   const pill = $("updPill");
   pill.classList.toggle("show", !!u.available);
   pill.textContent = u.available ? `새 버전 v${u.latest} 받기` : "";
@@ -574,6 +708,168 @@ $("updPill").onclick = runUpdate;
 setInterval(poll, 1000);
 poll().then(() => { renderEvents(); renderEdList(); });
 checkUpdate();
+</script>
+<script>
+/* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */
+(() => {
+  const up = { kit: null, name: "", seq: "", timer: null, vkey: "", ret: null };
+  const ulen = s => [...(s || "")].length;
+  const tagsOf = t => (t || "").split(/[,\n]/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const tagsLen = tags => tags.reduce((n, t) => n + ulen(t) + (t.includes(" ") ? 2 : 0), 0) + Math.max(0, tags.length - 1);  // 유튜브 스튜디오 방식
+  const hashCount = s => (s.match(/(^|[^0-9A-Za-z가-힣_&#])#[0-9A-Za-z가-힣_]+/g) || []).length;
+  const chText = () => ((up.kit && up.kit.chapters) || []).map(c => `${c.time} ${c.title}`).join("\n");
+  const edits = () => ({ title: $("upTitle").value, description: $("upDesc").value, tags: $("upTags").value });
+
+  function fillVids() {
+    const list = state.local, key = JSON.stringify(list.map(v => [v.name, v.analyzed]));
+    if (key === up.vkey) return false;
+    up.vkey = key;
+    const cur = up.name || (up.ret && up.ret.name) || $("upVid").value;
+    $("upVid").innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${v.analyzed ? "" : " (편집점 찾기 전)"}</option>`).join("")
+      : `<option value="">(보관함이 비어 있어요)</option>`;
+    if (list.some(v => v.name === cur)) $("upVid").value = cur;
+    else if (list.length) $("upVid").value = (list.find(v => v.analyzed) || list[0]).name;
+    return $("upVid").value !== up.name;
+  }
+  async function flush() {  // 고치던 내용을 바로 저장
+    if (up.timer) { clearTimeout(up.timer); up.timer = null; save(); }
+    await up.chain;
+  }
+  function save() {  // 하나씩 차례로 (늦게 보낸 내용이 먼저 저장된 내용을 덮지 않게)
+    up.chain = (up.chain || Promise.resolve()).then(async () => {
+      if (!up.kit) return;
+      const j = await api("/api/upload/kit", { name: up.name, seq: up.seq, edits: edits() });
+      if (j.ok) { up.kit = j.kit; $("upSaved").textContent = `고친 내용을 저장했어요 · 완성본 폴더의 ${j.kit.files.txt}`; meta(); }
+      else $("upSaved").textContent = "저장하지 못했어요 · 다시 고치면 한 번 더 저장해요";
+    }).catch(() => { $("upSaved").textContent = "저장하지 못했어요 · 다시 고치면 한 번 더 저장해요"; });
+    return up.chain;
+  }
+  async function load(seq) {
+    await flush();
+    const n = $("upVid").value;
+    up.name = n;
+    if (!n) { up.kit = null; $("upSrc").innerHTML = ""; return render(); }
+    if (up.ret) { if (seq === undefined && up.ret.name === n) seq = up.ret.seq; up.ret = null; }  // 썸네일 편집기에서 돌아옴 → 보던 편집본
+    const j = await api(`/api/upload/kit?name=${encodeURIComponent(n)}` + (seq === undefined ? "" : `&seq=${encodeURIComponent(seq)}`));
+    if (n !== $("upVid").value) return;  // 그 사이 다른 영상을 고름
+    const srcs = j.sources || [];
+    up.seq = j.seq || "";
+    $("upSrc").innerHTML = srcs.map(s => `<option value="${esc(s.id)}">${s.id ? `편집본 · ${esc(s.label)}${s.format === "shorts" ? " (쇼츠)" : ""}${s.export ? " · 내보냄" : " · 아직 안 내보냄"}` : esc(s.label)}</option>`).join("");
+    $("upSrc").value = up.seq;
+    $("upSrc").style.display = srcs.length > 1 ? "" : "none";
+    up.kit = j.kit || null;
+    $("upSaved").textContent = "";
+    render();
+  }
+  function meta() {
+    const k = up.kit;
+    $("upMeta").textContent = k ? `${k.made} 만듦${k.edited ? ` · ${k.edited} 고침` : ""} · ${k.format === "shorts" ? "쇼츠" : "긴 영상"} ${mmss(k.duration)}${k.source && k.source.export ? ` · ${k.source.export}` : ""}` : "";
+  }
+  function render() {
+    const k = up.kit;
+    $("upBody").style.display = k ? "" : "none";
+    $("upEmpty").style.display = k ? "none" : "";
+    $("upEmpty").innerHTML = !up.name ? `<b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.`
+      : `<b>아직 만든 올리기 키트가 없어요</b>'올리기 키트 만들기'를 누르면 영상 내용으로 제목 후보·설명·챕터·태그를 만들어 드려요.${state.local.some(v => v.name === up.name && !v.analyzed) ? "<br>보관함에서 '편집점 찾기'를 먼저 하면 챕터와 설명이 훨씬 좋아져요." : ""}`;
+    $("upMake").textContent = k ? "다시 만들기" : "올리기 키트 만들기";
+    $("upMake").disabled = !up.name;
+    $("upNotes").innerHTML = k ? (k.notes || []).concat(k.alerts || []).map(n => `<div class="up-note">${esc(n)}</div>`).join("") : "";
+    meta();
+    if (!k) return;
+    $("upTitle").value = k.title || "";
+    $("upDesc").value = k.description || "";
+    $("upTags").value = (k.tags || []).join(", ");
+    renderCands(); renderChs(); renderThumb(); counts();
+  }
+  function renderCands() {
+    const cur = $("upTitle").value;
+    $("upCands").innerHTML = (up.kit.titles || []).map((t, i) => `<button class="${t === cur ? "on" : ""}" data-i="${i}"><span class="k">${i + 1}</span><span>${esc(t)}</span><span class="c">${ulen(t)}자</span></button>`).join("");
+    $("upCands").querySelectorAll("button").forEach(b => (b.onclick = () => { $("upTitle").value = up.kit.titles[+b.dataset.i]; changed(); }));
+  }
+  function renderChs() {
+    const chs = up.kit.chapters || [];
+    $("upChCopy").disabled = !chs.length;
+    $("upChs").innerHTML = chs.length ? chs.map(c => `<div><span class="t">${esc(c.time)}</span><span>${esc(c.title)}</span>${c.named ? `<span class="m">마커</span>` : ""}</div>`).join("")
+      : `<p class="up-hint" style="margin:0">${up.kit.format === "shorts" ? "쇼츠는 챕터를 넣지 않아요." : "이 영상은 챕터가 없어요. 3분 넘는 영상을 10초 넘는 구간 3개 이상으로 나눌 수 있을 때만 넣어요."}</p>`;
+  }
+  function renderThumb() {
+    const t = up.kit.thumbnail || {}, go = `<button class="btn" id="upThumbGo">썸네일 ${t.file ? "고치기" : "만들기"}</button>`;
+    $("upThumb").innerHTML = t.file
+      ? `<h3>썸네일 확인<span class="sp"></span><span class="${t.ok ? "up-ok" : "up-bad"}" style="margin:0">${t.ok ? "✓ 그대로 올려도 돼요" : "확인해 주세요"}</span></h3>
+         <div class="pic ${t.h > t.w ? "tall" : ""}"><img src="/api/upload/thumb?file=${encodeURIComponent(t.file)}&v=${t.mtime}" alt=""></div>
+         <p class="up-sub">${esc(t.file)} · ${t.w || "?"}×${t.h || "?"} · ${esc(t.size_text || "")}</p>${(t.problems || []).map(p => `<p class="up-bad">${esc(p)}</p>`).join("")}${go}`
+      : `<h3>썸네일 확인</h3>${(t.problems || []).map(p => `<p class="up-bad">${esc(p)}</p>`).join("")}${go}`;
+    $("upThumbGo").onclick = async () => {
+      await flush();
+      try { sessionStorage.setItem("upReturn", JSON.stringify({ name: up.name, seq: up.seq, t: Date.now() })); } catch (e) {}  // 돌아오면 이 영상·편집본으로 7단계
+      location.href = "/thumb?name=" + encodeURIComponent(up.name);
+    };
+  }
+  function counts() {
+    const set = (id, n, max, extra) => { const el = $(id), bad = n > max || !!extra; el.textContent = `${n.toLocaleString()} / ${max.toLocaleString()}자${extra ? " · " + extra : ""}`; el.classList.toggle("over", bad); };
+    const t = $("upTitle").value, d = $("upDesc").value, h = hashCount(d);
+    set("upTitleCnt", ulen(t), 100, /[<>]/.test(t) ? "< > 는 못 써요" : "");
+    set("upDescCnt", ulen(d), 5000, /[<>]/.test(d) ? "< > 는 못 써요" : h > 15 ? `해시태그 ${h}개 (15개까지)` : "");
+    set("upTagsCnt", tagsLen(tagsOf($("upTags").value)), 500, "");
+    $("upCands").querySelectorAll("button").forEach(b => b.classList.toggle("on", up.kit.titles[+b.dataset.i] === t));
+  }
+  function changed() {
+    counts();
+    clearTimeout(up.timer);
+    $("upSaved").textContent = "고치는 중…";
+    up.timer = setTimeout(() => { up.timer = null; save(); }, 1000);
+  }
+  ["upTitle", "upDesc", "upTags"].forEach(id => $(id).addEventListener("input", changed));
+  $("upVid").onchange = () => load();
+  $("upSrc").onchange = () => load($("upSrc").value);
+  document.querySelector('.step[data-p="upload"]').addEventListener("click", async () => { await flush(); fillVids(); load(up.name === $("upVid").value ? up.seq : undefined); });
+  setInterval(() => { if ($("p-upload").classList.contains("on") && fillVids()) load(); }, 1500);  // 보관함이 바뀌면 목록도
+  $("upMake").onclick = async () => {
+    if (up.kit && (up.kit.edited || up.timer) && !confirm("다시 만들면 고친 제목·설명·태그가 새로 만든 내용으로 바뀌어요. 다시 만들까요?")) return;
+    clearTimeout(up.timer); up.timer = null;
+    $("upMake").disabled = true;
+    await up.chain;  // 저장 중이던 고친 내용이 새로 만든 키트를 덮지 않게
+    const n = $("upVid").value, seq = $("upSrc").value || "";
+    const j = await api("/api/upload/kit", { name: n, seq });
+    $("upMake").disabled = false;
+    if (!j.ok || n !== $("upVid").value) return;
+    up.name = n; up.seq = seq; up.kit = j.kit;
+    $("upSaved").textContent = "";
+    render();
+    toast(`올리기 키트를 만들었어요 · 완성본 폴더에 ${j.kit.files.txt}`);
+  };
+  document.querySelectorAll("[data-upcopy]").forEach(b => (b.onclick = async () => {
+    const w = b.dataset.upcopy;
+    const v = w === "title" ? $("upTitle").value : w === "desc" ? $("upDesc").value : w === "tags" ? tagsOf($("upTags").value).join(", ") : chText();
+    await copyText(v);
+    toast({ title: "제목을", desc: "설명을", tags: "태그를", chapters: "챕터를" }[w] + " 복사했어요");
+  }));
+  $("upAsk").onclick = async () => {
+    const k = up.kit, t = $("upTitle").value;
+    if (!k) return;
+    const draft = ["[지금 만든 초안]", `- 고른 제목: ${t}`, ...k.titles.filter(x => x !== t).map(x => `- 다른 후보: ${x}`),
+      `- 설명 첫 두 줄: ${$("upDesc").value.split("\n").slice(0, 2).join(" / ")}`, `- 태그: ${tagsOf($("upTags").value).join(", ")}`].join("\n");
+    await copyText(k.prompt.replace(/\[지금 만든 초안\][\s\S]*?\n\n(?=\[부탁해요\])/, draft + "\n\n"));
+    toast("복사했어요 · claude.ai 대화창에 붙여 넣으세요 (무료)");
+  };
+  $("upStudio").onclick = async () => { await flush(); api("/api/upload/open", { what: "studio" }); toast("유튜브 스튜디오를 열었어요 · 오른쪽 위 '만들기 → 동영상 업로드'를 누르세요"); };
+  $("upFile").onclick = async () => { await flush(); if (up.kit && up.kit.files) api("/api/upload/open", { what: "file", file: up.kit.files.txt }); };
+  $("upTpl").onclick = () => { api("/api/upload/open", { what: "template" }); toast("설명 틀을 메모장으로 열었어요 · 고치고 저장한 뒤 '다시 만들기'를 누르세요"); };
+  // 썸네일 편집기에서 '돌아가기'로 오면 올리기 화면 · 보던 영상과 편집본 그대로 (보관함 목록이 오면 fillVids 가 고름)
+  try {
+    const r = JSON.parse(sessionStorage.getItem("upReturn") || "null");
+    sessionStorage.removeItem("upReturn");
+    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) { up.ret = { name: r.name, seq: r.seq || "" }; go("upload"); }
+  } catch (e) {}
+  // 창을 닫거나 다른 화면으로 갈 때 고치던 내용 저장
+  const prevFlush = window.flushBeforeClose;
+  window.flushBeforeClose = async () => { await flush(); return prevFlush ? prevFlush() : true; };
+  window.addEventListener("pagehide", () => {
+    if (!up.timer || !up.kit) return;
+    clearTimeout(up.timer); up.timer = null;
+    navigator.sendBeacon("/api/upload/kit", new Blob([JSON.stringify({ name: up.name, seq: up.seq, edits: edits() })], { type: "text/plain;charset=UTF-8" }));  // 서버는 내용만 JSON 으로 읽음
+  });
+})();
 </script>
 </body>
 </html>

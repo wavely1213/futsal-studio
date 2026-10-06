@@ -93,6 +93,12 @@
   .film .fr img { width: 100%; height: 100%; object-fit: cover; }
   .film .fr:hover { border-color: var(--accent); }
   .film .fr span { position: absolute; right: 3px; bottom: 2px; font-size: 10px; background: rgba(0,0,0,.7); padding: 0 4px; border-radius: 3px; }
+  .film .fr b { position: absolute; left: 3px; top: 2px; font-size: 10px; font-weight: 700; background: rgba(0,0,0,.72); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+  /* 좁은 창: 머리줄은 한 줄 그대로 — 긴 안내 글이 먼저 줄어들고(…), 장면 위치 막대가 그다음 */
+  .film .ph > * { flex: none; white-space: nowrap; }
+  .film .ph .sp { flex: 1; }
+  .film .ph .fhint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .film .ph #scrub { flex: 0 1 220px; min-width: 90px; }
   .cands { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
   .cand { cursor: pointer; border-radius: 6px; overflow: hidden; border: 2px solid transparent; background: #000; }
   .cand:hover { border-color: var(--accent); }
@@ -239,7 +245,7 @@
   </div>
 
   <div class="panel film">
-    <div class="ph"><span class="t">영상 장면</span><span class="hint">누르면 배경으로 · Shift+누르면 이미지 레이어로 추가</span><div class="sp"></div>
+    <div class="ph"><span class="t">영상 장면</span><span class="hint fhint" title="누르면 배경으로 · Shift+누르면 이미지 레이어로 추가">누르면 배경으로 · Shift+누르면 이미지 레이어로 추가</span><span class="seg" id="stripSort" title="표정 좋은 순: 웃거나 놀란 얼굴이 크게 나온 장면부터"><button data-s="time" class="on">시간 순</button><button data-s="expr">표정 좋은 순</button></span><div class="sp"></div>
       <span class="hint" id="scrubT">00:00</span><input type="range" id="scrub" min="0" max="1" step="0.001" value="0.3" style="width:220px"><button class="btn" id="grabBtn">이 장면 추가</button></div>
     <div class="strip" id="strip"><span class="hint" style="padding:10px">장면을 고르는 중…</span></div>
   </div>
@@ -1818,8 +1824,17 @@ function watchJob() {
 const frameSrc = t => `/frame?name=${encodeURIComponent(NAME)}&t=${t}`;
 let SUBCROP = true;  // 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라냄)
 const subCrop = () => (SUBCROP ? { cropB: 0.26 } : {});
+let STRIP_SORT = "time";  // 영상 장면 줄: 시간 순 / 표정 좋은 순 (FRAMES 는 서버가 고른 좋은 순 그대로 — 자동 제작이 앞에서부터 씀)
+const exprOf = f => (f.emo ? Math.min(1, (f.emo.happiness || 0) + (f.emo.surprise || 0)) : -1);
+function faceBadge(f) {  // 😆 웃음 / 😮 놀람 + 얼굴 크기 (화면 높이 대비) — '표정 좋은 순'과 같은 기준(exprOf)
+  if (!f.face) return "";
+  const h = (f.emo && f.emo.happiness) || 0, s = (f.emo && f.emo.surprise) || 0, pct = Math.round(f.face * 100);
+  const tag = exprOf(f) < 0.4 ? "얼굴" : h >= s ? "😆 웃음" : "😮 놀람";
+  return `<b title="얼굴 크기: 화면 높이의 ${pct}%">${tag} ${pct}%</b>`;
+}
 function renderStrip() {
-  $("strip").innerHTML = FRAMES.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span></div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
+  const list = [...FRAMES].sort(STRIP_SORT === "expr" ? (a, b) => exprOf(b) - exprOf(a) || (b.face || 0) - (a.face || 0) || (b.score || 0) - (a.score || 0) : (a, b) => a.t - b.t);
+  $("strip").innerHTML = list.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span>${faceBadge(f)}</div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
   document.querySelectorAll(".fr").forEach(el => (el.onclick = e => {
     const src = frameSrc(el.dataset.t);
     if (e.shiftKey) return addImage(src, false, W > H ? {} : { w: W, h: W * 9 / 16, x: 0, y: (H - W * 9 / 16) / 2 });
@@ -1828,7 +1843,11 @@ function renderStrip() {
   }));
 }
 $("scrub").oninput = e => { $("scrubT").textContent = mmss(e.target.value * INFO.duration); };
-$("grabBtn").onclick = () => { const t = Math.round($("scrub").value * INFO.duration * 10) / 10; FRAMES.push({ t }); FRAMES.sort((a, b) => a.t - b.t); renderStrip(); toast(`${mmss(t)} 장면을 추가했어요`); };
+$("grabBtn").onclick = () => { const t = Math.round($("scrub").value * INFO.duration * 10) / 10; FRAMES.push({ t }); renderStrip(); toast(`${mmss(t)} 장면을 추가했어요`); };
+$("stripSort").querySelectorAll("button").forEach(b => (b.onclick = () => {
+  STRIP_SORT = b.dataset.s; $("stripSort").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderStrip();
+  if (STRIP_SORT === "expr" && FRAMES.length && !FRAMES.some(f => f.face)) toast("얼굴이 잘 보이는 장면을 찾지 못해서 점수 순으로 보여 드려요");
+}));
 
 /* ---------- 자동 제작 (롱폼 · 쇼츠 템플릿) ---------- */
 function splitTitle(t) {

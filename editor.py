@@ -1,4 +1,5 @@
 """편집실: 영상 정보·파형·썸네일·프로젝트 저장(멀티 트랙)·자동 추천·내보내기(영상/프리미어 XML/SRT)."""
+import hashlib
 import json
 import math
 import os
@@ -8,8 +9,9 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
 from urllib.parse import quote
 
@@ -45,12 +47,37 @@ def _nid():
 
 # ---------- 미디어 ----------
 
+def safe_name(n):
+    """파일 이름만 허용 (경로·드라이브·네트워크 경로(\\\\server)·'..' 는 거절)."""
+    from pathlib import PurePosixPath, PureWindowsPath
+    n = str(n or "")
+    if (not n or n in (".", "..") or "\x00" in n or ":" in n
+            or PureWindowsPath(n).name != n or PurePosixPath(n).name != n):
+        raise ValueError("잘못된 파일 이름이에요")
+    return n
+
+
+def video_path(name):
+    """보관함 영상 경로 (이름 검사 포함)."""
+    p = core.VIDEOS / safe_name(name)
+    if not p.is_file():
+        raise FileNotFoundError(f"영상을 찾지 못했어요 · {name}")
+    return p
+
+
 def media_path(f, src="videos"):
-    return (core.VIDEOS if src == "videos" else ASSETS) / Path(f).name
+    return (core.VIDEOS if src == "videos" else ASSETS) / safe_name(Path(str(f)).name)
 
 
 def _cache_dir(f, src="videos"):
-    return core.adir(f) if src == "videos" else core.ANALYSIS / "_media" / (Path(f).stem.rstrip(" .") or "media")
+    """미디어별 캐시 폴더 (파형·썸네일·미리보기 파일). 가져온 파일은 확장자까지 포함한 전체 이름으로 구분
+    (bgm.mp3 / bgm.wav, Logo.png / logo.jpg 가 섞이지 않게 · Windows 폴더 이름은 대소문자를 안 가림)."""
+    if src == "videos":
+        return core.adir(f)
+    n = Path(str(f)).name
+    tag = hashlib.sha1(n.lower().encode("utf-8")).hexdigest()[:10]
+    base = Path(n).stem.strip(" .")[:40].rstrip(" .") or "media"
+    return core.ANALYSIS / "_media" / f"{base}_{tag}"
 
 
 def probe(path):
@@ -68,13 +95,25 @@ def probe(path):
         w, h = h, w
     ext = path.suffix.lower()
     kind = "image" if ext in IMAGE_EXTS else ("video" if vids else "audio")
+    hdr = None  # 아이폰 HDR(HLG)·PQ 영상 → 내보낼 때 일반(SDR) 색으로 바꿔야 함
+    if vids and kind == "video":
+        hdr = "pq" if "smpte2084" in vids[0] else "hlg" if "arib-std-b67" in vids[0] else None
+    if kind == "image":  # 휴대폰 사진: 사진 속 회전 정보(EXIF)대로 세운 크기 (ffmpeg·브라우저 모두 세워서 보여줌)
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+                if im.getexif().get(0x0112, 1) in (5, 6, 7, 8):
+                    w, h = h, w
+        except Exception:
+            pass
     return {"duration": round(dur, 3), "width": w, "height": h, "fps": float(f[1]) if f else 30.0,
-            "audio": "Audio:" in err, "kind": kind}
+            "audio": "Audio:" in err, "kind": kind, "hdr": hdr}
 
 
 def media_info(name):
-    i = probe(core.VIDEOS / name)
-    return {k: i[k] for k in ("duration", "width", "height", "fps")}
+    i = probe(video_path(name))
+    return {k: i[k] for k in ("duration", "width", "height", "fps", "hdr")}
 
 
 def media_entry(f, src="videos", mid=None):
@@ -82,9 +121,39 @@ def media_entry(f, src="videos", mid=None):
     if not p.exists():
         raise FileNotFoundError(f"파일을 찾지 못했어요 · {f}")
     i = probe(p)
-    return {"id": mid or _nid(), "kind": i["kind"], "src": src, "file": p.name, "dur": i["duration"] if i["kind"] != "image" else 0,
-            "w": i["width"], "h": i["height"], "fps": i["fps"], "audio": i["audio"] and i["kind"] != "image",
-            "proxy": proxy_path(p.name, src).exists()}
+    e = {"id": mid or _nid(), "kind": i["kind"], "src": src, "file": p.name, "dur": i["duration"] if i["kind"] != "image" else 0,
+         "w": i["width"], "h": i["height"], "fps": i["fps"], "audio": i["audio"] and i["kind"] != "image",
+         "proxy": proxy_path(p.name, src).exists()}
+    if i.get("hdr"):
+        e["hdr"] = i["hdr"]
+    return e
+
+
+def tonemap_chain(hdr, max_w=None):
+    """HDR(HLG/PQ, 10비트) → 일반 BT.709 화면 (아이폰 영상이 내보내면 허옇게 뜨지 않게)."""
+    tin = "smpte2084" if hdr == "pq" else "arib-std-b67"
+    pre = [f"scale=w='min(iw,{int(max_w)})':h=-2"] if max_w else []  # 4K 를 미리 줄여 빠르게
+    return pre + [f"zscale=tin={tin}:pin=bt2020:min=bt2020nc:t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
+                  "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv", "format=yuv420p"]
+
+
+_HDR_CACHE = {}
+
+
+def media_hdr(md):
+    """미디어의 HDR 여부 (예전 프로젝트엔 표시가 없으니 한 번 확인해 둠)."""
+    if md.get("kind") != "video":
+        return None
+    if "hdr" in md:
+        return md["hdr"]
+    p = media_path(md["file"], md.get("src", "videos"))
+    k = str(p)
+    if k not in _HDR_CACHE:
+        try:
+            _HDR_CACHE[k] = probe(p).get("hdr") if p.exists() else None
+        except Exception:
+            _HDR_CACHE[k] = None
+    return _HDR_CACHE[k]
 
 
 # ---------- 미리보기용 가벼운 파일 (프록시) ----------
@@ -97,24 +166,35 @@ def make_proxy(f, src="videos", log=print):
     """4K·HEVC(아이폰) 영상도 편집실에서 부드럽게: 540p H.264, 짧은 키프레임 간격. 내보내기는 항상 원본으로."""
     p, out = media_path(f, src), proxy_path(f, src)
     out.parent.mkdir(parents=True, exist_ok=True)
-    dur = probe(p)["duration"] or 1
+    CANCEL.clear()
+    info = probe(p)
+    dur = info["duration"] or 1
     tmp = out.with_suffix(".part.mp4")
-    cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", "scale=-2:540,fps=30",
+    vf = (tonemap_chain(info["hdr"], 1920) if info.get("hdr") else []) + ["scale=-2:540", "fps=30"]
+    cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **core.NO_WINDOW)
-    for line in proc.stdout:
-        if line.startswith(b"out_time_us="):
-            try:
-                t = int(line[12:].strip() or 0) / 1e6
-                core.set_progress(label="미리보기 파일 만드는 중", item=f, pct=min(99, int(t * 100 / dur)), detail=f"{int(t)}초 / {int(dur)}초")
-            except ValueError:
-                pass
-    proc.wait()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+    _PROCS.add(proc)
+    try:
+        for line in proc.stdout:
+            if line.startswith(b"out_time_us="):
+                try:
+                    t = int(line[12:].strip() or 0) / 1e6
+                    core.set_progress(label="미리보기 파일 만드는 중", item=f, pct=min(99, int(t * 100 / dur)), detail=f"{int(t)}초 / {int(dur)}초")
+                except ValueError:
+                    pass
+        proc.wait()
+    finally:
+        _PROCS.discard(proc)
+        proc.stdout.close()
+    if CANCEL.is_set():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("미리보기 파일 만들기를 멈췄어요")
     if proc.returncode or not tmp.exists():
         tmp.unlink(missing_ok=True)
         raise RuntimeError("미리보기 파일을 만들지 못했어요")
-    tmp.replace(out)
+    os.replace(tmp, out)
     log(f"  미리보기 파일 완료 · {Path(f).name}")
     return {"src": src, "file": Path(f).name}
 
@@ -126,6 +206,25 @@ def library():
                "kind": "image" if p.suffix.lower() in IMAGE_EXTS else ("audio" if p.suffix.lower() in AUDIO_EXTS else "video")}
               for p in sorted(ASSETS.iterdir()) if p.is_file() and p.suffix.lower() in MEDIA_EXTS]
     return {"videos": vids, "assets": assets}
+
+
+def _upright_image(dest):
+    """휴대폰 사진의 회전 정보(EXIF)를 실제 픽셀에 적용해 저장 → ffmpeg·미리보기·썸네일이 모두 같은 방향."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(dest) as im:
+            if im.getexif().get(0x0112, 1) == 1:
+                return
+            up = ImageOps.exif_transpose(im)
+            fmt = (im.format or "").upper()
+        tmp = dest.with_name(dest.stem + ".rot" + dest.suffix)
+        if fmt in ("JPEG", "MPO") or dest.suffix.lower() in (".jpg", ".jpeg"):
+            up.convert("RGB").save(tmp, "JPEG", quality=95)
+        else:
+            up.save(tmp, fmt or None)
+        os.replace(tmp, dest)
+    except Exception:
+        pass
 
 
 def save_upload(name, stream, length):
@@ -146,7 +245,25 @@ def save_upload(name, stream, length):
                 break
             f.write(chunk)
             left -= len(chunk)
+    if dest.suffix.lower() in IMAGE_EXTS:
+        _upright_image(dest)
     return media_entry(dest.name, "assets")
+
+
+_GEN_LOCK = threading.Lock()
+_GEN_LOCKS = {}
+_GEN_SEM = threading.Semaphore(2)  # 썸네일·파형 만들기는 한 번에 2개까지 (내보내기·미리보기를 방해하지 않게)
+
+
+def _gen_lock(key):
+    with _GEN_LOCK:
+        return _GEN_LOCKS.setdefault(key, threading.Lock())
+
+
+def _write_atomic(path, text):
+    tmp = path.with_name(path.name + f".{threading.get_ident()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def waveform(name, per_sec=50, src="videos"):
@@ -154,43 +271,88 @@ def waveform(name, per_sec=50, src="videos"):
     cache = _cache_dir(name, src) / f"waveform_{per_sec}.json"
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))
-    import numpy as np
-    sr = 8000
-    p = subprocess.run([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-ac", "1", "-ar", str(sr),
-                        "-f", "s16le", "-"], capture_output=True, **core.NO_WINDOW)
-    a = np.abs(np.frombuffer(p.stdout, np.int16).astype(np.float32)) / 32768.0
-    hop = sr // per_sec
-    n = len(a) // hop
-    peaks = a[: n * hop].reshape(n, hop).max(axis=1) if n else np.zeros(0)
-    top = float(np.percentile(peaks, 99)) if n else 1.0
-    data = {"per_sec": per_sec, "peaks": [round(min(1.0, float(x) / (top or 1)), 3) for x in peaks], "top": round(top, 4)}
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(data), encoding="utf-8")
-    return data
+    with _gen_lock(str(cache)):
+        if cache.exists():
+            return json.loads(cache.read_text(encoding="utf-8"))
+        import numpy as np
+        sr = 8000
+        with _GEN_SEM:
+            p = subprocess.run([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-ac", "1", "-ar", str(sr),
+                                "-f", "s16le", "-"], capture_output=True, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+        a = np.abs(np.frombuffer(p.stdout, np.int16).astype(np.float32)) / 32768.0
+        hop = sr // per_sec
+        n = len(a) // hop
+        peaks = a[: n * hop].reshape(n, hop).max(axis=1) if n else np.zeros(0)
+        top = float(np.percentile(peaks, 99)) if n else 1.0
+        data = {"per_sec": per_sec, "peaks": [round(min(1.0, float(x) / (top or 1)), 3) for x in peaks], "top": round(top, 4)}
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(cache, json.dumps(data))
+        return data
 
 
 def thumbs(name, src="videos"):
-    """타임라인용 썸네일 띠 (가로로 이어붙인 한 장)."""
+    """타임라인용 썸네일 띠 (가로로 이어붙인 한 장). 키프레임만 읽어 빠르게 (전체 디코딩의 수십 분의 1)."""
     d = _cache_dir(name, src)
     meta = d / "thumbs2.json"  # 2: 가로 16000px 이하로 제한한 버전
-    if meta.exists() and (d / "thumbs2.jpg").exists():
+    jpg = d / "thumbs2.jpg"
+    if meta.exists() and jpg.exists():
         return json.loads(meta.read_text(encoding="utf-8"))
-    info = probe(media_path(name, src))
-    count = max(1, min(110, int(info["duration"] // 2) or 1))
-    interval = max(0.5, info["duration"] / count) if info["duration"] else 1.0
-    h = 72
-    w = int(round(h * info["width"] / info["height"] / 2) * 2) or 128
-    d.mkdir(parents=True, exist_ok=True)
-    vf = f"fps=1/{interval:.3f},scale={w}:{h},tile={count}x1" if info["kind"] == "video" else f"scale={w}:{h}"
-    core.run([core.ffmpeg(), "-y", "-v", "error", "-i", str(media_path(name, src)), "-vf", vf, "-frames:v", "1", "-q:v", "5",
-              str(d / "thumbs2.jpg")])
-    data = {"interval": interval, "w": w, "h": h, "count": count if info["kind"] == "video" else 1}
-    meta.write_text(json.dumps(data), encoding="utf-8")
-    return data
+    with _gen_lock(str(d)):
+        if meta.exists() and jpg.exists():
+            return json.loads(meta.read_text(encoding="utf-8"))
+        path = media_path(name, src)
+        info = probe(path)
+        count = max(1, min(110, int(info["duration"] // 2) or 1))
+        interval = max(0.5, info["duration"] / count) if info["duration"] else 1.0
+        h = 72
+        w = int(round(h * info["width"] / info["height"] / 2) * 2) or 128
+        d.mkdir(parents=True, exist_ok=True)
+        tm = (",".join(tonemap_chain(info["hdr"], 640)) + ",") if info.get("hdr") else ""
+        tmp = d / f"thumbs2.{threading.get_ident()}.tmp.jpg"
+        with _GEN_SEM:
+            if info["kind"] == "video":
+                dur = info["duration"] or interval * count
+                vf = f"{tm}tpad=stop_mode=clone:stop_duration={dur:.3f},fps=1/{interval:.3f},scale={w}:{h},tile={count}x1"
+                r = core.run([core.ffmpeg(), "-y", "-v", "error", "-discard:v", "nokey", "-i", str(path), "-an", "-sn", "-dn", "-vf", vf,
+                              "-frames:v", "1", "-q:v", "5", str(tmp)])
+                if r.returncode or not tmp.exists():  # 키프레임만으로 안 되는 파일은 전체 디코딩
+                    core.run([core.ffmpeg(), "-y", "-v", "error", "-i", str(path), "-an", "-vf", f"{tm}fps=1/{interval:.3f},scale={w}:{h},tile={count}x1",
+                              "-frames:v", "1", "-q:v", "5", str(tmp)])
+            else:
+                core.run([core.ffmpeg(), "-y", "-v", "error", "-i", str(path), "-vf", f"scale={w}:{h}", "-frames:v", "1", "-q:v", "5", str(tmp)])
+        if tmp.exists():
+            os.replace(tmp, jpg)
+        data = {"interval": interval, "w": w, "h": h, "count": count if info["kind"] == "video" else 1}
+        _write_atomic(meta, json.dumps(data))
+        return data
 
 
 def thumbs_file(name, src="videos"):
     return _cache_dir(name, src) / "thumbs2.jpg"
+
+
+def poster(name, src="videos"):
+    """미디어 탭 목록용 작은 그림 한 장 (영상 앞부분 한 장면만 빠르게)."""
+    d = _cache_dir(name, src)
+    out = d / "poster.jpg"
+    if out.exists():
+        return out
+    with _gen_lock(str(out)):
+        if out.exists():
+            return out
+        path = media_path(name, src)
+        if not path.exists() or path.suffix.lower() in AUDIO_EXTS:
+            return out
+        d.mkdir(parents=True, exist_ok=True)
+        info = probe(path)
+        tm = (",".join(tonemap_chain(info["hdr"], 640)) + ",") if info.get("hdr") else ""
+        tmp = d / f"poster.{threading.get_ident()}.tmp.jpg"
+        ss = ["-ss", f"{min(5.0, (info['duration'] or 0) * 0.1):.2f}"] if info["kind"] == "video" else []
+        with _GEN_SEM:
+            core.run([core.ffmpeg(), "-y", "-v", "error", *ss, "-i", str(path), "-frames:v", "1", "-an", "-vf", f"{tm}scale=-2:72", "-q:v", "5", str(tmp)])
+        if tmp.exists():
+            os.replace(tmp, out)
+        return out
 
 
 def media_bundle(f, src="videos"):
@@ -202,6 +364,49 @@ def media_bundle(f, src="videos"):
     if e["kind"] in ("video", "image"):
         out["thumbs"] = thumbs(e["file"], src)
     return out
+
+
+def rev_audio(src, f, a, b, sp):
+    """거꾸로 재생 클립의 소리 (미리보기용): 내보내기와 같은 areverse + 속도로 미리 만들어 둔 WAV."""
+    a, b, sp = round(float(a), 3), round(float(b), 3), round(max(0.05, float(sp)), 4)
+    p = media_path(f, src)
+    if not p.exists():
+        raise FileNotFoundError(f"파일을 찾지 못했어요 · {f}")
+    d = _cache_dir(f, src) / "rev"
+    out = d / f"rev_{a:.3f}_{b:.3f}_{sp:.4f}.wav"
+    if out.exists():
+        return out
+    with _gen_lock(str(out)):
+        if out.exists():
+            return out
+        d.mkdir(parents=True, exist_ok=True)
+        old = sorted(d.glob("rev_*.wav"), key=lambda x: x.stat().st_mtime)
+        for o in old[:-40]:  # 오래된 것 정리
+            o.unlink(missing_ok=True)
+        tmp = d / f"rev.{threading.get_ident()}.tmp.wav"
+        af = ",".join(["areverse"] + _atempo(sp))
+        with _GEN_SEM:
+            r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, a):.3f}", "-t", f"{max(0.05, b - a):.3f}", "-i", str(p),
+                          "-vn", "-af", af, "-ac", "2", "-ar", "48000", str(tmp)])
+        if r.returncode or not tmp.exists():
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError("거꾸로 재생 소리를 만들지 못했어요")
+        os.replace(tmp, out)
+        return out
+
+
+def run_killable(cmd):
+    """멈추기(✕)로 끌 수 있는 ffmpeg 실행 (검수 등). 멈추면 RuntimeError."""
+    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
+                         encoding="utf-8", errors="replace", **core.NO_WINDOW)
+    _PROCS.add(p)
+    try:
+        _, err = p.communicate()
+    finally:
+        _PROCS.discard(p)
+    if CANCEL.is_set():
+        raise RuntimeError("멈췄어요")
+    return subprocess.CompletedProcess(cmd, p.returncode, "", err)
 
 
 # ---------- 프로젝트 (시퀀스 v2: 멀티 트랙) ----------
@@ -327,6 +532,8 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
             seqs.append(_new_seq(f"쇼츠 {i} · {r['title'][:14]}", "shorts", items, captionStyle=cap(SHORTS_STYLE),
                                  layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on,
                                  titles=[{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}]))
+    for q in seqs:  # 자동으로 만든 가편집 표시 ('가편집 다시 만들기'는 이것만 바꿈 · 스타일 가편집은 app.py 에서 따로 표시)
+        q["auto"] = "style" if style else "rough"
     return seqs
 
 
@@ -359,11 +566,18 @@ def migrate_project(name, proj):
     if "sequences" not in proj:  # v1.3.0 저장본 → 시퀀스 구조로 변환
         seq = {"id": _nid(), "name": "시퀀스 1"}
         for k in ("format", "clips", "captionsOn", "captionStyle", "titles", "master"):
-            seq[k] = proj.pop(k)
+            if k in proj:
+                seq[k] = proj.pop(k)
+        seq.setdefault("format", "shorts")
         proj["sequences"] = [seq] + auto_sequences(name, proj["info"])
         proj["active"] = seq["id"]
     for s in proj["sequences"]:
         migrate_seq(s)
+        lm = {}  # 자르기를 반복해 길어진 연결 표시(link)를 짧게 (같은 것끼리는 계속 같게)
+        for it in s.get("items", []):
+            ln = it.get("link")
+            if ln and len(ln) > 16:
+                it["link"] = lm.setdefault(ln, _nid())
     media = proj.setdefault("media", [])
     if not any(m["id"] == "main" for m in media):
         i = proj["info"]
@@ -371,20 +585,138 @@ def migrate_project(name, proj):
                          "h": i["height"], "fps": i.get("fps", 30.0), "audio": True})
     for m in media:  # 미리보기 파일이 있는지 매번 다시 확인
         if m.get("kind") == "video":
-            m["proxy"] = proxy_path(m["file"], m.get("src", "videos")).exists()
+            try:
+                m["proxy"] = proxy_path(m["file"], m.get("src", "videos")).exists()
+            except ValueError:
+                m["proxy"] = False
     proj["v"] = 2
     return proj
 
 
+# 프로젝트 저장: 한 번에 하나씩(잠금) · 임시 파일에 다 쓴 뒤 바꿔 끼우기(중간에 꺼져도 깨지지 않음) · 판(rev) 번호로 다른 창 덮어쓰기 방지
+_SAVE_LOCK = threading.RLock()
+_REVC = {}
+
+
+class Conflict(Exception):
+    def __init__(self, rev):
+        super().__init__("다른 창에서 이 편집본이 바뀌었어요")
+        self.rev = rev
+
+
+def _read_json(p):
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _replace_retry(src, dst, tries=20):
+    for i in range(tries):  # Windows: 백신·OneDrive·탐색기가 잠깐 잡고 있으면 실패 → 잠깐 뒤 다시
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.05)
+
+
+def _disk_rev(p):
+    try:
+        st = p.stat()
+    except OSError:
+        return 0
+    c = _REVC.get(str(p))
+    if c and c[0] == st.st_mtime_ns:
+        return c[1]
+    try:
+        r = int(_read_json(p).get("rev") or 0)
+    except Exception:
+        return -1  # 깨진 파일 → 덮어써도 됨
+    _REVC[str(p)] = (st.st_mtime_ns, r)
+    return r
+
+
+BK_TAGS = {"재분석전": "편집점 다시 찾기 전", "덮어쓰기전": "다른 창 내용으로 덮어쓰기 전", "변환전": "새 형식으로 바꾸기 전"}
+
+
+def _backup_files(stem):
+    """이 프로젝트의 백업 [(시각, 표시, 경로)] — 이름이 [꿀팁] 처럼 대괄호를 가져도 정확히 (glob 를 쓰지 않음)."""
+    bdir = PROJECTS / "backup"
+    if not bdir.is_dir():
+        return []
+    pre, out = stem + "__", []
+    for f in bdir.iterdir():
+        n = f.name
+        if n.startswith(pre) and n.endswith(".json"):
+            m = re.fullmatch(r"(\d{8}_\d{6})(?:_(.+))?", n[len(pre):-5])
+            if m:
+                out.append((m[1], m[2] or "", f))
+    return sorted(out, key=lambda x: (x[0], x[1]))
+
+
+def _bk_epoch(ts):
+    try:
+        return time.mktime(time.strptime(ts, "%Y%m%d_%H%M%S"))
+    except ValueError:
+        return 0.0
+
+
+def _backup_copy(p, tag=""):
+    bdir = PROJECTS / "backup"
+    bdir.mkdir(exist_ok=True)
+    dst = bdir / f"{p.stem}__{time.strftime('%Y%m%d_%H%M%S')}{'_' + tag if tag else ''}.json"
+    shutil.copy2(p, dst)
+    return dst
+
+
+def _prune_backups(stem):
+    fs = _backup_files(stem)
+    for f in [x[2] for x in fs if not x[1]][:-10] + [x[2] for x in fs if x[1]][:-10]:
+        f.unlink(missing_ok=True)
+
+
+def _recover(p):
+    """깨졌거나 없어진 프로젝트를 가장 최근의 멀쩡한 사본으로."""
+    cands = [(p.with_name(p.name + ".tmp"), "저장 중이던 파일")]
+    cands += [(f, f"{ts[4:6]}월 {ts[6:8]}일 {ts[9:11]}:{ts[11:13]} 백업") for ts, _, f in reversed(_backup_files(p.stem))]
+    for f, label in cands:
+        try:
+            d = _read_json(f)
+            if isinstance(d, dict) and ("sequences" in d or "info" in d):
+                return d, label
+        except Exception:
+            continue
+    return None, None
+
+
 def load_project(name):
     p = _ppath(name)
-    if p.exists():
-        proj = json.loads(p.read_text(encoding="utf-8"))
-        was = proj.get("v")
-        proj = migrate_project(name, proj)
-        if was != 2:
-            save_project(name, proj)
-        return proj
+    with _SAVE_LOCK:
+        proj, recovered = None, None
+        if p.exists():
+            try:
+                proj = _read_json(p)
+                if not isinstance(proj, dict) or ("sequences" not in proj and "info" not in proj):
+                    raise ValueError("프로젝트 형식이 아니에요")
+            except (ValueError, OSError, UnicodeDecodeError):
+                try:  # 깨진 파일은 지우지 않고 옆에 남겨 둠
+                    os.replace(p, p.with_name(f"{p.stem}.손상-{time.strftime('%Y%m%d_%H%M%S')}.json.bad"))
+                except OSError:
+                    pass
+                proj, recovered = _recover(p)
+                if proj is None:
+                    raise RuntimeError("프로젝트 파일이 손상됐고 백업도 없어요")
+        elif p.with_name(p.name + ".tmp").exists():
+            proj, recovered = _recover(p)
+        if proj is not None:
+            was = proj.get("v")
+            if was != 2 and p.exists():
+                _backup_copy(p, "변환전")
+            proj = migrate_project(name, proj)
+            if was != 2 or recovered:
+                save_project(name, proj)
+            if recovered:
+                proj["_recovered"] = recovered
+            return proj
     info = media_info(name)
     segs = []
     t = core.adir(name) / "transcript.json"
@@ -403,30 +735,62 @@ def load_project(name):
     return proj
 
 
-def save_project(name, proj):
+def save_project(name, proj, base_rev=None, force=False):
+    """base_rev: 편집실이 열 때 받은 판 번호. 그 사이 다른 창·작업이 저장했으면 Conflict (덮어쓰지 않음).
+    force: 그래도 이 내용으로 (덮어쓰기 전 상태는 백업)."""
     p = _ppath(name)
-    p.write_text(json.dumps(proj, ensure_ascii=False), encoding="utf-8")
-    # 자동 백업: 5분마다 한 벌씩, 최근 10개까지
-    bdir = PROJECTS / "backup"
-    bdir.mkdir(exist_ok=True)
-    olds = sorted(bdir.glob(f"{p.stem}__*.json"))
-    if not olds or time.time() - olds[-1].stat().st_mtime > 300:
-        shutil.copy2(p, bdir / f"{p.stem}__{time.strftime('%Y%m%d_%H%M%S')}.json")
-        for o in olds[:-9]:
-            o.unlink(missing_ok=True)
+    with _SAVE_LOCK:
+        disk = _disk_rev(p) if p.exists() else 0
+        if base_rev is not None and not force and disk >= 0 and int(base_rev) != disk:
+            raise Conflict(disk)
+        if force and p.exists():
+            _backup_copy(p, "덮어쓰기전")
+        proj.pop("_recovered", None)
+        proj["rev"] = max(disk, 0) + 1
+        data = json.dumps(proj, ensure_ascii=False)
+        tmp = p.with_name(p.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        _replace_retry(tmp, p)
+        try:
+            _REVC[str(p)] = (p.stat().st_mtime_ns, proj["rev"])
+        except OSError:
+            pass
+        # 자동 백업: 5분마다 한 벌씩, 최근 10개까지
+        regs = [x for x in _backup_files(p.stem) if not x[1]]
+        if not regs or time.time() - _bk_epoch(regs[-1][0]) > 300:
+            _backup_copy(p)
+        _prune_backups(p.stem)
+        return proj["rev"]
+
+
+def wait_saves(timeout=3.0):
+    """앱을 닫기 전에 저장 중인 것이 끝나길 잠깐 기다림."""
+    if _SAVE_LOCK.acquire(timeout=timeout):
+        _SAVE_LOCK.release()
+
+
+_BK_MEMO = {}
 
 
 def backups(name):
-    """자동 백업 목록 (최근 것부터)."""
+    """자동 백업 목록 (최근 것부터). 편집본 수는 파일마다 한 번만 읽어 기억."""
     stem = _ppath(name).stem
     out = []
-    for f in sorted((PROJECTS / "backup").glob(f"{stem}__*.json"), reverse=True):
+    for ts, tag, f in reversed(_backup_files(stem)):
         try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-            n = len(d.get("sequences") or [])
-        except Exception:
-            n = 0
-        out.append({"file": f.name, "time": time.strftime("%m월 %d일 %H:%M", time.localtime(f.stat().st_mtime)), "sequences": n})
+            key = (f.name, f.stat().st_mtime_ns)
+        except OSError:
+            continue
+        if key not in _BK_MEMO:
+            try:
+                _BK_MEMO[key] = len(_read_json(f).get("sequences") or [])
+            except Exception:
+                _BK_MEMO[key] = 0
+        when = f"{ts[4:6]}월 {ts[6:8]}일 {ts[9:11]}:{ts[11:13]}"
+        out.append({"file": f.name, "time": when + (f" · {BK_TAGS.get(tag, tag)}" if tag else ""), "sequences": _BK_MEMO[key]})
     return out
 
 
@@ -434,18 +798,62 @@ def restore_backup(name, fname):
     f = (PROJECTS / "backup" / Path(fname).name)
     if not f.exists() or not f.name.startswith(_ppath(name).stem + "__"):
         raise FileNotFoundError("백업을 찾지 못했어요")
-    return migrate_project(name, json.loads(f.read_text(encoding="utf-8")))
+    with _SAVE_LOCK:
+        d = _read_json(f)
+    d.pop("rev", None)
+    return migrate_project(name, d)
+
+
+def _uniq_name(n, names):
+    if n not in names:
+        return n
+    k = 2
+    while f"{n} {k}" in names:
+        k += 1
+    return f"{n} {k}"
+
+
+def reanalyze_project(name):
+    """편집점 다시 찾기 뒤: 사용자가 만든 편집본은 하나도 지우지 않고, 자막·영상 정보만 새로 받아쓴 내용으로 +
+    새 가편집은 옆에 추가 (이전 상태는 '편집점 다시 찾기 전' 백업으로 남김)."""
+    p = _ppath(name)
+    if not p.exists():
+        return load_project(name), 0, False
+    proj = load_project(name)
+    with _SAVE_LOCK:
+        if p.exists():
+            _backup_copy(p, "재분석전")
+    info = media_info(name)
+    proj["info"] = info
+    segs = _segments_of(name)
+    caps = [{"id": _nid(), "start": s["start"], "end": s["end"], "text": s["text"]} for s in segs]
+    changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
+    proj["captions"] = caps
+    for m in proj.get("media") or []:
+        if m.get("id") == "main":
+            m.update(dur=info["duration"], w=info["width"], h=info["height"], fps=info.get("fps", 30.0))
+    names = {q["name"] for q in proj["sequences"]}
+    fresh = auto_sequences(name, info)
+    for q in fresh:
+        q["name"] = _uniq_name(q["name"] + " (새로 찾음)", names)
+        names.add(q["name"])
+    proj["sequences"] += fresh
+    save_project(name, proj)
+    return proj, len(fresh), changed_caps
 
 
 def freeze_frame(src, f, t):
-    """정지 화면(프레임 고정): 그 순간을 PNG 로 저장해 가져온 미디어로."""
+    """정지 화면(프레임 고정): 그 순간을 PNG 로 저장해 가져온 미디어로 (원래 영상과 같은 크기로 보이게 freeze 표시)."""
     p = media_path(f, src)
-    out = ASSETS / f"정지_{Path(f).stem[:30].strip(' .')}_{t:.2f}.png"
+    tag = hashlib.sha1(f"{src}|{p.name}".encode("utf-8")).hexdigest()[:6]
+    out = ASSETS / f"정지_{Path(f).stem[:30].strip(' .')}_{tag}_{t:.2f}.png"
     if not out.exists():
-        r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", str(p), "-frames:v", "1", str(out)])
+        info = probe(p)
+        vf = ["-vf", ",".join(tonemap_chain(info["hdr"]))] if info.get("hdr") else []
+        r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", str(p), "-frames:v", "1", *vf, str(out)])
         if r.returncode or not out.exists():
             raise RuntimeError("정지 화면을 만들지 못했어요")
-    return media_entry(out.name, "assets")
+    return {**media_entry(out.name, "assets"), "freeze": True}
 
 
 # ---------- 자동 추천 (AI 없이 규칙 기반) ----------
@@ -620,9 +1028,25 @@ def seq_total(seq):
     return max(g) if g else 0.0
 
 
-def trans_range(seq, tr):
-    by = {it["id"]: it for it in seq["items"]}
-    a, b, d = by.get(tr.get("a")), by.get(tr.get("b")), max(0.04, float(tr.get("dur") or 1.0))
+def i_len(it):
+    return (it["out"] - it["in"]) / i_sp(it)
+
+
+def max_trans_dur(seq, tr, by=None):
+    """전환이 쓸 수 있는 최대 길이 (클립을 줄이면 전환도 저절로 짧아짐 · editor.html maxTransDur 과 같음)."""
+    by = by if by is not None else {it["id"]: it for it in seq["items"]}
+    a, b = by.get(tr.get("a")), by.get(tr.get("b"))
+    if a and b:
+        al = tr.get("align", "center")
+        return 2 * min(i_len(a), i_len(b)) if al == "center" else i_len(b) if al == "start" else i_len(a)
+    x = a or b
+    return i_len(x) if x else 0.0
+
+
+def trans_range(seq, tr, by=None):
+    by = by if by is not None else {it["id"]: it for it in seq["items"]}
+    a, b = by.get(tr.get("a")), by.get(tr.get("b"))
+    d = max(0.04, min(float(tr.get("dur") or 1.0), max_trans_dur(seq, tr, by)))
     if a and b:
         cut = b["start"]
         al = tr.get("align", "center")
@@ -645,6 +1069,8 @@ def valid_trans(seq):
             continue
         if (a or b)["track"] != tr["track"]:
             continue
+        if max_trans_dur(seq, tr, by) < 0.066:  # 2프레임도 안 남으면 전환 없음
+            continue
         out.append(tr)
     return out
 
@@ -655,7 +1081,7 @@ def track_state(seq, track_id, t, trans):
     for tr in trans:
         if tr["track"] != track_id:
             continue
-        r = trans_range(seq, tr)
+        r = trans_range(seq, tr, by)
         if r and r[0] - 1e-6 <= t < r[1] - 1e-6:
             return ("trans", tr, by.get(tr.get("a")), by.get(tr.get("b")), r[0], r[1])
     for it in seq["items"]:
@@ -705,11 +1131,19 @@ def _effect_tags(effect, x, y, dur):
     return ""
 
 
+def _ass_text(s):
+    """글자 그대로 보이게: { } 는 효과 명령, \\n·\\N·\\h 는 줄바꿈 명령으로 읽히지 않게 막음."""
+    s = str(s).replace("\\", "\\\u2060")  # 역슬래시 뒤에 보이지 않는 글자 → 명령이 안 됨
+    s = s.replace("{", "\\{").replace("}", "\\}")
+    return s.replace("\r", "").replace("\n", r"\N")
+
+
 def _karaoke(text, dur):
-    words = text.split()
-    total = sum(len(w) for w in words) or 1
+    """노래방 효과: 줄바꿈은 그대로 두고 글자 수에 비례해 시간을 나눔."""
+    rows = [ln.split() for ln in str(text).replace("\r\n", "\n").split("\n")]
+    total = sum(len(w) for r in rows for w in r) or 1
     cs = int(dur * 100)
-    return " ".join(rf"{{\kf{max(1, int(cs * len(w) / total))}}}{w}" for w in words)
+    return r"\N".join(" ".join(rf"{{\kf{max(1, int(cs * len(w) / total))}}}" + _ass_text(w) for w in r) for r in rows)
 
 
 # ASS 글자 크기는 줄 높이(위+아래 여백) 기준이라 화면(CSS) 글자보다 작게 나옴 → Pretendard 비율만큼 키워 미리보기와 같게
@@ -764,7 +1198,7 @@ def build_ass(proj, W, H):
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
         tags = rf"{{\an{an}\pos({x},{y})}}" if s["effect"] != "slide" else rf"{{\an{an}}}"
-        body = _karaoke(text, end - start) if s["effect"] == "karaoke" else text.replace("\n", r"\N")
+        body = _karaoke(text, end - start) if s["effect"] == "karaoke" else _ass_text(text)
         eff = _effect_tags(s["effect"], x, y, end - start)
         lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
@@ -777,23 +1211,47 @@ def build_ass(proj, W, H):
     return "\n".join(lines) + "\n"
 
 
+def _srt_ts(sec):
+    """SRT 시각 (밀리초로 먼저 반올림 → 59.9996초가 '60,000' 이 되지 않게, 음수는 0)."""
+    ms = int(round(max(0.0, float(sec)) * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
 def _srt(caps):
     out = []
     for i, c in enumerate(caps, 1):
-        out.append(f"{i}\n{core._ts(c['start'])} --> {core._ts(c['end'])}\n{c['text']}\n")
+        out.append(f"{i}\n{_srt_ts(c['start'])} --> {_srt_ts(c['end'])}\n{c['text']}\n")
     return "\n".join(out)
 
 
 # ---------- 프리미어 XML (FCP7) ----------
 
-def _xmeml(proj, W, H, fps, stem):
-    """프리미어 프로에서 '가져오기'로 여는 XML (FCP7 형식, 트랙·속도 포함)."""
+def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None):
+    """프리미어 프로에서 '가져오기'로 여는 XML (FCP7 형식, 트랙·속도 포함). t_lo~t_hi: 구간 내보내기면 그 구간만."""
     tb = round(fps)
     ntsc = "TRUE" if abs(fps - round(fps)) > 0.01 else "FALSE"
     rate = f"<rate><timebase>{tb}</timebase><ntsc>{ntsc}</ntsc></rate>"
     media = {m["id"]: m for m in proj["media"]}
     seen, fid = set(), {}
-    total_f = int(round(seq_total(proj) * fps))
+    t_hi = seq_total(proj) if t_hi is None else t_hi
+    total_f = int(round((t_hi - t_lo) * fps))
+
+    def cut(it):
+        """구간 안쪽만 남긴 클립 (밖이면 None)."""
+        s0, e0 = it["start"], i_end(it)
+        a, b = max(s0, t_lo), min(e0, t_hi)
+        if b - a < 0.5 / fps:
+            return None
+        x, sp = dict(it), i_sp(it)
+        if it.get("rev"):
+            x["out"], x["in"] = it["out"] - (a - s0) * sp, it["in"] + (e0 - b) * sp
+        else:
+            x["in"], x["out"] = it["in"] + (a - s0) * sp, it["out"] - (e0 - b) * sp
+        x["start"] = a - t_lo
+        return x
 
     def fileref(m):
         k = m["id"]
@@ -839,7 +1297,7 @@ def _xmeml(proj, W, H, fps, stem):
 
     vt, at, k = [], [], 0
     for tr in proj["tracks"]:
-        its = sorted([it for it in proj["items"] if it["track"] == tr["id"]], key=lambda x: x["start"])
+        its = sorted([x for x in (cut(it) for it in proj["items"] if it["track"] == tr["id"]) if x], key=lambda x: x["start"])
         body = ""
         for it in its:
             if media.get(it["media"]) is None:
@@ -864,6 +1322,7 @@ _PROCS = set()
 
 
 def cancel_export():
+    """멈추기(✕): 내보내기·미리보기 파일·검수 모두 (실행 중인 ffmpeg 를 끔)."""
     CANCEL.set()
     for p in list(_PROCS):
         try:
@@ -874,6 +1333,16 @@ def cancel_export():
 
 class Cancelled(Exception):
     pass
+
+
+class HwEncError(RuntimeError):
+    """그래픽카드 인코더 문제 (이때만 일반 방식으로 다시 만듦)."""
+
+
+HW_ERR = re.compile(r"nvenc|_qsv|\bqsv\b|_amf|\bamf\b|videotoolbox|OpenEncodeSession|No capable devices|\bMFX\b|"
+                    r"Error initializing output stream|Could not open encoder|incompatible client key|No NVENC|"
+                    r"Device creation failed|InitializeEncoder|Error while opening encoder|hardware", re.I)
+HW_SESSION = re.compile(r"OpenEncodeSession|incompatible client key|out of memory|session", re.I)
 
 
 def _even(v):
@@ -903,8 +1372,8 @@ def _fit(it, md, seq, W, H):
         ch = min(zh, H)
         return {"chain": pre + f"scale={zw}:{zh},crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}", "bw": W, "bh": ch, "bx": 0,
                 "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"]}
-    if fit == "auto":  # 위 트랙: 영상은 화면에 맞춤, 이미지는 작으면 원래 크기
-        fit = "native" if md["kind"] == "image" and sw * ref <= W and sh * ref <= H else "contain"
+    if fit == "auto":  # 위 트랙: 영상은 화면에 맞춤, 이미지는 작으면 원래 크기 (정지 화면은 원래 영상처럼 화면에 맞춤)
+        fit = "native" if md["kind"] == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
     cover = fit == "cover"
     s = ref if fit == "native" else (max if cover else min)(W / sw, H / sh)
     scw, sch = _even(sw * s), _even(sh * s)
@@ -972,38 +1441,50 @@ def _color_filters(it):
             v3 = f"({v2}+{0.15 * sh / 100:.5f}*6.75*{v2}*(1-{v2})*(1-{v2})+{0.15 * hi / 100:.5f}*6.75*{v2}*{v2}*(1-{v2}))"
             chans.append(f"{ch}='clip({v3}*255,0,255)'")
         out.append("format=rgb24,lutrgb=" + ":".join(chans))
-    if abs(sat - 100) > 1e-6:
-        s = sat / 100  # SVG feColorMatrix saturate 와 같은 행렬
+    s = sat / 100 * (1 + vib / 100 * 0.35)  # 활기는 미리보기(colorFilter)와 같은 식으로 채도에 합침
+    if abs(s - 1) > 1e-6:
         m = [0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s,
              0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s]
         out.append("format=rgb24,colorchannelmixer=" + ":".join(f"{n}={v:.4f}" for n, v in zip(
             ("rr", "rg", "rb", "gr", "gg", "gb", "br", "bg", "bb"), m)))
-    if abs(vib) > 1e-6:
-        out.append(f"vibrance=intensity={vib / 100:.3f}")
     return out
 
 
-def _segments(seq, t_lo, t_hi, fps, trans):
-    """장면이 바뀌는 지점마다 나눈 구간 목록 [(f0, f1)]."""
+def _segments(seq, t_lo, t_hi, fps, trans, media=None):
+    """장면이 바뀌는 지점마다 나눈 구간 목록 [(f0, f1)].
+    같은 트랙 전환 안쪽의 편집점은 나누지 않음 → 전환 하나가 한 구간 (빠른 xfade)."""
     vt = {t["id"] for t in seq["tracks"] if t["k"] == "v" and not t.get("hide")}
+    by = {it["id"]: it for it in seq["items"]}
     pts = {t_lo, t_hi}
+    rng = {}
+    for tr in trans:
+        r = trans_range(seq, tr, by)
+        if r and tr["track"] in vt:
+            pts.update(r)
+            rng.setdefault(tr["track"], []).append(r)
+            if tr.get("type") in ("black", "white") and tr.get("a") and tr.get("b"):
+                pts.add((r[0] + r[1]) / 2)
+
+    def inside(track, p):
+        return any(r0 + 1e-4 < p < r1 - 1e-4 for r0, r1 in rng.get(track, ()))
+
     rev_items = []
     for it in seq["items"]:
         if it["track"] in vt:
-            pts.update((it["start"], i_end(it)))
+            for p in (it["start"], i_end(it)):
+                if not inside(it["track"], p):
+                    pts.add(p)
             if it.get("rev"):
                 rev_items.append(it)
-    for tr in trans:
-        r = trans_range(seq, tr)
-        if r and tr["track"] in vt:
-            pts.update(r)
-            if tr.get("type") in ("black", "white") and tr.get("a") and tr.get("b"):
-                pts.add((r[0] + r[1]) / 2)
-    for it in rev_items:  # 거꾸로 재생은 메모리를 많이 써서 2초씩 나눔
+    for it in rev_items:  # 거꾸로 재생은 원본 장면을 모아 두고 뒤집어서 메모리를 많이 씀 → 원본 약 2초(1080p 기준)씩
+        md = (media or {}).get(it["media"]) or {}
+        px = max(1, (md.get("w") or 1920) * (md.get("h") or 1080))
+        budget = 2.0 * min(1.0, (1920 * 1080) / px)  # 4K 는 0.5초
+        step = max(1.0 / fps, budget / max(1.0, i_sp(it)))
         t = it["start"]
         while t < i_end(it):
             pts.add(t)
-            t += 2.0
+            t += step
     fr = sorted({int(round(p * fps)) for p in pts if t_lo - 1e-6 <= p <= t_hi + 1e-6})
     out = []
     for a, b in zip(fr, fr[1:]):
@@ -1027,8 +1508,8 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         cnt["l"] += 1
         return f"{p}{cnt['l']}"
 
-    def add_input(it, t_a, t_b):
-        """아이템의 [t_a, t_b] (타임라인) 를 정확히 n 프레임으로 → 라벨."""
+    def add_input(it, t_a, t_b, pre=None):
+        """아이템의 [t_a, t_b] (타임라인) 를 정확히 n 프레임으로 → 라벨. pre: (사진) 프레임을 늘리기 전에 한 번만 할 필터."""
         md = media[it["media"]]
         p = media_path(md["file"], md["src"])
         if not p.exists():
@@ -1037,25 +1518,32 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         sp = i_sp(it)
         chain = []
         if md["kind"] == "image":
-            inputs.append(["-loop", "1", "-framerate", str(fps), "-t", f"{dur + 0.5:.3f}", "-i", str(p)])
-            chain += ["setpts=PTS-STARTPTS", f"fps={fps}"]
+            # 사진은 1초에 한 번만 읽고(같은 장면) 크기 맞추기도 한 번만 → fps 로 늘림 (예전엔 매 프레임 다시 읽고 줄임)
+            inputs.append(["-loop", "1", "-framerate", "1", "-t", f"{dur + 1.5:.3f}", "-i", str(p)])
+            chain += ["setpts=PTS-STARTPTS"] + _color_filters(it) + list(pre or []) + [f"fps={fps}"]
         else:
             ma, mb = i_mt(it, t_a), i_mt(it, t_b)
             lo, hi = min(ma, mb), max(ma, mb)
             mdur = md.get("dur") or 1e9
-            ss = min(max(0.0, lo), max(0.0, mdur - 0.05))
-            pre = max(0.0, -lo) / sp if not it.get("rev") else max(0.0, hi - mdur) / sp
-            inputs.append(["-ss", f"{ss:.3f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
+            sfps = float(md.get("fps") or 30.0)
+            # 반 프레임 일찍 찾아가야 가장 가까운 원본 프레임이 첫 장면이 됨 (소리와 싱크)
+            ss = min(max(0.0, lo - 0.5 / sfps), max(0.0, mdur - 0.05))
+            pre_pad = max(0.0, -lo) / sp if not it.get("rev") else max(0.0, hi - mdur) / sp
+            inputs.append(["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
             chain.append("setpts=PTS-STARTPTS")
+            hdr = media_hdr(md)
+            if hdr:
+                chain += tonemap_chain(hdr, 2 * W)
             if it.get("rev"):
                 chain += [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
             if abs(sp - 1) > 1e-6:
                 chain.append(f"setpts=PTS/{sp:.5f}")
             chain.append(f"fps={fps}")
-            if pre > 1e-3:
-                chain.append(f"tpad=start_mode=clone:start_duration={pre:.4f}")
+            if pre_pad > 1e-3:
+                chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
         chain += [f"tpad=stop_mode=clone:stop_duration={dur + 1:.3f}", f"trim=end_frame={n}", "setpts=PTS-STARTPTS"]
-        chain += _color_filters(it)
+        if md["kind"] != "image":
+            chain += _color_filters(it)
         out = lab("s")
         fc.append(f"[{idx}:v]" + ",".join(chain) + f"[{out}]")
         return out
@@ -1063,9 +1551,11 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
     def layer(it, t_a, t_b):
         """아이템 → ('full', 라벨) 화면 전체 / ('ov', 라벨, x식, y식) 겹치기."""
         md = media[it["media"]]
-        src = add_input(it, t_a, t_b)
         fit = _fit(it, md, seq, W, H)
         bw, bh, bx, by = fit["bw"], fit["bh"], fit["bx"], fit["by"]
+        bg = fit["bg"]
+        img_pre = md["kind"] == "image" and bg != "blur"
+        src = add_input(it, t_a, t_b, [fit["chain"], "setsar=1"] if img_pre else None)
         sx, s_anim = _kf_expr(it, "scale", t0, dur, scale=0.01)  # 키프레임 → 구간 안 시간 t 의 식
         rx, r_anim = _kf_expr(it, "rot", t0, dur, scale=math.pi / 180)
         px, px_anim = _kf_expr(it, "pos", t0, dur, comp=0, scale=W, offset=-0.5 * W)
@@ -1079,28 +1569,40 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         rot = r_anim or abs(float(rx)) > 1e-6
         motion = s_anim or r_anim or px_anim or py_anim or rot or abs(float(sx) - 1) > 1e-6 or abs(float(px)) > 0.5 or abs(float(py)) > 0.5
         has_op = op_anim or op_const < 0.999
-        bg = fit["bg"]
         fg = lab("f")
         if bg == "blur":
             s1, s2 = lab("b"), lab("c")
             fc.append(f"[{src}]split[{s1}][{s2}]")
             bgl = lab("g")
             qw, qh = _even(W / 4), _even(H / 4)  # 1/4 크기에서 흐리게 → 키움 (훨씬 빠름)
-            fc.append(f"[{s1}]scale={qw}:{qh}:force_original_aspect_ratio=increase,crop={qw}:{qh},boxblur=6:3,scale={W}:{H},eq=brightness=-0.08,setsar=1[{bgl}]")
+            br = max(1, round(6 * min(qw, qh) / 270))  # 흐림 정도는 화면 크기에 비례 (720p·1080p·4K 모두 같게 보이게)
+            fc.append(f"[{s1}]scale={qw}:{qh}:force_original_aspect_ratio=increase,crop={qw}:{qh},boxblur={br}:3,scale={W}:{H},eq=brightness=-0.08,setsar=1[{bgl}]")
             src = s2
         elif bg == "box":
             bgl = lab("g")
             fc.append(f"color=c=0x{fit['bar'].lstrip('#')}:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n}[{bgl}]")
-        chain = [fit["chain"], "setsar=1"]
+        chain = [] if img_pre else [fit["chain"], "setsar=1"]
         full_plain = not motion and (bg is not None or (bw == W and bh == H and it["track"] == "V1" and md["kind"] != "image"))
         if not motion and bg is None and it["track"] == "V1" and md["kind"] != "image" and not (bw == W and bh == H):
             chain.append(f"pad={W}:{H}:{int(bx)}:{int(by)}:color=black")  # 가로 영상 맞춤(위아래/좌우 검정)
             full_plain = True
         S = f"({sx})"
         R = f"({rx})"
+        if motion and not (s_anim or r_anim or px_anim or py_anim or rot or has_op) and bg is None and md["kind"] != "image":
+            # 고정 확대(줌 컷·펀치인): 화면을 다 덮으면 겹치기 없이 키우고 잘라내기만 (2~3배 빠름, 같은 그림)
+            S_ = float(sx)
+            zw, zh = _even(bw * S_), _even(bh * S_)
+            xo = ax + float(px) + S_ * (cx - ax) - bw * S_ / 2
+            yo = ay + float(py) + S_ * (cy - ay) - bh * S_ / 2
+            if xo <= 0 and yo <= 0 and xo + zw >= W and yo + zh >= H:
+                ox, oy = -(int(xo) & ~1), -(int(yo) & ~1)  # overlay 와 같은 자리(짝수 내림)
+                ox, oy = min(ox, (zw - W) // 2 * 2), min(oy, (zh - H) // 2 * 2)
+                chain += [f"scale={zw}:{zh}", f"crop={W}:{H}:{ox}:{oy}"]
+                fc.append(f"[{src}]" + ",".join(chain) + f"[{fg}]")
+                return ("full", fg)
         if motion:
-            chain.append("format=rgba")
-            if rot:
+            if rot:  # 회전할 때만 투명 바탕이 필요
+                chain.append("format=rgba")
                 D = _even(math.hypot(bw, bh) + 2)
                 chain.append(f"rotate=a='{rx}':ow={D}:oh={D}:c=black@0")
                 fw, fh = D, D
@@ -1123,14 +1625,14 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         if has_op:
             if "format=rgba" not in chain:
                 chain.append("format=rgba")
-            if op_anim:  # 프레임마다 불투명도 명령
+            if op_anim:  # 프레임마다 불투명도 명령 (반 프레임 앞 시각 → 반올림 때문에 한 프레임 늦게 적용되는 일 없게)
                 cmd = f"op{k_seg}_{cnt['l']}.cmd"
-                rows = [f"{f / fps:.4f} colorchannelmixer@o{cnt['l']} aa {float(kf_at(op, i_mt(it, t0 + f / fps))) / 100:.4f};" for f in range(n)]
+                rows = [f"{max(0.0, (f - 0.5) / fps):.6f} colorchannelmixer@o{cnt['l']} aa {float(kf_at(op, i_mt(it, t0 + f / fps))) / 100:.4f};" for f in range(n)]
                 (tmp / cmd).write_text("\n".join(rows) + "\n", encoding="utf-8")
                 chain += [f"sendcmd=f={cmd}", f"colorchannelmixer@o{cnt['l']}=aa={op_const:.4f}"]
             else:
                 chain.append(f"colorchannelmixer=aa={op_const:.4f}")
-        fc.append(f"[{src}]" + ",".join(chain) + f"[{fg}]")
+        fc.append(f"[{src}]" + (",".join(chain) or "null") + f"[{fg}]")
         if bg:
             ly = lab("y")
             fc.append(f"[{bgl}][{fg}]overlay=x='{X}':y='{Y}':eval=frame:format=auto,format=yuv420p[{ly}]")
@@ -1158,6 +1660,17 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         fc.append(f"color=c=black:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n},format=yuv420p[{b}]")
         return b
 
+    def solid(c):
+        b = lab("w")
+        fc.append(f"color=c={c}:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n},format=yuv420p,setsar=1[{b}]")
+        return b
+
+    def norm(x):
+        y = lab("p")
+        fc.append(f"[{x}]format=yuv420p,setsar=1[{y}]")
+        return y
+
+    near = lambda u, v: abs(u - v) < 0.5 / fps  # noqa: E731
     comp = None
     for tr_ in [t for t in seq["tracks"] if t["k"] == "v"]:
         if tr_.get("hide"):
@@ -1179,25 +1692,33 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             if b:
                 comp = put(comp, layer(b, t0, t0 + dur), f"{W}*(1-{Pt})")
             continue
+        out = lab("t")
+        whole = near(t0, ts) and near(t0 + dur, te)
+        mid = (ts + te) / 2
+        if typ in ("black", "white") and a and b and (near(t0, ts) and near(t0 + dur, mid) or near(t0, mid) and near(t0 + dur, te)):
+            # 검정/흰색 거치기: 앞 절반은 A→색, 뒤 절반은 색→B 를 빠른 xfade 로 (미리보기의 1-|2p-1| 과 같은 직선)
+            if near(t0, ts):
+                X = norm(put(comp, layer(a, t0, t0 + dur)))
+                fc.append(f"[{X}][{solid(typ)}]xfade=transition=fade:duration={dur:.4f}:offset=0[{out}]")
+            else:
+                Y = norm(put(comp, layer(b, t0, t0 + dur)))
+                fc.append(f"[{solid(typ)}][{Y}]xfade=transition=fade:duration={dur:.4f}:offset=0[{out}]")
+            comp = out
+            continue
         below = comp or base()
         c1, c2 = lab("x"), lab("x")
         fc.append(f"[{below}]split[{c1}][{c2}]")
         X = put(c1, layer(a, t0, t0 + dur)) if a else c1
         Y = put(c2, layer(b, t0, t0 + dur)) if b else c2
-        Xf, Yf = lab("p"), lab("q")
-        fc.append(f"[{X}]format=yuv420p,setsar=1[{Xf}]")
-        fc.append(f"[{Y}]format=yuv420p,setsar=1[{Yf}]")
-        out = lab("t")
-        whole = abs(t0 - ts) < 0.5 / fps and abs(t0 + dur - te) < 0.5 / fps
+        Xf, Yf = norm(X), norm(Y)
         if whole and typ in ("dissolve", "wipe"):  # 전환 전체가 한 구간이면 빠른 xfade
             fc.append(f"[{Xf}][{Yf}]xfade=transition={'fade' if typ == 'dissolve' else 'wipeleft'}:duration={dur:.4f}:offset=0[{out}]")
         elif typ == "wipe":
             fc.append(f"[{Xf}][{Yf}]blend=all_expr='if(gte(X,W*(1-{P})),B,A)'[{out}]")
         elif typ in ("black", "white"):
-            mid, col = lab("m"), lab("w")
-            fc.append(f"[{Xf}][{Yf}]blend=all_expr='if(lt({P},0.5),A,B)'[{mid}]")
-            fc.append(f"color=c={typ}:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n},format=yuv420p[{col}]")
-            fc.append(f"[{mid}][{col}]blend=all_expr='A*(1-(1-abs(2*{P}-1)))+B*(1-abs(2*{P}-1))'[{out}]")
+            mid_l, col = lab("m"), solid(typ)
+            fc.append(f"[{Xf}][{Yf}]blend=all_expr='if(lt({P},0.5),A,B)'[{mid_l}]")
+            fc.append(f"[{mid_l}][{col}]blend=all_expr='A*(1-(1-abs(2*{P}-1)))+B*(1-abs(2*{P}-1))'[{out}]")
         else:
             fc.append(f"[{Xf}][{Yf}]blend=all_expr='A*(1-{P})+B*{P}'[{out}]")
         comp = out
@@ -1224,31 +1745,39 @@ def _fc_opt():
     return _FC["o"]
 
 
-def _run_ff(args, cwd, on_frame=None):
-    """ffmpeg 실행 (진행률·취소 지원)."""
-    if CANCEL.is_set():
+def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None):
+    """ffmpeg 실행 (진행률·취소 지원). abort: 이 작업만 멈추는 신호. enc: 그래픽카드 인코더면 그 문제인지 구분."""
+    if CANCEL.is_set() or (abort is not None and abort.is_set()):
         raise Cancelled()
-    errf = tempfile.TemporaryFile(dir=cwd)
-    p = subprocess.Popen([core.ffmpeg(), "-hide_banner", "-nostats", "-progress", "pipe:1"] + args, cwd=str(cwd),
-                         stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
-    _PROCS.add(p)
-    try:
-        for line in p.stdout:
-            if on_frame and line.startswith(b"frame="):
+    with tempfile.TemporaryFile(dir=cwd) as errf:
+        p = subprocess.Popen([core.ffmpeg(), "-hide_banner", "-nostats", "-progress", "pipe:1"] + args, cwd=str(cwd),
+                             stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+        _PROCS.add(p)
+        if procs is not None:
+            procs.add(p)
+        try:
+            for line in p.stdout:
                 try:
-                    on_frame(int(line[6:].strip() or 0))
+                    if on_frame and line.startswith(b"frame="):
+                        on_frame(int(line[6:].strip() or 0))
+                    elif on_time and line.startswith(b"out_time_us="):
+                        on_time(int(line[12:].strip() or 0) / 1e6)
                 except ValueError:
                     pass
-        p.wait()
-    finally:
-        _PROCS.discard(p)
-    if CANCEL.is_set():
-        raise Cancelled()
-    if p.returncode:
-        errf.seek(0)
-        msg = errf.read().decode("utf-8", "replace")
-        raise RuntimeError(msg[-600:])
-    errf.close()
+            p.wait()
+        finally:
+            _PROCS.discard(p)
+            if procs is not None:
+                procs.discard(p)
+            p.stdout.close()
+        if CANCEL.is_set() or (abort is not None and abort.is_set()):
+            raise Cancelled()
+        if p.returncode:
+            errf.seek(0)
+            msg = errf.read().decode("utf-8", "replace")
+            if enc and HW_ERR.search(msg):
+                raise HwEncError(msg[-600:])
+            raise RuntimeError(msg[-600:])
 
 
 # 그래픽카드 인코더 (있으면 내보내기가 몇 배 빨라짐) — 실제로 짧게 인코딩해 보고 되는 것만 씀
@@ -1282,6 +1811,12 @@ def hw_encoder():
     return _HW["enc"]
 
 
+def _hw_works(enc, pr, W, H, fps):
+    r = core.run([core.ffmpeg(), "-hide_banner", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r={fps}:d=0.2"]
+                 + _venc(enc, pr, W, H, fps) + ["-f", "null", "-"])
+    return r.returncode == 0
+
+
 def _atempo(sp):
     out = []
     while sp > 2.0 + 1e-9:
@@ -1313,20 +1848,30 @@ def _kf_np(p, m, np):
 
 
 SR = 48000
+AFFTDN_DELAY = int(round(SR * 0.025))  # 잡음 줄이기(afftdn)가 소리를 25ms(1200샘플) 늦게 내보냄 → 그만큼 당김
 
 
-def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress):
-    """소리 섞기: 트랙별 볼륨·키프레임·페이드·전환·음소거/솔로 → 대사 + 배경음악(말할 때 자동 줄임)."""
+def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress, abort=None):
+    """소리 섞기 (실패·멈춤 때는 열린 임시 파일을 바로 놓아 Windows 에서도 지워지게)."""
+    try:
+        return _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort)
+    except BaseException as e:
+        traceback.clear_frames(e.__traceback__)
+        raise
+
+
+def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
+    """소리 섞기: 트랙별 볼륨·키프레임·페이드·전환·음소거/솔로 → 대사 + 배경음악(말할 때 자동 줄임).
+    클립마다 ffmpeg 로 읽는 것은 몇 개씩 동시에 (컷이 많은 롱폼이 훨씬 빨라짐)."""
     import numpy as np
     n = max(1, int(round((t_hi - t_lo) * SR)))
-    dia = np.memmap(tmp / "dialog.f32", np.float32, "w+", shape=(n, 2))
-    mus = np.memmap(tmp / "music.f32", np.float32, "w+", shape=(n, 2))
     tracks = {t["id"]: t for t in seq["tracks"] if t["k"] == "a"}
     solo = any(t.get("solo") for t in tracks.values())
-    items = [it for it in seq["items"] if it["track"] in tracks]
-    used = {"music": False}
-    for k, it in enumerate(items):
-        progress(k / max(1, len(items)))
+    by = {it["id"]: it for it in seq["items"]}
+    jobs = []
+    for it in seq["items"]:
+        if it["track"] not in tracks:
+            continue
         tr = tracks[it["track"]]
         md = media.get(it["media"])
         if not md or not md.get("audio") or it.get("mute") or tr.get("mute") or (solo and not tr.get("solo")):
@@ -1337,7 +1882,7 @@ def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress):
         for tt in trans:
             if tt["track"] != it["track"] or it["id"] not in (tt.get("a"), tt.get("b")):
                 continue
-            r = trans_range(seq, tt)
+            r = trans_range(seq, tt, by)
             if not r:
                 continue
             a_lo, a_hi = min(a_lo, r[0]), max(a_hi, r[1])
@@ -1345,121 +1890,179 @@ def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress):
         a_lo, a_hi = max(a_lo, t_lo), min(a_hi, t_hi)
         if a_hi - a_lo < 1e-3:
             continue
-        sp = i_sp(it)
         ma, mb = i_mt(it, a_lo), i_mt(it, a_hi)
         lo, hi = max(0.0, min(ma, mb)), min(md.get("dur") or 1e9, max(ma, mb))
         if hi - lo < 1e-3:
             continue
-        # 디코딩 시작점이 타임라인 어디인지
-        tl_start = i_tl(it, hi if it.get("rev") else lo)
-        af = (["areverse"] if it.get("rev") else []) + _atempo(sp)
-        cmd = [core.ffmpeg(), "-v", "error", "-ss", f"{lo:.4f}", "-t", f"{hi - lo:.4f}", "-i",
-               str(media_path(md["file"], md["src"])), "-vn", "-af", ",".join(af) or "anull", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **core.NO_WINDOW)
-        _PROCS.add(p)
-        lvl = param(it, "level")
-        g_static = 10 ** ((float(it.get("gain") or 0) + float(tr.get("vol") or 0)) / 20)
-        bus = dia if tr.get("role", "dialog") == "dialog" else mus
-        if bus is mus:
-            used["music"] = True
-        pos = int(round((tl_start - t_lo) * SR))
-        end_i = int(round((a_hi - t_lo) * SR))
-        st, en = it["start"], i_end(it)
-        try:
-            while True:
-                if CANCEL.is_set():
+        p_in = media_path(md["file"], md["src"])
+        if not p_in.exists():
+            raise RuntimeError(f"미디어 파일이 없어요 · {md['file']}")
+        jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, tr.get("role", "dialog") != "dialog"))
+    dia = mus = None
+    try:
+        dia = np.memmap(tmp / "dialog.f32", np.float32, "w+", shape=(n, 2))
+        mus = np.memmap(tmp / "music.f32", np.float32, "w+", shape=(n, 2)) if any(j[-1] for j in jobs) else None
+        lock = threading.Lock()
+        my = set()
+        stop = threading.Event()
+
+        def halted():
+            return CANCEL.is_set() or stop.is_set() or (abort is not None and abort.is_set())
+
+        def one(job):
+            it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, music = job
+            if halted():
+                raise Cancelled()
+            sp = i_sp(it)
+            tl_start = i_tl(it, hi if it.get("rev") else lo)  # 디코딩 시작점이 타임라인 어디인지
+            af = (["areverse"] if it.get("rev") else []) + _atempo(sp)
+            cmd = [core.ffmpeg(), "-v", "error", "-ss", f"{lo:.4f}", "-t", f"{hi - lo:.4f}", "-i", str(p_in),
+                   "-vn", "-af", ",".join(af) or "anull", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"]
+            lvl = param(it, "level")
+            g_static = 10 ** ((float(it.get("gain") or 0) + float(tr.get("vol") or 0)) / 20)
+            bus = mus if music else dia
+            pos = int(round((tl_start - t_lo) * SR))
+            end_i = int(round((a_hi - t_lo) * SR))
+            st, en = it["start"], i_end(it)
+            fi, fo = float(it.get("fadeIn") or 0), float(it.get("fadeOut") or 0)
+            got = 0
+            with tempfile.TemporaryFile(dir=tmp) as errf:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+                _PROCS.add(p)
+                my.add(p)
+                try:
+                    while True:
+                        if halted():
+                            raise Cancelled()
+                        raw = p.stdout.read(SR * 8 * 2)
+                        if not raw:
+                            break
+                        x = np.frombuffer(raw[: len(raw) // 8 * 8], np.float32).reshape(-1, 2)
+                        got += len(x)
+                        a0 = pos
+                        pos += len(x)
+                        if a0 >= end_i:
+                            continue
+                        lo_i = max(0, -a0)
+                        hi_i = min(len(x), end_i - a0, n - a0)
+                        if hi_i <= lo_i:
+                            continue
+                        x = x[lo_i:hi_i]
+                        tau = t_lo + (a0 + lo_i + np.arange(len(x))) / SR
+                        g = (10 ** (_kf_np(lvl, i_mt(it, tau), np) / 20)) * g_static
+                        if fi > 0:
+                            g = g * np.clip((tau - st) / fi, 0, 1)
+                        if fo > 0:
+                            g = g * np.clip((en - tau) / fo, 0, 1)
+                        for (r0, r1), side, typ in tgain:
+                            pr = np.clip((tau - r0) / max(1e-4, r1 - r0), 0, 1)
+                            if typ == "cgain":
+                                w = 1 - pr if side == "out" else pr
+                            else:
+                                w = np.cos(pr * np.pi / 2) if side == "out" else np.sin(pr * np.pi / 2)
+                            g = g * w
+                        # 아이템 범위(전환 포함) 밖은 0
+                        g = g * ((tau >= a_lo - 1e-6) & (tau < a_hi + 1e-6))
+                        y = x * g[:, None].astype(np.float32)
+                        with lock:
+                            bus[a0 + lo_i: a0 + hi_i] += y
+                finally:
+                    p.stdout.close()
+                    p.wait()
+                    _PROCS.discard(p)
+                    my.discard(p)
+                    bus = x = y = None  # noqa: F841 — 이 스레드의 흔적이 메모리 매핑을 붙잡지 않게
+                if halted():
                     raise Cancelled()
-                raw = p.stdout.read(SR * 8 * 5)
-                if not raw:
-                    break
-                x = np.frombuffer(raw[: len(raw) // 8 * 8], np.float32).reshape(-1, 2)
-                a0 = pos
-                pos += len(x)
-                if a0 >= end_i:
-                    continue
-                lo_i = max(0, -a0)
-                hi_i = min(len(x), end_i - a0, n - a0)
-                if hi_i <= lo_i:
-                    continue
-                x = x[lo_i:hi_i]
-                tau = t_lo + (a0 + lo_i + np.arange(len(x))) / SR
-                g = (10 ** (_kf_np(lvl, i_mt(it, tau), np) / 20)) * g_static
-                fi, fo = float(it.get("fadeIn") or 0), float(it.get("fadeOut") or 0)
-                if fi > 0:
-                    g = g * np.clip((tau - st) / fi, 0, 1)
-                if fo > 0:
-                    g = g * np.clip((en - tau) / fo, 0, 1)
-                for (r0, r1), side, typ in tgain:
-                    pr = np.clip((tau - r0) / max(1e-4, r1 - r0), 0, 1)
-                    if typ == "cgain":
-                        w = 1 - pr if side == "out" else pr
-                    else:
-                        w = np.cos(pr * np.pi / 2) if side == "out" else np.sin(pr * np.pi / 2)
-                    g = g * w
-                # 아이템 범위(전환 포함) 밖은 0
-                g = g * ((tau >= a_lo - 1e-6) & (tau < a_hi + 1e-6))
-                bus[a0 + lo_i: a0 + hi_i] += x * g[:, None].astype(np.float32)
-        finally:
-            p.stdout.close()
-            p.wait()
-            _PROCS.discard(p)
-    # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게
-    voice = seq.get("voice") or {}
-    vf = (["highpass=f=80"] if voice.get("hp") else []) + \
-         ([f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40"] if voice.get("nr") else []) + \
-         (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
-    if vf:
-        progress(0.98)
+                if p.returncode and not got:
+                    errf.seek(0)
+                    raise RuntimeError(f"소리를 읽지 못했어요 · {md['file']} · {errf.read().decode('utf-8', 'replace')[-200:]}")
+
+        workers = max(1, min(4, os.cpu_count() or 2))
+        if jobs:
+            ex = ThreadPoolExecutor(workers)
+            try:
+                futs = [ex.submit(one, j) for j in jobs]
+                for k, f in enumerate(futs):
+                    try:
+                        f.result()
+                    except BaseException:
+                        stop.set()
+                        for p in list(my):
+                            try:
+                                p.kill()
+                            except OSError:
+                                pass
+                        raise
+                    progress((k + 1) / len(futs))
+            finally:
+                ex.shutdown(wait=True, cancel_futures=True)
+        # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게
+        voice = seq.get("voice") or {}
+        D = AFFTDN_DELAY
+        vf = (["highpass=f=80"] if voice.get("hp") else []) + \
+             ([f"apad=pad_len={D}", f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40", f"atrim=start_sample={D}"] if voice.get("nr") else []) + \
+             (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
+        if vf:
+            progress(0.98)
+            dia.flush()
+            ok = True
+            try:
+                _run_ff(["-v", "error", "-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", "dialog.f32",
+                         "-af", ",".join(vf), "-f", "f32le", "-ar", str(SR), "-ac", "2", "dialog2.f32"], tmp, abort=abort)
+            except RuntimeError:
+                ok = False  # 보정이 안 되면 원래 소리로
+            if ok and (tmp / "dialog2.f32").exists():
+                cl = np.memmap(tmp / "dialog2.f32", np.float32, "r")
+                m = min(n, len(cl) // 2)
+                for b in range(0, m, SR * 10):
+                    e = min(m, b + SR * 10)
+                    dia[b:e] = np.asarray(cl[b * 2:e * 2]).reshape(-1, 2)
+                del cl
+        # 말할 때 배경음악 자동 줄이기 (덕킹) → 결과는 대사 버퍼에 그대로 더함 (임시 파일 하나 덜 씀)
+        duck = seq.get("duck") or {}
+        win = SR // 50  # 20ms
+        if mus is not None and duck.get("on"):
+            nw = n // win + 1
+            rms = np.zeros(nw, np.float32)
+            for b in range(0, n, win * 3000):
+                seg = np.asarray(dia[b: b + win * 3000])
+                k = len(seg) // win
+                if k:
+                    r = np.sqrt((seg[: k * win] ** 2).mean(axis=(1,)).reshape(k, win).mean(axis=1))
+                    rms[b // win: b // win + k] = r
+            act = rms > 10 ** (-40 / 20)
+            hold = int(0.35 / 0.02)  # 말 사이 짧은 쉼은 그대로 줄인 상태
+            act_h = act.copy()
+            last = -10 ** 9
+            for i in range(nw):
+                if act[i]:
+                    last = i
+                act_h[i] = i - last <= hold
+            target = 10 ** (float(duck.get("amount", -14)) / 20)
+            gw = np.ones(nw, np.float32)
+            g = 1.0
+            ca, cr = math.exp(-1 / (0.08 / 0.02)), math.exp(-1 / (0.45 / 0.02))
+            for i in range(nw):
+                tg = target if act_h[i] else 1.0
+                c = ca if tg < g else cr
+                g = tg + (g - tg) * c
+                gw[i] = g
+            for b in range(0, n, SR * 10):
+                e = min(n, b + SR * 10)
+                gi = np.interp(np.arange(b, e) / win, np.arange(nw), gw).astype(np.float32)
+                dia[b:e] = dia[b:e] + mus[b:e] * gi[:, None]
+        elif mus is not None:
+            for b in range(0, n, SR * 10):
+                dia[b: b + SR * 10] = dia[b: b + SR * 10] + mus[b: b + SR * 10]
         dia.flush()
-        r = core.run([core.ffmpeg(), "-v", "error", "-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", str(tmp / "dialog.f32"),
-                      "-af", ",".join(vf), "-f", "f32le", "-ar", str(SR), "-ac", "2", str(tmp / "dialog2.f32")])
-        if r.returncode == 0:
-            cl = np.memmap(tmp / "dialog2.f32", np.float32, "r")
-            m = min(n, len(cl) // 2)
-            for b in range(0, m, SR * 10):
-                e = min(m, b + SR * 10)
-                dia[b:e] = np.asarray(cl[b * 2:e * 2]).reshape(-1, 2)
-            del cl
-    # 말할 때 배경음악 자동 줄이기 (덕킹)
-    duck = seq.get("duck") or {}
-    out = np.memmap(tmp / "mix.f32", np.float32, "w+", shape=(n, 2))
-    win = SR // 50  # 20ms
-    if duck.get("on") and used["music"]:
-        nw = n // win + 1
-        rms = np.zeros(nw, np.float32)
-        for b in range(0, n, win * 3000):
-            seg = np.asarray(dia[b: b + win * 3000])
-            k = len(seg) // win
-            if k:
-                r = np.sqrt((seg[: k * win] ** 2).mean(axis=(1,)).reshape(k, win).mean(axis=1))
-                rms[b // win: b // win + k] = r
-        act = rms > 10 ** (-40 / 20)
-        hold = int(0.35 / 0.02)  # 말 사이 짧은 쉼은 그대로 줄인 상태
-        act_h = act.copy()
-        last = -10 ** 9
-        for i in range(nw):
-            if act[i]:
-                last = i
-            act_h[i] = i - last <= hold
-        target = 10 ** (float(duck.get("amount", -14)) / 20)
-        gw = np.ones(nw, np.float32)
-        g = 1.0
-        ca, cr = math.exp(-1 / (0.08 / 0.02)), math.exp(-1 / (0.45 / 0.02))
-        for i in range(nw):
-            tg = target if act_h[i] else 1.0
-            c = ca if tg < g else cr
-            g = tg + (g - tg) * c
-            gw[i] = g
-        for b in range(0, n, SR * 10):
-            e = min(n, b + SR * 10)
-            gi = np.interp(np.arange(b, e) / win, np.arange(nw), gw).astype(np.float32)
-            out[b:e] = dia[b:e] + mus[b:e] * gi[:, None]
-    else:
-        for b in range(0, n, SR * 10):
-            out[b: b + SR * 10] = dia[b: b + SR * 10] + mus[b: b + SR * 10]
-    out.flush()
-    del dia, mus, out
-    return tmp / "mix.f32"
+        peak = 0.0
+        if n <= SR * 4:  # 짧은 영상: 완전히 조용한지 (소리 크기 맞추기가 오류 나지 않게)
+            peak = float(np.abs(np.asarray(dia)).max()) if n else 0.0
+        return tmp / "dialog.f32", peak
+    finally:
+        # 메모리 매핑을 바로 놓음: 멈추거나 오류가 나도 (작업 스레드의 흔적이 남아 있어도) Windows 에서 임시 파일이 지워지게
+        dia = mus = None  # noqa: F841
 
 
 PRESETS = {
@@ -1467,6 +2070,65 @@ PRESETS = {
     "hq": {"label": "고화질 4K", "long": (3840, 2160), "shorts": (2160, 3840), "crf": 18, "preset": "veryfast"},
     "small": {"label": "가벼운 720p", "long": (1280, 720), "shorts": (720, 1280), "crf": 23, "preset": "veryfast"},
 }
+
+
+def _is_render_tmp(d):
+    """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음)."""
+    if not d.is_dir():
+        return False
+    if d.name.startswith(".render_"):
+        return True
+    if not re.fullmatch(r"tmp[a-z0-9_]{8}", d.name):
+        return False
+    try:
+        names = [x.name for x in d.iterdir()]
+    except OSError:
+        return False
+    return any(x in ("list.txt", "subs.ass", "dialog.f32", "mix.f32", "music.f32") or re.fullmatch(r"(seg\d{4}|p\d{3})\.mp4", x) for x in names)
+
+
+def sweep_temp(min_age=600):
+    """멈췄거나 앱이 갑자기 꺼져 남은 임시 폴더 정리 (완성본 폴더 안)."""
+    now = time.time()
+    try:
+        ds = list(core.OUT.iterdir())
+    except OSError:
+        return
+    for d in ds:
+        try:
+            if _is_render_tmp(d) and now - d.stat().st_mtime > min_age:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def _missing_media(proj, media, t_lo, t_hi):
+    """내보낼 구간에 쓰이는데 파일이 없는 미디어 이름들."""
+    tracks = {t["id"]: t for t in proj["tracks"]}
+    solo = any(t.get("solo") for t in tracks.values() if t["k"] == "a")
+    out = set()
+    for it in proj["items"]:
+        if it["start"] >= t_hi or i_end(it) <= t_lo:
+            continue
+        tr = tracks.get(it["track"]) or {}
+        md = media.get(it["media"])
+        if not md:
+            continue
+        if tr.get("k") == "v" and tr.get("hide"):
+            continue
+        if tr.get("k") == "a" and (tr.get("mute") or it.get("mute") or not md.get("audio") or (solo and not tr.get("solo"))):
+            continue
+        try:
+            ok = media_path(md["file"], md.get("src", "videos")).exists()
+        except ValueError:
+            ok = False
+        if not ok:
+            out.add(md["file"])
+    return sorted(out)
+
+
+def _tlabel(t):
+    return f"{int(t // 60)}m{int(t % 60):02d}s"
 
 
 def export(name, proj, opts, log):
@@ -1481,11 +2143,11 @@ def export(name, proj, opts, log):
     if "main" not in media:
         i = proj["info"]
         media["main"] = {"id": "main", "kind": "video", "src": "videos", "file": proj.get("source") or name, "dur": i["duration"],
-                         "w": i["width"], "h": i["height"], "audio": True}
+                         "w": i["width"], "h": i["height"], "fps": i.get("fps", 30.0), "audio": True}
     proj["media"] = list(media.values())
     bad = [it for it in proj["items"] if it.get("media") not in media or it["out"] - it["in"] <= 1e-3]
-    if bad:  # 미디어가 없거나 길이가 0인 클립은 빼고 진행
-        log(f"  빠진 미디어·빈 클립 {len(bad)}개는 건너뛰어요")
+    if bad:  # 프로젝트에 없는 미디어·길이가 0인 클립은 빼고 진행
+        log(f"  빈 클립 {len(bad)}개는 건너뛰어요")
         drop = {id(x) for x in bad}
         proj["items"] = [it for it in proj["items"] if id(it) not in drop]
     label = re.sub(r'[\\/:*?"<>|]', "", proj.get("name") or ("쇼츠" if fmt == "shorts" else "롱폼")).strip(" .")
@@ -1496,26 +2158,45 @@ def export(name, proj, opts, log):
     rng = opts.get("range")
     if rng and rng[1] - rng[0] > 0.1:
         t_lo, t_hi = max(0.0, float(rng[0])), min(total, float(rng[1]))
-        stem += "_구간"
+        stem += f"_구간_{_tlabel(t_lo)}-{_tlabel(t_hi)}"
     if t_hi - t_lo < 0.05:
         raise RuntimeError("내보낼 내용이 없어요 (타임라인이 비어 있어요)")
-    caps = [dict(c, start=c["start"] - t_lo, end=c["end"] - t_lo) for c in timeline_captions(proj)
-            if c["end"] > t_lo and c["start"] < t_hi] if proj.get("captionsOn", True) else []
-
+    # 같은 이름이 있으면 덮어쓰지 않고 (2), (3)… 을 붙임
+    exts = ([".mp4"] if opts.get("video", True) else []) + ([".srt"] if opts.get("srt", True) else []) + (["_premiere.xml"] if opts.get("xml", True) else [])
+    base, k = stem, 1
+    while any((core.OUT / f"{stem}{e}").exists() for e in exts):
+        k += 1
+        stem = f"{base} ({k})"
+    if opts.get("video", True):
+        miss = _missing_media(proj, media, t_lo, t_hi)
+        if miss:
+            raise RuntimeError("미디어 파일이 없어요 · " + ", ".join(miss[:5]) + " (옮기거나 지웠다면 미디어 탭에서 다시 넣어 주세요)")
+    # 자막 파일(SRT)은 '영상에 자막 넣기'와 상관없이 만듦 (유튜브 자막 올리기용) · 구간 내보내기면 구간 안으로 잘라 0초부터
+    span = t_hi - t_lo
+    caps = []
+    for c in timeline_captions(proj):
+        s, e = max(0.0, c["start"] - t_lo), min(span, c["end"] - t_lo)
+        if e - s >= 1.0 / fps:
+            caps.append(dict(c, start=s, end=e))
     if opts.get("srt", True):
-        (core.OUT / f"{stem}.srt").write_text(_srt(caps), encoding="utf-8")
-        outputs.append(f"{stem}.srt")
+        if caps:
+            (core.OUT / f"{stem}.srt").write_text(_srt(caps), encoding="utf-8")
+            outputs.append(f"{stem}.srt")
+        else:
+            log("  자막이 없어서 SRT 파일은 만들지 않았어요")
     if opts.get("xml", True):
-        (core.OUT / f"{stem}_premiere.xml").write_text(_xmeml(proj, BW, BH, fps, stem), encoding="utf-8")
+        (core.OUT / f"{stem}_premiere.xml").write_text(_xmeml(proj, BW, BH, fps, stem, t_lo, t_hi), encoding="utf-8")
         outputs.append(f"{stem}_premiere.xml")
 
     if opts.get("video", True):
-        tmp = Path(tempfile.mkdtemp(dir=core.OUT))
+        sweep_temp(0)
+        tmp = Path(tempfile.mkdtemp(prefix=".render_", dir=core.OUT))
         t_start = time.time()
-        state = {"pct": 0.0}
+        astate = {"frac": 0.0}
+        abort_a = threading.Event()
+        ex_a, fut, err = None, None, None
 
         def prog(pct, detail):
-            state["pct"] = pct
             el = time.time() - t_start
             eta = el / pct * (100 - pct) if pct > 2 else None
             core.set_progress(label="내보내는 중", item=name, step="", pct=int(pct), detail=detail,
@@ -1525,68 +2206,168 @@ def export(name, proj, opts, log):
             trans = valid_trans(proj)
             (tmp / "subs.ass").write_text(build_ass(proj, BW, BH), encoding="utf-8")
             shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
-            segs = _segments(proj, t_lo, t_hi, fps, trans)
+            segs = _segments(proj, t_lo, t_hi, fps, trans, media)
             tot_f = sum(b - a for a, b in segs) or 1
             done = {}
             lock = threading.Lock()
             prog(1, "준비 중")
 
-            hw = hw_encoder() if opts.get("hw", True) else None
+            def audio_job():
+                """소리: 섞기 → 소리 크기 맞추기 → AAC (영상 화면을 만드는 동안 같이 진행)."""
+                mix, peak = _mix_audio(proj, media, t_lo, t_hi, tmp, trans, lambda x: astate.update(frac=0.4 * x), abort_a)
+                m = proj.get("master") or {}
+                norm = m.get("normalize", True)
+                if norm and span < 3.05 and peak < 1e-4:  # 3초 안 되는 무음은 소리 크기 맞추기가 오류 → 건너뜀
+                    norm = False
 
-            def render(k, enc):
+                def enc(nm):
+                    af = [f"volume={float(m.get('volume', 1.0)):.3f}"]
+                    if nm:
+                        lufs = min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))
+                        af.append(f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11")
+                    af += ["aresample=48000", "asetpts=N/SR/TB"]  # 소리 크기 맞추기 뒤 시각을 다시 매겨 끝이 잘리거나 길어지지 않게
+                    _run_ff(["-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",
+                             "-ar", "48000", "audio.m4a"], tmp, on_time=lambda t: astate.update(frac=0.4 + 0.6 * min(1.0, t / max(0.1, span))),
+                            abort=abort_a)
+                try:
+                    enc(norm)
+                except RuntimeError:
+                    if not norm or CANCEL.is_set() or abort_a.is_set():
+                        raise
+                    log("  소리 크기 맞추기를 건너뛰고 다시 만들어요")
+                    enc(False)
+                return tmp / "audio.m4a"
+
+            ex_a = ThreadPoolExecutor(1)
+            fut = ex_a.submit(audio_job)
+
+            hw = hw_encoder() if opts.get("hw", True) else None
+            if hw and (hw, W, H) in _HW.get("bad", set()):
+                hw = None
+
+            def render(k, enc, abort, procs):
+                if abort.is_set():
+                    return
                 f0, f1 = segs[k]
                 args, final, n = _build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k)
 
                 def on_frame(fr):
                     with lock:
                         done[k] = min(n, fr)
-                        prog(2 + 83 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(segs)}" + (" · 그래픽카드" if enc else ""))
+                        prog(2 + 85 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(segs)}" + (" · 그래픽카드" if enc else ""))
 
                 _run_ff(["-y"] + args + [_fc_opt(), f"fc{k}.txt", "-map", f"[{final}]", "-an", "-frames:v", str(n)] + _venc(enc, pr, W, H, fps)
-                        + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame)
+                        + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame,
+                        procs=procs, abort=abort, enc=enc)
                 on_frame(n)
 
-            def render_all(enc):
+            def render_all(enc, workers=None):
+                """구간들을 동시에 만들고, 하나라도 실패하면 나머지를 바로 멈춤 (다 기다리지 않음)."""
                 done.clear()
-                workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(segs) > 1 else 1
-                with ThreadPoolExecutor(workers) as ex:
-                    for f in [ex.submit(render, k, enc) for k in range(len(segs))]:
-                        f.result()
+                if workers is None:
+                    workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(segs) > 1 else 1
+                abort, procs = threading.Event(), set()
+                ex = ThreadPoolExecutor(workers)
+                try:
+                    futs = [ex.submit(render, k, enc, abort, procs) for k in range(len(segs))]
+                    wait(futs, return_when=FIRST_EXCEPTION)
+                    errs = [f.exception() for f in futs if f.done() and f.exception() is not None]
+                    if errs:
+                        abort.set()
+                        for p in list(procs):
+                            try:
+                                p.kill()
+                            except OSError:
+                                pass
+                        real = [e for e in errs if not isinstance(e, Cancelled)]
+                        raise (real[0] if real else errs[0])
+                finally:
+                    ex.shutdown(wait=True, cancel_futures=True)
 
-            try:
-                render_all(hw)
-            except RuntimeError:
-                if not hw or CANCEL.is_set():
-                    raise
+            def to_cpu():
+                _HW.setdefault("bad", set()).add((hw, W, H))  # 이 크기에서만 이번 실행 동안 그래픽카드를 안 씀
                 log(f"  그래픽카드 인코딩({hw})이 안 돼서 일반 방식으로 다시 만들어요")
-                _HW["enc"] = None
                 for f in tmp.glob("seg*.mp4"):
                     f.unlink(missing_ok=True)
                 render_all(None)
+
+            try:
+                render_all(hw)
+            except HwEncError as e:
+                if CANCEL.is_set():
+                    raise Cancelled()
+                if HW_SESSION.search(str(e)) and len(segs) > 1:  # 동시에 여는 개수 제한 → 하나씩 다시
+                    log(f"  그래픽카드({hw})로 한 번에 하나씩 다시 만들어요")
+                    try:
+                        render_all(hw, 1)
+                    except HwEncError:
+                        to_cpu()
+                else:
+                    to_cpu()
+            except RuntimeError:
+                # 처음 보는 오류: 그래픽카드가 이 크기를 못 하는 것인지 짧게 확인 → 그렇다면 일반 방식, 아니면 그대로 오류
+                if not hw or CANCEL.is_set() or _hw_works(hw, pr, W, H, fps):
+                    raise
+                to_cpu()
             (tmp / "list.txt").write_text("".join(f"file 'seg{k:04d}.mp4'\n" for k in range(len(segs))), encoding="utf-8")
-            prog(86, "소리 섞는 중")
-            mix = _mix_audio(proj, media, t_lo, t_hi, tmp, trans, lambda x: prog(86 + 8 * x, "소리 섞는 중"))
-            prog(95, "마무리 · 소리 크기 맞추는 중")
-            af = [f"volume={float(proj['master'].get('volume', 1.0)):.3f}"]
-            if proj["master"].get("normalize", True):
-                lufs = min(-9.0, max(-24.0, float(proj["master"].get("lufs") or -14.0)))
-                af.append(f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11")
+            while True:  # 영상 화면이 다 되면 소리 마무리를 기다림
+                try:
+                    audio = fut.result(timeout=0.4)
+                    break
+                except TimeoutError:
+                    prog(87 + 11 * astate["frac"], "소리 마무리 중 · 소리 크기 맞추는 중")
+            prog(98, "마무리 중")
+            # 영상·소리를 그대로 합치기만 (다시 인코딩 없음)
+            _run_ff(["-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio.name, "-map", "0:v", "-map", "1:a", "-c", "copy",
+                     "-movflags", "+faststart", "final.mp4"], tmp)
             out = core.OUT / f"{stem}.mp4"
-            _run_ff(["-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name,
-                     "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",
-                     "-ar", "48000", "-t", f"{t_hi - t_lo:.3f}", "-movflags", "+faststart", "final.mp4"], tmp)
             try:  # 다 만들어진 뒤에만 완성본 폴더로 (멈추면 반쪽 파일이 안 남음)
-                os.replace(tmp / "final.mp4", out)
-            except OSError:
-                raise RuntimeError("같은 이름의 완성본 파일이 다른 프로그램에서 열려 있어요. 닫고 다시 내보내 주세요")
+                _replace_retry(tmp / "final.mp4", out, 5)
+            except OSError:  # 같은 이름 파일이 다른 프로그램에 열려 있음 → 다른 이름으로라도 꼭 남김
+                for i in range(2, 100):
+                    alt = core.OUT / f"{stem} ({i}).mp4"
+                    if alt.exists():
+                        continue
+                    try:
+                        os.replace(tmp / "final.mp4", alt)
+                    except OSError:
+                        continue
+                    log(f"  같은 이름 파일이 다른 프로그램에 열려 있어서 '{alt.name}'(으)로 저장했어요")
+                    out = alt
+                    break
+                else:
+                    raise RuntimeError("완성본을 저장하지 못했어요 (같은 이름 파일이 다른 프로그램에 열려 있어요)")
             outputs.insert(0, out.name)
-            log(f"  영상 길이 {t_hi - t_lo:.1f}초 · {W}×{H} · {fps}fps · {time.time() - t_start:.0f}초 걸림" + (f" · 그래픽카드({_HW['enc']})" if hw and _HW.get("enc") else ""))
-        except Cancelled:
+            log(f"  영상 길이 {span:.1f}초 · {W}×{H} · {fps}fps · {time.time() - t_start:.0f}초 걸림" + (f" · 그래픽카드({hw})" if hw and (hw, W, H) not in _HW.get("bad", set()) else ""))
+        except Cancelled as e:
+            traceback.clear_frames(e.__traceback__)
             log("  내보내기를 멈췄어요")
-            raise RuntimeError("내보내기를 멈췄어요")
-        except RuntimeError as e:
-            raise RuntimeError(f"영상을 만들지 못했어요 · {str(e)[-300:]}")
+            err = "내보내기를 멈췄어요"
+        except Exception as e:  # noqa: BLE001 — 열린 임시 파일을 놓기 위해 오류 정보만 남기고 정리
+            if not isinstance(e, RuntimeError):
+                traceback.print_exc()
+            traceback.clear_frames(e.__traceback__)
+            err = f"영상을 만들지 못했어요 · {str(e)[-300:]}"
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            if fut is not None:
+                if not fut.done():  # 실패·멈춤이면 소리 쪽도 바로 멈춤
+                    abort_a.set()
+                    for p in list(_PROCS):
+                        try:
+                            p.kill()
+                        except OSError:
+                            pass
+                try:
+                    fut.result(timeout=60)
+                except BaseException as e:  # noqa: BLE001
+                    traceback.clear_frames(e.__traceback__)
+                ex_a.shutdown(wait=True)
+            for _ in range(5):  # Windows: 잠깐 잡혀 있으면 조금 뒤 다시
+                shutil.rmtree(tmp, ignore_errors=True)
+                if not tmp.exists():
+                    break
+                time.sleep(0.3)
+        if err:
+            raise RuntimeError(err)
     log(f"  내보내기 완료 · {', '.join(outputs)}")
     return outputs

@@ -1,13 +1,20 @@
 """풋살사관학교 편집도우미 — 핵심 기능 (목록·다운로드·분석·러프컷·업데이트)."""
+import contextlib
+import importlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
+
+import updater
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG = json.loads((APP_DIR / "config.json").read_text(encoding="utf-8"))
@@ -29,12 +36,26 @@ def set_progress(**kw):
     PROGRESS.update(kw)
 
 
+_FF = None
+
+
 def ffmpeg():
-    exe = shutil.which("ffmpeg")
-    if exe:
-        return exe
-    import imageio_ffmpeg
-    return imageio_ffmpeg.get_ffmpeg_exe()
+    """앱과 함께 설치된 ffmpeg(imageio-ffmpeg)를 먼저 씀 — PATH 의 오래된 ffmpeg 는 xfade·자막 등이 없을 수 있음.
+    FUTSAL_FFMPEG 환경 변수로 직접 지정 가능."""
+    global _FF
+    if _FF is None:
+        import os
+        exe = os.environ.get("FUTSAL_FFMPEG")
+        if not exe:
+            try:
+                import imageio_ffmpeg
+                exe = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                exe = shutil.which("ffmpeg")
+        if not exe:
+            raise RuntimeError("ffmpeg를 찾지 못했어요")
+        _FF = exe
+    return _FF
 
 
 NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # Windows: 검은 창 안 띄움
@@ -46,9 +67,9 @@ def run(cmd):
 
 # ---------- 목록·다운로드 ----------
 
-def list_videos(kind="videos", cookies_browser=None, url=None):
+def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     """채널 영상 목록 (조회수 순). url을 주면 다른 유튜버 채널, 영상 주소 하나면 그 영상만."""
-    import yt_dlp
+    log = log or print
     opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
@@ -79,8 +100,26 @@ def list_videos(kind="videos", cookies_browser=None, url=None):
         else:
             path = re.sub(r"/(videos|shorts|streams|featured|playlists|about|community)$", "", p.path.rstrip("/"))
             target = f"https://www.youtube.com{path}/{kind}"  # ?si= 같은 공유 꼬리 제거
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(target, download=False)
+
+    def extract():
+        opts.update(_js_opts())
+        with _yt(log).YoutubeDL(opts) as ydl:
+            return ydl.extract_info(target, download=False)
+
+    with _engine(log):
+        try:
+            info = extract()
+        except Exception as e:
+            if not _blocked(e):
+                raise
+            log("YouTube가 막아서 다운로드 엔진을 최신으로 바꾼 뒤 한 번 더 불러올게요")
+            update_engine(log)
+            try:
+                info = extract()
+            except Exception as e2:
+                if _blocked(e2):
+                    raise RuntimeError(BLOCKED_MSG) from e2
+                raise
     ents = info.get("entries") if info.get("entries") is not None else [info]
     flat = []
     for e in ents:  # 탭이 여러 개로 묶여 오면 안쪽 영상까지 펼침
@@ -94,8 +133,6 @@ def list_videos(kind="videos", cookies_browser=None, url=None):
 
 
 def download(ids, log, cookies_browser=None, max_height=1080):
-    import yt_dlp
-
     cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}}
 
     def hook(d):
@@ -129,21 +166,39 @@ def download(ids, log, cookies_browser=None, max_height=1080):
     }
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
-    failed = []
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        for k, vid in enumerate(ids, 1):
-            cur.update(i=k, vid=vid, streams={})
-            set_progress(label="보관함에 담는 중", item=vid, step=f"{k}/{len(ids)}", pct=None, detail="연결하는 중")
-            log(f"보관함에 담는 중 · {vid}")
-            try:
-                ydl.download([vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"])
-                log("  담기 완료")
-            except Exception as e:  # 한 개 실패해도 나머지 계속
-                msg = str(e)
-                if "not a bot" in msg or "403" in msg:
-                    msg = "YouTube가 다운로드를 막았어요. 왼쪽 아래 '업데이트 확인'으로 엔진을 최신으로 바꾸거나, '크롬 로그인 정보로 받기'를 켜고 다시 담아 보세요."
-                log(f"  담지 못했어요 · {msg}")
-                failed.append(vid)
+    failed, retried = [], False  # 막히면 엔진 최신화 + 다시 받기는 한 번만
+    # YouTube 해석 도구: 켤 때 받기 시작한 설치가 있으면 (진행률을 보여 주며) 끝날 때까지 기다림 · 엔진 잠금 밖에서
+    ensure_deno(log, install=_since("deno_install", "t_fail") > ENGINE_RETRY)
+    with _engine(log):
+        opts.update(_js_opts())
+        ydl = _yt(log).YoutubeDL(opts)
+        try:
+            for k, vid in enumerate(ids, 1):
+                log(f"보관함에 담는 중 · {vid}")
+                for attempt in (1, 2):
+                    cur.update(i=k, vid=vid, streams={})
+                    set_progress(label="보관함에 담는 중", item=vid, step=f"{k}/{len(ids)}", pct=None, detail="연결하는 중")
+                    try:
+                        ydl.download([vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"])
+                        log("  담기 완료")
+                    except Exception as e:  # 한 개 실패해도 나머지 계속
+                        if attempt == 1 and not retried and _blocked(e):
+                            retried = True
+                            log("  YouTube가 막았어요 · 다운로드 엔진을 최신으로 바꾼 뒤 한 번 더 받아 볼게요")
+                            ydl.close()
+                            set_progress(label="다운로드 엔진 준비 중", item=vid, step=f"{k}/{len(ids)}", pct=None, detail="최신으로 바꾸는 중이에요")
+                            update_engine(log)
+                            opts.update(_js_opts())
+                            ydl = _yt(log).YoutubeDL(opts)
+                            continue
+                        msg = str(e)
+                        if _blocked_text(msg):
+                            msg = BLOCKED_MSG
+                        log(f"  담지 못했어요 · {msg}")
+                        failed.append(vid)
+                    break
+        finally:
+            ydl.close()
     return failed
 
 
@@ -326,53 +381,323 @@ def render(name, spec, log):
     return out
 
 
-# ---------- 업데이트 ----------
+# ---------- 다운로드 엔진 (yt-dlp · YouTube 해석 도구 Deno) ----------
+# YouTube 는 자주 바뀜 → 켤 때 3일마다 엔진을 최신으로, 막히면 그 자리에서 한 번 최신으로 바꾸고 다시 시도.
+# yt-dlp 공식 안내: YouTube 를 제대로 받으려면 yt-dlp-ejs(= yt-dlp[default]) + 자바스크립트 실행기(Deno 권장, 2.3 이상)가 필요.
+
+ENGINE_HOME = Path.home() / ".futsal-studio"  # 사용자별 (앱 폴더를 지워도 남음)
+ENGINE_EVERY = 3 * 86400
+ENGINE_RETRY = 86400  # 켤 때 저절로 하다 실패했으면 하루 뒤에 다시 (인터넷이 막힌 곳에서 켤 때마다 붙잡지 않게)
+ENGINE_PKG = "yt-dlp[default]"
+DENO_MIN = (2, 3, 0)
+DENO_ZIP = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+DENO_ZIP_ALT = "https://dl.deno.land/release/{ver}/deno-x86_64-pc-windows-msvc.zip"
+DENO_AUTO = sys.platform == "win32"  # 자동 설치는 Windows 만
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
+               "소재 찾기의 '다운로드가 계속 실패하나요?' → '크롬 로그인 정보로 받기'를 켜고 다시 해 보세요.")
+_ENGINE_LOCK = threading.RLock()  # pip 로 엔진을 바꾸는 동안만 목록·다운로드가 기다림 (같은 작업 안의 재시도는 통과)
+_DENO_LOCK = threading.Lock()     # Deno 설치는 한 번에 하나 (엔진 잠금과 따로: 받는 동안 목록 불러오기는 기다리지 않음)
+_DENO_PROG = {}                   # 받는 중인 Deno 진행률 (기다리는 다운로드 작업이 화면에 보여 줌)
+_DENO = None
+
+
+def _blocked_text(msg):
+    return "not a bot" in msg or "Sign in" in msg or re.search(r"(?<![\w-])403(?![\w-])", msg) is not None
+
+
+def _blocked(e):
+    """YouTube 가 막았다는 다운로드 오류인지 (엔진을 최신으로 바꾸면 풀리는 경우가 많음)."""
+    return any(c.__name__ == "DownloadError" for c in type(e).__mro__) and _blocked_text(str(e))
+
+
+@contextlib.contextmanager
+def _engine(log):
+    if not _ENGINE_LOCK.acquire(blocking=False):
+        set_progress(label="다운로드 엔진 준비 중", pct=None, detail="최신으로 바꾸는 중이에요 · 잠시만 기다려 주세요")
+        _ENGINE_LOCK.acquire()
+        set_progress()  # 기다림 끝 → 원래 작업 이름이 다시 보이게
+    try:
+        ensure_deno(log, install=False)
+        yield
+    finally:
+        _ENGINE_LOCK.release()
+
+
+def _js_opts():
+    return {"js_runtimes": {"deno": {"path": _DENO}}} if _DENO else {}
+
+
+def _yt(log=print):
+    try:
+        import yt_dlp
+        return yt_dlp
+    except Exception as e:  # 엔진 업데이트가 중간에 끊겨 망가진 경우 → 다시 설치
+        log(f"다운로드 엔진이 없거나 망가져서 다시 설치해요 · {e}")
+    update_engine(log)
+    try:
+        import yt_dlp
+        return yt_dlp
+    except Exception as e:
+        raise RuntimeError("다운로드 엔진을 설치하지 못했어요. 인터넷 연결을 확인한 뒤 '시작하기 (Windows).bat'을 "
+                           f"다시 실행해 주세요 · {e}")
+
+
+def _forget_ytdlp():
+    """pip 로 바꾼 뒤 새 yt-dlp 를 처음부터 다시 읽게 (예전 것과 섞이지 않게)."""
+    for m in [m for m in sys.modules if m.split(".")[0] in ("yt_dlp", "yt_dlp_ejs")]:
+        sys.modules.pop(m, None)
+    importlib.invalidate_caches()
+
+
+def _ytdlp_version():
+    try:
+        from importlib import metadata
+        return metadata.version("yt-dlp")
+    except Exception:
+        return None
+
+
+def _tail(text, n=200):
+    lines = [x.strip() for x in (text or "").splitlines() if x.strip()]
+    return lines[-1][-n:] if lines else ""
+
+
+def _stamp(name, **kw):
+    """ENGINE_HOME/<name>.json 기록 고치기 (값이 None 이면 그 항목을 지움)."""
+    p = ENGINE_HOME / f"{name}.json"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d = d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        d = {}
+    d.update(kw)
+    try:
+        ENGINE_HOME.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({k: v for k, v in d.items() if v is not None}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _since(name, key):
+    """기록된 시각 뒤 지난 초 (기록이 없거나 이상하면 아주 큼)."""
+    try:
+        age = time.time() - float(json.loads((ENGINE_HOME / f"{name}.json").read_text(encoding="utf-8"))[key])
+    except (OSError, ValueError, KeyError, TypeError):
+        return float("inf")
+    return age if age >= 0 else float("inf")
+
+
+def engine_age():
+    """마지막으로 엔진을 최신으로 바꾼 뒤 지난 초."""
+    return _since("engine_upgrade", "t")
+
+
+def update_engine(log, deno=True):
+    """다운로드 엔진(yt-dlp + YouTube 해석 부품)을 최신으로 바꾸고 새 버전을 다시 읽음. 성공하면 True.
+    잠금은 pip 동안만 (Deno 는 그 밖에서 확인·설치)."""
+    with _ENGINE_LOCK:
+        before = _ytdlp_version()
+        log("다운로드 엔진을 최신으로 바꾸는 중")
+        r = run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "-U", ENGINE_PKG])
+        _forget_ytdlp()
+        ok = r.returncode == 0
+        if ok:
+            after = _ytdlp_version()
+            _stamp("engine_upgrade", t=time.time(), version=after, t_fail=None)
+            log(f"  완료 · {after or '최신'}" + (" (이미 최신이에요)" if after and after == before else ""))
+        else:
+            _stamp("engine_upgrade", t_fail=time.time())
+            log(f"  최신으로 바꾸지 못했어요 · 인터넷 연결을 확인해 주세요 · {_tail(r.stderr)}")
+    if deno:
+        ensure_deno(log)
+    return ok
+
+
+def engine_autoupdate(log):
+    """앱을 켤 때 뒤에서: 3일이 지났으면 엔진을 최신으로, Deno 가 없으면 설치. 실패했으면 하루 동안은 다시 하지 않음.
+    화면 진행률은 건드리지 않음 (그사이 시작한 작업의 진행률을 덮지 않게)."""
+    try:
+        if engine_age() > ENGINE_EVERY and _since("engine_upgrade", "t_fail") > ENGINE_RETRY:
+            update_engine(log, deno=False)
+        ensure_deno(log, install=_since("deno_install", "t_fail") > ENGINE_RETRY, show=False)
+    except Exception as e:
+        log(f"다운로드 엔진 확인을 건너뛰었어요 · {e}")
+
+
+def _deno_ok(path):
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        r = subprocess.run([str(path), "--version"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30, **NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    m = re.search(r"deno (\d+)\.(\d+)\.(\d+)", r.stdout or "")
+    return bool(m) and tuple(int(x) for x in m.groups()) >= DENO_MIN
+
+
+def _use_deno(path):
+    """찾은 Deno 를 yt-dlp 가 쓰게: 경로를 기억하고 이 프로그램의 PATH 맨 앞에 넣음."""
+    global _DENO
+    _DENO = str(path)
+    d = os.path.dirname(_DENO)
+    if d not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+    return _DENO
+
+
+def _fetch_text(url):
+    req = urllib.request.Request(url, headers=updater.UA)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _deno_urls():
+    yield DENO_ZIP
+    try:  # GitHub 이 안 되면 Deno 공식 배포 서버
+        yield DENO_ZIP_ALT.format(ver=_fetch_text("https://dl.deno.land/release-latest.txt").strip())
+    except updater.NET_ERRORS:
+        return
+
+
+def _install_deno(dest, progress=None):
+    """공식 Windows 용 deno.exe 를 받아 확인(sha256·실행)한 뒤 dest 에 넣음."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    err = None
+    for url in _deno_urls():
+        try:
+            with tempfile.TemporaryDirectory(dir=ENGINE_HOME, ignore_cleanup_errors=True) as td:
+                zp = Path(td) / "deno.zip"
+                updater.download(url, zp, progress, timeout=60)
+                want = re.search(r"\b[0-9a-fA-F]{64}\b", _fetch_text(url + ".sha256sum"))
+                if not want or updater.sha256(zp) != want.group(0).lower():
+                    raise RuntimeError("받은 파일 확인(sha256)에 실패했어요")
+                new = Path(td) / dest.name
+                with zipfile.ZipFile(zp) as z:
+                    new.write_bytes(z.read("deno.exe"))
+                if sys.platform != "win32":
+                    new.chmod(0o755)
+                if not _deno_ok(new):
+                    raise RuntimeError("받은 Deno가 실행되지 않아요")
+                updater._replace(new, dest)
+                return
+        except Exception as e:
+            err = e
+    raise RuntimeError(updater._why(err) if isinstance(err, updater.NET_ERRORS) else str(err))
+
+
+def _deno_home():
+    return ENGINE_HOME / "bin" / ("deno.exe" if sys.platform == "win32" else "deno")
+
+
+def _find_deno():
+    if _DENO and os.path.isfile(_DENO):
+        return _DENO
+    for cand in (_deno_home(), shutil.which("deno")):
+        if _deno_ok(cand):
+            return _use_deno(cand)
+    return None
+
+
+def _deno_progress(show):
+    def cb(got, total):
+        pct = min(99, int(got * 100 / total)) if total else None
+        _DENO_PROG.update(pct=pct, detail=f"{got / 1e6:.0f}MB" + (f" / {total / 1e6:.0f}MB" if total else "") + " · 처음 한 번만 받아요")
+        if show:
+            set_progress(label="YouTube 해석 도구 받는 중", pct=pct, detail=_DENO_PROG["detail"])
+    return cb
+
+
+def ensure_deno(log, install=True, show=True):
+    """YouTube 해석에 쓰는 자바스크립트 실행기(Deno)를 찾고, 없으면 (Windows) 이 사용자 폴더에 설치.
+    실패해도 멈추지 않고 None (영상 일부가 안 받아질 수 있음). 다른 쪽이 설치하는 중이면 끝날 때까지 기다렸다 그 결과를 씀.
+    show: 받는 진행률을 화면에 (작업 안에서 부를 때만)."""
+    found = _find_deno()
+    if found or not (install and DENO_AUTO):
+        return found
+    while not _DENO_LOCK.acquire(timeout=0.5):
+        if show:
+            set_progress(label="YouTube 해석 도구 받는 중", pct=_DENO_PROG.get("pct"),
+                         detail=_DENO_PROG.get("detail") or "처음 한 번만 받아요 · 잠시만 기다려 주세요")
+    try:
+        found = _find_deno()  # 기다리는 동안 다른 쪽이 설치했으면 그대로 씀
+        if found:
+            return found
+        log("YouTube 해석 도구(Deno)를 설치하는 중이에요 · 처음 한 번만, 1~2분 걸려요")
+        _DENO_PROG.clear()
+        try:
+            _install_deno(_deno_home(), _deno_progress(show))
+        except Exception as e:
+            _stamp("deno_install", t_fail=time.time())
+            log(f"  YouTube 해석 도구(Deno)를 설치하지 못했어요 · 일부 영상이 안 받아질 수 있어요. "
+                f"인터넷 연결을 확인한 뒤 왼쪽 아래 '업데이트 확인'을 눌러 주세요 ({e})")
+            return None
+        _stamp("deno_install", t_fail=None)
+        log("  YouTube 해석 도구 설치 완료")
+        return _use_deno(_deno_home())
+    finally:
+        _DENO_PROG.clear()
+        _DENO_LOCK.release()
+
+
+# ---------- 업데이트 (실제 설치·되돌리기는 updater.py) ----------
 
 def _newer(a, b):
     return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
 
 
+def _skip_note(ver):
+    return f"새 버전(v{ver})이 이 PC에서 열리지 않아 이전 버전(v{VERSION})을 쓰고 있어요. 관리자에게 알려 주세요."
+
+
 def check_update():
+    out = {"current": VERSION, "available": False}
+    n = updater.take_notice()  # 방금 업데이트·되돌림 결과 → 화면에 한 번 알림
+    if n:
+        out.update(notice=n["text"], notice_warn=n["warn"])
     url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
     if not url:
-        return {"current": VERSION, "available": False, "note": "업데이트 주소가 설정되지 않았어요"}
-    with urllib.request.urlopen(url, timeout=10) as r:
-        m = json.loads(r.read().decode("utf-8"))
-    return {"current": VERSION, "latest": m["version"], "available": _newer(m["version"], VERSION),
-            "notes": m.get("notes", ""), "zip": m.get("zip")}
-
-
-def update_engine(log):
-    log("다운로드 엔진을 최신으로 바꾸는 중")
-    r = run([sys.executable, "-m", "pip", "install", "-q", "-U", "yt-dlp"])
-    log("  완료" if r.returncode == 0 else f"  실패 · {r.stderr[-300:]}")
+        return dict(out, note="업데이트 주소가 설정되지 않았어요")
+    try:
+        m, _ = updater.fetch_manifest(url)
+    except updater.UpdateError as e:
+        return dict(out, note=str(e))
+    out.update(latest=m["version"], available=_newer(m["version"], VERSION), notes=m.get("notes", ""), zip=m.get("zip"))
+    if out["available"] and updater.skipped(APP_DIR) == m["version"]:  # 되돌렸던 그 버전은 더 새 버전이 나올 때까지 권하지 않음
+        out.update(available=False, note=_skip_note(m["version"]))
+    return out
 
 
 def update_app(log):
-    info = check_update()
-    if "note" in info:
-        log(f"프로그램 업데이트 건너뜀 · {info['note']}")
+    """새 버전을 확인하며 설치 (받기 → 검사 → 되돌리기 복사본 → 교체). 다시 시작해야 하면 True."""
+    url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
+    if not url:
+        log("프로그램 업데이트 건너뜀 · 업데이트 주소가 설정되지 않았어요")
         return False
-    if not info.get("available"):
+    m, raw = updater.fetch_manifest(url)
+    if not _newer(m["version"], VERSION):
         log(f"이미 최신 버전이에요 (v{VERSION})")
         return False
-    log(f"프로그램 업데이트 · v{VERSION} → v{info['latest']}")
-    with tempfile.TemporaryDirectory() as td:
-        zpath = Path(td) / "app.zip"
-        urllib.request.urlretrieve(info["zip"], zpath)
-        with zipfile.ZipFile(zpath) as z:
-            names = [n for n in z.namelist() if not n.endswith("/")]
-            root = names[0].split("/")[0] + "/" if all(n.startswith(names[0].split("/")[0] + "/") for n in names) else ""
-            for n in names:
-                rel = n[len(root):]
-                if not rel or rel == "config.json":  # 사용자 설정은 보존
-                    continue
-                dest = (APP_DIR / rel).resolve()
-                if APP_DIR not in dest.parents:  # 압축 경로 조작 방지
-                    continue
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(z.read(n))
-    req = APP_DIR / "requirements.txt"
-    run([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)])
+    if updater.skipped(APP_DIR) == m["version"]:
+        log(f"프로그램 업데이트 건너뜀 · {_skip_note(m['version'])}")
+        return False
+    log(f"프로그램 업데이트 · v{VERSION} → v{m['version']}")
+
+    def prog(got, total):
+        set_progress(label="업데이트 받는 중", pct=min(99, int(got * 100 / total)) if total else None,
+                     detail=f"{got / 1e6:.1f}MB" + (f" / {total / 1e6:.1f}MB" if total else ""))
+
+    res = updater.download_and_install(m, raw, APP_DIR, log, prog)
+    if res["req_changed"]:  # 구성요소 목록이 바뀐 버전만 pip (안 바뀌면 건너뜀)
+        set_progress(label="업데이트 설치 중", pct=None, detail="새 구성요소를 설치하는 중이에요 · 몇 분 걸릴 수 있어요")
+        log("  새 구성요소를 설치하는 중이에요 (몇 분 걸릴 수 있어요)")
+        r = run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "-r", str(APP_DIR / "requirements.txt")])
+        if r.returncode:
+            updater.mark_requirements(APP_DIR, ok=False)
+            back = updater.rollback(APP_DIR, log)
+            raise RuntimeError("새 버전에 필요한 구성요소를 설치하지 못해 업데이트를 취소했어요"
+                               + (" (이전 버전 그대로예요)" if back else " (프로그램을 껐다 켜면 이전 버전으로 돌아가요)")
+                               + f". 인터넷 연결을 확인하고 다시 시도해 주세요 · {_tail(r.stderr)}")
+        updater.mark_requirements(APP_DIR)
     log("  완료 · 프로그램을 다시 시작해요")
     return True

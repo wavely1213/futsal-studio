@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+# 업데이트 중에 생기는 파일 (사용자 PC 전용)
+.update_staging/
+.rollback/
+.update_pending*
+.update_result*
+.req_hash
+.update_skip*
+*.rollback-tmp
