@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
-  "notes": "편집실 프리미어식으로 새로 만듦 (멀티 트랙·키프레임·전환·오디오) · 스타일 배우기 · 영상/썸네일 자동 검수 · 썸네일 기능 추가",
+  "version": "1.7.1",
+  "notes": "썸네일 편집기 안정화 (자유 변형 취소 시 편집 손실·숫자 입력 시 글자 효과 손상·저장 문제 등 90여 건 수정), 스타일 배우기 정확도 개선",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }
