@@ -9,6 +9,9 @@ if [ ! -x .venv/bin/python ]; then
   echo "처음 실행: 필요한 구성요소를 설치합니다. 몇 분 걸립니다..."
   python3 -m venv .venv || { read -p "실패. 엔터"; exit 1; }
 fi
+echo "구성요소를 확인하는 중..."
 .venv/bin/python -m pip install -q --disable-pip-version-check -r requirements.txt || { read -p "설치 실패. 엔터"; exit 1; }
-echo "브라우저에서 편집도우미가 열립니다. 이 창을 닫으면 프로그램이 종료됩니다."
-.venv/bin/python app.py
+nohup .venv/bin/python app.py >/dev/null 2>&1 &
+echo ""
+echo "완료! 앱 창이 열립니다. 다음부터는 응용 프로그램 폴더(~/Applications)의 '풋살사관학교 스튜디오'로 실행하세요."
+echo "이 창은 닫아도 됩니다."

@@ -1,6 +1,8 @@
-"""풋살사관학교 편집도우미 — 로컬 웹 클라이언트 (127.0.0.1 전용)."""
+"""풋살사관학교 스튜디오 — 데스크톱 앱 (화면은 전용 창, 내부 통신은 127.0.0.1 전용)."""
+import base64
 import json
 import os
+import time
 import subprocess
 import sys
 import threading
@@ -17,10 +19,18 @@ LOG, JOB = [], {"name": None, "result": None, "error": None}
 LOCK = threading.Lock()
 
 
+LOGFILE = core.WORK / "studio.log"
+
+
 def log(msg):
     with LOCK:
         LOG.append(msg)
     print(msg, flush=True)
+    try:  # 콘솔 없이 실행되므로 파일에도 남김
+        with open(LOGFILE, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
 
 
 def start_job(name, fn):
@@ -55,8 +65,77 @@ def open_folder(path):
 
 
 def restart():
+    """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후)."""
     log("다시 시작하는 중…")
-    os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "--no-browser"])
+    kw = {"cwd": str(core.APP_DIR)}
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen([_gui_python(), str(Path(__file__).resolve())], **kw)
+    os._exit(0)
+
+
+def _gui_python():
+    """Windows 에서는 콘솔 창이 안 뜨는 pythonw.exe 사용."""
+    exe = Path(sys.executable)
+    if sys.platform == "win32" and exe.name.lower() == "python.exe" and (exe.parent / "pythonw.exe").exists():
+        return str(exe.parent / "pythonw.exe")
+    return str(exe)
+
+
+APP_NAME = "풋살사관학교 스튜디오"
+
+
+def ensure_shortcut():
+    """바탕화면·시작 메뉴(Windows) 또는 응용 프로그램(Mac)에 아이콘을 만든다. 이미 있으면 건너뜀."""
+    try:
+        if sys.platform == "win32":
+            ps = f"""
+$w = New-Object -ComObject WScript.Shell
+foreach ($dir in @([Environment]::GetFolderPath('Desktop'), (Join-Path ([Environment]::GetFolderPath('Programs')) ''))) {{
+  $p = Join-Path $dir '{APP_NAME}.lnk'
+  $s = $w.CreateShortcut($p)
+  $s.TargetPath = '{_gui_python()}'
+  $s.Arguments = '"{Path(__file__).resolve()}"'
+  $s.WorkingDirectory = '{core.APP_DIR}'
+  $s.IconLocation = '{core.APP_DIR / "icon.ico"}'
+  $s.Save()
+}}"""
+            enc = base64.b64encode(ps.encode("utf-16-le")).decode()
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+                           capture_output=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
+        elif sys.platform == "darwin":
+            app = Path.home() / "Applications" / f"{APP_NAME}.app"
+            macos = app / "Contents" / "MacOS"
+            res = app / "Contents" / "Resources"
+            macos.mkdir(parents=True, exist_ok=True)
+            res.mkdir(parents=True, exist_ok=True)
+            launcher = macos / "launcher"
+            launcher.write_text(f'#!/bin/bash\ncd "{core.APP_DIR}"\nexec "{sys.executable}" "{Path(__file__).resolve()}"\n', encoding="utf-8")
+            launcher.chmod(0o755)
+            (app / "Contents" / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>{APP_NAME}</string>
+<key>CFBundleDisplayName</key><string>{APP_NAME}</string>
+<key>CFBundleIdentifier</key><string>kr.futsalacademy.studio</string>
+<key>CFBundleExecutable</key><string>launcher</string>
+<key>CFBundleIconFile</key><string>icon</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>{core.VERSION}</string>
+</dict></plist>""", encoding="utf-8")
+            if not (res / "icon.icns").exists():
+                iconset = res / "icon.iconset"
+                iconset.mkdir(exist_ok=True)
+                for sz in (16, 32, 128, 256, 512):
+                    for scale, suffix in ((1, ""), (2, "@2x")):
+                        subprocess.run(["sips", "-z", str(sz * scale), str(sz * scale), str(core.APP_DIR / "icon.png"),
+                                        "--out", str(iconset / f"icon_{sz}x{sz}{suffix}.png")], capture_output=True)
+                subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(res / "icon.icns")], capture_output=True)
+                subprocess.run(["rm", "-rf", str(iconset)])
+    except Exception as e:
+        log(f"바로가기를 만들지 못했어요 · {e}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -138,14 +217,38 @@ class Handler(BaseHTTPRequestHandler):
         return {"restart": changed}
 
 
+def _bind():
+    # 업데이트 재시작 직후엔 이전 프로세스가 포트를 놓을 때까지 잠깐 기다림
+    for _ in range(40):
+        try:
+            return ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        except OSError:
+            time.sleep(0.25)
+    return None
+
+
 def main():
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     url = f"http://127.0.0.1:{PORT}/"
-    log(f"풋살사관학교 스튜디오 v{core.VERSION} · {url}")
+    srv = _bind()
+    if srv is None:  # 이미 실행 중 → 그 화면만 띄워줌
+        webbrowser.open(url)
+        return
+    log(f"{APP_NAME} v{core.VERSION} 시작")
     log(f"작업 폴더 · {core.WORK}")
-    if "--no-browser" not in sys.argv:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
-    srv.serve_forever()
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    if sys.platform in ("win32", "darwin"):
+        threading.Thread(target=ensure_shortcut, daemon=True).start()
+    if "--browser" not in sys.argv:
+        try:
+            import webview  # pywebview: 전용 앱 창
+            webview.create_window(APP_NAME, url, width=1320, height=860, min_size=(960, 640))
+            webview.start()
+            os._exit(0)  # 창을 닫으면 종료
+        except Exception as e:
+            log(f"앱 창을 열지 못해 브라우저로 엽니다 · {e}")
+    webbrowser.open(url)
+    while True:
+        time.sleep(3600)
 
 
 if __name__ == "__main__":

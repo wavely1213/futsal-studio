@@ -26,6 +26,9 @@
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; -webkit-font-smoothing: antialiased; }
   button, select, textarea, input { font: inherit; color: inherit; }
+  /* 앱처럼: 메뉴·버튼·제목은 드래그 선택 안 됨 (대사·기록·입력칸은 선택 가능) */
+  .side, .phead, .bar, .vid, .pill, .chip, .filters, .ev .time, .ev .tag { -webkit-user-select: none; user-select: none; }
+  img { -webkit-user-drag: none; }
 
   .app { display: grid; grid-template-columns: 232px 1fr; height: 100vh; }
 
@@ -294,6 +297,13 @@ async function api(path, body) {
   if (!r.ok && j.error) toast(j.error);
   return j;
 }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return; } catch (e) {}
+  const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+}
+// 브라우저식 오른쪽 클릭 메뉴 끄기 (입력칸 제외)
+document.addEventListener("contextmenu", e => { if (!e.target.closest("textarea, input")) e.preventDefault(); });
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 4000); }
 function go(p) {
   document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.p === p));
@@ -394,7 +404,7 @@ function renderEvents() {
 $("tlSel").onchange = loadEvents;
 $("btnCopy").onclick = async () => {
   const j = await api(`/api/timeline?name=${encodeURIComponent($("tlSel").value)}`);
-  await navigator.clipboard.writeText(j.text);
+  await copyText(j.text);
   toast("복사했어요. Claude 대화창에 붙여넣으세요");
 };
 

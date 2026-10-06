@@ -37,8 +37,11 @@ def ffmpeg():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # Windows: 검은 창 안 띄움
+
+
 def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **NO_WINDOW)
 
 
 # ---------- 목록·다운로드 ----------
