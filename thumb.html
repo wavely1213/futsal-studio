@@ -1741,9 +1741,9 @@ const TPL = {
     },
     "미니멀 하단띠": (f, a, b) => [
       L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 95 }, subCrop())),
-      L("shape", { name: "하단 띠", x: 0, y: LH - 210, w: LW, h: 210, fill: "#000000", opacity: 0.78 }),
-      place(fitW(txt(a, { font: "Pretendard Black", size: 100, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 56, LH - 140),
-      ...(b ? [place(fitW(txt(b, { font: "Pretendard Black", size: 80, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 60, LH - 62)] : []),
+      L("shape", { name: "하단 띠", x: 0, y: LH - 235, w: LW, h: 235, fill: "#000000", opacity: 0.78 }),
+      place(fitW(txt(a, { font: "Pretendard Black", size: 100, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 56, LH - 162),
+      ...(b ? [place(fitW(txt(b, { font: "Pretendard Black", size: 80, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 60, LH - 58)] : []),
     ],
   },
   short: {
