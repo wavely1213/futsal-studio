@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
-  "notes": "썸네일 도구 추가 (자동 후보·포토샵식 편집·누끼)",
+  "version": "1.6.0",
+  "notes": "썸네일 편집기 포토샵식으로 새로 만듦 (쇼츠 9:16 · 글자별 편집 · 레이어 스타일 · 단축키)",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }

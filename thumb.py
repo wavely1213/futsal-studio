@@ -27,12 +27,12 @@ def _frames_dir(name):
     return d
 
 
-def grab(name, t, w=1280):
-    """영상의 t초 장면을 이미지로."""
-    out = _frames_dir(name) / f"f_{t:09.3f}.jpg"
+def grab(name, t, w=1920):
+    """영상의 t초 장면을 이미지로 (원본 화질, 가로 최대 1920 — 쇼츠 9:16 확대에도 덜 뭉개지게)."""
+    out = _frames_dir(name) / f"h_{t:09.3f}.jpg"
     if not out.exists():
         core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(core.VIDEOS / name), "-frames:v", "1",
-                  "-vf", f"scale={w}:-2", "-q:v", "2", str(out)])
+                  "-vf", f"scale='min({w},iw)':-2", "-q:v", "1", str(out)])
     return out
 
 
