@@ -1,8 +1,11 @@
 """썸네일 도구: 장면 후보 추출 · 장면 캡처 · 누끼(배경 제거) · 디자인 저장 · 이미지 내보내기."""
 import base64
+import io
 import json
+import os
 import re
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -112,12 +115,13 @@ def remove_bg(src_path, kind="hq"):
     import numpy as np
     import onnxruntime as ort
     from PIL import Image, ImageFilter
+    from PIL import ImageOps
     path, size, mean, std, logits = _model(kind)
     core.set_progress(label="누끼 따는 중", pct=None, detail="인물·사물만 남기는 중 (20~40초)")
     if kind not in _SESS:
         _SESS[kind] = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     sess = _SESS[kind]
-    img = Image.open(src_path).convert("RGB")
+    img = ImageOps.exif_transpose(Image.open(src_path)).convert("RGB")  # 휴대폰 사진 회전 정보 반영 (브라우저와 같은 방향)
     x = np.asarray(img.resize((size, size), Image.LANCZOS), dtype=np.float32) / 255.0
     x = (x - np.array(mean, np.float32)) / np.array(std, np.float32)
     x = x.transpose(2, 0, 1)[None].astype(np.float32)
@@ -133,7 +137,24 @@ def remove_bg(src_path, kind="hq"):
 
 
 def save_upload(data_url, ext="png"):
+    """올린 그림 저장. 휴대폰 사진의 회전 정보(EXIF)를 실제로 적용하고, 아주 큰 사진은 긴 변 3000px로 줄임."""
     raw = base64.b64decode(data_url.split(",", 1)[1])
+    try:
+        from PIL import Image, ImageOps
+        im = Image.open(io.BytesIO(raw))
+        rotated = im.getexif().get(0x0112, 1) != 1
+        if rotated or max(im.size) > 3000:
+            im = ImageOps.exif_transpose(im)
+            im.thumbnail((3000, 3000), Image.LANCZOS)
+            b = io.BytesIO()
+            if ext == "png" or im.mode in ("RGBA", "LA", "P"):
+                ext = "png"
+                im.save(b, "PNG")
+            else:
+                im.convert("RGB").save(b, "JPEG", quality=94)
+            raw = b.getvalue()
+    except Exception:
+        pass
     dst = ASSETS / f"img_{int(time.time() * 1000)}.{ext}"
     dst.write_bytes(raw)
     return dst
@@ -154,11 +175,35 @@ def _doc_path(name):
 
 def load_docs(name):
     p = _doc_path(name)
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"designs": []}
+    for f in (p, p.with_suffix(".json.bak")):  # 파일이 깨졌으면 바로 전 저장본으로
+        if f.exists():
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+                if isinstance(d, dict) and isinstance(d.get("designs"), list):
+                    return d
+            except Exception:
+                pass
+    return {"designs": []}
+
+
+_SAVE_LOCK = threading.Lock()
 
 
 def save_docs(name, docs):
-    _doc_path(name).write_text(json.dumps(docs, ensure_ascii=False), encoding="utf-8")
+    """안전하게 저장: 빈 목록은 거절, 임시 파일에 쓴 뒤 바꿔치기, 바로 전 저장본은 .bak으로."""
+    if not isinstance(docs, dict) or not docs.get("designs"):
+        return False
+    p = _doc_path(name)
+    with _SAVE_LOCK:
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(docs, ensure_ascii=False), encoding="utf-8")
+        if p.exists():
+            try:
+                os.replace(p, p.with_suffix(".json.bak"))
+            except OSError:
+                pass
+        os.replace(tmp, p)
+    return True
 
 
 def export_image(name, data_url, fmt="jpg", label="썸네일"):

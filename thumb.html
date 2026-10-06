@@ -323,6 +323,7 @@ let brush = { size: 40, hard: 70 };
 let FRAMES = [], HOOKS = [], KEYWORDS = [], INFO = { duration: 60 }, AUTO_FMT = "long";
 let undoStack = [], redoStack = [], saveTimer = null, histNames = [];
 let Z = 0.6, PX = 0, PY = 0, RS = 1, fitMode = true, FONT_VER = 0;
+let geoBase = null, CLIP_TOKEN = "", saveGen = 0;
 let xform = null, editing = null, textSel = null, fg = "#FFE14D", eyeApply = true, lockRatio = true, CLIP = null, spaceDown = false;
 const fxOpen = new Set(["space"]);
 
@@ -488,11 +489,14 @@ function fxMargin(l) {
 function newCanvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
 function tint(src, color) { const c = newCanvas(src.width, src.height), g = c.getContext("2d"); g.drawImage(src, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = color; g.fillRect(0, 0, c.width, c.height); return c; }
 // 레이어 한 장을 효과(획·광선·그림자·색 덮기)까지 합쳐 비트맵으로 — 위치만 바뀌면 다시 그리지 않음
-function layerBitmap(l, s) {
+const BM_SKIP = new Set(["x", "y", "rot", "skew", "opacity", "blend", "name", "hidden", "locked", "gid", "id"]);  // 비트맵 밖에서 적용되는 값
+function layerBitmap(l, sIn) {
+  const s = Math.min(2, 2 ** Math.ceil(Math.log2(Math.max(sIn, 0.125))));  // 배율을 계단으로 → 확대/축소마다 다시 그리지 않음
   const imReady = l.type === "image" ? (l._edit ? "e" + (l._ev || 0) : img(l.src) ? 1 : 0) : 0;
-  const key = JSON.stringify(l, (k, v) => (k === "x" || k === "y" || k.startsWith("_") ? undefined : v)) + `|${s}|${imReady}|${FONT_VER}`;
-  if (l._bm && l._bm.key === key) return l._bm;
-  const m = fxMargin(l);
+  const key = JSON.stringify(l, (k, v) => (BM_SKIP.has(k) || k.startsWith("_") ? undefined : v)) + `|${imReady}|${FONT_VER}`;
+  const cache = l._bm || (l._bm = {});
+  if (cache[s] && cache[s].key === key) return cache[s];
+  const m = fxMargin(l), t0 = performance.now();
   let k = s; const area = (l.w + 2 * m) * (l.h + 2 * m) * k * k; if (area > 16e6) k = s * Math.sqrt(16e6 / area);
   const cw = (l.w + 2 * m) * k, ch = (l.h + 2 * m) * k;
   const base = newCanvas(cw, ch), g = base.getContext("2d");
@@ -502,7 +506,7 @@ function layerBitmap(l, s) {
     g.setTransform(k, 0, 0, k, m * k, m * k);
     const gr = g.createLinearGradient(cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
     const s0 = clamp(Math.min(l.fade.start, l.fade.end), 0, 1), s1 = clamp(Math.max(l.fade.start, l.fade.end), 0, 1);
-    gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(s0, "rgba(0,0,0,1)"); gr.addColorStop(Math.max(s1, s0 + 0.001), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(Math.min(s0, 0.999), "rgba(0,0,0,1)"); gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
     g.globalCompositeOperation = "destination-in"; g.fillStyle = gr; g.fillRect(-m, -m, l.w + 2 * m, l.h + 2 * m);
     g.globalCompositeOperation = "source-over"; g.setTransform(1, 0, 0, 1, 0, 0);
   }
@@ -530,8 +534,9 @@ function layerBitmap(l, s) {
   }
   o.drawImage(shape, 0, 0);
   const res = l.warp.style !== "none" && l.warp.bend ? warpCanvas(out, l.warp, l.h * k) : out;
-  l._bm = { key, c: res, m };
-  return l._bm;
+  l._bmCost = performance.now() - t0;
+  cache[s] = { key, c: res, m };
+  return cache[s];
 }
 // 뒤틀기: 세로 띠로 잘라 위아래로 밀거나 늘림 (아치·깃발·부풀리기)
 function warpCanvas(src, wp, hpx) {
@@ -544,25 +549,28 @@ function warpCanvas(src, wp, hpx) {
   }
   return dst;
 }
+// 비트맵으로 합쳐 그려야 하는 레이어: 효과가 있거나, 반투명한 글자·도형(테두리와 채우기가 따로 비치지 않게)
+const needBitmap = l => !l._fast && (hasFx(l) || (l.opacity < 1 && l.type !== "image"));
 function drawLayer(c, l, s) {
   if (l.hidden) return;
   c.save();
-  c.globalAlpha = l.opacity;
-  c.translate(l.x + l.w / 2, l.y + l.h / 2); c.rotate(l.rot * RAD);
-  if (l.skew) c.transform(1, 0, -Math.tan(l.skew * RAD), 1, 0, 0);
-  c.translate(-l.w / 2, -l.h / 2);
-  if (hasFx(l)) {
-    const bm = layerBitmap(l, s);
-    if (l.blend && l.blend !== "source-over") c.globalCompositeOperation = l.blend;
-    c.drawImage(bm.c, -bm.m, -bm.m, l.w + 2 * bm.m, l.h + 2 * bm.m);
-  } else drawContent(c, l);
-  c.restore();
+  try {
+    c.globalAlpha = l.opacity;
+    c.translate(l.x + l.w / 2, l.y + l.h / 2); c.rotate(l.rot * RAD);
+    if (l.skew) c.transform(1, 0, -Math.tan(l.skew * RAD), 1, 0, 0);
+    c.translate(-l.w / 2, -l.h / 2);
+    if (needBitmap(l)) {
+      const bm = layerBitmap(l, s);
+      if (l.blend && l.blend !== "source-over") c.globalCompositeOperation = l.blend;
+      c.drawImage(bm.c, -bm.m, -bm.m, l.w + 2 * bm.m, l.h + 2 * bm.m);
+    } else drawContent(c, l);
+  } finally { c.restore(); }
 }
 function renderDoc(c, doc, sc) {
   const w = doc.w || 1280, h = doc.h || 720;
   c.save(); c.setTransform(sc, 0, 0, sc, 0, 0);
   c.fillStyle = doc.bg || "#000"; c.fillRect(0, 0, w, h);
-  for (const l of doc.layers) drawLayer(c, l, sc);
+  for (const l of doc.layers) { try { drawLayer(c, l, sc); } catch (e) { console.error("레이어 그리기 실패", l.id, e); } }  // 레이어 하나가 깨져도 나머지는 그림
   c.restore();
 }
 
@@ -571,10 +579,10 @@ const byId = id => (D ? D.doc.layers.find(l => l.id === id) : null);
 const selLs = () => (D ? D.doc.layers.filter(l => selIds.includes(l.id)) : []);
 const selL = () => { const a = selLs(); return a.length === 1 ? a[0] : null; };
 function select(ids) {
-  selIds = ids.filter(id => byId(id));
+  selIds = ids.filter(id => byId(id)); geoBase = null;
   if (textSel && !selIds.includes(textSel.id)) textSel = null;
   if (editing && !selIds.includes(editing.id)) endEdit();
-  if (xform && !selIds.length) commitXform();
+  if (xform && (selIds.length !== xform.ids.length || selIds.some(id => !xform.ids.includes(id)))) commitXform();
   if ((tool === "brush" || tool === "eraser") && !(selL() && selL().orig)) tool = "move", markTool();
   refreshUI(); if (selIds.length) showTab("props");
 }
@@ -585,15 +593,23 @@ function snapshot() { return JSON.stringify(D.doc, dropPriv); }
 function pushUndo(s, label) { undoStack.push(s); histNames.push(label || "편집"); if (undoStack.length > 120) { undoStack.shift(); histNames.shift(); } redoStack = []; }
 function commit(label) { pushUndo(snapshot(), label); }
 function changed(full = true) { scheduleSave(); renderAll(); if (full) { renderLayers(); renderProps(); renderOpts(); renderCP(); renderLS(); } }
-function restoreDoc(s) { D.doc = JSON.parse(s); D.doc.layers.forEach(normLayer); W = D.doc.w; H = D.doc.h; selIds = selIds.filter(id => byId(id)); textSel = null; }
+function restoreDoc(s) { D.doc = JSON.parse(s); D.doc.layers.forEach(normLayer); W = D.doc.w; H = D.doc.h; selIds = selIds.filter(id => byId(id)); textSel = null; liveBefore = null; geoBase = null; }
 function undo() { if (editing) endEdit(); xform = null; if (!undoStack.length) return toast("더 되돌릴 게 없어요"); redoStack.push(snapshot()); histNames.pop(); restoreDoc(undoStack.pop()); applyView(); changed(); }
 function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); histNames.push("다시 실행"); restoreDoc(redoStack.pop()); applyView(); changed(); }
-let liveBefore = null;
-function liveStart() { if (liveBefore === null && D) liveBefore = snapshot(); }
-function liveEnd() { if (liveBefore !== null && D && liveBefore !== snapshot()) { pushUndo(liveBefore, "속성 변경"); scheduleSave(); } liveBefore = null; }
+let liveBefore = null, liveOwner = null;
+function liveStart() { if (liveBefore === null && D) { liveBefore = snapshot(); liveOwner = D; } }
+function liveEnd() { if (liveBefore !== null && D && liveOwner === D && liveBefore !== snapshot()) { pushUndo(liveBefore, "속성 변경"); scheduleSave(); } liveBefore = null; liveOwner = null; geoBase = null; }
 const cleanDocs = () => JSON.parse(JSON.stringify(DOCS, dropPriv));
-function scheduleSave() { $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
-async function saveNow() { clearTimeout(saveTimer); await post("/api/thumb/save", { name: NAME, docs: cleanDocs() }); $("saved").textContent = "저장됨"; renderDesigns(); }
+function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
+async function saveNow() {
+  clearTimeout(saveTimer); saveTimer = null; if (!D) return; const g = saveGen;
+  await post("/api/thumb/save", { name: NAME, docs: cleanDocs() });
+  if (g === saveGen) $("saved").textContent = "저장됨";  // 저장하는 사이 또 바뀌었으면 '저장 중' 유지
+  renderDesigns();
+}
+// 창을 닫거나 숨길 때 남은 변경을 바로 보냄 (keepalive)
+function flushSave() { if (!D || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, docs: cleanDocs() }) }); } catch (e) {} }
+addEventListener("pagehide", flushSave); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
 
 /* ---------- 화면 (확대 · 이동) ---------- */
 const cv = $("cv"), ctx = cv.getContext("2d"), stage = $("stage"), wrap = $("wrap");
@@ -602,10 +618,16 @@ function fitView() {
   const sw = stage.clientWidth, sh = stage.clientHeight;
   Z = Math.max(0.05, Math.min((sw - 60) / W, (sh - 60) / H)); PX = (sw - W * Z) / 2; PY = (sh - H * Z) / 2; fitMode = true; applyView();
 }
-function setZoom(z, ax, ay) {
+let zoomTimer = 0;
+function setZoom(z, ax, ay, fast) {
   z = clamp(z, 0.05, 8);
   if (ax === undefined) { ax = stage.clientWidth / 2; ay = stage.clientHeight / 2; }
-  const cx = (ax - PX) / Z, cy = (ay - PY) / Z; Z = z; PX = ax - cx * Z; PY = ay - cy * Z; fitMode = false; applyView();
+  const cx = (ax - PX) / Z, cy = (ay - PY) / Z; Z = z; PX = ax - cx * Z; PY = ay - cy * Z; fitMode = false;
+  if (!fast) return applyView();
+  cv.style.width = W * Z + "px"; cv.style.height = H * Z + "px";  // 휠 도중엔 늘이기만 (가벼움)
+  Object.assign(wrap.style, { left: PX + "px", top: PY + "px", width: W * Z + "px", height: H * Z + "px" });
+  $("zoomtag").textContent = `${Math.round(Z * 100)}% · ${W}×${H}`; drawSel(); drawRulers(); drawUserGuides();
+  clearTimeout(zoomTimer); zoomTimer = setTimeout(applyView, 140);
 }
 function zoomStep(d) { const z = d > 0 ? ZSTEPS.find(s => s > Z * 1.01) || 8 : [...ZSTEPS].reverse().find(s => s < Z * 0.99) || 0.05; setZoom(z); }
 function applyView() {
@@ -795,11 +817,17 @@ function getV(k) {
   if (k === "name") return l.name;
   return getPath(l, k);
 }
+function geoRestore() {  // 이번 입력을 시작할 때의 레이어 상태로 되돌림 (같은 객체 유지)
+  const ls = selLs();
+  if (!geoBase) { geoBase = { layers: ls.map(clone) }; return; }
+  for (const o of geoBase.layers) { const cur = byId(o.id); if (!cur) continue; const f = clone(o); for (const k of Object.keys(f)) cur[k] = f[k]; }
+}
 function setV(k, v) {
   if (k === "b.size") { brush.size = clamp(Math.round(v), 2, 400); return; }
   if (k === "b.hard") { brush.hard = clamp(Math.round(v), 0, 100); return; }
-  if (!D) return; if (k === "bg") { D.doc.bg = v; return; }
+  if (!D) return; if (k === "bg") { commitXform(); D.doc.bg = v; return; }
   const ls = selLs(); if (!ls.length) return;
+  if (k === "x" || k === "y" || k === "w" || k === "h") geoRestore();
   if (ls.length > 1) {
     if (["x", "y", "w", "h"].includes(k)) groupSet(ls, k, v); else if (k === "opacity") ls.forEach(l => (l.opacity = clamp(v, 0, 1)));
     return;
@@ -1003,24 +1031,27 @@ function syncTextareas(src, l) { for (const el of [$("xText"), $("cpText"), edit
 function bindTextArea(ta, l) {
   if (!ta) return; ta.value = l.text;
   const upd = () => { if (document.activeElement !== ta) return; textSel = { id: l.id, s: ta.selectionStart, e: ta.selectionEnd }; syncFields(); };
-  ta.addEventListener("input", () => { liveStart(); applyTextEdit(l, ta.value); syncTextareas(ta, l); upd(); renderAll(); renderLayers(); });
+  ta.addEventListener("input", () => { liveStart(); applyTextEdit(l, ta.value); syncTextareas(ta, l); upd(); renderAll(); renderLayers(); scheduleSave(); });
   ta.addEventListener("blur", () => liveEnd());
   for (const ev of ["select", "keyup", "mouseup"]) ta.addEventListener(ev, upd);
   if (textSel && textSel.id === l.id) try { ta.setSelectionRange(textSel.s, textSel.e); } catch (e) {}
 }
 function chipsHtml(l) {
-  const a = expand(l), b = baseStyle(l), r = curRange(l) || [-1, -1];
+  const a = expand(l), b = baseStyle(l);
   return l.text.split("").map((ch, i) => {
     if (ch === "\n") return `<i class="br"></i>`;
     const st = Object.assign({}, b, a[i]), fs = clamp(17 * st.size / Math.max(1, l.size), 9, 34);
     const sh = st.s1w > 0 ? `text-shadow:0 0 1px ${st.s1c},0 0 1px ${st.s1c},0 0 2px ${st.s1c};` : "";
-    return `<span data-ci="${i}" class="${i >= r[0] && i < r[1] ? "on" : ""}" style="color:${st.fill};font-family:'${st.font}';font-size:${fs}px;${sh}">${ch === " " ? "&nbsp;" : esc(ch)}</span>`;
+    return `<span data-ci="${i}" style="color:${st.fill};font-family:'${st.font}';font-size:${fs}px;${sh}">${ch === " " ? "&nbsp;" : esc(ch)}</span>`;
   }).join("");
 }
 function refreshCharUI() {
   const l = selL(); if (!l || l.type !== "text") return;
-  document.querySelectorAll(".chips").forEach(c => (c.innerHTML = chipsHtml(l)));
-  const r = curRange(l);
+  const html = chipsHtml(l), r = curRange(l), rr = r || [-1, -1];
+  document.querySelectorAll(".chips").forEach(c => {
+    if (c._h !== html) { c.innerHTML = html; c._h = html; }
+    c.querySelectorAll("[data-ci]").forEach(s => { const i = +s.dataset.ci; s.classList.toggle("on", i >= rr[0] && i < rr[1]); });
+  });
   document.querySelectorAll("[data-selinfo]").forEach(s => (s.innerHTML = r
     ? `✏️ 고른 <b>${r[1] - r[0]}글자</b>에만 적용돼요 · <a href="#" data-act="selAll">글자 전체에 적용</a>`
     : `글자 전체에 적용돼요 · <b>일부 글자만</b> 바꾸려면 위 글자칸이나 글자 칩을 드래그해서 고르세요`));
@@ -1032,15 +1063,16 @@ function setTextSel(l, s, e) {
 }
 let chipDrag = null;
 document.addEventListener("mousedown", e => {
-  const c = e.target.closest && e.target.closest(".chips [data-ci]"); if (!c) return;
+  const c = e.target.closest && e.target.closest(".chips [data-ci]"); if (!c || e.button !== 0) return;
   e.preventDefault(); const l = selL(); if (!l) return; const i = +c.dataset.ci;
   const a = e.shiftKey && textSel && textSel.id === l.id ? textSel.s : i; chipDrag = { a }; setTextSel(l, Math.min(a, i), Math.max(a, i) + 1);
 });
 document.addEventListener("mouseover", e => {
-  if (!chipDrag) return; const c = e.target.closest && e.target.closest(".chips [data-ci]"); if (!c) return;
+  if (!chipDrag) return; if (!(e.buttons & 1)) { chipDrag = null; return; }
+  const c = e.target.closest && e.target.closest(".chips [data-ci]"); if (!c) return;
   const i = +c.dataset.ci, l = selL(); if (l) setTextSel(l, Math.min(chipDrag.a, i), Math.max(chipDrag.a, i) + 1);
 });
-addEventListener("mouseup", () => (chipDrag = null));
+addEventListener("mouseup", () => (chipDrag = null)); addEventListener("blur", () => (chipDrag = null));
 
 /* ---------- 떠 있는 창: 문자 패널 · 레이어 스타일 ---------- */
 function floatPanel(id, title, width) {
@@ -1198,6 +1230,7 @@ function startTransform(e, handle) {
   const o = ls.map(l => ({ l, x: l.x, y: l.y, w: l.w, h: l.h, rot: l.rot, skew: l.skew || 0, size: l.size }));
   const bb = bbox(ls), skewMode = one && (e.ctrlKey || e.metaKey) && (handle === "n" || handle === "s");
   if (handle === "rot" && !one) return;
+  ls.forEach(l => { if ((l._bmCost || 0) > 12) l._fast = true; });  // 효과가 무거운 레이어는 끄는 동안 효과 생략
   const ex = handle.includes("e") ? 1 : handle.includes("w") ? -1 : 0, ey = handle.includes("s") ? 1 : handle.includes("n") ? -1 : 0;
   const mv = ev => {
     const q = toCanvas(ev);
@@ -1236,6 +1269,7 @@ function startTransform(e, handle) {
     renderAll(); syncFields();
   };
   const up = () => {
+    ls.forEach(l => delete l._fast);
     removeEventListener("mousemove", mv); removeEventListener("mouseup", up); hideReadout();
     ls.filter(l => l.type === "text").forEach(bakeText);
     if (before !== snapshot()) { pushUndo(before, handle === "rot" ? "회전" : skewMode ? "기울이기" : "크기 조절"); scheduleSave(); }
@@ -1251,7 +1285,7 @@ function startPan(e) {
 }
 stage.addEventListener("wheel", e => {
   e.preventDefault(); const r = stage.getBoundingClientRect();
-  if (e.ctrlKey || e.metaKey || e.altKey) setZoom(Z * Math.exp(-e.deltaY * 0.0018), e.clientX - r.left, e.clientY - r.top);
+  if (e.ctrlKey || e.metaKey || e.altKey) setZoom(Z * Math.exp(-e.deltaY * 0.0018), e.clientX - r.left, e.clientY - r.top, true);
   else { fitMode = false; PX -= e.shiftKey ? e.deltaY : e.deltaX; PY -= e.shiftKey ? 0 : e.deltaY; wrap.style.left = PX + "px"; wrap.style.top = PY + "px"; drawRulers(); drawUserGuides(); }
 }, { passive: false });
 stage.addEventListener("mousemove", e => {
@@ -1267,7 +1301,7 @@ stage.addEventListener("mousemove", e => {
 const SHAPE_PRESET = { rect: { w: 420, h: 140, fill: "#000000", name: "사각형" }, ellipse: { w: 220, h: 220, fill: "#FFD400", name: "원" }, slant: { w: 520, h: 720, fill: "#000000", slant: 0.3, name: "사선 패널" },
   arrow: { w: 300, h: 160, fill: "#FF3B30", name: "화살표" }, star: { w: 200, h: 200, fill: "#FFE14D", name: "별" }, bubble: { w: 360, h: 220, fill: "#FFFFFF", name: "말풍선" } };
 function addShape(kind, p) {
-  commit("도형 추가");
+  commitXform(); commit("도형 추가");
   const l = kind === "burst" ? L("shape", { shape: "burst", name: "집중선", x: 0, y: 0, w: W, h: H, fill: "#FFFFFF", opacity: 0.55, lines: 70, inner: 0.42 })
     : L("shape", Object.assign({ shape: kind }, SHAPE_PRESET[kind]));
   if (kind !== "burst") { l.x = p.x - l.w / 2; l.y = kind === "slant" ? 0 : p.y - l.h / 2; if (kind === "slant") l.h = H; }
@@ -1277,7 +1311,7 @@ function drawShapeDrag(e, p) {
   const before = snapshot(), kind = tool; let l = null;
   const mv = ev => {
     const q = toCanvas(ev); let w = q.x - p.x, h = q.y - p.y; if (!l && Math.hypot(w, h) * Z < 4) return;
-    if (!l) { l = L("shape", Object.assign({ shape: kind }, SHAPE_PRESET[kind])); D.doc.layers.push(l); selIds = [l.id]; }
+    if (!l) { commitXform(); l = L("shape", Object.assign({ shape: kind }, SHAPE_PRESET[kind])); D.doc.layers.push(l); selIds = [l.id]; }
     if (ev.shiftKey) { const s = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * s; h = Math.sign(h || 1) * s; }
     if (ev.altKey) Object.assign(l, { x: p.x - Math.abs(w), y: p.y - Math.abs(h), w: Math.abs(w) * 2, h: Math.abs(h) * 2 });
     else Object.assign(l, { x: Math.min(p.x, p.x + w), y: Math.min(p.y, p.y + h), w: Math.abs(w), h: Math.abs(h) });
@@ -1290,7 +1324,7 @@ function drawShapeDrag(e, p) {
 /* ---------- 글자 바로 고치기 ---------- */
 function addText(p) {
   commit("글자 추가"); const l = L("text", { text: "제목을 입력", size: Math.round(110 * W / 1280) }); fitText(l); l.x = p.x - 12; l.y = p.y - l.h / 2;
-  D.doc.layers.push(l); selIds = [l.id]; startEdit(l, true);
+  D.doc.layers.push(l); selIds = [l.id]; startEdit(l, true); if (editing) editing.isNew = true; scheduleSave();
 }
 function placeInline() {
   const l = editing && byId(editing.id); if (!l) return;
@@ -1306,16 +1340,24 @@ function startEdit(l, all) {
   editing = { id: l.id, ta, before: snapshot(), ul: undoStack.length };
   const upd = () => { textSel = { id: l.id, s: ta.selectionStart, e: ta.selectionEnd }; syncFields(); };
   ta.addEventListener("mousedown", ev => ev.stopPropagation());
-  ta.addEventListener("input", () => { applyTextEdit(l, ta.value); syncTextareas(ta, l); upd(); renderAll(); renderLayers(); });
+  ta.addEventListener("input", () => { applyTextEdit(l, ta.value); syncTextareas(ta, l); upd(); renderAll(); renderLayers(); scheduleSave(); });
   for (const ev of ["select", "keyup", "mouseup"]) ta.addEventListener(ev, upd);
-  ta.addEventListener("keydown", ev => { ev.stopPropagation(); if (ev.key === "Escape" || (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); endEdit(); } });
+  ta.addEventListener("keydown", ev => {
+    const mod = ev.ctrlKey || ev.metaKey;
+    if (ev.key === "Escape" || (ev.key === "Enter" && mod)) { ev.stopPropagation(); ev.preventDefault(); endEdit(); return; }
+    if ((mod && ev.code === "KeyS") || ev.key === "F1") return;  // 저장·도움말은 전체 단축키로
+    ev.stopPropagation();
+  });
   refreshUI(); showTab("props"); placeInline();
   ta.focus(); if (all) ta.select(); else ta.setSelectionRange(ta.value.length, ta.value.length); upd();
 }
 function endEdit() {
-  if (!editing) return; const { ta, before, ul, id } = editing; editing = null; ta.remove(); textSel = null;
+  if (!editing) return; const { ta, before, ul, id, isNew } = editing; editing = null; ta.remove(); textSel = null;
   const l = byId(id); undoStack.length = Math.min(undoStack.length, ul); histNames.length = undoStack.length;
-  if (l && !l.text.trim()) { D.doc.layers = D.doc.layers.filter(x => x !== l); selIds = selIds.filter(x => x !== id); }
+  if (l && !l.text.trim()) {  // 글자를 다 지우면 레이어 삭제 (원래 있던 레이어면 Ctrl+Z로 되살릴 수 있게)
+    D.doc.layers = D.doc.layers.filter(x => x !== l); selIds = selIds.filter(x => x !== id);
+    if (!isNew) pushUndo(before, "글자 레이어 삭제");
+  }
   else if (before !== snapshot()) pushUndo(before, "글자 수정");
   scheduleSave(); changed();
 }
@@ -1352,12 +1394,14 @@ function brushDown(e) {
     else dab(q);
     last = q; l._ev = (l._ev || 0) + 1; renderAll();
   };
+  l._fast = true;  // 칠하는 동안엔 테두리·그림자 생략 (빠르게), 떼면 다시 그림
   stroke(e);
   const up = async () => {
-    removeEventListener("mousemove", stroke); removeEventListener("mouseup", up);
+    removeEventListener("mousemove", stroke); removeEventListener("mouseup", up); delete l._fast; renderAll();
+    pushUndo(before, erase ? "누끼 지우기" : "누끼 되살리기");  // 올리기 전에 바로 기록 (올리는 사이 Ctrl+Z 해도 순서가 맞게)
     $("saved").textContent = "브러시 저장 중…";
     const j = await post("/api/thumb/upload", { data: ec.toDataURL("image/png") });
-    pushUndo(before, erase ? "누끼 지우기" : "누끼 되살리기"); l.src = j.url; img(j.url); scheduleSave();
+    if (byId(l.id) === l) { l.src = j.url; img(j.url); } scheduleSave();
   };
   addEventListener("mousemove", stroke); addEventListener("mouseup", up);
 }
@@ -1435,7 +1479,7 @@ $("layers").addEventListener("mousedown", e => {
   e.preventDefault(); const id = row.dataset.l, y0 = e.clientY, onName = !!e.target.closest(".nm"); let drag = false, target = null;
   const rows = () => [...$("layers").querySelectorAll("[data-l]")];
   const mv = ev => {
-    if (!drag) { if (Math.abs(ev.clientY - y0) < 5) return; drag = true; if (!selIds.includes(id)) { selIds = [id]; renderLayers(); } rows().forEach(r => r.classList.toggle("dragging", selIds.includes(r.dataset.l))); }
+    if (!drag) { if (Math.abs(ev.clientY - y0) < 5) return; drag = true; if (!selIds.includes(id)) { select([id]); } rows().forEach(r => r.classList.toggle("dragging", selIds.includes(r.dataset.l))); }
     target = null; const rs = rows();
     rs.forEach(r => {
       r.classList.remove("drop-above", "drop-below"); const b = r.getBoundingClientRect();
@@ -1476,11 +1520,11 @@ function moveLayers(d) {
 }
 function toEdge(front) { if (!selIds.length) return; commit("레이어 순서"); const mv = selLs(), rest = D.doc.layers.filter(l => !selIds.includes(l.id)); D.doc.layers = front ? [...rest, ...mv] : [...mv, ...rest]; changed(); }
 function dupLayers() {
-  const ls = selLs(); if (!ls.length) return; commit("복제");
+  const ls = selLs(); if (!ls.length) return; commitXform(); commit("복제");
   const cs = remapGids(ls.map(l => { const c = clone(l); c.id = nid(); c.x += 24; c.y += 24; D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, c); return c; })), ids = cs.map(c => c.id);
   selIds = ids; changed(); toast(`레이어 ${ids.length}개를 복제했어요`);
 }
-function delLayers() { if (!selIds.length) return; commit("삭제"); D.doc.layers = D.doc.layers.filter(l => !selIds.includes(l.id)); selIds = []; changed(); }
+function delLayers() { if (!selIds.length) return; commitXform(); commit("삭제"); D.doc.layers = D.doc.layers.filter(l => !selIds.includes(l.id)); selIds = []; changed(); }
 function stepSel(d) {
   const a = D.doc.layers; if (!a.length) return; const cur = selIds.length ? a.findIndex(l => l.id === selIds[selIds.length - 1]) : d > 0 ? -1 : a.length;
   const j = clamp(cur + d, 0, a.length - 1); select([a[j].id]);
@@ -1488,9 +1532,12 @@ function stepSel(d) {
 $("lDup").onclick = dupLayers; $("lDel").onclick = delLayers;
 
 /* ---------- 복사 · 붙여넣기 ---------- */
-function copySel(cut) { const ls = selLs(); if (!ls.length) return; CLIP = ls.map(clone); if (cut) delLayers(); toast(`레이어 ${ls.length}개를 ${cut ? "잘라냈어요" : "복사했어요"} · Ctrl+V로 붙여넣기`); }
+function copySel(cut) {
+  const ls = selLs(); if (!ls.length) return; CLIP = ls.map(clone);
+  CLIP_TOKEN = "futsal-thumb-layers:" + nid() + nid();
+  try { navigator.clipboard && navigator.clipboard.writeText(CLIP_TOKEN).catch(() => {}); } catch (_) {} if (cut) delLayers(); toast(`레이어 ${ls.length}개를 ${cut ? "잘라냈어요" : "복사했어요"} · Ctrl+V로 붙여넣기`); }
 function pasteLayers(inPlace) {
-  if (!CLIP) return; commit("붙여넣기");
+  if (!CLIP) return; commitXform(); commit("붙여넣기");
   const ids = remapGids(CLIP.map(x => { const c = clone(x); c.id = nid(); if (!inPlace) { c.x += 20; c.y += 20; } normLayer(c); D.doc.layers.push(c); return c; })).map(c => c.id);
   CLIP = CLIP.map(x => Object.assign(clone(x), inPlace ? {} : { x: x.x + 20, y: x.y + 20 }));
   selIds = ids; changed(); showTab("props");
@@ -1506,8 +1553,10 @@ async function addImageFile(f) {
 }
 let pasteHandled = false;
 document.addEventListener("paste", e => {
-  if (e.target.closest && e.target.closest("textarea, input")) return;
-  const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith("image/"));
+  if (e.target.closest && e.target.closest("textarea, input[type=text], input[type=number], input:not([type])")) return;
+  const cd = e.clipboardData, txt = cd ? cd.getData("text/plain") : "";
+  if (CLIP && CLIP_TOKEN && txt === CLIP_TOKEN) { e.preventDefault(); pasteHandled = true; pasteLayers(); return; }
+  const it = [...((cd && cd.items) || [])].find(i => i.type.startsWith("image/"));
   if (it) { e.preventDefault(); pasteHandled = true; addImageFile(it.getAsFile()); return; }
   if (CLIP) { e.preventDefault(); pasteHandled = true; pasteLayers(); }
 });
@@ -1518,11 +1567,15 @@ stage.addEventListener("drop", e => { e.preventDefault(); const f = [...e.dataTr
 function startXform() {
   if (!selLs().length) return toast("변형할 레이어를 먼저 골라 주세요");
   if (editing) endEdit(); if (tool !== "move") setTool("move");
-  xform = { before: snapshot(), ul: undoStack.length }; renderOpts(); renderAll();
+  xform = { before: snapshot(), ul: undoStack.length, ids: [...selIds], layers: selLs().map(clone) }; renderOpts(); renderAll();
   toast("자유 변형 · 모서리=크기 (Shift 비율 해제 · Alt 가운데 기준) · 바깥 끌기=회전 · Ctrl+위/아래 손잡이=기울이기 · Enter 확정 / Esc 취소");
 }
 function commitXform() { if (!xform) return; const { before, ul } = xform; xform = null; undoStack.length = Math.min(undoStack.length, ul); histNames.length = undoStack.length; if (before !== snapshot()) { pushUndo(before, "자유 변형"); scheduleSave(); } stage.style.cursor = ""; renderOpts(); renderAll(); }
-function cancelXform() { if (!xform) return; const { before, ul } = xform; xform = null; undoStack.length = Math.min(undoStack.length, ul); histNames.length = undoStack.length; restoreDoc(before); stage.style.cursor = ""; changed(); }
+function cancelXform() {  // 자유 변형 대상 레이어만 Ctrl+T 직전으로 (다른 편집은 그대로)
+  if (!xform) return; const { ul, layers } = xform; xform = null; undoStack.length = Math.min(undoStack.length, ul); histNames.length = undoStack.length;
+  for (const o of layers) { const i = D.doc.layers.findIndex(l => l.id === o.id); if (i >= 0) D.doc.layers[i] = normLayer(clone(o)); }
+  stage.style.cursor = ""; changed();
+}
 
 /* ---------- 도구 ---------- */
 const TOOL_BTN = { move: "tMove", text: "tText", rect: "tShape", ellipse: "tEllipse", slant: "tSlant", eye: "tEye", brush: "tBrush", eraser: "tEraser", hand: "tHand" };
@@ -1544,7 +1597,7 @@ $("tImage").onclick = () => $("fileIn").click();
 $("fileIn").onchange = async e => { await addImageFile(e.target.files[0]); e.target.value = ""; };
 $("tCut").onclick = () => { const l = selL(); if (!l || l.type !== "image") return toast("누끼 딸 이미지 레이어를 먼저 골라 주세요"); doCut(l, "hq"); };
 function addImage(src, asBg, extra = {}) {
-  commit("이미지 추가");
+  commitXform(); commit("이미지 추가");
   const l = L("image", Object.assign({ src, name: asBg ? "배경" : "이미지" }, extra));
   if (asBg) { Object.assign(l, { x: 0, y: 0, w: W, h: H, fit: "cover" }); D.doc.layers.unshift(l); }
   else { if (!extra.w) Object.assign(l, { w: 640, h: 360, x: (W - 640) / 2, y: (H - 360) / 2 }); D.doc.layers.push(l); }
@@ -1572,7 +1625,7 @@ const ACT = {
 const MACT = { group: () => groupSel(true), ungroup: () => groupSel(false), copy: () => copySel(), dup: dupLayers, xform: startXform, ls: () => toggleLS(true), front: () => toEdge(true), back: () => toEdge(false),
   hide: () => { commit("숨기기"); selLs().forEach(l => (l.hidden = !l.hidden)); changed(); }, del: delLayers, paste: () => pasteLayers(), all: () => select(D.doc.layers.filter(l => !l.locked).map(l => l.id)) };
 function setFormat(f) {
-  const s = FMT[f]; if (!s || (D.doc.w === s.w && D.doc.h === s.h)) return;
+  const s = FMT[f]; if (!s || (D.doc.w === s.w && D.doc.h === s.h)) return; commitXform();
   commit("캔버스 크기"); const ow = D.doc.w, oh = D.doc.h, k = Math.min(s.w / ow, s.h / oh);
   for (const l of D.doc.layers) {
     if (l.type === "image" && l.name === "배경" && Math.abs(l.w - ow) < 2 && Math.abs(l.h - oh) < 2) { Object.assign(l, { x: 0, y: 0, w: s.w, h: s.h }); continue; }
@@ -1590,7 +1643,7 @@ addEventListener("keydown", e => {
   if (typing) {
     if (t.type === "number" && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault(); const m = FM[t.dataset.k] || {}; t.value = Math.round((+t.value + (e.key === "ArrowUp" ? 1 : -1) * (m.step || 1) * (e.shiftKey ? 10 : 1)) * 100) / 100;
-      t.dispatchEvent(new Event("input", { bubbles: true })); return;
+      t.dispatchEvent(new Event("input", { bubbles: true })); if (t.dataset.k !== undefined) { liveEnd(); renderLayers(); } return;
     }
     if (e.key === "Enter" && t.tagName === "INPUT") t.blur();
     if (e.key === "Escape") t.blur();
@@ -1598,6 +1651,7 @@ addEventListener("keydown", e => {
     return;
   }
   if (e.key === "Escape" && document.querySelector(".modal.show")) { document.querySelectorAll(".modal.show").forEach(m => m.classList.remove("show")); return; }
+  if (!D) return;
   if (e.key === " ") { e.preventDefault(); if (!spaceDown) { spaceDown = true; stage.classList.add("pan"); } return; }
   if (mod) {
     const k = { KeyZ: () => (e.shiftKey ? redo() : undo()), KeyY: redo, KeyT: startXform, KeyJ: dupLayers, KeyD: () => select([]),
@@ -1612,6 +1666,7 @@ addEventListener("keydown", e => {
     return;
   }
   if (e.altKey && (code === "BracketRight" || code === "BracketLeft")) { e.preventDefault(); stepSel(code === "BracketRight" ? 1 : -1); return; }
+  if (e.key === "Escape" && menu) { closeMenu(); return; }
   if (xform && e.key === "Enter") { e.preventDefault(); commitXform(); return; }
   if (xform && e.key === "Escape") { e.preventDefault(); cancelXform(); return; }
   if (e.key === "Escape") { closeMenu(); return; }
