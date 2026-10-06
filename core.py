@@ -20,6 +20,15 @@ for d in (VIDEOS, ANALYSIS, OUT):
     d.mkdir(parents=True, exist_ok=True)
 
 
+# 화면에 보여줄 진행 상태 (app.py 가 /api/state 로 내보냄)
+PROGRESS = {}
+
+
+def set_progress(**kw):
+    PROGRESS.clear()
+    PROGRESS.update(kw)
+
+
 def ffmpeg():
     exe = shutil.which("ffmpeg")
     if exe:
@@ -49,12 +58,29 @@ def list_videos(kind="videos", cookies_browser=None):
 def download(ids, log, cookies_browser=None, max_height=1080):
     import yt_dlp
 
+    cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}}
+
     def hook(d):
-        if d["status"] == "finished":
-            log(f"  담기 완료 · {Path(d['filename']).name}")
+        info = d.get("info_dict") or {}
+        fmts = info.get("requested_formats") or [info]
+        sizes = [f.get("filesize") or f.get("filesize_approx") or 0 for f in fmts]
+        fid = info.get("format_id")
+        idx = next((k for k, f in enumerate(fmts) if f.get("format_id") == fid), 0)
+        if d["status"] == "downloading":
+            got = d.get("downloaded_bytes") or 0
+            tot = d.get("total_bytes") or d.get("total_bytes_estimate") or sizes[idx] or 0
+            cur["streams"][idx] = (got, tot)
+            done = sum(g for g, _ in cur["streams"].values())
+            whole = sum(max(t, sizes[k] if k < len(sizes) else 0) for k, (_, t) in cur["streams"].items())
+            whole += sum(sz for k, sz in enumerate(sizes) if k not in cur["streams"])
+            pct = min(99, int(done * 100 / whole)) if whole else None
+            set_progress(label="보관함에 담는 중", item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=pct,
+                         detail=f"{done / 1e6:.1f}MB / {whole / 1e6:.1f}MB" + (f" · {d['_speed_str'].strip()}" if d.get("_speed_str") else ""))
+        elif d["status"] == "finished" and idx == len(fmts) - 1:
+            set_progress(label="보관함에 담는 중", item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=99, detail="영상과 소리를 합치는 중")
 
     opts = {
-        "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]",
+        "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
         "merge_output_format": "mp4",
         "outtmpl": str(VIDEOS / "%(upload_date)s_%(id)s_%(title).60B.%(ext)s"),
         "download_archive": str(VIDEOS / "archive.txt"),
@@ -66,10 +92,13 @@ def download(ids, log, cookies_browser=None, max_height=1080):
         opts["cookiesfrombrowser"] = (cookies_browser,)
     failed = []
     with yt_dlp.YoutubeDL(opts) as ydl:
-        for vid in ids:
+        for k, vid in enumerate(ids, 1):
+            cur.update(i=k, vid=vid, streams={})
+            set_progress(label="보관함에 담는 중", item=vid, step=f"{k}/{len(ids)}", pct=None, detail="연결하는 중")
             log(f"보관함에 담는 중 · {vid}")
             try:
-                ydl.download([f"https://www.youtube.com/watch?v={vid}"])
+                ydl.download([vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"])
+                log("  담기 완료")
             except Exception as e:  # 한 개 실패해도 나머지 계속
                 msg = str(e)
                 if "not a bot" in msg or "403" in msg:
@@ -136,23 +165,39 @@ def _peaks(wav, top=10):
     return sorted(picked, key=lambda p: p["time"])
 
 
-def analyze(name, log, model="large-v3-turbo"):
+def analyze_many(names, log, model="large-v3-turbo"):
+    return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
+
+
+def analyze(name, log, model="large-v3-turbo", step="1/1"):
     video = VIDEOS / name
     outdir = ANALYSIS / video.stem
     outdir.mkdir(parents=True, exist_ok=True)
     wav = outdir / "audio.wav"
     log(f"편집점 찾는 중 · {name}")
+    set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="소리 추출 중")
     run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
+    set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
     from faster_whisper import WhisperModel
     m = WhisperModel(model, device="cpu", compute_type="int8")
-    segs, _ = m.transcribe(str(wav), language="ko", vad_filter=True)
+    # PyAV 버전 차이로 인한 오류를 피하려고, ffmpeg로 뽑은 wav를 직접 읽어 넘긴다
+    import wave
+    import numpy as np
+    with wave.open(str(wav), "rb") as w:
+        audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
+    segs, info = m.transcribe(audio, language="ko", vad_filter=True)
+    total = info.duration or 0
     segments = []
     for s in segs:
         segments.append({"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()})
+        if total:
+            set_progress(label="편집점 찾는 중", item=name, step=step, pct=min(99, int(s.end * 100 / total)),
+                         detail=f"대사 받아쓰는 중 · {_short(s.end)} / {_short(total)}")
         if len(segments) % 20 == 0:
             log(f"  {_short(s.end)}까지 받아씀")
+    set_progress(label="편집점 찾는 중", item=name, step=step, pct=99, detail="컷 후보·하이라이트 찾는 중")
     sil, peaks = _silences(wav), _peaks(wav)
     wav.unlink()
 
@@ -208,6 +253,7 @@ def render(name, spec, log):
     tmp = Path(tempfile.mkdtemp(dir=OUT))
     parts = []
     for i, c in enumerate(cuts):
+        set_progress(label="러프컷 만드는 중", item=name, step=f"{i + 1}/{len(cuts)}", pct=int(i * 100 / len(cuts)), detail=f"컷 {i + 1} 자르는 중")
         log(f"  컷 {i + 1}/{len(cuts)} · {c['start']}초~{c['end']}초 {c.get('note', '')}")
         part = tmp / f"p{i:03d}.mp4"
         r = run([ffmpeg(), "-y", "-loglevel", "error", "-ss", str(c["start"]), "-to", str(c["end"]), "-i", str(video),

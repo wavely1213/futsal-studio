@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 import core
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
-LOG, JOB = [], {"name": None, "result": None}
+LOG, JOB = [], {"name": None, "result": None, "error": None}
 LOCK = threading.Lock()
 
 
@@ -27,15 +27,18 @@ def start_job(name, fn):
     with LOCK:
         if JOB["name"]:
             return False
-        JOB.update(name=name, result=None)
+        JOB.update(name=name, result=None, error=None)
 
     def runner():
+        core.set_progress()
         try:
             JOB["result"] = fn()
         except Exception as e:
+            JOB["error"] = str(e)
             log(f"문제가 생겼어요 · {e}")
             traceback.print_exc()
         finally:
+            core.set_progress()
             JOB["name"] = None
 
     threading.Thread(target=runner, daemon=True).start()
@@ -84,7 +87,8 @@ class Handler(BaseHTTPRequestHandler):
                 total = len(LOG)
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
                                     "result": JOB["result"] if not JOB["name"] else None,
-                                    "log": lines, "log_total": total, "local": core.local_videos()})
+                                    "error": JOB["error"] if not JOB["name"] else None,
+                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": core.local_videos()})
         if u.path == "/api/timeline":
             n = q["name"][0]
             return self._send(200, {"text": core.timeline(n), "events": core.timeline_events(n)})
@@ -105,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
         jobs = {
             "/api/list": ("채널 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck)),
             "/api/download": ("보관함에 담기", lambda: core.download(b["ids"], log, ck)),
-            "/api/analyze": ("편집점 찾기", lambda: [str(core.analyze(n, log, b.get("model", "large-v3-turbo"))) for n in b["names"]]),
+            "/api/analyze": ("편집점 찾기", lambda: core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
