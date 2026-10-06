@@ -37,19 +37,32 @@ def grab(name, t, w=1920):
 
 
 def _sharpness(path):
+    """썸네일 배경으로 좋은 장면 점수.
+    - 가운데가 선명할수록(위·아래 띠는 빼고 잼 — 영상에 박힌 자막 경계가 '선명'으로 잡히지 않게)
+    - 너무 어둡거나 밝지 않을수록
+    - 사람 피부가 가운데에 크게 보일수록 (인물 클로즈업)
+    - 아래쪽에 자막 같은 글자 띠가 있으면 감점"""
     import numpy as np
     from PIL import Image
-    im = np.asarray(Image.open(path).convert("L").resize((320, 180)), dtype=np.float32)
-    lap = im[1:-1, 1:-1] * 4 - im[:-2, 1:-1] - im[2:, 1:-1] - im[1:-1, :-2] - im[1:-1, 2:]
-    bright = im.mean()
-    # 선명할수록, 너무 어둡거나 밝지 않을수록 좋은 장면
-    return float(lap.var()) * (1.0 - abs(bright - 120) / 160)
+    rgb = np.asarray(Image.open(path).convert("RGB").resize((320, 180)), dtype=np.float32)
+    im = rgb @ np.array([0.299, 0.587, 0.114], np.float32)
+    c = im[27:126, 40:280]
+    lap = c[1:-1, 1:-1] * 4 - c[:-2, 1:-1] - c[2:, 1:-1] - c[1:-1, :-2] - c[1:-1, 2:]
+    expo = 1.0 - min(1.0, abs(im.mean() - 120) / 160)
+    r, g, b = rgb[27:153, 60:260, 0], rgb[27:153, 60:260, 1], rgb[27:153, 60:260, 2]
+    cr = 0.5 * r - 0.4187 * g - 0.0813 * b + 128
+    cb = -0.1687 * r - 0.3313 * g + 0.5 * b + 128
+    skin = float(((cr > 135) & (cr < 175) & (cb > 85) & (cb < 130) & (r > 60)).mean())
+    gx = np.abs(np.diff(im, axis=1)) > 70
+    text = max(float(gx[120:180].mean()), float(gx[0:30].mean()))
+    penalty = 0.35 if text > 0.06 else 0.7 if text > 0.04 else 1.0
+    return float(np.log1p(lap.var())) * expo * (1 + 2.5 * min(skin, 0.35)) * penalty
 
 
 def frame_candidates(name, n=8):
     """선명한 장면 n개 (하이라이트 근처 우선, 고르게 분포)."""
     from editor import media_info  # 순환 import 피함
-    cache = _frames_dir(name) / "candidates.json"
+    cache = _frames_dir(name) / "candidates2.json"
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))
     dur = media_info(name)["duration"]

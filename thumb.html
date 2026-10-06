@@ -154,6 +154,7 @@
   .hist > div:hover { background: var(--panel-3); } .hist .cur { color: var(--accent); cursor: default; }
   .cands.short { grid-template-columns: 1fr 1fr 1fr; }
   .designs .d { width: 96px; }
+  .selbox .csel { position: absolute; background: rgba(45,140,235,.35); outline: 1px solid rgba(120,190,255,.9); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -596,12 +597,32 @@ function drawSel() {
     const l = ls[0];
     Object.assign(b.style, { left: l.x * Z + "px", top: l.y * Z + "px", width: l.w * Z + "px", height: l.h * Z + "px", transform: `rotate(${l.rot}deg) skewX(${-(l.skew || 0)}deg)` });
     if (!l.locked) b.innerHTML = HANDLES.map(h => `<div class="h ${h}"></div>`).join("") + '<div class="h rot"></div>';
+    const r = l.type === "text" && curRange(l);
+    if (r) b.innerHTML += charRects(l, r[0], r[1]).map(q => `<i class="csel" style="left:${q.x * Z}px;top:${q.y * Z}px;width:${q.w * Z}px;height:${q.h * Z}px"></i>`).join("");
   } else {
     const r = bbox(ls); b.classList.add("multi");
     Object.assign(b.style, { left: r.x * Z + "px", top: r.y * Z + "px", width: r.w * Z + "px", height: r.h * Z + "px" });
     b.innerHTML = HANDLES.map(h => `<div class="h ${h}"></div>`).join("");
   }
   ui.appendChild(b);
+}
+// 고른 글자 범위를 캔버스 위에 파랗게 표시 (레이어 안 좌표)
+function charRects(l, s, e) {
+  const m = textLayout(ctx, l), sx = l.w / m.natW, sy = l.h / m.natH, out = []; let i = 0;
+  for (const ln of m.lines) {
+    const x0 = m.pad + (l.align === "center" ? (m.w - ln.w) / 2 : l.align === "right" ? m.w - ln.w : 0);
+    for (const sp of ln.spans) {
+      const a = Math.max(s, i), b = Math.min(e, i + sp.t.length);
+      if (a < b) {
+        ctx.font = `${sp.st.size}px "${sp.st.font}"`;
+        const p0 = ctx.measureText(sp.t.slice(0, a - i)).width, p1 = ctx.measureText(sp.t.slice(0, b - i)).width;
+        out.push({ x: (x0 + sp.x + p0) * sx, y: (m.pad + ln.top) * sy, w: (p1 - p0) * sx, h: ln.lh * sy });
+      }
+      i += sp.t.length;
+    }
+    i += 1;
+  }
+  return out;
 }
 function showGuides(gx, gy) {
   const ui = $("ui"); ui.querySelectorAll(".guide").forEach(g => g.remove());
@@ -751,7 +772,7 @@ function syncFields(except) {
   });
   document.querySelectorAll("[data-hex]").forEach(s => { const v = getV(s.dataset.hex); s.textContent = v ? toHex(v).toUpperCase() : ""; });
   document.querySelectorAll("[data-segk]").forEach(s => { const v = getV(s.dataset.segk); s.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === String(v))); });
-  refreshCharUI();
+  refreshCharUI(); if (textSel) renderAll();
 }
 function readEl(el) { const m = FM[el.dataset.k] || {}; if (el.type === "checkbox") return el.checked; if (el.type === "number" || el.type === "range") return +el.value / (m.mul || 1); return el.value; }
 

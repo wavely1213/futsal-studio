@@ -1,6 +1,7 @@
 """풋살사관학교 스튜디오 — 데스크톱 앱 (화면은 전용 창, 내부 통신은 127.0.0.1 전용)."""
 import base64
 import json
+import mimetypes
 import os
 import time
 import subprocess
@@ -210,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"docs": thumb.load_docs(n), "hooks": [editor._hook(r) for r in rec["shorts"]],
                                     "keywords": sorted({k for r in rec["shorts"] for k in r["keywords"]}),
                                     "title": n, "info": editor.media_info(n),
-                                    "cached": (core.adir(n) / "frames" / "candidates.json").exists()})
+                                    "cached": (core.adir(n) / "frames" / "candidates2.json").exists()})
         if u.path == "/editor":
             return self._send(200, (core.APP_DIR / "editor.html").read_bytes(), "text/html; charset=utf-8")
         if u.path == "/media":
@@ -224,6 +225,21 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/thumbs.jpg":
             p = core.adir(q["name"][0]) / "thumbs2.jpg"
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/edit/file":  # 편집실 미디어 (보관함 영상·가져온 음악/이미지)
+            p = editor.media_path(q["f"][0], q.get("src", ["videos"])[0]).resolve()
+            if not p.exists() or p.parent not in (core.VIDEOS.resolve(), editor.ASSETS.resolve()):
+                return self._send(404, {"error": "not found"})
+            return self._file(p, mimetypes.guess_type(p.name)[0] or "application/octet-stream")
+        if u.path == "/api/edit/media":
+            try:
+                return self._send(200, editor.media_bundle(q["f"][0], q.get("src", ["videos"])[0]))
+            except Exception as e:
+                return self._send(500, {"error": f"미디어를 열지 못했어요 · {e}"})
+        if u.path == "/api/edit/thumbs.jpg":
+            p = editor.thumbs_file(q["f"][0], q.get("src", ["videos"])[0])
+            return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/edit/library":
+            return self._send(200, editor.library())
         if u.path == "/api/edit/autoseq":
             n = q["name"][0]
             return self._send(200, {"sequences": editor.auto_sequences(n, editor.media_info(n))})
@@ -260,6 +276,12 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin and origin not in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"):
             return self._send(403, {"error": "forbidden"})
+        if urlparse(self.path).path == "/api/edit/upload":  # 큰 파일은 JSON 대신 그대로 받음
+            try:
+                n = parse_qs(urlparse(self.path).query)["name"][0]
+                return self._send(200, editor.save_upload(n, self.rfile, int(self.headers.get("Content-Length") or 0)))
+            except Exception as e:
+                return self._send(400, {"error": str(e)})
         b, path = self._body(), urlparse(self.path).path
         ck = b.get("cookies") or None
         jobs = {
@@ -307,6 +329,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path == "/api/edit/cancel":
+            editor.cancel_export()
+            return self._send(200, {"ok": True})
         if path == "/api/open":
             try:
                 open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])
