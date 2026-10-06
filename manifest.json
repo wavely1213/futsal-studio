@@ -1,6 +1,8 @@
 {
   "version": "1.8.1",
   "notes": "긴급 수정: 검정·흰색 전환이나 위 트랙 전환이 들어간 영상의 내보내기 실패, Python 3.10 이하 PC에서 내보내기 실패, 가편집 다시 만들기 때 복제·이름 바꾼 편집본이 지워지던 문제",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/0024bac3d388328dfd0c831d7676ab3cd2192da5.zip",
+  "commit": "0024bac3d388328dfd0c831d7676ab3cd2192da5",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "README.md": "122beeb1c933a5a2b0098821803148e56662ebac61bb84f39647f5f1a0e87186",
