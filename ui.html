@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>풋살사관학교 편집도우미</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1b1f24; --sub:#6b7280; --line:#e5e7eb; --accent:#1f6feb; --ok:#16a34a; --warn:#d97706; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header h1 { font-size:17px; margin:0; white-space:nowrap; }
+  button { white-space:nowrap; }
+  header .ver { color:var(--sub); font-size:12px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  header .sp { flex:1; }
+  #updBanner { display:none; white-space:nowrap; background:#fff7e6; border:1px solid #f5c26b; padding:6px 10px; border-radius:8px; font-size:13px; }
+  main { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding:16px 20px; max-width:1400px; margin:0 auto; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-width:0; }
+  section h2 { font-size:15px; margin:0 0 10px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:7px 12px; cursor:pointer; font:inherit; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  select, textarea { font:inherit; border:1px solid var(--line); border-radius:8px; padding:6px 8px; background:#fff; }
+  textarea { width:100%; min-height:110px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .tablewrap { max-height:330px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { position:sticky; top:0; background:#fafafa; font-weight:600; font-size:12px; color:var(--sub); }
+  td.num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .tag { font-size:11px; padding:2px 6px; border-radius:6px; background:#eef2ff; color:#3730a3; white-space:nowrap; }
+  .tag.ok { background:#dcfce7; color:var(--ok); }
+  pre { margin:0; white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  #timeline { max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:8px; background:#fafafa; }
+  #log { grid-column: 1 / -1; }
+  #logbox { height:180px; overflow:auto; background:#0f172a; color:#e2e8f0; border-radius:8px; padding:10px; }
+  #status { font-size:13px; color:var(--warn); }
+  .hint { color:var(--sub); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ 풋살사관학교 편집도우미</h1>
+  <span class="ver" id="ver"></span>
+  <span id="updBanner"></span>
+  <span class="sp"></span>
+  <span id="status"></span>
+  <button id="btnUpdate">업데이트</button>
+</header>
+
+<main>
+  <section>
+    <h2>① 채널 영상 받기</h2>
+    <div class="row">
+      <select id="kind"><option value="videos">긴 영상</option><option value="shorts">쇼츠</option></select>
+      <button id="btnList">목록 불러오기</button>
+      <button id="btnDownload" class="primary" disabled>선택한 영상 받기</button>
+      <label class="hint"><input type="checkbox" id="cookies"> 크롬 로그인 사용 (봇 확인에 막힐 때)</label>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr><th><input type="checkbox" id="chkAll"></th><th>조회수</th><th>제목</th><th>길이</th></tr></thead>
+      <tbody id="remote"><tr><td colspan="4" class="hint">"목록 불러오기"를 누르세요. 조회수 순으로 정렬됩니다.</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section>
+    <h2>② 내 영상 분석</h2>
+    <div class="row">
+      <button id="btnOpenVideos">영상 폴더 열기</button>
+      <select id="model"><option value="large-v3-turbo">정확 (권장)</option><option value="small">빠름</option></select>
+      <button id="btnAnalyze" class="primary" disabled>선택한 영상 분석</button>
+      <button id="btnOpenAnalysis">결과 폴더</button>
+    </div>
+    <div class="hint" style="margin-bottom:8px">촬영 원본은 "영상 폴더 열기"로 연 폴더에 넣으면 목록에 나타납니다.</div>
+    <div class="tablewrap">
+      <table><thead><tr><th></th><th>파일</th><th>크기</th><th>상태</th></tr></thead>
+      <tbody id="local"></tbody></table>
+    </div>
+  </section>
+
+  <section>
+    <h2>③ 타임라인 (편집점 후보)</h2>
+    <div class="row">
+      <select id="tlSel"></select>
+      <button id="btnCopy">복사 (Claude에게 보내기)</button>
+    </div>
+    <div id="timeline"><pre class="hint">분석이 끝난 영상을 고르세요.</pre></div>
+  </section>
+
+  <section>
+    <h2>④ 러프컷 만들기</h2>
+    <div class="row">
+      <select id="rcSel"></select>
+      <button id="btnRender" class="primary">러프컷 만들기</button>
+      <button id="btnOpenOut">결과 폴더</button>
+    </div>
+    <div class="hint" style="margin-bottom:6px">Claude가 준 컷 목록(JSON)을 붙여넣으세요. format: shorts(세로 9:16) / long(원본 비율)</div>
+    <textarea id="cuts">{"format": "shorts", "cuts": [{"start": 12.0, "end": 18.5, "note": "예시"}]}</textarea>
+  </section>
+
+  <section id="log">
+    <h2>작업 기록</h2>
+    <div id="logbox"><pre id="logtxt"></pre></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let logSince = 0, lastJob = null, pending = null, remoteRows = [];
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok && j.error) alert(j.error);
+  return j;
+}
+const fmtDur = s => s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "";
+const esc = s => s.replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+const cookies = () => $("cookies").checked ? "chrome" : null;
+
+function renderRemote() {
+  $("remote").innerHTML = remoteRows.map(r =>
+    `<tr><td><input type="checkbox" class="rchk" value="${r.id}"></td><td class="num">${r.views.toLocaleString()}</td><td>${esc(r.title)}</td><td class="num">${fmtDur(r.duration)}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="hint">영상이 없습니다.</td></tr>`;
+  document.querySelectorAll(".rchk").forEach(c => c.onchange = syncButtons);
+  syncButtons();
+}
+
+function renderLocal(list) {
+  const checked = new Set([...document.querySelectorAll(".lchk:checked")].map(c => c.value));
+  $("local").innerHTML = list.map(v =>
+    `<tr><td><input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}></td><td>${esc(v.name)}</td><td class="num">${v.size_mb}MB</td><td>${v.analyzed ? '<span class="tag ok">분석 완료</span>' : '<span class="tag">대기</span>'}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="hint">아직 영상이 없습니다.</td></tr>`;
+  document.querySelectorAll(".lchk").forEach(c => c.onchange = syncButtons);
+  for (const [sel, filter] of [["tlSel", v => v.analyzed], ["rcSel", () => true]]) {
+    const cur = $(sel).value, opts = list.filter(filter).map(v => v.name);
+    if ($(sel).dataset.opts !== opts.join("|")) {
+      $(sel).innerHTML = opts.map(n => `<option>${esc(n)}</option>`).join("") || "<option value=''>(없음)</option>";
+      $(sel).dataset.opts = opts.join("|");
+      if (opts.includes(cur)) $(sel).value = cur;
+      if (sel === "tlSel") loadTimeline();
+    }
+  }
+  syncButtons();
+}
+
+function syncButtons(busy) {
+  busy = busy === true || !!lastJob;
+  $("btnDownload").disabled = busy || !document.querySelector(".rchk:checked");
+  $("btnAnalyze").disabled = busy || !document.querySelector(".lchk:checked");
+  for (const b of ["btnList", "btnRender", "btnUpdate"]) $(b).disabled = busy;
+}
+
+async function loadTimeline() {
+  const n = $("tlSel").value;
+  if (!n) return;
+  const j = await api(`/api/timeline?name=${encodeURIComponent(n)}`);
+  $("timeline").innerHTML = `<pre>${esc(j.text || "")}</pre>`;
+}
+
+async function poll() {
+  const s = await api(`/api/state?since=${logSince}`);
+  $("ver").textContent = `v${s.version} · 작업 폴더 ${s.workspace}`;
+  if (s.log.length) {
+    $("logtxt").textContent += s.log.join("\n") + "\n";
+    $("logbox").scrollTop = $("logbox").scrollHeight;
+  }
+  logSince = s.log_total;
+  if (lastJob && !s.job && pending) { pending(s.result); pending = null; }
+  lastJob = s.job;
+  $("status").textContent = s.job ? `${s.job} 진행 중…` : "";
+  renderLocal(s.local);
+}
+
+function job(path, body, done) {
+  api(path, body).then(j => { if (j.ok) { lastJob = "…"; pending = done || null; syncButtons(true); } });
+}
+
+$("btnList").onclick = () => job("/api/list", {kind: $("kind").value, cookies: cookies()}, rows => { remoteRows = rows || []; renderRemote(); });
+$("chkAll").onchange = e => { document.querySelectorAll(".rchk").forEach(c => c.checked = e.target.checked); syncButtons(); };
+$("btnDownload").onclick = () => job("/api/download", {ids: [...document.querySelectorAll(".rchk:checked")].map(c => c.value), cookies: cookies()});
+$("btnAnalyze").onclick = () => job("/api/analyze", {names: [...document.querySelectorAll(".lchk:checked")].map(c => c.value), model: $("model").value}, loadTimeline);
+$("tlSel").onchange = loadTimeline;
+$("btnCopy").onclick = () => navigator.clipboard.writeText($("timeline").innerText).then(() => alert("복사했습니다. Claude 대화창에 붙여넣으세요."));
+$("btnRender").onclick = () => {
+  let spec;
+  try { spec = JSON.parse($("cuts").value); } catch (e) { return alert("컷 목록 JSON 형식이 올바르지 않습니다: " + e.message); }
+  if (!$("rcSel").value) return alert("영상을 먼저 고르세요.");
+  job("/api/render", {name: $("rcSel").value, spec});
+};
+for (const [b, w] of [["btnOpenVideos", "videos"], ["btnOpenAnalysis", "analysis"], ["btnOpenOut", "out"]]) $(b).onclick = () => api("/api/open", {which: w});
+
+$("btnUpdate").onclick = () => {
+  if (!confirm("다운로드 엔진과 프로그램을 최신 버전으로 업데이트할까요?")) return;
+  job("/api/update", {engine: true, app: true}, res => {
+    if (res && res.restart) api("/api/restart", {}).then(() => setTimeout(() => location.reload(), 4000));
+    else checkUpdate();
+  });
+};
+
+async function checkUpdate() {
+  const u = await api("/api/update/check");
+  const b = $("updBanner");
+  if (u.available) { b.style.display = "inline"; b.textContent = `새 버전 v${u.latest} 있음 — 업데이트를 누르세요${u.notes ? " · " + u.notes : ""}`; }
+  else b.style.display = "none";
+}
+
+setInterval(poll, 1000);
+poll();
+checkUpdate();
+</script>
+</body>
+</html>
