@@ -1,6 +1,8 @@
 {
   "version": "1.8.2",
   "notes": "편집실 검수 재확인 20건: B롤 영상·소리 싱크(속도·Q/W·정지 화면·트랙 이동), 거꾸로 재생 소리 미리보기, 고른 키프레임 지우기, 잠긴 트랙, 창 닫을 때 마지막 편집 보존, 그래픽카드 오류 구분, 사진 흐린 배경·켄 번스 속도와 부드러움, 내보내기 검수 기준 유지",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/50eb0823b5828edbc602d8cab808122127dc3bee.zip",
+  "commit": "50eb0823b5828edbc602d8cab808122127dc3bee",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "README.md": "122beeb1c933a5a2b0098821803148e56662ebac61bb84f39647f5f1a0e87186",
