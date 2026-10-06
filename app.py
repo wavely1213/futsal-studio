@@ -462,7 +462,9 @@ class Handler(BaseHTTPRequestHandler):
             f = (core.OUT / Path(b["file"]).name).resolve()
             if core.OUT.resolve() not in f.parents or not f.exists():
                 return self._send(404, {"ok": False, "error": "검수할 파일을 찾지 못했어요"})
-            ok = start_job("영상 검수", lambda: qa.check_video(f, b.get("format"), b.get("master"), editor.run_killable))
+            meta = editor.EXPORT_META.get(f.name) or {}  # 내보낼 때 기록한 설정이 먼저 (편집실을 새로 열면 화면 쪽 기록이 없음)
+            ok = start_job("영상 검수", lambda: qa.check_video(f, meta.get("format") or b.get("format"), meta.get("master") or b.get("master"),
+                                                             editor.run_killable))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/edit/proxy":
             ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
