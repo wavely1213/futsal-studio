@@ -1,6 +1,5 @@
 """전환 내보내기 회귀 테스트 — 실제 ffmpeg 로 내보냄 (v1.8.0: 검정·흰색 전환, 위 트랙 전환이 'Conversion failed' 로 실패했음).
 저장소 폴더에서 python3 -m unittest tests.test_export_trans"""
-import concurrent.futures
 import shutil
 import subprocess
 import sys
@@ -114,12 +113,11 @@ class ExportTransitions(unittest.TestCase):
         p = self.export("black", "center", fmt="shorts")
         self.assertLess(gray_at(p, 4.0), 25)
 
-    def test_future_timeout_caught_on_old_python(self):
-        # Python 3.10 이하에선 concurrent.futures.TimeoutError 가 내장 TimeoutError 와 다른 오류 → 둘 다 잡아야 함
-        self.assertIs(ed.FutTimeout, concurrent.futures.TimeoutError)
+    def test_audio_wait_has_no_timeout_exception(self):
+        # Python 3.10 이하에선 concurrent.futures.TimeoutError 가 내장 TimeoutError 와 달라 못 잡음 → wait() 로 기다림
         src = Path(ed.__file__).read_text(encoding="utf-8")
-        self.assertIn("except (TimeoutError, FutTimeout):", src)
-
+        self.assertIn("while not wait([fut], timeout=0.4).done:", src)
+        self.assertNotIn("fut.result(timeout=0.4)", src)
 
 if __name__ == "__main__":
     unittest.main()
