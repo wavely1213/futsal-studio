@@ -1,17 +1,15 @@
 {
-  "version": "1.8.1",
-  "notes": "긴급 수정: 검정·흰색 전환이나 위 트랙 전환이 들어간 영상의 내보내기 실패, Python 3.10 이하 PC에서 내보내기 실패, 가편집 다시 만들기 때 복제·이름 바꾼 편집본이 지워지던 문제",
-  "zip": "https://github.com/wavely1213/futsal-studio/archive/0024bac3d388328dfd0c831d7676ab3cd2192da5.zip",
-  "commit": "0024bac3d388328dfd0c831d7676ab3cd2192da5",
+  "version": "1.8.2",
+  "notes": "편집실 검수 재확인 20건: B롤 영상·소리 싱크(속도·Q/W·정지 화면·트랙 이동), 거꾸로 재생 소리 미리보기, 고른 키프레임 지우기, 잠긴 트랙, 창 닫을 때 마지막 편집 보존, 그래픽카드 오류 구분, 사진 흐린 배경·켄 번스 속도와 부드러움, 내보내기 검수 기준 유지",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "README.md": "122beeb1c933a5a2b0098821803148e56662ebac61bb84f39647f5f1a0e87186",
-    "app.py": "d3f2a94ca4a63de3c186b06cc3d000444dec8ba97a889e0680f8977073d0851e",
+    "app.py": "d380cb335d61eb99185a3ca73fb3246fd0fc961fd6a02e9330e603ba2b2146f4",
     "bundle.py": "9c3413bc29bea1a59fa03e376c5bb9943f110d14f5aac60341f6d5ce49380561",
     "config.json": "0391d3d12caafc330e497def79d72f09d40479d15d9d387913a2297c72614f62",
     "core.py": "800ebbbe70e0f51288a485c0cfca975c9956c3ad189f84021771a04eb5a46211",
-    "editor.html": "4a8598d7277827fba605c1a16264a3d15c15f0d8eb9aa79a8d51ceefe9cd7b06",
-    "editor.py": "2b180dfeb8b8acccb1cea1431cddc60b749fece5e76afb2fabbb6f82f47ecf6d",
+    "editor.html": "5726e1a2f2efd55f5655de3a8f82e977ac8b2a4678a24074ce2e49f1adde2d47",
+    "editor.py": "9037a5a37aa23639e1d49fcd472ad601dc69deb698a3a8be17e2e132485586d0",
     "face.py": "be0c8acb3ad30dfe611c6fdae662376ccbe4e042bd791d063a47b187dc5c3213",
     "fonts/BlackHanSans-Regular.ttf": "31960809284026681774a8e52dc19ebcad26cf69b0ad9d560f288296fbb52739",
     "fonts/DoHyeon-Regular.ttf": "35644be7f28e0a68a447b1f7af351dcde5674b870f24f7b5f43e26d00b4ab653",
@@ -32,7 +30,7 @@
     "ui.html": "3a2dcfb690640bf3fa4eb3000091eb90595316c17454548e55554ec077b2078b",
     "updater.py": "91cd71f2c5d4c7b2a5b00c1e170e399a9400b39c11d5d017e9843fd57478f8d6",
     "upload.py": "b529d1df4c390191b67946963d77418398a8a044a6d5b724da89f422ba9b4aff",
-    "version.txt": "25cec9739d3218e48acc5d8c3d4333e1d624121c5b7ab3bcddc71d0fa0134b83",
+    "version.txt": "e7066ea517cbc9e563967997e5cf2e3a899250403dac6fbaa25bb6b1815d16ca",
     "시작하기 (Mac).command": "5c70dc2c35bb2573975376d5b019cf92916e6b4b601314a5dbae5caa2cabc63f",
     "시작하기 (Windows).bat": "97bb90805f430f0d45ded9bc78bb98aab2a1aee9c5e04dfaf011d9d86ebd92fa"
   }
