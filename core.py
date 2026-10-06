@@ -51,7 +51,7 @@ def download(ids, log, cookies_browser=None, max_height=1080):
 
     def hook(d):
         if d["status"] == "finished":
-            log(f"  받기 완료: {Path(d['filename']).name}")
+            log(f"  담기 완료 · {Path(d['filename']).name}")
 
     opts = {
         "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]",
@@ -67,14 +67,14 @@ def download(ids, log, cookies_browser=None, max_height=1080):
     failed = []
     with yt_dlp.YoutubeDL(opts) as ydl:
         for vid in ids:
-            log(f"▶ 다운로드: {vid}")
+            log(f"보관함에 담는 중 · {vid}")
             try:
                 ydl.download([f"https://www.youtube.com/watch?v={vid}"])
             except Exception as e:  # 한 개 실패해도 나머지 계속
                 msg = str(e)
                 if "not a bot" in msg or "403" in msg:
-                    msg = "YouTube가 다운로드를 막았습니다. 상단 '업데이트'로 엔진을 최신으로 바꾸거나, '크롬 로그인 사용'을 켜고 다시 시도하세요."
-                log(f"  실패: {msg}")
+                    msg = "YouTube가 다운로드를 막았어요. 왼쪽 아래 '업데이트 확인'으로 엔진을 최신으로 바꾸거나, '크롬 로그인 정보로 받기'를 켜고 다시 담아 보세요."
+                log(f"  담지 못했어요 · {msg}")
                 failed.append(vid)
     return failed
 
@@ -93,7 +93,7 @@ def add_local(paths, log):
         src = Path(p)
         if src.suffix.lower() in VIDEO_EXTS and src.exists():
             shutil.copy2(src, VIDEOS / src.name)
-            log(f"추가: {src.name}")
+            log(f"추가 · {src.name}")
 
 
 # ---------- 분석 ----------
@@ -141,10 +141,10 @@ def analyze(name, log, model="large-v3-turbo"):
     outdir = ANALYSIS / video.stem
     outdir.mkdir(parents=True, exist_ok=True)
     wav = outdir / "audio.wav"
-    log(f"▶ 분석: {name}")
+    log(f"편집점 찾는 중 · {name}")
     run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
 
-    log("  받아쓰기 중… (첫 실행 땐 모델 다운로드로 몇 분 걸립니다)")
+    log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
     from faster_whisper import WhisperModel
     m = WhisperModel(model, device="cpu", compute_type="int8")
     segs, _ = m.transcribe(str(wav), language="ko", vad_filter=True)
@@ -152,7 +152,7 @@ def analyze(name, log, model="large-v3-turbo"):
     for s in segs:
         segments.append({"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()})
         if len(segments) % 20 == 0:
-            log(f"  … {_short(s.end)} 까지 받아씀")
+            log(f"  {_short(s.end)}까지 받아씀")
     sil, peaks = _silences(wav), _peaks(wav)
     wav.unlink()
 
@@ -168,8 +168,21 @@ def analyze(name, log, model="large-v3-turbo"):
         f.write(f"# 타임라인: {name}\n\n")
         for _, line in sorted(events):
             f.write(line + "\n")
-    log(f"  완료: 대사 {len(segments)}줄, 무음 {len(sil)}곳, 피크 {len(peaks)}곳")
+    log(f"  완료 · 대사 {len(segments)}줄 · 컷 후보 {len(sil)}곳 · 하이라이트 {len(peaks)}곳")
     return outdir
+
+
+def timeline_events(name):
+    """화면 표시용: 대사·컷 후보·하이라이트를 시간순 목록으로."""
+    d = ANALYSIS / Path(name).stem
+    if not (d / "transcript.json").exists():
+        return []
+    segs = json.loads((d / "transcript.json").read_text(encoding="utf-8"))
+    extra = json.loads((d / "analysis.json").read_text(encoding="utf-8"))
+    ev = [{"t": s["start"], "end": s["end"], "type": "speech", "text": s["text"]} for s in segs]
+    ev += [{"t": x["start"], "end": x["end"], "type": "silence", "text": f"{x['end'] - x['start']:.1f}초 동안 조용함"} for x in extra["silences"]]
+    ev += [{"t": p["time"], "end": p["time"] + 1, "type": "peak", "text": "소리가 갑자기 커짐 (환호·슈팅·웃음 가능성)"} for p in extra["loud_peaks"]]
+    return sorted(ev, key=lambda e: e["t"])
 
 
 def timeline(name):
@@ -195,7 +208,7 @@ def render(name, spec, log):
     tmp = Path(tempfile.mkdtemp(dir=OUT))
     parts = []
     for i, c in enumerate(cuts):
-        log(f"  컷 {i + 1}/{len(cuts)}: {c['start']}s ~ {c['end']}s {c.get('note', '')}")
+        log(f"  컷 {i + 1}/{len(cuts)} · {c['start']}초~{c['end']}초 {c.get('note', '')}")
         part = tmp / f"p{i:03d}.mp4"
         r = run([ffmpeg(), "-y", "-loglevel", "error", "-ss", str(c["start"]), "-to", str(c["end"]), "-i", str(video),
                  "-vf", vf, "-af", "loudnorm=I=-14:TP=-1.5", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -217,7 +230,7 @@ def render(name, spec, log):
             lines.append(f"* COMMENT: {c['note']}")
         rec += dur
     (OUT / f"{stem}.edl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    log(f"  완료: {out.name} ({rec:.1f}초) + {stem}.edl")
+    log(f"  완성 · {out.name} ({rec:.1f}초) · 편집 프로그램용 {stem}.edl")
     return out
 
 
@@ -230,7 +243,7 @@ def _newer(a, b):
 def check_update():
     url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
     if not url:
-        return {"current": VERSION, "available": False, "note": "업데이트 주소가 설정되지 않았습니다"}
+        return {"current": VERSION, "available": False, "note": "업데이트 주소가 설정되지 않았어요"}
     with urllib.request.urlopen(url, timeout=10) as r:
         m = json.loads(r.read().decode("utf-8"))
     return {"current": VERSION, "latest": m["version"], "available": _newer(m["version"], VERSION),
@@ -238,20 +251,20 @@ def check_update():
 
 
 def update_engine(log):
-    log("▶ 다운로드 엔진(yt-dlp) 업데이트")
+    log("다운로드 엔진을 최신으로 바꾸는 중")
     r = run([sys.executable, "-m", "pip", "install", "-q", "-U", "yt-dlp"])
-    log("  완료" if r.returncode == 0 else f"  실패: {r.stderr[-300:]}")
+    log("  완료" if r.returncode == 0 else f"  실패 · {r.stderr[-300:]}")
 
 
 def update_app(log):
     info = check_update()
     if "note" in info:
-        log(f"프로그램 업데이트 건너뜀: {info['note']}")
+        log(f"프로그램 업데이트 건너뜀 · {info['note']}")
         return False
     if not info.get("available"):
-        log(f"이미 최신 버전입니다 ({VERSION})")
+        log(f"이미 최신 버전이에요 (v{VERSION})")
         return False
-    log(f"▶ 프로그램 업데이트 {VERSION} → {info['latest']}")
+    log(f"프로그램 업데이트 · v{VERSION} → v{info['latest']}")
     with tempfile.TemporaryDirectory() as td:
         zpath = Path(td) / "app.zip"
         urllib.request.urlretrieve(info["zip"], zpath)
@@ -269,5 +282,5 @@ def update_app(log):
                 dest.write_bytes(z.read(n))
     req = APP_DIR / "requirements.txt"
     run([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)])
-    log(f"  완료. 프로그램을 다시 시작합니다.")
+    log("  완료 · 프로그램을 다시 시작해요")
     return True

@@ -33,7 +33,7 @@ def start_job(name, fn):
         try:
             JOB["result"] = fn()
         except Exception as e:
-            log(f"오류: {e}")
+            log(f"문제가 생겼어요 · {e}")
             traceback.print_exc()
         finally:
             JOB["name"] = None
@@ -52,7 +52,7 @@ def open_folder(path):
 
 
 def restart():
-    log("재시작 중…")
+    log("다시 시작하는 중…")
     os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "--no-browser"])
 
 
@@ -86,7 +86,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "log": lines, "log_total": total, "local": core.local_videos()})
         if u.path == "/api/timeline":
-            return self._send(200, {"text": core.timeline(q["name"][0])})
+            n = q["name"][0]
+            return self._send(200, {"text": core.timeline(n), "events": core.timeline_events(n)})
         if u.path == "/api/update/check":
             try:
                 return self._send(200, core.check_update())
@@ -102,14 +103,18 @@ class Handler(BaseHTTPRequestHandler):
         b, path = self._body(), urlparse(self.path).path
         ck = b.get("cookies") or None
         jobs = {
-            "/api/list": ("목록 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck)),
-            "/api/download": ("다운로드", lambda: core.download(b["ids"], log, ck)),
-            "/api/analyze": ("분석", lambda: [str(core.analyze(n, log, b.get("model", "large-v3-turbo"))) for n in b["names"]]),
-            "/api/render": ("러프컷", lambda: str(core.render(b["name"], b["spec"], log))),
+            "/api/list": ("채널 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck)),
+            "/api/download": ("보관함에 담기", lambda: core.download(b["ids"], log, ck)),
+            "/api/analyze": ("편집점 찾기", lambda: [str(core.analyze(n, log, b.get("model", "large-v3-turbo"))) for n in b["names"]]),
+            "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
         if path == "/api/open":
-            open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])
+            try:
+                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])
+            except Exception as e:
+                log(f"폴더를 열지 못했어요 · {e}")
+                return self._send(200, {"ok": False})
             return self._send(200, {"ok": True})
         if path == "/api/restart":
             self._send(200, {"ok": True})
@@ -118,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in jobs:
             name, fn = jobs[path]
             ok = start_job(name, fn)
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 진행 중입니다"})
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         self._send(404, {"error": "not found"})
 
     @staticmethod
@@ -132,8 +137,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     url = f"http://127.0.0.1:{PORT}/"
-    log(f"풋살사관학교 편집도우미 v{core.VERSION} 실행 — {url}")
-    log(f"작업 폴더: {core.WORK}")
+    log(f"풋살사관학교 스튜디오 v{core.VERSION} · {url}")
+    log(f"작업 폴더 · {core.WORK}")
     if "--no-browser" not in sys.argv:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     srv.serve_forever()
