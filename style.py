@@ -47,40 +47,62 @@ def _small(g):
 
 
 def _zoom_score(a, b):
-    """b가 a를 확대한 화면인지: (최소 오차, 확대 배율). a·b는 회색 FH×FW. 거칠게 찾고 근처를 촘촘히 다시 찾음."""
+    """b가 a를 확대한 화면인지: (최소 오차, 확대 배율). 반 해상도로 넓게 찾고, 후보 몇 개를 원 해상도에서 촘촘히 다듬음."""
     import numpy as np
     from PIL import Image
-    ia = Image.fromarray(a.astype(np.uint8))
 
-    def err(s, ox, oy):
-        cw, ch = FW / s, FH / s
-        x0, y0 = (FW - cw) / 2 + ox * FW / 2, (FH - ch) / 2 + oy * FH / 2
-        if x0 < 0 or y0 < 0 or x0 + cw > FW or y0 + ch > FH:
-            return 1e9
-        z = np.asarray(ia.resize((FW, FH), Image.BILINEAR, box=(x0, y0, x0 + cw, y0 + ch)), np.float32)
-        return float(np.abs(z - b).mean())
+    def mk(a, b, W, H):
+        ia = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8))
 
-    best = min((err(s, ox, oy), s, ox, oy) for s in (1.12, 1.2, 1.3, 1.45, 1.6) for ox in (-0.12, 0, 0.12) for oy in (-0.12, 0, 0.08))
-    _, s0, ox0, oy0 = best
-    best = min([best] + [(err(s0 + ds, ox0 + dx, oy0 + dy), s0 + ds, ox0 + dx, oy0 + dy)
-                         for ds in (-0.05, 0, 0.05) for dx in (-0.05, 0, 0.05) for dy in (-0.05, -0.025, 0, 0.025, 0.05)])
+        def err(s, ox, oy):
+            cw, ch = W / s, H / s
+            x0, y0 = (W - cw) / 2 + ox * W / 2, (H - ch) / 2 + oy * H / 2
+            if x0 < -1e-6 or y0 < -1e-6 or x0 + cw > W + 1e-6 or y0 + ch > H + 1e-6:
+                return 1e9
+            z = np.asarray(ia.resize((W, H), Image.BILINEAR, box=(x0, y0, x0 + cw, y0 + ch)), np.float32)
+            return float(np.abs(z - b).mean())
+        return err
+
+    half = lambda g: g.reshape(FH // 2, 2, FW // 2, 2).mean(axis=(1, 3))
+    errh, errf = mk(half(a), half(b), FW // 2, FH // 2), mk(a, b, FW, FH)
+    S = (1.06, 1.1, 1.14, 1.18, 1.22, 1.27, 1.33, 1.4, 1.48, 1.56)
+    O = (-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15)
+    cand = sorted((errh(s, ox, oy), s, ox, oy) for s in S for ox in O for oy in (-0.1, -0.05, 0, 0.05, 0.1))[:3]
+    res = []
+    for _, s0, ox0, oy0 in cand:
+        best = (errf(s0, ox0, oy0), s0, ox0, oy0)
+        for st in (0.02, 0.01, 0.005):
+            _, s0, ox0, oy0 = best
+            best = min([best] + [(errf(s0 + ds, ox0 + dx, oy0 + dy), s0 + ds, ox0 + dx, oy0 + dy)
+                                 for ds in (-st, 0, st) for dx in (-st, 0, st) for dy in (-st, 0, st)])
+        res.append(best)
+    best = min(res)
     return best[0], round(best[1], 2)
 
 
 def _text_bands(rgb):
-    """가로 띠 6개마다 '글자 같은 강한 세로 경계' 비율 + 밝은 글자색 표본."""
+    """가로 띠 6개마다 '글자 같은 강한 세로 경계'가 가장 촘촘한 작은 창의 밀도 (짧은 자막도 잡히게)."""
     import numpy as np
     g = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
-    gx = np.abs(np.diff(g, axis=1))
-    strong = gx > 70
-    bands = [float(strong[i * 30:(i + 1) * 30].mean()) for i in range(6)]
+    strong = np.abs(np.diff(g, axis=1)) > 70
+    WH, WW = 12, 96  # 자막 한 줄 높이, 화면 폭의 30% 정도
+    ii = np.zeros((FH + 1, FW), np.int32)
+    ii[1:, 1:] = strong.cumsum(0).cumsum(1)
+    ys = np.arange(0, FH - WH + 1, 3)
+    xs = np.arange(0, FW - WW, 16)
+    a, b = ii[ys][:, xs], ii[ys][:, xs + WW]
+    c, d = ii[ys + WH][:, xs], ii[ys + WH][:, xs + WW]
+    dens = (d - c - b + a).max(axis=1) / (WH * WW)
+    ctr = ys + WH / 2
+    bands = [float(dens[(ctr >= i * 30) & (ctr < (i + 1) * 30)].max()) for i in range(6)]
     return g, bands, strong
 
 
 def analyze_style(name, log=print):
     import numpy as np
     path = core.VIDEOS / name
-    dur = _probe_duration(path) or 1.0
+    probe = _probe_duration(path)
+    dur = probe or 1.0
     core.set_progress(label="스타일 배우는 중", item=name, pct=0, detail="화면 컷·줌·자막 살펴보는 중")
     log(f"스타일 분석 · {name}")
     prev_g = prev_s = None
@@ -104,7 +126,7 @@ def analyze_style(name, log=print):
                 if min(e1, e2) < 0.55 * e0 and min(e1, e2) < 16:
                     zooms.append({"t": round(t, 2), "scale": k1 if e1 <= e2 else 1 / k2})
         # 아래쪽 띠에 글자가 있어 보이면 밝은 획 색을 표본으로
-        if bands[5] > 0.05 or bands[4] > 0.05:
+        if bands[5] > 0.10 or bands[4] > 0.10:
             sl = slice(120, 180)
             px = rgb[sl][:, 1:][strong[sl]]
             br = px[px.max(axis=1) > 170]
@@ -113,13 +135,16 @@ def analyze_style(name, log=print):
         prev_g, prev_s = g, s
         i += 1
         if i % (FPS * 20) == 0:
-            core.set_progress(label="스타일 배우는 중", item=name, pct=min(90, int(t * 90 / dur)), detail=f"화면 살펴보는 중 · {int(t)}초 / {int(dur)}초")
-    n = max(1, i)
+            core.set_progress(label="스타일 배우는 중", item=name, pct=min(90, int(t * 90 / dur)) if probe else None, detail=f"화면 살펴보는 중 · {int(t)}초" + (f" / {int(dur)}초" if probe else ""))
+    if i == 0:
+        raise RuntimeError(f"영상 화면을 읽지 못했어요 · {name}")
+    dur = probe if probe > 0 else i / FPS  # 길이를 모르는 파일(녹화본 등)은 프레임 수로
+    dur = max(dur, (cuts[-1] if cuts else 0) + 1 / FPS)
     bh = np.array(band_hist) if band_hist else np.zeros((1, 6))
     base = float(np.median(bh[:, 1:4])) if len(bh) else 0.0
-    thr = max(0.045, base * 2.2)
+    thr = max(0.10, base * 2.2)
     cap_frames = {pos: float(((bh[:, a:b].max(axis=1)) > thr).mean()) for pos, (a, b) in {"top": (0, 2), "middle": (2, 4), "bottom": (4, 6)}.items()}
-    cap_pos = max(cap_frames, key=cap_frames.get)
+    cap_pos = max(cap_frames, key=cap_frames.get) if max(cap_frames.values()) > 0 else "bottom"
     color = "#FFFFFF"
     if cap_colors:
         r, g_, b = np.median(np.array(cap_colors), axis=0)
@@ -170,8 +195,20 @@ def merge(profiles):
     for k in ("lufs", "charsPerSec"):
         v = [p[k] for p in profiles if p.get(k) is not None]
         out[k] = round(st.mean(v), 2) if v else None
-    out["captionPos"] = st.mode(p["captionPos"] for p in profiles)
-    out["captionColor"] = st.mode(p["captionColor"] for p in profiles)
+    capd = [p for p in profiles if p.get("captionRatio", 0) >= 0.1]  # 자막이 실제로 있던 영상만 위치·색 투표 (자막 비율만큼 무게)
+
+    def _wpick(key, default):
+        w = {}
+        for p in capd:
+            w[p[key]] = w.get(p[key], 0.0) + p["captionRatio"]
+        return max(w, key=w.get) if w else default
+    out["captionPos"] = _wpick("captionPos", "bottom")
+    out["captionColor"] = _wpick("captionColor", "#FFFFFF")
+    zc = [(p["zoomCutsPerMin"] * p["duration"] / 60, p["avgZoom"]) for p in profiles]
+    tot = sum(c for c, _ in zc)
+    out["avgZoom"] = round(sum(c * z for c, z in zc) / tot, 2) if tot else 1.2
+    pp = [p["pauseP75"] for p in profiles if p.get("pauses")]
+    out["pauseP75"] = round(st.mean(pp), 2) if pp else 0.4
     out["pauses"] = sum(p["pauses"] for p in profiles)
     return out
 
@@ -216,9 +253,16 @@ def list_styles():
 def learn(style_name, names, log=print):
     style_name = re.sub(r'[\\/:*?"<>|]', "", style_name).strip(" .") or "내 스타일"
     profs = []
+    fails = []
     for k, n in enumerate(names, 1):
         core.set_progress(label="스타일 배우는 중", item=n, step=f"{k}/{len(names)}", pct=0, detail="준비 중")
-        profs.append(analyze_style(n, log))
+        try:
+            profs.append(analyze_style(n, log))
+        except Exception as e:  # 한 영상이 깨져도 나머지로 배움
+            fails.append(n)
+            log(f"  배우지 못했어요 · {n} · {e}")
+    if not profs:
+        raise RuntimeError("고른 영상에서 배울 수 있는 게 없었어요 (파일이 깨졌거나 화면이 없어요)")
     prof = merge(profs)
     prof["refs"] = profs
     STYLES.mkdir(parents=True, exist_ok=True)

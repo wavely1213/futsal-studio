@@ -306,6 +306,14 @@ class Handler(BaseHTTPRequestHandler):
                 f.unlink()
             return self._send(200, {"ok": True})
         if path == "/api/thumb/frames":
+            try:  # 이미 골라 둔 장면이 있으면 다른 작업 중이어도 바로 돌려줌
+                c = json.loads((core.adir(b["name"]) / "frames" / "candidates2.json").read_text(encoding="utf-8"))
+                vs = (core.VIDEOS / b["name"]).stat()
+                ex = core.adir(b["name"]) / "analysis.json"
+                if c.get("sig") == [vs.st_size, int(vs.st_mtime), int(ex.stat().st_mtime) if ex.exists() else 0]:
+                    return self._send(200, {"ok": True, "frames": c["items"]})
+            except Exception:
+                pass
             ok = start_job("장면 고르기", lambda: thumb.frame_candidates(b["name"]))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/thumb/cut":

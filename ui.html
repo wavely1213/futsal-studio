@@ -405,7 +405,7 @@ function renderStyleSrc() {
 function syncStyle() { const n = document.querySelectorAll(".schk:checked").length; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
 async function loadStyles() {
   const j = await (await fetch("/api/style/list")).json(), list = j.styles || [];
-  $("styleEmpty").style.display = list.length ? "none" : "block";
+  $("styleEmpty").style.display = list.length ? "none" : "block"; state.styles = list.map(s => s.name);
   const pos = { bottom: "아래", middle: "가운데", top: "위" };
   $("styleList").innerHTML = list.map(st => { const p = st.profile, q = st.params; return `<div class="card st">
       <h3>🎬 ${esc(st.name)}<span class="sp" style="flex:1"></span><button class="linkbtn" data-sdel="${esc(st.name)}">삭제</button></h3>
@@ -417,7 +417,9 @@ async function loadStyles() {
 }
 $("btnLearn").onclick = () => {
   const names = [...document.querySelectorAll(".schk:checked")].map(c => c.value), nm = $("styleName").value.trim() || `${niceName(names[0]).slice(0, 12)} 스타일`;
-  job("/api/style/learn", { name: nm, names }, () => { toast(`'${nm}'을 배웠어요 · 편집실 자동 가편집에서 고를 수 있어요`); loadStyles(); });
+  const clean = nm.replace(/[\\/:*?"<>|]/g, "").trim().replace(/^[ .]+|[ .]+$/g, "") || "내 스타일";
+  if ((state.styles || []).some(s => s.toLowerCase() === clean.toLowerCase()) && !confirm(`'${clean}' 스타일이 이미 있어요. 새로 배운 내용으로 바꿀까요?`)) return;
+  job("/api/style/learn", { name: nm, names }, () => { toast(`'${clean}'을 배웠어요 · 편집실 '스타일로 자동 편집'에서 고를 수 있어요`); $("styleName").value = ""; loadStyles(); });
 };
 
 /* 3. 편집점 */

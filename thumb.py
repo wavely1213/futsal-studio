@@ -33,9 +33,11 @@ def _frames_dir(name):
 def grab(name, t, w=1920):
     """영상의 t초 장면을 이미지로 (원본 화질, 가로 최대 1920 — 쇼츠 9:16 확대에도 덜 뭉개지게)."""
     out = _frames_dir(name) / f"h_{t:09.3f}.jpg"
+    src, vf = str(core.VIDEOS / name), f"scale='min({w},iw)':-2"
     if not out.exists():
-        core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(core.VIDEOS / name), "-frames:v", "1",
-                  "-vf", f"scale='min({w},iw)':-2", "-q:v", "1", str(out)])
+        core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-frames:v", "1", "-vf", vf, "-q:v", "1", str(out)])
+    if not out.exists():  # 영상 끝(또는 소리가 영상보다 긴 꼬리)이면 마지막 장면으로
+        core.run([core.ffmpeg(), "-y", "-v", "error", "-sseof", "-3", "-i", src, "-vf", vf, "-update", "1", "-q:v", "1", str(out)])
     return out
 
 
@@ -63,22 +65,37 @@ def _sharpness(path):
 
 
 def frame_candidates(name, n=8):
-    """선명한 장면 n개 (하이라이트 근처 우선, 고르게 분포)."""
+    """선명한 장면 n개 (하이라이트 근처 우선, 고르게 분포). 영상이나 편집점 분석이 바뀌면 다시 고름."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from editor import media_info  # 순환 import 피함
     cache = _frames_dir(name) / "candidates2.json"
+    extra = core.adir(name) / "analysis.json"
+    vs = (core.VIDEOS / name).stat()
+    sig = [vs.st_size, int(vs.st_mtime), int(extra.stat().st_mtime) if extra.exists() else 0]
     if cache.exists():
-        return json.loads(cache.read_text(encoding="utf-8"))
+        try:
+            c = json.loads(cache.read_text(encoding="utf-8"))
+            if isinstance(c, dict) and c.get("sig") == sig:
+                return c["items"]
+        except Exception:
+            pass
     dur = media_info(name)["duration"]
     ts = [dur * (0.03 + 0.94 * k / 23) for k in range(24)]
-    extra = core.adir(name) / "analysis.json"
     if extra.exists():
         ts += [p["time"] for p in json.loads(extra.read_text(encoding="utf-8")).get("loud_peaks", [])]
+    uniq = sorted(set(round(x, 1) for x in ts if 0 < x < dur))
     scored = []
-    for i, t in enumerate(sorted(set(round(x, 1) for x in ts if 0 < x < dur))):
-        core.set_progress(label="장면 고르는 중", item=name, pct=int(i * 100 / len(ts)), detail=f"{i + 1}/{len(ts)}")
-        p = grab(name, t)
-        if p.exists():
-            scored.append((_sharpness(p), t))
+    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2)) as ex:  # 장면 뽑기를 동시에
+        futs = {ex.submit(grab, name, t): t for t in uniq}
+        for i, fu in enumerate(as_completed(futs)):
+            t = futs[fu]
+            core.set_progress(label="장면 고르는 중", item=name, pct=int((i + 1) * 100 / len(uniq)), detail=f"{i + 1}/{len(uniq)}")
+            try:
+                p = fu.result()
+                if p.exists():
+                    scored.append((_sharpness(p), t))
+            except Exception:
+                pass
     scored.sort(reverse=True)
     picked = []
     for sc, t in scored:
@@ -87,7 +104,7 @@ def frame_candidates(name, n=8):
         if len(picked) >= n:
             break
     res = [{"t": t, "url": f"/frame?name={name}&t={t}"} for t in sorted(picked)]
-    cache.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+    cache.write_text(json.dumps({"sig": sig, "items": res}, ensure_ascii=False), encoding="utf-8")
     return res
 
 

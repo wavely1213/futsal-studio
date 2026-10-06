@@ -52,16 +52,44 @@ def list_videos(kind="videos", cookies_browser=None, url=None):
     opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
+    from urllib.parse import parse_qs, urlsplit
+    opts["noplaylist"] = True  # 영상 주소에 붙은 재생목록(list=)은 펼치지 않음
     url = (url or "").strip()
-    if url and not url.startswith("http"):
-        url = "https://www.youtube.com/" + (url if url.startswith("@") else "@" + url)
-    single = bool(re.search(r"(watch\?v=|youtu\.be/|/shorts/[A-Za-z0-9_-]{11})", url))
-    base = re.sub(r"/(videos|shorts|streams|featured|playlists)/?$", "", url.rstrip("/")) if url else CONFIG["channel_url"]
+    if not url:
+        target = f"{CONFIG['channel_url'].rstrip('/')}/{kind}"
+    else:
+        if not re.match(r"https?://", url, re.I):
+            if re.match(r"(?:(?:www|m|music)\.)?(?:youtube\.com|youtu\.be)/", url, re.I):
+                url = "https://" + url
+            else:
+                url = "https://www.youtube.com/" + (url if url.startswith("@") else "@" + url)
+        p = urlsplit(url)
+        host, q = p.netloc.lower(), parse_qs(p.query)
+        if host.endswith("youtu.be"):
+            vid = p.path.strip("/").split("/")[0] or None
+        elif p.path.rstrip("/") == "/watch":
+            vid = (q.get("v") or [None])[0]
+        else:
+            m = re.match(r"/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})", p.path)
+            vid = m.group(1) if m else None
+        if vid:
+            target = f"https://www.youtube.com/watch?v={vid}"  # list=/si=/t= 제거
+        elif p.path.rstrip("/") == "/playlist":
+            target = url
+        else:
+            path = re.sub(r"/(videos|shorts|streams|featured|playlists|about|community)$", "", p.path.rstrip("/"))
+            target = f"https://www.youtube.com{path}/{kind}"  # ?si= 같은 공유 꼬리 제거
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url if single else f"{base}/{kind}", download=False)
+        info = ydl.extract_info(target, download=False)
     ents = info.get("entries") if info.get("entries") is not None else [info]
+    flat = []
+    for e in ents:  # 탭이 여러 개로 묶여 오면 안쪽 영상까지 펼침
+        if e and e.get("_type") == "playlist" and e.get("entries"):
+            flat += [x for x in e["entries"] if x]
+        elif e:
+            flat.append(e)
     rows = [{"id": e["id"], "title": e.get("title") or "", "views": e.get("view_count") or 0,
-             "duration": e.get("duration") or 0, "kind": kind} for e in ents if e.get("id")]
+             "duration": e.get("duration") or 0, "kind": kind} for e in flat if e.get("id") and e.get("_type") != "playlist"]
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
