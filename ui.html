@@ -194,7 +194,7 @@
     <button class="step on" data-p="find"><span class="n">1</span><span><b>소재 찾기</b><span class="d">채널 인기 영상</span></span></button>
     <button class="step" data-p="library"><span class="n">2</span><span><b>보관함</b><span class="d">받은 영상 · 촬영 원본</span></span><span class="count" id="libCount"></span></button>
     <button class="step" data-p="points"><span class="n">3</span><span><b>편집점</b><span class="d">대사 · 컷 · 하이라이트</span></span></button>
-    <button class="step" data-p="cut"><span class="n">4</span><span><b>러프컷</b><span class="d">쇼츠 · 롱폼 만들기</span></span></button>
+    <button class="step" data-p="cut"><span class="n">4</span><span><b>편집실</b><span class="d">가편집 자동 세팅</span></span></button>
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
@@ -248,29 +248,10 @@
 
     <!-- 4. 러프컷 -->
     <section class="panel" id="p-cut">
-      <div class="phead"><div><h1>러프컷</h1><p>Claude가 정리해 준 컷 목록을 붙여넣으면 이어 붙인 영상과 편집 프로그램용 파일을 만들어요.</p></div></div>
-      <div class="bar">
-        <select class="sel" id="rcSel"></select>
-        <div class="seg" id="fmtSeg"><button class="on" data-v="shorts">쇼츠 · 세로 9:16</button><button data-v="long">롱폼 · 가로 16:9</button></div>
-        <div class="sp"></div>
-        <button class="btn" id="btnOpenOut">완성본 폴더</button>
-        <button class="btn primary" id="btnRender" disabled>러프컷 만들기</button>
-      </div>
-      <div class="two">
-        <div class="card field">
-          <h3>컷 목록 붙여넣기</h3>
-          <p>Claude가 준 내용을 그대로 붙여넣으면 돼요.</p>
-          <textarea class="code" id="cuts" spellcheck="false" placeholder='{"cuts": [
-  {"start": 12.0, "end": 18.5, "note": "허세 발언"},
-  {"start": 95.2, "end": 101.0, "note": "골 장면"}
-]}'></textarea>
-        </div>
-        <div class="card field">
-          <h3>미리보기</h3>
-          <p>만들기 전에 순서와 길이를 확인하세요.</p>
-          <div class="cutlist" id="cutPreview"><span class="sub" style="color:var(--ink-3)">컷 목록을 붙여넣으면 여기에 정리돼요.</span></div>
-        </div>
-      </div>
+      <div class="phead"><div><h1>편집실</h1><p>열면 1차 가편집이 이미 세팅돼 있어요. 롱폼 가편집 1개와 쇼츠 편집본(추천 구간)이 자동으로 만들어져요.</p></div></div>
+      <div class="bar"><div class="sp"></div><button class="btn" id="btnOpenOut">완성본 폴더</button></div>
+      <div class="grid" id="edList"></div>
+      <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
     </section>
   </div>
 </div>
@@ -315,7 +296,6 @@ document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
   seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
   if (seg.id === "kindSeg" && remote.length) loadRemote();
-  if (seg.id === "fmtSeg") preview();
 }));
 
 /* 1. 소재 찾기 */
@@ -367,7 +347,7 @@ function renderLocal() {
   document.querySelectorAll(".lchk").forEach(c => c.onchange = sync);
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
-  fillSelect("rcSel", state.local);
+  renderEdList();
   if (remote.length) renderRemote();
   sync();
 }
@@ -379,7 +359,7 @@ function fillSelect(id, list) {
 $("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요"); };
 $("btnAnalyze").onclick = () => {
   const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
-  job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾았어요"); $("tlSel").value = names[names.length - 1]; go("points"); });
+  job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); });
 };
 
 /* 3. 편집점 */
@@ -413,38 +393,20 @@ $("btnCopy").onclick = async () => {
 };
 
 /* 4. 러프컷 */
-function parseCuts() {
-  const raw = $("cuts").value.trim();
-  if (!raw) return { cuts: null };
-  try {
-    const j = JSON.parse(raw);
-    const cuts = Array.isArray(j) ? j : j.cuts;
-    if (!Array.isArray(cuts) || !cuts.length) return { error: "컷이 하나도 없어요" };
-    for (const c of cuts) if (!(c.end > c.start)) return { error: "끝 시간이 시작 시간보다 앞선 컷이 있어요" };
-    return { cuts, format: j.format };
-  } catch (e) { return { error: "형식이 맞지 않아요. Claude가 준 내용을 빠짐없이 붙여넣었는지 확인해 주세요." }; }
+function renderEdList() {
+  const list = state.local.filter(v => v.analyzed);
+  $("edEmpty").style.display = list.length ? "none" : "block";
+  const key = JSON.stringify(list.map(v => v.name));
+  if ($("edList").dataset.key === key) return;
+  $("edList").dataset.key = key;
+  $("edList").innerHTML = list.map(v => { const id = ytId(v.name); return `
+    <div class="vid" data-ed="${esc(v.name)}">
+      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">편집실 열기 →</div></div>
+    </div>`; }).join("");
+  document.querySelectorAll("[data-ed]").forEach(el => el.onclick = () => openEditor(el.dataset.ed));
 }
-function preview() {
-  const p = parseCuts();
-  if (p.format && !preview._set) { document.querySelectorAll("#fmtSeg button").forEach(b => b.classList.toggle("on", b.dataset.v === p.format)); }
-  preview._set = !!p.format;
-  if (p.error) $("cutPreview").innerHTML = `<span class="err">${p.error}</span>`;
-  else if (!p.cuts) $("cutPreview").innerHTML = `<span style="color:var(--ink-3)">컷 목록을 붙여넣으면 여기에 정리돼요.</span>`;
-  else {
-    const total = p.cuts.reduce((a, c) => a + (c.end - c.start), 0);
-    $("cutPreview").innerHTML = p.cuts.map((c, i) => `<div class="c"><b>${i + 1}</b><span>${mmss(c.start)} → ${mmss(c.end)}</span><span>${(c.end - c.start).toFixed(1)}초</span><span>${esc(c.note || "")}</span></div>`).join("")
-      + `<div class="sum">총 ${p.cuts.length}컷 · ${total.toFixed(1)}초 · ${segVal("fmtSeg") === "shorts" ? "세로 쇼츠" : "가로 롱폼"}${segVal("fmtSeg") === "shorts" && total > 60 ? ' <span class="err">· 쇼츠는 60초 이하를 권장해요</span>' : ""}</div>`;
-  }
-  sync();
-}
-$("cuts").oninput = () => { preview._set = false; preview(); };
 $("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
-$("btnRender").onclick = () => {
-  const p = parseCuts();
-  job("/api/render", { name: $("rcSel").value, spec: { format: segVal("fmtSeg"), cuts: p.cuts } }, out => {
-    if (out) { toast("러프컷을 만들었어요"); api("/api/open", { which: "out" }); }
-  });
-};
 
 /* 공통: 작업 실행 · 상태 */
 function sync() {
@@ -455,8 +417,6 @@ function sync() {
   const nl = document.querySelectorAll(".lchk:checked").length;
   $("btnAnalyze").disabled = busy || !nl;
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
-  const p = parseCuts();
-  $("btnRender").disabled = busy || !p.cuts || !!p.error || !$("rcSel").value;
 }
 function job(path, body, done) {
   api(path, body).then(j => { if (j.ok) { state.job = "…"; pending = done || null; sync(); showBusy(); } });
@@ -538,7 +498,7 @@ $("btnUpdate").onclick = () => $("updPill").classList.contains("show") ? runUpda
 $("updPill").onclick = runUpdate;
 
 setInterval(poll, 1000);
-poll().then(() => { renderEvents(); preview(); });
+poll().then(() => { renderEvents(); renderEdList(); });
 checkUpdate();
 </script>
 </body>

@@ -202,8 +202,11 @@ class Handler(BaseHTTPRequestHandler):
             p = (editor.FONTS / Path(u.path).name).resolve()
             return self._file(p, "font/otf") if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/thumbs.jpg":
-            p = core.adir(q["name"][0]) / "thumbs.jpg"
+            p = core.adir(q["name"][0]) / "thumbs2.jpg"
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/edit/autoseq":
+            n = q["name"][0]
+            return self._send(200, {"sequences": editor.auto_sequences(n, editor.media_info(n))})
         if u.path == "/api/edit/open":
             n = q["name"][0]
             try:
@@ -242,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         jobs = {
             "/api/list": ("채널 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck)),
             "/api/download": ("보관함에 담기", lambda: core.download(b["ids"], log, ck)),
-            "/api/analyze": ("편집점 찾기", lambda: core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))),
+            "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
@@ -268,6 +271,22 @@ class Handler(BaseHTTPRequestHandler):
             ok = start_job(name, fn)
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         self._send(404, {"error": "not found"})
+
+    @staticmethod
+    def _analyze(b):
+        out = core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))
+        # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
+        for n in b["names"]:
+            core.set_progress(label="가편집 만드는 중", item=n, pct=99, detail="컷 정리·쇼츠 구간 고르는 중")
+            p = editor._ppath(n)
+            if p.exists():
+                p.unlink()  # 새로 받아쓴 내용으로 다시 만듦
+            proj = editor.load_project(n)
+            editor.thumbs(n)
+            editor.waveform(n)
+            names = ", ".join(q["name"] for q in proj["sequences"])
+            log(f"  가편집 완료 · {names}")
+        return out
 
     @staticmethod
     def _update(b):

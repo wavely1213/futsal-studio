@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
-  "notes": "편집실 추가 (프리미어식 타임라인·자막 편집·음량·효과·자동 추천)",
+  "version": "1.4.0",
+  "notes": "자동 가편집, 쇼츠 화면 구성(박스·블러·원본 자르기), 도형, 대사 단위 컷 편집",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }

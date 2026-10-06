@@ -68,17 +68,17 @@ def waveform(name, per_sec=50):
 def thumbs(name):
     """타임라인용 썸네일 띠 (가로로 이어붙인 한 장)."""
     d = core.adir(name)
-    meta = d / "thumbs.json"
-    if meta.exists() and (d / "thumbs.jpg").exists():
+    meta = d / "thumbs2.json"  # 2: 가로 16000px 이하로 제한한 버전
+    if meta.exists() and (d / "thumbs2.jpg").exists():
         return json.loads(meta.read_text(encoding="utf-8"))
     info = media_info(name)
-    count = max(1, min(240, int(info["duration"] // 2) or 1))
+    count = max(1, min(110, int(info["duration"] // 2) or 1))
     interval = max(0.5, info["duration"] / count)
     h = 72
     w = int(round(h * info["width"] / info["height"] / 2) * 2) or 128
     d.mkdir(parents=True, exist_ok=True)
     core.run([core.ffmpeg(), "-y", "-v", "error", "-i", str(core.VIDEOS / name), "-vf",
-              f"fps=1/{interval:.3f},scale={w}:{h},tile={count}x1", "-frames:v", "1", "-q:v", "5", str(d / "thumbs.jpg")])
+              f"fps=1/{interval:.3f},scale={w}:{h},tile={count}x1", "-frames:v", "1", "-q:v", "5", str(d / "thumbs2.jpg")])
     data = {"interval": interval, "w": w, "h": h, "count": count}
     meta.write_text(json.dumps(data), encoding="utf-8")
     return data
@@ -90,27 +90,83 @@ def _ppath(name):
     return PROJECTS / f"{core.adir(name).name}.json"
 
 
+LONG_STYLE = dict(DEFAULT_STYLE, size=52, y=0.9, effect="fade")
+SHORTS_STYLE = dict(DEFAULT_STYLE, weight="Black", size=72, fill="#FFFFFF", stroke="#000000", strokeW=8, y=0.8, effect="pop")
+TITLE_STYLE = dict(DEFAULT_STYLE, weight="Black", size=100, fill="#FFE14D", stroke="#111111", strokeW=9, y=0.22, effect="pop")
+BOX_LAYOUT = {"mode": "box", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0}
+
+
+def _clip(a, b):
+    return {"id": _nid(), "in": round(a, 3), "out": round(b, 3), "volume": 1.0, "fadeIn": 0.0, "fadeOut": 0.0,
+            "mute": False, "reframe": 0.5}
+
+
+GENERIC = {"팁", "꿀팁", "중요", "핵심", "강조", "비결", "방법", "포인트", "무조건", "절대", "실수", "차이", "첫 번째", "첫번째",
+           "잘하", "어떻게", "비밀", "원리", "기술", "프로", "힘들"}
+
+
+def _hook(rec_item):
+    """쇼츠 제목: '주제어 꿀팁' / '주제어!' / 첫 문장."""
+    kws = rec_item["keywords"]
+    topic = next((k for k in kws if k not in GENERIC), None)
+    tip = any(k in kws for k in ("꿀팁", "팁", "비결", "방법", "포인트"))
+    first = re.sub(r"^\(테스트\)\s*", "", rec_item["title"]).strip()
+    if topic and tip:
+        return f"{topic} 꿀팁"
+    if topic:
+        return f"{topic}!"
+    return first[:16]
+
+
+def auto_sequences(name, info):
+    """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본."""
+    rec = recommend(name)
+    seqs = []
+    tidy = rec["tidy"] or [{"in": 0.0, "out": info["duration"]}]
+    seqs.append({"id": _nid(), "name": "롱폼 가편집", "format": "long",
+                 "clips": [_clip(c["in"], c["out"]) for c in tidy],
+                 "captionsOn": True, "captionStyle": dict(LONG_STYLE), "titles": [], "shapes": [],
+                 "layout": {"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5},
+                 "master": {"volume": 1.0, "normalize": True}})
+    for i, r in enumerate(rec["shorts"], 1):
+        clips = [_clip(c["in"], c["out"]) for c in r["cuts"]]
+        clips[0]["fadeIn"] = 0.0
+        clips[-1]["fadeOut"] = 0.3
+        length = sum(c["out"] - c["in"] for c in clips)
+        seqs.append({"id": _nid(), "name": f"쇼츠 {i} · {r['title'][:14]}", "format": "shorts", "clips": clips,
+                     "captionsOn": True, "captionStyle": dict(SHORTS_STYLE), "layout": dict(BOX_LAYOUT), "shapes": [],
+                     "titles": [{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2),
+                                 "style": dict(TITLE_STYLE)}],
+                     "master": {"volume": 1.0, "normalize": True}})
+    return seqs
+
+
 def load_project(name):
     p = _ppath(name)
     if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
+        proj = json.loads(p.read_text(encoding="utf-8"))
+        if "sequences" not in proj:  # v1.3.0 저장본 → 시퀀스 구조로 변환
+            seq = {"id": _nid(), "name": "시퀀스 1"}
+            for k in ("format", "clips", "captionsOn", "captionStyle", "titles", "master"):
+                seq[k] = proj.pop(k)
+            proj["sequences"] = [seq] + auto_sequences(name, proj["info"])
+            proj["active"] = seq["id"]
+        return proj
     info = media_info(name)
     segs = []
     t = core.adir(name) / "transcript.json"
     if t.exists():
         segs = json.loads(t.read_text(encoding="utf-8"))
-    return {
+    seqs = auto_sequences(name, info)
+    proj = {
         "source": name,
         "info": info,
-        "format": "shorts",
-        "clips": [{"id": _nid(), "in": 0.0, "out": info["duration"], "volume": 1.0, "fadeIn": 0.0, "fadeOut": 0.0,
-                   "mute": False, "reframe": 0.5}],
         "captions": [{"id": _nid(), "start": s["start"], "end": s["end"], "text": s["text"]} for s in segs if s["text"]],
-        "captionsOn": True,
-        "captionStyle": dict(DEFAULT_STYLE),
-        "titles": [],
-        "master": {"volume": 1.0, "normalize": True},
+        "sequences": seqs,
+        "active": seqs[0]["id"],
     }
+    save_project(name, proj)
+    return proj
 
 
 def save_project(name, proj):
@@ -195,6 +251,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3):
             if cur:
                 cuts.append(cur)
             hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
+            hits.sort(key=lambda k: (k in GENERIC, -KEYWORDS[k], -len(k)))  # 주제어 먼저
             title = segs[i]["text"][:28]
             picked.append({"start": s0, "end": e0, "score": round(score, 1), "title": title, "keywords": hits[:4],
                            "cuts": cuts, "length": round(sum(c["out"] - c["in"] for c in cuts), 1)})
@@ -298,14 +355,31 @@ def build_ass(proj, W, H):
              style_line("Cap", st)]
     for t in proj["titles"]:
         lines.append(style_line(f"T{t['id']}", t["style"]))
+    lines.append("Style: Shape,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1")
     lines += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    # 도형 (자막·타이틀 아래 층)
+    tl_total = sum(c["out"] - c["in"] for c in proj["clips"])
+    for sh in proj.get("shapes", []):
+        x, y = int(sh["x"] * W), int(sh["y"] * H)
+        w, h = max(2, int(sh["w"] * W)), max(2, int(sh["h"] * H))
+        r = int(min(sh.get("radius", 0) / 100 * min(w, h) / 2, min(w, h) / 2))
+        if r > 0:
+            path = (f"m {r} 0 l {w - r} 0 b {w} 0 {w} 0 {w} {r} l {w} {h - r} b {w} {h} {w} {h} {w - r} {h} "
+                    f"l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0")
+        else:
+            path = f"m 0 0 l {w} 0 l {w} {h} l 0 {h}"
+        start = 0.0 if sh.get("full") else sh["start"]
+        end = tl_total if sh.get("full") else sh["start"] + sh["dur"]
+        col, a = _ass_color(sh["color"]), int((1 - sh.get("opacity", 1.0)) * 255)
+        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
+                     rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
     def event(style, s, start, end, text):
         x, y = W // 2, int(H * s["y"])
         tags = rf"{{\an2\pos({x},{y})}}" if s["effect"] != "slide" else r"{\an2}"
         body = _karaoke(text, end - start) if s["effect"] == "karaoke" else text.replace("\n", r"\N")
         eff = _effect_tags(s["effect"], x, y, end - start)
-        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
+        lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     if proj.get("captionsOn", True):
         for c in timeline_captions(proj):
@@ -354,7 +428,8 @@ def export(name, proj, opts, log):
     W, H = (1080, 1920) if fmt == "shorts" else (1920, 1080)
     fps = proj["info"].get("fps", 30.0)
     src = core.VIDEOS / name
-    stem = f"{core.adir(name).name}_{'쇼츠' if fmt == 'shorts' else '롱폼'}"
+    label = re.sub(r'[\\/:*?"<>|]', "", proj.get("name") or ("쇼츠" if fmt == "shorts" else "롱폼")).strip(" .")
+    stem = f"{core.adir(name).name}_{label}"
     outputs = []
     caps = timeline_captions(proj) if proj.get("captionsOn", True) else []
 
@@ -372,8 +447,23 @@ def export(name, proj, opts, log):
             for k, c in enumerate(proj["clips"]):
                 core.set_progress(label="내보내는 중", item=name, step=f"{k + 1}/{n}", pct=int(k * 80 / n), detail=f"컷 {k + 1} 자르는 중")
                 ln = c["out"] - c["in"]
-                if fmt == "shorts":
-                    vf = f"scale=-2:{H},crop={W}:{H}:(iw-{W})*{c.get('reframe', 0.5):.3f}:0,setsar=1"
+                lay = {"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0,
+                       **(proj.get("layout") or {})}
+                ct, cb = float(lay.get("cropTop") or 0), float(lay.get("cropBottom") or 0)
+                # 원본 위·아래 잘라내기 (예전에 박힌 자막 등을 가림)
+                pre = f"crop=iw:ih*{1 - ct - cb:.4f}:0:ih*{ct:.4f}," if fmt == "shorts" and (ct or cb) else ""
+                if fmt == "shorts" and lay["mode"] == "fill":
+                    vf = f"{pre}scale=-2:{H},crop={W}:{H}:(iw-{W})*{c.get('reframe', 0.5):.3f}:0,setsar=1"
+                elif fmt == "shorts":
+                    zw = int(W * max(1.0, lay["zoom"]) / 2) * 2
+                    fg = f"scale={zw}:-2,crop={W}:min(ih\\,{H}):(iw-{W})*{c.get('reframe', 0.5):.3f}:0,setsar=1"
+                    ypos = f"(H-h)*{lay['vpos']:.3f}"
+                    if lay["mode"] == "blur":
+                        vf = (f"split[a][b];[a]scale=-2:{H},crop={W}:{H},boxblur=24:3,eq=brightness=-0.08[bg];"
+                              f"[b]{pre}{fg}[fg];[bg][fg]overlay=0:{ypos},setsar=1")
+                    else:
+                        bar = lay["bar"].lstrip("#")
+                        vf = f"{pre}{fg},pad={W}:{H}:0:(oh-ih)*{lay['vpos']:.3f}:color=0x{bar},setsar=1"
                 else:
                     vf = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
                 vol = 0.0 if c.get("mute") else c.get("volume", 1.0) * proj["master"].get("volume", 1.0)
