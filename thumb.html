@@ -174,6 +174,7 @@
   .uguide { position: absolute; background: #00d1ff; pointer-events: auto; z-index: 3; }
   .uguide.v { width: 1px; cursor: ew-resize; box-shadow: 0 0 0 2px transparent; } .uguide.h { height: 1px; cursor: ns-resize; }
   .uguide.v::after { content: ""; position: absolute; left: -3px; right: -3px; top: 0; bottom: 0; } .uguide.h::after { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; }
+  .layers .ly .lth { width: 44px; height: 26px; border-radius: 3px; flex: none; background: #2a2a2a; }
 </style>
 </head>
 <body>
@@ -263,6 +264,7 @@
     <kbd>Ctrl + / −</kbd><span>확대 / 축소 (Alt+휠)</span><kbd>Ctrl+0 / Ctrl+1</kbd><span>화면 맞춤 / 100%</span>
     <kbd>Ctrl+Z</kbd><span>되돌리기 (Shift: 다시)</span><kbd>Ctrl+S</kbd><span>저장</span>
     <kbd>Ctrl+Shift+S</kbd><span>이미지로 내보내기</span><kbd>더블클릭 / Enter</kbd><span>글자 바로 고치기 (Esc 확정)</span>
+    <kbd>Ctrl+G</kbd><span>그룹으로 묶기 (Shift: 풀기)</span><kbd>Ctrl+클릭(레이어 패널)</kbd><span>묶음 안 레이어 하나만</span>
     <kbd>Ctrl+R</kbd><span>눈금자 (끌어서 안내선 만들기)</span><kbd>Ctrl+;</kbd><span>안내선 보이기/숨기기</span>
     <kbd>레이어 두 번 클릭</kbd><span>레이어 스타일 창</span><kbd>숫자칸 이름 끌기</kbd><span>값 미세 조절</span>
   </div>
@@ -1113,9 +1115,10 @@ stage.addEventListener("mousedown", e => {
   const one = selL();
   if (xform && one && !inside(one, p)) return startTransform(e, "rot");
   const l = hitAt(p);
-  if (e.shiftKey) { if (l) select(selIds.includes(l.id) ? selIds.filter(x => x !== l.id) : [...selIds, l.id]); return; }
+  const grp = l && l.gid ? D.doc.layers.filter(x => x.gid === l.gid && !x.locked).map(x => x.id) : l ? [l.id] : [];
+  if (e.shiftKey) { if (l) select(selIds.includes(l.id) ? selIds.filter(x => !grp.includes(x)) : [...new Set([...selIds, ...grp])]); return; }
   if (!l) { if (!xform) select([]); return; }
-  if (!selIds.includes(l.id)) select([l.id]);
+  if (!selIds.includes(l.id)) select(grp);
   startMove(e, p);
 });
 stage.addEventListener("dblclick", e => {
@@ -1136,7 +1139,7 @@ function startMove(e, p) {
   let ls = selLs().filter(l => !l.locked); if (!ls.length) return;
   const before = snapshot();
   if (e.altKey) {
-    ls = ls.map(l => { const c = clone(l); c.id = nid(); D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, c); return c; });
+    ls = remapGids(ls.map(l => { const c = clone(l); c.id = nid(); D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, c); return c; }));
     selIds = ls.map(l => l.id); renderLayers();
   }
   const o = ls.map(l => ({ l, x: l.x, y: l.y })), bb = bbox(ls), cand = snapCands(ls); let moved = false;
@@ -1353,7 +1356,7 @@ function openMenu(x, y, html) {
     if (d) select([d.dataset.pick]); if (a && MACT[a.dataset.mact]) MACT[a.dataset.mact](); closeMenu();
   });
 }
-const MENU_ACTS = () => (selIds.length ? `<hr><div data-mact="copy">복사 <span class="hint">Ctrl+C</span></div><div data-mact="dup">복제 <span class="hint">Ctrl+J</span></div><div data-mact="xform">자유 변형 <span class="hint">Ctrl+T</span></div><div data-mact="ls">레이어 스타일…</div><div data-mact="front">맨 앞으로 <span class="hint">Ctrl+Shift+]</span></div><div data-mact="back">맨 뒤로 <span class="hint">Ctrl+Shift+[</span></div><div data-mact="hide">숨기기 <span class="hint">Ctrl+,</span></div><div data-mact="del">삭제 <span class="hint">Delete</span></div>` : "")
+const MENU_ACTS = () => (selIds.length ? `<hr>${selIds.length > 1 ? `<div data-mact="group">그룹으로 묶기 <span class="hint">Ctrl+G</span></div>` : ""}${selLs().some(l => l.gid) ? `<div data-mact="ungroup">묶음 풀기 <span class="hint">Ctrl+Shift+G</span></div>` : ""}<div data-mact="copy">복사 <span class="hint">Ctrl+C</span></div><div data-mact="dup">복제 <span class="hint">Ctrl+J</span></div><div data-mact="xform">자유 변형 <span class="hint">Ctrl+T</span></div><div data-mact="ls">레이어 스타일…</div><div data-mact="front">맨 앞으로 <span class="hint">Ctrl+Shift+]</span></div><div data-mact="back">맨 뒤로 <span class="hint">Ctrl+Shift+[</span></div><div data-mact="hide">숨기기 <span class="hint">Ctrl+,</span></div><div data-mact="del">삭제 <span class="hint">Delete</span></div>` : "")
   + (CLIP ? `<hr><div data-mact="paste">붙여넣기 <span class="hint">Ctrl+V</span></div>` : "") + `<hr><div data-mact="all">모두 선택 <span class="hint">Ctrl+A</span></div>`;
 stage.addEventListener("contextmenu", e => {
   e.preventDefault(); if (!D) return; const p = toCanvas(e);
@@ -1366,12 +1369,29 @@ document.addEventListener("contextmenu", e => { if (!e.target.closest("textarea,
 /* ---------- 레이어 패널 (끌어서 순서 변경) ---------- */
 function renderLayers() {
   if (!D) return; const ic = { image: "🖼", text: "T", shape: "▭" };
-  $("layers").innerHTML = [...D.doc.layers].reverse().map(l => `<div class="ly ${selIds.includes(l.id) ? "sel" : ""}" data-l="${l.id}" title="끌어서 순서 변경 · 두 번 누르면 레이어 스타일">
-    <span class="grip">⋮⋮</span><button class="ic" data-eye="${l.id}" title="보이기/숨기기">${l.hidden ? "◌" : "👁"}</button><span class="ty">${ic[l.type]}</span>
+  $("layers").innerHTML = [...D.doc.layers].reverse().map(l => `<div class="ly ${selIds.includes(l.id) ? "sel" : ""}" data-l="${l.id}" title="끌어서 순서 변경 · 두 번 누르면 레이어 스타일"${l.gid ? ` style="box-shadow:inset 3px 0 0 ${gidColor(l.gid)}"` : ""}>
+    <span class="grip">⋮⋮</span><button class="ic" data-eye="${l.id}" title="보이기/숨기기">${l.hidden ? "◌" : "👁"}</button><canvas class="lth" width="44" height="26" data-th="${l.id}"></canvas><span class="ty">${l.gid ? "📁" : ic[l.type]}</span>
     <span class="nm" title="이름을 두 번 누르면 이름 바꾸기">${esc(lname(l))}</span>${hasFx(l) ? `<span class="hint" title="효과 있음">fx</span>` : ""}<button class="ic" data-lock="${l.id}" title="잠금">${l.locked ? "🔒" : "🔓"}</button></div>`).join("")
     + `<div class="ly" style="cursor:default"><span class="grip"></span><span class="ic">■</span><span class="ty"></span><span class="nm">배경색</span><input type="color" data-k="bg"></div>`;
   const bg = $("layers").querySelector("[data-k=bg]"); if (bg) bg.value = toHex(D.doc.bg || "#000000");
+  clearTimeout(lthTimer); lthTimer = setTimeout(drawLayerThumbs, 120);
 }
+let lthTimer = 0;
+function drawLayerThumbs() {  // 레이어 패널의 작은 미리보기 (그 레이어만 그림)
+  document.querySelectorAll("canvas[data-th]").forEach(cn => {
+    const l = byId(cn.dataset.th); if (!l) return; const g = cn.getContext("2d"), k = Math.min(cn.width / W, cn.height / H), ox = (cn.width - W * k) / 2, oy = (cn.height - H * k) / 2;
+    g.clearRect(0, 0, cn.width, cn.height); g.fillStyle = "#3a3a3a"; g.fillRect(ox, oy, W * k, H * k);
+    g.save(); g.translate(ox, oy); g.scale(k, k); drawLayer(g, Object.assign({}, l, { hidden: false, _bm: null }), k); g.restore();
+  });
+}
+const gidColor = gid => `hsl(${[...gid].reduce((a, c) => a + c.charCodeAt(0) * 37, 0) % 360},70%,55%)`;
+function groupSel(on) {
+  const ls = selLs();
+  if (on) { if (ls.length < 2) return toast("묶을 레이어를 2개 이상 고르세요 (Shift/Ctrl+클릭)"); commit("그룹으로 묶기"); const g = nid(); ls.forEach(l => (l.gid = g)); toast(`레이어 ${ls.length}개를 묶었어요 · 캔버스에서 누르면 함께 선택돼요 (풀기: Ctrl+Shift+G)`); }
+  else { if (!ls.some(l => l.gid)) return; commit("그룹 풀기"); ls.forEach(l => delete l.gid); toast("묶음을 풀었어요"); }
+  changed();
+}
+function remapGids(ls) { const m = {}; ls.forEach(l => { if (l.gid) l.gid = m[l.gid] || (m[l.gid] = nid()); }); return ls; }
 function clickLayer(id, e) {
   if (e.ctrlKey || e.metaKey) select(selIds.includes(id) ? selIds.filter(x => x !== id) : [...selIds, id]);
   else if (e.shiftKey && anchorId && byId(anchorId)) { const ord = [...D.doc.layers].reverse().map(l => l.id), a = ord.indexOf(anchorId), b = ord.indexOf(id); select(ord.slice(Math.min(a, b), Math.max(a, b) + 1)); return; }
@@ -1429,7 +1449,7 @@ function moveLayers(d) {
 function toEdge(front) { if (!selIds.length) return; commit("레이어 순서"); const mv = selLs(), rest = D.doc.layers.filter(l => !selIds.includes(l.id)); D.doc.layers = front ? [...rest, ...mv] : [...mv, ...rest]; changed(); }
 function dupLayers() {
   const ls = selLs(); if (!ls.length) return; commit("복제");
-  const ids = ls.map(l => { const c = clone(l); c.id = nid(); c.x += 24; c.y += 24; D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, c); return c.id; });
+  const cs = remapGids(ls.map(l => { const c = clone(l); c.id = nid(); c.x += 24; c.y += 24; D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, c); return c; })), ids = cs.map(c => c.id);
   selIds = ids; changed(); toast(`레이어 ${ids.length}개를 복제했어요`);
 }
 function delLayers() { if (!selIds.length) return; commit("삭제"); D.doc.layers = D.doc.layers.filter(l => !selIds.includes(l.id)); selIds = []; changed(); }
@@ -1443,7 +1463,7 @@ $("lDup").onclick = dupLayers; $("lDel").onclick = delLayers;
 function copySel(cut) { const ls = selLs(); if (!ls.length) return; CLIP = ls.map(clone); if (cut) delLayers(); toast(`레이어 ${ls.length}개를 ${cut ? "잘라냈어요" : "복사했어요"} · Ctrl+V로 붙여넣기`); }
 function pasteLayers(inPlace) {
   if (!CLIP) return; commit("붙여넣기");
-  const ids = CLIP.map(x => { const c = clone(x); c.id = nid(); if (!inPlace) { c.x += 20; c.y += 20; } normLayer(c); D.doc.layers.push(c); return c.id; });
+  const ids = remapGids(CLIP.map(x => { const c = clone(x); c.id = nid(); if (!inPlace) { c.x += 20; c.y += 20; } normLayer(c); D.doc.layers.push(c); return c; })).map(c => c.id);
   CLIP = CLIP.map(x => Object.assign(clone(x), inPlace ? {} : { x: x.x + 20, y: x.y + 20 }));
   selIds = ids; changed(); showTab("props");
 }
@@ -1521,7 +1541,7 @@ const ACT = {
   autoFmt: b => { AUTO_FMT = b.dataset.v; renderAuto(); },
   fadeDir: b => { const l = selL(); if (!l) return; commit("마스크 방향"); Object.assign(l.fade, { on: true, angle: +b.dataset.v }); changed(); },
 };
-const MACT = { copy: () => copySel(), dup: dupLayers, xform: startXform, ls: () => toggleLS(true), front: () => toEdge(true), back: () => toEdge(false),
+const MACT = { group: () => groupSel(true), ungroup: () => groupSel(false), copy: () => copySel(), dup: dupLayers, xform: startXform, ls: () => toggleLS(true), front: () => toEdge(true), back: () => toEdge(false),
   hide: () => { commit("숨기기"); selLs().forEach(l => (l.hidden = !l.hidden)); changed(); }, del: delLayers, paste: () => pasteLayers(), all: () => select(D.doc.layers.filter(l => !l.locked).map(l => l.id)) };
 function setFormat(f) {
   const s = FMT[f]; if (!s || (D.doc.w === s.w && D.doc.h === s.h)) return;
@@ -1557,7 +1577,7 @@ addEventListener("keydown", e => {
       KeyS: () => (e.shiftKey ? exportImg() : saveNow().then(() => toast("저장했어요"))),
       Equal: () => zoomStep(1), NumpadAdd: () => zoomStep(1), Minus: () => zoomStep(-1), NumpadSubtract: () => zoomStep(-1), Digit0: fitView, Numpad0: fitView, Digit1: () => setZoom(1),
       BracketRight: () => (e.shiftKey ? toEdge(true) : moveLayers(1)), BracketLeft: () => (e.shiftKey ? toEdge(false) : moveLayers(-1)),
-      KeyR: toggleRulers, Semicolon: () => { showGuidesU = !showGuidesU; drawUserGuides(); toast(showGuidesU ? "안내선 보임" : "안내선 숨김"); },
+      KeyR: toggleRulers, KeyG: () => groupSel(!e.shiftKey), Semicolon: () => { showGuidesU = !showGuidesU; drawUserGuides(); toast(showGuidesU ? "안내선 보임" : "안내선 숨김"); },
       Comma: () => { if (!selIds.length) return; commit("숨기기"); selLs().forEach(l => (l.hidden = !l.hidden)); changed(); } }[code];
     if (code === "KeyV") { pasteHandled = false; setTimeout(() => { if (!pasteHandled && CLIP) pasteLayers(e.shiftKey); }, 80); return; }
     if (k) { e.preventDefault(); k(); }
