@@ -62,6 +62,13 @@
   .phead .sp { flex: 1; }
   .bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
   .bar .sp { flex: 1; }
+  .inp { border: 1px solid var(--line); background: var(--surface); padding: 9px 12px; border-radius: 10px; min-width: 260px; font: inherit; color: inherit; }
+  .sh { font-size: 15px; margin: 26px 0 12px; }
+  .styles .st { padding: 16px; }
+  .styles .st h3 { margin: 0 0 6px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .styles .st p { margin: 0 0 10px; color: var(--ink-2, #555); font-size: 13px; line-height: 1.55; }
+  .styles .st .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; color: var(--ink-3, #777); }
+  .styles .st .kv b { color: inherit; font-weight: 700; }
 
   .btn { border: 1px solid var(--line); background: var(--surface); padding: 9px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; white-space: nowrap; }
   .btn:hover { background: var(--surface-2); }
@@ -196,6 +203,7 @@
     <button class="step" data-p="points"><span class="n">3</span><span><b>편집점</b><span class="d">대사 · 컷 · 하이라이트</span></span></button>
     <button class="step" data-p="cut"><span class="n">4</span><span><b>편집실</b><span class="d">가편집 자동 세팅</span></span></button>
     <button class="step" data-p="thumb"><span class="n">5</span><span><b>썸네일</b><span class="d">자동 후보 · 누끼</span></span></button>
+    <button class="step" data-p="style"><span class="n">6</span><span><b>스타일 배우기</b><span class="d">잘 나가는 유튜버 편집 따라하기</span></span></button>
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
@@ -209,6 +217,7 @@
     <section class="panel on" id="p-find">
       <div class="phead"><div><h1>소재 찾기</h1><p>채널에서 반응이 좋았던 영상부터 보여드려요. 다시 쓸 영상을 골라 보관함에 담으세요.</p></div></div>
       <div class="bar">
+        <input class="inp" id="chUrl" placeholder="다른 유튜버 채널·영상 주소 (비우면 우리 채널)" title="예) https://www.youtube.com/@채널이름  ·  영상 주소 하나만 넣어도 돼요">
         <div class="seg" id="kindSeg"><button class="on" data-v="videos">긴 영상</button><button data-v="shorts">쇼츠</button></div>
         <button class="btn" id="btnList">채널 불러오기</button>
         <div class="sp"></div>
@@ -254,6 +263,18 @@
       <div class="grid" id="edList"></div>
       <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
     </section>
+    <section class="panel" id="p-style">
+      <div class="phead"><div><h1>스타일 배우기</h1><p>잘 나가는 유튜버 영상을 보관함에 담고 여기서 고르면, 컷 리듬·확대 컷·말 사이 공백·자막 위치와 색·소리 크기를 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요.</p></div></div>
+      <div class="bar">
+        <input class="inp" id="styleName" placeholder="스타일 이름 (예: 슛포러브 스타일)">
+        <div class="sp"></div>
+        <button class="btn primary" id="btnLearn" disabled>스타일 배우기</button>
+      </div>
+      <div class="card rows" id="styleSrc"></div>
+      <h2 class="sh">배운 스타일</h2>
+      <div class="grid styles" id="styleList"></div>
+      <div class="card empty" id="styleEmpty"><b>아직 배운 스타일이 없어요</b>1) 소재 찾기에 다른 유튜버 채널 주소를 넣고 영상을 담은 뒤 2) 여기서 그 영상들을 골라 "스타일 배우기"를 누르세요. 2~3개를 함께 배우면 더 정확해요.</div>
+    </section>
     <section class="panel" id="p-thumb">
       <div class="phead"><div><h1>썸네일</h1><p>영상에서 선명한 장면을 골라 후보를 자동으로 만들어요. 고른 후보를 포토샵처럼 고치고(글자·도형·누끼), 유튜브용 이미지로 저장해요.</p></div></div>
       <div class="grid" id="thList"></div>
@@ -297,6 +318,7 @@ function go(p) {
   document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.p === p));
   document.querySelectorAll(".panel").forEach(s => s.classList.toggle("on", s.id === "p-" + p));
   if (p === "points") loadEvents();
+  if (p === "style") loadStyles();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
@@ -322,8 +344,9 @@ function renderRemote() {
   sync();
 }
 function loadRemote() {
-  job("/api/list", { kind: segVal("kindSeg"), cookies: cookieOpt() }, rows => { remote = rows || []; selected.clear(); renderRemote(); });
+  job("/api/list", { kind: segVal("kindSeg"), cookies: cookieOpt(), url: $("chUrl").value.trim() }, rows => { remote = rows || []; selected.clear(); renderRemote(); });
 }
+$("chUrl").onkeydown = e => { if (e.key === "Enter") loadRemote(); };
 const cookieOpt = () => $("cookies").checked ? "chrome" : null;
 $("btnList").onclick = loadRemote;
 $("btnDownload").onclick = () => job("/api/download", { ids: [...selected], cookies: cookieOpt() }, failed => {
@@ -353,7 +376,7 @@ function renderLocal() {
   document.querySelectorAll(".lchk").forEach(c => c.onchange = sync);
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
-  renderEdList(); renderThList();
+  renderEdList(); renderThList(); renderStyleSrc();
   if (remote.length) renderRemote();
   sync();
 }
@@ -366,6 +389,35 @@ $("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toas
 $("btnAnalyze").onclick = () => {
   const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
   job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); });
+};
+
+/* 6. 스타일 배우기 */
+function renderStyleSrc() {
+  const checked = new Set([...document.querySelectorAll(".schk:checked")].map(c => c.value));
+  $("styleSrc").innerHTML = state.local.length ? state.local.map(v => { const id = ytId(v.name); return `<div class="row">
+      <input type="checkbox" class="schk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
+      <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div style="min-width:0"><div class="name">${esc(niceName(v.name))}</div><div class="sub">${v.analyzed ? "받아쓰기 있음 (말 빠르기까지 배워요)" : "화면·소리로 배워요"}</div></div><span></span><span></span></div>`; }).join("")
+    : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 따라 하고 싶은 유튜버 영상을 먼저 담아 주세요.</div>`;
+  document.querySelectorAll(".schk").forEach(c => (c.onchange = syncStyle));
+  syncStyle();
+}
+function syncStyle() { const n = document.querySelectorAll(".schk:checked").length; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
+async function loadStyles() {
+  const j = await (await fetch("/api/style/list")).json(), list = j.styles || [];
+  $("styleEmpty").style.display = list.length ? "none" : "block";
+  const pos = { bottom: "아래", middle: "가운데", top: "위" };
+  $("styleList").innerHTML = list.map(st => { const p = st.profile, q = st.params; return `<div class="card st">
+      <h3>🎬 ${esc(st.name)}<span class="sp" style="flex:1"></span><button class="linkbtn" data-sdel="${esc(st.name)}">삭제</button></h3>
+      <p>${esc(st.desc)}</p>
+      <div class="kv"><b>컷 길이</b><span>평균 ${p.avgShot}초 · 1분에 ${p.cutsPerMin}번</span><b>확대 컷</b><span>${q.zoomEvery ? `${q.zoomEvery}초마다 · ${q.zoomScale}배` : "거의 없음"}</span>
+      <b>말 사이 공백</b><span>${q.keepPause}초 넘으면 자름</span><b>자막</b><span>${q.captions ? `${pos[p.captionPos]}쪽 · <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.captionColor};border:1px solid #888"></span> ${p.captionColor}` : "적게 씀"}</span>
+      <b>소리 크기</b><span>${p.lufs ?? "—"} LUFS</span>${p.charsPerSec ? `<b>말 빠르기</b><span>1초에 ${p.charsPerSec}글자</span>` : ""}<b>배운 영상</b><span>${Array.isArray(p.source) ? p.source.length + "개" : "1개"}</span></div></div>`; }).join("");
+  document.querySelectorAll("[data-sdel]").forEach(b => (b.onclick = async () => { if (!confirm(`'${b.dataset.sdel}' 스타일을 지울까요?`)) return; await api("/api/style/delete", { name: b.dataset.sdel }); loadStyles(); }));
+}
+$("btnLearn").onclick = () => {
+  const names = [...document.querySelectorAll(".schk:checked")].map(c => c.value), nm = $("styleName").value.trim() || `${niceName(names[0]).slice(0, 12)} 스타일`;
+  job("/api/style/learn", { name: nm, names }, () => { toast(`'${nm}'을 배웠어요 · 편집실 자동 가편집에서 고를 수 있어요`); loadStyles(); });
 };
 
 /* 3. 편집점 */
@@ -435,6 +487,7 @@ function sync() {
   $("btnDownload").textContent = selected.size ? `보관함에 담기 (${selected.size})` : "보관함에 담기";
   const nl = document.querySelectorAll(".lchk:checked").length;
   $("btnAnalyze").disabled = busy || !nl;
+  if ($("btnLearn")) syncStyle();
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
 }
 function job(path, body, done) {

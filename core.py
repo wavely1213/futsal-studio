@@ -46,15 +46,22 @@ def run(cmd):
 
 # ---------- 목록·다운로드 ----------
 
-def list_videos(kind="videos", cookies_browser=None):
+def list_videos(kind="videos", cookies_browser=None, url=None):
+    """채널 영상 목록 (조회수 순). url을 주면 다른 유튜버 채널, 영상 주소 하나면 그 영상만."""
     import yt_dlp
     opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
+    url = (url or "").strip()
+    if url and not url.startswith("http"):
+        url = "https://www.youtube.com/" + (url if url.startswith("@") else "@" + url)
+    single = bool(re.search(r"(watch\?v=|youtu\.be/|/shorts/[A-Za-z0-9_-]{11})", url))
+    base = re.sub(r"/(videos|shorts|streams|featured|playlists)/?$", "", url.rstrip("/")) if url else CONFIG["channel_url"]
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"{CONFIG['channel_url']}/{kind}", download=False)
+        info = ydl.extract_info(url if single else f"{base}/{kind}", download=False)
+    ents = info.get("entries") if info.get("entries") is not None else [info]
     rows = [{"id": e["id"], "title": e.get("title") or "", "views": e.get("view_count") or 0,
-             "duration": e.get("duration") or 0, "kind": kind} for e in info.get("entries", [])]
+             "duration": e.get("duration") or 0, "kind": kind} for e in ents if e.get("id")]
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 

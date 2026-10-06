@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import core
 import editor
+import style
 import thumb
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
@@ -201,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
             p = (thumb.ASSETS / Path(u.path).name).resolve()
             ctype = "image/png" if p.suffix == ".png" else "image/jpeg"
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/style/list":
+            return self._send(200, {"styles": style.list_styles()})
         if u.path == "/api/thumb/open":
             n = q["name"][0]
             rec = editor.recommend(n)
@@ -260,12 +263,18 @@ class Handler(BaseHTTPRequestHandler):
         b, path = self._body(), urlparse(self.path).path
         ck = b.get("cookies") or None
         jobs = {
-            "/api/list": ("채널 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck)),
+            "/api/list": ("채널 불러오기", lambda: core.list_videos(b.get("kind", "videos"), ck, b.get("url"))),
+            "/api/style/learn": ("스타일 배우기", lambda: style.learn(b.get("name") or "내 스타일", b["names"], log)),
             "/api/download": ("보관함에 담기", lambda: core.download(b["ids"], log, ck)),
             "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
+        if path == "/api/style/delete":
+            f = (style.STYLES / f"{b['name']}.json").resolve()
+            if style.STYLES.resolve() in f.parents and f.exists():
+                f.unlink()
+            return self._send(200, {"ok": True})
         if path == "/api/thumb/frames":
             ok = start_job("장면 고르기", lambda: thumb.frame_candidates(b["name"]))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})

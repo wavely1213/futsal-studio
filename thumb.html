@@ -298,7 +298,8 @@ function renderThumbsLater() { clearTimeout(thumbTimer); thumbTimer = setTimeout
 function L(type, o) {
   const base = { id: nid(), type, name: "", x: 0, y: 0, w: 300, h: 200, rot: 0, skew: 0, opacity: 1, blend: "source-over", hidden: false, locked: false,
     shadow: { on: false, color: "#000000", blur: 20, dx: 0, dy: 8, opacity: 1 }, glow: { on: false, color: "#FFE14D", size: 30, opacity: 1 },
-    outline: { on: false, color: "#FFFFFF", width: 10 }, overlay: { on: false, color: "#FF3B30", opacity: 1 } };
+    outline: { on: false, color: "#FFFFFF", width: 10 }, overlay: { on: false, color: "#FF3B30", opacity: 1 },
+    fade: { on: false, angle: 0, start: 0.55, end: 1 }, extrude: { on: false, color: "#7A0000", depth: 14, angle: 45 } };
   const defs = {
     image: { name: "이미지", src: "", fit: "cover", fx: 0.5, fy: 0.5, cropT: 0, cropB: 0, cropL: 0, cropR: 0, flipX: false, bright: 100, contrast: 100, sat: 100, blur: 0, hue: 0, slant: 0, vignette: 0 },
     text: { text: "제목을 입력", font: "Black Han Sans", size: 110, fill: "#FFFFFF", fill2: "", gradAngle: 90, align: "left", lh: 1.12, ls: 0, hs: 1, vs: 1, runs: [],
@@ -432,12 +433,13 @@ function drawShape(c, l) {
   c.fill(); if (l.stroke.width > 0) c.stroke();
 }
 function drawContent(c, l) { if (l.type === "image") drawImageContent(c, l); else if (l.type === "shape") drawShape(c, l); else drawText(c, l); }
-const hasFx = l => l.shadow.on || l.glow.on || l.outline.on || l.overlay.on || (l.blend && l.blend !== "source-over");
+const hasFx = l => l.shadow.on || l.glow.on || l.outline.on || l.overlay.on || l.fade.on || l.extrude.on || (l.blend && l.blend !== "source-over");
 function fxMargin(l) {
   let m = 2;
   if (l.outline.on) m = Math.max(m, l.outline.width + 2);
   if (l.glow.on) m = Math.max(m, l.glow.size * 1.6 + (l.outline.on ? l.outline.width : 0));
-  if (l.shadow.on) m = Math.max(m, l.shadow.blur * 1.6 + Math.max(Math.abs(l.shadow.dx), Math.abs(l.shadow.dy)) + (l.outline.on ? l.outline.width : 0));
+  if (l.extrude.on) m = Math.max(m, l.extrude.depth + 2 + (l.outline.on ? l.outline.width : 0));
+  if (l.shadow.on) m = Math.max(m, (l.extrude.on ? l.extrude.depth : 0) + l.shadow.blur * 1.6 + Math.max(Math.abs(l.shadow.dx), Math.abs(l.shadow.dy)) + (l.outline.on ? l.outline.width : 0));
   return Math.ceil(m);
 }
 function newCanvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
@@ -452,6 +454,15 @@ function layerBitmap(l, s) {
   const cw = (l.w + 2 * m) * k, ch = (l.h + 2 * m) * k;
   const base = newCanvas(cw, ch), g = base.getContext("2d");
   g.setTransform(k, 0, 0, k, m * k, m * k); drawContent(g, l); g.setTransform(1, 0, 0, 1, 0, 0);
+  if (l.fade.on) {  // 레이어 마스크: 방향(angle)으로 start~end 구간에서 서서히 투명
+    const a = l.fade.angle * RAD, cx = l.w / 2, cy = l.h / 2, r = Math.abs(Math.cos(a)) * l.w / 2 + Math.abs(Math.sin(a)) * l.h / 2;
+    g.setTransform(k, 0, 0, k, m * k, m * k);
+    const gr = g.createLinearGradient(cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    const s0 = clamp(Math.min(l.fade.start, l.fade.end), 0, 1), s1 = clamp(Math.max(l.fade.start, l.fade.end), 0, 1);
+    gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(s0, "rgba(0,0,0,1)"); gr.addColorStop(Math.max(s1, s0 + 0.001), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.globalCompositeOperation = "destination-in"; g.fillStyle = gr; g.fillRect(-m, -m, l.w + 2 * m, l.h + 2 * m);
+    g.globalCompositeOperation = "source-over"; g.setTransform(1, 0, 0, 1, 0, 0);
+  }
   if (l.overlay.on) { g.globalCompositeOperation = "source-atop"; g.globalAlpha = l.overlay.opacity; g.fillStyle = l.overlay.color; g.fillRect(0, 0, base.width, base.height); g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; }
   let shape = base;
   if (l.outline.on && l.outline.width > 0) {
@@ -459,6 +470,11 @@ function layerBitmap(l, s) {
     const n = clamp(Math.round(r * 1.2), 12, 48);
     for (const f of r > 6 ? [1, 0.66, 0.33] : [1]) for (let a = 0; a < n; a++) { const t = a / n * Math.PI * 2; ug.drawImage(sil, Math.cos(t) * r * f, Math.sin(t) * r * f); }
     ug.drawImage(base, 0, 0); shape = u;
+  }
+  if (l.extrude.on && l.extrude.depth > 0) {  // 3D 돌출: 같은 모양을 한 방향으로 겹겹이 쌓아 입체감
+    const sil = tint(shape, l.extrude.color), u = newCanvas(cw, ch), ug = u.getContext("2d"), a = l.extrude.angle * RAD, d = l.extrude.depth * k;
+    for (let i = Math.ceil(d); i >= 1; i--) ug.drawImage(sil, Math.cos(a) * i, Math.sin(a) * i);
+    ug.drawImage(shape, 0, 0); shape = u;
   }
   const out = newCanvas(cw, ch), o = out.getContext("2d"), FAR = 20000;
   if (l.shadow.on) {
@@ -609,6 +625,8 @@ const FM = {
   gradAngle: { min: 0, max: 360, unit: "°" }, "glow.size": { min: 0, max: 150, unit: "px" }, "glow.opacity": { min: 0, max: 100, mul: 100, unit: "%" },
   "shadow.dx": { min: -100, max: 100, unit: "px" }, "shadow.dy": { min: -100, max: 100, unit: "px" }, "shadow.blur": { min: 0, max: 80, unit: "px" }, "shadow.opacity": { min: 0, max: 100, mul: 100, unit: "%" },
   "outline.width": { min: 0, max: 60, unit: "px" }, "overlay.opacity": { min: 0, max: 100, mul: 100, unit: "%" },
+  "fade.angle": { min: 0, max: 360, unit: "°" }, "fade.start": { min: 0, max: 100, mul: 100, unit: "%" }, "fade.end": { min: 0, max: 100, mul: 100, unit: "%" },
+  "extrude.depth": { min: 0, max: 60, unit: "px" }, "extrude.angle": { min: 0, max: 360, unit: "°" },
   "box.pad": { min: 0, max: 80, unit: "px" }, "box.radius": { min: 0, max: 80, unit: "px" },
   fx: { min: 0, max: 100, mul: 100, unit: "%" }, fy: { min: 0, max: 100, mul: 100, unit: "%" }, slant: { min: -100, max: 100, mul: 100, unit: "%" },
   bright: { min: 0, max: 200, unit: "%" }, contrast: { min: 0, max: 200, unit: "%" }, sat: { min: 0, max: 200, unit: "%" }, hue: { min: -180, max: 180, unit: "°" },
@@ -664,7 +682,7 @@ function scaleTextStyle(l, k) {
   const s = v => Math.round(v * k * 10) / 10;
   l.size = Math.max(1, s(l.size)); l.strokes.forEach(st => (st.width = s(st.width))); l.ls = s(l.ls);
   l.shadow.dx = s(l.shadow.dx); l.shadow.dy = s(l.shadow.dy); l.shadow.blur = s(l.shadow.blur);
-  l.box.pad = s(l.box.pad); l.box.radius = s(l.box.radius); l.glow.size = s(l.glow.size); l.outline.width = s(l.outline.width);
+  l.box.pad = s(l.box.pad); l.box.radius = s(l.box.radius); l.glow.size = s(l.glow.size); l.outline.width = s(l.outline.width); l.extrude.depth = s(l.extrude.depth);
   for (const r of l.runs) { if (r.size !== undefined) r.size = Math.max(1, s(r.size)); if (r.s1w !== undefined) r.s1w = s(r.s1w); if (r.s2w !== undefined) r.s2w = s(r.s2w); }
 }
 // 글자 레이어 크기를 바꾸면: 같은 비율이면 글자 크기에 반영, 다른 비율이면 가로/세로 비율로 저장
@@ -802,12 +820,15 @@ const TEXT_PRESETS = [
   ["검정 박스 노랑", { fill: "#FFE14D", fill2: "", strokes: [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: false }, outline: { on: false }, box: { on: true, color: "#000000", pad: 18, radius: 0 } }],
   ["입체 그림자", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#000000", width: 18 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#FF3B30", blur: 0, dx: 12, dy: 12, opacity: 1 }, glow: { on: false }, outline: { on: true, color: "#000000", width: 6 }, box: { on: false } }],
   ["스티커", { fill: "#FF3B30", fill2: "", strokes: [{ color: "#FFFFFF", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 14, dx: 0, dy: 8, opacity: 0.7 }, glow: { on: false }, outline: { on: true, color: "#111111", width: 6 }, box: { on: false } }],
+  ["3D 입체 노랑", { fill: "#FFE14D", fill2: "#FFB800", gradAngle: 90, strokes: [{ color: "#111111", width: 14 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 10, opacity: 0.7 }, glow: { on: false }, outline: { on: false }, box: { on: false }, extrude: { on: true, color: "#8A3B00", depth: 16, angle: 50 } }],
+  ["3D 입체 빨강", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#E50914", width: 14 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 14, dx: 0, dy: 8, opacity: 0.7 }, glow: { on: false }, outline: { on: false }, box: { on: false }, extrude: { on: true, color: "#5A0000", depth: 18, angle: 55 } }],
   ["깔끔 흰 글자", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 24, dx: 0, dy: 6, opacity: 0.8 }, glow: { on: false }, outline: { on: false }, box: { on: false } }],
 ];
 function applyPreset(l, p) {
   const k = l.size / 110, s = v => Math.round(v * k * 10) / 10, st = JSON.parse(JSON.stringify(p));
   st.strokes.forEach(x => (x.width = s(x.width)));
-  for (const n of ["shadow", "glow", "outline", "box"]) { const o = st[n]; if (!o) continue; for (const f of ["blur", "dx", "dy", "size", "width", "pad", "radius"]) if (o[f] !== undefined) o[f] = s(o[f]); Object.assign(l[n], o); delete st[n]; }
+  if (!st.extrude) st.extrude = { on: false };
+  for (const n of ["shadow", "glow", "outline", "box", "extrude"]) { const o = st[n]; if (!o) continue; for (const f of ["blur", "dx", "dy", "size", "width", "pad", "radius", "depth"]) if (o[f] !== undefined) o[f] = s(o[f]); Object.assign(l[n], o); delete st[n]; }
   Object.assign(l, st);
   for (const r of l.runs) { delete r.fill; delete r.s1c; delete r.s1w; delete r.s2c; delete r.s2w; }
   compress(l, expand(l)); refitKeep(l);
@@ -845,8 +866,14 @@ function textFieldsHtml() {
 function fxCommonHtml() {
   return `${fx("outline", "획 (바깥 테두리 · 스티커)", F("outline.color", "색", { t: "col" }) + F("outline.width", "두께"), "outline.on")}
     ${fx("shadow", "드롭 섀도 (그림자)", F("shadow.color", "색", { t: "col" }) + F("shadow.opacity", "진하기") + F("shadow.dx", "가로") + F("shadow.dy", "세로") + F("shadow.blur", "흐림"), "shadow.on")}
+    ${fx("extrude", "3D 입체 (돌출)", F("extrude.color", "옆면 색", { t: "col" }) + F("extrude.depth", "깊이") + F("extrude.angle", "방향"), "extrude.on")}
     ${fx("glow", "외부 광선 (네온)", F("glow.color", "색", { t: "col" }) + F("glow.opacity", "진하기") + F("glow.size", "크기"), "glow.on")}
-    ${fx("overlay", "색상 오버레이 (색 덮기)", F("overlay.color", "색", { t: "col" }) + F("overlay.opacity", "진하기"), "overlay.on")}`;
+    ${fx("overlay", "색상 오버레이 (색 덮기)", F("overlay.color", "색", { t: "col" }) + F("overlay.opacity", "진하기"), "overlay.on")}
+    ${fx("fade", "레이어 마스크 (한쪽으로 서서히 사라지기)", fadeHtml(), "fade.on")}`;
+}
+function fadeHtml() {
+  return `<div class="row2">${[[0, "→ 오른쪽"], [180, "← 왼쪽"], [90, "↓ 아래"], [270, "↑ 위"]].map(([a, t]) => `<button class="btn sm" data-act="fadeDir" data-v="${a}">${t}으로 사라짐</button>`).join("")}</div>`
+    + F("fade.angle", "방향") + F("fade.start", "사라지기 시작") + F("fade.end", "완전히 사라짐");
 }
 function imageFieldsHtml(l) {
   return `${F("fit", "맞춤", { t: "seg", opts: [["cover", "꽉 채우기"], ["contain", "전체 보이기"]] })}${F("fx", "가로 초점")}${F("fy", "세로 초점")}${F("slant", "사선 자르기")}
@@ -964,7 +991,7 @@ function toggleLS(on) { on = on ?? !LSP.classList.contains("show"); LSP.classLis
 function renderLS() {
   if (!LSP.classList.contains("show")) return; const bd = LSP.querySelector(".bd"), l = selL();
   if (!l) { bd.innerHTML = `<div class="hint">레이어를 하나 고르면 효과를 자세히 조절할 수 있어요. (레이어 패널에서 레이어를 두 번 눌러도 열려요)</div>`; return; }
-  const secs = [["blend", "혼합 옵션", null], ["outline", "획 (바깥 테두리)", "outline.on"], ["shadow", "드롭 섀도", "shadow.on"], ["glow", "외부 광선", "glow.on"], ["overlay", "색상 오버레이", "overlay.on"]];
+  const secs = [["blend", "혼합 옵션", null], ["outline", "획 (바깥 테두리)", "outline.on"], ["shadow", "드롭 섀도", "shadow.on"], ["extrude", "3D 입체 (돌출)", "extrude.on"], ["glow", "외부 광선", "glow.on"], ["overlay", "색상 오버레이", "overlay.on"], ["fade", "레이어 마스크 (페이드)", "fade.on"]];
   if (l.type !== "image") secs.push(["grad", "그라데이션 오버레이", "grad.on"]);
   if (l.type === "text") secs.splice(1, 0, ["tstroke", "글자 테두리 (2겹)", null], ["preset", "스타일 프리셋", null]), secs.push(["box", "글자 뒤 상자", "box.on"]);
   if (l.type === "image") secs.push(["adjust", "이미지 보정", null]);
@@ -975,9 +1002,11 @@ function renderLS() {
     tstroke: F("c.s1c", "바깥 테두리", { t: "col" }) + F("c.s1w", "└ 두께") + F("c.s2c", "안쪽 테두리", { t: "col" }) + F("c.s2w", "└ 두께") + `<div class="selinfo" data-selinfo></div>`,
     outline: F("outline.on", "사용", { t: "chk" }) + F("outline.color", "색", { t: "col" }) + swatches("outline.color", 12) + F("outline.width", "두께"),
     shadow: F("shadow.on", "사용", { t: "chk" }) + F("shadow.color", "색", { t: "col" }) + F("shadow.opacity", "진하기") + F("shadow.dx", "가로 거리") + F("shadow.dy", "세로 거리") + F("shadow.blur", "흐림 (크기)"),
+    extrude: F("extrude.on", "사용", { t: "chk" }) + F("extrude.color", "옆면 색", { t: "col" }) + swatches("extrude.color", 12) + F("extrude.depth", "깊이") + F("extrude.angle", "방향") + `<div class="hint">글자를 같은 방향으로 겹겹이 쌓아 튀어나온 것처럼 보이게 해요. 방향 45° = 오른쪽 아래.</div>`,
     glow: F("glow.on", "사용", { t: "chk" }) + F("glow.color", "색", { t: "col" }) + swatches("glow.color", 12) + F("glow.opacity", "진하기") + F("glow.size", "크기"),
     overlay: F("overlay.on", "사용", { t: "chk" }) + F("overlay.color", "색", { t: "col" }) + swatches("overlay.color", 12) + F("overlay.opacity", "진하기"),
     grad: F("grad.on", "사용", { t: "chk" }) + (l.type === "text" ? F("c.fill", "시작 색", { t: "col" }) : F("fill", "시작 색", { t: "col" })) + F("fill2", "끝 색", { t: "col" }) + F("gradAngle", "방향"),
+    fade: F("fade.on", "사용", { t: "chk" }) + fadeHtml() + `<div class="hint">장면 두 개를 자연스럽게 겹치거나, 사진 끝을 부드럽게 지울 때 써요.</div>`,
     box: F("box.on", "사용", { t: "chk" }) + F("box.color", "상자 색", { t: "col" }) + F("box.pad", "여백") + F("box.radius", "둥글기"),
     adjust: F("bright", "밝기") + F("contrast", "대비") + F("sat", "채도") + F("hue", "색조") + F("blur", "흐림") + F("vignette", "가장자리 어둡게") + `<button class="btn sm" data-act="iReset">보정 초기화</button>`,
   }[lsSec];
@@ -1441,6 +1470,7 @@ const ACT = {
   eyeApply: () => { eyeApply = !eyeApply; renderOpts(); },
   fmt: b => setFormat(b.dataset.v), hist: b => { const n = +b.dataset.v; while (undoStack.length > n) undo(); },
   autoFmt: b => { AUTO_FMT = b.dataset.v; renderAuto(); },
+  fadeDir: b => { const l = selL(); if (!l) return; commit("마스크 방향"); Object.assign(l.fade, { on: true, angle: +b.dataset.v }); changed(); },
 };
 const MACT = { copy: () => copySel(), dup: dupLayers, xform: startXform, ls: () => toggleLS(true), front: () => toEdge(true), back: () => toEdge(false),
   hide: () => { commit("숨기기"); selLs().forEach(l => (l.hidden = !l.hidden)); changed(); }, del: delLayers, paste: () => pasteLayers(), all: () => select(D.doc.layers.filter(l => !l.locked).map(l => l.id)) };
@@ -1600,6 +1630,15 @@ const TPL = {
       const t = txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 10 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 40, opacity: 1 } });
       ls.push(place(fitW(t, LW - 80), 0.5, 1, LW / 2, LH - (b ? 150 : 50)));
       if (b) ls.push(place(fitW(txt(b, { size: 100, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 18 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(6) }), LW - 80), 0.5, 1, LW / 2, LH - 36));
+      return ls;
+    },
+    "두 장면 겹치기": (f, a, b, cut) => {
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, sat: 115, contrast: 108 }, subCrop())),
+        L("image", Object.assign({ name: "장면 2", src: frameSrc(f[Math.min(3, f.length - 1)]), x: 520, y: 0, w: 760, h: LH, sat: 115, contrast: 108, fade: { on: true, angle: 180, start: 0.45, end: 0.95 } }, subCrop())),
+        L("shape", { name: "아래 어둡게", x: 0, y: LH * 0.5, w: LW, h: LH * 0.5, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.8 })];
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: -200, y: 0, w: LW, h: LH }, CUTFX(12))));
+      ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", fill2: "#FFE14D", gradAngle: 90, strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - (b ? 140 : 40)));
+      if (b) ls.push(place(fitW(txt(b, { size: 104, fill: "#FF3B30", align: "center", strokes: [{ color: "#FFFFFF", width: 20 }, { color: "#FFFFFF", width: 0 }], outline: { on: true, color: "#111111", width: 6 }, shadow: HARD(6) }), LW - 60), 0.5, 1, LW / 2, LH - 30));
       return ls;
     },
     "미니멀 하단띠": (f, a, b) => [
