@@ -534,6 +534,13 @@ const mDur = md => md.kind === "image" ? 1e7 : (md.dur || 1e7);
 const unlocked = tid => { const t = TRK(tid); return t && !t.lock; };
 const linkedOf = it => it.link ? S.items.filter(x => x.link === it.link) : [it];
 const BW = () => S.format === "shorts" ? 1080 : 1920, BH = () => S.format === "shorts" ? 1920 : 1080;
+// 고른 키프레임은 고를 때의 선택(클립·타이틀·자막·전환)이 그대로이고 효과 패널에 보일 때만 → 다른 것을 고른 뒤 Delete 가 안 보이는 키프레임을 지우지 않게
+const selSig = () => S.id + "|" + [...selI].join() + "|" + primary + "|" + JSON.stringify(selX);
+function curKf() {
+  if (!selKf || selKf.sig !== selSig() || rtab !== "fx") return null;
+  const it = byId(selKf.id);
+  return it && prm(it, selKf.key).k.some(x => Math.abs(x.t - selKf.t) < 1e-6) ? selKf : null;
+}
 function prm(it, key) { const p = (it.fx || {})[key]; return { v: p && p.v !== undefined ? p.v : DEF[key], k: (p && p.k) || [] }; }
 function lerp(a, b, x) { return Array.isArray(a) ? a.map((u, i) => u + (b[i] - u) * x) : a + (b - a) * x; }
 function kfAt(p, m) {
@@ -643,6 +650,7 @@ function changed(full = true) {
 }
 // 저장: 한 번에 하나씩 차례로 · 판 번호(REV)로 다른 창이 그 사이 저장했는지 확인 (몰래 덮어쓰지 않게)
 let REV = 0, dirty = false, editSeq = 0, saving = Promise.resolve(true), conflict = false;
+const CID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); // 이 창 id (저장 응답 전에 닫아도 같은 창의 저장은 이어서 받게)
 function scheduleSave() {
   dirty = true; editSeq++;
   if (conflict) { $("cfModal").classList.add("show"); return; }
@@ -657,7 +665,7 @@ function saveNow(force) {
 }
 async function doSave(force) {
   if (!P || (conflict && !force)) return false;
-  const seq = editSeq, body = JSON.stringify({ name: NAME, project: P, rev: REV, force: !!force });
+  const seq = editSeq, body = JSON.stringify({ name: NAME, project: P, rev: REV, force: !!force, client: CID, seq });
   try {
     const r = await fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body });
     const j = await r.json().catch(() => ({}));
@@ -896,6 +904,7 @@ function deleteGap(g) {
 }
 function deleteGfx() {
   if (!selX) return;
+  if (selX.k === "trans" && S.trans.some(t => t.id === selX.id && !unlocked(t.track))) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
   commit("지우기");
   if (selX.k === "caption") P.captions = P.captions.filter(c => c.id !== selX.id);
   if (selX.k === "title") S.titles = S.titles.filter(t => t.id !== selX.id);
@@ -1681,9 +1690,9 @@ $("tracks").addEventListener("mousedown", ev => {
     if (hit) { selX = { k: "caption", id: hit }; selI.clear(); seek(tAt); renderTimeline(); renderPanels(); focusCap(hit, false); } else emptyDown(ev, rk, tAt); return;
   }
   if (rk === "T" || rk === "G") return gfxDown(ev, rk, tAt);
+  if (TRK(rk).lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); // 클립·장면 전환 모두
   const trn = t.closest(".trn");
   if (trn) return trnDown(ev, trn);
-  if (TRK(rk).lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
   if (tool === "razor") { const m = snapTo([tAt], new Set()); return razorAt(rk, tAt + (Math.abs(m.adj) * zoom < 6 ? m.adj : 0), ev.shiftKey); }
   if (tool === "tsel") {
     const pick = S.items.filter(x => x.start >= tAt - EPS && unlocked(x.track) && (!ev.shiftKey || x.track === rk));
@@ -1972,6 +1981,7 @@ function gfxDown(ev, rk, tAt) {
 }
 function trnDown(ev, el) {
   const tr = S.trans.find(x => x.id === el.dataset.tr); if (!tr) return;
+  if (!unlocked(tr.track)) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
   selX = { k: "trans", id: tr.id }; selI.clear(); setRtab("fx");
   const edge = ev.target.classList.contains("teh") ? (ev.target.classList.contains("l") ? "l" : "r") : null;
   if (!edge) { renderTimeline(); renderPanels(); return; }
@@ -2305,10 +2315,11 @@ async function renderRec() {
     ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {
-    // 자동으로 만든 가편집(표시가 있거나, 예전 프로젝트면 원래 이름 그대로인 것)만 바꿈 · 사용자가 만든 편집본은 그대로
-    const isAuto = q => q.auto === "rough" || (!("auto" in q) && (q.name === "롱폼 가편집" || /^쇼츠 \d+ · /.test(q.name)));
+    // 자동으로 만든 가편집(표시 rough)만 바꿈 · 복제·이름 바꾼 것은 'user', 예전 프로젝트는 열 때 editor.py 가 표시
+    const isAuto = q => q.auto === "rough";
     const n = P.sequences.filter(isAuto).length;
-    if (!confirm(`자동으로 만든 가편집 ${n}개를 처음 상태로 다시 만들까요?\n(복제하거나 이름을 바꾼 편집본, 직접 만든 편집본은 그대로 남아요)`)) return;
+    if (!confirm(n ? `자동으로 만든 가편집 ${n}개를 처음 상태로 다시 만들까요?\n(복제하거나 이름을 바꾼 편집본, 직접 만든 편집본은 그대로 남아요)`
+      : "가편집을 새로 만들까요?\n(지금 있는 편집본은 모두 그대로 남아요)")) return;
     let j = null;
     try { const r = await fetch("/api/edit/autoseq?name=" + encodeURIComponent(NAME)); j = await r.json(); if (!r.ok) j = null; } catch (e) {}
     if (!j || !j.sequences || !j.sequences.length) return toast("가편집을 만들지 못했어요");
@@ -2507,7 +2518,7 @@ function laneInner(it, p, key) {
   const ks = p.k.map((k, i) => ({ k, i, t: tlOf(it, k.t) })).sort((a, b) => a.t - b.t);
   let h = "";
   for (let j = 0; j < ks.length - 1; j++) h += `<div class="kseg" style="left:${pc(ks[j].t)}%;width:${pc(ks[j + 1].t) - pc(ks[j].t)}%"></div>`;
-  const isSel = k => selKf && selKf.id === it.id && selKf.key === key && Math.abs(selKf.t - k.t) < 1e-6;
+  const kf = curKf(), isSel = k => kf && kf.id === it.id && kf.key === key && Math.abs(kf.t - k.t) < 1e-6;
   h += ks.map(({ k, i, t }) => `<b class="kd ${k.e === "ease" ? "ease" : ""} ${isSel(k) ? "sel" : ""}" data-ki="${i}" style="left:${pc(t)}%" title="${tc(t)} · ${Array.isArray(k.v) ? k.v.map(x => x.toFixed(3)).join(", ") : (+k.v).toFixed(1)} · ${k.e === "ease" ? "부드럽게" : "일정하게"} (오른쪽 클릭: 바꾸기)"></b>`).join("");
   return h + `<i class="kph" style="left:${pc(T)}%"></i>`;
 }
@@ -2621,7 +2632,7 @@ function bindLane(ln, it, key) {
     const kd = ev.target.closest(".kd");
     if (!kd) { selKf = null; ln.querySelectorAll(".kd.sel").forEach(x => x.classList.remove("sel")); pause(); seek(toT(ev.clientX)); updateFxLive(); return; }
     const p = prm(it, key), k = p.k[+kd.dataset.ki], before = JSON.stringify(P); let moved = false;
-    selKf = { id: it.id, key, t: k.t }; // 고른 키프레임 (Delete 로 지우기)
+    selKf = { id: it.id, key, t: k.t, sig: selSig() }; // 고른 키프레임 (Delete 로 지우기)
     document.querySelectorAll("#rt-fx .kd.sel").forEach(x => x.classList.remove("sel")); kd.classList.add("sel");
     const mv = e => { moved = true; k.t = mt(it, fr(toT(e.clientX))); selKf.t = k.t; p.k.sort((x, y) => x.t - y.t); (it.fx = it.fx || {})[key] = p; ver++; frameDirty = true; ln.innerHTML = laneInner(it, p, key); };
     const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up);
@@ -2657,7 +2668,7 @@ function updateFxLive() {
   });
 }
 function renderTransPanel(el) {
-  const tr = S.trans.find(x => x.id === selX.id); if (!tr) { selX = null; return renderFx(); }
+  const tr = S.trans.find(x => x.id === selX.id); if (!tr || !unlocked(tr.track)) { selX = null; return renderFx(); } // 잠긴 트랙 전환은 고칠 수 없음
   const audio = tr.track[0] === "A", types = audio ? ["cpower", "cgain"] : ["dissolve", "black", "white", "wipe", "push"], two = tr.a && tr.b;
   el.innerHTML = `<div class="ech"><b>장면 전환 · ${tr.track}</b><span class="hint">${two ? "두 클립 사이" : tr.b ? "클립 시작" : "클립 끝"}</span></div>
     <div class="pg"><div class="f"><label>종류</label><select class="s" id="trType">${types.map(k => `<option value="${k}" ${tr.type === k ? "selected" : ""}>${TRN[k]}</option>`).join("")}</select><span></span></div>
@@ -2993,7 +3004,9 @@ document.addEventListener("contextmenu", e => {
   if (mk) return showMenu(e, [["마커 지우기", () => { commit("마커 지우기"); S.markers.splice(+mk.dataset.mk, 1); changed(false); }], ["이름 붙이기", () => { const m = S.markers[+mk.dataset.mk], n = prompt("마커 이름 (메모)", m.name || ""); if (n !== null) { commit("마커 이름"); m.name = n.trim(); changed(false); } }]]);
   const te = e.target.closest("#tracks .trn");
   if (te) {
-    const id = te.dataset.tr; selX = { k: "trans", id }; selI.clear(); setRtab("fx"); renderTimeline(); // 클립 선택은 풀기 (Delete 가 전환만 지우게)
+    const id = te.dataset.tr, tr = S.trans.find(x => x.id === id);
+    if (tr && !unlocked(tr.track)) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
+    selX = { k: "trans", id }; selI.clear(); setRtab("fx"); renderTimeline(); // 클립 선택은 풀기 (Delete 가 전환만 지우게)
     showMenu(e, [["전환 지우기", () => { selX = { k: "trans", id }; deleteGfx(); }, "Delete"]]);
   }
 });
@@ -3024,8 +3037,8 @@ async function renderBin() {
     ${others.map(v => `<div class="item" data-n="${esc(v.name)}"><span class="sw" style="background:#555"></span><span class="nm">${esc(niceName(v.name))}</span><span class="st">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div>`).join("")}`;
   document.querySelectorAll("[data-seq]").forEach(el => el.onclick = () => switchSeq(el.dataset.seq));
   document.querySelectorAll(".bin [data-n]").forEach(el => el.onclick = () => leaveTo("/editor?name=" + encodeURIComponent(el.dataset.n)));
-  $("seqDup").onclick = () => { commit("편집본 복제"); const c = JSON.parse(JSON.stringify(S)); c.id = nid(); delete c.auto; c.name = uniqSeqName(S.name + " 복사본"); P.sequences.splice(P.sequences.indexOf(S) + 1, 0, c); switchSeq(c.id); };
-  $("seqRen").onclick = () => { const n = prompt("편집본 이름", S.name); if (n && n.trim() && n.trim() !== S.name) { commit("이름 바꾸기"); S.name = uniqSeqName(n.trim()); delete S.auto; changed(); } };
+  $("seqDup").onclick = () => { commit("편집본 복제"); const c = JSON.parse(JSON.stringify(S)); c.id = nid(); c.auto = "user"; c.name = uniqSeqName(S.name + " 복사본"); P.sequences.splice(P.sequences.indexOf(S) + 1, 0, c); switchSeq(c.id); };
+  $("seqRen").onclick = () => { const n = prompt("편집본 이름", S.name); if (n && n.trim() && n.trim() !== S.name) { commit("이름 바꾸기"); S.name = uniqSeqName(n.trim()); S.auto = "user"; changed(); } };
   $("seqDel").onclick = () => {
     if (P.sequences.length <= 1) return toast("편집본이 하나뿐이라 지울 수 없어요");
     if (!confirm(`"${S.name}" 편집본을 지울까요? (Ctrl+Z로 되돌릴 수 있어요)`)) return;
@@ -3205,7 +3218,7 @@ addEventListener("keydown", e => {
   if (mod && k === "k") { e.preventDefault(); splitAt(T, sh); return; }
   if (mod && k === "s") { e.preventDefault(); saveNow(); return; }
   if (mod && k === "c") { e.preventDefault(); copySel(); return; }
-  if (mod && k === "x" && !sh) { e.preventDefault(); if (!selKf && copySel()) deleteSel(false); return; }
+  if (mod && k === "x" && !sh) { e.preventDefault(); if (!curKf() && copySel()) deleteSel(false); return; }
   if (mod && sh && k === "x") { e.preventDefault(); markIn = markOut = null; renderTimeline(); return; }
   if (mod && k === "v") { e.preventDefault(); alt ? pasteAttrs() : pasteAt(fr(T), sh); return; }
   if (mod && k === "d") { e.preventDefault(); applyDefaultTrans(sh ? "a" : "v"); return; }
@@ -3267,7 +3280,7 @@ addEventListener("keydown", e => {
   else if (k === "m") addMarker();
   else if (k === "g") gainDialog();
   else if (k === "d" && sh) applyDefaultTrans("v", true);
-  else if ((k === "delete" || k === "backspace") && selKf) { // 고른 키프레임만 지우기 (클립은 그대로)
+  else if ((k === "delete" || k === "backspace") && curKf()) { // 고른 키프레임만 지우기 (클립은 그대로)
     e.preventDefault();
     const it = byId(selKf.id), p = it && prm(it, selKf.key), i = p ? p.k.findIndex(x => Math.abs(x.t - selKf.t) < 1e-6) : -1;
     if (i >= 0 && unlocked(it.track)) { commit("키프레임 지우기"); const vv = val(it, selKf.key, T); p.k.splice(i, 1); if (!p.k.length) p.v = vv; (it.fx = it.fx || {})[selKf.key] = p; changed(false); toast("키프레임을 지웠어요"); }
@@ -3319,7 +3332,7 @@ $("tracks").addEventListener("click", e => {
   if (b.id === "hCap") { commit("자막 보이기"); S.captionsOn = !S.captionsOn; changed(); return; }
   if (b.id === "addTrk") { const r = b.getBoundingClientRect(); return showMenu({ clientX: r.left, clientY: r.bottom + 2 }, [["영상 트랙 추가", () => addTrack("v")], ["오디오 트랙 추가", () => addTrack("a")], null, ["뒤쪽 빈 트랙 지우기", removeEmptyTracks]]); }
   if (d.tgt) { const t = TRK(d.tgt); t.target = !t.target; ver++; renderTimeline(); scheduleSave(); return; }
-  if (d.lock) { commit("트랙 잠금"); const t = TRK(d.lock); t.lock = !t.lock; if (t.lock) for (const x of S.items) if (x.track === t.id) selI.delete(x.id); changed(false); return; }
+  if (d.lock) { commit("트랙 잠금"); const t = TRK(d.lock); t.lock = !t.lock; if (t.lock) { for (const x of S.items) if (x.track === t.id) selI.delete(x.id); if (selX && selX.k === "trans" && S.trans.some(x => x.id === selX.id && x.track === t.id)) selX = null; } changed(false); return; }
   if (d.hide) { commit("트랙 보이기"); const t = TRK(d.hide); t.hide = !t.hide; changed(false); return; }
   if (d.ht) { const t = TRK(d.ht); t.h = t.h > 1 ? 1 : 2; ver++; renderTimeline(); scheduleSave(); return; }
   if (d.mute || d.solo) { const tr = TRK(d.mute || d.solo); commit(d.mute ? "트랙 음소거" : "트랙 솔로"); if (d.mute) tr.mute = !tr.mute; else tr.solo = !tr.solo; changed(false); }
@@ -3345,7 +3358,7 @@ addEventListener("resize", () => { if (P) { layoutFrame(); layoutSrc(); renderTi
 })();
 addEventListener("beforeunload", e => {
   if (!P || !dirty || conflict) return;
-  try { const b = new Blob([JSON.stringify({ name: NAME, project: P, rev: REV })], { type: "application/json" }); if (b.size <= 60000 && navigator.sendBeacon("/api/edit/save", b)) return; } catch (x) {}
+  try { const b = new Blob([JSON.stringify({ name: NAME, project: P, rev: REV, client: CID, seq: editSeq })], { type: "application/json" }); if (b.size <= 60000 && navigator.sendBeacon("/api/edit/save", b)) return; } catch (x) {}
   saveNow(); e.preventDefault(); e.returnValue = ""; // 큰 프로젝트는 신호(beacon)로 못 보내므로 잠깐 머물며 저장
 });
 $("cfReload").onclick = () => { dirty = false; location.reload(); };

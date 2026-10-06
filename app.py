@@ -442,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/edit/save":
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
-                rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")))
+                rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
             except editor.Conflict as e:
                 return self._send(409, {"ok": False, "conflict": True, "rev": e.rev, "error": str(e)})
             except OSError as e:
