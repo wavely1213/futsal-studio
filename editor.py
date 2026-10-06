@@ -529,12 +529,16 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
         for i, r in enumerate(rec["shorts"], 1):
             items = _items_from_cuts(_punch(r["cuts"], segs, every), 0.3, zoom=zoom)
             length = sum(c["out"] - c["in"] for c in r["cuts"])
-            seqs.append(_new_seq(f"쇼츠 {i} · {r['title'][:14]}", "shorts", items, captionStyle=cap(SHORTS_STYLE),
+            seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cap(SHORTS_STYLE),
                                  layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on,
                                  titles=[{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}]))
     for q in seqs:  # 자동으로 만든 가편집 표시 ('가편집 다시 만들기'는 이것만 바꿈 · 스타일 가편집은 app.py 에서 따로 표시)
         q["auto"] = "style" if style else "rough"
     return seqs
+
+
+def _short_name(i, r):
+    return f"쇼츠 {i} · {r['title'][:14]}"
 
 
 def _segments_of(name):
@@ -571,6 +575,16 @@ def migrate_project(name, proj):
         seq.setdefault("format", "shorts")
         proj["sequences"] = [seq] + auto_sequences(name, proj["info"])
         proj["active"] = seq["id"]
+    bare = [s for s in proj["sequences"] if "auto" not in s]
+    if bare:  # 예전 프로젝트엔 자동 가편집 표시가 없음 → 처음 만든 이름 그대로인 것만 자동, 복사본·이름 바꾼 것·직접 만든 것은 내 것
+        auto = {"롱폼 가편집"}
+        if any(str(s.get("name", "")).startswith("쇼츠 ") for s in bare):
+            try:
+                auto |= {_short_name(i, r) for i, r in enumerate(recommend(name)["shorts"], 1)}
+            except Exception:
+                pass
+        for s in bare:
+            s["auto"] = "rough" if s.get("name") in auto else "user"
     for s in proj["sequences"]:
         migrate_seq(s)
         lm = {}  # 자르기를 반복해 길어진 연결 표시(link)를 짧게 (같은 것끼리는 계속 같게)
@@ -596,6 +610,7 @@ def migrate_project(name, proj):
 # 프로젝트 저장: 한 번에 하나씩(잠금) · 임시 파일에 다 쓴 뒤 바꿔 끼우기(중간에 꺼져도 깨지지 않음) · 판(rev) 번호로 다른 창 덮어쓰기 방지
 _SAVE_LOCK = threading.RLock()
 _REVC = {}
+_WRITER = {}  # 파일별 마지막으로 저장한 편집실 창: (창 id, 그 창이 이어서 저장하기 시작한 판, 마지막 판, 편집 번호)
 
 
 class Conflict(Exception):
@@ -735,14 +750,23 @@ def load_project(name):
     return proj
 
 
-def save_project(name, proj, base_rev=None, force=False):
+def save_project(name, proj, base_rev=None, force=False, client=None, seq=None):
     """base_rev: 편집실이 열 때 받은 판 번호. 그 사이 다른 창·작업이 저장했으면 Conflict (덮어쓰지 않음).
-    force: 그래도 이 내용으로 (덮어쓰기 전 상태는 백업)."""
+    force: 그래도 이 내용으로 (덮어쓰기 전 상태는 백업).
+    client·seq: 편집실 창 id·편집 번호 — 저장 응답을 받기 전에 창을 닫아(신호 저장) 판 번호가 뒤처져도
+    그 사이 저장한 게 같은 창뿐이면 이어서 저장 (늦게 도착한 예전 내용은 버림)."""
     p = _ppath(name)
+    client = str(client) if client else None
+    seq = int(seq) if isinstance(seq, (int, float)) and not isinstance(seq, bool) else None
     with _SAVE_LOCK:
         disk = _disk_rev(p) if p.exists() else 0
+        w = _WRITER.get(str(p))
+        mine = client is not None and w is not None and w[0] == client and w[2] == disk
         if base_rev is not None and not force and disk >= 0 and int(base_rev) != disk:
-            raise Conflict(disk)
+            if not (mine and w[1] <= int(base_rev) < disk):
+                raise Conflict(disk)
+            if seq is not None and w[3] is not None and seq <= w[3]:
+                return disk  # 같은 창의 더 최근 내용이 이미 저장됨
         if force and p.exists():
             _backup_copy(p, "덮어쓰기전")
         proj.pop("_recovered", None)
@@ -758,6 +782,10 @@ def save_project(name, proj, base_rev=None, force=False):
             _REVC[str(p)] = (p.stat().st_mtime_ns, proj["rev"])
         except OSError:
             pass
+        if client:
+            _WRITER[str(p)] = (client, w[1] if mine else proj["rev"] - 1, proj["rev"], seq)
+        else:
+            _WRITER.pop(str(p), None)
         # 자동 백업: 5분마다 한 벌씩, 최근 10개까지
         regs = [x for x in _backup_files(p.stem) if not x[1]]
         if not regs or time.time() - _bk_epoch(regs[-1][0]) > 300:
