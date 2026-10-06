@@ -1,6 +1,8 @@
 {
   "version": "1.8.0",
   "notes": "편집실 검수 87건 반영, 안전한 업데이트(실패하면 자동 되돌림), 촬영본 여러 개 한 영상으로 묶기, 7 올리기(제목·설명·챕터·태그), 썸네일 장면 고르기에 표정 점수, 다운로드 엔진 자동 관리",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/3d56a1a32f4c8aa076a272bdccac94ab2ef6afc2.zip",
+  "commit": "3d56a1a32f4c8aa076a272bdccac94ab2ef6afc2",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "README.md": "122beeb1c933a5a2b0098821803148e56662ebac61bb84f39647f5f1a0e87186",
