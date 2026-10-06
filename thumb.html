@@ -175,6 +175,11 @@
   .uguide.v { width: 1px; cursor: ew-resize; box-shadow: 0 0 0 2px transparent; } .uguide.h { height: 1px; cursor: ns-resize; }
   .uguide.v::after { content: ""; position: absolute; left: -3px; right: -3px; top: 0; bottom: 0; } .uguide.h::after { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; }
   .layers .ly .lth { width: 44px; height: 26px; border-radius: 3px; flex: none; background: #2a2a2a; }
+  .qabody { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .qabody .qi { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--panel-2); cursor: default; line-height: 1.5; }
+  .qabody .qi[data-ql] { cursor: pointer; } .qabody .qi[data-ql]:hover { background: var(--panel-3); }
+  .qabody .qi b { display: block; } .qabody .qi.warn { box-shadow: inset 3px 0 0 #ffb020; } .qabody .qi.bad { box-shadow: inset 3px 0 0 #ff4d4d; } .qabody .qi.ok { box-shadow: inset 3px 0 0 #2ecc71; }
+  .qabody .score { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -189,6 +194,7 @@
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
     <button class="ic" id="safeBtn" title="가려지는 영역 보기 (쇼츠 버튼·제목 / 재생시간 표시)">▦</button>
     <button class="btn" id="pvBtn" title="유튜브 목록 크기로 미리보기">👀 목록 미리보기</button>
+    <button class="btn" id="qaBtn" title="작게 봐도 읽히는지·잘린 글자·가림 영역 자동 점검">✅ 검수</button>
     <button class="ic" id="help" title="단축키 (F1)">⌨</button>
     <span class="pill" id="busy"><span id="busyTxt">작업 중</span><span class="bar"><i id="busyBar"></i></span></span>
     <select class="s" id="exFmt" style="width:auto"><option value="jpg">JPG (유튜브용)</option><option value="png">PNG</option></select>
@@ -243,6 +249,11 @@
   <h3 style="margin:0 0 4px">목록 미리보기 <span class="hint">실제로 사람들이 보는 크기예요. 작은 크기에서도 글자가 읽히고 얼굴이 보이는지 확인하세요.</span></h3>
   <div id="pvBody" class="pvbody"></div>
   <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="pvClose">닫기</button></div>
+</div></div>
+<div class="modal" id="qaModal"><div class="box" style="width:620px">
+  <h3 style="margin:0 0 4px">썸네일 검수 <span class="hint">눌러서 해당 레이어로 가요</span></h3>
+  <div id="qaBody" class="qabody"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="qaClose">닫기</button></div>
 </div></div>
 <div class="modal" id="helpModal"><div class="box">
   <h3 style="margin:0 0 4px">단축키 <span class="hint">포토샵과 같게 맞췄어요 (Mac은 Ctrl 대신 ⌘)</span></h3>
@@ -1681,7 +1692,7 @@ function fitW(l, maxW) { if (l.w > maxW) { scaleTextStyle(l, maxW / l.w); fitTex
 function place(l, ax, ay, x, y) { l.x = x - l.w * ax; l.y = y - l.h * ay; return l; }
 const NOSTROKE = [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }], HARD = (dx, c = "#000000") => ({ on: true, color: c, blur: 0, dx, dy: dx, opacity: 1 });
 const CUTFX = w => ({ outline: { on: true, color: "#FFFFFF", width: w }, shadow: { on: true, color: "#000000", blur: 24, dx: 0, dy: 10, opacity: 0.85 } });
-const LW = 1280, LH = 720, SW = 1080, SH = 1920;
+const LW = 1280, LH = 720, SW = 1080, SH = 1920, SB = SH * 0.775, SAFE_W = SW * 0.8;  // 쇼츠: 아래 제목·오른쪽 버튼에 안 가리게
 const TPL = {
   long: {
     "큰 글씨 2줄": (f, a, b, cut) => {
@@ -1731,8 +1742,8 @@ const TPL = {
     "미니멀 하단띠": (f, a, b) => [
       L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 95 }, subCrop())),
       L("shape", { name: "하단 띠", x: 0, y: LH - 210, w: LW, h: 210, fill: "#000000", opacity: 0.78 }),
-      place(fitW(txt(a, { font: "Pretendard Black", size: 96, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 56, LH - 140),
-      ...(b ? [place(fitW(txt(b, { font: "Pretendard Black", size: 64, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 60, LH - 62)] : []),
+      place(fitW(txt(a, { font: "Pretendard Black", size: 100, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 56, LH - 140),
+      ...(b ? [place(fitW(txt(b, { font: "Pretendard Black", size: 80, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 60, LH - 62)] : []),
     ],
   },
   short: {
@@ -1741,35 +1752,35 @@ const TPL = {
         L("shape", { name: "위 어둡게", x: 0, y: 0, w: SW, h: 760, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.85 }),
         L("shape", { name: "아래 어둡게", x: 0, y: SH - 700, w: SW, h: 700, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.85 })];
       if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: SW, h: SH }, CUTFX(14))));
-      ls.push(place(fitW(txt(a, { size: 170, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(10) }), SW - 70), 0.5, 0, SW / 2, 230));
-      if (b) ls.push(place(fitW(txt(b, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), SW - 70), 0.5, 1, SW / 2, SH - 300));
+      ls.push(place(fitW(txt(a, { size: 170, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(10) }), SAFE_W), 0.5, 0, SW / 2, 230));
+      if (b) ls.push(place(fitW(txt(b, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
     "쇼츠 · 블러 배경 + 가운데 장면": (f, a, b) => [
       L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: 22, bright: 55, sat: 120 }, subCrop())),
       L("image", { name: "가운데 장면", src: frameSrc(f[0]), x: 0, y: (SH - 608) / 2, w: SW, h: 608, contrast: 110, sat: 115, shadow: { on: true, color: "#000000", blur: 40, dx: 0, dy: 12, opacity: 0.9 } }),
-      place(fitW(txt(a, { size: 150, fill: "#FFFFFF", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SW - 70), 0.5, 1, SW / 2, (SH - 608) / 2 - 60),
-      ...(b ? [place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 24 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SW - 70), 0.5, 0, SW / 2, (SH + 608) / 2 + 70)] : []),
+      place(fitW(txt(a, { size: 150, fill: "#FFFFFF", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, (SH - 608) / 2 - 60),
+      ...(b ? [place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 24 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 0, SW / 2, (SH + 608) / 2 + 70)] : []),
     ],
     "쇼츠 · 상단 제목 띠": (f, a, b) => [
       L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 560, w: SW, h: SH - 560, contrast: 110, sat: 115 }, subCrop())),
       L("shape", { name: "상단 띠", x: 0, y: 0, w: SW, h: 600, fill: "#161616", fill2: "#000000", gradAngle: 90 }),
-      place(fitW(txt(a, { size: 160, fill: "#FFE14D", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SW - 80), 0.5, 1, SW / 2, b ? 320 : 380),
-      ...(b ? [place(fitW(txt(b, { size: 120, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SW - 80), 0.5, 0, SW / 2, 345)] : []),
+      place(fitW(txt(a, { size: 160, fill: "#FFE14D", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SAFE_W), 0.5, 1, SW / 2, b ? 320 : 380),
+      ...(b ? [place(fitW(txt(b, { size: 120, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SAFE_W), 0.5, 0, SW / 2, 345)] : []),
     ],
     "쇼츠 · 인물 강조": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: cut ? 10 : 0, bright: cut ? 55 : 80, sat: 120 }, subCrop())),
         L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: SW, h: SH, fill: "#FFFFFF", opacity: 0.3, lines: 70, inner: 0.45 })];
       if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: -540, y: 260, w: SW * 2, h: SH - 260, fit: "cover" }, CUTFX(16))));
-      ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 8, opacity: 0.6 }, box: { on: true, color: "#E50914", pad: 20, radius: 8 } }), SW - 90), 0.5, 0, SW / 2, 170));
-      if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SW - 70), 0.5, 1, SW / 2, SH - 220));
+      ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 8, opacity: 0.6 }, box: { on: true, color: "#E50914", pad: 20, radius: 8 } }), SAFE_W), 0.5, 0, SW / 2, 170));
+      if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
     "쇼츠 · 네온": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 60, sat: 130, vignette: 80 }, subCrop()))];
       if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: SW, h: SH }, CUTFX(12))));
-      ls.push(place(fitW(txt(a, { size: 160, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 12 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 46, opacity: 1 } }), SW - 90), 0.5, 0, SW / 2, 240));
-      if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SW - 70), 0.5, 1, SW / 2, SH - 260));
+      ls.push(place(fitW(txt(a, { size: 160, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 12 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 46, opacity: 1 } }), SAFE_W), 0.5, 0, SW / 2, 240));
+      if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
   },
@@ -1850,6 +1861,59 @@ async function exportImg() {
   if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
 }
 $("exportBtn").onclick = exportImg;
+
+/* ---------- 썸네일 검수 ---------- */
+const lum = hex => { const v = [1, 3, 5].map(i => parseInt(toHex(hex).slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+function regionLum(doc, l) {  // 그 글자 레이어를 빼고 그린 배경의 평균 밝기
+  const k = 0.25, c = newCanvas(W * k, H * k), g = c.getContext("2d");
+  renderDoc(g, Object.assign({}, doc, { layers: doc.layers.filter(x => x !== l && !(x.type === "text" && x.gid && x.gid === l.gid)) }), k);
+  const b = bbox([l]), x = clamp(Math.floor(b.x * k), 0, c.width - 1), y = clamp(Math.floor(b.y * k), 0, c.height - 1);
+  const w = clamp(Math.ceil(b.w * k), 1, c.width - x), hh = clamp(Math.ceil(b.h * k), 1, c.height - y);
+  const d = g.getImageData(x, y, w, hh).data; let s = 0, n = 0;
+  for (let i = 0; i < d.length; i += 16) { s += lum("#" + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, "0")).join("")); n++; }
+  return n ? s / n : 0;
+}
+function runQA() {
+  if (!D) return; if (editing) endEdit();
+  const items = [], add = (lv, title, msg, l) => items.push({ lv, title, msg, id: l && l.id });
+  const texts = D.doc.layers.filter(l => l.type === "text" && !l.hidden), short = H > W, smallW = short ? 110 : 168;
+  const want = short ? FMT.short : FMT.long;
+  if (W === want.w && H === want.h) add("ok", "크기", `${W}×${H} — ${short ? "쇼츠" : "유튜브 썸네일"} 권장 크기예요.`);
+  else add("bad", "크기", `${W}×${H}예요. ${want.w}×${want.h}로 맞추는 게 좋아요.`);
+  if (!texts.length) add("warn", "글자 없음", "제목 글자가 없어요. 짧고 큰 글자 한두 줄이 클릭을 부르는 편이에요.");
+  const chars = texts.reduce((a, l) => a + l.text.replace(/\s/g, "").length, 0);
+  if (chars > 26) add("warn", "글자가 많아요", `글자 ${chars}자 — 20자 안쪽으로 줄이면 한눈에 읽혀요.`);
+  else if (texts.length) add("ok", "글자 수", `글자 ${chars}자 — 적당해요.`);
+  for (const l of texts) {
+    const m = textLayout(ctx, l), sy = l.h / m.natH, minSize = Math.min(l.size, ...l.runs.filter(r => r.size).map(r => r.size)) * sy;
+    const px = minSize * smallW / W, nm = `'${lname(l).slice(0, 14)}'`;
+    if (px < 7) add("bad", "작게 보면 안 읽혀요", `${nm} — 작은 목록(${smallW}px)에서 글자 높이가 ${px.toFixed(1)}px예요. 더 키우세요.`, l);
+    else if (px < 10) add("warn", "작게 보면 읽기 힘들어요", `${nm} — 작은 목록에서 ${px.toFixed(1)}px. 조금 더 키우면 좋아요.`, l);
+    const strokeOk = Math.max(l.strokes[0].width, l.strokes[1].width) >= l.size * 0.06 || l.box.on || (l.outline.on && l.outline.width >= 4) || (l.glow.on && l.glow.size >= 20);
+    if (!strokeOk) {
+      const bg = regionLum(D.doc, l), fl = lum(l.fill), ratio = (Math.max(bg, fl) + 0.05) / (Math.min(bg, fl) + 0.05);
+      if (ratio < 3) add("bad", "배경과 구분이 안 돼요", `${nm} — 글자색과 뒤 배경의 대비가 ${ratio.toFixed(1)}:1이에요. 테두리·글자 뒤 상자·그림자를 넣거나 색을 바꾸세요.`, l);
+      else if (ratio < 4.5) add("warn", "대비가 약해요", `${nm} — 대비 ${ratio.toFixed(1)}:1. 테두리를 넣으면 더 또렷해요.`, l);
+    }
+    const b = bbox([l]);
+    if (b.x < -2 || b.y < -2 || b.x + b.w > W + 2 || b.y + b.h > H + 2) add("bad", "글자가 잘려요", `${nm} — 캔버스 밖으로 나갔어요.`, l);
+    const zones = short ? [[0.86, 0.42, 0.14, 0.45, "좋아요·댓글 버튼"], [0, 0.8, 0.84, 0.2, "제목·채널 이름"]] : [[0.86, 0.86, 0.14, 0.14, "재생시간 표시"]];
+    for (const [zx, zy, zw, zh, zn] of zones) {
+      const ix = Math.max(0, Math.min(b.x + b.w, (zx + zw) * W) - Math.max(b.x, zx * W)), iy = Math.max(0, Math.min(b.y + b.h, (zy + zh) * H) - Math.max(b.y, zy * H));
+      if (ix * iy > b.w * b.h * 0.15) add("warn", "가려지는 곳에 글자", `${nm} — 유튜브 화면의 '${zn}'에 가려질 수 있어요.`, l);
+    }
+  }
+  const hidden = D.doc.layers.filter(l => l.hidden).length;
+  if (hidden) add("warn", "숨긴 레이어", `숨긴 레이어 ${hidden}개는 저장 이미지에 안 나와요.`);
+  const bad = items.filter(i => i.lv === "bad").length, warn = items.filter(i => i.lv === "warn").length;
+  const score = Math.max(0, 100 - bad * 20 - warn * 7);
+  $("qaBody").innerHTML = `<div class="score">${score}점 · ${bad ? `고칠 것 ${bad}개` : "큰 문제 없어요"}${warn ? ` · 확인할 것 ${warn}개` : ""}</div>`
+    + items.sort((a, b) => ["bad", "warn", "ok"].indexOf(a.lv) - ["bad", "warn", "ok"].indexOf(b.lv)).map(i => `<div class="qi ${i.lv}" ${i.id ? `data-ql="${i.id}"` : ""}><span>${{ ok: "✅", warn: "⚠️", bad: "⛔" }[i.lv]}</span><span><b>${esc(i.title)}</b>${esc(i.msg)}</span></div>`).join("");
+  $("qaBody").querySelectorAll("[data-ql]").forEach(e => (e.onclick = () => { $("qaModal").classList.remove("show"); select([e.dataset.ql]); }));
+  $("qaModal").classList.add("show");
+  return { score, bad, warn, items };
+}
+$("qaBtn").onclick = runQA; $("qaClose").onclick = () => $("qaModal").classList.remove("show");
 
 /* ---------- 눈금자 · 안내선 (Ctrl+R / Ctrl+;) ---------- */
 let showRulers = false, showGuidesU = true;
