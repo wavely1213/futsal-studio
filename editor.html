@@ -744,15 +744,22 @@ function shiftAfter(t0, d, ignore = new Set(), skip = new Set()) {
   for (const m of S.markers) if (m.t >= t0 - EPS) m.t = Math.max(0, m.t + d);
   return moved;
 }
-// 연결된 짝을 d 만큼 따라 옮김: 그 자리가 막혀 있으면(배경음악 등) 같은 종류·역할의 빈 트랙으로 → 덮거나 겹치지 않음
-// (대사 트랙처럼 옮길 곳이 없으면 제자리)
+// 연결된 짝을 d 만큼 따라 옮김: 그 자리가 막혀 있으면(배경음악 등) 같은 종류·역할·상태(숨김·음소거·솔로·볼륨)의 빈 트랙으로 → 덮거나 겹치지 않고, 보이고 들리는 것도 그대로
+// V1(메인)·A1(대사) 클립은 다른 트랙으로 보내지 않음 (자막·쇼츠 맞춤이 V1 기준) → 막히면 제자리. 대사 트랙처럼 옮길 곳이 없어도 제자리
 function followTo(its, d) {
   const moved = [];
   for (const it of [...its].sort((a, b) => d < 0 ? a.start - b.start : b.start - a.start)) {
-    const ns = fr(Math.max(0, it.start + d)), ne = ns + iLen(it), from = TRK(it.track), k = from.k;
-    const free = tid => !S.items.some(x => x !== it && x.track === tid && x.start < ne - HF && iEnd(x) > ns + HF);
-    let to = free(from.id) ? from : S.tracks.find(t => t.k === k && (k === "v" || t.role === from.role) && !t.lock && !t.id.endsWith("1") && t !== from && free(t.id));
-    if (!to && (k === "v" || from.role === "music") && ensureTrack(k.toUpperCase() + (S.tracks.filter(t => t.k === k).length + 1))) to = S.tracks.filter(t => t.k === k).pop();
+    const ns = fr(Math.max(0, it.start + d)), ne = ns + iLen(it), from = TRK(it.track), k = from.k, home = from.id.endsWith("1");
+    const free = (tid, s = ns, e = ne) => !S.items.some(x => x !== it && x.track === tid && x.start < e - HF && iEnd(x) > s + HF);
+    const same = t => k === "v" ? !!t.hide === !!from.hide : t.role === from.role && !!t.mute === !!from.mute && !!t.solo === !!from.solo && (t.vol || 0) === (from.vol || 0);
+    // 제자리 트랙: 지나가는 자리에 다른 클립이 없을 때만 (클립 순서가 바뀌지 않게)
+    let to = free(from.id, Math.min(ns, it.start), Math.max(ne, iEnd(it))) ? from
+      : home ? null : S.tracks.find(t => t.k === k && same(t) && !t.lock && !t.id.endsWith("1") && t !== from && free(t.id));
+    const nt = k.toUpperCase() + (S.tracks.filter(t => t.k === k).length + 1);
+    if (!to && !home && (k === "v" || from.role === "music") && !TRK(nt) && ensureTrack(nt)) { // 새 트랙은 원래 트랙과 같은 상태로
+      to = TRK(nt);
+      Object.assign(to, k === "v" ? { hide: !!from.hide } : { mute: !!from.mute, solo: !!from.solo, vol: from.vol || 0 });
+    }
     if (!to) continue;
     it.start = ns;
     if (to !== from) { it.track = to.id; moved.push(to.id); }
