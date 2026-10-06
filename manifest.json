@@ -1,5 +1,5 @@
 {
-  "version": "1.2.1",
-  "notes": "제목 끝 공백 때문에 편집점 찾기가 실패하던 문제 수정",
+  "version": "1.3.0",
+  "notes": "편집실 추가 (프리미어식 타임라인·자막 편집·음량·효과·자동 추천)",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }

@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import core
+import editor
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
 LOG, JOB = [], {"name": None, "result": None, "error": None}
@@ -154,11 +155,64 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
+    def _file(self, path, ctype):
+        """영상은 구간 요청(Range)을 지원해야 미리보기에서 앞뒤로 이동 가능."""
+        size = path.stat().st_size
+        rng = self.headers.get("Range")
+        start, end = 0, size - 1
+        if rng and rng.startswith("bytes="):
+            a, _, b = rng[6:].partition("-")
+            start = int(a) if a else max(0, size - int(b))
+            end = int(b) if a and b else size - 1
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        else:
+            self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        with open(path, "rb") as f:
+            f.seek(start)
+            left = end - start + 1
+            try:
+                while left > 0:
+                    chunk = f.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/":
             return self._send(200, (core.APP_DIR / "ui.html").read_bytes(), "text/html; charset=utf-8")
+        if u.path == "/editor":
+            return self._send(200, (core.APP_DIR / "editor.html").read_bytes(), "text/html; charset=utf-8")
+        if u.path == "/media":
+            p = (core.VIDEOS / q["name"][0]).resolve()
+            if core.VIDEOS.resolve() not in p.parents or not p.exists():
+                return self._send(404, {"error": "not found"})
+            return self._file(p, "video/mp4")
+        if u.path.startswith("/fonts/"):
+            p = (editor.FONTS / Path(u.path).name).resolve()
+            return self._file(p, "font/otf") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/thumbs.jpg":
+            p = core.adir(q["name"][0]) / "thumbs.jpg"
+            return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
+        if u.path == "/api/edit/open":
+            n = q["name"][0]
+            try:
+                return self._send(200, {"project": editor.load_project(n), "waveform": editor.waveform(n),
+                                        "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
+                                        "recommend": editor.recommend(n)})
+            except Exception as e:
+                traceback.print_exc()
+                return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
         if u.path == "/api/state":
             since = int(q.get("since", ["0"])[0])
             with LOCK:
@@ -192,6 +246,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
         }
+        if path == "/api/edit/save":
+            editor.save_project(b["name"], b["project"])
+            return self._send(200, {"ok": True})
+        if path == "/api/edit/export":
+            ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/open":
             try:
                 open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])

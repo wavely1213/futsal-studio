@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>편집실 · 풋살사관학교 스튜디오</title>
+<style>
+  @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Bold.otf"); font-weight: 700; }
+  @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Black.otf"); font-weight: 900; }
+  :root {
+    --bg: #161616; --panel: #1f1f1f; --panel-2: #262626; --panel-3: #2e2e2e; --line: #0c0c0c; --line-2: #383838;
+    --ink: #e8e8e8; --ink-2: #a3a3a3; --ink-3: #6b6b6b;
+    --accent: #2d8ceb; --accent-soft: rgba(45,140,235,.18);
+    --cap: #d97a1e; --title: #8b4fc6; --video: #2f6fb0; --audio: #1f8c86; --play: #2d8ceb;
+    --cut: #8a96a8; --peak: #ff9a3c; --danger: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 12.5px/1.45 PretendardE, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; overflow: hidden; -webkit-user-select: none; user-select: none; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  input[type=range] { accent-color: var(--accent); }
+  .app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 300px; grid-template-rows: 40px minmax(240px, 1fr) 300px; gap: 2px; background: var(--line); }
+  .panel { background: var(--panel); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .ph { display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
+  .ph .tab { border: 0; background: none; padding: 5px 10px; color: var(--ink-2); cursor: pointer; border-radius: 4px; font-weight: 600; }
+  .ph .tab.on { color: var(--ink); background: var(--panel-3); }
+  .ph .t { font-weight: 700; padding: 0 6px; color: var(--ink-2); }
+  .ph .sp, .sp { flex: 1; }
+  .body { flex: 1; overflow: auto; min-height: 0; }
+  .btn { border: 1px solid var(--line-2); background: var(--panel-3); border-radius: 5px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: #3a3a3a; }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .ic { border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+  .ic:hover { background: var(--panel-3); color: var(--ink); }
+  .ic.on { color: var(--accent); background: var(--accent-soft); }
+
+  /* 상단 바 */
+  .top { grid-column: 1 / -1; background: #1b1b1b; display: flex; align-items: center; gap: 10px; padding: 0 12px; }
+  .top .logo { width: 24px; height: 24px; border-radius: 6px; background: #0f7a3d; color: #fff; font-weight: 900; font-size: 10px; display: grid; place-items: center; }
+  .top .name { font-weight: 700; max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top .saved { color: var(--ink-3); font-size: 12px; }
+
+  /* 자막 목록 */
+  .search { margin: 8px; display: flex; gap: 6px; }
+  .search input { flex: 1; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 8px; }
+  .caprow { display: grid; grid-template-columns: 6px 64px 1fr; gap: 8px; padding: 6px 8px 6px 0; border-bottom: 1px solid #191919; align-items: start; }
+  .caprow .bar { align-self: stretch; }
+  .caprow.on .bar { background: var(--accent); }
+  .caprow.sel { background: var(--accent-soft); }
+  .caprow.out { opacity: .38; }
+  .caprow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: pointer; font-size: 11.5px; line-height: 1.3; padding-top: 3px; }
+  .caprow .tc:hover { color: var(--accent); }
+  .caprow textarea { width: 100%; resize: none; border: 1px solid transparent; background: none; border-radius: 4px; padding: 2px 4px; line-height: 1.4; overflow: hidden; -webkit-user-select: text; user-select: text; }
+  .caprow textarea:focus { outline: none; border-color: var(--accent); background: var(--panel-2); }
+
+  /* 추천 */
+  .sec { padding: 10px; border-bottom: 1px solid var(--line); }
+  .sec h4 { margin: 0 0 8px; font-size: 12px; color: var(--ink-2); font-weight: 700; }
+  .rec { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+  .rec b { display: block; margin-bottom: 2px; }
+  .rec .m { color: var(--ink-2); font-size: 11.5px; margin-bottom: 6px; }
+  .kw { display: inline-block; background: #3a2a14; color: #ffb35c; border-radius: 3px; padding: 0 5px; margin-right: 3px; font-size: 11px; }
+  .evrow { display: flex; gap: 8px; padding: 4px 10px; cursor: pointer; }
+  .evrow:hover { background: var(--panel-2); }
+  .evrow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; width: 46px; }
+  .evrow.silence .k { color: var(--cut); } .evrow.peak .k { color: var(--peak); }
+
+  /* 모니터 */
+  .mon { position: relative; flex: 1; display: grid; place-items: center; background: #0e0e0e; overflow: hidden; }
+  .frame { position: relative; background: #000; overflow: hidden; box-shadow: 0 0 0 1px #2a2a2a; }
+  .frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .frame.long video { object-fit: contain; }
+  .ov { position: absolute; inset: 0; pointer-events: none; }
+  .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; }
+  .ctl { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); }
+  .tcbig { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--play); font-size: 14px; min-width: 96px; }
+  .tcdim { font-variant-numeric: tabular-nums; color: var(--ink-3); min-width: 96px; text-align: right; }
+  .scrub { flex: none; height: 16px; margin: 0 10px 6px; position: relative; background: var(--panel-2); border-radius: 3px; cursor: pointer; }
+  .scrub .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); border-radius: 3px; }
+  .scrub .knob { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--play); }
+
+  /* 속성 */
+  .props { grid-row: 2 / 4; grid-column: 3; }
+  .pg { border-bottom: 1px solid var(--line); padding: 10px 12px 12px; }
+  .pg h4 { margin: 0 0 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .pg h4 .dot { width: 8px; height: 8px; border-radius: 2px; }
+  .f { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .f label { color: var(--ink-2); }
+  .f .v { color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; font-size: 11.5px; }
+  .f input[type=range] { width: 100%; }
+  .f input[type=color] { width: 30px; height: 22px; border: 1px solid var(--line-2); background: none; padding: 0; border-radius: 4px; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 2px; }
+  .seg button { border: 0; background: none; padding: 3px 9px; border-radius: 4px; cursor: pointer; color: var(--ink-2); white-space: nowrap; }
+  .seg button.on { background: var(--panel-3); color: var(--ink); }
+  select.s, input.s, textarea.s { width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 4px 6px; -webkit-user-select: text; user-select: text; }
+  textarea.s { resize: vertical; min-height: 54px; }
+  .nud { display: flex; gap: 4px; align-items: center; }
+  .nud span { font-variant-numeric: tabular-nums; min-width: 70px; text-align: center; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .hint { color: var(--ink-3); font-size: 11.5px; }
+  .tog { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* 프로젝트 */
+  .bin .item { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #191919; }
+  .bin .item:hover { background: var(--panel-2); }
+  .bin .item.cur { background: var(--accent-soft); }
+  .bin .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--video); flex: none; }
+  .bin .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bin .st { color: var(--ink-3); font-size: 11px; }
+
+  /* 타임라인 */
+  .tlwrap { grid-column: 2; display: grid; grid-template-columns: 40px 1fr 30px; gap: 2px; background: var(--line); min-height: 0; }
+  .tools { background: var(--panel); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+  .tools .ic { width: 30px; height: 30px; font-size: 15px; }
+  .tl { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .tlbar { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-bottom: 1px solid var(--line); flex: none; }
+  .tlscroll { flex: 1; overflow: auto; position: relative; min-height: 0; }
+  .tracks { position: relative; min-width: 100%; }
+  .row { display: flex; height: 34px; border-bottom: 1px solid #191919; }
+  .row.v1 { height: 56px; } .row.a1 { height: 64px; }
+  .row.ruler { height: 26px; position: sticky; top: 0; z-index: 4; background: var(--panel); }
+  .hd { position: sticky; left: 0; z-index: 3; width: 92px; flex: none; background: var(--panel-2); border-right: 1px solid var(--line); display: flex; align-items: center; gap: 2px; padding: 0 4px; }
+  .hd b { width: 26px; text-align: center; border-radius: 3px; padding: 1px 0; font-size: 11px; }
+  .row.c1 .hd b { background: #5a3610; } .row.v2 .hd b { background: #3c2457; } .row.v1 .hd b { background: #183a5e; } .row.a1 .hd b { background: #10433f; }
+  .hd .ic { padding: 2px 4px; font-size: 12px; }
+  .lane { position: relative; flex: none; }
+  .clip { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; overflow: hidden; cursor: grab; border: 1px solid rgba(255,255,255,.12); }
+  .clip.sel { outline: 2px solid #fff; outline-offset: -1px; z-index: 2; }
+  .clip .lbl { position: absolute; left: 6px; top: 2px; right: 6px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; pointer-events: none; z-index: 1; }
+  .clip .eh { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
+  .clip .eh.l { left: 0; } .clip .eh.r { right: 0; }
+  .clip .eh:hover { background: rgba(255,255,255,.25); }
+  .v1 .clip { background: var(--video) repeat-x; background-size: auto 100%; }
+  .v1 .clip::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(47,111,176,.85) 0 16px, rgba(47,111,176,.25) 16px); }
+  .a1 .clip { background: #12302e; }
+  .a1 .clip canvas { position: absolute; left: 0; top: 0; }
+  .c1 .clip { background: var(--cap); }
+  .v2 .clip { background: var(--title); }
+  .clip.muted { filter: grayscale(.9) brightness(.6); }
+  .ruler .lane { cursor: pointer; }
+  .tick { position: absolute; bottom: 0; border-left: 1px solid #4a4a4a; height: 6px; }
+  .tick.big { height: 12px; }
+  .tick span { position: absolute; left: 3px; bottom: 9px; font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+  .mk { position: absolute; top: 2px; width: 2px; height: 9px; border-radius: 1px; }
+  .mk.silence { background: var(--cut); } .mk.peak { background: var(--peak); }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--play); z-index: 5; pointer-events: none; }
+  .playhead::before { content: ""; position: absolute; top: 0; left: -6px; border: 6px solid transparent; border-top: 8px solid var(--play); }
+  .ghost { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; z-index: 6; pointer-events: none; display: none; }
+  .razor .lane .clip { cursor: crosshair; }
+
+  /* 레벨 미터 */
+  .meter { background: var(--panel); display: flex; gap: 3px; padding: 36px 5px 8px; justify-content: center; }
+  .meter .m { width: 7px; background: #111; position: relative; border-radius: 2px; overflow: hidden; }
+  .meter .m i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(0deg, #2fbf6b 0 65%, #e5c33b 65% 85%, #e5484d 85%); }
+
+  /* 진행 · 알림 · 모달 */
+  .pill { display: none; align-items: center; gap: 8px; background: var(--panel-3); border: 1px solid var(--line-2); padding: 4px 10px; border-radius: 999px; font-size: 12px; }
+  .pill.show { display: inline-flex; }
+  .pill .bar { width: 90px; height: 5px; background: #111; border-radius: 3px; overflow: hidden; }
+  .pill .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(16px); background: #fff; color: #111; padding: 9px 16px; border-radius: 8px; font-weight: 700; opacity: 0; transition: .2s; pointer-events: none; z-index: 20; }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 15; }
+  .modal.show { display: grid; }
+  .modal .box { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 18px; width: 420px; }
+  .modal h3 { margin: 0 0 4px; font-size: 16px; }
+  .modal label { display: flex; gap: 8px; align-items: center; padding: 6px 0; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+  .keys kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 5px; color: var(--ink); font: 11px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 상단 -->
+  <div class="top">
+    <button class="btn" id="back">← 스튜디오</button>
+    <div class="logo">FS</div>
+    <div class="name" id="pname">편집실</div>
+    <span class="saved" id="saved"></span>
+    <div class="sp"></div>
+    <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)">↶</button>
+    <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
+    <button class="ic" id="help" title="단축키">⌨</button>
+    <span class="pill" id="busy"><span id="busyTxt">내보내는 중</span><span class="bar"><i id="busyBar"></i></span><span id="busyPct"></span></span>
+    <button class="btn pri" id="exportBtn">내보내기</button>
+  </div>
+
+  <!-- 왼쪽 위: 자막 / 추천 -->
+  <div class="panel" style="grid-column:1;grid-row:2">
+    <div class="ph"><button class="tab on" data-tab="caps">자막</button><button class="tab" data-tab="rec">추천 · 편집점</button><div class="sp"></div></div>
+    <div class="body" id="tab-caps">
+      <div class="search"><input id="capSearch" placeholder="자막 검색"><button class="btn" id="capAdd" title="현재 위치에 자막 추가">＋</button></div>
+      <div id="capList"></div>
+    </div>
+    <div class="body" id="tab-rec" style="display:none"></div>
+  </div>
+
+  <!-- 가운데 위: 프로그램 모니터 -->
+  <div class="panel" style="grid-column:2;grid-row:2">
+    <div class="ph"><span class="t">프로그램</span><span class="hint" id="monFmt"></span><div class="sp"></div>
+      <div class="seg" id="fmtSeg"><button data-v="shorts">쇼츠 9:16</button><button data-v="long">롱폼 16:9</button></div></div>
+    <div class="mon" id="mon"><div class="frame" id="frame"><video id="vid" preload="auto" playsinline></video><div class="ov" id="ov"></div></div></div>
+    <div class="scrub" id="scrub"><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
+    <div class="ctl">
+      <span class="tcbig" id="tcNow">00:00:00:00</span>
+      <div class="sp"></div>
+      <button class="ic" id="bPrevEdit" title="이전 편집점 (↑)">⏮</button>
+      <button class="ic" id="bBack" title="1프레임 뒤로 (←)">◀︎❚</button>
+      <button class="ic" id="bPlay" title="재생/정지 (Space)" style="font-size:16px">▶</button>
+      <button class="ic" id="bFwd" title="1프레임 앞으로 (→)">❚▶︎</button>
+      <button class="ic" id="bNextEdit" title="다음 편집점 (↓)">⏭</button>
+      <button class="ic" id="bSplit" title="여기서 자르기 (Ctrl+K)">✂</button>
+      <div class="sp"></div>
+      <span class="tcdim" id="tcDur">00:00:00:00</span>
+    </div>
+  </div>
+
+  <!-- 오른쪽: 속성 -->
+  <div class="panel props">
+    <div class="ph"><span class="t">속성</span><div class="sp"></div></div>
+    <div class="body" id="props"></div>
+  </div>
+
+  <!-- 왼쪽 아래: 프로젝트 -->
+  <div class="panel bin" style="grid-column:1;grid-row:3">
+    <div class="ph"><span class="t">프로젝트</span><div class="sp"></div><span class="hint" id="binCount"></span></div>
+    <div class="body" id="bin"></div>
+  </div>
+
+  <!-- 가운데 아래: 도구 · 타임라인 · 미터 -->
+  <div class="tlwrap" style="grid-row:3">
+    <div class="tools">
+      <button class="ic on" id="tSel" title="선택 도구 (V)">➤</button>
+      <button class="ic" id="tRazor" title="자르기 도구 (C)">✂</button>
+      <button class="ic" id="tTitle" title="타이틀 추가 (T)">T</button>
+    </div>
+    <div class="tl">
+      <div class="tlbar">
+        <span class="tcbig" id="tcNow2" style="font-size:13px">00:00:00:00</span>
+        <span class="hint" id="tlInfo"></span>
+        <div class="sp"></div>
+        <span class="hint">확대</span><input type="range" id="zoom" min="2" max="200" value="20" style="width:140px">
+      </div>
+      <div class="tlscroll" id="tlscroll"><div class="tracks" id="tracks"></div></div>
+    </div>
+    <div class="meter"><div class="m"><i id="mL"></i></div><div class="m"><i id="mR"></i></div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="modal" id="exModal"><div class="box">
+  <h3>내보내기</h3><div class="hint" style="margin-bottom:10px">완성본 폴더에 저장돼요. 자막·타이틀·효과·음량이 영상에 입혀집니다.</div>
+  <label><input type="checkbox" id="exVideo" checked> 영상 (mp4) — 업로드용</label>
+  <label><input type="checkbox" id="exXml" checked> 프리미어 프로젝트 (XML) — 프리미어에서 이어서 편집</label>
+  <label><input type="checkbox" id="exSrt" checked> 자막 파일 (SRT)</label>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" id="exCancel">취소</button><button class="btn pri" id="exGo">내보내기</button></div>
+</div></div>
+<div class="modal" id="helpModal"><div class="box">
+  <h3>단축키</h3><div class="hint" style="margin-bottom:10px">프리미어 프로와 같은 키를 쓰도록 맞췄어요.</div>
+  <div class="keys">
+    <kbd>Space</kbd><span>재생 / 정지</span><kbd>J · K · L</kbd><span>5초 뒤로 · 정지 · 재생(누를수록 빠르게)</span>
+    <kbd>← →</kbd><span>1프레임 이동 (Shift: 1초)</span><kbd>↑ ↓</kbd><span>이전 / 다음 편집점</span>
+    <kbd>V</kbd><span>선택 도구</span><kbd>C</kbd><span>자르기 도구 (클립을 누른 위치에서 자름)</span>
+    <kbd>Ctrl+K</kbd><span>재생 위치에서 자르기</span><kbd>Delete</kbd><span>선택한 클립·자막·타이틀 삭제 (뒤 클립이 당겨짐)</span>
+    <kbd>T</kbd><span>타이틀 추가</span><kbd>+ / −</kbd><span>타임라인 확대 / 축소</span>
+    <kbd>Ctrl+Z</kbd><span>되돌리기 (Ctrl+Shift+Z 다시 실행)</span><kbd>Home / End</kbd><span>처음 / 끝으로</span>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="helpClose">닫기</button></div>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const FPS = 30;
+const NAME = new URLSearchParams(location.search).get("name");
+const tc = t => { t = Math.max(0, t); const f = Math.floor((t % 1) * FPS + 1e-6), s = Math.floor(t); return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60, f].map(x => String(x).padStart(2, "0")).join(":"); };
+const mmss = t => { t = Math.max(0, t); return `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(1).padStart(4, "0")}`; };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const nid = () => Math.random().toString(16).slice(2, 10);
+const niceName = n => n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "");
+
+let P = null, WAVE = null, TH = null, EVENTS = [], REC = null, DUR = 0;
+let T = 0, playing = false, rate = 1, curIdx = 0, sel = null, tool = "select", zoom = 20;
+let undoStack = [], redoStack = [], saveTimer = null;
+const vid = $("vid");
+
+/* ---------- 데이터 도우미 ---------- */
+function seq() { let p = 0; return P.clips.map((c, i) => { const s = p; p += c.out - c.in; return { c, i, s, e: p }; }); }
+function total() { return P.clips.reduce((a, c) => a + c.out - c.in, 0); }
+function at(t) { const q = seq(); for (const x of q) if (t < x.e - 1e-6) return x; return q[q.length - 1]; }
+function src2tl(src) { return seq().filter(x => src >= x.c.in && src < x.c.out).map(x => x.s + src - x.c.in); }
+function capsTL() {
+  const out = [];
+  for (const cap of P.captions) for (const x of seq()) {
+    const a = Math.max(cap.start, x.c.in), b = Math.min(cap.end, x.c.out);
+    if (b - a > 0.05) out.push({ cap, s: x.s + a - x.c.in, e: x.s + b - x.c.in });
+  }
+  return out;
+}
+function commit(label) {
+  undoStack.push(JSON.stringify(P)); if (undoStack.length > 80) undoStack.shift(); redoStack = [];
+}
+function changed(full = true) { scheduleSave(); if (full) renderAll(); else { renderTimeline(); renderProps(); } }
+function scheduleSave() {
+  $("saved").textContent = "저장 중…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    await fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, project: P }) });
+    $("saved").textContent = "저장됨";
+  }, 700);
+}
+function undo() { if (!undoStack.length) return; redoStack.push(JSON.stringify(P)); P = JSON.parse(undoStack.pop()); sel = null; changed(); }
+function redo() { if (!redoStack.length) return; undoStack.push(JSON.stringify(P)); P = JSON.parse(redoStack.pop()); sel = null; changed(); }
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
+
+/* ---------- 재생 ---------- */
+let actx = null, gain = null, an = null, anBuf = null;
+function ensureAudio() {
+  if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = actx.createMediaElementSource(vid);
+    gain = actx.createGain(); an = actx.createAnalyser(); an.fftSize = 1024; anBuf = new Float32Array(an.fftSize);
+    src.connect(gain); gain.connect(an); an.connect(actx.destination);
+  } catch (e) { actx = null; }
+}
+function seek(t) {
+  T = clamp(t, 0, Math.max(0, total() - 0.001));
+  const x = at(T); if (!x) return;
+  curIdx = x.i;
+  const target = x.c.in + (T - x.s);
+  if (Math.abs(vid.currentTime - target) > 0.02) vid.currentTime = target;
+  drawFrameState();
+}
+function play() { ensureAudio(); if (T >= total() - 0.05) seek(0); playing = true; vid.playbackRate = rate; vid.play(); $("bPlay").textContent = "❚❚"; }
+function pause() { playing = false; rate = 1; vid.pause(); $("bPlay").textContent = "▶"; }
+function toggle() { playing ? pause() : play(); }
+function edits() { const q = seq(); return [0, ...q.map(x => x.e)]; }
+
+function loop() {
+  if (P) {
+    if (playing) {
+      const x = seq()[curIdx];
+      if (x) {
+        if (vid.currentTime >= x.c.out - 0.03 || vid.currentTime < x.c.in - 0.3) {
+          const nx = seq()[curIdx + 1];
+          if (nx) { curIdx++; vid.currentTime = nx.c.in; T = nx.s; }
+          else { pause(); T = total(); }
+        } else T = x.s + (vid.currentTime - x.c.in);
+      }
+      autoscroll();
+    }
+    // 음량 (클립 볼륨 · 페이드 · 음소거 · 전체 음량)
+    const x = seq()[curIdx];
+    if (gain && x) {
+      const c = x.c, local = T - x.s, len = c.out - c.in;
+      let g = c.mute ? 0 : c.volume * P.master.volume;
+      if (c.fadeIn > 0) g *= clamp(local / c.fadeIn, 0, 1);
+      if (c.fadeOut > 0) g *= clamp((len - local) / c.fadeOut, 0, 1);
+      gain.gain.value = g;
+    }
+    drawFrameState();
+    drawMeter();
+  }
+  requestAnimationFrame(loop);
+}
+function drawMeter() {
+  let lvl = 0;
+  if (an && playing) { an.getFloatTimeDomainData(anBuf); let m = 0; for (const v of anBuf) m = Math.max(m, Math.abs(v)); lvl = m; }
+  const db = lvl > 0 ? 20 * Math.log10(lvl) : -60, h = clamp((db + 60) / 60, 0, 1) * 100;
+  $("mL").style.height = h + "%"; $("mR").style.height = Math.max(0, h - 2) + "%";
+}
+
+/* ---------- 모니터 · 자막 미리보기 ---------- */
+function layoutFrame() {
+  const mon = $("mon"), f = $("frame"), short = P.format === "shorts";
+  const ar = short ? 9 / 16 : 16 / 9;
+  let h = mon.clientHeight - 16, w = h * ar;
+  if (w > mon.clientWidth - 16) { w = mon.clientWidth - 16; h = w / ar; }
+  f.style.width = w + "px"; f.style.height = h + "px";
+  f.classList.toggle("long", !short);
+  document.querySelectorAll("#fmtSeg button").forEach(b => b.classList.toggle("on", b.dataset.v === P.format));
+  $("monFmt").textContent = short ? "1080×1920 · 세로" : "1920×1080 · 가로";
+}
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function styleText(el, st, scale) {
+  el.style.fontWeight = st.weight === "Black" ? 900 : 700;
+  el.style.fontSize = st.size * scale + "px";
+  el.style.top = st.y * 100 + "%";
+  el.style.color = st.fill;
+  if (st.bgOn) {
+    el.style.webkitTextStroke = "0"; el.style.background = hexA(st.bg, st.bgOpacity);
+    el.style.padding = `${Math.max(6, st.strokeW) * scale}px ${Math.max(10, st.strokeW * 1.6) * scale}px`; el.style.borderRadius = 4 * scale + "px";
+  } else {
+    el.style.background = "none"; el.style.padding = "0";
+    el.style.webkitTextStroke = `${st.strokeW * 2 * scale}px ${st.stroke}`;
+  }
+}
+function effect(el, st, e, r, scale, text) {
+  let op = 1, sc = 1, dy = 0;
+  if (st.effect === "fade") op = Math.min(1, e / 0.15, r / 0.12);
+  if (st.effect === "pop") sc = e < 0.11 ? 0.7 + 0.38 * (e / 0.11) : e < 0.19 ? 1.08 - 0.08 * ((e - 0.11) / 0.08) : 1;
+  if (st.effect === "slide") { dy = 40 * scale * (1 - Math.min(1, e / 0.18)); op = Math.min(1, e / 0.12); }
+  el.style.opacity = op;
+  el.style.transform = `translate(-50%, -100%) translateY(${dy}px) scale(${sc})`;
+  if (st.effect === "karaoke") {
+    const words = text.split(" "), tot = words.reduce((a, w) => a + w.length, 0) || 1, dur = e + r;
+    let acc = 0;
+    el.innerHTML = words.map(w => { const on = (acc / tot) * dur <= e; acc += w.length; return `<span style="color:${on ? st.highlight : st.fill}">${esc(w)}</span>`; }).join(" ");
+  } else if (el._t !== text) { el.textContent = text; }
+  el._t = st.effect === "karaoke" ? null : text;
+}
+let ovEls = {};
+function drawFrameState() {
+  const scale = $("frame").clientHeight / (P.format === "shorts" ? 1920 : 1080);
+  const x = seq()[curIdx];
+  if (x) vid.style.objectPosition = P.format === "shorts" ? `${x.c.reframe * 100}% 50%` : "50% 50%";
+  const want = {};
+  if (P.captionsOn) for (const c of capsTL()) if (T >= c.s && T < c.e) want["c" + c.cap.id] = { st: P.captionStyle, s: c.s, e: c.e, text: c.cap.text };
+  for (const t of P.titles) if (T >= t.start && T < t.start + t.dur) want["t" + t.id] = { st: t.style, s: t.start, e: t.start + t.dur, text: t.text };
+  for (const k of Object.keys(ovEls)) if (!want[k]) { ovEls[k].remove(); delete ovEls[k]; }
+  for (const [k, w] of Object.entries(want)) {
+    let el = ovEls[k];
+    if (!el) { el = document.createElement("div"); el.className = "txt"; $("ov").appendChild(el); ovEls[k] = el; }
+    styleText(el, w.st, scale);
+    effect(el, w.st, T - w.s, w.e - T, scale, w.text);
+  }
+  const tot = total();
+  $("tcNow").textContent = tc(T); $("tcNow2").textContent = tc(T); $("tcDur").textContent = tc(tot);
+  const pct = tot ? T / tot * 100 : 0;
+  $("scrubFill").style.width = pct + "%"; $("scrubKnob").style.left = pct + "%";
+  const ph = $("playhead"); if (ph) ph.style.left = 92 + T * zoom + "px";
+  highlightCaption();
+}
+let lastCapOn = null;
+function highlightCaption() {
+  const x = seq()[curIdx]; if (!x) return;
+  const src = x.c.in + (T - x.s);
+  const cur = P.captions.find(c => src >= c.start && src < c.end);
+  const id = cur ? cur.id : null;
+  if (id === lastCapOn) return;
+  lastCapOn = id;
+  document.querySelectorAll(".caprow").forEach(r => r.classList.toggle("on", r.dataset.id === id));
+  if (id && playing) { const r = document.querySelector(`.caprow[data-id="${id}"]`); if (r) r.scrollIntoView({ block: "nearest" }); }
+}
+
+/* ---------- 타임라인 ---------- */
+const HD = 92;
+function renderTimeline() {
+  const tot = total(), W = Math.max(tot * zoom + 200, $("tlscroll").clientWidth - HD);
+  const caps = capsTL();
+  const marks = [];
+  for (const ev of EVENTS) if (ev.type !== "speech") for (const t of src2tl(ev.t)) marks.push({ t, type: ev.type });
+  // 눈금 간격
+  const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300]; const step = steps.find(s => s * zoom >= 70) || 600;
+  let ticks = "";
+  for (let t = 0; t <= tot + step; t += step / 5) {
+    const big = Math.abs(t / step - Math.round(t / step)) < 1e-6;
+    ticks += `<div class="tick ${big ? "big" : ""}" style="left:${t * zoom}px">${big ? `<span>${tc(t).slice(3, 8)}</span>` : ""}</div>`;
+  }
+  const lane = inner => `<div class="lane" style="width:${W}px">${inner}</div>`;
+  const q = seq();
+  const vclips = q.map(x => {
+    const c = x.c, w = (c.out - c.in) * zoom;
+    let bg = "";
+    if (TH) { const tw = TH.w * (50 / TH.h); bg = `background-image:url('/thumbs.jpg?name=${encodeURIComponent(NAME)}');background-size:${TH.count * tw}px 50px;background-position:${-(c.in / TH.interval) * tw}px 4px;`; }
+    return `<div class="clip ${isSel("clip", c.id) ? "sel" : ""} ${c.mute ? "muted" : ""}" data-k="clip" data-id="${c.id}" style="left:${x.s * zoom}px;width:${w}px;${bg}"><div class="eh l"></div><div class="lbl">${esc(niceName(NAME))} · ${mmss(c.in)}~${mmss(c.out)}</div><div class="eh r"></div></div>`;
+  }).join("");
+  const aclips = q.map(x => { const c = x.c; return `<div class="clip ${isSel("clip", c.id) ? "sel" : ""} ${c.mute ? "muted" : ""}" data-k="clip" data-id="${c.id}" style="left:${x.s * zoom}px;width:${(c.out - c.in) * zoom}px"><canvas data-cid="${c.id}"></canvas><div class="lbl">${c.mute ? "음소거" : Math.round(c.volume * 100) + "%"}${c.fadeIn ? " · 페이드인" : ""}${c.fadeOut ? " · 페이드아웃" : ""}</div><div class="eh l"></div><div class="eh r"></div></div>`; }).join("");
+  const cclips = P.captionsOn ? caps.map(c => `<div class="clip ${isSel("caption", c.cap.id) ? "sel" : ""}" data-k="caption" data-id="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, (c.e - c.s) * zoom)}px"><div class="lbl">${esc(c.cap.text)}</div></div>`).join("") : "";
+  const tclips = P.titles.map(t => `<div class="clip ${isSel("title", t.id) ? "sel" : ""}" data-k="title" data-id="${t.id}" style="left:${t.start * zoom}px;width:${t.dur * zoom}px"><div class="eh l"></div><div class="lbl">${esc(t.text)}</div><div class="eh r"></div></div>`).join("");
+  $("tracks").style.width = W + HD + "px";
+  $("tracks").className = "tracks" + (tool === "razor" ? " razor" : "");
+  $("tracks").innerHTML = `
+    <div class="row ruler"><div class="hd"></div>${lane(ticks + marks.map(m => `<div class="mk ${m.type}" style="left:${m.t * zoom}px" title="${m.type === "peak" ? "하이라이트 후보" : "컷 후보"}"></div>`).join(""))}</div>
+    <div class="row c1"><div class="hd"><b>C1</b><button class="ic ${P.captionsOn ? "on" : ""}" id="hCap" title="자막 보이기/숨기기">👁</button><span class="hint">자막</span></div>${lane(cclips)}</div>
+    <div class="row v2"><div class="hd"><b>V2</b><span class="hint">타이틀</span></div>${lane(tclips)}</div>
+    <div class="row v1"><div class="hd"><b>V1</b><span class="hint">영상</span></div>${lane(vclips)}</div>
+    <div class="row a1"><div class="hd"><b>A1</b><span class="hint">소리</span></div>${lane(aclips)}</div>
+    <div class="playhead" id="playhead"></div><div class="ghost" id="ghost"></div>`;
+  $("hCap").onclick = () => { commit(); P.captionsOn = !P.captionsOn; changed(); };
+  drawWaves();
+  $("tlInfo").textContent = `컷 ${P.clips.length}개 · 길이 ${mmss(tot)}`;
+  drawFrameState();
+}
+function drawWaves() {
+  if (!WAVE) return;
+  const ps = WAVE.per_sec, pk = WAVE.peaks;
+  document.querySelectorAll("canvas[data-cid]").forEach(cv => {
+    const c = P.clips.find(x => x.id === cv.dataset.cid); if (!c) return;
+    const w = Math.min(32000, Math.max(1, Math.round((c.out - c.in) * zoom))), h = 56;
+    cv.width = w; cv.height = h;
+    const g = cv.getContext("2d"); g.fillStyle = c.mute ? "#3a4a48" : "#3fd0c6";
+    const vol = c.mute ? 0.15 : Math.min(2, c.volume);
+    for (let x = 0; x < w; x++) {
+      const t = c.in + x / zoom, i = Math.floor(t * ps), j = Math.max(i + 1, Math.floor((t + 1 / zoom) * ps));
+      let m = 0; for (let k = i; k < j && k < pk.length; k++) m = Math.max(m, pk[k]);
+      const a = Math.min(1, m * vol) * (h / 2 - 4);
+      g.fillRect(x, h / 2 - a + 6, 1, Math.max(1, a * 2));
+    }
+  });
+}
+const isSel = (k, id) => sel && sel.k === k && sel.id === id;
+function autoscroll() {
+  const sc = $("tlscroll"), x = HD + T * zoom;
+  if (x > sc.scrollLeft + sc.clientWidth - 40) sc.scrollLeft = x - 120;
+  if (x < sc.scrollLeft + HD) sc.scrollLeft = Math.max(0, x - HD - 40);
+}
+function xToT(ev) { const r = $("tracks").getBoundingClientRect(); return clamp((ev.clientX - r.left - HD) / zoom, 0, total()); }
+
+// 클립 조작: 선택 · 자르기 · 가장자리 끌어 길이 조절 · 끌어서 순서 변경
+$("tracks").addEventListener("mousedown", ev => {
+  const clipEl = ev.target.closest(".clip");
+  if (ev.target.closest(".hd")) return;
+  if (!clipEl) { seek(xToT(ev)); sel = null; renderProps(); renderTimeline(); dragSeek(ev); return; }
+  const k = clipEl.dataset.k, id = clipEl.dataset.id;
+  if (tool === "razor" && k === "clip") { splitAt(xToT(ev)); return; }
+  sel = { k, id };
+  const edge = ev.target.classList.contains("eh") ? (ev.target.classList.contains("l") ? "l" : "r") : null;
+  const t0 = xToT(ev);
+  if (k === "caption") { const c = P.captions.find(x => x.id === id); seek(t0); renderTimeline(); renderProps(); focusCap(id, false); return; }
+  const before = JSON.stringify(P);
+  let moved = false;
+  if (k === "clip") {
+    const c = P.clips.find(x => x.id === id), o = { in: c.in, out: c.out };
+    const onMove = e => {
+      const d = (e.clientX - ev.clientX) / zoom; moved = moved || Math.abs(e.clientX - ev.clientX) > 3;
+      if (!moved) return;
+      if (edge === "l") c.in = clamp(o.in + d, 0, c.out - 0.2);
+      else if (edge === "r") c.out = clamp(o.out + d, c.in + 0.2, P.info.duration);
+      else { const g = $("ghost"); g.style.display = "block"; g.style.left = HD + xToT(e) * zoom + "px"; }
+      if (edge) renderTimeline();
+    };
+    const onUp = e => {
+      removeEventListener("mousemove", onMove); removeEventListener("mouseup", onUp);
+      if (moved && !edge) {
+        const dropT = xToT(e), from = P.clips.indexOf(c);
+        P.clips.splice(from, 1);
+        let idx = 0; let pos = 0;
+        for (; idx < P.clips.length; idx++) { const len = P.clips[idx].out - P.clips[idx].in; if (dropT < pos + len / 2) break; pos += len; }
+        P.clips.splice(idx, 0, c);
+      }
+      if (moved) { undoStack.push(before); redoStack = []; changed(); } else { seek(t0); renderTimeline(); renderProps(); }
+    };
+    addEventListener("mousemove", onMove); addEventListener("mouseup", onUp);
+  } else if (k === "title") {
+    const t = P.titles.find(x => x.id === id), o = { start: t.start, dur: t.dur };
+    const onMove = e => {
+      const d = (e.clientX - ev.clientX) / zoom; moved = moved || Math.abs(e.clientX - ev.clientX) > 3; if (!moved) return;
+      if (edge === "l") { const ns = clamp(o.start + d, 0, o.start + o.dur - 0.3); t.dur = o.dur - (ns - o.start); t.start = ns; }
+      else if (edge === "r") t.dur = Math.max(0.3, o.dur + d);
+      else t.start = Math.max(0, o.start + d);
+      renderTimeline();
+    };
+    const onUp = () => { removeEventListener("mousemove", onMove); removeEventListener("mouseup", onUp); if (moved) { undoStack.push(before); redoStack = []; changed(); } else { seek(t0); renderTimeline(); renderProps(); } };
+    addEventListener("mousemove", onMove); addEventListener("mouseup", onUp);
+  }
+});
+function dragSeek(ev) {
+  const mv = e => seek(xToT(e)); const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+function splitAt(t) {
+  const x = at(t); if (!x) return;
+  const cut = x.c.in + (t - x.s);
+  if (cut - x.c.in < 0.1 || x.c.out - cut < 0.1) return;
+  commit();
+  const b = { ...x.c, id: nid(), in: cut, fadeIn: 0 }; x.c.out = cut; x.c.fadeOut = 0;
+  P.clips.splice(x.i + 1, 0, b);
+  changed(); toast("잘랐어요");
+}
+function deleteSel() {
+  if (!sel) return;
+  commit();
+  if (sel.k === "clip") { if (P.clips.length <= 1) { undoStack.pop(); return toast("클립이 하나뿐이라 지울 수 없어요"); } P.clips = P.clips.filter(c => c.id !== sel.id); }
+  if (sel.k === "caption") P.captions = P.captions.filter(c => c.id !== sel.id);
+  if (sel.k === "title") P.titles = P.titles.filter(t => t.id !== sel.id);
+  sel = null; changed(); seek(Math.min(T, total() - 0.01));
+}
+function addTitle() {
+  commit();
+  const t = { id: nid(), text: "제목을 입력하세요", start: T, dur: 3, style: { ...P.captionStyle, weight: "Black", size: 104, y: 0.2, fill: "#FFD400", stroke: "#000000", strokeW: 8, bgOn: false, effect: "pop" } };
+  P.titles.push(t); sel = { k: "title", id: t.id }; changed();
+  setTimeout(() => { const el = $("pTitleText"); if (el) { el.focus(); el.select(); } }, 50);
+}
+
+/* ---------- 자막 목록 ---------- */
+function renderCaps() {
+  const q = $("capSearch").value.trim();
+  const inSeq = c => P.clips.some(x => c.end > x.in && c.start < x.out);
+  $("capList").innerHTML = P.captions.filter(c => !q || c.text.includes(q)).map(c => `
+    <div class="caprow ${isSel("caption", c.id) ? "sel" : ""} ${inSeq(c) ? "" : "out"}" data-id="${c.id}">
+      <div class="bar"></div>
+      <div class="tc" data-seek="${c.id}">${mmss(c.start)}<br>${mmss(c.end)}</div>
+      <textarea rows="1" data-cap="${c.id}" spellcheck="false">${esc(c.text)}</textarea>
+    </div>`).join("") || `<div class="hint" style="padding:12px">자막이 없어요. 스튜디오의 보관함에서 "편집점 찾기"를 먼저 해 주세요.</div>`;
+  document.querySelectorAll("[data-cap]").forEach(ta => {
+    const fit = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }; fit();
+    ta.onfocus = () => { sel = { k: "caption", id: ta.dataset.cap }; ta._before = JSON.stringify(P); renderProps(); };
+    ta.oninput = () => { fit(); const c = P.captions.find(x => x.id === ta.dataset.cap); c.text = ta.value; scheduleSave(); };
+    ta.onblur = () => { if (ta._before && ta._before !== JSON.stringify(P)) { undoStack.push(ta._before); redoStack = []; renderTimeline(); } };
+  });
+  document.querySelectorAll("[data-seek]").forEach(el => el.onclick = () => {
+    const c = P.captions.find(x => x.id === el.dataset.seek); const ts = src2tl(c.start + 0.01);
+    sel = { k: "caption", id: c.id };
+    if (ts.length) seek(ts[0]); else toast("이 자막은 지금 잘려나간 구간에 있어요");
+    renderTimeline(); renderProps();
+  });
+}
+function focusCap(id, edit) {
+  const r = document.querySelector(`.caprow[data-id="${id}"]`); if (!r) return;
+  document.querySelectorAll(".caprow").forEach(x => x.classList.toggle("sel", x === r));
+  r.scrollIntoView({ block: "nearest" }); if (edit) r.querySelector("textarea").focus();
+}
+$("capSearch").oninput = renderCaps;
+$("capAdd").onclick = () => {
+  const x = seq()[curIdx]; if (!x) return; const src = x.c.in + (T - x.s);
+  commit(); const c = { id: nid(), start: src, end: Math.min(src + 2, x.c.out), text: "새 자막" };
+  P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); sel = { k: "caption", id: c.id }; changed();
+  setTimeout(() => focusCap(c.id, true), 30);
+};
+
+/* ---------- 추천 · 편집점 ---------- */
+function renderRec() {
+  const r = REC || { shorts: [], tidy: [] };
+  const m = t => mmss(t).slice(0, 5);
+  $("tab-rec").innerHTML = `
+    <div class="sec"><h4>쇼츠 추천 구간 <span class="hint">(AI 없이 PC에서 계산)</span></h4>
+      ${r.shorts.map((s, i) => `<div class="rec"><b>${i + 1}. ${esc(s.title)}…</b>
+        <div class="m">${m(s.start)}~${m(s.end)} · 다듬은 길이 ${s.length}초 · 컷 ${s.cuts.length}개</div>
+        <div style="margin-bottom:6px">${s.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>
+        <button class="btn" data-rec="${i}">이 구간으로 편집 시작</button></div>`).join("") || `<div class="hint">추천할 구간을 찾지 못했어요. 대사가 있는 영상인지 확인해 주세요.</div>`}
+    </div>
+    <div class="sec"><h4>롱폼 군더더기 정리</h4>
+      <div class="hint" style="margin-bottom:8px">추임새("아", "자"), 같은 말 반복, 긴 무음을 빼고 이어붙여요. 군더더기 ${r.junk || 0}곳 · 컷 ${r.tidy.length}개</div>
+      <button class="btn" id="recTidy" ${r.tidy.length ? "" : "disabled"}>전체 영상 군더더기 정리</button>
+      <button class="btn" id="recFull">원본 전체로 되돌리기</button>
+    </div>
+    <div class="sec"><h4>편집점 표시 <span class="hint">(타임라인 위쪽 눈금에도 표시)</span></h4></div>
+    ${EVENTS.filter(e => e.type !== "speech").map(e => `<div class="evrow ${e.type}" data-t="${e.t}"><span class="tc">${m(e.t)}</span><span class="k">${e.type === "peak" ? "▲ 하이라이트" : "── 컷 후보"}</span><span class="hint">${esc(e.text)}</span></div>`).join("")}`;
+  document.querySelectorAll("[data-rec]").forEach(b => b.onclick = () => {
+    const s = r.shorts[+b.dataset.rec];
+    commit(); P.clips = s.cuts.map(c => ({ id: nid(), in: c.in, out: c.out, volume: 1, fadeIn: 0, fadeOut: 0, mute: false, reframe: 0.5 }));
+    P.format = "shorts"; sel = null; changed(); seek(0); toast(`쇼츠 구간을 타임라인에 올렸어요 (${s.length}초)`);
+  });
+  const tidy = $("recTidy"); if (tidy) tidy.onclick = () => {
+    commit(); P.clips = r.tidy.map(c => ({ id: nid(), in: c.in, out: c.out, volume: 1, fadeIn: 0, fadeOut: 0, mute: false, reframe: 0.5 }));
+    P.format = "long"; sel = null; changed(); seek(0); toast(`군더더기를 정리했어요 · ${mmss(total())}`);
+  };
+  $("recFull").onclick = () => {
+    commit(); P.clips = [{ id: nid(), in: 0, out: P.info.duration, volume: 1, fadeIn: 0, fadeOut: 0, mute: false, reframe: 0.5 }];
+    sel = null; changed(); seek(0);
+  };
+  document.querySelectorAll(".evrow").forEach(el => el.onclick = () => { const ts = src2tl(+el.dataset.t); if (ts.length) seek(ts[0]); else toast("지금 잘려나간 구간이에요"); });
+}
+document.querySelectorAll(".ph .tab").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".ph .tab").forEach(x => x.classList.toggle("on", x === b));
+  $("tab-caps").style.display = b.dataset.tab === "caps" ? "" : "none";
+  $("tab-rec").style.display = b.dataset.tab === "rec" ? "" : "none";
+});
+
+/* ---------- 속성 ---------- */
+const PRESETS = {
+  "유튜브 기본": { weight: "Bold", size: 64, fill: "#FFFFFF", stroke: "#000000", strokeW: 6, bgOn: false, effect: "pop" },
+  "예능 노랑": { weight: "Black", size: 76, fill: "#FFE14D", stroke: "#1A1A1A", strokeW: 9, bgOn: false, effect: "pop" },
+  "박스형": { weight: "Bold", size: 58, fill: "#FFFFFF", bgOn: true, bg: "#000000", bgOpacity: 0.6, strokeW: 10, effect: "fade" },
+  "강조 하이라이트": { weight: "Black", size: 70, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false, effect: "karaoke", highlight: "#FFD400" },
+};
+function slider(id, label, val, min, max, step, fmt) { return `<div class="f"><label>${label}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"><span class="v" id="${id}V">${fmt(val)}</span></div>`; }
+const dB = v => v <= 0 ? "-∞ dB" : (20 * Math.log10(v) >= 0 ? "+" : "") + (20 * Math.log10(v)).toFixed(1) + " dB";
+function styleEditor(prefix, st, title) {
+  return `<div class="pg"><h4><span class="dot" style="background:${title ? "var(--title)" : "var(--cap)"}"></span>${title ? "타이틀 스타일" : "자막 스타일 · 전체 적용"}</h4>
+    ${title ? "" : `<div class="presets">${Object.keys(PRESETS).map(k => `<button class="btn" data-preset="${k}">${k}</button>`).join("")}</div>`}
+    <div class="f"><label>굵기</label><div class="seg" id="${prefix}weight"><button data-v="Bold" class="${st.weight === "Bold" ? "on" : ""}">굵게</button><button data-v="Black" class="${st.weight === "Black" ? "on" : ""}">아주 굵게</button></div><span></span></div>
+    ${slider(prefix + "size", "크기", st.size, 30, 160, 1, v => v + "px")}
+    <div class="f"><label>글자색</label><input type="color" id="${prefix}fill" value="${st.fill}"><span></span></div>
+    <div class="f"><label>테두리</label><input type="color" id="${prefix}stroke" value="${st.stroke}"><span></span></div>
+    ${slider(prefix + "strokeW", "테두리 두께", st.strokeW, 0, 16, 1, v => v + "px")}
+    <div class="f"><label>배경 상자</label><label class="tog"><input type="checkbox" id="${prefix}bgOn" ${st.bgOn ? "checked" : ""}> 사용</label><input type="color" id="${prefix}bg" value="${st.bg}"></div>
+    ${slider(prefix + "bgOpacity", "배경 진하기", st.bgOpacity, 0.1, 1, 0.05, v => Math.round(v * 100) + "%")}
+    ${slider(prefix + "y", "세로 위치", st.y, 0.08, 0.95, 0.01, v => Math.round(v * 100) + "%")}
+    <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    <div class="f"><label>강조색</label><input type="color" id="${prefix}highlight" value="${st.highlight}"><span class="hint">노래방 효과용</span></div>
+  </div>`;
+}
+function bindStyle(prefix, getSt) {
+  const live = () => drawFrameState();
+  let before = null;
+  const start = () => { if (!before) before = JSON.stringify(P); };
+  const end = () => { if (before && before !== JSON.stringify(P)) { undoStack.push(before); redoStack = []; scheduleSave(); renderTimeline(); } before = null; };
+  for (const k of ["size", "strokeW", "bgOpacity", "y"]) {
+    const el = $(prefix + k); if (!el) continue;
+    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = k === "bgOpacity" || k === "y" ? Math.round(el.value * 100) + "%" : el.value + "px"; live(); };
+    el.onchange = end;
+  }
+  for (const k of ["fill", "stroke", "bg", "highlight"]) { const el = $(prefix + k); el.oninput = () => { start(); getSt()[k] = el.value; live(); }; el.onchange = end; }
+  $(prefix + "bgOn").onchange = e => { start(); getSt().bgOn = e.target.checked; live(); end(); };
+  $(prefix + "effect").onchange = e => { start(); getSt().effect = e.target.value; live(); end(); };
+  $(prefix + "weight").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().weight = b.dataset.v; end(); renderProps(); });
+}
+function renderProps() {
+  const x = sel && sel.k === "clip" ? P.clips.find(c => c.id === sel.id) : null;
+  const cap = sel && sel.k === "caption" ? P.captions.find(c => c.id === sel.id) : null;
+  const tt = sel && sel.k === "title" ? P.titles.find(c => c.id === sel.id) : null;
+  let h = `<div class="pg"><h4>시퀀스</h4>
+    <div class="f"><label>형식</label><div class="seg" id="pFmt"><button data-v="shorts" class="${P.format === "shorts" ? "on" : ""}">쇼츠 9:16</button><button data-v="long" class="${P.format === "long" ? "on" : ""}">롱폼 16:9</button></div><span></span></div>
+    ${slider("pMaster", "전체 음량", P.master.volume, 0, 2, 0.01, dB)}
+    <div class="f"><label>소리 평준화</label><label class="tog"><input type="checkbox" id="pNorm" ${P.master.normalize ? "checked" : ""}> 유튜브 기준(-14 LUFS)</label><span></span></div>
+    <div class="f"><label>자막</label><label class="tog"><input type="checkbox" id="pCapOn" ${P.captionsOn ? "checked" : ""}> 영상에 자막 넣기</label><span></span></div>
+  </div>`;
+  if (x) {
+    h += `<div class="pg"><h4><span class="dot" style="background:var(--video)"></span>클립 · 컷 ${P.clips.indexOf(x) + 1}</h4>
+      <div class="f"><label>시작</label><div class="nud"><button class="btn" data-nud="in:-0.1">−</button><span>${mmss(x.in)}</span><button class="btn" data-nud="in:0.1">＋</button></div><span></span></div>
+      <div class="f"><label>끝</label><div class="nud"><button class="btn" data-nud="out:-0.1">−</button><span>${mmss(x.out)}</span><button class="btn" data-nud="out:0.1">＋</button></div><span></span></div>
+      <div class="hint" style="margin:-2px 0 10px">길이 ${(x.out - x.in).toFixed(1)}초 · 0.1초씩 조절, 타임라인에서 클립 끝을 끌어도 돼요</div>
+      ${P.format === "shorts" ? slider("pReframe", "화면 위치", x.reframe, 0, 1, 0.01, v => v < 0.45 ? "왼쪽" : v > 0.55 ? "오른쪽" : "가운데") : ""}
+    </div>
+    <div class="pg"><h4><span class="dot" style="background:var(--audio)"></span>소스 음향</h4>
+      ${slider("pVol", "볼륨", x.volume, 0, 2, 0.01, dB)}
+      ${slider("pFin", "페이드 인", x.fadeIn, 0, 3, 0.1, v => (+v).toFixed(1) + "초")}
+      ${slider("pFout", "페이드 아웃", x.fadeOut, 0, 3, 0.1, v => (+v).toFixed(1) + "초")}
+      <div class="f"><label>음소거</label><label class="tog"><input type="checkbox" id="pMute" ${x.mute ? "checked" : ""}> 이 클립 소리 끄기</label><span></span></div>
+      <button class="btn" id="pVolAll">이 볼륨을 모든 클립에 적용</button>
+    </div>`;
+  }
+  if (cap) {
+    h += `<div class="pg"><h4><span class="dot" style="background:var(--cap)"></span>자막 수정</h4>
+      <textarea class="s" id="pCapText">${esc(cap.text)}</textarea>
+      <div class="f" style="margin-top:8px"><label>시작</label><div class="nud"><button class="btn" data-cnud="start:-0.1">−</button><span>${mmss(cap.start)}</span><button class="btn" data-cnud="start:0.1">＋</button></div><span></span></div>
+      <div class="f"><label>끝</label><div class="nud"><button class="btn" data-cnud="end:-0.1">−</button><span>${mmss(cap.end)}</span><button class="btn" data-cnud="end:0.1">＋</button></div><span></span></div>
+      <button class="btn" id="pCapSplit">재생 위치에서 자막 나누기</button> <button class="btn" id="pCapDel">삭제</button>
+    </div>`;
+  }
+  if (tt) {
+    h += `<div class="pg"><h4><span class="dot" style="background:var(--title)"></span>타이틀</h4>
+      <textarea class="s" id="pTitleText">${esc(tt.text)}</textarea>
+      <div class="hint" style="margin:6px 0">${mmss(tt.start)}부터 ${tt.dur.toFixed(1)}초 · 타임라인에서 끌어 옮기거나 끝을 늘려요</div>
+      <button class="btn" id="pTitleDel">삭제</button></div>` + styleEditor("ts_", tt.style, true);
+  }
+  if (!tt) h += styleEditor("cs_", P.captionStyle, false);
+  if (!x && !cap && !tt) h += `<div class="pg hint">타임라인에서 클립·자막·타이틀을 누르면 여기서 자세히 조절할 수 있어요.<br>단축키는 위쪽 ⌨ 버튼.</div>`;
+  $("props").innerHTML = h;
+
+  // 시퀀스
+  $("pFmt").querySelectorAll("button").forEach(b => b.onclick = () => { commit(); P.format = b.dataset.v; changed(); layoutFrame(); });
+  bindRange("pMaster", v => P.master.volume = v, dB);
+  $("pNorm").onchange = e => { commit(); P.master.normalize = e.target.checked; scheduleSave(); };
+  $("pCapOn").onchange = e => { commit(); P.captionsOn = e.target.checked; changed(); };
+  if (x) {
+    document.querySelectorAll("[data-nud]").forEach(b => b.onclick = () => {
+      const [k, d] = b.dataset.nud.split(":"); commit();
+      if (k === "in") x.in = clamp(x.in + +d, 0, x.out - 0.2); else x.out = clamp(x.out + +d, x.in + 0.2, P.info.duration);
+      changed(false);
+    });
+    if ($("pReframe")) bindRange("pReframe", v => x.reframe = v, v => v < 0.45 ? "왼쪽" : v > 0.55 ? "오른쪽" : "가운데");
+    bindRange("pVol", v => x.volume = v, dB, true);
+    bindRange("pFin", v => x.fadeIn = v, v => (+v).toFixed(1) + "초", true);
+    bindRange("pFout", v => x.fadeOut = v, v => (+v).toFixed(1) + "초", true);
+    $("pMute").onchange = e => { commit(); x.mute = e.target.checked; changed(false); };
+    $("pVolAll").onclick = () => { commit(); P.clips.forEach(c => c.volume = x.volume); changed(false); toast("모든 클립에 적용했어요"); };
+  }
+  if (cap) {
+    const ta = $("pCapText"); let before = null;
+    ta.oninput = () => { if (!before) before = JSON.stringify(P); cap.text = ta.value; scheduleSave(); const l = document.querySelector(`[data-cap="${cap.id}"]`); if (l) l.value = ta.value; };
+    ta.onblur = () => { if (before) { undoStack.push(before); redoStack = []; before = null; renderTimeline(); } };
+    document.querySelectorAll("[data-cnud]").forEach(b => b.onclick = () => {
+      const [k, d] = b.dataset.cnud.split(":"); commit();
+      if (k === "start") cap.start = clamp(cap.start + +d, 0, cap.end - 0.1); else cap.end = Math.max(cap.start + 0.1, cap.end + +d);
+      changed();
+    });
+    $("pCapDel").onclick = deleteSel;
+    $("pCapSplit").onclick = () => {
+      const xx = seq()[curIdx]; const src = xx.c.in + (T - xx.s);
+      if (src <= cap.start + 0.1 || src >= cap.end - 0.1) return toast("재생 위치를 자막 안쪽에 두고 눌러 주세요");
+      commit(); const words = cap.text.split(" "), r = (src - cap.start) / (cap.end - cap.start), cut = Math.max(1, Math.round(words.length * r));
+      const b = { id: nid(), start: src, end: cap.end, text: words.slice(cut).join(" ") || cap.text };
+      cap.end = src; cap.text = words.slice(0, cut).join(" ");
+      P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); changed();
+    };
+  }
+  if (tt) {
+    const ta = $("pTitleText"); let before = null;
+    ta.oninput = () => { if (!before) before = JSON.stringify(P); tt.text = ta.value; scheduleSave(); drawFrameState(); };
+    ta.onblur = () => { if (before) { undoStack.push(before); redoStack = []; before = null; renderTimeline(); } };
+    $("pTitleDel").onclick = deleteSel;
+    bindStyle("ts_", () => tt.style);
+  } else {
+    bindStyle("cs_", () => P.captionStyle);
+    document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { commit(); Object.assign(P.captionStyle, PRESETS[b.dataset.preset]); changed(); toast(`"${b.dataset.preset}" 스타일을 적용했어요`); });
+  }
+}
+function bindRange(id, set, fmt, redrawTl) {
+  const el = $(id); let before = null;
+  el.oninput = () => { if (!before) before = JSON.stringify(P); set(+el.value); $(id + "V").textContent = fmt(+el.value); drawFrameState(); if (redrawTl) drawWaves(); };
+  el.onchange = () => { if (before && before !== JSON.stringify(P)) { undoStack.push(before); redoStack = []; scheduleSave(); if (redrawTl) renderTimeline(); } before = null; };
+}
+
+/* ---------- 프로젝트 목록 ---------- */
+async function renderBin() {
+  const s = await (await fetch("/api/state?since=999999")).json();
+  const list = s.local.filter(v => v.analyzed);
+  $("binCount").textContent = `${list.length}개`;
+  $("bin").innerHTML = list.map(v => `<div class="item ${v.name === NAME ? "cur" : ""}" data-n="${esc(v.name)}"><span class="sw"></span><span class="nm">${esc(niceName(v.name))}</span><span class="st">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div>`).join("")
+    || `<div class="hint" style="padding:10px">편집점을 찾은 영상이 여기에 나와요.</div>`;
+  document.querySelectorAll(".bin .item").forEach(el => el.onclick = () => { if (el.dataset.n !== NAME) location.href = "/editor?name=" + encodeURIComponent(el.dataset.n); });
+}
+
+/* ---------- 내보내기 ---------- */
+$("exportBtn").onclick = () => $("exModal").classList.add("show");
+$("exCancel").onclick = () => $("exModal").classList.remove("show");
+$("exGo").onclick = async () => {
+  $("exModal").classList.remove("show");
+  clearTimeout(saveTimer);
+  await fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, project: P }) });
+  const r = await (await fetch("/api/edit/export", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: NAME, project: P, opts: { video: $("exVideo").checked, xml: $("exXml").checked, srt: $("exSrt").checked } }) })).json();
+  if (!r.ok) return toast(r.error || "지금은 내보낼 수 없어요");
+  watchJob();
+};
+function watchJob() {
+  $("busy").classList.add("show"); $("exportBtn").disabled = true;
+  const iv = setInterval(async () => {
+    const s = await (await fetch("/api/state?since=999999")).json();
+    const pr = s.progress || {};
+    $("busyTxt").textContent = pr.detail || "내보내는 중"; $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
+    if (!s.job) {
+      clearInterval(iv); $("busy").classList.remove("show"); $("exportBtn").disabled = false;
+      if (s.error) toast("내보내기 실패 · " + s.error.slice(0, 80));
+      else { toast("내보냈어요! 완성본 폴더를 열게요"); fetch("/api/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ which: "out" }) }); }
+    }
+  }, 700);
+}
+
+/* ---------- 키보드 ---------- */
+addEventListener("keydown", e => {
+  // 글자 입력칸에서만 단축키를 막음 (슬라이더·체크박스·색상 선택 뒤에도 단축키 동작)
+  if (e.target.closest("textarea, select, input[type=text], input[type=search], input:not([type])")) { if (e.key === "Escape") e.target.blur(); return; }
+  if (e.target.matches("input[type=range]") && e.key.startsWith("Arrow")) e.preventDefault();
+  const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k === "k") { e.preventDefault(); splitAt(T); return; }
+  if (mod && k === "s") { e.preventDefault(); scheduleSave(); return; }
+  if (k === " ") { e.preventDefault(); toggle(); }
+  else if (k === "k") pause();
+  else if (k === "l") { if (playing) { rate = Math.min(4, rate * 2); vid.playbackRate = rate; } else play(); }
+  else if (k === "j") { pause(); seek(T - 5); }
+  else if (k === "arrowleft") { e.preventDefault(); pause(); seek(T - (e.shiftKey ? 1 : 1 / FPS)); }
+  else if (k === "arrowright") { e.preventDefault(); pause(); seek(T + (e.shiftKey ? 1 : 1 / FPS)); }
+  else if (k === "arrowup") { e.preventDefault(); const p = edits().filter(t => t < T - 0.05); seek(p.length ? p[p.length - 1] : 0); }
+  else if (k === "arrowdown") { e.preventDefault(); const n = edits().find(t => t > T + 0.05); if (n !== undefined) seek(n); }
+  else if (k === "home") seek(0);
+  else if (k === "end") seek(total());
+  else if (k === "v") setTool("select");
+  else if (k === "c") setTool("razor");
+  else if (k === "t") addTitle();
+  else if (k === "delete" || k === "backspace") deleteSel();
+  else if (k === "=" || k === "+") setZoom(zoom * 1.4);
+  else if (k === "-") setZoom(zoom / 1.4);
+});
+function setTool(t) { tool = t; $("tSel").classList.toggle("on", t === "select"); $("tRazor").classList.toggle("on", t === "razor"); renderTimeline(); }
+function setZoom(z) { zoom = clamp(z, 2, 200); $("zoom").value = zoom; renderTimeline(); autoscroll(); }
+$("tSel").onclick = () => setTool("select"); $("tRazor").onclick = () => setTool("razor"); $("tTitle").onclick = addTitle;
+$("zoom").oninput = e => setZoom(+e.target.value);
+$("bPlay").onclick = toggle; $("bSplit").onclick = () => splitAt(T);
+$("bBack").onclick = () => { pause(); seek(T - 1 / FPS); }; $("bFwd").onclick = () => { pause(); seek(T + 1 / FPS); };
+$("bPrevEdit").onclick = () => { const p = edits().filter(t => t < T - 0.05); seek(p.length ? p[p.length - 1] : 0); };
+$("bNextEdit").onclick = () => { const n = edits().find(t => t > T + 0.05); if (n !== undefined) seek(n); };
+$("undo").onclick = undo; $("redo").onclick = redo;
+$("help").onclick = () => $("helpModal").classList.add("show"); $("helpClose").onclick = () => $("helpModal").classList.remove("show");
+$("back").onclick = () => { clearTimeout(saveTimer); fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, project: P }) }).then(() => location.href = "/"); };
+document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit(); P.format = b.dataset.v; changed(); layoutFrame(); });
+const scrub = $("scrub");
+scrub.onmousedown = e => { const f = ev => { const r = scrub.getBoundingClientRect(); seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * total()); autoscroll(); }; f(e); const up = () => { removeEventListener("mousemove", f); removeEventListener("mouseup", up); }; addEventListener("mousemove", f); addEventListener("mouseup", up); };
+$("tlscroll").addEventListener("wheel", e => { if (e.ctrlKey || e.altKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)); } }, { passive: false });
+document.addEventListener("contextmenu", e => { if (!e.target.closest("textarea, input")) e.preventDefault(); });
+addEventListener("resize", () => { if (P) { layoutFrame(); renderTimeline(); } });
+
+function renderAll() { layoutFrame(); renderTimeline(); renderCaps(); renderProps(); }
+
+/* ---------- 시작 ---------- */
+(async () => {
+  if (!NAME) { document.body.innerHTML = "<p style='padding:20px'>영상을 고르지 않았어요.</p>"; return; }
+  $("pname").textContent = niceName(NAME);
+  $("saved").textContent = "여는 중… (처음 열 땐 파형·썸네일을 만드느라 조금 걸려요)";
+  const r = await fetch("/api/edit/open?name=" + encodeURIComponent(NAME));
+  const j = await r.json();
+  if (!r.ok) { $("saved").textContent = j.error || "열지 못했어요"; return; }
+  P = j.project; WAVE = j.waveform; TH = j.thumbs; EVENTS = j.events || []; REC = j.recommend;
+  DUR = P.info.duration;
+  vid.src = "/media?name=" + encodeURIComponent(NAME);
+  vid.addEventListener("loadedmetadata", () => seek(0), { once: true });
+  zoom = clamp(Math.round(($("tlscroll").clientWidth - HD - 40) / Math.max(10, total())), 2, 60); $("zoom").value = zoom;
+  renderAll(); renderRec(); renderBin();
+  $("saved").textContent = "저장됨";
+  requestAnimationFrame(loop);
+  const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기") watchJob();
+})();
+</script>
+</body>
+</html>

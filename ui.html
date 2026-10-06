@@ -240,7 +240,8 @@
         <select class="sel" id="tlSel"></select>
         <div class="filters" id="filters"></div>
         <div class="sp"></div>
-        <button class="btn primary" id="btnCopy">Claude에게 보낼 내용 복사</button>
+        <button class="btn" id="btnCopy">텍스트로 복사</button>
+        <button class="btn primary" id="btnEdit">편집실에서 열기</button>
       </div>
       <div class="card events" id="events"></div>
     </section>
@@ -360,11 +361,11 @@ function renderLocal() {
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
       <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${id ? "채널 영상" : "촬영 원본"} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div></div>
       ${v.analyzed ? `<span class="chip ok" data-chip="${esc(v.name)}" data-base="편집점 준비됨">편집점 준비됨</span>` : `<span class="chip" data-chip="${esc(v.name)}" data-base="아직 안 함">아직 안 함</span>`}
-      ${v.analyzed ? `<button class="btn" data-open="${esc(v.name)}">편집점 보기</button>` : `<span></span>`}
+      ${v.analyzed ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
     </div>`;
   }).join("") : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
   document.querySelectorAll(".lchk").forEach(c => c.onchange = sync);
-  document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { $("tlSel").value = b.dataset.open; go("points"); });
+  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   fillSelect("rcSel", state.local);
   if (remote.length) renderRemote();
@@ -400,12 +401,15 @@ function renderEvents() {
   $("events").innerHTML = list.length ? list.map(e => `<div class="ev ${e.type}"><span class="time">${mmss(e.t)}</span><span class="tag">${TAG[e.type]}</span><span class="txt">${esc(e.text)}</span></div>`).join("")
     : `<div class="empty"><b>${$("tlSel").value ? "해당하는 항목이 없어요" : "아직 편집점을 찾은 영상이 없어요"}</b>${$("tlSel").value ? "" : "보관함에서 영상을 고르고 \"편집점 찾기\"를 눌러 주세요."}</div>`;
   $("btnCopy").disabled = !events.length;
+  $("btnEdit").disabled = !events.length;
 }
 $("tlSel").onchange = loadEvents;
+function openEditor(n) { if (n) location.href = "/editor?name=" + encodeURIComponent(n); }
+$("btnEdit").onclick = () => openEditor($("tlSel").value);
 $("btnCopy").onclick = async () => {
   const j = await api(`/api/timeline?name=${encodeURIComponent($("tlSel").value)}`);
   await copyText(j.text);
-  toast("복사했어요. Claude 대화창에 붙여넣으세요");
+  toast("복사했어요");
 };
 
 /* 4. 러프컷 */
