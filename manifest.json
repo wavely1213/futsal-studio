@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
-  "notes": "전용 앱 창으로 전환, 바탕화면 아이콘 자동 생성",
+  "version": "1.2.1",
+  "notes": "제목 끝 공백 때문에 편집점 찾기가 실패하던 문제 수정",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }

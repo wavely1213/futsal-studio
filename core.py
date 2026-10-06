@@ -86,6 +86,7 @@ def download(ids, log, cookies_browser=None, max_height=1080):
         "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
         "merge_output_format": "mp4",
         "outtmpl": str(VIDEOS / "%(upload_date)s_%(id)s_%(title).60B.%(ext)s"),
+        "trim_file_name": 120,
         "download_archive": str(VIDEOS / "archive.txt"),
         "ffmpeg_location": ffmpeg(),
         "quiet": True, "no_warnings": True, "noprogress": True,
@@ -111,11 +112,16 @@ def download(ids, log, cookies_browser=None, max_height=1080):
     return failed
 
 
+def adir(name):
+    """영상별 분석 폴더. Windows 는 폴더 이름 끝의 공백·점을 지워버리므로 미리 제거."""
+    return ANALYSIS / (Path(name).stem.rstrip(" .") or "video")
+
+
 def local_videos():
     out = []
     for v in sorted(VIDEOS.iterdir()):
         if v.suffix.lower() in VIDEO_EXTS:
-            done = (ANALYSIS / v.stem / "transcript_timeline.md").exists()
+            done = (adir(v.name) / "transcript_timeline.md").exists()
             out.append({"name": v.name, "size_mb": round(v.stat().st_size / 1e6, 1), "analyzed": done})
     return out
 
@@ -174,12 +180,14 @@ def analyze_many(names, log, model="large-v3-turbo"):
 
 def analyze(name, log, model="large-v3-turbo", step="1/1"):
     video = VIDEOS / name
-    outdir = ANALYSIS / video.stem
+    outdir = adir(name)
     outdir.mkdir(parents=True, exist_ok=True)
     wav = outdir / "audio.wav"
     log(f"편집점 찾는 중 · {name}")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="소리 추출 중")
-    run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+    r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+    if r.returncode or not wav.exists():
+        raise RuntimeError(f"영상에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
@@ -222,7 +230,7 @@ def analyze(name, log, model="large-v3-turbo", step="1/1"):
 
 def timeline_events(name):
     """화면 표시용: 대사·컷 후보·하이라이트를 시간순 목록으로."""
-    d = ANALYSIS / Path(name).stem
+    d = adir(name)
     if not (d / "transcript.json").exists():
         return []
     segs = json.loads((d / "transcript.json").read_text(encoding="utf-8"))
@@ -234,7 +242,7 @@ def timeline_events(name):
 
 
 def timeline(name):
-    p = ANALYSIS / Path(name).stem / "transcript_timeline.md"
+    p = adir(name) / "transcript_timeline.md"
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
@@ -251,7 +259,7 @@ def _tc(sec, fps=30):
 def render(name, spec, log):
     video = VIDEOS / name
     cuts, fmt = spec["cuts"], spec.get("format", "long")
-    stem = f"{video.stem}_{fmt}"
+    stem = f"{video.stem.rstrip(' .')}_{fmt}"
     vf = "scale=-2:1920,crop=1080:1920" if fmt == "shorts" else "null"
     tmp = Path(tempfile.mkdtemp(dir=OUT))
     parts = []
