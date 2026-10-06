@@ -46,10 +46,10 @@
 3. `config.json` 의 `update_manifest_url` 이 가리키는 곳에 아래 `manifest.json` 을 올립니다
 
 ```json
-{"version": "1.0.1", "notes": "변경 내용 한 줄", "zip": "https://.../futsal-studio-1.0.1.zip"}
+{"version": "1.0.1", "notes": "변경 내용 한 줄", "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"}
 ```
 
 사용자 PC의 `config.json` 은 업데이트해도 덮어쓰지 않습니다.
 
 이 저장소에서는 `./release.sh 1.0.2 "변경 내용"` 한 줄로 위 과정을 자동 처리합니다
-(version.txt·manifest.json 갱신 → 커밋 → 태그 → 푸시, 배포 zip은 GitHub 태그 압축본을 그대로 사용).
+(version.txt·manifest.json 갱신 → 커밋 → 태그 → 푸시, 배포 zip은 main 브랜치 압축본을 그대로 사용).
