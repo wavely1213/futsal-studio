@@ -1,5 +1,5 @@
 {
-  "version": "1.6.0",
-  "notes": "썸네일 편집기 포토샵식으로 새로 만듦 (쇼츠 9:16 · 글자별 편집 · 레이어 스타일 · 단축키)",
+  "version": "1.7.0",
+  "notes": "편집실 프리미어식으로 새로 만듦 (멀티 트랙·키프레임·전환·오디오) · 스타일 배우기 · 영상/썸네일 자동 검수 · 썸네일 기능 추가",
   "zip": "https://github.com/wavely1213/futsal-studio/archive/refs/heads/main.zip"
 }
