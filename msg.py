@@ -907,9 +907,9 @@ def text_looks(st, fmt, cap_y):
     emph = dict(T, font=c.get("emphFont") or "Black Han Sans", weight="Black", size=110 if sh else 96, fill=c.get("emphColor") or "#FFE14D",
                 stroke="#111111", strokeW=9, y=(0.66 if low else 0.3) if not sh else (0.66 if low else 0.36), x=0.5, align="center",
                 effect=c.get("emphEffect") or "stamp")
-    if c.get("situLook") == "plain":
-        situ = dict(T, weight="Bold", size=58 if sh else 50, fill="#FFFFFF", stroke="#000000", strokeW=5, bgOn=False, x=0.06, y=(0.86 if low else 0.14) if not sh else 0.18,
-                    align="left", effect="fade", font="Do Hyeon")
+    if c.get("situLook") == "plain":  # 다큐: 흰 상자에 검은 글씨 (차분하게)
+        situ = dict(T, weight="Bold", size=58 if sh else 50, fill="#111111", stroke="#FFFFFF", strokeW=10, bgOn=True, bg="#FFFFFF", bgOpacity=0.85,
+                    x=0.06, y=(0.86 if low else 0.14) if not sh else 0.18, align="left", effect="fade", font="Do Hyeon")
     else:
         situ = dict(T, weight="Bold", size=58 if sh else 54, fill="#FFFFFF", stroke="#000000", strokeW=10, bgOn=True, bg="#0F7A3D", bgOpacity=0.9,
                     x=0.06, y=(0.86 if low else 0.14) if not sh else 0.18, align="left", effect="slide")
@@ -1449,7 +1449,8 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
             v, au = B.clip(a, min(dur, a + MONTAGE_CLIP), nocaps=True, vol_db=-6.0)
             tr = B.flash(prev, v, "white", 0.14) if prev is not None else None
             made += [v["id"], au["id"]] + ([tr["id"]] if tr else [])
-            B.sfx.append((v["start"], pal.get("montage", "휙"), -6.0, "montage"))
+            if k % 2 == 0:  # 휙 소리는 한 컷 걸러 (번쩍 전환마다 다 넣으면 시끄러움)
+                B.sfx.append((v["start"], pal.get("montage", "휙"), -6.0, "montage"))
             prev = v
         tt = B.title("오늘의 명장면", s0, B.pos - s0, dict(looks["emphasis"], y=0.2 if cap_y > 0.5 else 0.75, size=80, fill="#FFFFFF", effect="pop"))
         B.event("montage", s0, "오늘의 명장면", f"시범 {len(mont[:7])}개를 빠르게", refs={"items": made, "titles": [tt["id"]]},
@@ -1572,7 +1573,7 @@ def _insert(B, c, name, sig, st, intensity, looks, pal, seed, cap_y):
         B.sfx.append((s0 - 0.1, pal.get("replay", "휙"), None, "replay"))
         k = pal.get("kick")
         if k:
-            for o in [o for o in sig.get("onsets") or () if a <= o <= b][:2]:
+            for o in [o for o in sig.get("onsets") or () if a <= o <= b][:1]:
                 B.sfx.append((s0 + (o - a) / REPLAY_SPEED, k, None, "kick"))
         B.event("replay", s0, "다시 보기", f"{mmss(c['t'])} 시범을 느리게 한 번 더", src=c["a"], refs=refs, ins={"start": round(s0, 3), "len": round(ln, 3)})
     else:
