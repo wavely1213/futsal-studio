@@ -1,6 +1,8 @@
 {
   "version": "1.9.2",
   "notes": "긴급 수정: 제목이 잘려 한글 자모가 남은 파일(예: '정형ᄃ')에서 스타일 배우기 등이 'cp949' 오류로 멈추던 문제",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/2c511990d3fa020f0df822a90ae30d21e8ac73f8.zip",
+  "commit": "2c511990d3fa020f0df822a90ae30d21e8ac73f8",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "4d9699d90acadfde33c4036d5de3af0867b7970edc1cb327adcf9b0bbf94b994",
