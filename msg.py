@@ -158,7 +158,7 @@ def _onsets(wave, words, sr=16000):
             continue
         if any(a <= t <= b for a, b in talk):
             continue
-        out.append(round(t, 2))
+        out.append(round(float(t), 2))
         last = t
     return out
 
