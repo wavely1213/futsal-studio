@@ -21,6 +21,7 @@ import editor
 import hooks
 import plan
 import qa
+import refs
 import source
 import style
 import thumb
@@ -45,7 +46,7 @@ LOCK = threading.Lock()
 
 
 LOGFILE = core.WORK / "studio.log"
-STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기")   # 스타일 파일(plan)을 끝에 다시 쓰는 작업
+STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기", "학습용 영상 받기", "학습용 스타일 배우기")   # 스타일 파일(plan)을 끝에 다시 쓰는 작업
 
 
 def log(msg):
@@ -83,6 +84,20 @@ def start_job(name, fn):
 
     threading.Thread(target=runner, daemon=True).start()
     return True
+
+
+def _refs_job(fn):
+    """학습용 영상 작업: 사용자에게 보여 줄 안내(채널 주소 없음·YouTube 막힘·멈춤)는 결과로 돌려줌 (그 밖의 오류는 작업 기록에)."""
+    try:
+        return dict(fn(), ok=True)
+    except (refs.RefsError, style.StyleCancelled) as e:
+        log(f"  {e}")
+        return {"ok": False, "error": str(e)}
+    except RuntimeError as e:
+        if str(e) != core.BLOCKED_MSG:
+            raise
+        log(f"  {refs.BLOCKED_MSG}")
+        return {"ok": False, "error": refs.BLOCKED_MSG, "blocked": True}  # 이 화면의 '크롬 로그인 정보로 받기'를 가리킴
 
 
 def open_folder(path):
@@ -290,6 +305,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
             return self._send(200, {"styles": style.list_styles()})
+        # ---- 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) ----
+        if u.path == "/api/refs":
+            try:
+                return self._send(200, dict(refs.listing(), ok=True))
+            except OSError as e:
+                return self._send(500, {"ok": False, "error": f"학습용 영상 목록을 읽지 못했어요 · {e}"})
+        if u.path == "/api/refs/recommended":
+            return self._send(200, refs.recommended())
         # ---- 영상 기획 분석: 클로드 계정 상태 (읽기만 · 60초 기억) · Claude 에게 물어볼 내용 ----
         if u.path == "/api/claude/status":
             return self._send(200, claude_cli.status(refresh=(q.get("refresh") or ["0"])[0] == "1"))
@@ -443,7 +466,59 @@ class Handler(BaseHTTPRequestHandler):
             "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
+            # 학습용 영상: 채널 인기 영상 받기 · 추천 방향 한 번에 · 채널 스타일 다시 배우기 · 지우기 · 배운 파일만 지우기 · 보관함에서 옮기기
+            "/api/refs/add": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_channel(b.get("url"), b.get("count") or 5, b.get("kind") or "videos", log, ck,
+                                                                  b.get("learn", True) is not False, bool(b.get("prune")), b.get("style") or None))),
+            "/api/refs/direction": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_direction(str(b.get("dir") or ""), log, ck, b.get("learn", True) is not False,
+                                                                        bool(b.get("prune"))))),
+            "/api/refs/learn": ("학습용 스타일 배우기", lambda: _refs_job(lambda: refs.learn_channel(str(b.get("channel") or ""), log, bool(b.get("prune"))))),
+            "/api/refs/delete": ("학습용 영상 지우기", lambda: _refs_job(lambda: refs.delete(b.get("names"), b.get("channel"), log, bool(b.get("confirmOriginal"))))),
+            "/api/refs/prune": ("배운 영상 파일 지우기", lambda: _refs_job(lambda: refs.prune(b["names"] if b.get("names") is not None else refs.channel_names(b["channel"]), log))),
+            "/api/refs/restore": ("보관함으로 되돌리기", lambda: _refs_job(lambda: refs.restore(b["names"], log))),
+            "/api/refs/move": ("학습용으로 옮기기", lambda: _refs_job(lambda: refs.move_from_library(b["names"], log, bool(b.get("confirm"))))),
         }
+        if path in ("/api/refs/delete", "/api/refs/prune", "/api/refs/move", "/api/refs/restore"):  # 이름은 파일 이름만 · 보관함에서 옮길 때 확인이 필요한 영상
+            try:
+                names = b.get("names")
+                if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)):
+                    raise ValueError
+                for n in names or []:
+                    editor.safe_name(n)
+                if path in ("/api/refs/move", "/api/refs/restore") and not names:
+                    raise ValueError
+                if path == "/api/refs/move":
+                    for n in names:
+                        editor.video_path(n)
+            except (ValueError, TypeError):
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            except FileNotFoundError:
+                return self._send(404, {"ok": False, "error": "보관함에서 영상을 찾지 못했어요. 목록을 새로 고친 뒤 다시 골라 주세요"})
+            if path == "/api/refs/move" and not b.get("confirm"):
+                data = source.load()
+                need = [n for n in names if source.describe(n, data, False)["kind"] != "other"]
+                if need:
+                    return self._send(200, {"ok": False, "confirm": need, "error": None})
+            if path == "/api/refs/move":  # 편집실 프로젝트에서 쓰는 영상은 옮기지 않음 → 먼저 알려 줌
+                busy = refs.projects_using(names)
+                if busy and not b.get("skipInUse"):
+                    return self._send(200, {"ok": False, "inUse": busy, "error": None})
+            if path == "/api/refs/prune" and not names and not isinstance(b.get("channel"), str):
+                return self._send(400, {"ok": False, "error": "파일을 지울 영상이나 채널을 골라 주세요"})
+            if path == "/api/refs/delete" and not b.get("confirmOriginal"):  # 원본(다시 받을 수 없음)은 한 번 더 확인
+                ch = b.get("channel") if isinstance(b.get("channel"), str) else None
+                orig = refs.originals(names if ch is None else None, ch)
+                if orig:
+                    return self._send(200, {"ok": False, "original": orig, "error": None})
+            if path == "/api/refs/delete" and names is None and not isinstance(b.get("channel"), str):
+                return self._send(400, {"ok": False, "error": "지울 영상이나 채널을 골라 주세요"})
+        if path == "/api/refs/add" and not str(b.get("url") or "").strip():
+            return self._send(400, {"ok": False, "error": "채널 주소나 @핸들을 넣어 주세요"})
+        if path == "/api/refs/banner":
+            try:
+                refs.dismiss_banner(b.get("dismiss", True) is not False)
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, {"ok": True})
         if path == "/api/style/delete":
             f = (style.STYLES / f"{b['name']}.json").resolve()
             if style.STYLES.resolve() in f.parents and f.exists():
@@ -618,7 +693,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": bool(_WINDOW)})
         if path == "/api/open":
             try:
-                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT}[b["which"]])
+                if b["which"] == "refs":
+                    refs.root().mkdir(parents=True, exist_ok=True)
+                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root()}[b["which"]])
             except Exception as e:
                 log(f"폴더를 열지 못했어요 · {e}")
                 return self._send(200, {"ok": False})
@@ -715,7 +792,7 @@ class Handler(BaseHTTPRequestHandler):
             threading.Timer(0.5, restart).start()
             return
         if path in jobs:
-            if path in ("/api/list", "/api/download"):
+            if path in ("/api/list", "/api/download", "/api/refs/add", "/api/refs/direction"):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
             ok = start_job(name, fn)

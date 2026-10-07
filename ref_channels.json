@@ -1,0 +1,1076 @@
+{
+ "version": 1,
+ "updated": "2026-10-07",
+ "note": "구독자 수는 조사한 날(2026-10-07) 값이에요. 실제와 다를 수 있어요.",
+ "groups": [
+  "풋살 특화",
+  "축구 레슨·기술",
+  "축구 예능·챌린지",
+  "리뷰·브이로그·분석"
+ ],
+ "channels": [
+  {
+   "name": "쌈바 풋살 클래스",
+   "url": "https://www.youtube.com/@SambaFutsalClass",
+   "handle": "@SambaFutsalClass",
+   "group": "풋살 특화",
+   "subs": 62000,
+   "subsText": "6.2만",
+   "category": "풋살 레슨",
+   "format": "번호 붙인 강좌 시리즈(7~15분) + 드릴 쇼츠",
+   "tip": "[쌈풋강좌 EPxx] 시리즈, 고정 썸네일 템플릿, 몰아보기 편집본. 가장 직접적인 경쟁 채널",
+   "channelId": "UC2AKksZvQPH8XLIwgLiNhJQ"
+  },
+  {
+   "name": "샌드박스 풋살",
+   "url": "https://www.youtube.com/@SANDBOX_Futsal",
+   "handle": "@SANDBOX_Futsal",
+   "group": "풋살 특화",
+   "subs": 57000,
+   "subsText": "5.7만",
+   "category": "팀·매치 예능",
+   "format": "초청 매치 풀영상 + 기술 설명 쇼츠",
+   "tip": "~이란? 기술 설명 쇼츠가 10만 회 안팎. 촬영본을 기술별 모음집으로 다시 엮음"
+  },
+  {
+   "name": "명싸커",
+   "url": "https://www.youtube.com/@myungsoccer",
+   "handle": "@myungsoccer",
+   "group": "풋살 특화",
+   "subs": 22000,
+   "subsText": "2.2만",
+   "category": "풋살 레슨 + 선수 다큐",
+   "format": "FK리그 EP 시리즈 + 기술 레슨",
+   "tip": "득점왕이 알려주는 ~ 권위형 제목. 업로드는 거의 멈춤",
+   "channelId": "UC1N305jQJlCaSzGaSRTL6Rw"
+  },
+  {
+   "name": "풋살의민족",
+   "url": "https://www.youtube.com/@futmin7923",
+   "handle": "@futmin7923",
+   "group": "풋살 특화",
+   "subs": 11000,
+   "subsText": "1.1만",
+   "category": "풋살 미디어",
+   "format": "[풋살의정석-포지션] 강의, 선수 스페셜",
+   "tip": "포지션별 시리즈 이름, 썸네일에 이력 캡션. 최근 활동은 확인 못 함",
+   "channelId": "UCacCi2nZd9ZJsZHmvjrscpg"
+  },
+  {
+   "name": "쪼살",
+   "url": "https://www.youtube.com/@Cho_sal",
+   "handle": "@Cho_sal",
+   "group": "풋살 특화",
+   "subs": 11000,
+   "subsText": "1.1만",
+   "category": "풋살 레슨",
+   "format": "4~7분 실전 움직임 해설 + 팁 쇼츠",
+   "tip": "경기 화면에 네온 화살표·원을 그린 전술 오버레이. 구독자의 9배가 넘는 조회수",
+   "channelId": "UCl4yBpHVaZsjxwXwnYj4kDA"
+  },
+  {
+   "name": "한국풋살연맹 KFL",
+   "url": "https://www.youtube.com/@kfl7010",
+   "handle": "@kfl7010",
+   "group": "풋살 특화",
+   "subs": 11000,
+   "subsText": "1.1만",
+   "category": "공식 리그",
+   "format": "FK CUP 하이라이트 + 쇼츠",
+   "tip": "쇼츠 3단 레이아웃. 해설 소재와 섭외 대상 풀로 쓸 만함"
+  },
+  {
+   "name": "축구도전(축도)",
+   "url": "https://www.youtube.com/@footballchallenge0402",
+   "handle": "@footballchallenge0402",
+   "group": "풋살 특화",
+   "subs": 8860,
+   "subsText": "8,860",
+   "category": "풋살 레슨",
+   "format": "1인칭 POV 경기 해설(14~24분)",
+   "tip": "실전 POV 해설과 강사 성장 서사. 롱폼이 길어 조회수는 낮음",
+   "channelId": "UCGBr6mg2lHIbmL43MV14ahw"
+  },
+  {
+   "name": "풋살 엄살라",
+   "url": "https://www.youtube.com/@엄살라",
+   "handle": "@엄살라",
+   "group": "풋살 특화",
+   "subs": 8260,
+   "subsText": "8,260",
+   "category": "팀 브이로그 + 스킬 쇼츠",
+   "format": "팀 서사 롱폼 + 기술 한 개 쇼츠",
+   "tip": "고정 해시태그를 단 스킬 쇼츠, 영화 포스터풍 썸네일"
+  },
+  {
+   "name": "풋살해주호",
+   "url": "https://www.youtube.com/@futsalstudio",
+   "handle": "@futsalstudio",
+   "group": "풋살 특화",
+   "subs": 7150,
+   "subsText": "7,150",
+   "category": "풋살 레슨(국가대표)",
+   "format": "N가지 총정리 강의 + 기술 한 개 쇼츠",
+   "tip": "플랩 세미프로 가는 기술 제목. 레슨 중심에 챌린지는 양념",
+   "channelId": "UCVFGEMzwYdZysjTrz_54f8A"
+  },
+  {
+   "name": "풋살코리아",
+   "url": "https://www.youtube.com/@futsalkorea5",
+   "handle": "@futsalkorea5",
+   "group": "풋살 특화",
+   "subs": 4970,
+   "subsText": "4,970",
+   "category": "풋살 전술 분석",
+   "format": "해외 경기 전술 분석 + 국가대표 하이라이트",
+   "tip": "전술 해설은 롱폼보다 쇼츠에서 반응이 좋음. 쇼츠 템플릿"
+  },
+  {
+   "name": "아이콘 풋살",
+   "url": "https://www.youtube.com/@icon1018",
+   "handle": "@icon1018",
+   "group": "풋살 특화",
+   "subs": 4320,
+   "subsText": "4,320",
+   "category": "동호인 팀",
+   "format": "대회 참가기 EP + 실전 기술 쇼츠",
+   "tip": "실전용 OO 드리블 쇼츠가 구독자의 10배 넘는 조회수"
+  },
+  {
+   "name": "주재파악 TV",
+   "url": "https://www.youtube.com/@주재파악TV",
+   "handle": "@주재파악TV",
+   "group": "풋살 특화",
+   "subs": 2190,
+   "subsText": "2,190",
+   "category": "팀 경기 브이로그",
+   "format": "vs 강팀 롱폼 + 질문형 쇼츠",
+   "tip": "쇼츠 상단 질문형 훅 + 하단 고정 브랜드 바"
+  },
+  {
+   "name": "영타",
+   "url": "https://www.youtube.com/@영타87",
+   "handle": "@영타87",
+   "group": "풋살 특화",
+   "subs": 2170,
+   "subsText": "2,170",
+   "category": "플랩 하이라이트",
+   "format": "고정 카메라 경기 영상 + 원포인트 쇼츠",
+   "tip": "저비용 플랩 경기 콘텐츠, 노란 훅 문구 + 키워드 강조 썸네일"
+  },
+  {
+   "name": "용인 케이식스",
+   "url": "https://www.youtube.com/@TEAM_KSIX_YONGIN",
+   "handle": "@TEAM_KSIX_YONGIN",
+   "group": "풋살 특화",
+   "subs": 663,
+   "subsText": "663",
+   "category": "동호인 팀",
+   "format": "강팀 도전·대회 출전기",
+   "tip": "썸네일 선수 이름표 화살표, 별명 캐릭터"
+  },
+  {
+   "name": "유니팝(KICK OH)",
+   "url": "https://www.youtube.com/@KICK_OH",
+   "handle": "@KICK_OH",
+   "group": "풋살 특화",
+   "subs": 470,
+   "subsText": "470",
+   "category": "아카데미 레슨",
+   "format": "프로 기술 실전 검증 쇼츠",
+   "tip": "쇼츠 상하단 고정 템플릿. 채널 정체성이 흐린 점은 반면교사"
+  },
+  {
+   "name": "JK 아트사커",
+   "url": "https://www.youtube.com/@JKartsoccer",
+   "handle": "@JKartsoccer",
+   "group": "축구 레슨·기술",
+   "subs": 973000,
+   "subsText": "97.3만",
+   "category": "레슨 + 챌린지",
+   "format": "[축구천재 검증], [거미손 챌린지] 코너 + 쇼츠",
+   "tip": "기술 레슨을 검증·도전 이야기로 포장. 쇼츠 100만 회대",
+   "star": true,
+   "channelId": "UCT8DsZlac7D1_dx6d8Kh_Qw"
+  },
+  {
+   "name": "티아고킴",
+   "url": "https://www.youtube.com/@tiago_kim",
+   "handle": "@tiago_kim",
+   "group": "축구 레슨·기술",
+   "subs": 70000,
+   "subsText": "7.0만",
+   "category": "코치 개인 레슨",
+   "format": "기초 레슨 + 원리 한 줄 쇼츠",
+   "tip": "공중볼 트래핑 원리 쇼츠 290만 회. 레슨에서 토크로 바꾼 뒤 조회수 하락"
+  },
+  {
+   "name": "축구도사 메기",
+   "url": "https://www.youtube.com/@축구도사메기Megi",
+   "handle": "@축구도사메기Megi",
+   "group": "축구 레슨·기술",
+   "subs": 63000,
+   "subsText": "6.3만",
+   "category": "체험형 레슨",
+   "format": "스승을 찾아서 롱폼 + 장비 실험 쇼츠",
+   "tip": "풋살 국가대표 게스트 회차 있음. 쇼츠가 롱폼보다 10~100배 조회",
+   "channelId": "UCsmfvvOOIV0rdxOD98Q_3qw"
+  },
+  {
+   "name": "축구배울래?",
+   "url": "https://www.youtube.com/@cb_academy",
+   "handle": "@cb_academy",
+   "group": "축구 레슨·기술",
+   "subs": 62000,
+   "subsText": "6.2만",
+   "category": "아카데미 레슨",
+   "format": "프리스타일·축구화 리뷰(롱폼은 멈춤)",
+   "tip": "채널 설명란에 수업 문의 경로. 구독자 대비 조회수가 약함"
+  },
+  {
+   "name": "사커 튜토리얼",
+   "url": "https://www.youtube.com/@soccer_tutorial",
+   "handle": "@soccer_tutorial",
+   "group": "축구 레슨·기술",
+   "subs": 45000,
+   "subsText": "4.5만",
+   "category": "기술 레슨",
+   "format": "튜토리얼/자주 쓰는 상황/흔한 실수 시리즈",
+   "tip": "썸네일에 화살표·O/X·주석. 같은 실내 풋살장 환경"
+  },
+  {
+   "name": "서벤사커",
+   "url": "https://www.youtube.com/@seobensoccer",
+   "handle": "@seobensoccer",
+   "group": "축구 레슨·기술",
+   "subs": 44000,
+   "subsText": "4.4만",
+   "category": "레슨(소수) + 하이라이트",
+   "format": "거의 휴면",
+   "tip": "기초 레슨이 하이라이트보다 10배 넘게 조회. X/O 비교 썸네일"
+  },
+  {
+   "name": "두개의심장",
+   "url": "https://www.youtube.com/@_twoheart",
+   "handle": "@_twoheart",
+   "group": "축구 레슨·기술",
+   "subs": 34000,
+   "subsText": "3.4만",
+   "category": "유소년 육성 토크",
+   "format": "실내 인터뷰 20~30분 + 쇼츠",
+   "tip": "부모와 유소년 대상 질문형 주제, 게스트 인터뷰"
+  },
+  {
+   "name": "축정원",
+   "url": "https://www.youtube.com/@축정원",
+   "handle": "@축정원",
+   "group": "축구 레슨·기술",
+   "subs": 17000,
+   "subsText": "1.7만",
+   "category": "초보 레슨",
+   "format": "코치와 수강생 실전 레슨 + 클립 쇼츠",
+   "tip": "롱폼에서 핵심 1포인트를 잘라 쇼츠로(훅 자막 + 화살표 라벨)",
+   "channelId": "UCiDZRKIkyWI_E1jCi91zDVw"
+  },
+  {
+   "name": "강코치 풋볼",
+   "url": "https://www.youtube.com/@Kangcoach_futbol",
+   "handle": "@Kangcoach_futbol",
+   "group": "축구 레슨·기술",
+   "subs": 12500,
+   "subsText": "1.25만",
+   "category": "1인 코치 원포인트",
+   "format": "4~7분 레슨 + 프로 기술 쇼츠 + 모음 영상",
+   "tip": "포지션 + 필수 기술 N가지 제목, 고정 로고 템플릿"
+  },
+  {
+   "name": "고알레 아카데미",
+   "url": "https://www.youtube.com/@GoaleAcademy",
+   "handle": "@GoaleAcademy",
+   "group": "축구 레슨·기술",
+   "subs": 12000,
+   "subsText": "1.2만",
+   "category": "원포인트 레슨",
+   "format": "2~5분, 쇼츠 없음",
+   "tip": "예능 본채널과 레슨 채널 분리. 검색 키워드형 제목이 가장 잘 됨"
+  },
+  {
+   "name": "풋볼아이",
+   "url": "https://www.youtube.com/@풋볼아이",
+   "handle": "@풋볼아이",
+   "group": "축구 레슨·기술",
+   "subs": 117000,
+   "subsText": "11.7만",
+   "category": "기술 튜토리얼",
+   "format": "1~2분 롱폼 + 코치 시범 쇼츠",
+   "tip": "풋살 방향전환 쇼츠 9.2만 회. N가지 + 브랜드 태그 제목"
+  },
+  {
+   "name": "왼발의 청춘",
+   "url": "https://www.youtube.com/@Leftballer",
+   "handle": "@Leftballer",
+   "group": "축구 레슨·기술",
+   "subs": 8170,
+   "subsText": "8,170",
+   "category": "축구·풋살 레슨",
+   "format": "문제 해결형 레슨 + 게스트 코치",
+   "tip": "前 풋살 국가대표 코치가 알려주는 권위형 제목"
+  },
+  {
+   "name": "지니풋볼",
+   "url": "https://www.youtube.com/@geniefootball",
+   "handle": "@geniefootball",
+   "group": "축구 레슨·기술",
+   "subs": 5900,
+   "subsText": "5,900",
+   "category": "레슨센터 코치",
+   "format": "기술 한 개 강좌 4~6분",
+   "tip": "오프라인 레슨센터 + 콘텐츠 선순환. 소규모인데 강좌 2~6만 회"
+  },
+  {
+   "name": "감스트",
+   "url": "https://www.youtube.com/@gamst6217",
+   "handle": "@gamst6217",
+   "group": "축구 예능·챌린지",
+   "subs": 3040000,
+   "subsText": "304만",
+   "category": "리액션 예능",
+   "format": "중계 리액션 하이라이트 + 쇼츠",
+   "tip": "썸네일은 표정 + 큰 스코어. 레슨 요소는 없음",
+   "channelId": "UCbFzvzDu17eDZ3RIeaLRswQ"
+  },
+  {
+   "name": "슛포러브",
+   "url": "https://www.youtube.com/@shootforlovekorea",
+   "handle": "@shootforlovekorea",
+   "group": "축구 예능·챌린지",
+   "subs": 1850000,
+   "subsText": "185만",
+   "category": "스타 게스트 예능",
+   "format": "12~20분 예능 + 하이라이트 쇼츠",
+   "tip": "썸네일 공식, 7일 만에 실력 바뀔까 성장 챌린지",
+   "star": true,
+   "channelId": "UCdTDdygpZKdDew2s1s419iw"
+  },
+  {
+   "name": "안정환 19",
+   "url": "https://www.youtube.com/@Ahn_19",
+   "handle": "@Ahn_19",
+   "group": "축구 예능·챌린지",
+   "subs": 648000,
+   "subsText": "64.8만",
+   "category": "레전드 토크 + 레슨",
+   "format": "토크 예능 + 원포인트 레슨 쇼츠",
+   "tip": "레슨 롱폼을 [주제] Lesson! 쇼츠로 쪼개기. 레슨 조회수는 토크보다 낮음"
+  },
+  {
+   "name": "고알레",
+   "url": "https://www.youtube.com/@GOALE",
+   "handle": "@GOALE",
+   "group": "축구 예능·챌린지",
+   "subs": 589000,
+   "subsText": "58.9만",
+   "category": "리얼 예능",
+   "format": "대회·대결 롱폼 + 축구화 리뷰",
+   "tip": "진행자 캐릭터화, 레슨 영상은 예능의 약 1/3 조회",
+   "channelId": "UCI0FxD0282RxDk193_RJcJg"
+  },
+  {
+   "name": "이거해조 원희형",
+   "url": "https://www.youtube.com/@wonheehyung",
+   "handle": "@wonheehyung",
+   "group": "축구 예능·챌린지",
+   "subs": 448000,
+   "subsText": "44.8만",
+   "category": "1:1 대결 예능",
+   "format": "막아조 원희형 시리즈",
+   "tip": "1:1 대결 + 기록 누적 + 본편·비하인드·쇼츠·예고 분할",
+   "channelId": "UC7JbUmyD7g8JH6LvkkQuSZQ"
+  },
+  {
+   "name": "도블락",
+   "url": "https://www.youtube.com/@gkdoblock",
+   "handle": "@gkdoblock",
+   "group": "축구 예능·챌린지",
+   "subs": 411000,
+   "subsText": "41.1만",
+   "category": "GK 1인칭 경기 예능",
+   "format": "POV 경기 롱폼 + 시사·실험 쇼츠",
+   "tip": "정체성 하나 + 고정 촬영 시그니처. 이종 대결 실험",
+   "star": true,
+   "channelId": "UCYuXe8y4Hsz1-flloFBJt5Q"
+  },
+  {
+   "name": "석꾸축꾸",
+   "url": "https://www.youtube.com/@seokggu",
+   "handle": "@seokggu",
+   "group": "축구 예능·챌린지",
+   "subs": 391000,
+   "subsText": "39.1만",
+   "category": "실험·비교",
+   "format": "3~5분 A vs B 실험",
+   "tip": "코치가 양손에 비교 대상을 든 썸네일. 1인 촬영"
+  },
+  {
+   "name": "동네축구 고수 DONGO",
+   "url": "https://www.youtube.com/@dongo_77",
+   "handle": "@dongo_77",
+   "group": "축구 예능·챌린지",
+   "subs": 144000,
+   "subsText": "14.4만",
+   "category": "아마추어 도전",
+   "format": "입단테스트·대결 롱폼 + 포지션 팁 쇼츠",
+   "tip": "아마추어가 엘리트에 도전하면? 서사, 1분 꿀팁 쇼츠"
+  },
+  {
+   "name": "이동방송국(이동국)",
+   "url": "https://www.youtube.com/@leedonggook_",
+   "handle": "@leedonggook_",
+   "group": "축구 예능·챌린지",
+   "subs": 111000,
+   "subsText": "11.1만",
+   "category": "토크 예능 + 레슨 쇼츠",
+   "format": "토크·대결 롱폼, 레슨은 쇼츠",
+   "tip": "실내 풋살 코트 레슨 쇼츠 템플릿, 레슨=쇼츠·예능=롱폼 분리",
+   "channelId": "UCgZRNGPDg1jg66e6hBCeETQ"
+  },
+  {
+   "name": "김진짜",
+   "url": "https://www.youtube.com/@realkim10",
+   "handle": "@realkim10",
+   "group": "리뷰·브이로그·분석",
+   "subs": 1060000,
+   "subsText": "106만",
+   "category": "이슈 해설",
+   "format": "~한 이유 롱폼 + 페이스캠 쇼츠",
+   "tip": "이유형 제목 연작, 상단 제목/중단 장면/하단 코치 리액션 쇼츠"
+  },
+  {
+   "name": "달수네라이브",
+   "url": "https://www.youtube.com/@DALSOOLIVE",
+   "handle": "@DALSOOLIVE",
+   "group": "리뷰·브이로그·분석",
+   "subs": 804000,
+   "subsText": "80.4만",
+   "category": "시사 토크",
+   "format": "15~30분 토크",
+   "tip": "한 줄 후킹 + [코너명] 제목",
+   "channelId": "UCRDowcnvz5ZVh-3NVAdfiqg"
+  },
+  {
+   "name": "리춘수(이천수)",
+   "url": "https://www.youtube.com/@leechunsoo10",
+   "handle": "@leechunsoo10",
+   "group": "리뷰·브이로그·분석",
+   "subs": 788000,
+   "subsText": "78.8만",
+   "category": "레전드 토크",
+   "format": "경기 리뷰 + 패널 토크",
+   "tip": "코치 캐릭터 채널 모델, 하이라이트 발언 쇼츠",
+   "channelId": "UChI3EXzhAkRszawlMageKvQ"
+  },
+  {
+   "name": "새벽의 축구 전문가",
+   "url": "https://www.youtube.com/@새벽의축구전문가",
+   "handle": "@새벽의축구전문가",
+   "group": "리뷰·브이로그·분석",
+   "subs": 441000,
+   "subsText": "44.1만",
+   "category": "전술 해설",
+   "format": "12~19분 내레이션 해설",
+   "tip": "세상에서 제일 쉽게 포지셔닝, 빨간 인용 + 흰 질문 썸네일",
+   "channelId": "UCdh5nloZ9eo5YpZ2DRWwIew"
+  },
+  {
+   "name": "꽁병지TV",
+   "url": "https://www.youtube.com/@kkongbyungji",
+   "handle": "@kkongbyungji",
+   "group": "리뷰·브이로그·분석",
+   "subs": 335000,
+   "subsText": "33.5만",
+   "category": "레전드 GK 토크",
+   "format": "해설·토크 + 본인 시연 쇼츠",
+   "tip": "골키퍼 입장에서 본 ~ 전문가 시점 해설, 얼굴 누끼 썸네일",
+   "star": true,
+   "channelId": "UCKgYRjFGgvj7aS8y4EhH2CA"
+  },
+  {
+   "name": "말년 호빙요",
+   "url": "https://www.youtube.com/@oldrobinho",
+   "handle": "@oldrobinho",
+   "group": "리뷰·브이로그·분석",
+   "subs": 228000,
+   "subsText": "22.8만",
+   "category": "1인 토크 해설",
+   "format": "13~24분 경기 직후 리뷰",
+   "tip": "1인 토크 포맷, 짧은 구어체 썸네일 카피"
+  },
+  {
+   "name": "더투탑",
+   "url": "https://www.youtube.com/@the_2top",
+   "handle": "@the_2top",
+   "group": "리뷰·브이로그·분석",
+   "subs": 189000,
+   "subsText": "18.9만",
+   "category": "축구화 리뷰 + 브이로그",
+   "format": "리뷰·챌린지·여행",
+   "tip": "가성비 풋살화 TOP5가 롱폼 최고 조회",
+   "channelId": "UC-VWpTsHaT4eqqrUjLvR6Qg"
+  },
+  {
+   "name": "축구친구",
+   "url": "https://www.youtube.com/@foo7b9ll",
+   "handle": "@foo7b9ll",
+   "group": "리뷰·브이로그·분석",
+   "subs": 145000,
+   "subsText": "14.5만",
+   "category": "이슈 해설",
+   "format": "10~17분 해설",
+   "tip": "질문형 제목 + 단정형 썸네일 키워드 조합, 고정 썸네일 템플릿"
+  },
+  {
+   "name": "이스타",
+   "url": "https://www.youtube.com/@leestarchoo",
+   "handle": "@leestarchoo",
+   "group": "리뷰·브이로그·분석",
+   "subs": 141000,
+   "subsText": "14.1만",
+   "category": "토크·팟캐스트",
+   "format": "[코너명] 토크",
+   "tip": "코너 말머리 체계, 아마추어팀 리그 도전기",
+   "channelId": "UCRb8CJyprj-cZFlJ6-pLKzg"
+  },
+  {
+   "name": "축구심동",
+   "url": "https://www.youtube.com/@sim-dong-woon",
+   "handle": "@sim-dong-woon",
+   "group": "리뷰·브이로그·분석",
+   "subs": 69000,
+   "subsText": "6.9만",
+   "category": "축구화 리뷰 + 팁 쇼츠",
+   "format": "리뷰 롱폼 + 원포인트 쇼츠",
+   "tip": "동호인 고민형 원포인트 쇼츠 20만~50만 회"
+  },
+  {
+   "name": "이제풋볼 축구화 연구소",
+   "url": "https://www.youtube.com/@NOWFOOTBALL",
+   "handle": "@NOWFOOTBALL",
+   "group": "리뷰·브이로그·분석",
+   "subs": 58000,
+   "subsText": "5.8만",
+   "category": "장비 리뷰",
+   "format": "4~6분 실착 리뷰 + 킥 쇼츠",
+   "tip": "TF화 감아차기 쇼츠 200만 회"
+  },
+  {
+   "name": "볼만찬 기자들",
+   "url": "https://www.youtube.com/@ballmanchan",
+   "handle": "@ballmanchan",
+   "group": "리뷰·브이로그·분석",
+   "subs": 48000,
+   "subsText": "4.8만",
+   "category": "기자 토크",
+   "format": "44분 분석 + 클립 쇼츠",
+   "tip": "전술판 설명 장면을 쇼츠로, 쇼츠 템플릿"
+  },
+  {
+   "name": "축구화 리뷰하는 약사",
+   "url": "https://www.youtube.com/@scrreview",
+   "handle": "@scrreview",
+   "group": "리뷰·브이로그·분석",
+   "subs": 30000,
+   "subsText": "3.0만",
+   "category": "장비 리뷰",
+   "format": "3~6분 리뷰 + 판정형 쇼츠",
+   "tip": "풋살화 영상이 상위권. 검색 수요 증거"
+  },
+  {
+   "name": "키킷 KICKiT",
+   "url": "https://www.youtube.com/@kickit_official",
+   "handle": "@kickit_official",
+   "group": "리뷰·브이로그·분석",
+   "subs": 14000,
+   "subsText": "1.4만",
+   "category": "여자 아마추어팀 시즌제",
+   "format": "ooofc 시즌2 ep.N",
+   "tip": "시즌제 팀 성장 서사, VS 썸네일. 휴면 추정"
+  }
+ ],
+ "directions": [
+  {
+   "key": "A",
+   "title": "레슨 + 예능 MSG형",
+   "desc": "코치 레슨을 중심에 두고 검증·도전 코너와 예능 자막·썸네일로 포장해요. 롱폼은 레슨 시리즈, 쇼츠는 원리 한 개.",
+   "channels": [
+    {
+     "channel": "JK 아트사커",
+     "url": "https://www.youtube.com/@JKartsoccer",
+     "learn": "레슨을 검증·챌린지 코너로 포장, 2~6글자 질문 썸네일, 레터박스 쇼츠",
+     "videos": [
+      {
+       "id": "JVOez02RWlE",
+       "title": "축구천재 검증",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=JVOez02RWlE"
+      },
+      {
+       "id": "lyRbX5oybsU",
+       "title": "직접 붙어보면 다를까",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=lyRbX5oybsU"
+      },
+      {
+       "id": "z6nTeM-dyn4",
+       "title": "거미손 챌린지",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=z6nTeM-dyn4"
+      },
+      {
+       "id": "GL7hw2xmLiA",
+       "title": "이 터치 가능?",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=GL7hw2xmLiA"
+      },
+      {
+       "id": "7JRuT7G0_7c",
+       "title": "천연잔디 4가지 이유",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/7JRuT7G0_7c"
+      }
+     ],
+     "handle": "@JKartsoccer",
+     "channelId": "UCT8DsZlac7D1_dx6d8Kh_Qw"
+    },
+    {
+     "channel": "축구도사 메기",
+     "url": "https://www.youtube.com/@축구도사메기Megi",
+     "learn": "비포/애프터 체험 레슨, 누끼 + 권위 라벨 썸네일, 풋살 국가대표 게스트 회차",
+     "videos": [
+      {
+       "id": "SDeLRFEIl40",
+       "title": "디딤발 원리",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=SDeLRFEIl40"
+      },
+      {
+       "id": "Qk51OZ3Ewkk",
+       "title": "드리블 원리",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=Qk51OZ3Ewkk"
+      },
+      {
+       "id": "vT-dsd-N460",
+       "title": "풋살 국가대표 드리블 루틴",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=vT-dsd-N460"
+      },
+      {
+       "id": "WNj2Wdt2k1c",
+       "title": "스터드 감아차기",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/WNj2Wdt2k1c"
+      }
+     ],
+     "handle": "@축구도사메기Megi",
+     "channelId": "UCsmfvvOOIV0rdxOD98Q_3qw"
+    },
+    {
+     "channel": "슛포러브",
+     "url": "https://www.youtube.com/@shootforlovekorea",
+     "learn": "예능 자막·말풍선·하단 2줄 썸네일, N일 성장 챌린지",
+     "videos": [
+      {
+       "id": "_gpK_j_SLG8",
+       "title": "7일 만에 실력 바뀔까",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=_gpK_j_SLG8"
+      },
+      {
+       "id": "50Nmj3xCgU0",
+       "title": "설기현 조축",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=50Nmj3xCgU0"
+      },
+      {
+       "id": "n-P26Ytw8NI",
+       "title": "김영광 x 김남일",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=n-P26Ytw8NI"
+      }
+     ],
+     "handle": "@shootforlovekorea",
+     "channelId": "UCdTDdygpZKdDew2s1s419iw"
+    },
+    {
+     "channel": "쌈바 풋살 클래스",
+     "url": "https://www.youtube.com/@SambaFutsalClass",
+     "learn": "풋살 전용 강좌 시리즈 구조, 고정 썸네일 템플릿",
+     "videos": [
+      {
+       "id": "D5NTShMyh14",
+       "title": "발바닥 드래그 EP03",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=D5NTShMyh14"
+      },
+      {
+       "id": "RSGTAgFJrcA",
+       "title": "ALA 움직임",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=RSGTAgFJrcA"
+      },
+      {
+       "id": "SXQEu7V92QM",
+       "title": "체크백",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=SXQEu7V92QM"
+      },
+      {
+       "id": "5wfzSxiWBxA",
+       "title": "풋살 기초 몰아보기",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=5wfzSxiWBxA"
+      }
+     ],
+     "handle": "@SambaFutsalClass",
+     "channelId": "UC2AKksZvQPH8XLIwgLiNhJQ"
+    },
+    {
+     "channel": "쪼살",
+     "url": "https://www.youtube.com/@Cho_sal",
+     "learn": "경기 장면 위 전술 오버레이 편집, 플랩 타깃 제목",
+     "videos": [
+      {
+       "id": "MJ4BJYPs2g0",
+       "title": "6대6 풋살 교과서",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=MJ4BJYPs2g0"
+      },
+      {
+       "id": "jmXaWZBxMU8",
+       "title": "영상만 봐도 실력이 늘어요",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=jmXaWZBxMU8"
+      },
+      {
+       "id": "pA0ym7j9uKI",
+       "title": "Just Press",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=pA0ym7j9uKI"
+      }
+     ],
+     "handle": "@Cho_sal",
+     "channelId": "UCl4yBpHVaZsjxwXwnYj4kDA"
+    }
+   ],
+   "best": true
+  },
+  {
+   "key": "B",
+   "title": "챌린지·대결형",
+   "desc": "1:1 대결이나 강팀 도전처럼 기록과 회차가 쌓이는 시리즈가 중심이에요. 레슨은 대결 직후 쇼츠로 붙여요.",
+   "channels": [
+    {
+     "channel": "이거해조 원희형",
+     "url": "https://www.youtube.com/@wonheehyung",
+     "learn": "1:1 대결 + 기록 누적, VS 말장난 썸네일, 본편·비하인드·쇼츠·예고 분할",
+     "videos": [
+      {
+       "id": "sSHFMPAjzLQ",
+       "title": "전진우 vs 조원희",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=sSHFMPAjzLQ"
+      },
+      {
+       "id": "VplbLdsST9E",
+       "title": "송종국 vs 조원희",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=VplbLdsST9E"
+      },
+      {
+       "id": "1n1FpgzKkfs",
+       "title": "이근호 vs 조원희",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=1n1FpgzKkfs"
+      },
+      {
+       "id": "rgW9DvPiod4",
+       "title": "진지하게 하려다 개그",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/rgW9DvPiod4"
+      }
+     ],
+     "handle": "@wonheehyung",
+     "channelId": "UC7JbUmyD7g8JH6LvkkQuSZQ"
+    },
+    {
+     "channel": "도블락",
+     "url": "https://www.youtube.com/@gkdoblock",
+     "learn": "1인칭 POV 시그니처, 이종 대결, 구독자 매치, 원리 시연",
+     "videos": [
+      {
+       "id": "luZMmTBdoso",
+       "title": "피구부 14 대 1",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=luZMmTBdoso"
+      },
+      {
+       "id": "d_pvHQoiOKE",
+       "title": "구독자 매치",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=d_pvHQoiOKE"
+      },
+      {
+       "id": "fS_MdsDCePU",
+       "title": "핸드볼 골키퍼",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=fS_MdsDCePU"
+      },
+      {
+       "id": "cmrTFCG-5SY",
+       "title": "탑스핀 슈팅",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=cmrTFCG-5SY"
+      }
+     ],
+     "handle": "@gkdoblock",
+     "channelId": "UCYuXe8y4Hsz1-flloFBJt5Q"
+    },
+    {
+     "channel": "동네축구 고수 DONGO",
+     "url": "https://www.youtube.com/@dongo_77",
+     "learn": "아마추어가 엘리트에 도전 서사, 엠블럼 썸네일",
+     "videos": [
+      {
+       "id": "NszvUdIOKi8",
+       "title": "고려대 입단테스트",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=NszvUdIOKi8"
+      },
+      {
+       "id": "JxBfJsoValI",
+       "title": "고교 엘리트 vs K7 아마추어",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=JxBfJsoValI"
+      },
+      {
+       "id": "yicWD-Pp_WU",
+       "title": "일본 풋살 고수 경기",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=yicWD-Pp_WU"
+      }
+     ],
+     "handle": "@dongo_77"
+    },
+    {
+     "channel": "주재파악 TV",
+     "url": "https://www.youtube.com/@주재파악TV",
+     "learn": "풋살 강팀 도전 EP 시리즈, 질문형 쇼츠 + 브랜드 바",
+     "videos": [
+      {
+       "id": "7P5I7ckf0f0",
+       "title": "수도권 강팀 총집합",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=7P5I7ckf0f0"
+      },
+      {
+       "id": "at8hvwrIMx8",
+       "title": "대전 대회 2부",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=at8hvwrIMx8"
+      },
+      {
+       "id": "PDjgzF-Zrqw",
+       "title": "축구 현역 상대로??",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/PDjgzF-Zrqw"
+      },
+      {
+       "id": "mR-bzvBUZd4",
+       "title": "프로의 압박을 벗겨내는?!",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/mR-bzvBUZd4"
+      }
+     ],
+     "handle": "@주재파악TV"
+    },
+    {
+     "channel": "석꾸축꾸",
+     "url": "https://www.youtube.com/@seokggu",
+     "learn": "1인 촬영 A vs B 실험, 양손 비교 썸네일",
+     "videos": [
+      {
+       "id": "_77bDPqXje0",
+       "title": "최저가 vs 최고가 축구공",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=_77bDPqXje0"
+      },
+      {
+       "id": "E4RtAdBFsyc",
+       "title": "공 크기별 슈팅",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=E4RtAdBFsyc"
+      },
+      {
+       "id": "Fv5FIOfAozA",
+       "title": "가장 많이 넣어보세요",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/Fv5FIOfAozA"
+      }
+     ],
+     "handle": "@seokggu"
+    }
+   ]
+  },
+  {
+   "key": "C",
+   "title": "쇼츠 집중형",
+   "desc": "기술 한 개를 30~60초 쇼츠로 고정 틀에 맞춰 자주 올리고, 롱폼은 'N가지 총정리'나 모음집으로 묶어요.",
+   "channels": [
+    {
+     "channel": "풋살해주호",
+     "url": "https://www.youtube.com/@futsalstudio",
+     "learn": "풋살 기술 한 개 쇼츠, 플랩 세미 가는 기술 총정리 롱폼",
+     "videos": [
+      {
+       "id": "41WKQgWz7VA",
+       "title": "팬텀 드리블 팁",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/41WKQgWz7VA"
+      },
+      {
+       "id": "ahCc_GO_RTY",
+       "title": "풋살 국가대표가 쓰는 실전 기술",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/ahCc_GO_RTY"
+      },
+      {
+       "id": "g9OPu80EXAU",
+       "title": "기본기 총정리",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=g9OPu80EXAU"
+      },
+      {
+       "id": "kjKi2Za_IJk",
+       "title": "드리블 15가지",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=kjKi2Za_IJk"
+      }
+     ],
+     "handle": "@futsalstudio",
+     "channelId": "UCVFGEMzwYdZysjTrz_54f8A"
+    },
+    {
+     "channel": "축구심동",
+     "url": "https://www.youtube.com/@sim-dong-woon",
+     "learn": "동호인 고민형 원포인트 쇼츠 공식, 자조 유머 톤",
+     "videos": [
+      {
+       "id": "qbXVt9LHkSU",
+       "title": "무릎 아플 때 공 멀리 차는 법",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/qbXVt9LHkSU"
+      },
+      {
+       "id": "1kMUCAcR2Ao",
+       "title": "빠르지 않아도 수비를 괴롭히는 법",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/1kMUCAcR2Ao"
+      },
+      {
+       "id": "_RCUz5RL6fY",
+       "title": "크로스를 살살 올려야 하는 이유",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/_RCUz5RL6fY"
+      }
+     ],
+     "handle": "@sim-dong-woon"
+    },
+    {
+     "channel": "풋볼아이",
+     "url": "https://www.youtube.com/@풋볼아이",
+     "learn": "코치 1인 풋살 기술 시범 쇼츠 템플릿",
+     "videos": [
+      {
+       "id": "ehnwbwHNk9A",
+       "title": "풋살 방향전환",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/ehnwbwHNk9A"
+      },
+      {
+       "id": "Y8n70G1MGYk",
+       "title": "미토마 스킬",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/Y8n70G1MGYk"
+      },
+      {
+       "id": "QQeH0qYTbJI",
+       "title": "모든 스트라이커가 쓰는 풋살 무브",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/QQeH0qYTbJI"
+      }
+     ],
+     "handle": "@풋볼아이"
+    },
+    {
+     "channel": "샌드박스 풋살",
+     "url": "https://www.youtube.com/@SANDBOX_Futsal",
+     "learn": "~이란? 기술 정의 쇼츠, 기술별 모음집",
+     "videos": [
+      {
+       "id": "eABQYnLATwc",
+       "title": "바디 페인팅이란?",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/eABQYnLATwc"
+      },
+      {
+       "id": "wV0L0_oLS5o",
+       "title": "사이드에서 팬텀정석",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/wV0L0_oLS5o"
+      },
+      {
+       "id": "bIqimewX158",
+       "title": "플랩 레벨이?",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/bIqimewX158"
+      },
+      {
+       "id": "u2MsIG2BA-E",
+       "title": "K리거가 풋살을 한다면? 모음집",
+       "shorts": false,
+       "url": "https://www.youtube.com/watch?v=u2MsIG2BA-E"
+      }
+     ],
+     "handle": "@SANDBOX_Futsal"
+    },
+    {
+     "channel": "이동방송국(이동국)",
+     "url": "https://www.youtube.com/@leedonggook_",
+     "learn": "실내 풋살 코트 레슨 쇼츠 템플릿(상단 검은 박스 제목, 괄호 자막, 로고)",
+     "videos": [
+      {
+       "id": "p_xF4c5Rqfs",
+       "title": "공 안 뺏기고 등지는 법",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/p_xF4c5Rqfs"
+      },
+      {
+       "id": "ZPpZYBVYFUQ",
+       "title": "크리스티아누 호날두처럼 헤더",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/ZPpZYBVYFUQ"
+      },
+      {
+       "id": "Wj092cabvn4",
+       "title": "PK 무조건 성공하는 법",
+       "shorts": true,
+       "url": "https://www.youtube.com/shorts/Wj092cabvn4"
+      }
+     ],
+     "handle": "@leedonggook_",
+     "channelId": "UCgZRNGPDg1jg66e6hBCeETQ"
+    }
+   ]
+  }
+ ]
+}

@@ -135,7 +135,9 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
-def download(ids, log, cookies_browser=None, max_height=1080):
+def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None):
+    """영상 받기 → 받지 못한 영상 id 목록. 기본은 편집용 보관함(VIDEOS · archive.txt · 출처는 sources.json).
+    학습용 영상(refs)은 dest(받는 폴더)·archive(False 면 쓰지 않음)·label(진행 표시)·remember(받은 영상 정보 [dict] 를 받는 함수)를 바꿔 씀."""
     import source
     cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}, "infos": {}}
 
@@ -155,21 +157,22 @@ def download(ids, log, cookies_browser=None, max_height=1080):
             whole = sum(max(t, sizes[k] if k < len(sizes) else 0) for k, (_, t) in cur["streams"].items())
             whole += sum(sz for k, sz in enumerate(sizes) if k not in cur["streams"])
             pct = min(99, int(done * 100 / whole)) if whole else None
-            set_progress(label="보관함에 담는 중", item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=pct,
+            set_progress(label=label, item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=pct,
                          detail=f"{done / 1e6:.1f}MB / {whole / 1e6:.1f}MB" + (f" · {d['_speed_str'].strip()}" if d.get("_speed_str") else ""))
         elif d["status"] == "finished" and idx == len(fmts) - 1:
-            set_progress(label="보관함에 담는 중", item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=99, detail="영상과 소리를 합치는 중")
+            set_progress(label=label, item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=99, detail="영상과 소리를 합치는 중")
 
     opts = {
         "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
         "merge_output_format": "mp4",
-        "outtmpl": str(VIDEOS / "%(upload_date)s_%(id)s_%(title).60B.%(ext)s"),
+        "outtmpl": str((dest or VIDEOS) / "%(upload_date)s_%(id)s_%(title).60B.%(ext)s"),
         "trim_file_name": 120,
-        "download_archive": str(VIDEOS / "archive.txt"),
         "ffmpeg_location": ffmpeg(),
         "quiet": True, "no_warnings": True, "noprogress": True,
         "progress_hooks": [hook],
     }
+    if archive is not False:
+        opts["download_archive"] = str(archive or VIDEOS / "archive.txt")
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
     failed, retried = [], False  # 막히면 엔진 최신화 + 다시 받기는 한 번만
@@ -180,14 +183,14 @@ def download(ids, log, cookies_browser=None, max_height=1080):
         ydl = _yt(log).YoutubeDL(opts)
         try:
             for k, vid in enumerate(ids, 1):
-                log(f"보관함에 담는 중 · {vid}")
+                log(f"{label} · {vid}")
                 for attempt in (1, 2):
                     cur.update(i=k, vid=vid, streams={})
-                    set_progress(label="보관함에 담는 중", item=vid, step=f"{k}/{len(ids)}", pct=None, detail="연결하는 중")
+                    set_progress(label=label, item=vid, step=f"{k}/{len(ids)}", pct=None, detail="연결하는 중")
                     try:
                         ydl.download([vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"])
                         log("  담기 완료")
-                        _remember_source(cur, log)
+                        _remember_source(cur, log, remember)
                     except Exception as e:  # 한 개 실패해도 나머지 계속
                         if attempt == 1 and not retried and _blocked(e):
                             retried = True
@@ -209,19 +212,45 @@ def download(ids, log, cookies_browser=None, max_height=1080):
     return failed
 
 
-def _remember_source(cur, log):
-    """방금 받은 영상의 채널 정보 → sources.json (실패해도 받은 영상은 그대로)."""
+def _remember_source(cur, log, remember=None):
+    """방금 받은 영상의 채널 정보 → sources.json (학습용 영상은 remember) · 실패해도 받은 영상은 그대로."""
     import source
     infos, cur["infos"] = list(cur["infos"].values()), {}
     try:
-        source.record_download(infos)
+        (remember or source.record_download)(infos)
     except Exception as e:  # noqa: BLE001
         log(f"  출처(채널)는 기록하지 못했어요 · {e}")
 
 
 def adir(name):
-    """영상별 분석 폴더. Windows 는 폴더 이름 끝의 공백·점을 지워버리므로 미리 제거."""
-    return ANALYSIS / (Path(name).stem.rstrip(" .") or "video")
+    """영상별 분석 폴더. Windows 는 폴더 이름 끝의 공백·점을 지워버리므로 미리 제거.
+    편집용 보관함에 파일이 있으면 analysis/<이름> · 아니고 학습용 영상(refs) 기록이 있으면 그 채널 폴더의 _analysis/<이름>
+    (보관함에서 지운 같은 이름 영상의 옛 분석 폴더가 남아 있어도 학습용이 이김) · 둘 다 아니면 analysis/<이름>."""
+    d = ANALYSIS / (Path(name).stem.rstrip(" .") or "video")
+    if (VIDEOS / Path(name).name).exists():
+        return d
+    return _ref("adir_of", name) or d
+
+
+def video_file(name):
+    """영상 파일 경로: 편집용 보관함(videos) → 없으면 학습용 영상(refs) → 둘 다 없으면 보관함 경로 (있는지는 부르는 쪽이 확인)."""
+    p = VIDEOS / Path(name).name
+    if p.is_file():
+        return p
+    return _ref("path_of", name) or p
+
+
+def kept_sig(name):
+    """학습용 영상을 '배운 뒤 영상 파일 지우기'로 지웠으면 그때 파일 지문 (남은 분석 기록을 그대로 쓸 때) · 아니면 None."""
+    return None if (VIDEOS / Path(name).name).is_file() else _ref("kept_sig", name)
+
+
+def _ref(fn, name):
+    try:
+        import refs
+        return getattr(refs, fn)(Path(name).name)
+    except Exception:  # noqa: BLE001 — 학습용 기록을 못 읽어도 편집용 보관함은 그대로
+        return None
 
 
 def local_videos():
