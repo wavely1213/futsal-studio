@@ -198,7 +198,9 @@ class FindJunkTest(unittest.TestCase):
         self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 19.9}], [{"time": 15.0, "rms_db": -8.0}]), [])  # 공 차는 소리
         self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 19.9}], [15.0]), [])  # 시각만 넘겨도 됨
         self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 15.0}, {"start": 16.5, "end": 19.9}]), [(10, 20, NG)])  # 말 없는 소리 1.5초
-        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 14.0}, {"start": 18.5, "end": 19.9}]), [])  # 4.5초 시범 소리
+        # 소리만 있고 봉우리가 없으면 6초 넘게 이어져야 시범 (체육관·운동장은 늘 시끄러워서 4~5초 숨 고르기는 다시 찍기)
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 14.0}, {"start": 18.5, "end": 19.9}]), [(10, 20, NG)])
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 13.0}, {"start": 19.5, "end": 19.9}]), [])  # 6.5초 시범 소리
         show = [S(10, 12, "한 번 더 보여 드릴게요."), S(20, 22, "한 번 더 보여 드릴게요.")]
         self.assertEqual(takes.find_junk(show, []), [])
         # 슬레이트 말이 있으면 시범이 있어도 NG · 끊긴 앞 테이크도 그대로 NG
@@ -207,6 +209,49 @@ class FindJunkTest(unittest.TestCase):
         self.assertEqual(takes.find_junk([S(10, 12.5, "패스하고 어 바로 앞으로 뛰어나가세요."), S(20, 22.5, line)], []), [(10, 20, NG)])
         # 사이가 3초 이하면 시범으로 안 봄 (같은 말을 바로 다시 한 것)
         self.assertEqual(takes.find_junk([S(10, 12.5, line), S(15.5, 18, line)], []), [(10, 15.5, NG)])
+
+    def test_demo_protection_with_coach_fillers_and_noisy_retakes(self):
+        # E6 검토: 코치는 거의 모든 말을 '자,'로 시작하고 '…, 네.'로 끝냄 — 이런 말버릇이 있어도 다 말한 설명이라 시범 사이 첫 설명은 그대로
+        line = "패스하고 바로 앞으로 뛰어나가세요."
+        peak = [15.0]
+        for a, b in ((f"자, {line}", f"자, {line}"), (f"자, {line}", line), (f"{line[:-1]}, 네.", f"{line[:-1]}, 네."),
+                     ("자 이렇게 발 안쪽으로 받아 주세요.", "자 이렇게 발 안쪽으로 받아 주세요.")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(takes.find_junk([S(10, 12.5, a), S(20, 22.5, b)], [], peak), [])  # 공 차는 소리
+                self.assertEqual(takes.find_junk([S(10, 12.5, a), S(20, 22.5, b)], []), [])  # 조용한 곳 정보 없이 7.5초
+        # 머뭇거림이 든 앞 테이크는 그대로 NG ('자,'로 시작해도)
+        self.assertEqual(takes.find_junk([S(10, 12.5, "자, 패스하고 음 바로 앞으로 뛰어나가세요."), S(20, 22.5, line)], [], peak), [(10, 20, NG)])
+        self.assertEqual(takes.find_junk([S(10, 12.5, "자, 패스하고 바로 앞으로 뛰어나가세요 어"), S(20, 22.5, line)], [], peak), [(10, 20, NG)])
+        # 시끄러운 곳에서 4초 숨 고르고 슬레이트 말 없이 다시 한 말은 NG (봉우리 없음 · 조용한 곳 없음)
+        self.assertEqual(takes.find_junk([S(10, 12.5, line), S(16.5, 19, line)], []), [(10, 16.5, NG)])
+        # 짧은 빈 곳의 큰 소리(카메라에 공이 맞음)는 시범이 아님 → NG
+        self.assertEqual(takes.find_junk([S(10, 12.5, line), S(13.4, 15.9, line)], [], [12.6]), [(10, 13.4, NG)])
+        # 봉우리 창(1초)이 말에 걸치면 시범 소리로 안 봄 (말소리 자체가 큰 것)
+        self.assertEqual(takes.find_junk([S(10, 12.5, line), S(16.8, 19.3, line)], [], [12.0]), [(10, 16.8, NG)])
+
+    def test_chant_words_do_not_shield_real_stutters(self):
+        # E6 검토: 방향·동작 말('앞으로' · '패스')은 문장 첫마디로도 흔함 — 혼자 두 번이면 말더듬 · 외친 줄('패스!')·두 낱말 리듬만 구령
+        self.assertEqual(takes.find_junk([S(0, 0.4, "앞으로"), S(0.6, 1.0, "앞으로"), S(1.1, 4, "나가면서 받으세요")], []), [(0, 0.6, STUTTER)])
+        self.assertEqual(takes.find_junk([S(0, 0.4, "패스"), S(0.6, 1.0, "패스"), S(1.1, 4, "패스할 때는 디딤발을 공 옆에 두세요")], []),
+                         [(0, 0.6, STUTTER), (0.6, 1.1, STUTTER)])  # '패스 패스할 때는' 이 남지 않게 둘 다
+        self.assertEqual(takes.find_junk([S(0, 0.4, "계속"), S(0.6, 1.0, "계속")], []), [(0, 0.6, STUTTER)])
+        self.assertEqual(takes.find_junk([S(0, 0.4, "패스!"), S(0.6, 1.0, "패스!")], []), [])  # 드릴 중 외친 구령
+        self.assertEqual(takes.find_junk([S(0, 0.8, "안쪽, 바깥쪽"), S(1.0, 1.8, "안쪽, 바깥쪽")], []), [])
+        for w in ("앞으로", "패스", "계속", "빨리", "더", "옆", "위"):
+            self.assertFalse(takes.is_chant(w), w)
+        self.assertTrue(takes.is_chant("빠르게!"))
+        self.assertFalse(takes.is_chant("와"))  # '와'는 구령 낱말에서 뺌 ('우와'는 그대로)
+        self.assertTrue(takes.is_chant("우와!"))
+
+    def test_shouted_lines_are_not_blanket_exempt(self):
+        # E6 검토: Whisper 가 붙인 '!' 하나로 반복이 다 살아나면 안 됨 — 똑같이 외친 짧은 말·긴 문장 반복은 그대로 지움
+        self.assertEqual(takes.find_junk([S(0, 0.4, "그러니까!"), S(0.6, 1.0, "그러니까!"), S(1.2, 4, "공을 끝까지 보세요")], []),
+                         [(0, 0.6, STUTTER)])
+        self.assertFalse(takes.repeat_ok("오늘은 슈팅 챌린지예요!", "오늘은 슈팅 챌린지예요!"))
+        self.assertTrue(takes.find_junk([S(0, 1.8, "오늘은 슈팅 챌린지예요!"), S(2.0, 3.8, "오늘은 슈팅 챌린지예요!")], []))
+        self.assertFalse(takes.repeat_ok("오늘은 정말 중요한 슈팅 챌린지를 할 거예요,", "오늘은 정말 중요한 슈팅 챌린지를 할 거예요!"))
+        self.assertTrue(takes.repeat_ok("빠르게,", "빠르게!"))  # 짧은 말을 외치며 다시 함
+        self.assertTrue(takes.repeat_ok("나이스!", "나이스!"))
 
     def test_slate_from_preceding_silence(self):
         # (c) 1초 이상 조용한 곳의 시작부터 슬레이트 말 끝까지 (1초보다 짧은 조용함은 안 봄)

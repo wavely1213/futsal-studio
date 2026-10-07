@@ -11,7 +11,8 @@ SIMILAR, MIN_CHARS = 0.7, 6         # 글자 비슷한 정도 · 이보다 짧�
 LOOSE_MAX = 20                      # 두 테이크 사이에 '다시 한 말'로 설명 안 되는 글자가 이보다 많으면 다른 내용 (슬레이트 말이 없으면 0)
 COVER = 0.8                         # 슬레이트 말이 없으면 뒤 테이크가 앞 테이크 말을 이만큼 이상 다시 해야 함 (나란한 설명은 그대로)
 QUIET_MAX = 15.0                    # 두 테이크 사이에 말 없이 이보다 길게 비면(시범 장면일 수 있음) 슬레이트 말이 있을 때만
-DEMO_MIN = 3.0                      # 두 테이크 사이에 조용하지 않은데 말이 없는 곳이 이보다 길거나 큰 소리 봉우리(공 차는 소리·환호)가 있으면 시범
+DEMO_MIN = 4.0                      # 두 테이크 사이 말 없는 곳이 이보다 길고 그 안에 큰 소리 봉우리(공 차는 소리·환호)가 있으면 시범
+DEMO_LONG = 6.0                     # 봉우리가 없으면: 조용하지 않은데 말이 없는 곳이 이보다 길어야 시범 (체육관·운동장은 늘 시끄러워서 3~5초 숨 고르기와 구별)
 SLATE_SIL = 1.0                     # 슬레이트 말 앞의 이만큼 이상 조용한 곳부터 지움
 STUTTER_GAP, STUTTER_MAX = 1.0, 10  # 말더듬: 이 초 안에 다시 시작한, 이 글자 이하의 짧은 말
 CUTOFF_MAX = 0.6                    # 끊긴 첫마디로 볼 최대 길이 (초)
@@ -42,15 +43,26 @@ SORRY = {"죄송합니다", "죄송해요", "죄송", "미안합니다", "미안
 # 슬레이트 말에 붙은 실수 말 ('아 이거 아닌데 다시 할게요') — 남는 글자로 안 셈
 OOPS = re.compile(r"(?:이거|이게|그게)?(?:아닌데|아니네|아니다|아니야|아니지)|아이고|아이구|어이쿠|아차|이런")
 # 구령·리듬 말·환호 — 받아쓰기가 줄마다 나눠도 말더듬이 아님 ('하나, 둘, 셋!' · '왼발, 오른발' · '나이스! 나이스!' · '골!')
-CHANT_WORDS = (
+# 숫자 세기·소리 흉내·환호는 그 낱말만으로 구령 (문장 첫마디로 잘 안 씀)
+CHANT_STRONG = (
     "하나", "둘", "셋", "넷", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "원", "투", "쓰리", "포", "파이브",  # ('일, 이, 삼'은 '이'·'사' 같은 흔한 말과 겹쳐 뺌 · 숫자로 받아쓴 '1, 2, 3'은 됨)
-    "왼발", "오른발", "왼쪽", "오른쪽", "안쪽", "바깥쪽", "인사이드", "아웃사이드", "앞", "뒤", "옆", "위", "아래", "앞으로", "뒤로", "옆으로",
-    "탁", "톡", "툭", "퉁", "쿵", "짝", "착", "팡", "뻥", "스텝", "점프", "터치", "원터치", "투터치",
-    "빠르게", "천천히", "강하게", "세게", "약하게", "빨리", "계속", "더", "멈춰", "스톱", "턴", "돌아", "패스", "슛", "슈팅",
+    "탁", "톡", "툭", "퉁", "쿵", "짝", "착", "팡", "뻥",
     "나이스", "나이스샷", "좋아", "좋다", "좋습니다", "굿", "굳", "오케이", "오케", "예스", "골", "고올", "그렇지", "그렇죠", "그거지", "그거죠",
-    "잘했어", "잘한다", "잘하네", "와", "우와", "브라보", "대박", "최고", "화이팅", "파이팅", "가자", "가즈아", "들어갔다", "들어갔어",
+    "잘했어", "잘한다", "잘하네", "우와", "브라보", "대박", "최고", "화이팅", "파이팅", "가자", "가즈아", "들어갔다", "들어갔어",
     "됐다", "됐어", "완벽", "완벽해", "멋지다", "멋있다", "퍼펙트", "박수")
-_CHANT = re.compile(r"(?:%s)+요?" % "|".join(sorted(map(re.escape, CHANT_WORDS), key=len, reverse=True)))
+# 방향·동작·재촉 말은 문장 첫마디로도 흔해서('앞으로' → '앞으로 나가면서 …' · '패스' → '패스할 때는 …') 그 낱말만으로는 구령이 아님:
+# 서로 다른 두 낱말이 이어지거나('왼발, 오른발' · '안쪽, 바깥쪽') 외친 줄('빠르게!' · '패스!')일 때만
+CHANT_WEAK = (
+    "왼발", "오른발", "왼쪽", "오른쪽", "안쪽", "바깥쪽", "인사이드", "아웃사이드", "앞", "뒤", "옆", "위", "아래", "앞으로", "뒤로", "옆으로",
+    "스텝", "점프", "터치", "원터치", "투터치",
+    "빠르게", "천천히", "강하게", "세게", "약하게", "빨리", "계속", "더", "멈춰", "스톱", "턴", "돌아", "패스", "슛", "슈팅")
+CHANT_WORDS = CHANT_STRONG + CHANT_WEAK
+_CHANT_TOK = re.compile("(?:%s)" % "|".join(sorted(map(re.escape, CHANT_WORDS), key=len, reverse=True)))
+_CHANT = re.compile(r"(?:%s)+요?" % _CHANT_TOK.pattern)
+SHOUT = re.compile(r"!\s*$")
+# 다 말한 테이크인지 볼 때 '끊긴·더듬은' 표시로 보는 머뭇거림 (앞뒤에 붙은 '자', '네', '이제' 같은 말버릇은 괜찮음)
+HESITATE = {"아", "어", "음", "그", "으", "엄", "흠", "뭐", "저기", "아니", "그러니까", "그니까"}
+LEAD_TAIL = {"자", "네", "예", "응", "이제", "그냥", "막"}
 
 
 def _ed():
@@ -115,15 +127,26 @@ def is_slate(text, ed=None):
 
 def is_chant(text, ed=None):
     """한 줄 전체가 숫자 세기·리듬 말·짧은 구령·환호뿐인지 ('하나, 둘, 셋!' · '왼발, 오른발,' · '나이스!' · '좋아요.' · '골!').
-    받아쓰기가 이런 말을 줄마다 나눠도 말더듬·군더더기로 지우지 않으려고 씀 (앞쪽·사이 추임새는 빼고 봄)."""
+    받아쓰기가 이런 말을 줄마다 나눠도 말더듬·군더더기로 지우지 않으려고 씀 (앞쪽·사이 추임새는 빼고 봄).
+    방향·동작 말(CHANT_WEAK)만 있으면 서로 다른 두 낱말이 있거나 외친 줄('!')일 때만 ('앞으로' · '패스' 혼자는 문장 첫마디일 수 있음)."""
     ed = ed or _ed()
     words = [w for w in (ed._norm(x) for x in str(text or "").split()) if w and w not in ed.FILLERS]
-    return bool(words) and all(_CHANT.fullmatch(w) or w.isdigit() for w in words)
+    if not words or not all(_CHANT.fullmatch(w) or w.isdigit() for w in words):
+        return False
+    toks = {t for w in words for t in _CHANT_TOK.findall(w)}
+    return (any(w.isdigit() for w in words) or bool(toks & set(CHANT_STRONG)) or len(toks) >= 2
+            or bool(SHOUT.search(str(text or ""))))
 
 
 def repeat_ok(a, b, ed=None):
-    """줄마다 나뉜 같은 말 a → b 가 일부러 한 반복인지: 구령·환호이거나, 외친 말('빠르게,' → '빠르게!')."""
-    return is_chant(a, ed) or bool(re.search(r"!\s*$", str(a or "")) or re.search(r"!\s*$", str(b or "")))
+    """줄마다 나뉜 같은 말 a → b 가 일부러 한 반복인지: 둘 다 구령·환호이거나, 짧은 말을 외치며 다시 함('빠르게,' → '빠르게!').
+    똑같이 외친 말 둘('그러니까!' '그러니까!')·긴 문장('오늘은 슈팅 챌린지예요!' 두 번)은 반복으로 봄 (Whisper 가 '!'를 흔히 붙임)."""
+    ed = ed or _ed()
+    if is_chant(a, ed) and is_chant(b, ed):
+        return True
+    a, b = str(a or ""), str(b or "")
+    return (len(_core(a, ed)) <= STUTTER_MAX and len(_core(b, ed)) <= STUTTER_MAX
+            and bool(SHOUT.search(a)) != bool(SHOUT.search(b)))
 
 
 def _plain(text, ed):
@@ -150,22 +173,30 @@ def _contrast(a, b):
 
 
 def _finished(a, b, ed):
-    """앞 테이크 a 를 다 말했는지: 추임새·끝 머뭇거림 없이 뒤 테이크 b 만큼(UNDONE) 말함 — 끊긴·더듬은 테이크가 아님."""
-    plain = "".join(_plain(a, ed))
-    return plain == ed._norm(a) and len(plain) > UNDONE * len("".join(_plain(b, ed)))
+    """앞 테이크 a 를 다 말했는지: 머뭇거림('어' · '음' · 끝의 '그러니까')·고쳐 말하기 없이 뒤 테이크 b 만큼(UNDONE) 말함 — 끊긴·더듬은 테이크가 아님.
+    앞뒤에 붙은 말버릇('자, …' · '…, 네.')은 다 말한 테이크로 봄 (코치가 거의 모든 말을 '자,'로 시작함)."""
+    words = [w for w in (ed._norm(x) for x in str(a or "").split()) if w]
+    while words and (words[0] in ed.FILLERS or words[0] in HESITATE):  # 앞쪽 추임새는 무엇이든
+        words.pop(0)
+    while words and words[-1] in LEAD_TAIL:  # 끝의 말버릇 ('네.')
+        words.pop()
+    if not words or any(w in HESITATE or FIX_WORDS.fullmatch(w) for w in words):
+        return False
+    return len("".join(_plain(a, ed))) > UNDONE * len("".join(_plain(b, ed)))
 
 
 def _demo_between(segs, i, j, silences, peaks):
-    """i 끝 ~ j 시작 사이 말 없는 곳에 시범이 있는지: 큰 소리 봉우리(공 차는 소리·환호, 1초 단위 시각)가 있거나
-    조용하지 않은데 말이 없는 곳이 DEMO_MIN 초 넘게 이어짐 (조용한 곳 정보가 없으면 빈 곳 길이 그대로)."""
+    """i 끝 ~ j 시작 사이 말 없는 곳에 시범이 있는지: DEMO_MIN 초 넘게 말이 없고 그 안에 큰 소리 봉우리(공 차는 소리·환호 —
+    1초 창의 시작 시각, 창이 말 사이에 다 들어감)가 있거나, 조용하지 않은데 말이 없는 곳이 DEMO_LONG 초 넘게 이어짐
+    (조용한 곳 정보가 없으면 빈 곳 길이 그대로). 짧은 빈 곳의 큰 소리(카메라에 공이 맞음 등)는 다시 찍는 이유일 수도 있어 안 봄."""
     for k in range(i, j):
         a, b = segs[k]["end"], segs[k + 1]["start"]
         if b - a <= 0:
             continue
-        if any(a < p + 0.5 < b for p in peaks):
+        if b - a > DEMO_MIN and any(a <= p and p + 1.0 <= b for p in peaks):
             return True
         quiet = sum(max(0.0, min(b, x["end"]) - max(a, x["start"])) for x in silences)
-        if b - a - quiet > DEMO_MIN:
+        if b - a - quiet > DEMO_LONG:
             return True
     return False
 
