@@ -1,6 +1,8 @@
 {
   "version": "2.4.0",
   "notes": "휴대폰으로 보기: 휴대폰(mulgyeol.kr/futsal)에서 진행 확인·작업 시작/멈추기·미리보기·끝나면 알림 (QR 짝짓기·서명·암호화 · 계정·공유기 설정 필요 없음) · 채널 전략 작업도 휴대폰에서 진행·멈추기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/6d0bd97da2972d8b332301e731b2ccf597964b1f.zip",
+  "commit": "6d0bd97da2972d8b332301e731b2ccf597964b1f",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "3ab15bd6d9ba498825ebe68a066cf6453fb2e9a7a351e50ef81314cd0e57434d",
