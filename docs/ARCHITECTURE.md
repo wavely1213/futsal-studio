@@ -24,11 +24,11 @@
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · thumb · face · style · plan · refs · source · qa · bundle · upload · hooks · takes(2차 작업 중)
+[기능 모듈]  core · editor · thumb · face · style · plan · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
    ▼
-[외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy
+[외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy · YouTube 공개 RSS(채널 전략)
    ▼
-[작업 폴더 WORK]   videos/ analysis/ projects/ thumbnails/ styles/ refs/(학습용 영상) edit_media/ out/ studio.log …
+[작업 폴더 WORK]   videos/ analysis/ projects/ thumbnails/ styles/ refs/(학습용 영상) strategy/(채널 전략) edit_media/ out/ studio.log …
 [~/.futsal-studio] bin/deno.exe · models/*.onnx · 엔진 기록(json)
 [앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태)
 ```
@@ -40,7 +40,7 @@
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -56,6 +56,8 @@
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
+  - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
+  - `forecast` → (표준 라이브러리 + numpy, numpy 는 함수 안에서). 파일·네트워크가 없는 계산만 한다. `strategy`만 쓴다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
   - `face` → `core`, `thumb`
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
@@ -85,8 +87,10 @@
 | takes | `takes.py` (2차 작업 중, 커밋 전) | `find_junk`·`is_slate`: 받아쓰기 구간만 보고 NG 테이크·슬레이트 말·말더듬 구간을 규칙으로 찾음 → `editor.recommend`가 가편집·쇼츠 후보에서 뺌 (`KNOWN_ISSUES.md` I-012). `find_fillers`: 단어 시각이 있으면 홀로 떨어진 추임새 단어 |
 | source | `source.py` | 보관함 영상의 출처(풋살사관학교·다른 채널·내 촬영본·모름) 판단과 기록(`videos/sources.json`, D-020). 받을 때 yt-dlp 채널 정보 기록, 예전 영상은 채널 목록 기억 → 뒤에서 천천히 영상 정보 조회(`start_backfill`), 직접 고르기(`set_manual`), 다른 채널은 채널별 묶음·고정 색(`channels`), 고르기 칩 개수(`summary`) |
 | refs | `refs.py` | 학습용 영상(스타일 배우기 전용) 보관함 (D-022): 기록 `refs/refs.json`(바꿔 끼우기·잠김 재시도·깨지면 `.bad`), 채널별 폴더·색(`source._register` 재사용, 보관함과 같은 색), `add_channel`(인기 영상 N개 → `core.download`를 받는 곳만 바꿔 → 채널 폴더 → '<채널명> 스타일' 배우기), `add_direction`(추천 방향 A/B/C), `prune`(배운 파일만 지우고 지문 `sig` 남김), `delete`(원본은 한 번 더 확인 · 빈 채널 폴더만 지움), `move_from_library`(보관함 → 학습용: 편집실 프로젝트에서 쓰는 영상은 건너뜀 `projects_using` · 분석 폴더 → 영상 → 기록, 실패하면 되돌림 · `archive.txt`에서 id 뺌), `restore`(학습용 → 보관함으로 되돌리기), `listing`(기록 없이 refs 하위 폴더에 있는 파일·받는 폴더에 남은 파일은 다시 기록 `_adopt`), `recommended`(`ref_channels.json`) |
+| strategy | `strategy.py` | 채널 전략 (D-024): 기록 `WORK/strategy/`(state·channels·history·checkups·forecast, 바꿔 끼우기·.bad·잠기면 안 덮어씀), 경쟁 채널 넣기·빼기(열쇠·중복 막기), `refresh`(yt-dlp 목록 `core.channel_listing` + RSS `fetch_rss`·`parse_rss` · 예절 BR-016 · 막히면 6시간 쉼·RSS 계속 · 채널마다 저장 · 다시 시작한 날), `channel_stats`·`cadence`, 제목 패턴(`formula_stats`·`topic_stats`·`series_stats`·`fixed_hashtags`), `group_summary`·`strengths`·배운 스타일 연결, `takeaways`(규칙 R-* · 8분류 · 맞춤 점수), 할 일(`todo_*`·`todos_for`), 방향 초안 `PRESETS`·`validate_strategy`, `forecast_result`(입력 해시 캐시 · 자료 받은 시각 기준 입력 · 한 번에 하나)·`forecast_preview`(저장 없는 미리 보기)·`own_pace`(지금 속도), `solution`(30/60/90 · 먼저 할 것 · 계획을 바꾸면)·`solution_view`(캐시 `solution.json`), `checkup`·`evaluate`·`band_at`·`forward_check`·`remind`, `claude_prompt`·`parse_ai`·`run_ai`, 화면 묶음 `overview`·`week_view`(이번 주 할 것). 채널 원본은 새로 고침·점검만 읽고(`load_channel`), 분석은 줄인 자료(`_read_slim`)를 기억한다 (D-026). 비교 데이터 `strategy_seed.json`(함께 배포) |
+| forecast | `forecast.py` | 가능성(%) (D-025): `calibrate`(반응 회귀·분류 줄이기·σ·Theil–Sen 전환·탄력성·bootstrap·DEFAULTS), `own_posterior`, `simulate`(주 단위 · 공통 난수 · 지수 누적 · 되먹임), 목표·궤적·KPI, 민감도 `variants`, 표시 `show`(BR-015), `assumptions`, 검증(`loo_coverage`·`video_reliability`·`backtest`·`brier`), `inputs_hash` |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
-| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 7단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
+| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 8단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기·채널 전략 · 5·7단계에 '전략에서 만든 할 일' 상자), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
 
 ## 5. 데이터 모델 요약
 
@@ -105,6 +109,7 @@
 - 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
 - 학습용 영상(스타일 배우기 전용, D-022) `refs/<채널 폴더>/<영상>` · 분석 기록 `refs/<채널 폴더>/_analysis/<stem>/`(style_events·plan_events·옮겨 온 받아쓰기) · 받는 중 `refs/_받는 중/`. 기록 `refs/refs.json` = {channels{채널 열쇠: {name, names, handles, url, color, folder}}, files{파일 이름: {channelKey, folder, videoId, title, how(download·move·found), kind, saved, pruned, sig, original·origin(확인하고 옮긴 원본 · 자동으로 지우지 않음)}}, ids{}, ui{bannerDismissed}}. 채널 열쇠·색 규칙은 `sources.json`과 같다. 같은 이름이 보관함에도 있으면 보관함이 먼저다(`core.video_file`·`adir`). 보관함에 파일이 없으면 옛 `analysis/<stem>`이 남아 있어도 학습용 기록이 먼저다. channels 의 `original`: '풋살사관학교'·'내 촬영본' 칸(원본)
 - 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
+- 채널 전략 `strategy/` (D-024): `state.json` = {v, own{name, channelId, handle, group, revivedAt, revivedManual}, competitors[{key, name, url, handle, channelId, group, from, addedAt}], removed[], strategy{direction, target[], targetNote, formats[{id, name, kind, perWeek}], days[], differentiation, series[{name, desc}], goals{m6, m12}, startedAt, updatedAt}, hidden[], todos[{id, text, category, use[], from{takeaway, channel, video}, createdAt, done, doneAt}], settings{remind, ownAuto}, pause{until, reason(blocked·fails), at}, ai{summary, diagnosis[], actions[], titles[], risks[], by, model, at, dataHash}} (예전 기록의 solution 칸은 읽을 때 버림) · `channels/<sha1(열쇠)[:16]>.json` = {key, name, handle, url, channelId, group, subs, subsAt, src, descFlags{lesson, contact, sponsor}(설명 원문은 저장 안 함), tabs{long|shorts{ids[], n, complete, sum, at, fullAt}}, videos{id: {k, t, te, o, d, v, vAt, pub, likes, seen}}, rss{at, ok, error, ids[]}, translated, errors[], at(마지막으로 무엇이든 받은 시각), listedAt(목록을 받은 시각 · RSS 만 받으면 그대로), seeded·origin(비교 데이터에서 출발했을 때)} — 분석은 형식마다 최근 120개 + RSS 영상만 남긴 줄인 자료를 기억하고, 새로 고침·점검만 원본을 읽음 · `history.jsonl`(한 줄 = {k, at, subs(그날 목록에서 받았을 때만 · 아니면 null), listed, n, sum, complete(목록을 받았을 때만), rss{id: 조회수}} · 깨진 줄은 건너뜀) · `checkups.json` {v, items[≤200] · 3일 안에 다시 점검하면 마지막 것을 바꿈} · 캐시 `forecast.json` {inputsHash, at, result} · 캐시 `solution.json` {hash, at}. 앱 폴더의 `strategy_seed.json`(비교 데이터 · 같은 채널 형식 · src 'seed')은 새로 고친 자료가 없을 때만 쓴다
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`
 - 사용자별 `~/.futsal-studio/`: `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
 - 앱 폴더의 업데이트 상태: `.update_staging/`, `.rollback/v<이전>/{files/, rollback.json}`, `.update_pending`, `.update_result`, `.req_hash`, `.update_skip` (모두 `.gitignore`에 있음)
@@ -135,7 +140,7 @@
   - 서버는 `127.0.0.1`에만 bind한다.
 - **동시성**:
   - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
-  - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`.
+  - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`, `strategy._LOCK`(state·채널·기록 파일).
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
   - 멈추기(✕)는 `editor.CANCEL`, `run_killable`, `cancel_export`로 처리한다.
 - **파일 저장 안전**:

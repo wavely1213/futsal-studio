@@ -23,6 +23,7 @@ import plan
 import qa
 import refs
 import source
+import strategy
 import style
 import thumb
 import upload
@@ -436,6 +437,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "not found"})
             return self._file(p, "image/png" if p.suffix.lower() == ".png" else "image/jpeg")
         # ---- 용어 사전: 받아쓰기에 알려 줄 풋살 용어·이름 + 자주 틀리게 받아쓰는 말 (작업 폴더 dict.json) ----
+        if u.path.startswith("/api/strategy"):  # 채널 전략 (8단계 · 읽기만)
+            return self._strategy_get(u.path, q)
         if u.path == "/api/dict":
             return self._send(200, dict(captions.load_dict(core.dict_path()), defaults=captions.default_dict()))
         self._send(404, {"error": "not found"})
@@ -798,6 +801,8 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"용어 사전을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": f"용어 사전을 저장하지 못했어요 · {e}"})
             return self._send(200, dict(d, ok=True))
+        if path.startswith("/api/strategy/"):  # 채널 전략 (8단계)
+            return self._strategy_post(path, b)
         if path == "/api/restart":
             self._send(200, {"ok": True})
             threading.Timer(0.5, restart).start()
@@ -809,6 +814,121 @@ class Handler(BaseHTTPRequestHandler):
             ok = start_job(name, fn)
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         self._send(404, {"error": "not found"})
+
+    def _strategy_get(self, path, q):
+        """채널 전략 읽기 (GET 은 사용자 기록을 바꾸지 않음 · 쓰는 것은 캐시 forecast.json·solution.json 뿐 ·
+        가능성은 입력이 같으면 캐시, 처음이면 그 자리에서 1~2초 계산 · 계산은 한 번에 하나)."""
+        try:
+            if path == "/api/strategy":
+                return self._send(200, strategy.overview())
+            if path == "/api/strategy/forecast":
+                return self._send(200, {"ok": True, "forecast": strategy.forecast_result(), "solution": strategy.solution_view()})
+            if path == "/api/strategy/prompt":
+                return self._send(200, {"ok": True, "prompt": strategy.claude_prompt()})
+            if path == "/api/strategy/todos":
+                use = (q.get("use") or [""])[0]
+                return self._send(200, {"ok": True, "todos": strategy.todos_for(use if use in ("thumb", "title", "edit", "upload", "plan", "shorts") else "")})
+            if path == "/api/strategy/remind":
+                return self._send(200, dict(strategy.remind(), ok=True))
+            if path == "/api/strategy/preview":  # 저장하지 않은 계획의 가능성 미리 보기 (캐시·저장 없음)
+                return self._send(200, dict(strategy.forecast_preview((q.get("L") or ["0"])[0], (q.get("S") or ["0"])[0]), ok=True))
+        except strategy.StrategyError as e:
+            return self._send(400, {"ok": False, "error": str(e)})
+        except strategy.forecast.ForecastError as e:
+            return self._send(500, {"ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            log(f"채널 전략을 읽지 못했어요 · {e}")
+            return self._send(500, {"ok": False, "error": "채널 전략을 읽지 못했어요. 잠시 뒤 다시 열어 주세요"})
+        return self._send(404, {"error": "not found"})
+
+    def _strategy_post(self, path, b):
+        """채널 전략 바꾸기·작업 시작 (YouTube 를 쓰는 작업은 뒤에서 하던 출처 찾기를 멈추고 시작)."""
+        busy = {"ok": False, "error": "다른 작업이 끝난 뒤에 다시 눌러 주세요"}
+        try:
+            if path == "/api/strategy/save":
+                if b.get("revivedAt") is not None:
+                    strategy.set_revived(strategy.parse_day(b["revivedAt"]))
+                    return self._send(200, {"ok": True})
+                saved = strategy.save_strategy(b.get("strategy"))
+                log("채널 전략을 저장했어요")
+                return self._send(200, {"ok": True, "strategy": saved})
+            if path == "/api/strategy/channels":
+                if isinstance(b.get("add"), dict):
+                    a = b["add"]
+                    entry = strategy.add_channel(a.get("url"), a.get("group"))
+                    log(f"채널 전략 · 경쟁 채널 추가 · {entry['name']}")
+                    job = False
+                    if a.get("refresh"):
+                        source.stop_backfill()
+                        job = start_job(strategy.JOB_REFRESH, lambda: strategy.refresh([entry["key"]], "normal", log, editor.CANCEL))
+                    return self._send(200, {"ok": True, "entry": entry, "job": job})
+                if isinstance(b.get("remove"), dict):
+                    strategy.remove_channel(str(b["remove"].get("key") or ""))
+                    return self._send(200, {"ok": True})
+                if isinstance(b.get("group"), dict):
+                    strategy.set_group(str(b["group"].get("key") or ""), b["group"].get("group"))
+                    return self._send(200, {"ok": True})
+                return self._send(400, {"ok": False, "error": "무엇을 할지 모르겠어요"})
+            if path == "/api/strategy/refresh":
+                if b.get("own"):
+                    name, fn = strategy.JOB_OWN, lambda: strategy.refresh(None, "own", log, editor.CANCEL, strategy.JOB_OWN)
+                else:
+                    keys = b.get("keys") if isinstance(b.get("keys"), list) else None
+                    if keys is not None and not all(isinstance(k, str) for k in keys):
+                        return self._send(400, {"ok": False, "error": "잘못된 채널 목록이에요"})
+                    mode = "all" if b.get("all") else "normal"
+                    name, fn = strategy.JOB_REFRESH, lambda: strategy.refresh(keys, mode, log, editor.CANCEL)
+                source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게)
+                ok = start_job(name, fn)
+                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+            if path == "/api/strategy/pause":  # [지금 다시 시도]: 연달아 실패해서 쉬는 것만 풂
+                strategy.clear_pause()
+                return self._send(200, {"ok": True})
+            if path == "/api/strategy/checkup":
+                studio = strategy._clean_studio(b.get("studio"))
+                source.stop_backfill()
+                ok = start_job(strategy.JOB_CHECK, lambda: strategy.checkup(log, editor.CANCEL, studio))
+                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+            if path == "/api/strategy/todo":
+                if isinstance(b.get("add"), dict):
+                    a = b["add"]
+                    t = strategy.todo_add(takeaway=a.get("takeaway") or None, text=a.get("text"), category=a.get("category"))
+                    return self._send(200, {"ok": True, "todo": t})
+                if isinstance(b.get("update"), dict):
+                    return self._send(200, {"ok": True, "todo": strategy.todo_update(str(b["update"].get("id") or ""), bool(b["update"].get("done")))})
+                if isinstance(b.get("remove"), dict):
+                    strategy.todo_remove(str(b["remove"].get("id") or ""))
+                    return self._send(200, {"ok": True})
+                return self._send(400, {"ok": False, "error": "무엇을 할지 모르겠어요"})
+            if path == "/api/strategy/takeaway":
+                tid = str(b.get("id") or "")
+                if not tid:
+                    return self._send(400, {"ok": False, "error": "가져올 점을 골라 주세요"})
+                strategy.set_hidden(tid, b.get("hide", True) is not False)
+                return self._send(200, {"ok": True})
+            if path == "/api/strategy/settings":
+                return self._send(200, {"ok": True, "settings": strategy.set_settings(
+                    b.get("remind") if isinstance(b.get("remind"), bool) else None, b.get("ownAuto") if isinstance(b.get("ownAuto"), bool) else None)})
+            if path == "/api/strategy/ai":
+                ok = start_job(strategy.JOB_AI, lambda: strategy.run_ai(log, editor.CANCEL))
+                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+            if path == "/api/strategy/ai_paste":
+                ai = strategy.parse_ai(b.get("text"), by="paste")
+                dh = strategy.data_hash(strategy.overview())
+                with LOCK:  # 클로드 작업이 끝에 덮어쓰지 않게: 도는 중이면 거절 (확인과 저장을 작업 잠금 안에서)
+                    if JOB["name"] == strategy.JOB_AI:
+                        return self._send(409, {"ok": False, "busy": True,
+                                                "error": f"지금 '{JOB['name']}' 중이에요. 끝난 뒤에 [저장]을 다시 눌러 주세요 (붙여 넣은 글은 그대로 있어요)"})
+                    ai = strategy.save_ai(ai, dh)
+                log("Claude 전략 대답을 붙여 넣었어요")
+                return self._send(200, {"ok": True, "ai": ai})
+        except strategy.StrategyError as e:
+            return self._send(400, {"ok": False, "error": str(e)})
+        except OSError as e:
+            log(f"채널 전략을 저장하지 못했어요 · {e}")
+            return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+        return self._send(404, {"error": "not found"})
 
     @staticmethod
     def _analyze(b):
