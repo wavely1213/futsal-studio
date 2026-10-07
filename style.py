@@ -25,6 +25,7 @@ import plan
 STYLES = core.WORK / "styles"
 FW, FH, FPS = 320, 180, 4
 TEXT_WH, TEXT_WW = 12, 96            # 자막 한 줄 높이, 화면 폭의 30% 정도 (저해상도 기준)
+MAX_SEC = 1200.0                     # 긴 영상은 앞 20분만 살펴봄 (편집 습관은 영상 안에서 거의 같고, 1시간 영상이 너무 오래 걸렸음)
 EV_VER = 2                           # 기록 형식이 바뀌면 올림 (예전 기록은 다시 살펴봄) · 2: 작은 흑백 화면(look) 추가
 EV_FPS = 2                           # 글자 밀도·움직임은 1초에 2번만 남김
 RMS_STEP = 0.1                       # 소리 세기 기록 간격(초)
@@ -71,10 +72,10 @@ def _probe_duration(path):
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
 
 
-def _frames(path):
+def _frames(path, limit=None):
     """저해상도 RGB 프레임을 1초에 4장씩 흘려보냄 (메모리에 다 올리지 않음)."""
     import numpy as np
-    cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), "-vf", f"fps={FPS},scale={FW}:{FH}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), *(["-t", f"{limit:.3f}"] if limit else []), "-vf", f"fps={FPS},scale={FW}:{FH}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     kw = getattr(core, "NO_WINDOW", {})
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kw)
     n = FW * FH * 3
@@ -225,14 +226,14 @@ def _speech(name):
         return None
 
 
-def _audio_events(path):
+def _audio_events(path, limit=None):
     """말 사이 공백(0.15초 넘는 무음)·소리 크기(LUFS)·0.1초마다 소리 세기(dBFS) — 소리를 한 번만 풀어서."""
     import numpy as np
     sr = 8000
     step = int(sr * RMS_STEP)
 
     def once(eb):
-        cmd = [core.ffmpeg(), "-hide_banner", "-nostats", "-i", str(path), "-vn", "-af", f"silencedetect=noise=-32dB:d=0.15,{eb}",
+        cmd = [core.ffmpeg(), "-hide_banner", "-nostats", "-i", str(path), *(["-t", f"{limit:.3f}"] if limit else []), "-vn", "-af", f"silencedetect=noise=-32dB:d=0.15,{eb}",
                "-f", "s16le", "-ac", "1", "-ar", str(sr), "-"]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
         err = []
@@ -368,13 +369,17 @@ def extract_events(name, log=print, label="스타일 배우는 중"):
         log("  예전에 살펴본 기록을 그대로 써요")
         return ev
     sig = _sig(path)
-    probe = _probe_duration(path)
+    full_dur = _probe_duration(path)
+    limit = MAX_SEC if full_dur > MAX_SEC + 60 else None
+    probe = min(full_dur, MAX_SEC) if limit else full_dur
     dur = probe or 1.0
+    if limit:
+        log(f"  긴 영상이라 앞 {int(MAX_SEC // 60)}분만 살펴봐요 (편집 습관은 영상 안에서 거의 같아요)")
     core.set_progress(label=label, item=name, pct=0, detail="화면 컷·줌·자막 살펴보는 중")
     prev_g = prev_s = None
     diffs, cuts, zooms, band_hist, motion, colors, looks = [], [], [], [], [], [], []
     last_cut, i = -99, 0
-    for rgb in _frames(path):
+    for rgb in _frames(path, limit):
         if i % FPS == 0 and _cancelled():
             raise StyleCancelled("영상 살펴보기를 멈췄어요")
         t = i / FPS
@@ -412,12 +417,14 @@ def extract_events(name, log=print, label="스타일 배우는 중"):
     mo = np.array(motion + motion[-1:] * (len(motion) % 2), np.float32)
 
     core.set_progress(label=label, item=name, pct=92, detail="말 사이 공백·소리 크기 재는 중")
-    au = _audio_events(path)
+    au = _audio_events(path, limit)
     ev = {"v": EV_VER, "sig": sig, "source": name, "duration": round(dur, 3), "analyzed": time.strftime("%Y-%m-%d %H:%M"),
           "cuts": cuts, "zooms": zooms, "fps": EV_FPS, "text": text, "capColors": colors,
           "silences": au["silences"], "rmsStep": RMS_STEP, "rms": au["rms"],
           "motion": np.round(mo.reshape(-1, 2).max(axis=1), 1).tolist(), "lufs": au["lufs"], "speech": _speech(name),
           "look": _pack_looks(looks)}
+    if limit:
+        ev["fullDuration"] = round(full_dur, 3)  # 영상 전체 길이 (살펴본 건 앞부분 duration 초)
     _save_events(name, ev)
     core.set_progress(label=label, item=name, pct=100, detail="완료")
     return ev

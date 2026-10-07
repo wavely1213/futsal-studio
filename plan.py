@@ -28,9 +28,10 @@ import core
 
 PLAN_VER = 1
 PW = 640                     # 1초 한 장 화면 폭
-OCR_CAP, OCR_CAP_SLOW, OCR_SLOW = 400, 250, 0.3   # 영상 하나에 글자 읽기 최대 장 수 (한 장이 0.3초 넘으면 250장)
+OCR_CAP, OCR_CAP_SLOW, OCR_SLOW = 200, 120, 0.3   # 영상 하나에 글자 읽기 최대 장 수 (한 장이 0.3초 넘으면 250장)
 OCR_SAME = 6                 # 글자 띠 지문이 이만큼 이하로 다르면 같은 자막 (다시 안 읽음)
 INTRO_MAX, INTRO_FRAC, INTRO_MIN = 60.0, 0.15, 20.0
+FULL_DECODE_MAX, FULL_DECODE_HEAD = 240.0, 120.0  # 4분이 넘으면 앞 2분만 전부 풀고 나머지는 키프레임만
 TEASER_HAM, REPLAY_HAM, INSERT_HAM = 10, 8, 24
 TEASER_BLOCK_MAX = 15      # 티저 한 토막은 15초까지 (더 길면 그냥 인트로 장면)
 TEASER_START_MAX = 10      # 첫 티저 토막은 10초 안에 시작
@@ -421,9 +422,29 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
     """화면을 1초 한 장(640px)씩 한 번만 풀어서: 지문·복잡도·잔디·채도·색 묶음·(얼굴)·(글자 읽기)."""
     np = _np()
     ph = max(2, int(round(PW * H / max(1, W) / 2)) * 2)
-    cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), "-vf", f"fps=1,scale={PW}:{ph}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
     n = PW * ph * 3
+    # 빠르게: 앞부분(인트로)만 1초마다 정확히 풀고, 본편은 키프레임만 풀어서 1초 간격으로 채움
+    # (긴 영상에서 전부 푸는 데 대부분의 시간이 들었음 · 키프레임은 보통 2~5초마다 있음)
+    full = dur if dur <= FULL_DECODE_MAX else FULL_DECODE_HEAD
+    vf = ["-vf", f"fps=1,scale={PW}:{ph}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    parts = [[core.ffmpeg(), "-v", "error", "-i", str(path), "-t", f"{full:.3f}", *vf]]
+    if dur > full:
+        parts.append([core.ffmpeg(), "-v", "error", "-skip_frame", "nokey", "-ss", f"{full:.3f}", "-i", str(path), *vf])
+    state = {"p": None}
+
+    def frames():
+        for cmd in parts:
+            state["p"] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+            try:
+                while True:
+                    b = state["p"].stdout.read(n)
+                    if len(b) < n:
+                        break
+                    yield b
+            finally:
+                state["p"].kill()
+                state["p"].wait()
+                state["p"].stdout.close()
     hashes, flats, greens, sats, hists, faces, nface = [], [], [], [], [], [], []
     bh, thr = _text_thr(sev)
     ocr_out, stat = [], {"n": 0, "sec": 0.0}
@@ -435,11 +456,10 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
     cap, sent, last_th, last_t, ext = OCR_CAP, 0, None, None, {}
     import face
     t = 0
+    gen = frames()
+    prev_face = None
     try:
-        while True:
-            b = p.stdout.read(n)
-            if len(b) < n:
-                break
+        for b in gen:
             if _cancelled():
                 raise PlanCancelled()
             rgb = np.frombuffer(b, np.uint8).reshape(ph, PW, 3)
@@ -450,14 +470,19 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
             sats.append(sa)
             hists.append(hi)
             if use_faces:
-                try:
-                    from PIL import Image
-                    fs = [f for f in face._detect(Image.fromarray(rgb)) if f[3] - f[1] >= 0.08]
-                    faces.append(max([f[3] - f[1] for f in fs] or [0.0]))
-                    nface.append(len(fs))
-                except Exception:  # noqa: BLE001
-                    faces.append(0.0)
-                    nface.append(0)
+                if prev_face is not None and prev_face[0] == hsh:  # 같은 화면(키프레임을 채운 초)은 다시 안 찾음
+                    faces.append(prev_face[1])
+                    nface.append(prev_face[2])
+                else:
+                    try:
+                        from PIL import Image
+                        fs = [f for f in face._detect(Image.fromarray(rgb)) if f[3] - f[1] >= 0.08]
+                        faces.append(max([f[3] - f[1] for f in fs] or [0.0]))
+                        nface.append(len(fs))
+                    except Exception:  # noqa: BLE001
+                        faces.append(0.0)
+                        nface.append(0)
+                    prev_face = (hsh, faces[-1], nface[-1])
             if use_ocr:
                 if stat["n"] >= 20 and stat["sec"] / stat["n"] > OCR_SLOW:
                     cap = OCR_CAP_SLOW  # 느린 PC: 덜 읽음
@@ -490,9 +515,7 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
                 prog(min(70, int(t * 70 / max(1.0, dur))), f"기획 분석 · 화면 살펴보는 중 ({t}/{int(dur)}초)"
                      + (f" · 화면 글자 {stat['n']}/{sent}장" if use_ocr else ""))
     finally:
-        p.kill()
-        p.wait()
-        p.stdout.close()
+        gen.close()
         if q is not None:
             if _cancelled():  # 남은 글자 읽기는 버림
                 while True:
