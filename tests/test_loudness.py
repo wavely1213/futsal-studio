@@ -113,7 +113,7 @@ class QaLoudnessTest(unittest.TestCase):
         self.assertEqual(len(sound(r)), 1)
         self.assertEqual(sound(r)[0][:2], ("warn", "소리가 작아요"))
         self.assertIn("2.5dB 작게", sound(r)[0][2])
-        self.assertIn("목표를 -11로 올려", sound(r)[0][2])  # 모자란 만큼 올리라고 (같은 목표로 다시 내보내면 같은 결과)
+        self.assertIn("목표를 -12로 올려", sound(r)[0][2])  # 모자란 만큼 올리라고 (같은 목표로 다시 내보내면 같은 결과) · -12 까지만 (E6 검토)
         r = check(-16.1, {"normalize": True, "lufs": -15})  # 실측: MSGRAW01 전체 목표 -15 → -16.1
         self.assertIn("목표를 -14로 올려", sound(r)[0][2])
 
@@ -131,6 +131,28 @@ class QaLoudnessTest(unittest.TestCase):
         self.assertIn(("warn", "소리 깨짐 가능"), [x[:2] for x in sound(r)])
         r = check(-14.0, {"normalize": True, "lufs": -14}, peak=-1.5)
         self.assertEqual([x[0] for x in sound(r)], ["ok"])
+
+    def test_short_of_target_by_more_than_1db_is_not_on_target(self):
+        # E6 검토 재현: feat_e6 가편집 실측 -15.3 · -15.6 LUFS (목표 -14) 가 100점 '목표(-14)대로 맞췄어요' — 유튜브는 키워 주지 않으므로 1dB 넘게 모자라면 경고
+        for lufs in (-15.3, -15.6, -15.9):
+            with self.subTest(lufs=lufs):
+                r = check(lufs, {"normalize": True, "lufs": -14})
+                (lv, title, msg), = sound(r)
+                self.assertEqual((lv, title), ("warn", "소리 크기"))
+                self.assertNotIn("대로 맞췄어요", msg)
+                self.assertIn(f"{-14 - lufs:.1f}dB 작게", msg)
+                self.assertLess(r["score"], 100)
+        r = check(-14.9, {"normalize": True, "lufs": -14})  # 1dB 안은 목표대로
+        self.assertEqual(sound(r)[0][:2], ("ok", "소리 크기"))
+        r = check(-12.8, {"normalize": True, "lufs": -14})  # 1dB 넘게 크면 그것도 알려 줌
+        self.assertEqual(sound(r)[0][:2], ("warn", "소리 크기"))
+
+    def test_raise_advice_never_above_minus_12(self):
+        # 모자란 정도는 영상마다 달라서 따라 하면 다른 영상이 -11 근처로 커질 수 있음 → 안내는 -12 까지만
+        for lufs, tgt, want in ((-16.5, -14, -12), (-19.0, -14, -12), (-15.4, -14, -12), (-16.1, -15, -14)):
+            with self.subTest(lufs=lufs, tgt=tgt):
+                msg = sound(check(lufs, {"normalize": True, "lufs": tgt}))[0][2]
+                self.assertIn(f"목표를 {want}로 올려", msg)
 
     def test_target_mismatch_inside_band(self):
         r = check(-12.5, {"normalize": True, "lufs": -15})
