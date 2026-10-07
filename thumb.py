@@ -16,6 +16,7 @@ THUMBS = core.WORK / "thumbnails"
 ASSETS = THUMBS / "assets"
 ASSETS.mkdir(parents=True, exist_ok=True)
 MODELS = Path.home() / ".futsal-studio" / "models"
+STICKERS = core.APP_DIR / "stickers"  # 썸네일 스티커 그림 (Fluent Emoji 3D · MIT, stickers/NOTICE.md)
 # (파일 이름, 입력 크기, 평균, 표준편차, 출력이 로짓인지, 크기 안내)
 BG_MODELS = {
     "hq": ("BiRefNet-general-bb_swin_v1_tiny-epoch_232", 1024, (0.485, 0.456, 0.406), (0.229, 0.224, 0.225), True, "약 220MB"),

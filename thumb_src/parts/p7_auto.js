@@ -396,7 +396,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   const openP = fetch("/api/thumb/open?name=" + encodeURIComponent(NAME)).then(r => r.json());
   const framesP = post("/api/thumb/frames", { name: NAME });
   openP.catch(() => {}); framesP.catch(() => {});  // 실패는 아래에서 기다릴 때 그대로 드러남
-  await Promise.all([["BlackHanSans-Regular.ttf", "Black Han Sans"], ["Pretendard-Black.otf", "Pretendard Black"], ["Pretendard-Bold.otf", "Pretendard Bold"], ["DoHyeon-Regular.ttf", "Do Hyeon"]].map(async ([f, w]) => {
+  await Promise.all(FONT_FILES.map(async ([, w, f]) => {
     try { const ff = new FontFace(w, `url(/fonts/${f})`); await ff.load(); document.fonts.add(ff); } catch (e) {}
   }));
   FONT_VER++;

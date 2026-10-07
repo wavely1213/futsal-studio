@@ -10,7 +10,10 @@ const r1 = v => Math.round(v * 10) / 10;
 const norm180 = a => ((((a + 180) % 360) + 360) % 360) - 180;
 const niceName = n => n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "");
 const mmss = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
-const FONTS = { "검은고딕": "Black Han Sans", "프리텐다드 블랙": "Pretendard Black", "프리텐다드 볼드": "Pretendard Bold", "도현": "Do Hyeon" };
+// 글꼴: 화면 이름 → 글꼴 이름, 받을 파일 (모두 OFL · fonts/ 의 라이선스 파일)
+const FONT_FILES = [["검은고딕", "Black Han Sans", "BlackHanSans-Regular.ttf"], ["프리텐다드 블랙", "Pretendard Black", "Pretendard-Black.otf"], ["프리텐다드 볼드", "Pretendard Bold", "Pretendard-Bold.otf"],
+  ["도현", "Do Hyeon", "DoHyeon-Regular.ttf"], ["주아 (둥근 고딕)", "Jua", "Jua-Regular.ttf"], ["독도 (손글씨)", "Dokdo", "Dokdo-Regular.ttf"]];
+const FONTS = Object.fromEntries(FONT_FILES.map(([k, v]) => [k, v]));
 const BLENDS = [["source-over", "표준"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["soft-light", "소프트 라이트"], ["hard-light", "하드 라이트"], ["darken", "어둡게"], ["lighten", "밝게"], ["color-dodge", "색상 닷지"], ["color-burn", "색상 번"], ["difference", "차이"], ["hue", "색조"], ["saturation", "채도"], ["color", "색상"], ["luminosity", "광도"]];
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2800); }
 async function post(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return r.json(); }

@@ -41,6 +41,7 @@ def _utf8_console():
 _utf8_console()
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
+FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}  # /fonts/ 응답 종류 (확장자로)
 LOG, JOB = [], {"name": None, "result": None, "error": None}
 LOCK = threading.Lock()
 
@@ -339,7 +340,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(editor.video_path(q["name"][0]), "video/mp4")
         if u.path.startswith("/fonts/"):
             p = (editor.FONTS / Path(u.path).name).resolve()
-            return self._file(p, "font/otf") if p.exists() else self._send(404, {"error": "not found"})
+            ok = p.is_file() and p.parent == editor.FONTS.resolve()
+            return self._file(p, FONT_TYPES.get(p.suffix.lower(), "application/octet-stream")) if ok else self._send(404, {"error": "not found"})
+        if u.path.startswith("/stickers/"):  # 썸네일 스티커 (저장소 stickers/ · 이름만 받고 폴더 밖은 거절)
+            p = (thumb.STICKERS / Path(u.path).name).resolve()
+            ok = p.is_file() and p.parent == thumb.STICKERS.resolve() and p.suffix.lower() in (".png", ".json")
+            return self._file(p, "image/png" if p.suffix.lower() == ".png" else "application/json") if ok else self._send(404, {"error": "not found"})
         if u.path == "/thumbs.jpg":
             p = core.adir(q["name"][0]) / "thumbs2.jpg"
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
