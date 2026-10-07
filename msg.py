@@ -359,6 +359,31 @@ def _motion_z(sig):
     return [(i * st, (float(v) - med) / mad) for i, v in enumerate(m)]
 
 
+BOUND = re.compile(r"^(?:번째|째|개|번|거|것|수|때|데|건|게|지)(?:\s|$|[.!?,])")
+INTENS = ("진짜", "정말", "완전", "제일", "가장", "무조건", "꼭")
+
+
+def _norm_txt(t):
+    return re.sub(r"[\s.,!?~…]+", "", str(t or ""))
+
+
+def _emph_short(lab, line):
+    """강조 글자가 말 한 줄을 통째로 옮긴 것이면(아래 말 자막과 같은 글이 두 번) 핵심 낱말만 ('진짜 핵심!' · '인사이드!')."""
+    if len(_norm_txt(lab)) < 0.8 * max(1, len(_norm_txt(line))):
+        return lab
+    toks = re.findall(r"[가-힣A-Za-z0-9%]+", str(line or ""))
+    found = editor._find_terms(toks, editor._emph_terms())
+    for w in EMPH_MORE + tuple(editor.EMPH_WORDS):
+        for i, tk in enumerate(toks):
+            if tk.startswith(w) and w not in INTENS:
+                pre = toks[i - 1] if i and toks[i - 1] in INTENS else ""
+                head = f"{found[0][2]} " if found and found[0][2] not in (w,) else ""
+                return (head + (pre + " " if pre and not head else "") + w + "!").strip()
+    if found and len(found[0][2].replace(" ", "")) >= 2:
+        return f"{found[0][2]}!"
+    return lab
+
+
 def _emph_clause(txt):
     """기술 이름은 없지만 강조 말(무조건·핵심·생명…)이 든 말 → 그 말부터 서술어까지 짧은 구절 ('터치가 무조건 길어져요!').
     서술어(~요·~다)로 끝나지 않거나 14글자 넘으면 None (말 조각을 띄우지 않게)."""
@@ -442,7 +467,10 @@ def moments(sig, segs=None):
         if not lab:
             lab, sc = _emph_clause(txt)
         if lab:
-            lab = LEAD.sub("", lab).strip() or lab
+            lab = _emph_short(LEAD.sub("", lab).strip() or lab, txt)
+        if lab and BOUND.match(lab):  # '번째 슈팅.'처럼 앞말이 잘린 조각은 띄우지 않음
+            lab = None
+        if lab:
             key = lab.rstrip("!").split()[0]
             t = next((w0 for w0, _, w, j in words if j == k and w.replace(" ", "").startswith(key[:2])), a)
             add("emphasis", a, b, t, 1.0 + sc, lab, "기술 이름·강조 낱말")
@@ -1240,14 +1268,15 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
         if prev is not None:
             tr = B.flash(prev, v, "white" if intro.get("flash") else "dissolve", 0.3)
             refs["trans"] = [tr["id"]] if tr else []
-        sh = B.shape(0.2, 0.36, 0.6, 0.3, GREEN, s0, TITLE_CARD, 0.92, 30, "제목 카드") if fmt == "long" else None
+        sh = B.shape(0.06, 0.6, 0.5, 0.25, GREEN, s0, TITLE_CARD, 0.92, 24, "제목 카드") if fmt == "long" else None  # 왼쪽 아래 (얼굴을 가리지 않게)
         if intro.get("letterbox"):
             refs["shapes"] += [B.shape(0, 0, 1, 0.1, "#000000", s0, TITLE_CARD, 1.0, 0, "검은 띠")["id"], B.shape(0, 0.9, 1, 0.1, "#000000", s0, TITLE_CARD, 1.0, 0, "검은 띠")["id"]]
         if sh:
             refs["shapes"].append(sh["id"])
-        t1 = B.title("오늘의 주제", s0 + 0.1, TITLE_CARD - 0.1, dict(editor.TITLE_STYLE, weight="Bold", size=46, fill="#FFFFFF", strokeW=0, y=0.47, effect="fade"))
-        t2 = B.title(_short_text(topic, 10), s0 + 0.25, TITLE_CARD - 0.25, dict(editor.TITLE_STYLE, font="Black Han Sans", size=124, fill="#FFE14D", stroke="#111111",
-                                                                               strokeW=8, y=0.63, effect="stamp"))
+        t1 = B.title("오늘의 주제", s0 + 0.1, TITLE_CARD - 0.1, dict(editor.TITLE_STYLE, weight="Bold", size=44, fill="#FFFFFF", strokeW=0, x=0.09, y=0.69,
+                                                                align="left", effect="fade"))
+        t2 = B.title(_short_text(topic, 10), s0 + 0.25, TITLE_CARD - 0.25, dict(editor.TITLE_STYLE, font="Black Han Sans", size=112, fill="#FFE14D", stroke="#111111",
+                                                                               strokeW=8, x=0.09, y=0.82, align="left", effect="stamp"))
         refs["titles"] += [t1["id"], t2["id"]]
         B.sfx.append((s0 + 0.2, pal.get("title", "짠"), None, "title"))
         B.event("title", s0, topic, "제목 카드", refs=refs, ins={"start": round(s0, 3), "len": TITLE_CARD})
@@ -1573,7 +1602,11 @@ def _body_sections(B, picked, moms, a0, a1, moods):
     return out
 
 
+MAX_SECTIONS = 5   # 배경음악은 한 영상에 3~5곡 (너무 자주 바뀌면 산만함)
+
+
 def _merge_sections(secs, total):
+    """같은 분위기·짧은 구간(8초 미만)은 앞 구간에 합치고, 많으면 가장 짧은 본편 구간부터 이웃과 합침 (첫 인트로 음악은 그대로)."""
     out = []
     for a, b, m in secs:
         if b - a <= 0.05:
@@ -1582,8 +1615,21 @@ def _merge_sections(secs, total):
             out[-1] = (out[-1][0], max(out[-1][1], b), out[-1][2])
         else:
             out.append((a, b, m))
-    if len(out) >= 2 and out[0][1] - out[0][0] < 8.0 and out[0][0] < 0.05 and out[0][2] != out[1][2]:
-        pass  # 짧은 인트로 음악은 그대로 (티저만의 분위기)
+    while len(out) > MAX_SECTIONS:
+        k = min(range(1, len(out) - 1), key=lambda i: out[i][1] - out[i][0])  # 첫(인트로)·끝(엔드) 음악은 남김
+        j = k - 1 if k > 1 and out[k - 1][1] - out[k - 1][0] <= out[k + 1][1] - out[k + 1][0] else k + 1
+        if j < k:
+            out[j] = (out[j][0], out[k][1], out[j][2])
+        else:
+            out[j] = (out[k][0], out[j][1], out[j][2])
+        del out[k]
+        merged = []
+        for x in out:
+            if merged and merged[-1][2] == x[2]:
+                merged[-1] = (merged[-1][0], x[1], x[2])
+            else:
+                merged.append(x)
+        out = merged
     return [(round(a, 3), round(min(b, total), 3), m) for a, b, m in out]
 
 

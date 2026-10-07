@@ -107,7 +107,8 @@ class Compile(unittest.TestCase):
     def test_texts_avoid_caption_band_and_two_at_once(self):
         for k, q, r in self.seqs():
             cy = q["captionStyle"]["y"]
-            msgs = [t for t in q["titles"] if t.get("msg") and t["text"] not in ("구독",)]
+            on_still = {x for e in q["msg"]["events"] if e["kind"] in ("title", "end", "freeze") for x in e["refs"].get("titles", [])}  # 정지 그림 위 (말 자막 없음)
+            msgs = [t for t in q["titles"] if t.get("msg") and t["id"] not in on_still]
             for t in msgs:
                 if t["style"].get("bgOn") or abs(t["style"]["y"] - cy) >= 0.15:
                     continue

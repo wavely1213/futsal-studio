@@ -97,6 +97,15 @@ class Lines(unittest.TestCase):
         self.assertEqual([x["text"] for x in lines], ["왜 놓칠까요?", "그래서 중요해요.", "나이스 좋아요"])
         self.assertEqual(lines[2]["start"], 4.0)
 
+    def test_emphasis_labels_are_not_the_whole_line_or_fragments(self):
+        """강조 큰 글자: 말 한 줄을 통째로 옮기지 않고(아래 말 자막과 같은 글 두 번) 핵심 낱말만 · 앞말이 잘린 조각은 안 띄움 · 서술어까지 짧은 구절."""
+        self.assertEqual(msg._emph_short("이게 진짜 핵심이에요.", "이게 진짜 핵심이에요."), "진짜 핵심!")
+        self.assertEqual(msg._emph_short("인사이드!", "그래서 인사이드로 받을 때는 힘을 빼세요."), "인사이드!")
+        self.assertTrue(msg.BOUND.match("번째 슈팅."))
+        self.assertFalse(msg.BOUND.match("슈팅 핵심!"))
+        self.assertEqual(msg._emph_clause("디딤발이 너무 가까우면 터치가 무조건 길어져요.")[0], "터치가 무조건 길어져요!")
+        self.assertIsNone(msg._emph_clause("포인트는 패스하고 멈추지 않는 거예요.")[0])
+
     def test_lexicons(self):
         self.assertTrue(msg.HOOK_Q.search("왜 다들 공을 놓칠까요?"))
         self.assertFalse(msg.HOOK_Q.search("수비가 붙으니까요"))
