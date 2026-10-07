@@ -183,11 +183,12 @@ def _events_file(name):
     return core.adir(name) / "style_events.json"
 
 
-def _load_events(name, path=None):
-    """저장해 둔 기록 — 영상 파일(크기·수정 시각)이 그대로일 때만. 아니면 None."""
+def _load_events(name, path=None, sig=None):
+    """저장해 둔 기록 — 영상 파일(크기·수정 시각)이 그대로일 때만. 아니면 None.
+    sig 를 주면 그 지문과 비교 (학습용 영상을 배운 뒤 파일만 지웠을 때 남겨 둔 지문 · core.kept_sig)."""
     try:
         ev = json.loads(_events_file(name).read_text(encoding="utf-8"))
-        if isinstance(ev, dict) and ev.get("v") == EV_VER and ev.get("sig") == _sig(path or core.VIDEOS / name):
+        if isinstance(ev, dict) and ev.get("v") == EV_VER and ev.get("sig") == (sig if sig is not None else _sig(path or core.video_file(name))):
             return ev
     except (OSError, ValueError):
         pass
@@ -345,10 +346,17 @@ def _look_index(n, cuts, m, before):
 def extract_events(name, log=print, label="스타일 배우는 중"):
     """영상 하나를 살펴본 기록(스타일 이벤트): 컷·확대 컷·띠별 글자 밀도(1초 2번)·자막 색 표본·무음·소리 세기(0.1초)·움직임(1초 2번)
     ·작은 흑백 화면(1초 2번 · 편집본 점수에서 점프 컷이 화면에 티가 나는지 볼 때).
-    analysis/<영상>/style_events.json 에 남기고, 영상 파일(크기·수정 시각)이 그대로면 다시 살펴보지 않음."""
+    analysis/<영상>/style_events.json 에 남기고, 영상 파일(크기·수정 시각)이 그대로면 다시 살펴보지 않음.
+    학습용 영상(refs)도 같은 이름으로 찾고, 배운 뒤 파일만 지운 영상은 남겨 둔 기록을 그대로 씀."""
     import numpy as np
-    path = core.VIDEOS / name
+    path = core.video_file(name)
     if not path.is_file():
+        kept = core.kept_sig(name)
+        ev = _load_events(name, sig=kept) if kept else None
+        if ev is not None:
+            log(f"스타일 분석 · {name}")
+            log("  영상 파일은 지웠지만 예전에 살펴본 기록으로 배워요")
+            return ev
         raise FileNotFoundError(f"영상을 찾지 못했어요 · {name}")
     log(f"스타일 분석 · {name}")
     ev = _load_events(name, path)
@@ -1120,7 +1128,7 @@ def _failed_before(name):
     """예전에 이 파일(크기·수정 시각 그대로)을 살펴보다 실패했는지 — 그러면 다시 긴 작업을 돌리지 않음."""
     try:
         j = json.loads(_fail_file(name).read_text(encoding="utf-8"))
-        return j.get("sig") == _sig(core.VIDEOS / os.path.basename(name)) and 0 <= time.time() - float(j.get("at") or 0) < FAIL_TTL
+        return j.get("sig") == _sig(core.video_file(os.path.basename(name))) and 0 <= time.time() - float(j.get("at") or 0) < FAIL_TTL
     except (OSError, ValueError, AttributeError, TypeError):
         return False
 
@@ -1128,7 +1136,7 @@ def _failed_before(name):
 def _mark_failed(name):
     try:
         _fail_file(name).parent.mkdir(parents=True, exist_ok=True)
-        _fail_file(name).write_text(json.dumps({"sig": _sig(core.VIDEOS / os.path.basename(name)), "at": time.time()}), encoding="utf-8")
+        _fail_file(name).write_text(json.dumps({"sig": _sig(core.video_file(os.path.basename(name))), "at": time.time()}), encoding="utf-8")
     except OSError:
         pass
 

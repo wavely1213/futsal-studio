@@ -266,13 +266,16 @@ def _model_state():
     return {"ocr": avmodels.usable("ocr"), "audio": avmodels.usable("audio"), "faces": face.ready()}
 
 
-def load_events(name, path=None):
-    """저장해 둔 기획 기록 — 파일이 그대로이고 판(PLAN_VER)이 같으며, 그때 없던 모델이 지금도 없을 때만. 아니면 None."""
+def load_events(name, path=None, sig=None):
+    """저장해 둔 기획 기록 — 파일이 그대로이고 판(PLAN_VER)이 같으며, 그때 없던 모델이 지금도 없을 때만. 아니면 None.
+    sig 를 주면(학습용 영상을 배운 뒤 파일만 지움 · core.kept_sig) 그 지문과 비교하고, 다시 살펴볼 파일이 없으니 모델 확인은 건너뜀."""
     import style
     try:
         pe = json.loads(_plan_file(name).read_text(encoding="utf-8"))
-        if not (isinstance(pe, dict) and pe.get("v") == PLAN_VER and pe.get("sig") == style._sig(path or core.VIDEOS / name)):
+        if not (isinstance(pe, dict) and pe.get("v") == PLAN_VER and pe.get("sig") == (sig if sig is not None else style._sig(path or core.video_file(name)))):
             return None
+        if sig is not None:
+            return pe
         # models 는 '그때 쓴 모델' (소리 없는 영상이어도 소리 모델을 썼으면 참 · 결과가 있었는지는 hasAudio)
         had, now = pe.get("models") or {}, _model_state()
         if any(now.get(k) and not had.get(k) for k in ("ocr", "audio")):
@@ -705,8 +708,13 @@ def extract_plan(name, sev=None, log=print, label="스타일 배우는 중", ste
     import face
     import style
     import thumb
-    path = core.VIDEOS / name
+    path = core.video_file(name)  # 편집용 보관함 → 학습용 영상(refs)
     if not path.is_file():
+        kept = core.kept_sig(name)  # 배운 뒤 파일만 지운 학습용 영상: 남겨 둔 기록을 그대로
+        pe = load_events(name, sig=kept) if kept else None
+        if pe is not None:
+            log("  기획 분석: 영상 파일은 지웠지만 예전에 살펴본 기록을 그대로 써요")
+            return pe
         raise FileNotFoundError(f"영상을 찾지 못했어요 · {name}")
     pe = load_events(name, path)
     if pe is not None:
@@ -1979,7 +1987,7 @@ def _ai_images(prof, folder, per_video=4, total=8):
     영상 곳곳(25%·50%·75%)에서 고르게 고른 장면 — 영상마다 per_video 장, 모두 total 장까지 (여러 영상이면 고르게 나눔).
     썸네일 장면 캐시(thumb.grab)는 원본 크기라 건드리지 않고 따로 뽑음."""
     refs = [r for r in (prof or {}).get("refs") or [] if isinstance(r, dict) and isinstance(r.get("plan"), dict)
-            and isinstance(r.get("source"), str) and (core.VIDEOS / r["source"]).is_file()]
+            and isinstance(r.get("source"), str) and core.video_file(r["source"]).is_file()]
     if not refs:
         return []
     per = max(2, min(per_video, total // len(refs)))
@@ -2000,7 +2008,7 @@ def _ai_images(prof, folder, per_video=4, total=8):
                 break
             nm = f"scene{len(out) + 1}.jpg"
             f = Path(folder) / nm
-            core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t + 0.3:.3f}", "-i", str(core.VIDEOS / src),
+            core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t + 0.3:.3f}", "-i", str(core.video_file(src)),
                       "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", str(f)])
             if f.is_file():
                 out.append((f, nm, f"{_title(src)[:30]} · {why}"))
