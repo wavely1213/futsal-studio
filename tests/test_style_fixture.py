@@ -530,7 +530,7 @@ class TestScoreFixes(StyleFixtureBase):
         (core.adir(fresh) / "transcript.json").write_text(json.dumps(speech_segments(), ensure_ascii=False), encoding="utf-8")
         self.assertIsNone(style._load_events(fresh))
         code, j = call("/api/style/score", {"style": "오류 스타일", "name": fresh})
-        self.assertEqual((code, j), (200, {"ok": True, "job": True, "error": None}))
+        self.assertEqual((code, j), (200, {"ok": True, "job": True, "error": None, "jobId": app.JOB["id"]}))  # jobId: 화면이 자기 작업 결과만 받게 (D-024 보강 8)
         t0 = time.time()
         while app.JOB["name"] and time.time() - t0 < 180:
             time.sleep(0.2)

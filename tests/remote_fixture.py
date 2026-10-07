@@ -192,20 +192,45 @@ def service(home, clock=None, ntfy="http://127.0.0.1:1", bridge=None):
     return svc, fb
 
 
-def pair_device(svc, name="iPhone · Safari"):
-    """PC 코드 만들기 → /r/pair 와 같은 길로 기기 하나 (state 를 잠깐 on 으로)."""
+def pair_body(p, name="iPhone · Safari", install=None, ts=None, nonce=None):
+    """휴대폰이 보내는 /r/pair 본문: 코드 대신 증명 (p = svc.pairing.create() 또는 {"proof": 증명 열쇠})."""
+    ts = int(ts if ts is not None else time.time())
+    nonce = nonce or remote._b64u(secrets.token_bytes(16))
+    b = {"v": 2, "nonce": nonce, "ts": ts, "proof": remote.pair_proof(p["proof"], nonce, ts), "name": name}
+    if install:
+        b["install"] = install
+    return b
+
+
+def open_pair(p, resp):
+    """잠긴 /r/pair 대답 → 속 (휴대폰 proto.openPairResponse 와 같음)."""
+    aad = remote.pair_aad(p["topic"], resp["pc"]["id"], resp["device"]["id"])
+    return json.loads(remote.gcm_open(p["key"], resp["sealed"][5:], aad))
+
+
+def pair_device(svc, name="iPhone · Safari", install=None):
+    """PC 코드 만들기 → /r/pair 와 같은 길로 기기 하나 (state 를 잠깐 on 으로) → 휴대폰이 푼 모양 + host(서명할 PC 주소)."""
     old = svc.state
     svc.state = "on"
     p = svc.pairing.create()
     svc.state = old
-    return svc.r_pair({"code": p["code"], "name": name})
+    resp = svc.r_pair(pair_body(p, name, install, ts=svc.clock()))
+    inner = open_pair(p, resp)
+    return dict(inner, api=resp["api"], time=resp["time"], host=svc.host(), raw=resp)
 
 
-def signed(cred, method, path, body=b"", ts=None, nonce=None, clock=time.time):
+def signed(cred, method, path, body=b"", ts=None, nonce=None, clock=time.time, host=None):
     ts = str(int(ts if ts is not None else clock()))
     nonce = nonce or remote._b64u(secrets.token_bytes(16))
-    sig = remote.sign(remote._unb64u(cred["keys"]["auth"]), method, path, ts, nonce, body)
-    return f"FSR1 {cred['device']['id']}.{ts}.{nonce}.{sig}"
+    host = cred.get("host", "") if host is None else host
+    sig = remote.sign(remote._unb64u(cred["keys"]["auth"]), host, method, path, ts, nonce, body)
+    return f"FSR2 {cred['device']['id']}.{ts}.{nonce}.{sig}"
+
+
+def topics_of(svc, cred, status):
+    """/r/status 의 잠긴 주제 → {beacon, notify} (휴대폰 proto.openTopics 와 같음)."""
+    aad = remote.topics_aad(svc.store.data["pc"]["id"], cred["device"]["id"])
+    return json.loads(remote.gcm_open(remote._unb64u(cred["keys"]["beacon"]), status["topics"], aad))
 
 
 def http(port, method, path, body=None, headers=None, raw=None):

@@ -38,9 +38,15 @@ const cmd = JSON.parse(await new Promise(r => { let s = ""; process.stdin.on("da
 const out = [];
 for (const c of cmd) {
   if (c.op === "norm") out.push(P.normCode(c.s));
-  else if (c.op === "derive") { const d = await P.derivePair(c.code); out.push({ topic: d.topic, pair: await P.openPair(c.msg, d.topic, d.key) }); }
+  else if (c.op === "derive") { const d = await P.derivePair(c.code); out.push({ topic: d.topic, pair: await P.openPair(c.msg, d.topic, d.key),
+    proof: await P.pairProof(d.proof, c.nonce || "AAAAAAAAAAAAAAAAAAAAAA", c.ts || 1), ex: [d.key.extractable, d.proof.extractable, d.proof.usages] }); }
+  else if (c.op === "pairresp") { const d = await P.derivePair(c.code); out.push(await P.openPairResponse(c.resp, d.topic, d.key)); }
   else if (c.op === "beacon") { const k = await P.importKeys(c.auth, c.beacon); out.push(await P.openBeacon(c.msg, c.device, k.beacon)); }
-  else if (c.op === "sign") { const k = await P.importKeys(c.auth, c.beacon); out.push(await P.authHeader(k.auth, c.device, c.method, c.path, c.body, c.ts, c.nonce)); }
+  else if (c.op === "topics") { const k = await P.importKeys(c.auth, c.beacon); out.push(await P.openTopics(c.blob, k.beacon, c.pc, c.device)); }
+  else if (c.op === "sign") { const k = await P.importKeys(c.auth, c.beacon); out.push(await P.authHeader(k.auth, c.device, c.host, c.method, c.path, c.body, c.ts, c.nonce)); }
+  else if (c.op === "hostof") out.push(P.hostOf(c.url));
+  else if (c.op === "hangul") out.push([P.hasHangul(c.s), P.fromHangul(c.s), P.normCode(P.fromHangul(c.s))]);
+  else if (c.op === "inapp") out.push(P.inAppBrowser(c.ua));
   else if (c.op === "host") out.push(P.hostOk(c.url, c.dev));
   else if (c.op === "hint") out.push(P.hintUrl(c.u, c.dev));
   else if (c.op === "hash") out.push(P.parseHash(c.h));
@@ -79,7 +85,7 @@ class ProtoInteropTests(unittest.TestCase):
 
     def test_pairing_rendezvous_opens_in_page(self):
         code = remote.new_code()
-        topic, key = remote.derive_pair(code)
+        topic, key, _ = remote.derive_pair(code)
         msg = "fsp1." + remote.gcm_seal(key, json.dumps({"v": 1, "url": "https://a-b-c.trycloudflare.com", "pc": {"id": "0" * 16, "name": "내 PC"}, "exp": 1}),
                                          "fsp1|" + topic)
         bad = "fsp1." + remote.gcm_seal(key, json.dumps({"v": 1}), "fsp1|other")
@@ -88,6 +94,64 @@ class ProtoInteropTests(unittest.TestCase):
         self.assertEqual(out[0]["pair"]["url"], "https://a-b-c.trycloudflare.com")
         self.assertEqual(out[0]["pair"]["pc"]["name"], "내 PC")
         self.assertIsNone(out[1]["pair"])  # 다른 주제에 묶인 글은 못 엶
+        self.assertEqual(out[0]["ex"], [False, False, ["sign"]])  # 코드 열쇠도 가져오기 전용
+
+    def test_pair_proof_and_sealed_response_match_pc(self):
+        """짝짓기 v2: 페이지의 증명을 PC 가 받고, PC 의 잠긴 대답을 페이지가 엶 (코드가 다르면 못 엶 · 대답을 바꾸면 못 엶)."""
+        self.svc.state, self.svc.url = "on", "https://quiet-river-sample-x.trycloudflare.com"
+        p = self.svc.pairing.create()
+        code, nonce, ts = p["code"], remote._b64u(os.urandom(16)), int(self.clock())
+        out = self.node([{"op": "derive", "code": code, "msg": "", "nonce": nonce, "ts": ts}])[0]
+        self.assertEqual(out["proof"], remote.pair_proof(p["proof"], nonce, ts))
+        resp = self.svc.r_pair({"v": 2, "nonce": nonce, "ts": ts, "proof": out["proof"], "name": "node"})
+        other = remote.new_code()
+        tampered = dict(resp, device={"id": "f" * 16})
+        got = self.node([{"op": "pairresp", "code": code, "resp": resp}, {"op": "pairresp", "code": other, "resp": resp},
+                         {"op": "pairresp", "code": code, "resp": tampered}, {"op": "pairresp", "code": code, "resp": {"keys": {"auth": "x"}}}])
+        self.assertEqual(got[0]["url"], "https://quiet-river-sample-x.trycloudflare.com")
+        self.assertEqual(got[0]["keys"]["auth"], self.svc.store.device(resp["device"]["id"])["auth"])
+        self.assertEqual(got[0]["notify"]["topic"], self.svc.store.data["topics"]["notify"])
+        self.assertEqual(got[1:], [None, None, None])
+
+    def test_sealed_topics_open_in_page(self):
+        a = pair_device(self.svc, "a")
+        st = self.svc.r_status(self.svc.store.device(a["device"]["id"]), 0)
+        self.assertNotIn(self.svc.store.data["topics"]["notify"], json.dumps(st))  # 주제는 잠긴 채로만
+        pc = self.svc.store.data["pc"]["id"]
+        out = self.node([{"op": "topics", "blob": st["topics"], "pc": pc, "device": a["device"]["id"], **a["keys"]},
+                         {"op": "topics", "blob": st["topics"], "pc": pc, "device": "0" * 16, **a["keys"]}])
+        self.assertEqual(out[0]["notify"]["topic"], self.svc.store.data["topics"]["notify"])
+        self.assertEqual(out[0]["beacon"]["topic"], self.svc.store.data["topics"]["beacon"])
+        self.assertIsNone(out[1])
+
+    def test_korean_keyboard_code_converted(self):
+        """검토: 한국 휴대폰 기본 자판(한글)으로 코드를 치면 '10글자를 다시 확인' → 누른 영문 글쇠로 바꿈."""
+        code = "7K3QM9XD2P"
+        typed = "7ㅏ3ㅂ-ㅡ9ㅌㅇ-2ㅔ"  # 한글 자판에서 7K3Q-M9XD-2P 를 누른 모습
+        composed = "7ㅏ3ㅂㅡ9ㅌ아2ㅔ"  # 자음 뒤 모음이 붙어 글자가 된 경우 (d + k → 아)
+        out = self.node([{"op": "hangul", "s": typed}, {"op": "hangul", "s": composed}, {"op": "hangul", "s": "ABCD"}, {"op": "hangul", "s": "닭꽥"}])
+        self.assertEqual(out[0], [True, "7k3q-m9xd-2p", code])
+        self.assertTrue(out[1][0])
+        self.assertEqual(out[1][1], "7k3qm9xdk2p")  # 'ㅇ'+'ㅏ'(아) 는 d k 로 풀림 → 11글자라 코드 아님 (안내로)
+        self.assertEqual(out[2], [False, "ABCD", None])
+        self.assertEqual(out[3][1], "ekfrRhor")  # 닭 = e k fr · 꽥 = R ho r
+
+    def test_page_strips_same_control_chars_as_pc(self):
+        """휴대폰 페이지 app.js 의 CTRL 과 PC remote._CTRL 이 같은 글자를 뺌 (줄 구분·폭 없는 글자 포함)."""
+        line = next(ln for ln in (SITE / "app.js").read_text(encoding="utf-8").splitlines() if ln.startswith("const CTRL ="))
+        samples = ["a\u2028b", "c\u0085d", "e\u2029f", "g\u200bh\u200di", "\u202ej\u2066k\u2069", "l\ufeffm", "n\x00\x1b[31mo", "p\tq\nr", "보통 글자"]
+        r = subprocess.run([NODE, "-e", line + "\nconsole.log(JSON.stringify(" + json.dumps(samples) + ".map(s => s.replace(CTRL, ''))))"],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(json.loads(r.stdout), [remote._CTRL.sub("", x) for x in samples])
+
+    def test_in_app_browser_detected(self):
+        uas = {"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.4.5": "카카오톡",
+               "Mozilla/5.0 (Linux; Android 14; SM-S918N Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120 Mobile Safari/537.36 NAVER(inapp; search; 2000; 12.1.0)": "네이버",
+               "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 300.0": "인스타그램",
+               "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1": None,
+               "Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36": None,
+               "Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0 Mobile Safari/537.36": None}
+        self.assertEqual(self.node([{"op": "inapp", "ua": u} for u in uas]), list(uas.values()))
 
     def test_beacon_only_opens_with_own_key(self):
         a = pair_device(self.svc, "a")
@@ -119,15 +183,23 @@ class ProtoInteropTests(unittest.TestCase):
     def test_page_signature_verified_by_pc(self):
         a = pair_device(self.svc, "a")
         ts = int(self.clock())
+        host = "quiet-river-sample-x.trycloudflare.com"
         body = json.dumps({"action": "cancel"})
         reqs = [("GET", "/r/status?since=12", ""), ("POST", "/r/action", body), ("GET", "/r/library", "")]
-        out = self.node([{"op": "sign", "device": a["device"]["id"], "method": m, "path": p, "body": b, "ts": ts, **a["keys"]} for m, p, b in reqs])
+        out = self.node([{"op": "sign", "device": a["device"]["id"], "host": host, "method": m, "path": p, "body": b, "ts": ts, **a["keys"]} for m, p, b in reqs])
         for (m, p, b), h in zip(reqs, out):
-            self.assertEqual(self.svc.auth.verify(h, m, p, b.encode())["id"], a["device"]["id"])
-        h = self.node([{"op": "sign", "device": a["device"]["id"], "method": "POST", "path": "/r/action", "body": body, "ts": ts,
+            self.assertTrue(h.startswith("FSR2 "))
+            self.assertEqual(self.svc.auth.verify(h, m, p, b.encode(), host)["id"], a["device"]["id"])
+        h2 = self.node([{"op": "sign", "device": a["device"]["id"], "host": "other-host-x.trycloudflare.com", "method": "GET", "path": "/r/library",
+                         "body": "", "ts": ts, **a["keys"]}])[0]
+        with self.assertRaises(remote.AuthError):  # 다른 주소로 보낸 서명은 이 PC 에서 안 맞음
+            self.svc.auth.verify(h2, "GET", "/r/library", b"", host)
+        h = self.node([{"op": "sign", "device": a["device"]["id"], "host": host, "method": "POST", "path": "/r/action", "body": body, "ts": ts,
                         "nonce": "A" * 22, **a["keys"]}])[0]
         self.assertEqual(h.split(".")[2], "A" * 22)
-        self.assertEqual(h.split(".")[3], remote.sign(remote._unb64u(a["keys"]["auth"]), "POST", "/r/action", str(ts), "A" * 22, body.encode()))
+        self.assertEqual(h.split(".")[3], remote.sign(remote._unb64u(a["keys"]["auth"]), host, "POST", "/r/action", str(ts), "A" * 22, body.encode()))
+        self.assertEqual(self.node([{"op": "hostof", "url": "https://Quiet-River.trycloudflare.com"}, {"op": "hostof", "url": "http://127.0.0.1:8972"}]),
+                         ["quiet-river.trycloudflare.com", "127.0.0.1:8972"])
 
     def test_keys_are_non_extractable_in_page(self):
         a = pair_device(self.svc, "a")

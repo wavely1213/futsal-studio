@@ -262,7 +262,7 @@ class DownloadTests(unittest.TestCase):
 
     def test_good_download_placed_after_verify(self):
         prog = []
-        with mock.patch.object(tunnel, "CF_ASSETS", self.assets()), mock.patch.object(tunnel, "version_ok", lambda p: True), \
+        with mock.patch.object(tunnel, "CF_ASSETS", self.assets()), mock.patch.object(tunnel, "_version", lambda p: "ok"), \
                 mock.patch.object(tunnel, "_arch", lambda: "amd64"):
             p = tunnel.ensure(progress=lambda g, t: prog.append((g, t)))
         self.assertEqual(p, tunnel.bin_path())
@@ -289,9 +289,10 @@ class DownloadTests(unittest.TestCase):
 
     def test_bad_version_after_download_removed(self):
         with mock.patch.object(tunnel, "CF_ASSETS", self.assets()), mock.patch.object(tunnel, "_arch", lambda: "amd64"), \
-                mock.patch.object(tunnel, "version_ok", lambda p: False):
-            with self.assertRaises(RuntimeError):
+                mock.patch.object(tunnel, "_version", lambda p: "other"):
+            with self.assertRaises(RuntimeError) as cm:
                 tunnel.ensure()
+        self.assertEqual(str(cm.exception), tunnel.MISSING_MSG)
         self.assertFalse(tunnel.bin_path().exists())
 
     def test_cancel_removes_part(self):

@@ -34,7 +34,7 @@ class StoreTests(unittest.TestCase):
 
     def test_atomic_save_and_reload(self):
         s = remote.Store(self.home / "remote.json", self.clock)
-        dev = s.add_device("내 휴대폰")
+        dev, _ = s.add_device("내 휴대폰")
         again = remote.Store(self.home / "remote.json", self.clock)
         self.assertEqual(again.device(dev["id"])["name"], "내 휴대폰")
         self.assertFalse(list(self.home.glob("*.tmp")))
@@ -61,7 +61,7 @@ class StoreTests(unittest.TestCase):
 
     def test_device_expiry_after_90_days(self):
         s = remote.Store(self.home / "remote.json", self.clock)
-        d = s.add_device("오래된 폰")
+        d, _ = s.add_device("오래된 폰")
         self.clock.tick(89 * 86400)
         self.assertEqual(s.expired(), [])
         self.clock.tick(2 * 86400)
@@ -145,17 +145,40 @@ class SignatureTests(unittest.TestCase):
     def test_malformed_authorization_fuzz(self):
         good = signed(self.cred, "GET", "/r/status?since=0", clock=self.clock)
         did, rest = good[5:].split(".", 1)
-        cases = [None, "", "Bearer x", "FSR1", "FSR1 " + did, good.replace("FSR1", "FSR2"), good + ".x", good[:-1],
-                 "FSR1 " + did.upper() + "." + rest, good.replace(".", ":"), "FSR1 " + "a" * 5000, good + "\r\nX: y",
-                 "FSR1 ../../etc." + rest, "FSR1 " + did + ".-1." + rest.split(".", 1)[1], base64.b64encode(good.encode()).decode()]
+        cases = [None, "", "Bearer x", "FSR2", "FSR2 " + did, good.replace("FSR2", "FSR1"), good + ".x", good[:-1],
+                 "FSR2 " + did.upper() + "." + rest, good.replace(".", ":"), "FSR2 " + "a" * 5000, good + "\r\nX: y",
+                 "FSR2 ../../etc." + rest, "FSR2 " + did + ".-1." + rest.split(".", 1)[1], base64.b64encode(good.encode()).decode()]
         for h in cases:
             with self.assertRaises(remote.AuthError, msg=repr(h)[:60]):
                 self.verify(h)
 
-    def test_nonce_memory_is_bounded(self):
-        for _ in range(remote.NONCE_MAX + 50):
-            self.verify(signed(self.cred, "GET", "/r/status?since=0", clock=self.clock))
+    def test_nonce_memory_is_bounded_and_never_evicts_live_nonces(self):
+        """꽉 차면 옛 nonce 를 지우지 않고 잠깐 거절(429) — 지우면 시각이 아직 맞는 붙잡은 요청을 다시 쓸 수 있음 (검토 PoC)."""
+        first = signed(self.cred, "GET", "/r/choices", clock=self.clock)
+        self.verify(first, "GET", "/r/choices")
+        for _ in range(remote.NONCE_MAX - 1):
+            self.verify(signed(self.cred, "GET", "/r/choices", clock=self.clock), "GET", "/r/choices")
+        with self.assertRaises(remote.AuthError) as cm:
+            self.verify(signed(self.cred, "GET", "/r/choices", clock=self.clock), "GET", "/r/choices")
+        self.assertEqual((cm.exception.code, cm.exception.status), ("busy", 429))
+        with self.assertRaises(remote.AuthError) as cm:
+            self.verify(first, "GET", "/r/choices")  # 붙잡아 둔 첫 요청: 여전히 '두 번 왔어요'
+        self.assertEqual(cm.exception.code, "replay")
         self.assertLessEqual(len(self.svc.auth.nonces[self.cred["device"]["id"]]), remote.NONCE_MAX)
+        self.clock.tick(remote.NONCE_TTL + 1)  # 기억이 지나면 다시 됨 (그때는 시각 차이로 옛 요청도 거절)
+        self.verify(signed(self.cred, "GET", "/r/choices", clock=self.clock), "GET", "/r/choices")
+        with self.assertRaises(remote.AuthError) as cm:
+            self.verify(first, "GET", "/r/choices")
+        self.assertEqual(cm.exception.code, "skew")
+
+    def test_signature_bound_to_pc_host(self):
+        """서명에 PC 주소(host)가 들어감 → 다른(옛·가짜) 터널 주소로 보낸 서명을 진짜 PC 로 옮겨 와도 안 맞음."""
+        h = signed(self.cred, "GET", "/r/status?since=0", clock=self.clock, host="old-fake-words.trycloudflare.com")
+        with self.assertRaises(remote.AuthError) as cm:
+            self.svc.auth.verify(h, "GET", "/r/status?since=0", b"", "real-pc-words.trycloudflare.com")
+        self.assertEqual(cm.exception.code, "bad_sig")
+        h = signed(self.cred, "GET", "/r/status?since=0", clock=self.clock, host="real-pc-words.trycloudflare.com")
+        self.assertEqual(self.svc.auth.verify(h, "GET", "/r/status?since=0", b"", "real-pc-words.trycloudflare.com")["id"], self.cred["device"]["id"])
 
 
 class TicketTests(unittest.TestCase):
@@ -163,7 +186,7 @@ class TicketTests(unittest.TestCase):
         self.clock = Clock()
         self.t = remote.Tickets(self.clock)
 
-    def test_ticket_expires_after_two_hours(self):
+    def test_ticket_expires_after_an_hour(self):
         tid = self.t.issue("dev1", "file", "/x/a.mp4")
         self.assertEqual(self.t.get(tid)[2], "/x/a.mp4")
         self.clock.tick(remote.TICKET_TTL + 1)
@@ -186,6 +209,19 @@ class TicketTests(unittest.TestCase):
         a = self.t.issue("d", "file", "/1")
         self.assertGreaterEqual(len(a), 22)
         self.assertRegex(a, r"^[A-Za-z0-9_-]+$")
+
+    def test_ticket_bound_to_where_the_list_was_fetched(self):
+        """표는 목록을 받은 곳(IPv4 /24 · IPv6 /48)에서만 — 표 주소를 다른 곳으로 가져가면 404 (검토: 와벨리 스크립트가 표를 빼 가는 경우)."""
+        t = self.t.issue("dev1", "file", "/x/a.mp4", "203.0.113.7")
+        self.assertIsNotNone(self.t.get(t, "203.0.113.200"))   # 같은 대역 (휴대폰 IP 가 조금 바뀜)
+        self.assertIsNone(self.t.get(t, "198.51.100.7"))       # 다른 곳
+        self.assertIsNone(self.t.get(t, ""))
+        t6 = self.t.issue("dev1", "file", "/x/a.mp4", "2001:db8:aaaa:1::5")
+        self.assertIsNotNone(self.t.get(t6, "2001:db8:aaaa:ffff::9"))
+        self.assertIsNone(self.t.get(t6, "2001:db8:bbbb::5"))
+        self.assertNotEqual(self.t.issue("dev1", "file", "/x/a.mp4", "198.51.100.7"), t)  # 다른 곳에서 목록을 받으면 다른 표
+        self.assertEqual(remote.net_of("::ffff:203.0.113.9"), "203.0.113.0/24")
+        self.assertEqual(remote.net_of("not-an-ip"), "not-an-ip")
 
     def test_lru_cap(self):
         for i in range(remote.TICKET_MAX + 10):
@@ -254,6 +290,19 @@ class TextTests(unittest.TestCase):
         self.assertIn("~/풋살사관학교_작업/out/a.mp4", s)
         self.assertNotIn("\x1b", s)
         self.assertNotIn("‮", s)
+
+    def test_unicode_line_breaks_and_invisible_marks_stripped(self):
+        """검토: NEL·줄/문단 구분(U+0085·2028·2029)은 splitlines·일부 보기에서 줄바꿈 → 기기 이름으로 가짜 기록 줄을 만듦."""
+        evil = "폰\u2028원격 · 가짜 · 휴대폰 연결을 끊었어요\u0085다음\u2029줄\u200b\u200d\u2060\ufeff\u061c\u202e끝"
+        self.assertEqual(len(remote.clean(evil, 200).splitlines()), 1)
+        self.assertEqual(len(remote.scrub(evil).splitlines()), 1)
+        self.assertEqual(remote.clean(evil, 200), "폰원격 · 가짜 · 휴대폰 연결을 끊었어요다음줄끝")
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        svc, fb = service(home, Clock())
+        cred = pair_device(svc, evil)
+        self.assertNotIn("\u2028", cred["device"]["name"])
+        self.assertTrue(all(len(x.splitlines()) == 1 for x in fb.lines))
 
     def test_clean_strips_newlines_and_limits(self):
         self.assertEqual(remote.clean("가\r\n나‮다" + "x" * 100, 10), "가  나다xxxxx")

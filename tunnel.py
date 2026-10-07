@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import urllib.request
+import weakref
 from pathlib import Path
 
 import core
@@ -42,6 +43,8 @@ CHECK_BACKOFF = (2, 4, 8)             # 자기 확인(/r/ping) 간격 — 너무
 WIN = sys.platform == "win32"
 BLOCKED_MSG = "연결하지 못했어요 · 회사·학교 인터넷은 막혀 있을 수 있어요"
 MISSING_MSG = "연결 도구(cloudflared)를 준비하지 못했어요 · 인터넷 연결을 확인하고 다시 켜 주세요"
+AV_MSG = "백신 프로그램이 연결 도구(cloudflared)를 막았을 수 있어요 · 백신에서 예외로 허용한 뒤 다시 켜 주세요"
+_LIVE = weakref.WeakSet()  # 이 앱이 띄운 Tunnel (남은 pid 정리가 우리 것을 끄지 않게)
 
 
 class Cancelled(Exception):
@@ -61,13 +64,31 @@ def bin_path():
     return core.ENGINE_HOME / "bin" / "cloudflared.exe"
 
 
-def version_ok(exe):
+def _version(exe):
+    """→ "ok" · "other"(돌았지만 고정 판이 아님) · 실행하지 못한 까닭(OSError·시간 초과) — 백신이 막으면 여기서 OSError."""
     try:
         r = subprocess.run([str(exe), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=20, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as e:
+        return e
+    return "ok" if CF_VERSION in (r.stdout or "") + (r.stderr or "") else "other"
+
+
+def version_ok(exe):
+    return _version(exe) == "ok"
+
+
+def _av_error(why):
+    """확인(크기·sha256)을 마친 파일이 실행되지 않음 → 백신 안내 + Windows 오류 번호 (주소·경로 없음)."""
+    code = getattr(why, "winerror", None) or getattr(why, "errno", None)
+    return RuntimeError(AV_MSG + (f" (Windows 오류 {code})" if code else ""))
+
+
+def _verified(p, size, sha):
+    try:
+        return p.is_file() and p.stat().st_size == size and updater.sha256(p) == sha
+    except OSError:
         return False
-    return CF_VERSION in (r.stdout or "") + (r.stderr or "")
 
 
 def find():
@@ -90,6 +111,8 @@ def ensure(progress=None, cancel=None, timeout=30):
         raise RuntimeError("원격 접속은 Windows PC에서만 켤 수 있어요")
     name, size, sha = CF_ASSETS[_arch()]
     dest = bin_path()
+    if _verified(dest, size, sha):  # 고정 판 그대로인데 실행이 안 됨 → 다시 받지 않고(55MB) 백신 안내
+        raise _av_error(_version(dest))
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
 
@@ -111,10 +134,13 @@ def ensure(progress=None, cancel=None, timeout=30):
     except updater.NET_ERRORS as e:
         _unlink(tmp)
         raise RuntimeError(f"{MISSING_MSG} ({updater._why(e)})") from None
-    if not version_ok(dest):
+    v = _version(dest)
+    if v == "ok":
+        return dest
+    if v == "other":  # 돌기는 하는데 고정 판이 아님 (있을 수 없지만) → 지우고 다음에 다시
         _unlink(dest)
         raise RuntimeError(MISSING_MSG)
-    return dest
+    raise _av_error(v)  # 확인한 파일을 백신이 격리했거나 실행을 막음 → 파일은 지우지 않음
 
 
 def _unlink(p):
@@ -239,13 +265,24 @@ def _same(a, b):
         return False
 
 
+def _live_pids():
+    out = set()
+    for t in list(_LIVE):
+        p = t.proc
+        if p is not None and p.poll() is None:
+            out.add(p.pid)
+    return out
+
+
 def kill_stale(exe):
-    """지난번 앱이 갑자기 꺼져 남은 cloudflared 가 있으면 끔 — 그 pid 의 실행 파일이 우리 것일 때만."""
+    """지난번 앱이 갑자기 꺼져 남은 cloudflared 가 있으면 끔 — 그 pid 의 실행 파일이 우리 것일 때만, 지금 이 앱이 띄운 것은 빼고."""
     f = _pidfile()
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
         pid = int(d["pid"])
     except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if pid in _live_pids():
         return False
     _unlink(f)
     img = _image_of(pid)
@@ -291,6 +328,7 @@ class Tunnel:
 
     def start(self):
         kill_stale(self.exe)
+        _LIVE.add(self)
         self.thread = threading.Thread(target=self._run, daemon=True, name="tunnel")
         self.thread.start()
 
@@ -408,6 +446,10 @@ class Tunnel:
         t = self.thread
         if t and t is not threading.current_thread():
             t.join(timeout)
+        with self.lock:  # 멈추는 사이 막 띄운 프로세스가 있었으면 그것도
+            p2 = self.proc
+        if p2 is not None and p2 is not p:
+            self._kill(p2, wait=timeout)
         self.state = "off"
 
     def alive(self):

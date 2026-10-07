@@ -2,8 +2,9 @@
 
 PC 에서 하는 작업을 휴대폰(https://mulgyeol.kr/futsal)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
   - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(/r/* 만). 화면용 로컬 서버(8765)는 터널 뒤에 두지 않는다.
-  - 확인 순서: Host(remote.futsal.invalid) → 메서드 → 요청 수 제한 → CORS·Origin·JSON → 서명/표(ticket) → 허용 동작 목록 → 파일 이름·허용 폴더.
-  - 짝짓기: PC 가 만든 10분짜리 한 번 쓰는 코드 → 휴대폰이 기기 열쇠 2개(서명용·비콘용)를 받음 → ~/.futsal-studio/remote.json.
+  - 확인 순서: Host(remote.futsal.invalid) → 메서드 → 요청 수 제한 → CORS·Origin → 서명/표(ticket) → JSON → 허용 동작 목록 → 파일 이름·허용 폴더.
+  - 짝짓기: PC 가 만든 10분짜리 한 번 쓰는 코드 → 휴대폰은 코드 대신 코드로 만든 증명(HMAC)만 보냄 → 기기 열쇠 2개(서명용·비콘용)를
+    코드로 만든 열쇠로 잠가 돌려줌 (터널·Cloudflare 는 코드도 열쇠도 못 봄) → ~/.futsal-studio/remote.json.
   - 비콘: 빠른 터널 주소는 켤 때마다 바뀜 → 지금 주소를 기기마다 AES-GCM 으로 잠가 ntfy 주제에 올림 (휴대폰 페이지가 찾아옴).
   - 알림: 정해진 문장만 ntfy 알림 주제로 (파일 이름·제목·경로·오류 글 없음).
 app 을 import 하지 않는다 — app 이 Bridge 로 기록·작업 시작 같은 기능을 넘겨준다. 암호 부품(pycryptodomex)은 함수 안에서만 불러온다
@@ -13,6 +14,7 @@ import base64
 import collections
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import queue
@@ -40,7 +42,7 @@ import updater
 API = 1
 SENTINEL = "remote.futsal.invalid"  # cloudflared 가 원격 리스너로 보낼 때 쓰는 Host (.invalid 는 어떤 브라우저도 만들 수 없음)
 SITE = "https://mulgyeol.kr/futsal"
-ORIGINS = ("https://mulgyeol.kr", "https://www.mulgyeol.kr")
+ORIGINS = ("https://mulgyeol.kr", "https://www.mulgyeol.kr", "https://futsal.mulgyeol.kr")  # 마지막은 따로 떼어 낼 자리 (D-024 소유자 결정 a)
 NTFY_DEFAULT = "https://ntfy.sh"
 MAX_DEVICES = 5
 DEVICE_TTL = 90 * 86400      # 90일 동안 안 쓴 휴대폰은 저절로 끊음
@@ -50,13 +52,16 @@ PAIR_FAILS_HOUR = 20         # 한 시간에 짝짓기 실패가 이만큼이면
 PAIR_SALT, PAIR_ITER = b"futsal-remote/pair/v1", 200_000
 SKEW = 300                   # 서명 시각 허용 차이(초)
 NONCE_TTL = 600
-NONCE_MAX = 2000             # 기기마다 기억하는 nonce 수
-TICKET_TTL, TICKET_MAX = 7200, 4000
+NONCE_MAX = 4000             # 기기마다 기억하는 nonce 수 (꽉 차면 지우지 않고 거절 · 서명 길 초당 5개 × 10분보다 큼)
+TICKET_TTL, TICKET_REUSE, TICKET_MAX = 3600, 1200, 4000  # 표는 1시간 · 20분 넘게 남았으면 같은 표 · 받은 곳(IP 대역)에 묶음
 BODY_MAX = 64 * 1024
 MEDIA_CHUNK = 4 << 20        # 구간 요청 한 번에 내주는 최대 크기
 CONCURRENCY = 24
 MEDIA_PER_DEVICE, MEDIA_TOTAL = 6, 10
 ACTION_GAP = 2.0             # 기기마다 동작 요청 간격(초)
+NOTIFY_TEST_GAP = 60         # 휴대폰의 '알림 시험'은 1분에 한 번
+STALE_DAYS = 14              # PC 목록에 '오래 안 씀'
+RETRY_AFTER = (120, 300, 900, 1800)  # 터널 오류 뒤 저절로 다시 켜기 (그 뒤로는 30분마다)
 AUTH_FAIL_MAX, AUTH_FAIL_WINDOW, LOCKOUT = 10, 600, 900
 LASTSEEN_SAVE = 300          # 마지막 사용 시각은 5분마다만 파일에 씀
 LOG_TAIL = 200
@@ -64,6 +69,7 @@ BEACON_GAP, HEARTBEAT = 60, 1200
 DAILY_BUDGET, BUDGET_SOFT = 200, 180   # ntfy.sh 무료는 하루 약 250개 · 180개를 넘으면 상태 바뀜·확인 필요만
 RETRY_DELAYS = (2.0, 5.0)              # 보내기 실패 → 이만큼 쉬고 다시 (모두 3번)
 AUTO_OFF_CHOICES = (0, 1, 3, 12, 24)
+INSTALL_RE = re.compile(r"[A-Za-z0-9_-]{16,43}")  # 휴대폰 브라우저마다 하나 (비밀 아님 · 다시 연결하면 옛 항목을 바꿔 끼움)
 PREVIEW_KEEP = 10
 CROCK = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32 (I·L·O·U 없음)
 CONFIRM_TTL = 120
@@ -81,13 +87,23 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               "학습용 영상 지우기", "배운 영상 파일 지우기", "보관함으로 되돌리기", "학습용으로 옮기기"}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
-    "paired": "새 휴대폰이 연결됐어요",
+    "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
     "test": "알림 시험이에요 · 잘 받았다면 준비 끝!",
     "tunnel": "확인이 필요해요 · 원격 연결이 자꾸 끊겨요",
     "blocked": "확인이 필요해요 · YouTube가 막았어요",
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
+    "moved": "알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · mulgyeol.kr/futsal 에서 새 주제로 다시 구독해 주세요 "
+             "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
-_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f‎‏‪-‮⁦-⁩]")
+MISSED_MSG = "받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요"
+NOT_STOPPABLE_MSG = "이 작업은 중간에 멈출 수 없어요 · 끝나면 알려 드릴게요"
+BLOCKED_PHONE_MSG = ("YouTube가 막았어요 · PC 스튜디오에서 '업데이트 확인'으로 다운로드 엔진을 최신으로 바꾸거나 "
+                     "'크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요")
+# 멈추기(editor.CANCEL·ffmpeg 끄기)를 보는 작업 — 그 밖의 작업은 휴대폰에서 [멈추기]를 보여 주지 않음
+STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보기 만들기", "영상 검수", "스타일 배우기", "학습용 스타일 배우기",
+             "스타일 일치 점수", "클로드로 더 깊게 보기"}
+# 줄바꿈·제어·방향 바꾸는 글자 + 줄을 나누는 유니코드(NEL·줄/문단 구분)·폭 없는 글자 → 기록에 가짜 줄을 못 만들게
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
 
 
 class CryptoMissing(RuntimeError):
@@ -95,13 +111,15 @@ class CryptoMissing(RuntimeError):
 
 
 class AuthError(Exception):
-    def __init__(self, code, msg):
+    def __init__(self, code, msg, status=401):
         super().__init__(msg)
-        self.code = code
+        self.code, self.status = code, status
 
 
 class PairError(Exception):
-    pass
+    def __init__(self, msg, code="pair"):
+        super().__init__(msg)
+        self.code = code
 
 
 class ActionError(Exception):
@@ -184,17 +202,43 @@ def gcm_open(key, blob, aad):
 
 
 def derive_pair(code):
-    """코드 → (만남 주제, 32바이트 열쇠). 페이지(proto.js)와 같은 계산."""
-    dk = hashlib.pbkdf2_hmac("sha256", code.encode("ascii"), PAIR_SALT, PAIR_ITER, 48)
-    return "fsp" + dk[:12].hex(), dk[16:48]
+    """코드 → (만남 주제, 잠금 열쇠 32바이트, 증명 열쇠 16바이트). 페이지(proto.js)와 같은 계산
+    (PBKDF2-SHA256 64바이트 = 블록 2개 · 블록을 늘리면 휴대폰·PC 계산이 그만큼 길어짐)."""
+    dk = hashlib.pbkdf2_hmac("sha256", code.encode("ascii"), PAIR_SALT, PAIR_ITER, 64)
+    return "fsp" + dk[:12].hex(), dk[16:48], dk[48:64]
 
 
-def canonical(method, path, ts, nonce, body):
-    return f"FSR1\n{method}\n{path}\n{ts}\n{nonce}\n{hashlib.sha256(body or b'').hexdigest()}".encode("utf-8")
+def pair_proof(proof_key, nonce, ts):
+    """휴대폰이 코드를 안다는 증명 (코드 글은 터널로 보내지 않음)."""
+    return _b64u(hmac.new(proof_key, f"fsp2|{nonce}|{ts}".encode("ascii"), hashlib.sha256).digest())
 
 
-def sign(key, method, path, ts, nonce, body=b""):
-    return _b64u(hmac.new(key, canonical(method, path, ts, nonce, body), hashlib.sha256).digest())
+def pair_aad(topic, pc_id, dev_id):
+    return f"fsp2|{topic}|{pc_id}|{dev_id}"
+
+
+def topics_aad(pc_id, dev_id):
+    return f"fst1|{pc_id}|{dev_id}"
+
+
+def canonical(host, method, path, ts, nonce, body):
+    """서명할 글: 받는 곳(터널 주소의 host) · 메서드 · 경로+쿼리 · 시각 · nonce · 본문 sha256 — 다른 주소로 보낸 서명은 여기서 안 맞음."""
+    return f"FSR2\n{host}\n{method}\n{path}\n{ts}\n{nonce}\n{hashlib.sha256(body or b'').hexdigest()}".encode("utf-8")
+
+
+def sign(key, host, method, path, ts, nonce, body=b""):
+    return _b64u(hmac.new(key, canonical(host, method, path, ts, nonce, body), hashlib.sha256).digest())
+
+
+def net_of(ip):
+    """표를 묶는 받은 곳: IPv4 /24 · IPv6 /48 (휴대폰 IP 가 조금 바뀌어도 되게) · 이상한 글은 그대로."""
+    try:
+        a = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
+        return str(ip)[:64]
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return str(ipaddress.ip_network(f"{a}/{24 if a.version == 4 else 48}", strict=False))
 
 
 # ---------- 연결 코드 ----------
@@ -211,10 +255,6 @@ def norm_code(s):
     """사람이 친 코드 → 10글자 (대문자, -·띄어쓰기 빼고, O→0, I·L→1) · 틀린 꼴이면 None."""
     s = re.sub(r"[\s\-]", "", str(s or "")).upper().replace("O", "0").replace("I", "1").replace("L", "1")
     return s if len(s) == 10 and all(ch in CROCK for ch in s) else None
-
-
-def _code_hash(c):
-    return hashlib.sha256(("futsal-pair|" + c).encode("ascii")).digest()
 
 
 # ---------- 주소 검사 (원격으로 받을 수 있는 것만) ----------
@@ -277,7 +317,8 @@ def channel_url(s):
 
 def _fresh():
     return {"v": 1, "pc": {"id": secrets.token_hex(8), "name": "내 PC"}, "enabled": False,
-            "settings": {"autoOffHours": 12, "keepAwake": "job", "notify": {"done": True, "failed": True, "attention": True}},
+            # PC 잠들지 않게: 기본은 '켜 둔 동안 항상' (잠들면 밖에서 새 작업을 못 시킴 · 원격 접속 자체가 소유자가 켜는 것)
+            "settings": {"autoOffHours": 12, "keepAwake": "always", "notify": {"done": True, "failed": True, "attention": True}},
             "devices": [], "topics": {"beacon": "fsb" + secrets.token_hex(12), "notify": "fsn" + secrets.token_hex(12)}, "seq": 0}
 
 
@@ -288,6 +329,7 @@ def _valid_store(d):
               and isinstance(d.get("seq"), int) and isinstance(d.get("settings"), dict))
         for x in d["devices"]:
             ok = ok and re.fullmatch(r"[0-9a-f]{16}", x["id"]) and len(_unb64u(x["auth"])) == 32 and len(_unb64u(x["beacon"])) == 32
+            ok = ok and (x.get("install") is None or bool(INSTALL_RE.fullmatch(str(x["install"]))))
         return bool(ok)
     except (KeyError, TypeError, AttributeError, ValueError):
         return False
@@ -335,14 +377,19 @@ class Store:
     def device(self, did):
         return next((x for x in self.data["devices"] if x["id"] == did), None)
 
-    def add_device(self, name):
+    def add_device(self, name, install=None):
+        """새 기기 → (기기, 바꿔 끼운 옛 기기들). 같은 브라우저(install)가 다시 연결하면 옛 항목을 지우고 새것으로."""
         with self.lock:
             now = int(self.clock())
             dev = {"id": secrets.token_hex(8), "name": clean(name, 40) or "휴대폰", "created": now, "lastSeen": now,
                    "auth": _b64u(secrets.token_bytes(32)), "beacon": _b64u(secrets.token_bytes(32))}
-            self.data["devices"].append(dev)
+            old = []
+            if install and INSTALL_RE.fullmatch(install):
+                dev["install"] = install
+                old = [x for x in self.data["devices"] if x.get("install") == install]
+            self.data["devices"] = [x for x in self.data["devices"] if x not in old] + [dev]
             self.save()
-            return dev
+            return dev, old
 
     def remove(self, ids):
         with self.lock:
@@ -352,10 +399,12 @@ class Store:
                 self.save()
             return before - len(self.data["devices"])
 
-    def rotate_topics(self):
+    def rotate_topics(self, notify=True):
+        """비콘 주제는 늘, 알림 주제는 notify 일 때만 새로 → 옛 주제들."""
         with self.lock:
             old = dict(self.data["topics"])
-            self.data["topics"] = {"beacon": "fsb" + secrets.token_hex(12), "notify": "fsn" + secrets.token_hex(12)}
+            self.data["topics"] = {"beacon": "fsb" + secrets.token_hex(12),
+                                   "notify": "fsn" + secrets.token_hex(12) if notify else old["notify"]}
             self.save()
             return old
 
@@ -387,7 +436,7 @@ class Store:
 
 # ---------- 서명 확인 ----------
 
-_AUTH_RE = re.compile(r"FSR1 ([0-9a-f]{16})\.(\d{1,12})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})")
+_AUTH_RE = re.compile(r"FSR2 ([0-9a-f]{16})\.(\d{1,12})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})")
 
 
 class Auth:
@@ -396,7 +445,8 @@ class Auth:
         self.nonces = {}
         self.lock = threading.Lock()
 
-    def verify(self, header, method, path, body):
+    def verify(self, header, method, path, body, host=""):
+        """host: 이 PC 의 지금 터널 주소 host (서명에 들어 있음 → 다른 주소로 보낸 서명을 옮겨 와도 안 맞음)."""
         m = _AUTH_RE.fullmatch(str(header or "").strip())
         if not m:
             raise AuthError("bad_header", "연결 정보가 없거나 잘못됐어요")
@@ -407,7 +457,7 @@ class Auth:
         now = self.clock()
         if abs(now - int(ts)) > SKEW:
             raise AuthError("skew", "휴대폰 시계가 PC와 너무 달라요")
-        want = sign(_unb64u(dev["auth"]), method, path, ts, nonce, body)
+        want = sign(_unb64u(dev["auth"]), host or "", method, path, ts, nonce, body)
         if not hmac.compare_digest(want, sig):
             raise AuthError("bad_sig", "연결 정보가 맞지 않아요")
         with self.lock:
@@ -416,7 +466,9 @@ class Auth:
                 seen.popitem(last=False)
             if nonce in seen:
                 raise AuthError("replay", "같은 요청이 두 번 왔어요")
-            _lru_put(seen, nonce, now + NONCE_TTL, NONCE_MAX)
+            if len(seen) >= NONCE_MAX:  # 아직 살아 있는 nonce 는 지우지 않음 (지우면 그 요청을 다시 쓸 수 있음) → 잠깐 거절
+                raise AuthError("busy", "요청이 너무 많아요 · 잠시 뒤 다시 해 주세요", 429)
+            seen[nonce] = now + NONCE_TTL
         return dev
 
     def forget(self, ids):
@@ -427,8 +479,14 @@ class Auth:
 
 # ---------- 짝짓기 ----------
 
+PAIR_NOTES = {"killed": "틀린 연결 코드가 5번 들어와서 그 코드를 버렸어요 · 다른 사람이 코드를 맞히려 했을 수 있어요 · "
+                        "[휴대폰 연결하기]로 새 코드를 만들어 주세요",
+              "blocked": "한 시간 동안 틀린 연결 시도가 많아서 연결을 잠시 막았어요 · [휴대폰 연결하기]로 새 코드를 만들면 다시 돼요"}
+
+
 class Pairing:
-    """연결 코드 하나 (10분 · 한 번 · 5번 틀리면 버림). 코드 글은 PC 화면에 보여 주려고 메모리에만 (기록·파일에 안 남김)."""
+    """연결 코드 하나 (10분 · 한 번 · 5번 틀리면 버림). 코드 글은 PC 화면에 보여 주려고 메모리에만 (기록·파일에 안 남김).
+    휴대폰은 코드 대신 증명(pair_proof)을 보낸다 — 터널 쪽은 코드를 모른다. note: 코드를 버리거나 막은 까닭 (PC 화면에 보여 줌)."""
 
     def __init__(self, clock=time.time):
         self.clock = clock
@@ -436,13 +494,14 @@ class Pairing:
         self.cur = None
         self.fails = collections.deque()
         self.blocked = False
+        self.note = None
 
     def create(self):
         with self.lock:
             code = new_code()
-            topic, key = derive_pair(code)
-            self.cur = {"code": code, "hash": _code_hash(code), "exp": self.clock() + CODE_TTL, "fails": 0, "topic": topic, "key": key}
-            self.blocked = False
+            topic, key, proof = derive_pair(code)
+            self.cur = {"code": code, "exp": self.clock() + CODE_TTL, "fails": 0, "topic": topic, "key": key, "proof": proof}
+            self.blocked, self.note = False, None
             return dict(self.cur)
 
     def cancel(self):
@@ -455,8 +514,8 @@ class Pairing:
                 self.cur = None
             return dict(self.cur) if self.cur else None
 
-    def check(self, code_in):
-        """맞으면 코드를 써 버리고 True · 아니면 PairError."""
+    def check(self, nonce, ts, proof):
+        """증명이 맞으면 코드를 써 버리고 그 코드의 {topic, key} · 아니면 PairError (틀린 시도는 셈)."""
         msg = "코드가 맞지 않거나 시간이 지났어요 · PC 화면의 새 코드로 다시 해 주세요"
         with self.lock:
             now = self.clock()
@@ -464,49 +523,57 @@ class Pairing:
                 self.fails.popleft()
             if self.blocked:
                 raise PairError("지금은 연결할 수 없어요 · PC에서 새 코드를 만들어 주세요")
-            cur, c = self.cur, norm_code(code_in)
+            cur = self.cur
             if cur and now > cur["exp"]:
                 self.cur = cur = None
-            if not cur or c is None or not hmac.compare_digest(_code_hash(c), cur["hash"]):
+            shape = (isinstance(nonce, str) and re.fullmatch(r"[A-Za-z0-9_-]{22}", nonce) and isinstance(ts, int) and not isinstance(ts, bool)
+                     and isinstance(proof, str) and re.fullmatch(r"[A-Za-z0-9_-]{43}", proof))
+            skew = bool(cur and shape) and abs(now - ts) > SKEW  # 살아 있는 코드가 없으면 그냥 '맞지 않거나 시간이 지났어요'
+            if not cur or not shape or skew or not hmac.compare_digest(pair_proof(cur["proof"], nonce, ts), proof):
                 self.fails.append(now)
                 if cur:
                     cur["fails"] += 1
                     if cur["fails"] >= CODE_FAILS:
-                        self.cur = None
+                        self.cur, self.note = None, "killed"
                 if len(self.fails) >= PAIR_FAILS_HOUR:
-                    self.blocked, self.cur = True, None
+                    self.blocked, self.cur, self.note = True, None, "blocked"
+                if skew:
+                    raise PairError("휴대폰 시계가 PC와 너무 달라요 · 휴대폰 시간을 '자동'으로 맞춘 뒤 다시 해 주세요", "skew")
                 raise PairError(msg)
             self.cur = None
-            return True
+            return {"topic": cur["topic"], "key": cur["key"]}
 
 
 # ---------- 미디어 표 (ticket) ----------
 
 class Tickets:
+    """영상·그림 주소의 표: 기기 · 종류 · 파일 · 만료(1시간) · 받은 곳(목록을 받은 IP 의 /24·/48).
+    <video>·<img> 는 머리글을 못 보내므로 표를 가진 것만으로 받는데, 표 주소를 다른 곳(다른 대역)으로 옮겨 가면 안 받아 준다."""
+
     def __init__(self, clock=time.time):
         self.clock = clock
         self.lock = threading.Lock()
         self.items = collections.OrderedDict()
         self.rev = {}
 
-    def issue(self, device, kind, path):
-        now = self.clock()
+    def issue(self, device, kind, path, ip=""):
+        now, net = self.clock(), net_of(ip)
         with self.lock:
-            k = (device, kind, str(path))
+            k = (device, kind, str(path), net)
             t = self.rev.get(k)
-            if t and t in self.items and self.items[t][3] - now > 1800:  # 30분 넘게 남았으면 같은 표 (목록을 자주 새로 해도 표가 쌓이지 않게)
+            if t and t in self.items and self.items[t][3] - now > TICKET_REUSE:  # 넉넉히 남았으면 같은 표 (목록을 자주 새로 해도 표가 쌓이지 않게)
                 return t
             t = secrets.token_urlsafe(16)
-            _lru_put(self.items, t, (device, kind, str(path), now + TICKET_TTL), TICKET_MAX)
+            _lru_put(self.items, t, (device, kind, str(path), now + TICKET_TTL, net), TICKET_MAX)
             self.rev[k] = t
             if len(self.rev) > TICKET_MAX * 2:
                 self.rev = {kk: vv for kk, vv in self.rev.items() if vv in self.items}
             return t
 
-    def get(self, t):
+    def get(self, t, ip=""):
         with self.lock:
             it = self.items.get(t)
-            if not it or it[3] < self.clock():
+            if not it or it[3] < self.clock() or it[4] != net_of(ip):
                 return None
             return it
 
@@ -626,8 +693,8 @@ class Publisher:
     def beacon(self, important=False, moved=None, topic=None):
         self.q.put(("beacon", important, moved, topic))
 
-    def notify(self, kind, text, prio=3, tags="bell"):
-        self.q.put(("notify", kind, text, prio, tags))
+    def notify(self, kind, text, prio=3, tags="bell", topic=None):
+        self.q.put(("notify", kind, text, prio, tags, topic))
 
     def rendezvous(self, topic, body):
         self.q.put(("raw", topic, body))
@@ -666,9 +733,9 @@ class Publisher:
                     else:
                         self.pending = (False, None, None)  # 같은 꼴은 마지막 것만 (60초에 한 번)
                 elif item[0] == "notify":
-                    _, kind, text, prio, tags = item
-                    if self._budget(kind in ("attention", "failed", "paired")):
-                        self._post_notify(text, prio, tags)
+                    _, kind, text, prio, tags, topic = item
+                    if self._budget(kind in ("attention", "failed", "paired", "moved")):
+                        self._post_notify(text, prio, tags, topic)
                 elif item[0] == "raw":
                     if self._budget(True):
                         self._post(f"{self.svc.ntfy()}/{item[1]}", item[2].encode("utf-8"), {"Content-Type": "text/plain"})
@@ -684,8 +751,8 @@ class Publisher:
             self._post(f"{self.svc.ntfy()}/{topic or self.svc.store.data['topics']['beacon']}", body.encode("ascii"),
                        {"Content-Type": "text/plain"})
 
-    def _post_notify(self, text, prio, tags):
-        msg = {"topic": self.svc.store.data["topics"]["notify"], "title": "풋살 스튜디오", "message": text,
+    def _post_notify(self, text, prio, tags, topic=None):
+        msg = {"topic": topic or self.svc.store.data["topics"]["notify"], "title": "풋살 스튜디오", "message": text,
                "tags": [tags], "priority": prio, "click": self.svc.site()}
         self._post(self.svc.ntfy() + "/", json.dumps(msg, ensure_ascii=False).encode("utf-8"), {"Content-Type": "application/json"})
 
@@ -724,6 +791,14 @@ class Publisher:
 
 # ---------- 원격 서비스 ----------
 
+def _close_server(srv):
+    try:
+        srv.shutdown()
+        srv.server_close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class Service:
     def __init__(self, home=None, clock=time.time, ntfy=None):
         self.home = Path(home) if home else None
@@ -742,11 +817,19 @@ class Service:
         self.last = None
         self.qa = collections.OrderedDict()
         self.confirms = {}
-        self._stopping = threading.Event()
+        # 켜기·끄기: 시도마다 번호(_gen)와 그만두기 Event 를 새로 — 늦게 끝난 옛 시도는 지금 상태·enabled·터널을 못 바꾼다.
+        # Event 는 지우지(clear) 않는다 (옛 시도 스레드가 아직 보고 있을 수 있음).
+        self._gen = 0
+        self._cancel = threading.Event()
+        self._tunnels = set()  # 띄운 Tunnel 전부 → 끄기·앱 끄기에서 하나도 남기지 않음
         self._job_seen = None
         self._lockout_logged = 0.0
         self._started = False
         self._off_reason = "user"
+        self._err_kind = None              # "tunnel"·"start" 오류는 저절로 다시 켜 봄 · "crypto" 는 안 함
+        self._retry = {"n": 0, "at": None}
+        self._last_test = -1e9
+        self._proj_cache = collections.OrderedDict()
 
     # ----- 준비 -----
     def init(self, bridge):
@@ -780,7 +863,13 @@ class Service:
         return ORIGINS + tuple(extra)
 
     def port(self):
-        return self.listener.server_address[1] if self.listener else None
+        lst = self.listener
+        return lst.server_address[1] if lst else None
+
+    def host(self):
+        """서명에 들어가는 이 PC 주소의 host (터널 주소 · 개발 때는 127.0.0.1:<포트>) · 주소가 없으면 ''."""
+        u = self.url
+        return urlparse(u).netloc.lower() if u else ""
 
     # ----- PC 화면 (/api/remote*) -----
     def brief(self):
@@ -792,11 +881,15 @@ class Service:
         pair = None
         if p and self.state == "on":
             pair = {"code": fmt_code(p["code"]), "link": self.pair_link(p["code"]), "expiresAt": int(p["exp"])}
+        now = self.clock()
         return {"state": self.state, "error": self.error, "prep": self.prep, "dev": _dev(),
-                "devices": [{"id": x["id"], "name": x["name"], "created": x["created"], "lastSeen": x["lastSeen"]} for x in d["devices"]],
-                "maxDevices": MAX_DEVICES, "pair": pair, "settings": d["settings"], "pc": d["pc"],
+                "devices": [{"id": x["id"], "name": x["name"], "created": x["created"], "lastSeen": x["lastSeen"],
+                             "stale": now - (x.get("lastSeen") or x.get("created") or 0) > STALE_DAYS * 86400} for x in d["devices"]],
+                "maxDevices": MAX_DEVICES, "pair": pair, "pairNote": PAIR_NOTES.get(self.pairing.note) if not pair else None,
+                "settings": d["settings"], "pc": d["pc"],
                 "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}, "site": self.site(),
-                "autoOffAt": self._auto_off_at(), "crypto": crypto_ok()}
+                "autoOffAt": self._auto_off_at(), "crypto": crypto_ok(),
+                "retryAt": int(self._retry["at"]) if self.state == "error" and self._retry["at"] and d.get("enabled") else None}
 
     def pair_link(self, code):
         hint = ""
@@ -805,64 +898,105 @@ class Service:
             hint = m.group(1) if m else (urlparse(self.url).netloc if _dev() else "")
         return f"{self.site()}#pair={code}" + (f"&u={hint}" if hint else "")
 
-    def turn_on(self):
+    def turn_on(self, auto=False):
+        """원격 접속 켜기 (PC 화면에서만 · auto 는 오류 뒤 저절로 다시)."""
         with self.lock:
             if self.state in ("preparing", "starting", "on", "restarting"):
                 return True
             if not crypto_ok():
-                self.state, self.error = "error", MISSING_MSG
+                self.state, self.error, self._err_kind = "error", MISSING_MSG, "crypto"
                 return False
-            self._teardown()  # 실패한 앞의 시도(터널·리스너)가 남아 있으면 정리
-            self.state, self.error, self.prep = "preparing", None, 0
-            self._stopping.clear()
-        threading.Thread(target=self._start, daemon=True, name="remote-start").start()
+            if not auto:
+                self._retry = {"n": 0, "at": None}
+            self._cancel.set()  # 앞의 시도는 그만 (그 스레드는 자기 Event 를 계속 봄)
+            self._gen += 1
+            gen, cancel = self._gen, threading.Event()
+            self._cancel = cancel
+            tuns, lst = self._take_resources()
+            self.state, self.error, self.prep, self.url, self._err_kind = "preparing", None, 0, None, None
+        self._stop_resources(tuns, lst)  # 실패한 앞의 시도(터널·리스너)가 남아 있으면 정리
+        threading.Thread(target=self._start, args=(gen, cancel), daemon=True, name="remote-start").start()
         return True
 
-    def _start(self):
+    def _current(self, gen, cancel):
+        return gen == self._gen and not cancel.is_set()
+
+    def _start(self, gen, cancel):
+        lst = None
         try:
             exe = None
             if not _dev():
-                exe = tunnel.ensure(progress=self._prep_progress, cancel=self._stopping.is_set)
-            if self._stopping.is_set():
-                return
-            self._open_listener()
-            self.store.set(enabled=True)
-            self.last_auth = self.clock()
-            if _dev():
-                self._tunnel_event("on", url=f"http://127.0.0.1:{self.port()}")
-            else:
-                with self.lock:
+                # 지난번에 남은 cloudflared 를 먼저 (판을 올릴 때 실행 중인 파일이라 바꿔 끼우기가 막히지 않게 · 지금 띄운 것은 안 건드림)
+                tunnel.kill_stale(os.environ.get("FUTSAL_CLOUDFLARED") or tunnel.bin_path())
+                exe = tunnel.ensure(progress=lambda got, total: self._prep_progress(gen, got, total), cancel=cancel.is_set)
+            with self.lock:
+                if not self._current(gen, cancel):
+                    return
+            lst = self._new_listener()
+            dev_url = None
+            with self.lock:
+                if not self._current(gen, cancel):  # 리스너를 여는 사이 [끄기]·다시 켜기 → 이 시도는 아무것도 남기지 않음
+                    return
+                self.listener, lst = lst, None
+                self.store.set(enabled=True)  # 지금 시도일 때만 (끄기와 같은 잠금 안에서)
+                self.last_auth = self.clock()
+                if _dev():
+                    dev_url = f"http://127.0.0.1:{self.port()}"
+                else:
                     self.state, self.prep = "starting", None
-                self.tun = tunnel.Tunnel(exe, self.port(), self._tunnel_event)
-                self.tun.start()
+                    holder = {}
+                    tun = tunnel.Tunnel(exe, self.port(), lambda kind, **kw: self._tunnel_event(gen, holder.get("t"), kind, **kw))
+                    holder["t"] = tun
+                    self.tun = tun
+                    self._tunnels.add(tun)
+                    tun.start()
+            if dev_url:
+                self._tunnel_event(gen, None, "on", url=dev_url)
             self.log("원격 접속을 켰어요")
         except Exception as e:  # noqa: BLE001
-            if self._stopping.is_set():  # 받는 중에 [끄기]를 누름
-                return
+            with self.lock:
+                if not self._current(gen, cancel):  # 받는 중에 [그만두기]·[끄기]
+                    return
+                tuns, lst2 = self._take_resources()
+                self.state, self.error, self.prep, self._err_kind = "error", scrub(e) or "원격 접속을 켜지 못했어요", None, "start"
+                self._schedule_retry()
+            self._stop_resources(tuns, lst2)
             if not isinstance(e, (RuntimeError, OSError)):
                 traceback.print_exc()
-            self._close_listener()
-            with self.lock:
-                self.state, self.error, self.prep = "error", scrub(e) or "원격 접속을 켜지 못했어요", None
             self.log(f"원격 접속을 켜지 못했어요 · {scrub(e)}")
+        finally:
+            if lst is not None:  # 띄웠지만 넘겨주지 못한 리스너 (그만둔 시도·오류) → 닫음
+                _close_server(lst)
 
-    def _prep_progress(self, got, total):
-        self.prep = min(99, int(got * 100 / total)) if total else None
+    def _prep_progress(self, gen, got, total):
+        if gen == self._gen:
+            self.prep = min(99, int(got * 100 / total)) if total else None
 
-    def _tunnel_event(self, kind, url=None, error=None):
-        """tunnel.Tunnel → 상태 바뀜. 터널 주소(url)는 기록에 남기지 않는다."""
+    def _schedule_retry(self):
+        n = self._retry["n"]
+        self._retry = {"n": n + 1, "at": self.clock() + RETRY_AFTER[min(n, len(RETRY_AFTER) - 1)]}
+
+    def _tunnel_event(self, gen, tun, kind, url=None, error=None):
+        """tunnel.Tunnel → 상태 바뀜 (지금 시도·지금 터널의 소식만). 터널 주소(url)는 기록에 남기지 않는다."""
+        lst = dead = None
         with self.lock:
-            if self._stopping.is_set():
+            if gen != self._gen or self._cancel.is_set() or (tun is not None and tun is not self.tun):
                 return
             if kind == "on":
                 changed = url != self.url
                 self.state, self.error, self.url = "on", None, url
+                self._retry = {"n": 0, "at": None}
             elif kind == "restarting":
                 self.state, self.url = "restarting", None
                 return
-            elif kind == "error":
+            elif kind == "error":  # 터널이 멈춤 → 리스너도 닫고(다시 켤 때 새로) 잠시 뒤 저절로 다시
                 self.state, self.error, self.url = "error", error or "연결이 끊겼어요", None
-                self._off_reason = "error"
+                self._off_reason, self._err_kind = "error", "tunnel"
+                lst, self.listener = self.listener, None
+                dead, self.tun = self.tun, None
+                if dead is not None:
+                    self._tunnels.discard(dead)
+                self._schedule_retry()
             elif kind == "attention":
                 self._note("attention", NOTE_TEXT["tunnel"])
                 return
@@ -872,30 +1006,51 @@ class Service:
             self.pub.beacon(important=True)
             self._publish_pair()
         if kind == "error":
+            self._stop_resources([dead], lst, timeout=2)  # 멈춘 터널이 (혹시라도) 남긴 프로세스까지 · 이 스레드가 터널 스레드여도 됨
             self.log(f"원격 접속 · {error}")
             self.pub.beacon(important=True)
 
-    def _teardown(self):
-        with self.lock:
-            self._stopping.set()
-            tun, self.tun = self.tun, None
-        if tun:
-            tun.stop()
-        self._close_listener()
+    def _take_resources(self):
+        """(잠금 안에서) 지금 터널·추적 중인 모든 터널·리스너를 떼어 냄 → 끄는 것은 _stop_resources 가 잠금 밖에서.
+        번호(_gen)를 올린 같은 잠금 안에서 떼어 내므로, 그 뒤 새 시도가 띄운 터널은 건드리지 않는다."""
+        tuns = [t for t in [self.tun] + list(self._tunnels) if t is not None]
+        self._tunnels.clear()
+        lst, self.listener, self.tun = self.listener, None, None
+        return tuns, lst
+
+    def _stop_resources(self, tuns, lst, timeout=5):
+        """터널들과 리스너를 끔 — 잠금 밖에서 (터널 스레드가 _tunnel_event 로 잠금을 기다릴 수 있음)."""
+        for t in dict.fromkeys(x for x in tuns if x is not None):
+            try:
+                t.stop(timeout=timeout)
+            except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
+                traceback.print_exc()
+        if lst is not None:
+            _close_server(lst)
 
     def turn_off(self, why="user", keep_enabled=False):
-        was = self.state
-        self._off_reason = why
-        self._teardown()
+        err = None
+        with self.lock:
+            was = self.state
+            self._off_reason = why
+            self._cancel.set()
+            self._gen += 1  # 켜는 중인 시도가 있으면 이제 '옛 시도' (그 시도는 enabled·터널·리스너를 못 바꿈)
+            tuns, lst = self._take_resources()
+            self.state, self.error, self.prep, self.url, self._err_kind = "off", None, None, None, None
+            self._retry = {"n": 0, "at": None}
+            if not keep_enabled:
+                try:
+                    self.store.set(enabled=False)  # 같은 잠금 안 → 바로 뒤의 새 켜기가 쓴 True 를 덮지 않음
+                except OSError as e:
+                    err = e
+        self._stop_resources(tuns, lst)
         self.tickets.drop()
         self.pairing.cancel()
-        with self.lock:
-            self.state, self.error, self.prep, self.url = "off", None, None, None
-        if not keep_enabled:
-            self.store.set(enabled=False)
         if was != "off":
             self.pub.beacon(important=True)
             self.log(f"원격 접속을 껐어요 · {OFF_REASONS.get(why, why)}")
+        if err:
+            raise err
         return True
 
     def pair_start(self):
@@ -917,20 +1072,24 @@ class Service:
         msg = json.dumps({"v": 1, "url": self.url, "pc": d["pc"], "exp": int(p["exp"])}, ensure_ascii=False)
         self.pub.rendezvous(p["topic"], "fsp1." + gcm_seal(p["key"], msg, "fsp1|" + p["topic"]))
 
-    def revoke(self, ids=None, everyone=False, why="PC에서"):
+    def revoke(self, ids=None, everyone=False, why="PC에서", rotate_notify=True):
+        """끊기: 열쇠·표·nonce 를 바로 버리고 비콘 주제를 바꿈 (rotate_notify 면 알림 주제도 → 옛 알림 주제에 한 번 안내를 남김)."""
         d = self.store.data
         gone = [x for x in d["devices"] if everyone or x["id"] in (ids or [])]
         if not gone:
             return 0
-        old = self.store.rotate_topics()
+        old = self.store.rotate_topics(notify=rotate_notify)
         self.store.remove({x["id"] for x in gone})
         self.tickets.drop({x["id"] for x in gone})
         self.auth.forget([x["id"] for x in gone])
         if everyone:
             self.pairing.cancel()
+        new = dict(self.store.data["topics"])
         if self.store.data["devices"]:  # 남은 휴대폰에만 새 주제를 옛 주제로 알려 줌 (끊은 휴대폰은 열쇠가 없어 못 읽음)
-            self.pub.beacon(important=True, moved=dict(self.store.data["topics"]), topic=old["beacon"])
+            self.pub.beacon(important=True, moved=new, topic=old["beacon"])
         self.pub.beacon(important=True)
+        if new["notify"] != old["notify"]:  # ntfy 앱은 옛 주제를 계속 구독 중 → 조용히 끊기지 않게 정해진 안내를 한 번
+            self.pub.notify("moved", NOTE_TEXT["moved"], 4, "warning", topic=old["notify"])
         for x in gone:
             self.log(f"휴대폰 연결을 끊었어요 · {clean(x['name'], 40)} ({why})")
         return len(gone)
@@ -953,22 +1112,28 @@ class Service:
     def test_notify(self):
         self.pub.notify("test", NOTE_TEXT["test"], 3, "bell")
 
-    def shutdown(self, timeout=2.0):
-        """앱을 끌 때: 마지막 비콘(앱을 껐어요)을 한 번 보내고 터널을 끔 · 다음에 켜면 다시 켜지도록 enabled 는 그대로."""
-        if not self.store or self.state == "off":
+    def shutdown(self, timeout=1.5):
+        """앱을 끌 때: 터널·리스너를 먼저 끄고(무엇이 켜져 있든) → 휴대폰에 '앱을 껐어요' 비콘을 한 번, timeout 안에서만
+        (느린 DNS 에도 앱 끄기·업데이트 다시 시작이 기다리지 않게 따로 스레드). 다음에 켜면 다시 켜지도록 enabled 는 그대로."""
+        if not self.store:
             return
         try:
-            self._off_reason = "app"
-            body = self.beacon_body(state="off", reason=OFF_REASONS["app"])
             with self.lock:
-                self._stopping.set()
-                tun, self.tun = self.tun, None
-            if body:
-                self.pub.post_now(f"{self.ntfy()}/{self.store.data['topics']['beacon']}", body.encode("ascii"), {"Content-Type": "text/plain"}, timeout)
-            if tun:
-                tun.stop(timeout=timeout)
-            self._close_listener()
-            self.state = "off"
+                was = self.state
+                self._off_reason = "app"
+                self._cancel.set()
+                self._gen += 1
+                tuns, lst = self._take_resources()
+                self.state, self.url, self.prep = "off", None, None
+            self._stop_resources(tuns, lst, timeout=1.0)
+            if was != "off" and self.pub:
+                body = self.beacon_body(state="off", reason=OFF_REASONS["app"])
+                if body:
+                    t = threading.Thread(target=self.pub.post_now, daemon=True, name="remote-last-beacon",
+                                         args=(f"{self.ntfy()}/{self.store.data['topics']['beacon']}", body.encode("ascii"),
+                                               {"Content-Type": "text/plain"}, timeout))
+                    t.start()
+                    t.join(timeout)
         except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
             traceback.print_exc()
 
@@ -1002,12 +1167,17 @@ class Service:
 
     # ----- 작업이 끝났을 때 (app.JOB_HOOKS) -----
     def job_hook(self, name, error, result, by, secs):
-        ok, err, blocked = True, None, False
+        """last: 휴대폰 '마지막 작업' 칸 — ok(끝)·warn(확인이 필요해요: 막힘·못 받은 영상)·실패. 알림은 정해진 문장만."""
+        ok, err, blocked, warn = True, None, False, False
         if error:
             ok, err = False, scrub(error)
         elif isinstance(result, dict) and result.get("ok") is False:
             ok, err, blocked = False, scrub(result.get("error")), bool(result.get("blocked"))
-        self.last = {"name": name, "ok": ok, "error": err, "blocked": blocked, "endedAt": int(self.clock()), "by": by}
+            if blocked:
+                warn, err = True, BLOCKED_PHONE_MSG
+        elif name == "보관함에 담기" and isinstance(result, list) and result:  # 받기 작업은 못 받은 영상 id 목록을 돌려줌
+            ok, warn, err = False, True, MISSED_MSG.format(n=len(result))
+        self.last = {"name": name, "ok": ok, "warn": warn, "error": err, "blocked": blocked, "endedAt": int(self.clock()), "by": by}
         if name == "영상 검수" and isinstance(result, dict) and result.get("file"):  # 검수 결과는 완성본 목록에 같이 보여 줌
             summary = {k: result.get(k) for k in ("score", "bad", "warn", "duration", "width", "height")}
             summary["items"] = [{k: scrub(it.get(k)) if isinstance(it.get(k), str) else it.get(k) for k in ("lv", "title", "msg", "t")}
@@ -1018,7 +1188,7 @@ class Service:
         self.pub.beacon()
         n = self.store.data["settings"]["notify"]
         label = _label(name)
-        if blocked or (name == "보관함에 담기" and isinstance(result, list) and result):
+        if warn:
             if n.get("attention"):
                 self._note("attention", NOTE_TEXT["blocked" if blocked else "missed"])
         elif not ok:
@@ -1031,7 +1201,7 @@ class Service:
         if self.pub and self.store.data["settings"]["notify"].get("attention", True):
             self.pub.notify(kind, text, 4, "warning")
 
-    # ----- 뒤에서: 하트비트·자동 끄기·오래된 기기 -----
+    # ----- 뒤에서: 하트비트·자동 끄기·오래된 기기·오류 뒤 다시 켜기 -----
     def _auto_off_at(self):
         h = self.store.data["settings"].get("autoOffHours") or 0
         return int(self.last_auth + h * 3600) if h and self.state == "on" else None
@@ -1048,7 +1218,8 @@ class Service:
                 traceback.print_exc()
 
     def tick(self, last_hb=None):
-        """5초마다 (시험은 직접 부름): 작업이 바뀌면 비콘 · 20분 하트비트 · 오래 안 쓰면 끄기 · 90일 안 쓴 기기 끊기."""
+        """5초마다 (시험은 직접 부름): 작업이 바뀌면 비콘 · 20분 하트비트 · 오래 안 쓰면 끄기 · 90일 안 쓴 기기 끊기 ·
+        켜 두기로 한(enabled) 원격이 터널 오류로 멈췄으면 2분·5분·15분·그 뒤 30분마다 저절로 다시 켜 봄 (PC 앞에 아무도 없어도)."""
         if not self.store:
             return
         if self.state == "on":
@@ -1063,9 +1234,14 @@ class Service:
             if h and not cur and self.clock() - self.last_auth >= h * 3600:
                 self.turn_off("idle")
                 self._note("attention", f"원격 접속을 껐어요 ({h}시간 동안 안 써서)")
+        elif (self.state == "error" and self._err_kind in ("tunnel", "start") and self.store.data.get("enabled")
+              and self._retry["at"] is not None and self.clock() >= self._retry["at"]):
+            self._retry["at"] = None
+            self.log("원격 접속을 다시 켜 볼게요")
+            self.turn_on(auto=True)
         old = self.store.expired()
-        if old:
-            self.revoke(old, why="90일 동안 안 씀")
+        if old:  # 오래 안 쓴 기기: 비콘 주제만 바꿈 (알림 주제까지 바꾸면 쓰고 있는 휴대폰의 ntfy 알림이 조용히 끊김)
+            self.revoke(old, why="90일 동안 안 씀", rotate_notify=False)
 
     def _keep_awake(self):
         """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기. SetThreadExecutionState 는 스레드마다라 한 스레드에서만."""
@@ -1078,7 +1254,8 @@ class Service:
         on = False
         while True:
             try:
-                want = self.state == "on" and (bool((self.bridge.job() or {}).get("name")) or self.store.data["settings"].get("keepAwake") == "always")
+                want = self.state in ("on", "restarting") and (bool((self.bridge.job() or {}).get("name"))
+                                                               or self.store.data["settings"].get("keepAwake") == "always")
                 if want != on:
                     f(core.ES_CONTINUOUS | core.ES_SYSTEM_REQUIRED if want else core.ES_CONTINUOUS)
                     on = want
@@ -1087,9 +1264,8 @@ class Service:
             time.sleep(5)
 
     # ----- 리스너 -----
-    def _open_listener(self):
-        if self.listener:
-            return
+    def _new_listener(self):
+        """새 원격 리스너 (띄우기만 · self.listener 에 넣는 것은 부르는 쪽이 잠금 안에서)."""
         port = int(os.environ.get("FUTSAL_REMOTE_PORT") or 0)
         srv = None
         for _ in range(20):
@@ -1102,17 +1278,18 @@ class Service:
                 time.sleep(0.25)
         if srv is None:
             raise RuntimeError("원격 접속용 포트를 열지 못했어요 · 잠시 뒤 다시 켜 주세요")
-        self.listener = srv
         threading.Thread(target=srv.serve_forever, daemon=True, name="remote-listener").start()
+        return srv
+
+    def _open_listener(self):  # 시험 도우미 (켜기 흐름은 _start)
+        if not self.listener:
+            self.listener = self._new_listener()
 
     def _close_listener(self):
-        srv, self.listener = self.listener, None
-        if srv:
-            try:
-                srv.shutdown()
-                srv.server_close()
-            except Exception:  # noqa: BLE001
-                pass
+        with self.lock:
+            srv, self.listener = self.listener, None
+        if srv is not None:
+            _close_server(srv)
 
     # ----- 휴대폰 요청 처리 -----
     def touch(self, dev):
@@ -1123,19 +1300,34 @@ class Service:
         return {"api": API, "pc": self.store.data["pc"], "time": int(self.clock())}
 
     def r_pair(self, b):
-        if len(self.store.data["devices"]) >= MAX_DEVICES:
+        """짝짓기: 코드 증명이 맞으면 기기 열쇠·주제·지금 주소를 코드에서 만든 열쇠로 잠가 돌려줌 (터널 쪽은 아무것도 못 읽음)."""
+        if not crypto_ok():
+            raise PairError(MISSING_MSG)
+        install = b.get("install") if isinstance(b.get("install"), str) and INSTALL_RE.fullmatch(b["install"]) else None
+        devs = self.store.data["devices"]
+        if len(devs) >= MAX_DEVICES and not (install and any(x.get("install") == install for x in devs)):
             raise PairError(f"휴대폰은 {MAX_DEVICES}대까지 연결할 수 있어요 · PC에서 안 쓰는 휴대폰을 먼저 끊어 주세요")
-        self.pairing.check(b.get("code"))
-        dev = self.store.add_device(b.get("name"))
+        p = self.pairing.check(b.get("nonce"), b.get("ts"), b.get("proof"))
+        dev, old = self.store.add_device(b.get("name"), install)
+        if old:  # 같은 브라우저가 다시 연결 → 옛 열쇠·표는 바로 버림 (주제는 그대로: 같은 휴대폰)
+            self.tickets.drop({x["id"] for x in old})
+            self.auth.forget([x["id"] for x in old])
         self.last_auth = self.clock()
         d = self.store.data
-        self.log(f"휴대폰이 연결됐어요 · {clean(dev['name'], 40)}")
+        self.log(f"휴대폰이 {'다시 ' if old else ''}연결됐어요 · {clean(dev['name'], 40)}")
         self._note("paired", NOTE_TEXT["paired"])
         self.pub.beacon(important=True)
-        return {"api": API, "pc": d["pc"], "device": {"id": dev["id"], "name": dev["name"]},
-                "keys": {"auth": dev["auth"], "beacon": dev["beacon"]},
-                "beacon": {"server": self.ntfy(), "topic": d["topics"]["beacon"]},
-                "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}, "time": int(self.clock())}
+        inner = {"v": 2, "url": self.url, "pc": d["pc"], "device": {"id": dev["id"], "name": dev["name"]},
+                 "keys": {"auth": dev["auth"], "beacon": dev["beacon"]},
+                 "beacon": {"server": self.ntfy(), "topic": d["topics"]["beacon"]},
+                 "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}}
+        sealed = "fsp2." + gcm_seal(p["key"], json.dumps(inner, ensure_ascii=False), pair_aad(p["topic"], d["pc"]["id"], dev["id"]))
+        return {"api": API, "v": 2, "pc": {"id": d["pc"]["id"]}, "device": {"id": dev["id"]}, "sealed": sealed, "time": int(self.clock())}
+
+    def _item_title(self, item):
+        """진행 칸의 파일 이름 → 보관함과 같은 제목 (날짜_영상id_ 와 확장자를 뺌)."""
+        s = scrub(item or "")
+        return source._title_of(s) if re.search(r"\.[A-Za-z0-9]{2,4}$", s) else s
 
     def r_status(self, dev, since):
         snap = self.bridge.job()
@@ -1143,41 +1335,53 @@ class Service:
         if snap.get("name"):
             pr = snap.get("progress") or {}
             job = {"name": snap["name"], "by": snap.get("by"), "startedAt": int(snap["t0"]) if snap.get("t0") else None,
-                   "progress": {"label": scrub(pr.get("label") or ""), "item": scrub(pr.get("item") or ""), "pct": pr.get("pct"),
+                   "stoppable": snap["name"] in STOPPABLE,
+                   "progress": {"label": scrub(pr.get("label") or ""), "item": self._item_title(pr.get("item")), "pct": pr.get("pct"),
                                 "detail": scrub(pr.get("detail") or ""), "eta": pr.get("eta")}}
         new, total = self.bridge.logs(max(0, since))
         if since <= 0 or since > total:  # 처음이거나 앱이 다시 켜져 번호가 줄었음 → 마지막 200줄만
             new, total = self.bridge.logs(max(0, total - LOG_TAIL))
         new = new[-LOG_TAIL:]
         d = self.store.data
+        topics = json.dumps({"beacon": {"server": self.ntfy(), "topic": d["topics"]["beacon"]},
+                             "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}})
         return {"api": API, "ver": self.bridge.version, "time": int(self.clock()), "pc": d["pc"], "job": job, "last": self.last,
                 "log": [scrub(x) for x in new], "logTotal": total,
                 "remote": {"autoOffAt": self._auto_off_at(), "devices": len(d["devices"]), "device": {"id": dev["id"], "name": dev["name"]}},
-                "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]},
-                "beacon": {"server": self.ntfy(), "topic": d["topics"]["beacon"]}}
+                # 주제 이름은 곧 비밀(알림 주제 = 보내기 열쇠) → 기기 비콘 열쇠로 잠가서 (Cloudflare 가 못 봄)
+                "topics": gcm_seal(_unb64u(dev["beacon"]), topics, topics_aad(d["pc"]["id"], dev["id"]))}
 
     def _projects(self, name):
+        """편집본 목록 (id·이름·형식) — 프로젝트 파일이 바뀌지 않았으면 기억한 것 (보관함 목록이 큰 파일을 매번 다 읽지 않게)."""
         try:
             p = editor._ppath(name)
-            if not p.exists():
-                return []
+            st = p.stat()
+        except (OSError, ValueError):
+            return []
+        key, sig = str(p), (st.st_mtime_ns, st.st_size)
+        hit = self._proj_cache.get(key)
+        if hit and hit[0] == sig:
+            return [dict(x) for x in hit[1]]
+        try:
             proj = json.loads(p.read_text(encoding="utf-8"))
-            return [{"id": str(q.get("id")), "name": clean(q.get("name"), 80), "format": "shorts" if q.get("format") == "shorts" else "long"}
-                    for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("id")]
+            out = [{"id": str(q.get("id")), "name": clean(q.get("name"), 80), "format": "shorts" if q.get("format") == "shorts" else "long"}
+                   for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("id")]
         except (OSError, ValueError, AttributeError):
             return []
+        _lru_put(self._proj_cache, key, (sig, out), 500)
+        return [dict(x) for x in out]
 
-    def r_library(self, dev):
+    def r_library(self, dev, ip=""):
         vids = source.annotate(core.local_videos())
         out = []
         for v in vids:
             s = v.get("source") or {}
             out.append({"name": v["name"], "title": source._title_of(v["name"]), "sizeMb": v.get("size_mb"), "analyzed": bool(v.get("analyzed")),
                         "source": {"kind": s.get("kind") or "unknown", "channel": s.get("channel") or ""},
-                        "poster": "/r/m/" + self.tickets.issue(dev["id"], "poster", v["name"]), "sequences": self._projects(v["name"])})
+                        "poster": "/r/m/" + self.tickets.issue(dev["id"], "poster", v["name"], ip), "sequences": self._projects(v["name"])})
         return {"videos": out}
 
-    def r_outputs(self, dev):
+    def r_outputs(self, dev, ip=""):
         try:
             files = [p for p in core.OUT.iterdir() if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in OUT_KINDS]
         except OSError:
@@ -1188,11 +1392,11 @@ class Service:
             st = p.stat()
             kind = OUT_KINDS[p.suffix.lower()]
             item = {"name": p.name, "kind": kind, "sizeMb": round(st.st_size / 1e6, 1), "mtime": int(st.st_mtime),
-                    "url": "/r/m/" + self.tickets.issue(dev["id"], "file", p.resolve())}
+                    "url": "/r/m/" + self.tickets.issue(dev["id"], "file", p.resolve(), ip)}
             if kind == "video":
                 pv = editor.out_preview_path(p.name)
                 fresh = pv.is_file() and pv.stat().st_mtime >= st.st_mtime  # 같은 이름으로 다시 만든 완성본이면 옛 미리보기는 안 씀
-                item["preview"] = {"exists": fresh, "url": "/r/m/" + self.tickets.issue(dev["id"], "file", pv.resolve()) if fresh else None}
+                item["preview"] = {"exists": fresh, "url": "/r/m/" + self.tickets.issue(dev["id"], "file", pv.resolve(), ip) if fresh else None}
                 item["qa"] = self.qa.get(p.name)
             out.append(item)
         return {"outputs": out}
@@ -1234,19 +1438,38 @@ class Service:
         if not self.limiter.action_ok(dev["id"]):  # 작업을 시작하는 요청만 2초에 한 번 (확인 묻기는 세지 않음)
             raise ActionError("조금 뒤에 다시 눌러 주세요", 429)
         who = clean(dev["name"], 40)
-        ok = self.bridge.start_job(label, fn, by=f"휴대폰 · {who}")
+
+        def run():  # 휴대폰에서 시킨 작업은 엔진·Deno 를 스스로 설치·업데이트하지 않음 (PC 에서만 · D-024)
+            with core.no_self_update():
+                return fn()
+        ok = self.bridge.start_job(label, run, by=f"휴대폰 · {who}")
         if not ok:
             raise ActionError(BUSY_MSG, 409)
         self.log(f"원격 · {who} · {label}" + (f" · {clean(target, 80)}" if target else ""))
         return {"ok": True, "job": label}
 
     def r_cancel(self, dev):
+        snap = self.bridge.job() if self.bridge else {}
+        name = snap.get("name")
+        if not name:
+            raise ActionError("지금 하는 작업이 없어요", 409)
+        if name not in STOPPABLE:
+            raise ActionError(NOT_STOPPABLE_MSG, 409)
         editor.cancel_export()
         self.log(f"원격 · {clean(dev['name'], 40)} · 멈추기")
         return {"ok": True}
 
     def r_forget(self, dev):
         self.revoke([dev["id"]], why="휴대폰에서")
+        return {"ok": True}
+
+    def r_notify_test(self, dev):
+        now = self.clock()
+        if now - self._last_test < NOTIFY_TEST_GAP:
+            raise ActionError("알림 시험은 1분에 한 번만 보낼 수 있어요 · 잠시 뒤 다시 눌러 주세요", 429)
+        self._last_test = now
+        self.test_notify()
+        self.log(f"원격 · {clean(dev['name'], 40)} · 알림 시험")
         return {"ok": True}
 
 
@@ -1359,7 +1582,19 @@ def _a_export(svc, dev, a, tok):
         raise ActionError("내보내기 설정을 다시 골라 주세요")
     if not isinstance(seq, str) or seq not in [q["id"] for q in svc._projects(n)]:
         raise ActionError("편집본을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요", 404)
-    return svc._go(dev, "내보내기", lambda: editor.export_saved(n, seq, preset, svc.bridge.log), n)
+    log = svc.bridge.log
+
+    def run():  # 휴대폰에서 내보냈으면 같은 작업 안에서 540p 작은 미리보기까지 (LTE 로 볼 때 데이터를 아끼게)
+        res = editor.export_saved(n, seq, preset, log)
+        mp4 = next((x for x in res if isinstance(x, str) and x.lower().endswith(".mp4")), None) if isinstance(res, list) else None
+        if mp4 and not editor.CANCEL.is_set():
+            log("  휴대폰에서 보기 좋게 작은 미리보기도 만들어요")
+            try:
+                editor.out_preview(mp4, log)
+            except Exception as e:  # noqa: BLE001 — 내보낸 영상은 그대로
+                log(f"  작은 미리보기는 만들지 못했어요 · {scrub(e)}")
+        return res
+    return svc._go(dev, "내보내기", run, n)
 
 
 def _a_qa(svc, dev, a, tok):
@@ -1461,6 +1696,9 @@ class RemoteHandler(BaseHTTPRequestHandler):
         host, port = self.headers.get("Host") or "", svc.port()
         if not (host == SENTINEL or (_dev() and host in (f"127.0.0.1:{port}", f"localhost:{port}"))):
             return self._json(403, {"error": "forbidden"})
+        if self.headers.get("Transfer-Encoding"):  # 본문은 Content-Length 로만 (조각 본문은 읽지 않고 거절 · 잠금 횟수에 안 셈)
+            self.close_connection = True
+            return self._json(411, {"error": "요청을 보내는 방식이 맞지 않아요 · 페이지를 새로 고친 뒤 다시 해 주세요"})
         u = urlparse(self.path)
         path = u.path
         # 3. 요청 수 (Cloudflare 가 붙이는 실제 주소 기준)
@@ -1498,33 +1736,35 @@ class RemoteHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return self._json(413, {"error": "요청이 너무 커요"})
             body = self.rfile.read(n) if n else b""
-        # 5. 확인 (표 · 서명) → 6. 허용 목록
+        # 5. 확인 (표 · 서명) → JSON → 6. 허용 목록
         if media:
-            return self._media(svc, path[5:])
+            return self._media(svc, path[5:], ip)
         if path == "/r/ping" and method == "GET":
             return self._json(200, svc.r_ping())
-        try:
-            b = json.loads(body or b"{}")
-            if not isinstance(b, dict):
-                raise ValueError
-        except ValueError:
-            return self._json(400, {"error": "잘못된 요청이에요"})
-        if path == "/r/pair" and method == "POST":
+        if path == "/r/pair" and method == "POST":  # 열린 길: 증명만 (JSON 은 깊이 폭탄도 400)
+            b = _json_body(body)
+            if b is None:
+                return self._json(400, {"error": "잘못된 요청이에요"})
             try:
                 return self._json(200, svc.r_pair(b))
             except PairError as e:
                 self._fail(svc, ip)
-                return self._json(403, {"error": str(e)})
-        try:
-            dev = svc.auth.verify(self.headers.get("Authorization"), method, self.path, body)
+                return self._json(403, {"error": str(e), "code": e.code, "time": int(svc.clock())})
+        try:  # 서명은 받은 본문 바이트 그대로 확인 → 그 뒤에만 JSON 을 읽음
+            dev = svc.auth.verify(self.headers.get("Authorization"), method, self.path, body, svc.host())
         except AuthError as e:
-            self._fail(svc, ip)
-            return self._json(401, {"error": str(e), "code": e.code, "time": int(svc.clock())})
+            if e.status == 401:
+                self._fail(svc, ip)
+            return self._json(e.status, {"error": str(e), "code": e.code, "time": int(svc.clock())})
+        b = _json_body(body)
+        if b is None:
+            return self._json(400, {"error": "잘못된 요청이에요"})
         svc.touch(dev)
         routes = {("GET", "/r/status"): lambda: svc.r_status(dev, _int((parse_qs(u.query).get("since") or ["0"])[0])),
-                  ("GET", "/r/library"): lambda: svc.r_library(dev), ("GET", "/r/outputs"): lambda: svc.r_outputs(dev),
+                  ("GET", "/r/library"): lambda: svc.r_library(dev, ip), ("GET", "/r/outputs"): lambda: svc.r_outputs(dev, ip),
                   ("GET", "/r/choices"): lambda: svc.r_choices(dev), ("POST", "/r/action"): lambda: svc.r_action(dev, b),
-                  ("POST", "/r/cancel"): lambda: svc.r_cancel(dev), ("POST", "/r/forget"): lambda: svc.r_forget(dev)}
+                  ("POST", "/r/cancel"): lambda: svc.r_cancel(dev), ("POST", "/r/forget"): lambda: svc.r_forget(dev),
+                  ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev)}
         if (method, path) == ("POST", "/r/remote-off"):  # 더 안전하게만 (휴대폰에서 켜는 길은 없음)
             svc.log(f"원격 · {clean(dev['name'], 40)} · 원격 접속 끄기")
             self._json(200, {"ok": True})
@@ -1543,11 +1783,11 @@ class RemoteHandler(BaseHTTPRequestHandler):
             svc._lockout_logged = svc.clock()
             svc.log("원격 접속 · 잘못된 연결 시도가 많아 잠시 막았어요")
 
-    def _media(self, svc, tid):
-        it = svc.tickets.get(tid) if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", tid or "") else None
-        if not it:
+    def _media(self, svc, tid, ip):
+        it = svc.tickets.get(tid, ip) if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", tid or "") else None
+        if not it:  # 없거나·지났거나·다른 곳(IP 대역)에서 온 표 → 휴대폰 화면이 목록을 다시 받아 새 표로
             return self._json(404, {"error": "다시 불러와 주세요"})
-        device, kind, ref, _ = it
+        device, kind, ref = it[:3]
         try:
             if kind == "poster":
                 p = editor.poster(editor.safe_name(ref)).resolve()
@@ -1618,6 +1858,15 @@ def _int(v):
         return int(v)
     except (TypeError, ValueError):
         return 0
+
+
+def _json_body(body):
+    """POST 본문 → dict · 아니면 None (깊이 폭탄의 RecursionError 도 400 으로)."""
+    try:
+        b = json.loads(body or b"{}")
+    except (ValueError, RecursionError):
+        return None
+    return b if isinstance(b, dict) else None
 
 
 # ---------- app 이 부르는 곳 ----------

@@ -331,6 +331,8 @@
   .rbox .rdev:last-child { border-bottom: 0; }
   .rbox .rdev b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .rbox .rdev span { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+  .rbox .rdev .rold { color: var(--peak); font-weight: 600; }
+  .rbox .rnote { color: var(--ink-2); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; margin: 8px 0; }
   .rbox .rrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
   .rbox .rrow > span:first-child { min-width: 110px; color: var(--ink-2); }
   .rbox .rrow label { display: inline-flex; align-items: center; gap: 4px; }
@@ -615,13 +617,15 @@ const srcBadge = (s, name, short) => {  // name 을 주면 눌러서 바꾸는 �
   return name ? `<button class="${cls}" data-src="${esc(name)}" title="${esc(tip)} · 눌러서 바꿀 수 있어요">${esc(srcLabel(s, short))}</button>`
     : `<span class="${cls}" title="${esc(tip)}">${esc(srcLabel(s, short))}</span>`;
 };
-const srcNote = v => { const s = srcOf(v); return s.kind === "unknown" ? "" : ` · ${s.kind === "other" ? s.channel || "다른 채널" : SRC[s.kind]}`; };  // 고르는 칸(select)용 짧은 표시
+const srcNote = v => { const s = srcOf(v); return s.kind === "unknown" ? "" : ` · ${esc(s.kind === "other" ? s.channel || "다른 채널" : SRC[s.kind])}`; };  // 고르는 칸(select)용 짧은 표시 · innerHTML 에 들어가므로 esc (채널 이름은 YouTube 에서 온 글)
 const srcKey = v => { const s = srcOf(v); return `${srcLabel(s)}|${s.color ?? ""}`; };
 const chName = c => c.channel || "이름 모르는 채널";
 // 보관함 고르기: all · own · other · footage · unknown · "ch:<channelKey>"(다른 채널 중 한 채널)
 const srcMatch = (v, f) => { const s = srcOf(v); return f === "all" || (f.startsWith("ch:") ? s.kind === "other" && (s.channelKey || "") === f.slice(3) : s.kind === f); };
 
-let state = { local: [], job: null }, logSince = 0, pending = null, remote = [], selected = new Set(), lastLocalKey = "";
+let state = { local: [], job: null }, logSince = 0, pending = null, pendingId = null, remote = [], selected = new Set(), lastLocalKey = "";
+// 작업이 끝나면 부를 함수(pending) + 그 작업 번호(pendingId, 시작 응답의 jobId) — 그 번호의 결과만 받음 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
+function waitFor(j, fn) { state.job = "…"; pending = fn || null; pendingId = (j && j.jobId) || null; sync(); showBusy(); }
 let srcFilter = "all";
 const libSel = new Set();  // 보관함에서 고른 영상 (고르기 칩으로 숨겨진 영상도 기억)
 const libChecked = () => [...libSel];
@@ -839,7 +843,7 @@ function syncBundle(busy) {
   $("btnBundle").textContent = n >= 2 ? `한 영상으로 묶기 (${n})` : "한 영상으로 묶기";
   // 편집실·썸네일에 다녀와 화면이 새로 열려도, 묶는 중이면 끝날 때 알림을 이어서 보여 줌
   if (pending === bundleDone) bundleMark(true);
-  else if (busy && !pending && state.job === BUNDLE_JOB && bundleMarked()) pending = bundleDone;
+  else if (busy && !pending && state.job === BUNDLE_JOB && bundleMarked()) { pending = bundleDone; pendingId = state.jobId || null; }
 }
 // 다녀오는 사이에 이미 끝났으면 결과만 알려 줌
 if (bundleMarked()) api("/api/state?since=999999999").then(s => {
@@ -1070,7 +1074,7 @@ async function refDel(body, done) {  // 학습용 영상 지우기 · 원본(보
     if (!confirm(`이 중 ${j.original.length}개는 보관함에서 옮긴 원본 영상이에요 (풋살사관학교·내 촬영본·출처 모름).\n지우면 다시 받을 수 없어요. 편집에 쓰려면 지우지 말고 '보관함으로'를 눌러 되돌려 주세요.\n그래도 지울까요? [취소]를 누르면 아무것도 지우지 않아요.`)) return;
     return refDel(Object.assign({}, body, { confirmOriginal: true }), done);
   }
-  if (j.ok) { state.job = "…"; pending = done || null; sync(); showBusy(); }
+  if (j.ok) waitFor(j, done);
 }
 $("styleLib").onchange = () => { styleLib = $("styleLib").checked; try { localStorage.setItem("styleLib", styleLib ? "1" : "0"); } catch (e) {} renderStyleSrc(); };
 function syncStyle() { const n = stySel.size; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
@@ -1111,15 +1115,14 @@ async function moveToRefs(names, o) {  // o: {asked(처음 확인함), all(우�
     return moveToRefs(rest, Object.assign(o, { skip: true, held: busy.length }));
   }
   if (!j.ok) return;
-  state.job = "…"; sync(); showBusy();
-  pending = r => {
+  waitFor(j, r => {
     loadRefs();
     if (!r || r.ok === false) { toast((r && r.error) || "옮기지 못했어요"); return; }
     (r.moved || []).forEach(n => libSel.delete(n));
     const f = r.failed || [];
     const iu = Object.keys(r.inUse || {}).length + (o.held || 0);
     toast(`${(r.moved || []).length}개를 학습용 영상으로 옮겼어요${iu ? ` · 편집 중인 ${iu}개는 보관함에 뒀어요` : ""}${f.length ? ` · ${f.length}개는 못 옮겼어요: ${f[0].error}` : ""}`);
-  };
+  });
 }
 /* 6. 배운 스타일 카드: '영상 기획 분석'(판단 문장) 위주 — 시각·컷 수 같은 숫자는 접힌 '근거 보기'·'구조 수치' 안에만 */
 const PLAN_ROWS = [["intro", "인트로"], ["genre", "장르"], ["format", "형식"], ["captions", "자막"], ["fun", "재미 요소"]];
@@ -1279,7 +1282,7 @@ function bindScores() {
       const r = await (await fetch("/api/style/score", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style: name, name: sel.value }) })).json();
       if (r.ok && r.job) {  // 처음 보는 영상: 원본을 한 번 살펴봄 (길면 몇 분) · 멈추기는 편집실 멈추기와 같은 신호
         scoring = { name, vid: sel.value }; sel.disabled = true; res.innerHTML = SCORING_TXT; bindScores();
-        state.job = "…"; pending = show; sync(); showBusy(); return;
+        waitFor(r, show); return;
       }
       show(r);
     } catch (e) { b.disabled = false; res.textContent = "점수를 매기지 못했어요. 잠시 뒤 다시 눌러 주세요"; }
@@ -1370,7 +1373,7 @@ function sync() {
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
 }
 function job(path, body, done) {
-  api(path, body).then(j => { if (j.ok) { state.job = "…"; pending = done || null; sync(); showBusy(); } });
+  api(path, body).then(j => { if (j.ok) waitFor(j, done); });
 }
 function setRing(svg, pct) {
   const ind = pct === null || pct === undefined;
@@ -1380,7 +1383,7 @@ function setRing(svg, pct) {
 function showBusy() {
   const pr = state.progress || {};
   $("busy").classList.toggle("show", !!state.job);
-  $("busyTxt").textContent = pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…");
+  $("busyTxt").textContent = (state.jobBy ? "휴대폰에서 시킨 일 · " : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
   $("busyPct").textContent = pr.pct !== null && pr.pct !== undefined ? `${pr.pct}%` : "";
   $("busyDetail").textContent = pr.detail || "";
   $("busyDetail").style.display = pr.detail ? "" : "none";
@@ -1406,7 +1409,8 @@ function showBusy() {
 
 async function poll() {
   let s;
-  try { s = await api(`/api/state?since=${logSince}`); } catch (e) { return; }
+  const want = pendingId;
+  try { s = await api(`/api/state?since=${logSince}${want ? "&job=" + want : ""}`); } catch (e) { return; }
   $("ver").textContent = `v${s.version}`;
   $("workspace").textContent = "작업 폴더 " + s.workspace.split(/[\\/]/).slice(-1)[0];
   $("workspace").title = s.workspace;
@@ -1414,15 +1418,19 @@ async function poll() {
   logSince = s.log_total;
   const wasBusy = !!state.job;
   state.job = s.job;
+  state.jobId = s.job_id;
+  state.jobBy = s.job_by;
   state.progress = s.progress;
   state.local = s.local;
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
-  if (wasBusy && !s.job && pending) {
-    const f = pending; pending = null;
-    if (s.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
-    else f(s.result);
+  // 내가 시킨 작업(번호)이 끝났을 때만 그 결과로 — 번호가 없으면(예전 흐름) 작업이 비었을 때
+  const fin = pending && (want ? (s.done && s.done.id === want && want === pendingId ? s.done : null) : (wasBusy && !s.job ? s : null));
+  if (fin) {
+    const f = pending; pending = null; pendingId = null;
+    if (fin.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
+    else f(fin.result);
   }
   // 6-1 스타일 일치 점수: 작업이 끝났는데(실패 포함) 아직 '매기는 중'이면 풀어 줌 · 스타일 화면이면 편집점 찾기를 마친 영상을 목록에 바로
   const sKey = s.local.filter(v => v.analyzed).map(v => v.name).join("\n"), onStyle = $("p-style") && $("p-style").classList.contains("on");
@@ -1634,6 +1642,7 @@ function remoteDot(r) {
 }
 const rmAgo = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; };
 const rmClock = t => new Date(t * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
+const rmDate = t => new Date(t * 1000).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
 function rmQr(rows) {  // 서버가 준 '0'·'1' 줄 → SVG (글자를 그대로 넣지 않음)
   const n = rows.length, q = 4, s = n + q * 2;
   let p = "";
@@ -1642,7 +1651,7 @@ function rmQr(rows) {  // 서버가 준 '0'·'1' 줄 → SVG (글자를 그대�
 }
 function rmRender(d) {
   const st = d.state, set = d.settings || {}, nt = set.notify || {};
-  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen)]), set, d.notify.topic]);
+  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.pairNote, d.retryAt, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen), x.stale]), set, d.notify.topic]);
   if (key === RM.key) return;
   RM.key = key;
   let h = `<h2>휴대폰으로 보기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
@@ -1657,8 +1666,9 @@ function rmRender(d) {
     h += `<p class="lead">${st === "starting" ? "연결하는 중이에요…" : "연결을 다시 잡는 중이에요…"} <span class="spin" style="display:inline-block;vertical-align:-2px"></span></p>
       <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
   } else if (st === "error") {
-    h += `<p class="rerr">${esc(d.error || "원격 접속을 켜지 못했어요")}</p>
-      <div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
+    h += `<p class="rerr">${esc(d.error || "원격 접속을 켜지 못했어요")}</p>`
+      + (d.retryAt ? `<div class="small">${esc(rmClock(d.retryAt))}쯤 저절로 다시 켜 볼게요 · 지금 하려면 [다시 시도]</div>` : "")
+      + `<div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
   } else {
     const site = esc(String(d.site || "https://mulgyeol.kr/futsal").replace(/^https?:\/\//, ""));
     h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰에서 <b>${site}</b> 을 열어 주세요</p>`;
@@ -1667,21 +1677,24 @@ function rmRender(d) {
         <div class="rcode">${esc(d.pair.code)}</div><div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
         <div class="rbtns"><button class="btn sm" data-rm="pcancel">취소</button></div></div></div>`;
     } else {
+      if (d.pairNote) h += `<p class="rnote">${esc(d.pairNote)}</p>`;
       h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button>`
         + (d.devices.length >= d.maxDevices ? `<div class="small">휴대폰은 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 휴대폰을 먼저 끊어 주세요</div>` : "");
     }
     h += `<div class="rsec"><h3>연결된 휴대폰</h3>` + (d.devices.length ? d.devices.map(x =>
-        `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmAgo(x.lastSeen))}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
+        `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
         + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 휴대폰 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
     h += `<div class="rsec"><h3>설정</h3>
       <div class="rrow"><span>자동으로 끄기</span><select class="inp" style="min-width:0;padding:5px 8px" data-rm="autoOff">${offOpt}</select></div>
-      <div class="rrow"><span>PC 잠들지 않게</span><div class="seg"><button data-rm="awake" data-v="job" class="${set.keepAwake !== "always" ? "on" : ""}">작업할 때만</button><button data-rm="awake" data-v="always" class="${set.keepAwake === "always" ? "on" : ""}">켜 둔 동안 항상</button></div></div>
+      <div class="rrow"><span>PC 잠들지 않게</span><div class="seg"><button data-rm="awake" data-v="always" class="${set.keepAwake !== "job" ? "on" : ""}">켜 둔 동안 항상</button><button data-rm="awake" data-v="job" class="${set.keepAwake === "job" ? "on" : ""}">작업할 때만</button></div></div>
+      <div class="small">${set.keepAwake === "job" ? "작업할 때만: 작업이 끝나면 PC가 잠들 수 있어서, 그 뒤에는 밖에서 새 작업을 못 시켜요" : "원격 접속을 켜 둔 동안 PC가 잠들지 않아요 · 밖에서 언제든 새 작업을 시킬 수 있어요"}</div>
       <div class="rrow"><span>알림</span>${[["done", "작업 끝"], ["failed", "멈춤"], ["attention", "확인 필요"]].map(([k, t]) =>
         `<label><input type="checkbox" data-rm="notify" data-k="${k}"${nt[k] !== false ? " checked" : ""}> ${t}</label>`).join("")}
         <button class="btn sm" data-rm="test"${d.devices.length ? "" : " disabled"}>알림 시험</button></div>
-      <div class="small">알림은 ntfy 앱으로 받아요 · 휴대폰 화면 '더보기 → 알림 받기'에서 바로 켤 수 있어요 · 주제 이름 <span class="rtopic">${esc(d.notify.topic)}</span> <button class="linkbtn" data-rm="copyTopic">복사</button></div></div>
+      <div class="small">알림은 ntfy 앱으로 받아요 · 휴대폰을 연결하면 휴대폰 화면이 알림 설정을 안내해요 · 주제 이름 <span class="rtopic">${esc(d.notify.topic)}</span> <button class="linkbtn" data-rm="copyTopic">복사</button></div>
+      <div class="small">스튜디오 알림은 '작업이 끝났어요' 같은 짧은 문장뿐이에요 · 알림이 무엇을 설치하라고 하면 열지 말고 무시해 주세요</div></div>
       <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
   }
   $("rmBox").innerHTML = h;

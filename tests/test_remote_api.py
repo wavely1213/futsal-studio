@@ -25,7 +25,7 @@ import editor  # noqa: E402
 import refs  # noqa: E402
 import remote  # noqa: E402
 import style  # noqa: E402
-from remote_fixture import ORIGIN, Clock, FakeBridge, dev_env, http, pair_device, signed  # noqa: E402
+from remote_fixture import ORIGIN, Clock, FakeBridge, dev_env, http, open_pair, pair_body, pair_device, signed, topics_of  # noqa: E402
 
 FF = core.ffmpeg()
 NAME = "20260101_AbCdEfGhIjK_시험 영상 [꿀팁].mp4"
@@ -198,15 +198,52 @@ class BoundaryTests(Base):
         self.assertEqual(self.call("GET", "/r/status?since=0")[0], 200)  # 다른 주소(휴대폰)는 그대로
 
     def test_pair_over_http_and_wrong_code(self):
-        self.svc.pairing.create()
-        st, _, b = self.call("POST", "/r/pair", {"code": "0000-0000-00", "name": "x"}, cred=False)
+        p = self.svc.pairing.create()
+        st, _, b = self.call("POST", "/r/pair", pair_body({"proof": os.urandom(16)}, "x", ts=self.clock()), cred=False)
         self.assertEqual(st, 403)
         self.assertIn("코드가 맞지 않거나", b["error"])
-        code = self.svc.pairing.live()["code"]
-        st, _, b = self.call("POST", "/r/pair", {"code": remote.fmt_code(code).lower(), "name": "Galaxy · Chrome"}, cred=False)
+        st, _, b = self.call("POST", "/r/pair", {"code": remote.fmt_code(p["code"]).lower(), "name": "x"}, cred=False)
+        self.assertEqual(st, 403)  # 코드 글 그대로(예전 방식)는 안 받음
+        st, _, b = self.call("POST", "/r/pair", pair_body(p, "Galaxy · Chrome", ts=self.clock()), cred=False)
         self.assertEqual(st, 200)
-        self.assertEqual(b["device"]["name"], "Galaxy · Chrome")
-        self.assertEqual(self.call("GET", "/r/status?since=0", cred=b)[0], 200)
+        self.assertNotIn("keys", b)  # 열쇠는 잠긴 속에만
+        inner = open_pair(p, b)
+        self.assertEqual(inner["device"]["name"], "Galaxy · Chrome")
+        self.assertEqual(inner["url"], self.svc.url)
+        cred = dict(inner, host=self.svc.host())
+        self.assertEqual(self.call("GET", "/r/status?since=0", cred=cred)[0], 200)
+        st, _, b = self.call("POST", "/r/pair", pair_body(p, "또", ts=self.clock() - remote.SKEW - 10), cred=False)
+        self.assertEqual((st, b["code"]), (403, "pair"))  # 이미 쓴 코드 (시각 확인보다 먼저 코드가 없음)
+
+    def test_pair_skew_reports_pc_time(self):
+        p = self.svc.pairing.create()
+        st, _, b = self.call("POST", "/r/pair", pair_body(p, "x", ts=self.clock() - remote.SKEW - 10), cred=False)
+        self.assertEqual((st, b["code"]), (403, "skew"))
+        self.assertEqual(b["time"], int(self.clock()))
+
+    def test_json_read_only_after_signature(self):
+        """검토: 서명 확인 전에 JSON 을 읽어 깊이 폭탄이 500·추적을 냄 → 서명 먼저(틀리면 401), 열린 짝짓기 길의 폭탄은 400."""
+        bomb = b"[" * 30000 + b"]" * 30000
+        st, _, b = self.call("POST", "/r/action", raw=bomb, cred=False, headers={"Authorization": "FSR2 x"})
+        self.assertEqual(st, 401)
+        st, _, b = self.call("POST", "/r/action", raw=b"{not json", cred=False, headers={"Authorization": "FSR2 x"})
+        self.assertEqual(st, 401)  # 서명이 틀리면 글은 읽지도 않음
+        self.assertEqual(self.call("POST", "/r/pair", raw=bomb, cred=False)[0], 400)
+        self.assertEqual(self.call("POST", "/r/action", raw=bomb)[0], 400)  # 서명이 맞아도 폭탄은 400 (500 아님)
+        self.assertEqual(self.call("GET", "/r/ping", cred=False)[0], 200)
+
+    def test_chunked_body_411_and_not_counted_as_failure(self):
+        """검토: Content-Length 없이 조각(chunked)으로 오면 빈 본문으로 서명이 틀려 15분 잠금까지 → 411 · 실패로 안 셈."""
+        import socket
+        for _ in range(remote.AUTH_FAIL_MAX + 2):
+            s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+            s.sendall((f"POST /r/action HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {ORIGIN}\r\nContent-Type: application/json\r\n"
+                       "Transfer-Encoding: chunked\r\nAuthorization: FSR2 x\r\n\r\n2\r\n{}\r\n0\r\n\r\n").encode())
+            head = s.recv(4096).decode("latin1")
+            s.close()
+            self.assertIn(" 411 ", head.split("\r\n")[0])
+        self.assertFalse(self.svc.limiter.locked("127.0.0.1"))
+        self.assertEqual(self.call("GET", "/r/status?since=0")[0], 200)
 
     def test_malformed_json_400(self):
         for raw in (b"{", b"[]", b"\xff\xfe", b'"x"'):
@@ -219,9 +256,13 @@ class StatusListTests(Base):
         self.fb.log(f"내보내기 완료 · {home}/풋살사관학교_작업/out/x.mp4")
         st, _, b = self.call("GET", "/r/status?since=0")
         self.assertEqual(st, 200)
-        for k in ("api", "ver", "time", "job", "last", "log", "logTotal", "remote", "notify", "beacon"):
+        for k in ("api", "ver", "time", "job", "last", "log", "logTotal", "remote", "topics"):
             self.assertIn(k, b)
         self.assertEqual(b["remote"]["device"]["name"], "iPhone · Safari")
+        d = self.svc.store.data
+        self.assertNotIn(d["topics"]["notify"], json.dumps(b))  # 알림 주제(= 보내기 열쇠)는 Cloudflare 가 못 보게 잠가서
+        self.assertEqual(topics_of(self.svc, self.cred, b), {"beacon": {"server": self.svc.ntfy(), "topic": d["topics"]["beacon"]},
+                                                              "notify": {"server": self.svc.ntfy(), "topic": d["topics"]["notify"]}})
         self.assertTrue(any("~/풋살사관학교_작업/out/x.mp4" in x for x in b["log"]))
         self.assertFalse(any(home in x for x in b["log"]))
         st, _, b2 = self.call("GET", f"/r/status?since={b['logTotal']}")
@@ -330,6 +371,15 @@ class RangeTicketTests(Base):
         self.assertEqual(self.get("a.mp4")[0], 404)
         self.assertEqual(self.call("GET", other_url, cred=False, origin=None)[0], 200)
 
+    def test_ticket_only_works_where_the_list_was_fetched(self):
+        """검토(중간): 표 주소는 그것만 있으면 어디서든 영상 전체를 받았음 → 목록을 받은 곳(Cloudflare 가 붙이는 Cf-Connecting-Ip 의 /24)에서만."""
+        b = self.call("GET", "/r/outputs", headers={"Cf-Connecting-Ip": "203.0.113.5"})[2]
+        url = next(o["url"] for o in b["outputs"] if o["name"] == "a.mp4")
+        ok = self.call("GET", url, cred=False, origin=None, headers={"Cf-Connecting-Ip": "203.0.113.77", "Range": "bytes=0-9"})
+        self.assertEqual((ok[0], ok[2]), (206, self.data[:10]))
+        self.assertEqual(self.call("GET", url, cred=False, origin=None, headers={"Cf-Connecting-Ip": "198.51.100.5"})[0], 404)
+        self.assertEqual(self.call("GET", url, cred=False, origin=None)[0], 404)  # 다른 곳(여기서는 루프백)
+
     def test_bad_ticket_shapes(self):
         for t in ("x", "../../etc/passwd", "%2e%2e%2f", "a" * 200, ""):
             self.assertEqual(self.call("GET", "/r/m/" + t, cred=False, origin=None)[0], 404, t)
@@ -339,10 +389,10 @@ class RangeTicketTests(Base):
         self.assertEqual(self.get("a.mp4")[0], 404)
 
     def test_disallowed_extension_never_served(self):
-        tid = self.svc.tickets.issue(self.cred["device"]["id"], "file", (self.out / "x.json").resolve())
+        tid = self.svc.tickets.issue(self.cred["device"]["id"], "file", (self.out / "x.json").resolve(), "127.0.0.1")
         (self.out / "x.json").write_text("{}", encoding="utf-8")
         self.assertEqual(self.call("GET", "/r/m/" + tid, cred=False, origin=None)[0], 404)
-        tid = self.svc.tickets.issue(self.cred["device"]["id"], "file", (self.tmp / "secret.mp4").resolve())
+        tid = self.svc.tickets.issue(self.cred["device"]["id"], "file", (self.tmp / "secret.mp4").resolve(), "127.0.0.1")
         (self.tmp / "secret.mp4").write_bytes(b"x")
         self.assertEqual(self.call("GET", "/r/m/" + tid, cred=False, origin=None)[0], 404)  # 허용 폴더 밖
 
@@ -442,6 +492,11 @@ class ActionTests(Base):
         info = editor.probe(mp4[0])
         self.assertEqual((info["width"], info["height"]), (1280, 720) if seq["format"] == "long" else (720, 1280))
         self.assertEqual(self.svc.last["by"], "휴대폰 · iPhone · Safari")
+        # 검토: 휴대폰에서 내보내면 데이터로 볼 작은 미리보기까지 같은 작업 안에서 (따로 눌러 기다리지 않게)
+        self.assertTrue(editor.out_preview_path(mp4[0].name).is_file())
+        self.assertIn("  휴대폰에서 보기 좋게 작은 미리보기도 만들어요", self.fb.lines)
+        o = next(x for x in self.call("GET", "/r/outputs")[2]["outputs"] if x["name"] == mp4[0].name)
+        self.assertTrue(o["preview"]["exists"])
 
     def test_qa_and_preview_jobs_then_outputs(self):
         shutil.copy(self.media / "v.mp4", self.out / "완성.mp4")
@@ -517,12 +572,82 @@ class ActionTests(Base):
             self.assertEqual(self.act("learn_refs", {"channel": "UCx"})[2], {"ok": True, "job": "학습용 스타일 배우기"})
             self.fb.wait_idle()
 
-    def test_cancel_audited(self):
+    def test_cancel_only_for_stoppable_jobs(self):
+        """검토: 멈출 수 없는 작업에도 '멈추기를 보냈어요' → 멈출 수 있는 작업만 · 아니면 409 와 까닭."""
         with mock.patch.object(editor, "cancel_export") as c:
+            st, _, b = self.call("POST", "/r/cancel", {})
+            self.assertEqual((st, b["ok"], b["error"]), (409, False, "지금 하는 작업이 없어요"))
+            gate = threading.Event()
+            self.fb.start_job("편집점 찾기", gate.wait)
+            st, _, b = self.call("POST", "/r/cancel", {})
+            self.assertEqual((st, b["error"]), (409, remote.NOT_STOPPABLE_MSG))
+            job = self.call("GET", "/r/status?since=0")[2]["job"]
+            self.assertFalse(job["stoppable"])
+            gate.set()
+            self.fb.wait_idle()
+            self.assertEqual(c.call_count, 0)
+            gate2 = threading.Event()
+            self.fb.start_job("내보내기", gate2.wait)
+            self.assertTrue(self.call("GET", "/r/status?since=0")[2]["job"]["stoppable"])
             self.assertEqual(self.call("POST", "/r/cancel", {})[2], {"ok": True})
             self.assertEqual(self.act("cancel")[2], {"ok": True})
+            gate2.set()
+            self.fb.wait_idle()
         self.assertEqual(c.call_count, 2)
         self.assertIn("원격 · iPhone · Safari · 멈추기", self.fb.lines)
+
+    def test_notify_test_from_phone_rate_limited(self):
+        with mock.patch.object(self.svc, "test_notify") as t:
+            self.assertEqual(self.call("POST", "/r/notify-test", {})[2], {"ok": True})
+            st, _, b = self.call("POST", "/r/notify-test", {})
+            self.assertEqual(st, 429)
+            self.clock.tick(remote.NOTIFY_TEST_GAP + 1)
+            self.assertEqual(self.call("POST", "/r/notify-test", {})[0], 200)
+        self.assertEqual(t.call_count, 2)
+        self.assertIn("원격 · iPhone · Safari · 알림 시험", self.fb.lines)
+
+    def test_progress_item_shows_title_not_file_name(self):
+        gate = threading.Event()
+        self.fb.start_job("편집점 찾기", gate.wait)
+        with mock.patch.dict(self.fb.job_state, {"progress": {"label": "편집점 찾는 중", "item": "20990101_STYLETEST01_줌컷 레슨.mp4", "pct": 3}}):
+            item = self.call("GET", "/r/status?since=0")[2]["job"]["progress"]["item"]
+        gate.set()
+        self.fb.wait_idle()
+        self.assertEqual(item, "줌컷 레슨")
+
+    def test_phone_jobs_never_self_update(self):
+        """검토: 휴대폰이 시킨 받기·학습용 받기가 pip install -U yt-dlp · Deno 설치를 부름 → 휴대폰 작업 안에서는 하지 않음 (PC 에서만)."""
+        seen = []
+        with mock.patch.object(core, "download", lambda ids, log, ck: seen.append(core.self_update_allowed()) or []):
+            self.act("download", {"url": "https://youtu.be/AbCdEfGhIjK"})
+            self.fb.wait_idle()
+        self.assertEqual(seen, [False])
+        self.assertTrue(core.self_update_allowed())  # PC 쪽(이 스레드)은 그대로
+        ran = []
+        with mock.patch.object(core, "run", lambda cmd: ran.append(cmd)), mock.patch.object(core, "_install_deno", lambda *a: ran.append("deno")), \
+                mock.patch.object(core, "_find_deno", lambda: None), mock.patch.object(core, "DENO_AUTO", True):
+            lines = []
+            with core.no_self_update():
+                self.assertFalse(core.update_engine(lines.append))
+                self.assertIsNone(core.ensure_deno(lines.append, install=True))
+        self.assertEqual(ran, [])
+        self.assertIn(core.REMOTE_NO_UPDATE_MSG, lines)
+
+    def test_project_list_cached_until_file_changes(self):
+        """검토: 보관함 목록마다 프로젝트 파일 전체를 읽음 → 바뀌지 않았으면 기억한 편집본 목록."""
+        self.make_project()
+        first = self.svc._projects(NAME)
+        self.assertTrue(first)
+        pp = editor._ppath(NAME)
+        st = pp.stat()
+        raw = pp.read_bytes()
+        pp.write_bytes(b"x" * len(raw))  # 같은 크기 · 같은 시각으로 되돌림 → 다시 읽지 않음
+        os.utime(pp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(self.svc._projects(NAME), first)
+        pp.write_bytes(raw[:-1] + b" " + raw[-1:])  # 바뀜 → 다시 읽음
+        self.assertEqual(self.svc._projects(NAME), first)
+        pp.write_text("{깨짐", encoding="utf-8")
+        self.assertEqual(self.svc._projects(NAME), [])
 
     def test_forget_removes_own_device(self):
         self.assertEqual(self.call("POST", "/r/forget", {})[2], {"ok": True})
@@ -546,7 +671,7 @@ class ActionTests(Base):
         text = "\n".join(self.fb.lines)
         d = self.svc.store.data
         for secret in (self.cred["keys"]["auth"], self.cred["keys"]["beacon"], d["topics"]["beacon"], d["topics"]["notify"],
-                       self.svc.url, "FSR1", *self.svc.tickets.items.keys()):
+                       self.svc.url, "FSR2", *self.svc.tickets.items.keys()):
             self.assertNotIn(secret, text)
 
 
@@ -609,6 +734,63 @@ class LocalServerTests(Base):
         self.assertNotIn("auth", json.dumps(s["devices"]))
         self.assertEqual(self.local("POST", "/api/remote/pair/cancel", {})[2], {"ok": True})
         self.assertIsNone(self.local("GET", "/api/remote")[2]["pair"])
+
+    def test_pc_screens_get_their_own_job_result(self):
+        """검토: PC 화면이 '작업이 비면 결과'로 받으면, 그 사이 휴대폰이 시킨 작업의 결과를 받음 (폴더 열기·엉뚱한 검수)
+        → 시작 응답의 jobId 와 /api/state?job=<번호> 의 done 으로 자기 작업 결과만."""
+        app = self.app
+        a = app.start_job("영상 검수", lambda: {"mine": "PC"})
+        self.assertIsInstance(a, int)
+        end = time.time() + 5
+        while app.JOB["name"] and time.time() < end:
+            time.sleep(0.01)
+        gate = threading.Event()
+        b = app.start_job("편집점 찾기", lambda: gate.wait(5) and {"mine": "phone"}, by="휴대폰 · iPhone · Safari")  # 바로 휴대폰 작업
+        self.assertEqual(b, a + 1)
+        st, _, s = self.local("GET", f"/api/state?since=0&job={a}")
+        self.assertEqual((s["job"], s["job_id"], s["job_by"]), ("편집점 찾기", b, "휴대폰 · iPhone · Safari"))
+        self.assertEqual((s["done"]["id"], s["done"]["result"], s["done"]["error"]), (a, {"mine": "PC"}, None))
+        gate.set()
+        end = time.time() + 5
+        while app.JOB["name"] and time.time() < end:
+            time.sleep(0.01)
+        st, _, s = self.local("GET", f"/api/state?since=0&job={a}")
+        self.assertEqual(s["result"], {"mine": "phone"})  # 예전 방식이면 이것을 받았음
+        self.assertEqual(s["done"]["result"], {"mine": "PC"})
+        self.assertIsNone(self.local("GET", "/api/state?since=0&job=999999")[2]["done"])
+        self.assertIsNone(self.local("GET", "/api/state?since=0&job=x")[2]["done"])
+        for i in range(25):  # 끝난 결과는 최근 20개만
+            app.start_job("x", lambda: None)
+            end = time.time() + 5
+            while app.JOB["name"] and time.time() < end:
+                time.sleep(0.01)
+        self.assertLessEqual(len(app.DONE), 20)
+        self.assertNotIn(a, app.DONE)
+
+    def test_start_response_has_job_id(self):
+        shutil.copy(self.media / "v.mp4", core.VIDEOS / "p.mp4")
+        st, _, b = self.local("POST", "/api/edit/proxy", {"src": "videos", "file": "p.mp4"})
+        self.assertEqual(st, 200)
+        self.assertIs(b["ok"], True)
+        self.assertIsInstance(b["jobId"], int)
+        end = time.time() + 60
+        while self.app.JOB["name"] and time.time() < end:
+            time.sleep(0.05)
+        self.assertEqual(self.local("GET", f"/api/state?since=0&job={b['jobId']}")[2]["done"]["result"], {"src": "videos", "file": "p.mp4"})
+
+    def test_ui_select_source_note_is_escaped(self):
+        """검토: ui.html srcNote 가 YouTube 채널 이름을 그대로 innerHTML(<option>)에 넣음 → esc. (휴대폰이 아무 채널 영상이나 받게 할 수 있음)"""
+        import shutil as sh
+        import subprocess
+        node = sh.which("node")
+        if not node:
+            self.skipTest("node 없음")
+        html = (Path(remote.__file__).parent / "ui.html").read_text(encoding="utf-8")
+        lines = [ln for ln in html.splitlines() if ln.startswith(("const esc =", "const SRC =", "const srcOf =", "const srcNote ="))]
+        self.assertEqual(len(lines), 4)
+        js = "\n".join(lines) + '\nconsole.log(JSON.stringify([srcNote({source: {kind: "other", channel: "<img src=x onerror=alert(1)>"}}), srcNote({source: {kind: "own"}})]));'
+        out = json.loads(subprocess.run([node, "-e", js], capture_output=True, text=True, timeout=30).stdout)
+        self.assertEqual(out, [" · &lt;img src=x onerror=alert(1)&gt;", " · 풋살사관학교"])
 
     def test_settings_revoke_test_off(self):
         st, _, b = self.local("POST", "/api/remote/settings", {"autoOffHours": 3, "keepAwake": "always"})

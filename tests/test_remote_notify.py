@@ -49,7 +49,7 @@ class NotifyBase(unittest.TestCase):
     def _paired_pushes(self, n):
         end = time.time() + 8
         while time.time() < end:
-            if len(self.ntfy.wait(lambda p: p[1] == "새 휴대폰이 연결됐어요", 0.1)) >= n:
+            if len(self.ntfy.wait(lambda p: p[1] == remote.NOTE_TEXT["paired"], 0.1)) >= n:
                 time.sleep(0.2)  # 함께 보낸 비콘까지
                 return True
         return False
@@ -170,7 +170,7 @@ class BeaconTests(NotifyBase):
         self.turn_on()
         pair = self.svc.pair_start()
         code = pair["code"].replace("-", "")
-        topic, key = remote.derive_pair(code)
+        topic, key, _ = remote.derive_pair(code)
         got = self.ntfy.wait(lambda p: p[0] == topic)
         self.assertTrue(got)
         m = json.loads(remote.gcm_open(key, got[-1][1][5:], "fsp1|" + topic))
@@ -195,6 +195,12 @@ class RevokeTests(NotifyBase):
         self.assertIsNone(open_beacon(last, self.a))  # 끊은 휴대폰 몫은 없음
         self.assertTrue(self.beacons(new["beacon"]))  # 새 주제에도 바로
         self.assertIn("휴대폰 연결을 끊었어요 · 폰 A (PC에서)", self.fb.lines)
+        # 검토(높음): ntfy 앱은 옛 알림 주제를 계속 구독 → 조용히 끊기지 않게 옛 주제에 정해진 안내를 한 번
+        old_notes = self.ntfy.wait(lambda p: p[0] == old["notify"])
+        self.assertEqual([p[1] for p in old_notes], [remote.NOTE_TEXT["moved"]])
+        self.assertIn("다시 구독", old_notes[0][1])
+        self.assertIn("설치하라고 하지 않아요", old_notes[0][1])
+        self.assertNotIn(new["notify"], old_notes[0][1] + json.dumps(old_notes[0][2]))  # 새 주제는 옛 주제(끊은 휴대폰도 봄)에 안 씀
 
 
 class NotifyTests(NotifyBase):
@@ -229,9 +235,21 @@ class NotifyTests(NotifyBase):
     def test_blocked_and_missed_are_attention(self):
         self.turn_on()
         self.svc.job_hook("학습용 영상 받기", None, {"ok": False, "error": "막힘", "blocked": True}, "휴대폰 · x", 30)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (False, True))
+        self.assertIn("크롬 로그인 정보로 받기", self.svc.last["error"])
         self.svc.job_hook("보관함에 담기", None, ["AbCdEfGhIjK"], "휴대폰 · x", 30)
         texts = [p[1] for p in self.notes(n=2)]
         self.assertEqual(texts, ["확인이 필요해요 · YouTube가 막았어요", "확인이 필요해요 · 받지 못한 영상이 있어요"])
+
+    def test_failed_download_is_not_shown_as_done(self):
+        """검토(높음): 받지 못한 영상이 있는데 휴대폰 '마지막 작업'이 '보관함에 담기 끝 ✓' → 확인이 필요해요 + 할 일."""
+        self.svc.job_hook("보관함에 담기", None, ["AbCdEfGhIjK"], "휴대폰 · x", 30)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"]), (False, True))
+        self.assertEqual(last["error"], remote.MISSED_MSG.format(n=1))
+        self.assertIn("크롬 로그인 정보로 받기", last["error"])
+        self.svc.job_hook("보관함에 담기", None, [], "휴대폰 · x", 30)  # 다 받음
+        self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (True, False))
 
     def test_settings_turn_off_kinds(self):
         self.turn_on()
@@ -246,7 +264,10 @@ class NotifyTests(NotifyBase):
     def test_new_device_push(self):
         self.turn_on()
         pair_device(self.svc, "새 폰")
-        self.assertIn("새 휴대폰이 연결됐어요", [p[1] for p in self.notes()])
+        texts = [p[1] for p in self.notes()]
+        self.assertIn(remote.NOTE_TEXT["paired"], texts)
+        self.assertIn("내가 한 게 아니면", remote.NOTE_TEXT["paired"])  # 소유자가 받는 유일한 보안 신호 → 할 일까지
+        self.assertIn("[끊기]", remote.NOTE_TEXT["paired"])
 
     def test_daily_budget(self):
         with mock.patch.object(remote, "DAILY_BUDGET", 6), mock.patch.object(remote, "BUDGET_SOFT", 3):
@@ -284,7 +305,7 @@ class NotifyTests(NotifyBase):
             self.assertTrue(self.fb.start_job("내보내기", lambda: None, by="휴대폰 · x"))
             self.assertTrue(self.fb.wait_idle(5))
         self.svc.test_notify()
-        self.assertIsNotNone(self.svc.r_status(self.a["device"], 0))
+        self.assertIsNotNone(self.svc.r_status(self.svc.store.device(self.a["device"]["id"]), 0))
         self.assertLess(time.time() - t0, 3)
 
 
@@ -327,11 +348,17 @@ class IdleTests(NotifyBase):
         self.assertEqual(self.svc.pc_status()["autoOffAt"], int(self.clock() - 3000 + 3600))
 
     def test_old_devices_expire_via_tick(self):
+        old = dict(self.svc.store.data["topics"])
         self.clock.tick(remote.DEVICE_TTL + 10)
         self.svc.touch(self.svc.store.device(self.b["device"]["id"]))
         self.svc.tick()
         self.assertEqual([d["name"] for d in self.svc.store.data["devices"]], ["폰 B"])
         self.assertIn("휴대폰 연결을 끊었어요 · 폰 A (90일 동안 안 씀)", self.fb.lines)
+        # 검토(높음): 오래 안 쓴 기기 정리가 쓰고 있는 휴대폰의 ntfy 알림을 조용히 끊지 않게 — 알림 주제는 그대로, 비콘 주제만
+        self.assertEqual(self.svc.store.data["topics"]["notify"], old["notify"])
+        self.assertNotEqual(self.svc.store.data["topics"]["beacon"], old["beacon"])
+        time.sleep(0.3)
+        self.assertEqual(self.ntfy.topic(old["notify"]), [])
 
 
 class ThreadTests(unittest.TestCase):
