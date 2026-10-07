@@ -389,6 +389,7 @@ class Handler(BaseHTTPRequestHandler):
                 proj = editor.load_project(n)
                 rec = proj.pop("_recovered", None)
                 return self._send(200, {"project": proj, "waveform": editor.waveform(n), "recovered": rec,
+                                        "capLong": editor.long_captions(proj.get("captions"), proj.get("info")),
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
                                         "recommend": editor.recommend(n)})
             except Exception as e:
@@ -598,6 +599,16 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 return self._send(500, {"ok": False, "error": f"저장하지 못했어요 · {e}"})
             return self._send(200, {"ok": True, "rev": rev})
+        if path == "/api/edit/oneline":  # 편집실 '자막 한 줄씩 나누기' (지금 글 그대로 나눔 · 저장은 편집실이 함)
+            caps = b.get("captions")
+            if not isinstance(caps, list):
+                return self._send(400, {"error": "자막 목록이 아니에요"})
+            info = b.get("info") if isinstance(b.get("info"), dict) else editor.media_info(b["name"])
+            try:
+                out, n = editor.oneline_captions(caps, info, editor.silences_of(b["name"]))
+            except (TypeError, ValueError, KeyError) as e:
+                return self._send(400, {"error": f"자막을 나누지 못했어요 · {e}"})
+            return self._send(200, {"captions": out, "split": n})
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})

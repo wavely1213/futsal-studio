@@ -1,5 +1,6 @@
-"""자막 나누기·용어 사전 — 받아쓰기의 단어 시각(words)으로 읽기 좋은 자막 덩어리를 만들고, 잘못 받아쓴 풋살 용어를 고침.
-chunk(words, fmt) → [{start, end, text, words}] (단어 사이에서만 나눔) · from_segments(받아쓰기 구간) → 편집실 자막
+"""자막 나누기·용어 사전 — 받아쓰기의 단어 시각(words)으로 읽기 좋은 한 줄 자막을 만들고, 잘못 받아쓴 풋살 용어를 고침.
+chunk(words, fmt) → [{start, end, text, words}] (단어 사이에서만 나눔 · 언제나 한 줄) · from_segments(받아쓰기 구간) → 편집실 자막
+split_text(글, 시작, 끝) → 이미 있는 자막(예전 받아쓰기·고친 글)을 한 줄씩 (단어 시각이 없으면 글자 수대로 시간을 나눔)
 apply_dict(text, fixmap) · fix_words(words, fixmap) · 사전 파일 읽기/쓰기(load_dict·save_dict)
 표준 라이브러리만 씀 (core 가 받아쓰는 중에, editor 가 자막을 만들 때 부름)."""
 import json
@@ -8,14 +9,16 @@ import re
 import time
 from functools import lru_cache
 
-LIMITS = {"shorts": (12, 2.0), "long": (22, 3.5)}  # 자막 한 덩어리: 최대 글자 수(띄어쓰기 빼고) · 최대 길이(초)
+# 자막 한 줄: 최대 글자 수(띄어쓰기 빼고) · 최대 길이(초) — 쇼츠 13글자는 기본 크기(72)에서 1080 화면 90% 안에 한 줄로 들어감
+LIMITS = {"shorts": (13, 2.2), "long": (17, 3.0)}
 MIN_DUR = 0.6     # 이보다 짧게 스치는 자막은 앞뒤와 합침 (못 합치면 화면에 이만큼은 남김)
-LINE = 12         # 롱폼 자막이 이 글자보다 길면 가장 고르게 나뉘는 단어 사이에서 두 줄로
+ORPHAN = 3        # 이 글자 이하 낱말 하나만 있는 자막은 되도록 안 만듦 (앞뒤에 붙임)
 GAP_MAX = 1.2     # 단어 사이가 이만큼 비면 한 자막으로 묶지 않음
 GAP_FILL = 0.3    # 자막 사이 빈틈이 이보다 짧으면 앞 자막을 다음 자막까지 늘림 (깜빡임 방지)
 
 # 이렇게 끝나는 말 뒤는 끊어 읽기 좋은 곳 (조사·이음말) · 문장 끝
 _NICE = re.compile(r"(?:은|는|이|가|을|를|에|도|만|로|고|서|면|데|며|게|와|과|요|다|죠|까|네|야)[,.?!…~]*$")  # '~지 말고'·'~의' 뒤는 안 끊음
+_EOW = re.compile(r"(?:요|고|서|데|다|죠|면|며|니까|는데|지만)[,.?!…~]*$")  # 말 덩어리가 끝나는 말끝 — 조사 뒤보다 더 끊기 좋음
 _END = re.compile(r"[.?!…]$")
 # 사전 고치기: 낱말 뒤에 붙어도 되는 조사 (최대 두 개 · '피버를'은 고치고 '피버트'는 안 고침)
 _JOSA = "(?:이에요|예요|입니다|이랑|에서|에게|한테|으로|부터|까지|처럼|보다|하고|은|는|이|가|을|를|의|에|로|와|과|도|만|랑|씩)"
@@ -237,25 +240,11 @@ def _term_joints(texts, terms):
     return inside
 
 
-def _lines(texts, inside):
-    """롱폼 두 줄: 가장 고르게 나뉘는 단어 사이 (끊어 읽기 좋은 곳 · 아래 줄이 같거나 길게 · 용어 안쪽은 피함)."""
-    if len(texts) < 2 or sum(_chars(t) for t in texts) <= LINE:
-        return " ".join(texts)
-    best, at = None, None
-    for m in range(1, len(texts)):
-        a, b = sum(_chars(t) for t in texts[:m]), sum(_chars(t) for t in texts[m:])
-        sc = abs(a - b) + (0 if _NICE.search(texts[m - 1]) or texts[m - 1][-1] in ",.?!…" else 2.5) \
-            + (8 if m - 1 in inside else 0) + (0.1 if a > b else 0)
-        if best is None or sc < best:
-            best, at = sc, m
-    return " ".join(texts[:at]) + "\n" + " ".join(texts[at:])
-
-
 def chunk(words, fmt="long", breaks=(), terms=()):
-    """단어 [{w, s, e}] → 자막 덩어리 [{start, end, text, words}] — 단어 사이에서만 나눔.
-    쇼츠: 12글자(띄어쓰기 빼고)·2초까지 한 줄 / 롱폼: 22글자·3.5초까지, 12글자가 넘으면 두 줄('\\n').
-    한 단어가 혼자 그보다 길면 그 단어만 따로. 0.6초보다 짧은 자투리는 되도록 앞뒤와 합침.
-    breaks: 이 번호(words 기준)의 단어 뒤에서 되도록 나눔 (받아쓰기 구간 끝) · terms: 안 나눌 여러 단어 용어.
+    """단어 [{w, s, e}] → 자막 덩어리 [{start, end, text, words}] — 단어 사이에서만 나누고, 언제나 한 줄.
+    쇼츠: 13글자(띄어쓰기 빼고)·2.2초까지 / 롱폼: 17글자·3초까지. 한 단어가 혼자 그보다 길면 그 단어만 따로.
+    0.6초보다 짧은 자투리와 짧은 낱말 하나만 남는 자막은 되도록 앞뒤와 합침. 말끝(~요·~고·~서·~는데·~다)·문장부호 뒤에서 끊음.
+    breaks: 이 번호(words 기준)의 단어 뒤에서 되도록 나눔 (받아쓰기 구간 끝) · terms: 안 나눌 여러 단어 용어 (용어가 혼자 한도보다 길 때만 나눔).
     시작·끝은 첫 단어 시작·마지막 단어 끝 그대로."""
     ws, brk = [], set()
     for k, w in enumerate(words or ()):
@@ -281,8 +270,8 @@ def chunk(words, fmt="long", breaks=(), terms=()):
     for k in range(n - 1):  # 문장 끝(마침표 등)이 가장 강한 끊을 곳 · 받아쓰기 구간 끝은 문장 중간일 때도 있어 그보다 약하게
         end, seg, g = bool(_END.search(texts[k])), k in brk, gap[k]
         join.append(join[-1] + (10 if end else 4 if seg else 3 if texts[k].endswith(",") else 0) + 12 * max(0.0, g - 0.25))
-        cut[k] = (0.0 if end or g >= 0.4 else 0.5 if seg else 1.0 if _NICE.search(texts[k]) or g >= 0.2 else 2.5) \
-            + (8 if k in inside else 0)
+        cut[k] = (0.0 if end or g >= 0.4 else 0.4 if seg or texts[k].endswith(",") or _EOW.search(texts[k])
+                  else 1.2 if _NICE.search(texts[k]) or g >= 0.2 else 2.5) + (1000 if k in inside else 0)
 
     best, prev = [0.0] + [float("inf")] * n, [0] * (n + 1)
     for j in range(1, n + 1):
@@ -291,7 +280,9 @@ def chunk(words, fmt="long", breaks=(), terms=()):
             if j - i > 1 and (gap[i] >= GAP_MAX or chars > mc or dur > md):
                 break
             short = max(0.0, 1 - chars / (0.7 * mc))
-            c = best[i] + 3.0 + join[j - 1] - join[i] + (cut[j - 1] if j < n else 0.0) + 4 * short * short
+            c = best[i] + 2.0 + join[j - 1] - join[i] + (cut[j - 1] if j < n else 0.0) + 4 * short * short
+            if j - i == 1 and chars <= ORPHAN and n > 1:  # 낱말 하나짜리 짧은 자막 ('요.'·'그래서')
+                c += 6
             if dur < MIN_DUR:
                 c += 40 + 100 * (MIN_DUR - dur)
             if c < best[j]:
@@ -302,20 +293,120 @@ def chunk(words, fmt="long", breaks=(), terms=()):
         j = prev[j]
     out = []
     for i, j in reversed(spans):
-        part = texts[i:j]
-        text = " ".join(part) if shorts else _lines(part, {k - i for k in inside if i <= k < j - 1})
-        out.append({"start": ws[i]["s"], "end": ws[j - 1]["e"], "text": text,
+        out.append({"start": ws[i]["s"], "end": ws[j - 1]["e"], "text": " ".join(texts[i:j]),
                     "words": [{"w": w["w"], "s": w["s"], "e": w["e"]} for w in ws[i:j]]})
     return out
 
 
-def from_segments(segs, fmt="long", terms=()):
-    """받아쓰기 구간 → 편집실 자막 [{start, end, text(, words)}].
-    단어 시각이 있는 구간은 chunk 로 읽기 좋게 나누고, 없는 구간(예전 받아쓰기)은 예전처럼 구간 그대로.
-    단어 시각이 하나도 없으면 예전과 똑같이."""
+def _limit(fmt):
+    return LIMITS["shorts" if fmt in ("shorts", "short") else "long"]
+
+
+def needs_split(text, fmt="long"):
+    """한 줄 자막으로 다시 나눠야 하는지 — 줄바꿈이 있거나 글자 수가 한도보다 많음."""
+    t = str(text or "")
+    return "\n" in t.strip() or (len(t.split()) > 1 and _chars(t) > _limit(fmt)[0])
+
+
+def _speech(start, end, silences):
+    """[start, end] 에서 조용한 곳(analysis.json silences)을 뺀 말소리 구간들 — 말소리가 30%도 안 남으면 통째로."""
+    ivs = [(start, end)]
+    for x in silences or ():
+        try:
+            a, b = max(start, float(x["start"])), min(end, float(x["end"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if b - a <= 0.05:
+            continue
+        ivs = [q for p, r in ivs for q in ((p, min(r, a)), (max(p, b), r)) if q[1] - q[0] > 1e-6]
+    if sum(b - a for a, b in ivs) < 0.3 * (end - start) or not ivs:
+        return [(start, end)]
+    return ivs
+
+
+def _at(ivs, p, late):
+    """말소리 구간들을 이어 붙인 시간 p → 실제 시각. late: 구간 끝에 딱 걸리면 다음 구간 시작으로 (낱말 시작)."""
+    for a, b in ivs:
+        d = b - a
+        if p < d - 1e-9 or (not late and p <= d + 1e-9):
+            return a + max(0.0, p)
+        p -= d
+    return ivs[-1][1]
+
+
+def even_words(toks, start, end, silences=()):
+    """단어 시각이 없을 때: 낱말마다 글자 수대로 시간을 나눔 → [{w, s, e}].
+    조용한 곳(silences)이 있으면 그 시간은 빼고 나눈 뒤, 조용한 곳에서 가장 가까운 낱말 사이를 조용한 곳 앞뒤에 맞춤
+    (말을 멈춘 곳 = 낱말 사이 → 그 앞뒤 낱말은 그 안에서 다시 글자 수대로)."""
+    n = len(toks)
+    wts = [max(1, _chars(t)) for t in toks]
+    ivs = _speech(start, end, silences)
+    total, tot = sum(b - a for a, b in ivs), sum(wts) or 1
+    cum = [0]
+    for x in wts:
+        cum.append(cum[-1] + x)
+    est = [_at(ivs, total * c / tot, True) for c in cum]  # 낱말 k 앞 경계의 어림 시각
+    anchors, last = [(0, start, start)], 0
+    for (_, a), (b, _) in zip(ivs, ivs[1:]):  # 말소리 구간 사이 = 쓰는 조용한 곳 [a, b]
+        if n < 2:
+            break
+        k = min(range(1, n), key=lambda k: abs(est[k] - (a + b) / 2))
+        if k > last:
+            anchors.append((k, a, b))
+            last = k
+    anchors.append((n, end, end))
+    out = []
+    for (k0, _, t0), (k1, t1, _) in zip(anchors, anchors[1:]):
+        sub = cum[k1] - cum[k0] or 1
+        for k in range(k0, k1):
+            out.append({"w": toks[k], "s": round(t0 + (t1 - t0) * (cum[k] - cum[k0]) / sub, 2),
+                        "e": round(t0 + (t1 - t0) * (cum[k + 1] - cum[k0]) / sub, 2)})
+    return out
+
+
+def _tidy(out, limit=float("inf")):
+    """짧은 빈틈은 메우고, 너무 짧게 스치는 자막은 다음 자막 전까지 조금 더 보여 줌 (limit 을 넘지 않게)."""
+    for k, c in enumerate(out):
+        nxt = out[k + 1]["start"] if k + 1 < len(out) else limit
+        if 0 < nxt - c["end"] < GAP_FILL:
+            c["end"] = nxt
+        if c["end"] - c["start"] < MIN_DUR:
+            c["end"] = round(min(c["start"] + MIN_DUR, max(c["end"], nxt)), 2)
+    return out
+
+
+def split_text(text, start, end, fmt="long", terms=(), words=None, silences=()):
+    """이미 있는 자막 하나(글 · 시작 · 끝)를 한 줄 자막들로 [{start, end, text(, words)}] — 사용자가 고친 글 그대로 나눔.
+    words: 그 글의 낱말마다 실제 말한 시각 [{s, e}] (낱말 수가 같을 때만 씀 → 나눈 자막에도 words) ·
+    없으면 띄어쓰기에서 나누고 시간은 글자 수대로 (silences 가 있으면 조용한 곳에서 끊기 좋게).
+    첫 자막은 원래 시작, 마지막 자막은 원래 끝 그대로 · 자막 사이는 빈틈 없이 이어짐 (원래 쉬던 곳은 그대로 빔)."""
+    toks = str(text or "").split()
+    start, end = float(start), max(float(start), float(end))
+    if not toks:
+        return []
+    real = bool(words) and len(words) == len(toks)
+    if real:
+        try:
+            ws = [{"w": t, "s": float(w["s"]), "e": float(w["e"])} for t, w in zip(toks, words)]
+        except (TypeError, ValueError, KeyError):
+            real = False
+    if not real:
+        ws = even_words(toks, start, end, silences)
+    parts = chunk(ws, fmt, terms=terms)
+    if not parts:
+        return []
+    out = [{"start": q["start"], "end": q["end"], "text": q["text"], **({"words": q["words"]} if real else {})} for q in parts]
+    out[0]["start"], out[-1]["end"] = start, end
+    for a, b in zip(out, out[1:]):  # 원래 한 자막이었으니 앞 자막 시작이 뒤 자막보다 늦지 않게
+        b["start"] = max(b["start"], a["start"] + 0.01)
+        a["end"] = min(max(a["end"], a["start"] + 0.01), b["start"])
+    return _tidy(out, end)
+
+
+def from_segments(segs, fmt="long", terms=(), silences=()):
+    """받아쓰기 구간 → 편집실 자막 [{start, end, text(, words)}] — 모두 한 줄.
+    단어 시각이 있는 구간은 chunk 로 읽기 좋게 나누고, 없는 구간(예전 받아쓰기)은 split_text 로 글자 수대로 시간을 나눠 한 줄씩."""
     segs = [s for s in segs or () if str(s.get("text") or "").strip()]
-    if not any(s.get("words") for s in segs):
-        return [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in segs]
     out, run, brk = [], [], set()
 
     def flush():
@@ -331,13 +422,7 @@ def from_segments(segs, fmt="long", terms=()):
             brk.add(len(run) - 1)
         else:
             flush()
-            out.append({"start": s["start"], "end": s["end"], "text": s["text"].strip()})
+            out.extend(split_text(s["text"], s["start"], s["end"], fmt, terms, silences=silences))
     flush()
     out.sort(key=lambda c: c["start"])
-    for k, c in enumerate(out):  # 짧은 빈틈은 메우고, 너무 짧게 스치는 자막은 다음 자막 전까지 조금 더 보여 줌
-        nxt = out[k + 1]["start"] if k + 1 < len(out) else float("inf")
-        if 0 < nxt - c["end"] < GAP_FILL:
-            c["end"] = nxt
-        if c["end"] - c["start"] < MIN_DUR:
-            c["end"] = round(min(c["start"] + MIN_DUR, max(c["end"], nxt)), 2)
-    return out
+    return _tidy(out)

@@ -82,12 +82,7 @@ class ChunkTest(unittest.TestCase):
                 stuck = not strict and not (k and mergeable(chunks[k - 1], c)) and not (k + 1 < len(chunks) and mergeable(c, chunks[k + 1]))
                 if not stuck:
                     self.assertGreaterEqual(dur, captions.MIN_DUR - 1e-9, c)
-            if fmt == "shorts":
-                self.assertNotIn("\n", c["text"])
-            else:  # 12글자가 넘으면 두 줄 (둘 다 비지 않게), 아니면 한 줄
-                lines = c["text"].split("\n")
-                self.assertEqual(len(lines), 2 if chars > captions.LINE and len(ws) > 1 else 1, c)
-                self.assertTrue(all(ln.strip() for ln in lines))
+            self.assertNotIn("\n", c["text"])  # 쇼츠·롱폼 모두 언제나 한 줄
         return chunks
 
     def test_sixty_words_shorts_and_long(self):
@@ -111,9 +106,9 @@ class ChunkTest(unittest.TestCase):
         words = [W("오늘은", 0.0, 0.3), W("퍼스트", 0.35, 0.65), W("터치를", 0.7, 1.0), W("배워볼게요.", 1.05, 1.8),
                  W("공이", 2.3, 2.5), W("오면", 2.55, 2.8), W("발", 2.85, 3.0), W("안쪽으로", 3.05, 3.5), W("받아요.", 3.55, 4.2)]
         shorts = [c["text"] for c in captions.chunk(words, "shorts", terms=["퍼스트 터치"])]
-        self.assertEqual(shorts, ["오늘은 퍼스트 터치를", "배워볼게요.", "공이 오면 발 안쪽으로", "받아요."])
+        self.assertEqual(shorts, ["오늘은 퍼스트 터치를", "배워볼게요.", "공이 오면 발 안쪽으로 받아요."])  # 11글자·1.9초는 한 줄에
         long = [c["text"] for c in captions.chunk(words, "long", terms=["퍼스트 터치"])]
-        self.assertEqual(long, ["오늘은 퍼스트 터치를\n배워볼게요.", "공이 오면\n발 안쪽으로 받아요."])  # 문장마다 · 용어 안에서 줄 안 바꿈
+        self.assertEqual(long, ["오늘은 퍼스트 터치를 배워볼게요.", "공이 오면 발 안쪽으로 받아요."])  # 문장마다 한 줄
         self.assertEqual(captions.chunk([], "long"), [])
         self.assertEqual(captions.chunk([W(" ", 0, 1)], "shorts"), [])
 
@@ -399,13 +394,13 @@ class EditorCaptionTest(WorkDir):
         name = self.video("코치 설명.mp4", "320x180", 5.0)
         self.transcript(name, self.SEGS)
         caps = editor.load_project(name)["captions"]
-        self.assertEqual([c["text"] for c in caps], ["오늘은 퍼스트 터치를\n배워볼게요.", "공이 오면\n발 안쪽으로 받아요."])
+        self.assertEqual([c["text"] for c in caps], ["오늘은 퍼스트 터치를 배워볼게요.", "공이 오면 발 안쪽으로 받아요."])  # 한 줄씩
         self.assertTrue(all(c["id"] and len(c["wt"]) == 2 * len(c["text"].split()) and "words" not in c for c in caps))  # 단어 시각은 작게
         self.assertEqual(caps[0]["wt"], [50, 30, 5, 30, 5, 30, 5, 75])  # 첫 단어 시작 0.5초, 그 뒤로는 차이 (1/100초)
-        tall = self.video("세로 촬영.mp4", "180x320", 5.0)  # 세로 영상은 쇼츠형 (12글자 · 한 줄)
+        tall = self.video("세로 촬영.mp4", "180x320", 5.0)  # 세로 영상은 쇼츠형 (13글자 · 한 줄)
         self.transcript(tall, self.SEGS)
         caps = editor.load_project(tall)["captions"]
-        self.assertEqual([c["text"] for c in caps], ["오늘은 퍼스트 터치를", "배워볼게요.", "공이 오면 발 안쪽으로", "받아요."])
+        self.assertEqual([c["text"] for c in caps], ["오늘은 퍼스트 터치를", "배워볼게요.", "공이 오면 발 안쪽으로 받아요."])
         # 편집점 다시 찾기: 자막도 새로 나눔 (편집본은 그대로)
         self.transcript(tall, [dict(self.SEGS[0], words=self.SEGS[0]["words"][:4], text="오늘은 퍼스트 터치를 배워볼게요.")])
         proj, added, changed = editor.reanalyze_project(tall)
@@ -423,8 +418,8 @@ class EditorCaptionTest(WorkDir):
         seqs = editor.auto_sequences(name, editor.media_info(name))
         self.assertEqual(seqs[0]["format"], "long")
         caps = editor.load_project(name)["captions"]
-        self.assertEqual([{k: c[k] for k in ("start", "end", "text")} for c in caps], segs)  # 예전처럼 구간 그대로
-        self.assertTrue(all(set(c) == {"id", "start", "end", "text"} for c in caps))
+        self.assertEqual([{k: c[k] for k in ("start", "end", "text")} for c in caps], segs)  # 짧은 구간은 그대로 (한 줄 한도 안)
+        self.assertTrue(all(set(c) <= {"id", "start", "end", "text", "sh", "shn"} for c in caps))  # 단어 시각(wt)은 지어내지 않음
 
     def ass_kf(self, proj):
         lines = [ln for ln in editor.build_ass(proj, 1920, 1080).splitlines() if ln.startswith("Dialogue: 1,") and ",Cap," in ln]
@@ -577,20 +572,13 @@ class ReviewFixTest(WorkDir):
         name, proj = self.landscape()
         caps = proj["captions"]
         self.assertTrue(any(c.get("sh") for c in caps))
-        self.assertTrue(any("\n" in c["text"] for c in caps))  # 프로젝트 자막은 롱폼형 그대로 (롱폼 편집본·미리보기)
+        self.assertFalse(any("\n" in c["text"] for c in caps))  # 프로젝트 자막은 롱폼형 한 줄 (롱폼 편집본·미리보기)
         v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": 15.0, "speed": 1.0}
         base = {"items": [v], "captions": caps, "titles": [], "shapes": [], "captionsOn": True}
         longs = editor.timeline_captions(dict(base, format="long"))
         self.assertEqual([c["text"] for c in longs], [c["text"] for c in caps])
-        # 리뷰: 편집실 미리보기는 프로젝트 자막 그대로 보여 주므로 내보내기도 같아야 함 (쇼츠 편집본도 나누지 않음)
-        same = editor.timeline_captions(dict(base, format="shorts"))
-        self.assertEqual([(c["start"], c["end"], c["text"]) for c in same], [(c["start"], c["end"], c["text"]) for c in longs])
-        st0 = dict(editor.SHORTS_STYLE, effect="karaoke")
-        self.assertEqual(len(EditorCaptionTest.ass_kf(self, dict(base, format="shorts", captionStyle=st0))), len(caps))  # 내보낼 자막 수 = 미리보기 자막 수
-        # 미리보기가 같은 방식으로 나누게 되면 켤 쇼츠형 나누기 (sh)
-        patch = mock.patch.object(editor, "SHORTS_SPLIT", True)
-        patch.start()
-        self.addCleanup(patch.stop)
+        # 쇼츠 편집본은 쇼츠형으로 나눔 (sh) — 편집실 미리보기(capParts)도 같은 방식 (test_caption_oneline 의 node 비교)
+        self.assertTrue(editor.SHORTS_SPLIT)
         shorts = editor.timeline_captions(dict(base, format="shorts"))
         self.assertGreater(len(shorts), len(caps))
         self.assertEqual(" ".join(c["text"] for c in shorts).split(), " ".join(c["text"] for c in caps).split())  # 낱말 그대로, 순서대로
@@ -609,7 +597,7 @@ class ReviewFixTest(WorkDir):
         # 자동 쇼츠 편집본(영상이 짧으면 안 생김)도 쇼츠형으로
         for sq in (q for q in proj["sequences"] if q["format"] == "shorts"):
             for c in editor.timeline_captions(dict(sq, captions=caps)):
-                self.assertLessEqual(len(c["text"].replace(" ", "")), 12, c)
+                self.assertLessEqual(len(c["text"].replace(" ", "")), captions.LIMITS["shorts"][0], c)
         # 글을 고쳤으면(낱말 수가 바뀜) 나누지 않고 그대로
         cap = next(c for c in caps if c.get("sh"))
         edited = dict(cap, text=cap["text"].replace("\n", " ") + " 추가")

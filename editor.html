@@ -50,6 +50,9 @@
   /* 자막 목록 */
   .search { margin: 8px; display: flex; gap: 6px; }
   .search input { flex: 1; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 8px; }
+  .captools { margin: -2px 8px 8px; display: flex; gap: 6px; align-items: center; }
+  .capban { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid rgba(45,140,235,.35); background: var(--accent-soft); border-radius: 6px; line-height: 1.45; }
+  .capban .acts { display: flex; gap: 6px; margin-top: 6px; }
   .caprow .cx { opacity: 0; border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
   .caprow:hover .cx { opacity: 1; } .caprow .cx:hover { background: #3a1f1f; color: #ff8a8a; }
   .caprow { display: grid; grid-template-columns: 6px 64px 1fr 22px; gap: 8px; padding: 6px 8px 6px 0; border-bottom: 1px solid #191919; align-items: start; }
@@ -336,6 +339,8 @@
     <div class="ph" id="ltabs"><button class="tab on" data-lt="caps">자막</button><button class="tab" data-lt="rec">추천 · 자동 편집</button><button class="tab" data-lt="fxl">효과</button><button class="tab" data-lt="gfx">그래픽</button></div>
     <div class="body" id="lt-caps">
       <div class="search"><input id="capSearch" placeholder="자막 검색"><button class="btn" id="capAdd" title="현재 위치에 자막 추가">＋</button></div>
+      <div class="captools"><button class="btn" id="capOneLine" title="여러 줄로 길게 뭉친 자막을 한 줄씩 짧게 나눠요 (고친 글 그대로 · Ctrl+Z 로 되돌려요)">자막 한 줄씩 나누기</button></div>
+      <div class="capban" id="capBan" style="display:none"></div>
       <div id="capList"></div>
     </div>
     <div class="body" id="lt-rec" style="display:none"></div>
@@ -612,22 +617,77 @@ function trackState(tid, t) {
   return null;
 }
 
-/* 자막 → 타임라인 (V1 원본 클립을 따라감) */
+/* 자막의 단어 시각 — editor.py _cap_words 와 같은 규칙 (wt: 1/100초, 첫 값 뒤로는 차이 · 낱말 수가 글과 같을 때만) */
+function capWords(cap) {
+  const toks = String(cap.text || "").split(/\s+/).filter(Boolean);
+  let ws;
+  if (cap.wt != null) {
+    if (!Array.isArray(cap.wt)) return null;
+    const t = []; let acc = 0;
+    for (const x of cap.wt) { const v = Number(x); if (!Number.isFinite(v)) return null; acc += Math.trunc(v); t.push(acc); }
+    if (t.length !== 2 * toks.length) return null;
+    ws = toks.map((w, k) => ({ w, s: t[2 * k] / 100, e: t[2 * k + 1] / 100 }));
+  } else ws = Array.isArray(cap.words) ? cap.words : [];
+  ws = ws.filter(w => { const m = (Number(w.s) + Number(w.e)) / 2; return cap.start - 0.05 <= m && m <= cap.end + 0.05; });
+  return ws.length && ws.length === toks.length ? ws : null;
+}
+/* 쇼츠 편집본에서 가로 영상 자막을 쇼츠형 한 줄로 (만들 때 정해 둔 나눌 곳 sh) — editor.py _shorts_parts 와 같은 규칙 */
+function capParts(cap) {
+  const ws = capWords(cap), sh = cap.sh, toks = String(cap.text || "").split(/\s+/).filter(Boolean);
+  const whole = [{ start: cap.start, end: cap.end, text: cap.text, words: ws }];
+  if (!Array.isArray(sh) || !sh.length || (cap.shn != null && cap.shn !== toks.length)) return whole;
+  let tm = ws;
+  if (!tm) {
+    if (cap.shn == null) return whole;
+    const len = t => Array.from(t).length, tot = toks.reduce((a, t) => a + len(t), 0) || 1; let acc = 0; tm = [];
+    for (const t of toks) { tm.push({ w: t, s: cap.start + (cap.end - cap.start) * acc / tot }); acc += len(t); }
+  }
+  const cuts = [0, ...sh.map(k => Math.trunc(Number(k))), tm.length];
+  if (cuts.some((k, i) => !Number.isFinite(k) || (i && k <= cuts[i - 1]))) return whole;
+  const out = [];
+  for (let i = 1; i < cuts.length; i++) {
+    const a = cuts[i - 1], b = cuts[i];
+    const s = a === 0 ? cap.start : Math.max(cap.start, +tm[a].s), e = b === tm.length ? cap.end : Math.min(cap.end, +tm[b].s);
+    if (e - s <= 0.04) return whole;
+    out.push({ start: s, end: e, text: tm.slice(a, b).map(w => w.w).join(" "), words: ws ? ws.slice(a, b) : null });
+  }
+  return out;
+}
+/* 자막 → 타임라인 (V1 원본 클립을 따라감 · 쇼츠 편집본은 쇼츠형으로 나눔) — editor.py timeline_captions 와 같은 규칙 */
 let _caps = { v: -1, list: [] };
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
-  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev), out = [];
+  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev), out = [], tot = total(), shorts = S.format === "shorts";
   const cs = P.captions.slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
+  const parts = new Map();
   for (const it of vids) {
     let lo = 0, hi = cs.length; const from = it.in - maxLen;
     while (lo < hi) { const m = (lo + hi) >> 1; if (cs[m].start < from) lo = m + 1; else hi = m; }
     for (let i = lo; i < cs.length && cs[i].start < it.out; i++) {
-      const cap = cs[i], a = Math.max(cap.start, it.in), b = Math.min(cap.end, it.out);
-      if (b - a > 0.05) out.push({ cap, s: tlOf(it, a), e: tlOf(it, b) });
+      const cap = cs[i];
+      if (!parts.has(cap)) parts.set(cap, shorts ? capParts(cap) : [{ start: cap.start, end: cap.end, text: cap.text, words: capWords(cap) }]);
+      for (const q of parts.get(cap)) {
+        const a = Math.max(q.start, it.in), b = Math.min(q.end, it.out);
+        if (b - a <= 0.05) continue;
+        const s = tlOf(it, a), e = Math.min(tlOf(it, b), tot);
+        if (e - s > 0.04) out.push({ cap, s, e, text: q.text, kw: q.words ? q.words.map(w => tlOf(it, +w.s) - s) : null });
+      }
     }
   }
   out.sort((a, b) => a.s - b.s);
   _caps = { v: ver, list: out }; return out;
+}
+// 한 줄 자막이 화면 밖으로 넘치지 않게 글자 크기 배율 — editor.py cap_fit 과 같은 규칙 (한글 0.9em 어림 · 0.7배보다 더 줄여야 하면 그대로 두고 줄바꿈)
+const emOf = ch => ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? 0.9 : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
+function capFit(text, st, W) {
+  const x = st.x ?? 0.5, al = st.align || "center";
+  const room = al === "left" ? 1 - x : al === "right" ? x : 2 * Math.min(x, 1 - x);
+  const avail = W * (al === "center" ? Math.min(0.9, room - 0.05) : room - 0.05);
+  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch), 0)));
+  const need = em * st.size + 2 * (st.strokeW || 0);
+  if (need <= avail || avail <= 0) return 1;
+  const k = Math.floor(avail / need * 100) / 100;
+  return k >= 0.7 ? k : 1;
 }
 function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
@@ -1373,9 +1433,9 @@ function layoutFrame() {
   frameDirty = true;
 }
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
-function styleText(el, st, scale) {
+function styleText(el, st, scale, fk = 1) {
   el.style.fontWeight = st.weight === "Black" ? 900 : 700;
-  el.style.fontSize = st.size * scale + "px";
+  el.style.fontSize = st.size * scale * fk + "px";
   el.style.top = st.y * 100 + "%";
   el.style.left = (st.x ?? 0.5) * 100 + "%";
   el.style.textAlign = st.align === "left" ? "left" : st.align === "right" ? "right" : "center";
@@ -1388,7 +1448,7 @@ function styleText(el, st, scale) {
     el.style.webkitTextStroke = `${st.strokeW * 2 * scale}px ${st.stroke}`;
   }
 }
-function effect(el, st, e, r, scale, text) {
+function effect(el, st, e, r, scale, text, kw) {
   let op = 1, sc = 1, dy = 0;
   if (st.effect === "fade") op = Math.min(1, e / 0.15, r / 0.12);
   if (st.effect === "pop") sc = e < 0.11 ? 0.7 + 0.38 * (e / 0.11) : e < 0.19 ? 1.08 - 0.08 * ((e - 0.11) / 0.08) : 1;
@@ -1399,8 +1459,9 @@ function effect(el, st, e, r, scale, text) {
   el.style.transform = `translate(${ax}, -100%) translateY(${dy}px) scale(${sc})`;
   if (st.effect === "karaoke") {
     const words = text.split(" "), len = w => w.replace(/\n/g, "").length, tot = words.reduce((a, w) => a + len(w), 0) || 1, dur = e + r; // 줄바꿈은 글자 수에 안 셈 (내보내기와 같은 시간)
+    const byWord = kw && !text.includes("\n") && words.every(Boolean) && kw.length === words.length; // 단어 시각이 맞으면 말한 때에 채움 (내보내기 \kf 와 같게)
     let acc = 0;
-    el.innerHTML = words.map(w => { const on = (acc / tot) * dur <= e; acc += len(w); return `<span style="color:${on ? st.highlight : st.fill}">${esc(w)}</span>`; }).join(" ");
+    el.innerHTML = words.map((w, k) => { const on = byWord ? k === 0 || kw[k] <= e : (acc / tot) * dur <= e; acc += len(w); return `<span style="color:${on ? st.highlight : st.fill}">${esc(w)}</span>`; }).join(" ");
   } else if (el._t !== text) { el.textContent = text; }
   el._t = st.effect === "karaoke" ? null : text;
 }
@@ -1417,14 +1478,14 @@ function drawOverlays(t) {
     }).join("");
   }
   const want = {};
-  if (S.captionsOn) for (const c of capsTL()) if (t >= c.s && t < c.e) want["c" + c.cap.id] = { st: S.captionStyle, s: c.s, e: c.e, text: c.cap.text };
+  if (S.captionsOn) for (const c of capsTL()) if (t >= c.s && t < c.e) want["c" + c.cap.id] = { st: S.captionStyle, s: c.s, e: c.e, text: c.text, kw: c.kw, fit: true };
   for (const g of S.titles) if (t >= g.start && t < g.start + g.dur && t < tot + 0.01) want["t" + g.id] = { st: g.style, s: g.start, e: g.start + g.dur, text: g.text };
   for (const k of Object.keys(ovEls)) if (!want[k]) { ovEls[k].remove(); delete ovEls[k]; }
   for (const [k, w] of Object.entries(want)) {
     let el = ovEls[k];
     if (!el) { el = document.createElement("div"); el.className = "txt"; $("ov").appendChild(el); ovEls[k] = el; }
-    styleText(el, w.st, scale);
-    effect(el, w.st, t - w.s, w.e - t, scale, w.text);
+    styleText(el, w.st, scale, w.fit ? capFit(w.text, w.st, BW()) : 1);
+    effect(el, w.st, t - w.s, w.e - t, scale, w.text, w.kw);
   }
 }
 let lastCapOn = null;
@@ -1570,7 +1631,7 @@ function renderTimeline() {
       const w = (c.e - c.s) * zoom, sel = selX && selX.k === "caption" && selX.id === c.cap.id;
       if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
       flush();
-      caps += `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.cap.text)}</div></div>`;
+      caps += `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`;
     }
     flush();
   }
@@ -2264,6 +2325,39 @@ $("capAdd").onclick = () => {
   P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); selX = { k: "caption", id: c.id }; changed();
   setTimeout(() => focusCap(c.id, true), 30);
 };
+
+// 자막 한 줄씩 나누기: 지금 글(고친 글) 그대로 서버(editor.oneline_captions)에서 나눔 → 되돌리기 한 단계 · 자동 저장
+async function capOneLine() {
+  const btn = $("capOneLine"); if (btn.disabled) return;
+  const before = JSON.stringify(P.captions);
+  btn.disabled = true; btn.textContent = "나누는 중…";
+  try {
+    const r = await fetch("/api/edit/oneline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: NAME, captions: P.captions, info: P.info }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    if (JSON.stringify(P.captions) !== before) return toast("나누는 동안 자막이 바뀌었어요 · 한 번 더 눌러 주세요");
+    hideCapBan();
+    if (JSON.stringify(j.captions) === before) return toast("자막이 이미 모두 한 줄이에요");
+    commit("자막 한 줄씩 나누기");
+    const n0 = P.captions.length; P.captions = j.captions; P.capOneLine = 1;
+    if (selX && selX.k === "caption" && !P.captions.some(c => c.id === selX.id)) selX = null;
+    capKey = ""; changed();
+    toast(j.split ? `긴 자막 ${j.split}개를 한 줄씩 나눴어요 · 자막 ${n0}개 → ${P.captions.length}개 (되돌리기: Ctrl+Z)` : "쇼츠 편집본에서 쓸 한 줄 자막도 맞춰 뒀어요");
+  } catch (e) { toast("자막을 나누지 못했어요 · " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "자막 한 줄씩 나누기"; }
+}
+$("capOneLine").onclick = capOneLine;
+// 여러 줄로 뭉친 자막이 많은 예전 프로젝트: 한 번만 '한 줄씩 나눌까요?' 안내 (괜찮아요 → 다시 안 띄움)
+function hideCapBan() { $("capBan").style.display = "none"; if (P && !P.capOneLine) { P.capOneLine = 1; scheduleSave(); } }
+function showCapBan(n) {
+  if (!n || P.capOneLine || n < Math.max(3, 0.15 * P.captions.length)) return;
+  const b = $("capBan");
+  b.innerHTML = `자막 ${n}개가 여러 줄로 길게 뭉쳐 있어요. 한 줄씩 짧게 나눌까요? <span class="hint">(고친 글은 그대로 · Ctrl+Z 로 되돌려요)</span>
+    <div class="acts"><button class="btn pri" id="capBanGo">한 줄씩 나누기</button><button class="btn" id="capBanNo">괜찮아요</button></div>`;
+  b.style.display = "";
+  $("capBanGo").onclick = capOneLine;
+  $("capBanNo").onclick = hideCapBan;
+}
 
 /* ---------- 추천 · 자동 편집 ---------- */
 async function renderRec() {
@@ -3385,7 +3479,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;
   for (const m of P.media) if (m.id !== "main") loadBundle(m);
   setTool("select");
-  layoutFrame(); zoomFit(); renderCaps(); renderPanels(); renderBin();
+  layoutFrame(); zoomFit(); renderCaps(); renderPanels(); renderBin(); showCapBan(j.capLong);
   $("saved").textContent = "자동 저장 켜짐";
   requestAnimationFrame(loop);
   const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기") watchJob("내보내기");

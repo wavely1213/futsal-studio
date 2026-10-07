@@ -1017,28 +1017,85 @@ def _recover(p):
     return None, None
 
 
-def _captions_of(segs, info):
-    """받아쓰기 → 편집실 자막. 단어 시각이 있으면 읽기 좋게 나눔 (세로 영상은 쇼츠형 한 줄, 가로는 롱폼형 두 줄까지 ·
-    용어 사전의 여러 단어 용어는 안 나눔) · 없으면(예전 받아쓰기) 구간 그대로.
+def _wt(ws):
+    """단어 시각을 작게: 1/100초 정수 (첫 단어 시작, 그 뒤로는 앞 값과의 차이)."""
+    cs = [int(round(float(x) * 100)) for w in ws for x in (w["s"], w["e"])]
+    return cs[:1] + [b - a for a, b in zip(cs, cs[1:])]
+
+
+def _cap_fmt(info):
+    return "shorts" if (info or {}).get("height", 0) > (info or {}).get("width", 0) else "long"
+
+
+def _make_cap(part, fmt, terms, base=None):
+    """한 줄 자막 하나 → 편집실 자막 {id, start, end, text(, wt, sh, shn)} · base 의 다른 값(위치·모양 등)은 그대로.
+    가로 영상 자막은 쇼츠 편집본에서 쓸 쇼츠형 나눌 곳 sh(몇 번째 낱말부터 새 자막인지)와 그때 낱말 수 shn 도 함께."""
+    cap = {k: v for k, v in (base or {}).items() if k not in ("wt", "sh", "shn", "words")}
+    cap.update(id=cap.get("id") or _nid(), start=round(float(part["start"]), 3), end=round(float(part["end"]), 3), text=part["text"])
+    ws = part.get("words")
+    if ws:
+        cap["wt"] = _wt(ws)
+    if fmt == "long":
+        sub = captions.split_text(part["text"], part["start"], part["end"], "shorts", terms, words=ws)
+        if len(sub) > 1:
+            cap["sh"], k = [], 0
+            for q in sub[:-1]:
+                k += len(q["text"].split())
+                cap["sh"].append(k)
+            cap["shn"] = len(part["text"].split())
+    return cap
+
+
+def _terms():
+    return captions.load_dict(core.dict_path())["terms"]
+
+
+def silences_of(name):
+    try:
+        return json.loads((core.adir(name) / "analysis.json").read_text(encoding="utf-8")).get("silences") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def _captions_of(segs, info, silences=()):
+    """받아쓰기 → 편집실 자막 (모두 한 줄). 세로 영상은 쇼츠형(13글자·2.2초), 가로는 롱폼형(17글자·3초) ·
+    용어 사전의 여러 단어 용어는 안 나눔 · 단어 시각이 없으면(예전 받아쓰기) 띄어쓰기에서 나누고 시간은 글자 수대로 (silences: 조용한 곳).
     단어 시각은 작게 wt (1/100초 정수: 첫 단어 시작, 그 뒤로는 앞 값과의 차이 · 낱말은 자막 글 그대로) · 가로 영상 자막은 쇼츠 편집본에서 쓸
-    쇼츠형 나눌 곳 sh(몇 번째 낱말부터 새 자막인지)도 함께."""
-    fmt = "shorts" if info.get("height", 0) > info.get("width", 0) else "long"
-    terms = captions.load_dict(core.dict_path())["terms"] if any(s.get("words") for s in segs) else ()
-    out = []
-    for c in captions.from_segments(segs, fmt, terms):
-        ws = c.pop("words", None)
-        cap = {"id": _nid(), **c}
-        if ws:
-            cs = [int(round(float(x) * 100)) for w in ws for x in (w["s"], w["e"])]
-            cap["wt"] = cs[:1] + [b - a for a, b in zip(cs, cs[1:])]
-            parts = captions.chunk(ws, "shorts", terms=terms) if fmt == "long" else []
-            if len(parts) > 1 and sum(len(q["words"]) for q in parts) == len(ws):
-                cap["sh"], k = [], 0
-                for q in parts[:-1]:
-                    k += len(q["words"])
-                    cap["sh"].append(k)
-        out.append(cap)
-    return out
+    쇼츠형 나눌 곳 sh 도 함께."""
+    fmt, terms = _cap_fmt(info), _terms()
+    return [_make_cap(c, fmt, terms) for c in captions.from_segments(segs, fmt, terms, silences)]
+
+
+def oneline_captions(caps, info, silences=(), terms=None):
+    """편집실 '자막 한 줄씩 나누기': 프로젝트 자막을 모두 한 줄 자막으로 → (새 자막 목록, 나눈 자막 수).
+    지금 글(사용자가 고친 글) 그대로 나누고, 단어 시각(wt)이 글과 맞으면 그 시각대로, 아니면 글자 수대로 (silences: 조용한 곳).
+    이미 한 줄이고 짧은 자막은 그대로 (두 번 눌러도 같음) · 나뉜 첫 자막은 원래 id, 다른 값(위치·모양 등)은 나뉜 자막마다 그대로."""
+    fmt = _cap_fmt(info)
+    terms = _terms() if terms is None else terms
+    out, n = [], 0
+    for c in sorted((c for c in caps or () if isinstance(c, dict)), key=lambda c: float(c.get("start") or 0)):
+        text = str(c.get("text") or "")
+        if not captions.needs_split(text, fmt):
+            if fmt == "long" and not c.get("sh") and text.strip():  # 예전 자막: 쇼츠 편집본에서 나눌 곳만 새로
+                ws = _cap_words(c)
+                c = _make_cap({"start": c["start"], "end": c["end"], "text": " ".join(text.split()), **({"words": ws} if ws else {})}, fmt, terms, c)
+            out.append(c)
+            continue
+        ws = _cap_words(c)
+        parts = captions.split_text(text, c["start"], c["end"], fmt, terms, words=ws, silences=() if ws else silences)
+        if not parts:
+            out.append(c)
+            continue
+        n += 1
+        for k, q in enumerate(parts):
+            out.append(_make_cap(q, fmt, terms, dict(c, id=c.get("id") if k == 0 else None)))
+    return out, n
+
+
+def long_captions(caps, info):
+    """한 줄로 나누면 좋을 자막 수 (편집실이 열 때 '한 줄씩 나눌까요?' 안내를 띄울지)."""
+    fmt = _cap_fmt(info)
+    return sum(1 for c in caps or () if isinstance(c, dict) and captions.needs_split(c.get("text"), fmt))
 
 
 def load_project(name):
@@ -1079,7 +1136,7 @@ def load_project(name):
     proj = {
         "source": name,
         "info": info,
-        "captions": _captions_of(segs, info),
+        "captions": _captions_of(segs, info, silences_of(name)),
         "sequences": seqs,
         "active": seqs[0]["id"],
     }
@@ -1192,7 +1249,7 @@ def reanalyze_project(name):
     info = media_info(name)
     proj["info"] = info
     segs = _segments_of(name)
-    caps = _captions_of(segs, info)
+    caps = _captions_of(segs, info, silences_of(name))
     changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
     proj["captions"] = caps
     for m in proj.get("media") or []:
@@ -1521,14 +1578,14 @@ def timeline_captions(proj):
 
 # ---------- 단어 시각 · 쇼츠형 자막 나누기 (#5) ----------
 
-# 쇼츠 편집본에서 가로 영상 자막을 sh 로 나눠 내보낼지 — 편집실 미리보기(editor.html)가 아직 안 나누므로 꺼 둠
-# (켜면 미리보기와 내보낸 영상의 자막이 달라짐 · 미리보기가 같은 방식으로 나누게 되면 True)
-SHORTS_SPLIT = False
+# 쇼츠 편집본에서 가로 영상 자막을 sh 로 나눠 보여 주고 내보냄 — 편집실 미리보기(editor.html capParts)도 같은 방식으로 나눔
+SHORTS_SPLIT = True
+
 
 def _cap_words(cap):
     """자막의 단어 시각 [{w, s, e}] — 자막 안에 든 단어 수가 지금 글의 낱말 수와 같을 때만.
     편집실에서 글을 고쳐 낱말 수가 바뀌었거나 자막을 나눠서 안 맞으면 None (글자 수 비례로).
-    wt(1/100초 · 첫 값 뒤로는 차이) 또는 예전 모양 words [{w, s, e}] 둘 다 읽음."""
+    wt(1/100초 · 첫 값 뒤로는 차이) 또는 예전 모양 words [{w, s, e}] 둘 다 읽음. editor.html capWords 와 같은 규칙."""
     toks = str(cap.get("text") or "").split()
     try:
         if cap.get("wt") is not None:
@@ -1545,26 +1602,67 @@ def _cap_words(cap):
 
 
 def _shorts_parts(cap):
-    """쇼츠 편집본에서 가로 영상 자막을 쇼츠형(한 줄 12글자·2초까지)으로 — 만들 때 정해 둔 나눌 곳(sh)에서.
-    나눈 자막은 이어서 보임 (다음 자막 시작까지) · 글을 고쳐 낱말 수가 바뀌었으면 한 덩어리 그대로. [(자막, 단어 시각)]"""
+    """쇼츠 편집본에서 가로 영상 자막을 쇼츠형(한 줄 13글자·2.2초까지)으로 — 만들 때 정해 둔 나눌 곳(sh)에서.
+    단어 시각이 맞으면 그 시각에서, 없으면(예전 받아쓰기) 글자 수대로 나눈 시각에서 (낱말 수가 shn 과 같을 때만).
+    나눈 자막은 이어서 보임 (다음 자막 시작까지) · 글을 고쳐 낱말 수가 바뀌었으면 한 덩어리 그대로. [(자막, 단어 시각)]
+    editor.html capParts 와 같은 규칙."""
     ws = _cap_words(cap)
-    sh = cap.get("sh")
-    if not ws or not isinstance(sh, list) or not sh:
+    sh, toks = cap.get("sh"), str(cap.get("text") or "").split()
+    if not isinstance(sh, list) or not sh or (cap.get("shn") is not None and cap.get("shn") != len(toks)):
         return [(cap, ws)]
+    tm = ws
+    if not tm:
+        if cap.get("shn") is None:
+            return [(cap, ws)]
+        tot, acc, tm = sum(len(t) for t in toks) or 1, 0, []
+        for t in toks:  # 글자 수대로 (editor.html 과 같은 식)
+            tm.append({"w": t, "s": cap["start"] + (cap["end"] - cap["start"]) * acc / tot})
+            acc += len(t)
     try:
-        cuts = [0] + [int(k) for k in sh] + [len(ws)]
+        cuts = [0] + [int(k) for k in sh] + [len(tm)]
     except (TypeError, ValueError):
         return [(cap, ws)]
     if any(b <= a for a, b in zip(cuts, cuts[1:])):
         return [(cap, ws)]
     out = []
     for a, b in zip(cuts, cuts[1:]):
-        s = cap["start"] if a == 0 else max(cap["start"], float(ws[a]["s"]))
-        e = cap["end"] if b == len(ws) else min(cap["end"], float(ws[b]["s"]))
+        s = cap["start"] if a == 0 else max(cap["start"], float(tm[a]["s"]))
+        e = cap["end"] if b == len(tm) else min(cap["end"], float(tm[b]["s"]))
         if e - s <= 0.04:
             return [(cap, ws)]
-        out.append(({"start": s, "end": e, "text": " ".join(w["w"] for w in ws[a:b])}, ws[a:b]))
+        out.append(({"start": s, "end": e, "text": " ".join(w["w"] for w in tm[a:b])}, ws[a:b] if ws else None))
     return out
+
+
+# 자막 한 줄이 화면 밖으로 넘치지 않게: 글자 폭을 어림해 (Pretendard: 한글 0.864em) 넘치면 글자를 조금 줄임 (0.7배까지).
+# 그보다 더 줄여야 하는 긴 자막(예전 자막)은 크기 그대로 두고 줄을 바꿈 · editor.html capFit 과 같은 규칙
+FIT_MIN = 0.7
+
+
+def _em(ch):
+    o = ord(ch)
+    if ch == " ":
+        return 0.24
+    if o >= 0x1100:
+        return 0.9
+    if "0" <= ch <= "9" or "a" <= ch <= "z":
+        return 0.6
+    if "A" <= ch <= "Z":
+        return 0.78
+    return 0.42
+
+
+def cap_fit(text, st, W):
+    """자막 글자 크기 배율 (1 = 그대로) — 가장 긴 줄이 화면 폭의 90%(왼쪽/오른쪽 정렬이면 남은 쪽) 안에 들게."""
+    x, al = float(st.get("x", 0.5)), st.get("align", "center")
+    room = (1 - x) if al == "left" else x if al == "right" else 2 * min(x, 1 - x)
+    avail = W * (min(0.9, room - 0.05) if al == "center" else room - 0.05)
+    em = max([sum(_em(ch) for ch in ln) for ln in str(text).replace("\r", "").split("\n")] or [0])
+    need = em * float(st["size"]) + 2 * float(st.get("strokeW") or 0)
+    if need <= avail or avail <= 0:
+        return 1.0
+    k = math.floor(avail / need * 100) / 100
+    return k if k >= FIT_MIN else 1.0
 
 
 # ---------- 자막 (ASS) ----------
@@ -1663,18 +1761,20 @@ def build_ass(proj, W, H):
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
                      rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
-    def event(style, s, start, end, text, words=None):
+    def event(style, s, start, end, text, words=None, fit=False):
         al = s.get("align", "center")
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
-        tags = rf"{{\an{an}\pos({x},{y})}}" if s["effect"] != "slide" else rf"{{\an{an}}}"
+        k = cap_fit(text, s, W) if fit else 1.0
+        fs = rf"\fs{round(s['size'] * k * FONT_K)}" if k < 1 else ""  # 화면보다 긴 한 줄 자막은 글자만 조금 작게
+        tags = rf"{{\an{an}\pos({x},{y}){fs}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}}}"
         body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
         eff = _effect_tags(s["effect"], x, y, end - start)
         lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     if proj.get("captionsOn", True):
         for c in timeline_captions(proj):
-            event("Cap", st, c["start"], c["end"], c["text"], c.get("words"))
+            event("Cap", st, c["start"], c["end"], c["text"], c.get("words"), fit=True)
     for t in proj["titles"]:
         if t["start"] < tl_total:
             event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), t["text"])
