@@ -1028,6 +1028,7 @@ class UploadFlowTests(ServiceBase):
         self.assertEqual({k2: v["state"] for k2, v in r["steps"].items()}, {"thumbnail": "todo", "captions": "todo", "playlist": "todo"})
         self.assertEqual(r["steps"]["captions"]["msg"], yu.RELOGIN_STEP)
         self.assertEqual(self.fake.snapshot()["log"].count("token:refresh"), before)  # 새 토큰을 받으려다 실패한 뒤로는 부르지 않음
+        self.assertEqual(yu.history()["items"][0]["steps"]["playlist"]["msg"], yu.RELOGIN_STEP)  # 기록에도
         self.assertTrue(yu.status()["needsRelogin"])
         self.connect()
         r2 = yu.finish(r["videoId"], None, self.log, self.cancel)

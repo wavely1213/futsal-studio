@@ -814,9 +814,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._drain(n)
             return self._incomplete(s)
         rate = f.modes.get("rate")
-        drop = f.modes.get("drop_after")
         got, t0 = bytearray(), time.time()
         while len(got) < n:
+            drop = f.modes.get("drop_after")  # 보내는 도중에 켜도 듣게 (조각마다 다시 봄)
             try:
                 blk = self.rfile.read(min(65536, n - len(got)))
             except (OSError, ValueError):

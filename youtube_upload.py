@@ -1347,6 +1347,7 @@ def _post(c, entry, log, cancel, only=None, check=True):
                            ("썸네일 편집기에서 다시 저장해 주세요" if name == "thumbnail" else "편집실에서 다시 내보내 주세요")}
             log(f"  {label[name]} · 파일을 읽지 못함")
         _history_put(entry)
+    _history_put(entry)  # 건너뛴 단계(연결 끊김·멈춤 · continue)의 안내도 기록에
     if check and not dead and not (cancel is not None and cancel.is_set()):
         core.set_progress(label="유튜브 마무리 중", item=entry["name"], step="4/4", pct=None, detail="올라간 상태 확인하는 중")
         try:
