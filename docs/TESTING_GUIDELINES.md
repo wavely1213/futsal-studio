@@ -12,6 +12,7 @@
 - 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 450개, 개발 환경에서 4분 남짓. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
 - 단일 파일 실행: `python3 -m unittest tests.test_update` / 하나만: `python3 -m unittest tests.test_update.InstallTests.test_hash_mismatch_leaves_app_unchanged`
 - 테스트 파일 위치·네이밍: `tests/test_<영역>.py` (평평한 구조), 고정 자료는 `tests/fixtures/`. `tests/` 는 배포 목록에서 빠진다.
+- 썸네일 AI 추천 e2e(개발용, unittest 가 줍지 않음): `tests/e2e/mkwork.py <작업폴더> <시험 영상 폴더>` 로 시험 작업 폴더를 만들고 격리 서버를 띄운 뒤 `TH_PORT=<포트> python3 tests/e2e/thq_e2e.py <스크린샷 폴더>` → `FAILS: 0`. 시험 영상은 저장소에 넣지 않는다(출처·이름은 mkwork.py 머리말).
 
 | 파일 | 대상 |
 |---|---|

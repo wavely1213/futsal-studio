@@ -121,13 +121,18 @@ class AiTests(unittest.TestCase):
 
     def test_parse_checks_each_item(self):
         txt = "여기요\n```json\n" + json.dumps([
-            {"l1": "수비가 속는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌"},
+            {"l1": "수비를 속이는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌", "q": "발바닥 드래그로 수비를 속이세요"},
             {"l1": "너무너무너무너무 긴 첫째 줄이에요", "l2": "x", "emph": "x", "sub": ""},
             {"l1": 3, "l2": "숫자", "emph": "", "sub": ""},
             {"l1": "<b>나쁜</b>", "l2": "글자", "emph": "", "sub": ""},
             {"l1": "드래그", "l2": "무조건 봐", "emph": "없는 낱말", "sub": ""}], ensure_ascii=False) + "\n```"
         out = tc.parse_ai(txt)
-        self.assertEqual([c["l1"] for c in out], ["수비가 속는", "드래그"])
+        self.assertEqual([c["l1"] for c in out], ["수비를 속이는", "드래그"])
+        body = "발바닥 드래그로 수비를 속이세요"
+        grounded = tc.parse_ai(txt, body, ["발바닥 드래그", "수비"])
+        self.assertEqual([c["l1"] for c in grounded], ["수비를 속이는"], "대사가 있으면 근거(q) 인용이 맞는 문구만")
+        self.assertEqual(grounded[0]["q"], body)
+        self.assertFalse(tc.grounded("수비 전환", "이 순서대로!", "수비 전환이 중요해요", "수비 전환이 중요해요", ["수비 전환"]), "주제 말고 대사에 없는 꼬리표")
         self.assertEqual(out[0]["emph"], [1, 4, 7])
         self.assertIsNone(out[1]["emph"], "줄에 없는 강조 낱말은 강조 없음")
         self.assertEqual(out[0]["src"], "ai")
@@ -143,7 +148,7 @@ class AiTests(unittest.TestCase):
         self.assertIn("영상만 봐도 / 실력이 늘어요", p)
 
     def test_run_ai_caches_and_invalidates(self):
-        reply = json.dumps([{"l1": "수비가 속는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌"},
+        reply = json.dumps([{"l1": "수비를 속이는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌", "q": "발바닥 드래그로 수비를 속이세요"},
                             {"l1": "이거 하나면", "l2": "수비 끝!", "emph": "끝!", "sub": ""}], ensure_ascii=False)
         with mock.patch.object(claude_cli, "run", return_value={"text": reply, "model": "claude-test"}) as run:
             r = tc.run_ai(self.NAME, log=lambda m: None)
@@ -152,7 +157,8 @@ class AiTests(unittest.TestCase):
         self.assertTrue((core.adir(self.NAME) / tc.CACHE).is_file())
         sug = tc.suggest(self.NAME)
         self.assertTrue(sug["ai"])
-        self.assertIn("수비가 속는", [c["l1"] for c in sug["items"] if c["src"] == "ai"])
+        self.assertIn("수비를 속이는", [c["l1"] for c in sug["items"] if c["src"] == "ai"])
+        self.assertNotIn("이거 하나면", [c["l1"] for c in sug["items"] if c["src"] == "ai"], "판정 3회차: 대사 근거(q)가 없는 클로드 문구는 버림")
         # 받아쓰기가 바뀌면 예전 클로드 문구는 안 씀
         import os
         st = self.tr.stat()

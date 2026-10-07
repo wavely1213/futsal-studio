@@ -102,6 +102,7 @@ def hamming(a, b):
         return 64
 
 
+CAND_VER = 2       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로)
 GRADE_VER = 5      # 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
@@ -383,7 +384,7 @@ def _cand_sig(name):
     import face
     import detect
     import avmodels  # 지연 import: avmodels → thumb
-    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready(), avmodels.ready("ocr"), GRADE_VER]
+    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready(), avmodels.ready("ocr"), GRADE_VER, CAND_VER]
 
 
 def cached_candidates(name):
@@ -496,15 +497,44 @@ TEXT_FLOOR = 0.35   # 감점은 여기까지 (글자 있는 장면만 있는 영
 TEXT_MIN_H = 0.06   # 글자 상자 높이가 화면의 6% 보다 낮으면(간판·등번호·작은 자막) 셈하지 않음
 
 
-def text_boxes(rgb, band=None, band_y=None):
-    """장면에 이미 박혀 있는 큰 글자 상자들 [[x, y, w, h]] (0~1). 글자 읽기 모델이 받아져 있을 때만 (여기서 내려받지 않음) · 없으면 None.
-    템플릿이 잘라 내는 자막·방송 띠 안 글자와 작은 글자(간판·등번호)는 뺌."""
+def ocr_lines(rgb):
+    """글자 읽기 결과 그대로 (모델이 받아져 있을 때만 · 여기서 내려받지 않음) · 없으면 None."""
     import numpy as np
     import avmodels  # 지연 import: avmodels → thumb
     if not (avmodels.available("ocr") or (avmodels.ready("ocr") and avmodels.ensure("ocr", label="썸네일 분석"))):
         return None
+    return avmodels.ocr(np.asarray(rgb)) or []
+
+
+def name_bar(lines):
+    """방송 화면 아래의 이름 띠(로워서드: 'Edwin José Pinzón' 같은 작은 글자 줄) → 띠가 시작하는 높이 0~1 · 없으면 None.
+    판정 3회차: 큰 글자만 보는 text_boxes 가 아래 20% 의 작은 이름 띠를 못 잡아 쇼츠에 방송 이름 띠가 그대로 남음."""
+    ys = []
+    for x in lines or []:
+        x0, y0, x1, y1 = x["box"]
+        if (y0 + y1) / 2 > 0.75 and y1 - y0 >= 0.02 and x1 - x0 >= 0.1:
+            ys.append(y0)
+    return round(max(0.7, min(ys) - 0.015), 3) if ys else None
+
+
+def colorfulness(rgb):
+    """색이 얼마나 요란한지 (Hasler–Süsstrunk · 보통 경기장 15~45 · 분홍·초록 낙서 벽 85+)."""
+    import numpy as np
+    a = np.asarray(rgb.resize((160, 90)), np.float32)
+    rg = a[..., 0] - a[..., 1]
+    yb = 0.5 * (a[..., 0] + a[..., 1]) - a[..., 2]
+    return round(float(np.hypot(rg.std(), yb.std()) + 0.3 * np.hypot(rg.mean(), yb.mean())), 1)
+
+
+def text_boxes(rgb, band=None, band_y=None, lines=None):
+    """장면에 이미 박혀 있는 큰 글자 상자들 [[x, y, w, h]] (0~1). 글자 읽기 모델이 받아져 있을 때만 (여기서 내려받지 않음) · 없으면 None.
+    템플릿이 잘라 내는 자막·방송 띠 안 글자와 작은 글자(간판·등번호)는 뺌. lines: 이미 읽은 결과(ocr_lines)."""
+    if lines is None:
+        lines = ocr_lines(rgb)
+    if lines is None:
+        return None
     out = []
-    for x in avmodels.ocr(np.asarray(rgb)) or []:
+    for x in lines:
         x0, y0, x1, y1 = x["box"]
         cy = (y0 + y1) / 2
         if x["h"] < TEXT_MIN_H or (band == "bottom" and band_y and cy > band_y) or (band == "top" and band_y and cy < band_y):
@@ -598,14 +628,19 @@ def frame_candidates(name, n=TOP_N):
             with Image.open(grab(name, t)) as im:
                 rgb = ImageOps.exif_transpose(im).convert("RGB")
             info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
-            tb = text_boxes(rgb, info["band"], info["bandY"])
+            info["color"] = colorfulness(rgb)
+            lines = ocr_lines(rgb)
+            nb = name_bar(lines)
+            if nb and info["band"] is None:
+                info["band"], info["bandY"] = "bottom", nb  # 아래 이름 띠는 자막 띠처럼 잘라 냄
+            tb = text_boxes(rgb, info["band"], info["bandY"], lines)
         except Exception:
             info.setdefault("grade", None)
         ta = None if tb is None else round(min(1.0, sum(b[2] * b[3] for b in tb)), 4)
         sc *= text_penalty(ta)
         it = {"t": t, "url": f"/frame?name={name}&t={t}", "score": round(sc, 3), "kind": info["kind"], "persons": info["persons"], "ball": info["ball"],
               "main": main_person(info["persons"], info["ball"]), "blur": info["blur"], "band": info["band"], "bandY": info["bandY"],
-              "grade": info["grade"], "hash": info["hash"], "text": ta, "flags": info.get("flags", [])}
+              "grade": info["grade"], "hash": info["hash"], "text": ta, "flags": info.get("flags", []), "color": info.get("color")}
         if tb:
             it["tboxes"] = tb[:12]
         if fs:

@@ -29,13 +29,14 @@ class CopyPromiseTests(unittest.TestCase):
     def test_concrete_templates_and_flags(self):
         c = self.cands("1대1 돌파 이렇게 하세요", ["수비를 속이는 드리블은 세 가지 단계예요"])
         self.assertIn("one", c)
-        self.assertIn("order", c)
+        self.assertNotIn("order", c, "판정 3회차: '이 순서대로!'는 화면에 순서가 없는 빈 약속")
         self.assertEqual((c["numlist"]["l2"], c["numlist"]["concrete"]), ("3가지면 끝", True), "대사의 '세 가지' → 숫자 약속")
         self.assertEqual(c["result"]["l2"], "수비가 속아요", "드리블 → 결과 약속")
         self.assertTrue(c["beat"]["concrete"])
         self.assertTrue(c["howto"]["vague"] and not c["howto"]["concrete"])
         self.assertFalse(c["why"]["concrete"], "'1대1' 은 주제 낱말이라 숫자 약속이 아님")
-        self.assertGreater(c["one"]["score"], c["howto"]["score"])
+        self.assertTrue(c["one"]["stock"] and c["result"]["stock"], "판정 3회차: '딱 1가지'·'수비가 속아요'는 상투 꼬리표")
+        self.assertGreater(c["numlist"]["score"], c["one"]["score"])
 
     def test_numbers_only_from_transcript(self):
         c = self.cands("슈팅 연습", ["디딤발 위치가 중요해요"])
@@ -93,7 +94,7 @@ class GradeTests(unittest.TestCase):
         self.assertIn("GRADE_VER", inspect.getsource(thumb._cand_sig))
 
 
-JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "frameQ", "weakScenes", "headlessBad")
+JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "loud", "frameQ", "weakScenes", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }
