@@ -1,5 +1,6 @@
 """편집실: 영상 정보·파형·썸네일·프로젝트 저장(멀티 트랙)·자동 추천·내보내기(영상/프리미어 XML/SRT)."""
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -15,7 +16,9 @@ from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
 from urllib.parse import quote
 
+import captions
 import core
+import takes
 
 PROJECTS = core.WORK / "projects"
 ASSETS = core.WORK / "edit_media"  # 편집실에서 가져온 음악·이미지·영상
@@ -449,8 +452,12 @@ def _items_from_cuts(cuts, fade_last=0.0, zoom=1.0):
         pr = _pair(c["in"], c["out"], start=pos, fade_out=fade_last if k == len(cuts) - 1 else 0.0)
         if c.get("zoom") and zoom > 1.001:
             pr[0]["fx"] = {"scale": {"v": round(zoom * 100, 1), "k": []}}
+        sp = float(c.get("speed") or 1.0)  # 말 빠르기 맞추기 (#7) — 영상·소리 같이
+        if abs(sp - 1) > 1e-6:
+            for x in pr:
+                x["speed"] = sp
         items += pr
-        pos += c["out"] - c["in"]
+        pos += (c["out"] - c["in"]) / sp
     return items
 
 
@@ -471,6 +478,119 @@ def _punch(cuts, segs, every):
         out.append({"in": round(a, 3), "out": c["out"], "zoom": zoomed})
         pos += c["out"] - c["in"]
     return out
+
+
+# ---------- 컷 리듬 맞추기 (#7): 배운 컷 길이로 긴 말 컷 나누기 · 말 빠르기 ----------
+RHYTHM_MIN = 0.6     # 나눈 조각이 이보다 짧으면 안 나눔(초)
+WORD_GAP = 0.1       # 단어끼리 이만큼까지 겹쳐도 그 사이를 단어 경계로 봄 (가운데는 두 단어에서 0.05초 안)
+TALK_DENSE = 0.5     # 1초 글자 수가 영상 평균의 이 비율 밑이면 시범·보여 주기 (나누지도 빠르게 하지도 않음)
+DEMO_GAP = 1.0       # 단어 사이가 이보다 길면 말 대신 보여 주는 중 → 그 사이에서는 안 나눔 (시범 장면이 끊기지 않게)
+TEMPO_MAX = 1.12
+SOFT_ZOOM = 1.08     # 확대 컷이 거의 없는 스타일은 나눈 곳만 살짝 당김 (카메라 두 대 느낌만)
+
+
+def _rhythm_words(segs):
+    """받아쓰기 → 단어 [(시작, 끝, 글자 수)] (시작 순)."""
+    out = []
+    for s in segs or ():
+        for w in s.get("words") or ():
+            try:
+                a, b, n = float(w["s"]), float(w["e"]), len(str(w.get("w") or "").replace(" ", ""))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if b >= a and n:
+                out.append((a, b, n))
+    return sorted(out)
+
+
+def _coach_cps(segs):
+    """영상 전체 말 빠르기 (1초 글자 수 · 스타일 배우기와 같은 셈: 받아쓴 구간 길이로 나눔). 모르면 0."""
+    talk = sum(max(0.0, float(s["end"]) - float(s["start"])) for s in segs or ())
+    chars = sum(len(str(s.get("text") or "").replace(" ", "")) for s in segs or ())
+    return chars / talk if talk > 5 else 0.0
+
+
+def _chars_in(a, b, units):
+    """[a, b] 안에 든 글자 수 (걸친 단어·구간은 걸친 만큼)."""
+    n = 0.0
+    for s, e, c in units:
+        if e > a and s < b:
+            n += c * ((min(b, e) - max(a, s)) / (e - s) if e - s > 1e-6 else 1.0)
+    return n
+
+
+def _is_talk(a, b, units, cps):
+    return b - a > 1e-6 and cps > 0 and _chars_in(a, b, units) / (b - a) >= TALK_DENSE * cps
+
+
+def _word_bounds(words, a, b):
+    """[a, b] 안의 단어 경계 — 앞 단어들이 다 끝나고(0.1초 겹침까지) 다음 단어가 시작하는 곳의 가운데.
+    말이 오래 끊긴 곳(DEMO_GAP 넘게)은 빼서, 말 없이 보여 주는 장면은 한 컷으로 둠."""
+    out, me = [], None
+    for s, e, _ in words:
+        if e <= a or s >= b:
+            continue
+        if me is not None and me - WORD_GAP <= s <= me + DEMO_GAP:
+            out.append(round((me + s) / 2, 3))
+        me = e if me is None else max(me, e)
+    return out
+
+
+def _split_rhythm(cuts, words, target, units=None, cps=None):
+    """말하는 컷 중 목표 컷 길이(targetShot)보다 긴 것을 단어 경계에서 나눔 — 나눈 곳마다 원래 크기 ↔ 확대(zoomScale)를 번갈아
+    (카메라 두 대처럼 · zoom 표시는 _punch 와 같음: _items_from_cuts 가 확대). 지우는 곳은 없음 (나누기만).
+    target: 초, 또는 타임라인 위치 → 초 (도입·본론·마무리). 시범처럼 말이 드문 컷은 그대로."""
+    tf = target if callable(target) else (lambda pos, t=float(target or 0): t)
+    units = words if units is None else units
+    cps = cps or 0.0  # 모르면 말이 드문 컷도 나눔
+    out, pos = [], 0.0
+    for c in cuts:
+        a, b = float(c["in"]), float(c["out"])
+        cur, k0 = a, len(out)
+        if tf(pos) > 0 and b - a > tf(pos) and (not cps or _is_talk(a, b, units, cps)):
+            bs = _word_bounds(words, a, b)
+            while True:
+                t = tf(pos + cur - a)
+                if t <= 0 or b - cur <= 1.5 * t:
+                    break
+                half = max(RHYTHM_MIN, 0.5 * t)
+                cand = [x for x in bs if cur + half <= x <= b - half]
+                if not cand:
+                    break
+                x = min(cand, key=lambda v: abs(v - (cur + t)))
+                out.append({"in": round(cur, 3), "out": x, "zoom": bool((len(out) - k0) % 2)})
+                cur = x
+        # 나눈 조각만 원래 크기 ↔ 확대 번갈아 (안 나눈 컷·시범 장면은 원래 화면 그대로)
+        out.append({"in": round(cur, 3), "out": c["out"], "zoom": bool((len(out) - k0) % 2)})
+        pos += b - a
+    return out
+
+
+def _curve_fn(curve3, total):
+    """컷 리듬 3구간 [도입 30초, 본론, 마무리 20초] → 타임라인 위치별 목표 컷 길이."""
+    c = [float(x or 0) for x in curve3]
+    return lambda pos: c[0] if pos < 30.0 else c[2] if pos >= total - 20.0 else c[1]
+
+
+def _apply_tempo(cuts, units, cps, factor):
+    """말이 촘촘한 컷만 factor 배 빠르게 (1.0~1.12) · 시범처럼 말이 드문 곳은 1.0 그대로."""
+    f = round(min(TEMPO_MAX, max(1.0, float(factor or 1.0))), 3)
+    return [dict(c, speed=f) if f > 1.0 and _is_talk(c["in"], c["out"], units, cps) else dict(c) for c in cuts]
+
+
+def _rhythm(cuts, segs, st, every):
+    """스타일 가편집의 컷 목록 → 컷 리듬(나누기·번갈아 확대) + 말 빠르기. 스타일 값이 없으면 예전처럼 줌 컷만."""
+    words = _rhythm_words(segs)
+    units = words or [(float(s["start"]), float(s["end"]), len(str(s["text"]).replace(" ", ""))) for s in segs]
+    cps = _coach_cps(segs)
+    split = float(st.get("splitShot") or 0)
+    c3 = st.get("curve3") if isinstance(st.get("curve3"), list) and len(st["curve3"]) == 3 else [split] * 3
+    if split > 0 and words:
+        out = _split_rhythm(cuts, words, _curve_fn(c3, sum(c["out"] - c["in"] for c in cuts)), units, cps)
+    else:
+        out = _punch(cuts, segs, every)
+    ref = float(st.get("tempo") or 0)
+    return _apply_tempo(out, units, cps, ref / cps) if ref > 0 and cps > 0 else out
 
 
 def _new_seq(name, fmt, items, **kw):
@@ -503,11 +623,13 @@ CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
 
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
-    style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기) — 있으면 그 스타일대로."""
+    style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기·컷 리듬·말 빠르기) — 있으면 그 스타일대로."""
     st = style or {}
     rec = recommend(name, keep_pause=st.get("keepPause"))
     segs = _segments_of(name)
     every, zoom = float(st.get("zoomEvery") or 0), min(1.6, max(1.0, float(st.get("zoomScale") or 1.0)))
+    if every <= 0:  # 컷 리듬 (#7): 확대 컷이 거의 없는 스타일 → 나눈 곳만 살짝
+        zoom = min(zoom, SOFT_ZOOM)
     master = {"volume": 1.0, "normalize": True, "lufs": round(min(-9.0, max(-24.0, float(st.get("lufs") or -14.0))), 1)}
 
     def cap(base):
@@ -522,13 +644,13 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     seqs = []
     if "long" in kinds:
         tidy = rec["tidy"] or [{"in": 0.0, "out": info["duration"]}]
-        seqs.append(_new_seq("롱폼 가편집", "long", _items_from_cuts(_punch(tidy, segs, every), zoom=zoom), captionStyle=cap(LONG_STYLE),
+        seqs.append(_new_seq("롱폼 가편집", "long", _items_from_cuts(_rhythm(tidy, segs, st, every), zoom=zoom), captionStyle=cap(LONG_STYLE),
                              layout={"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0},
                              master=dict(master), captionsOn=caps_on))
     if "shorts" in kinds:
         for i, r in enumerate(rec["shorts"], 1):
-            items = _items_from_cuts(_punch(r["cuts"], segs, every), 0.3, zoom=zoom)
-            length = sum(c["out"] - c["in"] for c in r["cuts"])
+            items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every), 0.3, zoom=zoom)
+            length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
             seqs.append(_new_seq(f"쇼츠 {i} · {r['title'][:14]}", "shorts", items, captionStyle=cap(SHORTS_STYLE),
                                  layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on,
                                  titles=[{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}]))
@@ -688,6 +810,30 @@ def _recover(p):
     return None, None
 
 
+def _captions_of(segs, info):
+    """받아쓰기 → 편집실 자막. 단어 시각이 있으면 읽기 좋게 나눔 (세로 영상은 쇼츠형 한 줄, 가로는 롱폼형 두 줄까지 ·
+    용어 사전의 여러 단어 용어는 안 나눔) · 없으면(예전 받아쓰기) 구간 그대로.
+    단어 시각은 작게 wt (1/100초 정수: 첫 단어 시작, 그 뒤로는 앞 값과의 차이 · 낱말은 자막 글 그대로) · 가로 영상 자막은 쇼츠 편집본에서 쓸
+    쇼츠형 나눌 곳 sh(몇 번째 낱말부터 새 자막인지)도 함께."""
+    fmt = "shorts" if info.get("height", 0) > info.get("width", 0) else "long"
+    terms = captions.load_dict(core.dict_path())["terms"] if any(s.get("words") for s in segs) else ()
+    out = []
+    for c in captions.from_segments(segs, fmt, terms):
+        ws = c.pop("words", None)
+        cap = {"id": _nid(), **c}
+        if ws:
+            cs = [int(round(float(x) * 100)) for w in ws for x in (w["s"], w["e"])]
+            cap["wt"] = cs[:1] + [b - a for a, b in zip(cs, cs[1:])]
+            parts = captions.chunk(ws, "shorts", terms=terms) if fmt == "long" else []
+            if len(parts) > 1 and sum(len(q["words"]) for q in parts) == len(ws):
+                cap["sh"], k = [], 0
+                for q in parts[:-1]:
+                    k += len(q["words"])
+                    cap["sh"].append(k)
+        out.append(cap)
+    return out
+
+
 def load_project(name):
     p = _ppath(name)
     with _SAVE_LOCK:
@@ -726,7 +872,7 @@ def load_project(name):
     proj = {
         "source": name,
         "info": info,
-        "captions": [{"id": _nid(), "start": s["start"], "end": s["end"], "text": s["text"]} for s in segs if s["text"]],
+        "captions": _captions_of(segs, info),
         "sequences": seqs,
         "active": seqs[0]["id"],
     }
@@ -826,7 +972,7 @@ def reanalyze_project(name):
     info = media_info(name)
     proj["info"] = info
     segs = _segments_of(name)
-    caps = [{"id": _nid(), "start": s["start"], "end": s["end"], "text": s["text"]} for s in segs]
+    caps = _captions_of(segs, info)
     changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
     proj["captions"] = caps
     for m in proj.get("media") or []:
@@ -868,6 +1014,38 @@ def _norm(t):
     return re.sub(r"[\s.,!?~…]+", "", t)
 
 
+# ---------- NG 테이크·슬레이트·말더듬 정리 (takes.py) ----------
+
+def _minus(cuts, ivs, pre=0.0):
+    """컷 목록에서 정리할 구간 [a, b) 빼기 · 남길 말 바로 앞 여유(pre)는 남김 · 잘려서 0.2초도 안 남는 조각은 버림.
+    슬레이트 말 구간은 그 말 끝에서 끝나므로 여유 없이 끝까지 뺌."""
+    ivs = [(a, round(b - (0.0 if w[:1] == ["슬레이트 말"] else pre), 2)) for a, b, *w in ivs
+           if b - (0.0 if w[:1] == ["슬레이트 말"] else pre) > a]
+    out = []
+    for c in cuts:
+        pieces = [(c["in"], c["out"])]
+        for a, b in ivs:
+            nxt = []
+            for x, y in pieces:
+                if b <= x or a >= y:
+                    nxt.append((x, y))
+                else:
+                    nxt += [q for q in ((x, a), (b, y)) if q[1] - q[0] >= 0.2]
+            pieces = nxt
+        out += [c] if pieces == [(c["in"], c["out"])] else [dict(c, **{"in": x, "out": y}) for x, y in pieces]
+    return out
+
+
+def _covered(ivs, a, b):
+    """[a, b) 가운데 정리할 구간에 덮인 길이(초) — 서로 겹친 곳은 한 번만 셈."""
+    got, end = 0.0, a
+    for x, y, *_ in sorted(ivs):
+        x, y = max(x, end), min(y, b)
+        if y > x:
+            got, end = got + y - x, y
+    return got
+
+
 def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초)."""
     if keep_pause:
@@ -891,6 +1069,11 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
             junk.add(i)
         if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]):
             junk.add(i)
+    junk_iv = takes.find_junk(segs, extra.get("silences", []))  # NG 테이크·슬레이트·말더듬 구간
+    junk |= {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in junk_iv)}  # 그 안에 든 말도 군더더기
+    # 단어 시각이 있으면: 말 사이에 홀로 떨어진 '음'·'어' 같은 추임새 단어도 뺌 (이미 빠지는 곳에 든 것은 셈하지 않음)
+    gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
+    fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
@@ -940,6 +1123,9 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
                     cur = {"in": round(a, 2), "out": round(b, 2)}
             if cur:
                 cuts.append(cur)
+            cuts = _minus(_minus(cuts, junk_iv, pre), fill_iv)
+            if not cuts or e0 - s0 - _covered(junk_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
+                continue
             hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
             hits.sort(key=lambda k: (k in GENERIC, -KEYWORDS[k], -len(k)))  # 주제어 먼저
             title = segs[i]["text"][:28]
@@ -966,7 +1152,9 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
             cur = {"in": round(a, 2), "out": round(b, 2)}
     if cur:
         tidy.append(cur)
-    return {"shorts": picked, "tidy": tidy, "junk": len(junk), "segments": len(segs)}
+    tidy = _minus(_minus(tidy, junk_iv, pre), fill_iv)
+    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv), "segments": len(segs),
+            "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + fill_iv, key=lambda x: (x[0], -x[1]))]}
 
 
 # ---------- 타임라인 계산 (editor.html 과 같은 규칙) ----------
@@ -1096,14 +1284,67 @@ def timeline_captions(proj):
     total = seq_total(proj)
     vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev")],
                   key=lambda x: x["start"])
-    for cap in proj["captions"]:
-        for it in vids:
-            a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
-            if b - a > 0.05:
-                s, e = i_tl(it, a), min(i_tl(it, b), total)
-                if e - s > 0.04:
-                    res.append({"start": s, "end": e, "text": cap["text"]})
+    shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
+    for cap0 in proj["captions"]:
+        for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
+            for it in vids:
+                a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
+                if b - a > 0.05:
+                    s, e = i_tl(it, a), min(i_tl(it, b), total)
+                    if e - s > 0.04:
+                        c = {"start": s, "end": e, "text": cap["text"]}
+                        if ws:  # 노래방 자막용 단어 시각도 타임라인으로
+                            c["words"] = [{"w": w.get("w", ""), "s": i_tl(it, float(w["s"])), "e": i_tl(it, float(w["e"]))} for w in ws]
+                        res.append(c)
     return sorted(res, key=lambda x: x["start"])
+
+
+# ---------- 단어 시각 · 쇼츠형 자막 나누기 (#5) ----------
+
+# 쇼츠 편집본에서 가로 영상 자막을 sh 로 나눠 내보낼지 — 편집실 미리보기(editor.html)가 아직 안 나누므로 꺼 둠
+# (켜면 미리보기와 내보낸 영상의 자막이 달라짐 · 미리보기가 같은 방식으로 나누게 되면 True)
+SHORTS_SPLIT = False
+
+def _cap_words(cap):
+    """자막의 단어 시각 [{w, s, e}] — 자막 안에 든 단어 수가 지금 글의 낱말 수와 같을 때만.
+    편집실에서 글을 고쳐 낱말 수가 바뀌었거나 자막을 나눠서 안 맞으면 None (글자 수 비례로).
+    wt(1/100초 · 첫 값 뒤로는 차이) 또는 예전 모양 words [{w, s, e}] 둘 다 읽음."""
+    toks = str(cap.get("text") or "").split()
+    try:
+        if cap.get("wt") is not None:
+            t = list(itertools.accumulate(int(x) for x in cap["wt"]))
+            if len(t) != 2 * len(toks):
+                return None
+            ws = [{"w": w, "s": float(t[2 * k]) / 100, "e": float(t[2 * k + 1]) / 100} for k, w in enumerate(toks)]
+        else:
+            ws = cap.get("words") or ()
+        ws = [w for w in ws if cap["start"] - 0.05 <= (float(w["s"]) + float(w["e"])) / 2 <= cap["end"] + 0.05]
+    except (TypeError, ValueError, KeyError, AttributeError, IndexError):
+        return None
+    return ws if ws and len(ws) == len(toks) else None
+
+
+def _shorts_parts(cap):
+    """쇼츠 편집본에서 가로 영상 자막을 쇼츠형(한 줄 12글자·2초까지)으로 — 만들 때 정해 둔 나눌 곳(sh)에서.
+    나눈 자막은 이어서 보임 (다음 자막 시작까지) · 글을 고쳐 낱말 수가 바뀌었으면 한 덩어리 그대로. [(자막, 단어 시각)]"""
+    ws = _cap_words(cap)
+    sh = cap.get("sh")
+    if not ws or not isinstance(sh, list) or not sh:
+        return [(cap, ws)]
+    try:
+        cuts = [0] + [int(k) for k in sh] + [len(ws)]
+    except (TypeError, ValueError):
+        return [(cap, ws)]
+    if any(b <= a for a, b in zip(cuts, cuts[1:])):
+        return [(cap, ws)]
+    out = []
+    for a, b in zip(cuts, cuts[1:]):
+        s = cap["start"] if a == 0 else max(cap["start"], float(ws[a]["s"]))
+        e = cap["end"] if b == len(ws) else min(cap["end"], float(ws[b]["s"]))
+        if e - s <= 0.04:
+            return [(cap, ws)]
+        out.append(({"start": s, "end": e, "text": " ".join(w["w"] for w in ws[a:b])}, ws[a:b]))
+    return out
 
 
 # ---------- 자막 (ASS) ----------
@@ -1138,9 +1379,18 @@ def _ass_text(s):
     return s.replace("\r", "").replace("\n", r"\N")
 
 
-def _karaoke(text, dur):
-    """노래방 효과: 줄바꿈은 그대로 두고 글자 수에 비례해 시간을 나눔."""
+def _karaoke(text, dur, words=None, t0=0.0):
+    """노래방 효과: 줄바꿈은 그대로 두고 글자 수에 비례해 시간을 나눔.
+    words(타임라인 기준 단어 시각, t0 = 자막 시작)가 낱말 수와 맞으면 실제로 말한 때에 채움:
+    단어마다 그 단어 시작 ~ 다음 단어 시작 (첫 단어는 자막 시작부터, 마지막은 자막 끝까지) · 합은 자막 길이와 같음."""
     rows = [ln.split() for ln in str(text).replace("\r\n", "\n").split("\n")]
+    if words and len(words) == sum(len(r) for r in rows):
+        cs = int(round(dur * 100))
+        marks = [0] + [min(cs, max(0, int(round((w["s"] - t0) * 100)))) for w in words[1:]] + [cs]
+        for k in range(1, len(marks)):
+            marks[k] = max(marks[k], marks[k - 1])
+        ks = iter(b - a for a, b in zip(marks, marks[1:]))
+        return r"\N".join(" ".join(rf"{{\kf{next(ks)}}}" + _ass_text(w) for w in r) for r in rows)
     total = sum(len(w) for r in rows for w in r) or 1
     cs = int(dur * 100)
     return r"\N".join(" ".join(rf"{{\kf{max(1, int(cs * len(w) / total))}}}" + _ass_text(w) for w in r) for r in rows)
@@ -1193,18 +1443,18 @@ def build_ass(proj, W, H):
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
                      rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
-    def event(style, s, start, end, text):
+    def event(style, s, start, end, text, words=None):
         al = s.get("align", "center")
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
         tags = rf"{{\an{an}\pos({x},{y})}}" if s["effect"] != "slide" else rf"{{\an{an}}}"
-        body = _karaoke(text, end - start) if s["effect"] == "karaoke" else _ass_text(text)
+        body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
         eff = _effect_tags(s["effect"], x, y, end - start)
         lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     if proj.get("captionsOn", True):
         for c in timeline_captions(proj):
-            event("Cap", st, c["start"], c["end"], c["text"])
+            event("Cap", st, c["start"], c["end"], c["text"], c.get("words"))
     for t in proj["titles"]:
         if t["start"] < tl_total:
             event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), t["text"])
@@ -1848,6 +2098,7 @@ def _kf_np(p, m, np):
 
 
 SR = 48000
+ATEMPO_PAD = 0.1  # 빠르기 바꾼 소리는 이만큼(초) 더 읽음 — atempo 가 끝을 1~3ms 덜 내보내 생기는 무음 틈 메우기
 AFFTDN_DELAY = int(round(SR * 0.025))  # 잡음 줄이기(afftdn)가 소리를 25ms(1200샘플) 늦게 내보냄 → 그만큼 당김
 
 
@@ -1916,7 +2167,13 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
             sp = i_sp(it)
             tl_start = i_tl(it, hi if it.get("rev") else lo)  # 디코딩 시작점이 타임라인 어디인지
             af = (["areverse"] if it.get("rev") else []) + _atempo(sp)
-            cmd = [core.ffmpeg(), "-v", "error", "-ss", f"{lo:.4f}", "-t", f"{hi - lo:.4f}", "-i", str(p_in),
+            d_lo, d_hi = lo, hi
+            if abs(sp - 1) > 1e-6:  # atempo 는 끝이 몇 ms 모자라게 나옴 → 조금 더 읽고 남는 건 아래에서 버림 (빠르게 한 컷 사이 '틱' 막기)
+                if it.get("rev"):
+                    d_lo = max(0.0, lo - ATEMPO_PAD)
+                else:
+                    d_hi = min(md.get("dur") or 1e9, hi + ATEMPO_PAD)
+            cmd = [core.ffmpeg(), "-v", "error", "-ss", f"{d_lo:.4f}", "-t", f"{d_hi - d_lo:.4f}", "-i", str(p_in),
                    "-vn", "-af", ",".join(af) or "anull", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"]
             lvl = param(it, "level")
             g_static = 10 ** ((float(it.get("gain") or 0) + float(tr.get("vol") or 0)) / 20)

@@ -69,6 +69,14 @@
   .styles .st p { margin: 0 0 10px; color: var(--ink-2, #555); font-size: 13px; line-height: 1.55; }
   .styles .st .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; color: var(--ink-3, #777); }
   .styles .st .kv b { color: inherit; font-weight: 700; }
+  .styles .st .kv .tempo { margin-left: 6px; white-space: nowrap; cursor: pointer; color: var(--ink-2); }
+  .styles .st .kv .tempo input { vertical-align: -2px; margin: 0 3px 0 0; }
+  /* 스타일 일치 점수 */
+  .styles .st .score { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .styles .st .score select.sel { flex: 1 1 120px; min-width: 0; padding: 6px 8px; font-size: 12px; }
+  .styles .st .score .btn { padding: 6px 10px; font-size: 12px; }
+  .styles .st .score .res { flex-basis: 100%; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+  .styles .st .score .res b { color: var(--brand); font-size: 14px; }
 
   .btn { border: 1px solid var(--line); background: var(--surface); padding: 9px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; white-space: nowrap; }
   .btn:hover { background: var(--surface-2); }
@@ -228,6 +236,25 @@
   .up-meta { color: var(--ink-3); font-size: 12px; margin: -8px 0 14px; overflow-wrap: anywhere; }
   .up-meta:empty { display: none; }
   @media (max-width: 860px) { .up-grid { grid-template-columns: 1fr; } }
+  /* 2-2. 용어 사전 (보관함) */
+  .dict { padding: 16px; }
+  .dict h3 { margin: 18px 0 2px; font-size: 14px; }
+  .dict .hint { margin: 0 0 12px; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+  .dict .hint.sub { margin-bottom: 6px; color: var(--ink-3); font-size: 12px; }
+  .dict-terms { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dterm { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 13px; font-weight: 600; }
+  .dterm button { border: 0; background: none; color: inherit; cursor: pointer; width: 20px; height: 20px; border-radius: 50%; font-size: 14px; line-height: 1; padding: 0; }
+  .dterm button:hover { background: var(--surface); }
+  .dfix { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .dfix:last-child { border-bottom: 0; }
+  .dfix .linkbtn { margin-left: auto; font-size: 12px; }
+  .dict .arr { color: var(--ink-3); }
+  .dict-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .dict-add .inp { min-width: 0; flex: 1 1 160px; }
+  .dict-none { color: var(--ink-3); font-size: 13px; }
+  .dict-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .dict-foot .sp { flex: 1; }
+  .dict-state { font-size: 12px; color: var(--peak); }
   /* 7단계가 되면서 작은 창(960×640)에서 사이드바가 넘침 → 낮은 창에서는 단계 간격을 조금 줄이고, 그래도 넘치면 사이드바만 스크롤 */
   @media (min-width: 861px) { .side { overflow-y: auto; } }
   @media (min-width: 861px) and (max-height: 720px) {
@@ -286,6 +313,18 @@
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
       </div>
       <div class="card rows" id="local"></div>
+      <!-- 2-2. 용어 사전: 받아쓰기가 풋살 용어·이름을 잘 알아듣게 -->
+      <h2 class="sh">용어 사전</h2>
+      <div class="card dict" id="dictCard">
+        <p class="hint">받아쓰기에 풋살 용어와 이름을 미리 알려 줘서 더 정확하게 받아써요. 앞에 있는 말부터 알려 줘요(너무 많으면 뒤쪽은 빠질 수 있어요). 저장하면 다음 '편집점 찾기'부터 적용돼요.</p>
+        <div class="dict-terms" id="dictTerms"><span class="dict-none">불러오는 중…</span></div>
+        <div class="dict-add"><input class="inp" id="dictTerm" maxlength="30" placeholder="넣을 용어 (예: 파라렐라)"><button class="btn" id="dictTermAdd">용어 넣기</button></div>
+        <h3>자주 틀리게 받아쓰는 말 고치기</h3>
+        <p class="hint sub">받아쓴 글에서 왼쪽 말을 오른쪽 말로 바꿔요. 낱말이 따로 있을 때만 바꾸고, 뒤에 붙은 말도 맞춰요 (예: 피버를 → 피벗을).</p>
+        <div id="dictFixes"></div>
+        <div class="dict-add"><input class="inp" id="dictWrong" maxlength="40" placeholder="틀리게 나온 말 (예: 피버)"><span class="arr">→</span><input class="inp" id="dictRight" maxlength="40" placeholder="바른 말 (예: 피벗)"><button class="btn" id="dictFixAdd">고칠 말 넣기</button></div>
+        <div class="dict-foot"><button class="linkbtn" id="dictReset">처음 용어로 되돌리기</button><span class="sp"></span><span class="dict-state" id="dictState"></span><button class="btn primary" id="dictSave" disabled>저장</button></div>
+      </div>
     </section>
 
     <!-- 3. 편집점 -->
@@ -523,6 +562,62 @@ $("btnBundle").onclick = () => {
   job("/api/bundle", { names, title: t.trim() || "촬영본", model: segVal("modelSeg") }, bundleDone);
 };
 
+/* 2-2. 용어 사전: 받아쓰기에 알려 줄 용어 + 자주 틀리게 받아쓰는 말 고치기 (저장하면 다음 편집점 찾기부터) */
+let dict = null, dictDefaults = null, dictSaved = "";
+const dictKey = () => JSON.stringify(dict), dictClean = s => s.replace(/\s+/g, " ").trim();
+const dictEnter = (e, fn) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) fn(); };  // 한글 조합 중 Enter 는 글자 확정만
+function renderDict() {
+  if (!dict) return;
+  $("dictTerms").innerHTML = dict.terms.length ? dict.terms.map((t, i) => `<span class="dterm">${esc(t)}<button data-dterm="${i}" title="빼기" aria-label="${esc(t)} 빼기">×</button></span>`).join("")
+    : `<span class="dict-none">용어가 없어요 · 아래에서 넣어 주세요</span>`;
+  const fx = Object.entries(dict.fix);
+  $("dictFixes").innerHTML = fx.length ? fx.map(([a, b]) => `<div class="dfix"><span>${esc(a)}</span><span class="arr">→</span><b>${esc(b)}</b><button class="linkbtn" data-dfix="${esc(a)}">빼기</button></div>`).join("")
+    : `<span class="dict-none">아직 없어요 · 받아쓰기에서 자꾸 틀리게 나오는 말이 있으면 넣어 주세요</span>`;
+  document.querySelectorAll("[data-dterm]").forEach(b => (b.onclick = () => { dict.terms.splice(+b.dataset.dterm, 1); renderDict(); }));
+  document.querySelectorAll("[data-dfix]").forEach(b => (b.onclick = () => { delete dict.fix[b.dataset.dfix]; renderDict(); }));
+  const dirty = dictKey() !== dictSaved;
+  $("dictSave").disabled = !dirty;
+  $("dictState").textContent = dirty ? "저장하지 않은 내용이 있어요" : "";
+}
+async function loadDict() {
+  try {
+    const j = await api("/api/dict");
+    if (!j.terms) return;
+    dict = { terms: j.terms, fix: j.fix }; dictDefaults = j.defaults; dictSaved = dictKey(); renderDict();
+  } catch (e) { $("dictTerms").innerHTML = `<span class="dict-none">용어 사전을 불러오지 못했어요 · 앱을 다시 켜 주세요</span>`; }
+}
+function addTerm() {
+  const t = dictClean($("dictTerm").value);
+  if (!t || !dict) return;
+  if (dict.terms.includes(t)) return toast("이미 있는 용어예요");
+  dict.terms.unshift(t); $("dictTerm").value = ""; renderDict(); $("dictTerm").focus();
+}
+function addFix() {
+  const a = dictClean($("dictWrong").value), b = dictClean($("dictRight").value);
+  if (!dict) return;
+  if (!a || !b) return toast("틀리게 나온 말과 바른 말을 둘 다 써 주세요");
+  if (a === b) return toast("두 말이 같아요");
+  dict.fix[a] = b; $("dictWrong").value = ""; $("dictRight").value = ""; renderDict(); $("dictWrong").focus();
+}
+$("dictTermAdd").onclick = addTerm;
+$("dictTerm").onkeydown = e => dictEnter(e, addTerm);
+$("dictFixAdd").onclick = addFix;
+$("dictRight").onkeydown = e => dictEnter(e, addFix);
+$("dictReset").onclick = () => {
+  if (!dictDefaults || !confirm("처음 들어 있던 용어와 고칠 말로 되돌릴까요?\n(저장을 눌러야 바뀌어요)")) return;
+  dict = JSON.parse(JSON.stringify(dictDefaults)); renderDict();
+};
+$("dictSave").onclick = async () => {
+  $("dictSave").disabled = true;
+  try {
+    const j = await api("/api/dict", dict);
+    if (!j.ok) return renderDict();  // 이유는 api() 가 알림으로 보여 줌
+    dict = { terms: j.terms, fix: j.fix }; dictSaved = dictKey(); renderDict();
+    toast("용어 사전을 저장했어요 · 다음 '편집점 찾기'부터 적용돼요");
+  } catch (e) { renderDict(); toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); }
+};
+loadDict();
+
 /* 6. 스타일 배우기 */
 function renderStyleSrc() {
   const checked = new Set([...document.querySelectorAll(".schk:checked")].map(c => c.value));
@@ -544,8 +639,60 @@ async function loadStyles() {
       <p>${esc(st.desc)}</p>
       <div class="kv"><b>컷 길이</b><span>평균 ${p.avgShot}초 · 1분에 ${p.cutsPerMin}번</span><b>확대 컷</b><span>${q.zoomEvery ? `${q.zoomEvery}초마다 · ${q.zoomScale}배` : "거의 없음"}</span>
       <b>말 사이 공백</b><span>${q.keepPause}초 넘으면 자름</span><b>자막</b><span>${q.captions ? `${pos[p.captionPos]}쪽 · <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.captionColor};border:1px solid #888"></span> ${p.captionColor}` : "적게 씀"}</span>
-      <b>소리 크기</b><span>${p.lufs ?? "—"} LUFS</span>${p.charsPerSec ? `<b>말 빠르기</b><span>1초에 ${p.charsPerSec}글자</span>` : ""}<b>배운 영상</b><span>${Array.isArray(p.source) ? p.source.length + "개" : "1개"}</span></div></div>`; }).join("");
+      <b>소리 크기</b><span>${p.lufs ?? "—"} LUFS</span>${q.splitShot ? `<b>컷 리듬</b><span>도입 ${q.curve3[0]}초 · 본론 ${q.curve3[1]}초 · 마무리 ${q.curve3[2]}초마다 컷</span>` : ""}${p.charsPerSec ? `<b>말 빠르기</b><span>1초에 ${p.charsPerSec}글자 <label class="tempo" title="코치님 말이 이 스타일보다 느리면, 말하는 부분만 최대 12% 빠르게 (시범 부분은 그대로)"><input type="checkbox" data-stempo="${esc(st.name)}"${p.tempoOn === false ? "" : " checked"}> 가편집에서 맞추기</label></span>` : ""}<b>배운 영상</b><span>${Array.isArray(p.source) ? p.source.length + "개" : "1개"}</span></div>${scoreBlock(st.name, JSON.stringify([p.analyzed, p.duration, p.source, p.tempoOn !== false]))}</div>`; }).join("");
   document.querySelectorAll("[data-sdel]").forEach(b => (b.onclick = async () => { if (!confirm(`'${b.dataset.sdel}' 스타일을 지울까요?`)) return; await api("/api/style/delete", { name: b.dataset.sdel }); loadStyles(); }));
+  bindScores();
+  document.querySelectorAll("[data-stempo]").forEach(c => (c.onchange = async () => {  // 컷 리듬 맞추기 (#7): 말 빠르기 켜기/끄기
+    c.disabled = true;
+    const r = await api("/api/style/tempo", { name: c.dataset.stempo, on: c.checked }).catch(() => ({}));
+    if (r.ok) toast(c.checked ? "말하는 부분을 이 스타일 빠르기에 맞춰요 (최대 12%)" : "말 빠르기는 원본 그대로 둘게요");
+    else if (!r.error) toast("설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
+    loadStyles();
+  }));
+}
+/* 6-1. 스타일 일치 점수: 고른 영상을 이 스타일로 자동 가편집하면 스타일과 얼마나 닮았는지 (내보내지 않고 바로) */
+const scores = {}, scoreVid = {}, SCORE_HINT = "고른 영상을 이 스타일로 가편집하면 몇 점일지 매겨 봐요";
+const SCORING_TXT = `처음 보는 영상이라 원본 화면을 한 번 살펴본 뒤 점수를 매겨요. 영상이 길면 몇 분 걸려요… <button class="btn" data-sstop>멈추기</button>`;
+let scoring = null;  // 작업으로 매기는 중인 점수 {name, vid} — 카드를 다시 그려도 '매기는 중'·멈추기를 그대로 보여 줌
+function scoreText(r) {  // fixed: 가편집이 스타일 값을 그대로 옮겨 써서 늘 맞는 부분 (소리 크기) → 점수에는 안 넣고 '스타일대로'
+  const fx = r.fixed || [], parts = Object.entries(r.parts || {}).filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => fx.includes(k) ? `<span title="가편집이 스타일 값을 그대로 써서 점수에는 넣지 않아요">${esc(k)} 스타일대로</span>` : `${esc(k)} ${v}`);
+  return `스타일 가편집 일치 <b>${r.score}점</b>${parts.length ? " · " + parts.join(" · ") : ""}${r.guessed ? ` <span title="원본 화면을 살펴보지 못해 한 자리에서 계속 찍은 영상으로 보고 매겼어요">(어림 점수)</span>` : ""}`;
+}
+function scoreBlock(name, stamp) {  // stamp: 스타일을 배운 시각 → 같은 이름으로 다시 배우면 예전 점수는 안 보임
+  const vids = state.local.filter(v => v.analyzed);
+  if (!vids.length) return `<div class="score"><span class="res">편집점 찾기를 한 영상이 있으면, 이 스타일로 만든 가편집이 얼마나 닮았는지 점수로 보여 줘요</span></div>`;
+  const run = !!(state.job && scoring && scoring.name === name);
+  const cur = run ? scoring.vid : vids.some(v => v.name === scoreVid[name]) ? scoreVid[name] : vids[0].name, r = scores[name], ok = r && r.name === cur && r.stamp === String(stamp);
+  return `<div class="score"><select class="sel" data-svid="${esc(name)}" title="점수를 매길 영상"${run ? " disabled" : ""}>${vids.map(v => `<option value="${esc(v.name)}"${v.name === cur ? " selected" : ""}>${esc(niceName(v.name))}</option>`).join("")}</select>
+      <button class="btn" data-sscore="${esc(name)}" data-sstamp="${esc(stamp)}"${run ? " disabled" : ""}>일치 점수</button><span class="res">${run ? SCORING_TXT : ok ? scoreText(r) : SCORE_HINT}</span></div>`;
+}
+function bindScores() {
+  document.querySelectorAll("[data-sstop]").forEach(x => (x.onclick = e => { e.target.disabled = true; api("/api/edit/cancel", {}); }));
+  document.querySelectorAll("[data-svid]").forEach(s => (s.onchange = () => {
+    const r = scores[s.dataset.svid], stamp = s.parentElement.querySelector("[data-sstamp]").dataset.sstamp;
+    if (scoring && scoring.name === s.dataset.svid && state.job) return;  // 매기는 중에는 안내를 그대로 둠
+    scoreVid[s.dataset.svid] = s.value;
+    s.parentElement.querySelector(".res").innerHTML = r && r.name === s.value && r.stamp === stamp ? scoreText(r) : SCORE_HINT;
+  }));
+  document.querySelectorAll("[data-sscore]").forEach(b => (b.onclick = async () => {
+    const name = b.dataset.sscore, stamp = b.dataset.sstamp, sel = b.parentElement.querySelector("select"), res = b.parentElement.querySelector(".res");
+    scoreVid[name] = sel.value; b.disabled = true; res.textContent = "점수 매기는 중…";
+    const show = r => {  // 작업으로 매긴 점수는 그 사이 카드가 다시 그려졌을 수 있어 지금 카드를 다시 찾음
+      const bt = [...document.querySelectorAll("[data-sscore]")].find(x => x.dataset.sscore === name) || b, box = bt.parentElement, out = box.querySelector(".res");
+      bt.disabled = false; box.querySelector("select").disabled = false; scoring = null;
+      if (r && r.ok) { scores[name] = { ...r, stamp }; if (box.querySelector("select").value === r.name) out.innerHTML = scoreText(r); }
+      else out.textContent = (r && r.error) || "점수를 매기지 못했어요";
+    };
+    try {
+      const r = await (await fetch("/api/style/score", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style: name, name: sel.value }) })).json();
+      if (r.ok && r.job) {  // 처음 보는 영상: 원본을 한 번 살펴봄 (길면 몇 분) · 멈추기는 편집실 멈추기와 같은 신호
+        scoring = { name, vid: sel.value }; sel.disabled = true; res.innerHTML = SCORING_TXT; bindScores();
+        state.job = "…"; pending = show; sync(); showBusy(); return;
+      }
+      show(r);
+    } catch (e) { b.disabled = false; res.textContent = "점수를 매기지 못했어요. 잠시 뒤 다시 눌러 주세요"; }
+  }));
 }
 $("btnLearn").onclick = () => {
   const names = [...document.querySelectorAll(".schk:checked")].map(c => c.value), nm = $("styleName").value.trim() || `${niceName(names[0]).slice(0, 12)} 스타일`;
@@ -677,6 +824,11 @@ async function poll() {
     if (s.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
     else f(s.result);
   }
+  // 6-1 스타일 일치 점수: 작업이 끝났는데(실패 포함) 아직 '매기는 중'이면 풀어 줌 · 스타일 화면이면 편집점 찾기를 마친 영상을 목록에 바로
+  const sKey = s.local.filter(v => v.analyzed).map(v => v.name).join("\n"), onStyle = $("p-style") && $("p-style").classList.contains("on");
+  if (!s.job && scoring) { scoring = null; if (onStyle) loadStyles(); }
+  else if (onStyle && state.sKey !== undefined && sKey !== state.sKey && !scoring) loadStyles();
+  state.sKey = sKey;
   showBusy();
   renderLocal();
   sync();

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import bundle
+import captions
 import core
 import editor
 import hooks
@@ -376,6 +377,9 @@ class Handler(BaseHTTPRequestHandler):
             if p.suffix.lower() not in upload.IMG_EXTS or not p.is_file():
                 return self._send(404, {"error": "not found"})
             return self._file(p, "image/png" if p.suffix.lower() == ".png" else "image/jpeg")
+        # ---- 용어 사전: 받아쓰기에 알려 줄 풋살 용어·이름 + 자주 틀리게 받아쓰는 말 (작업 폴더 dict.json) ----
+        if u.path == "/api/dict":
+            return self._send(200, dict(captions.load_dict(core.dict_path()), defaults=captions.default_dict()))
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -411,6 +415,43 @@ class Handler(BaseHTTPRequestHandler):
             if style.STYLES.resolve() in f.parents and f.exists():
                 f.unlink()
             return self._send(200, {"ok": True})
+        # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
+        if path == "/api/style/tempo":
+            try:
+                style.set_tempo(str(b.get("name") or ""), bool(b.get("on")))
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except (OSError, ValueError):
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, {"ok": True})
+        # ---- 스타일 일치 점수: 배운 스타일로 만든 자동 가편집이 그 스타일과 얼마나 닮았는지 (내보내지 않고 바로) ----
+        # 원본 화면을 처음 보는 영상이면 작업으로 한 번 살펴본 뒤 매김 (결과는 작업 결과로) · 안내는 한국어만 화면에
+        if path == "/api/style/score":
+            sname, vname = str(b.get("style") or ""), str(b.get("name") or "")
+            fail = "점수를 매기지 못했어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"
+
+            def do_score():
+                try:
+                    return dict(style.score_video(sname, vname, log, analyze=True), ok=True)
+                except style.StyleError as e:
+                    return {"ok": False, "error": str(e)}
+                except Exception as e:  # noqa: BLE001
+                    traceback.print_exc()
+                    log(f"점수를 매기지 못했어요 · {e}")
+                    return {"ok": False, "error": fail}
+            try:
+                return self._send(200, dict(style.score_video(sname, vname), ok=True))
+            except style.NeedsAnalysis:
+                ok = start_job("스타일 일치 점수", do_score)
+                return self._send(200 if ok else 409, {"ok": ok, "job": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except style.StyleError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                log(f"점수를 매기지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": fail})
         if path == "/api/thumb/frames":
             c = thumb.cached_candidates(b["name"])  # 이미 골라 둔 장면이 있으면 다른 작업 중이어도 바로 돌려줌
             if c is not None:
@@ -556,6 +597,16 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"열지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": f"열지 못했어요 · {e}"})
             return self._send(200, {"ok": True})
+        # ---- 용어 사전 저장 (다음 '편집점 찾기'부터 받아쓰기에 씀) ----
+        if path == "/api/dict":
+            try:
+                d = captions.save_dict(core.dict_path(), {"terms": b.get("terms", []), "fix": b.get("fix", {})})
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"용어 사전을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": f"용어 사전을 저장하지 못했어요 · {e}"})
+            return self._send(200, dict(d, ok=True))
         if path == "/api/restart":
             self._send(200, {"ok": True})
             threading.Timer(0.5, restart).start()

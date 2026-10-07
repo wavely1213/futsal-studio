@@ -36,6 +36,7 @@
 
 - 락파일: **없다.** `requirements.txt`(7줄)가 유일한 목록이고 반드시 커밋한다.
 - 버전 지정: 현재 **버전을 지정하지 않는다**(설치 시점의 최신을 받음). 상한·고정도 없다.
+  - 예외: `faster-whisper>=1.1.0` 하한 하나 (단어 시각·`hotwords`가 있는 버전, D-019). 상한은 없다.
   - **`yt-dlp[default]`는 고정하지 않는다.** YouTube가 자주 바뀌어 앱이 직접 최신으로 올린다.
     - 켤 때 3일마다 올린다.
     - YouTube가 막으면 그 자리에서 1회 올린다(`core.update_engine`, `pip install -U`).
@@ -75,7 +76,7 @@
 | 패키지 | 용도 | 선택 이유 | 라이선스 |
 |---|---|---|---|
 | `yt-dlp[default]` | 채널 목록·영상 받기 (`core.list_videos`·`download`) | YouTube 변화에 가장 빨리 대응한다. `[default]`에 YouTube 해석 부품(yt-dlp-ejs)이 들어 있다 | Unlicense |
-| `faster-whisper` | 한국어 받아쓰기 (`core.analyze`, CPU int8, 기본 `large-v3-turbo`) | GPU 없이 CPU로 빠르다. PyTorch가 필요 없다 | MIT |
+| `faster-whisper` (`>=1.1.0`) | 한국어 받아쓰기 (`core.analyze`, CPU int8, 기본 `large-v3-turbo`, 단어 시각·용어 힌트) | GPU 없이 CPU로 빠르다. PyTorch가 필요 없다 | MIT |
 | `imageio-ffmpeg` | ffmpeg 실행 파일 (`core.ffmpeg()`, `FUTSAL_FFMPEG`로 대체 가능) | 사용자가 ffmpeg를 따로 설치하지 않아도 된다. ffprobe는 없어서 `ffmpeg -i` 출력을 읽는다 | BSD-2 (실행 파일은 GPL 빌드, 4번) |
 | `pywebview` | 전용 앱 창 (Windows WebView2) | 브라우저 탭 대신 앱처럼 열고, 표준 서버 + HTML을 그대로 쓴다 | BSD-3 |
 | `pillow` | 그림 처리 (썸네일 올리기 회전·축소, 장면 점수, 누끼 마스크, 얼굴 입력) | 사실상 표준이다 | MIT-CMU |

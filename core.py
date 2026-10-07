@@ -264,11 +264,106 @@ def _peaks(wav, top=10):
     return sorted(picked, key=lambda p: p["time"])
 
 
+# ---------- 단어 단위 받아쓰기: 모델 한 번만 불러 쓰기 · 용어 사전 · 받아쓰는 동안 PC 잠들지 않게 ----------
+# 사전 형식·고치기·자막 나누기는 captions.py (표준 라이브러리만 쓰는 도우미라 core 가 불러 씀)
+_WHISPER, _WHISPER_LOCK, _SESSION = {}, threading.Lock(), threading.local()
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def dict_path():
+    """용어 사전 파일 (스튜디오 보관함의 '용어 사전'에서 고침)."""
+    return WORK / "dict.json"
+
+
+def _whisper(model):
+    """받아쓰기 모델 — (모델, 스레드 수)마다 한 번만 불러 씀 (여러 영상을 이어서 받아써도). 편집점 찾기가 끝나면 내려놓음."""
+    from faster_whisper import WhisperModel
+    key = (model, min(8, os.cpu_count() or 4))
+    with _WHISPER_LOCK:
+        if key not in _WHISPER:
+            _WHISPER[key] = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=key[1])
+        return _WHISPER[key]
+
+
+def _keep_awake(on, prev=None):
+    """Windows: 받아쓰는 동안 PC 가 절전으로 들어가지 않게 (SetThreadExecutionState) · 끝나면 원래대로. 다른 운영체제는 그대로."""
+    import ctypes
+    try:
+        f = ctypes.windll.kernel32.SetThreadExecutionState
+    except AttributeError:
+        return None
+    f.restype, f.argtypes = ctypes.c_uint, [ctypes.c_uint]
+    if on:
+        return f(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) or None
+    f(prev if prev and prev & ES_CONTINUOUS else ES_CONTINUOUS)
+    return None
+
+
+@contextlib.contextmanager
+def _analysis_session():
+    """편집점 찾기 한 묶음 (겹쳐 불러도 바깥 한 번만): 절전 막기 → 끝나면(실패해도) 되돌리고 모델을 내려놓음 (메모리 반환)."""
+    depth = getattr(_SESSION, "depth", 0)
+    prev = _keep_awake(True) if depth == 0 else None
+    _SESSION.depth = depth + 1
+    try:
+        yield
+    finally:
+        _SESSION.depth = depth
+        if depth == 0:
+            _keep_awake(False, prev)
+            with _WHISPER_LOCK:
+                _WHISPER.clear()
+
+
+def _whisper_opts(m, vocab):
+    """단어 시각 + 용어 사전 힌트 (첫머리 initial_prompt, 설치된 faster-whisper 가 받으면 매 구간 hotwords)."""
+    import inspect
+    import captions
+    tok = getattr(m, "hf_tokenizer", None)
+
+    def count(s):  # 토큰 수 (토크나이저가 없으면 한글 1글자 ≈ 2토큰으로 넉넉히)
+        try:
+            return len(tok.encode(" " + s, add_special_tokens=False).ids)
+        except Exception:
+            return 2 * len(s)
+    opts = {"word_timestamps": True}
+    p = captions.prompt(vocab["terms"], 180, count)  # 첫머리 힌트 한도 ≈223토큰 · hotwords(60)와 합쳐도 받아쓸 자리가 남게
+    if p:
+        opts["initial_prompt"] = p
+    try:
+        params = inspect.signature(m.transcribe).parameters
+    except (TypeError, ValueError):
+        params = {}
+    h = captions.hotwords(vocab["terms"], 60, count) if "hotwords" in params else ""
+    if h:
+        opts["hotwords"] = h
+    return opts
+
+
+def _seg_of(s, fixmap):
+    """받아쓴 구간 하나 → {start, end, text(, words)} · 사전 고치기 · 글은 단어를 이은 것과 똑같게. (구간, 고친 곳 수)"""
+    import captions
+    seg = {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+    ws = [{"w": w.word.strip(), "s": round(float(w.start), 2), "e": round(float(w.end), 2), "p": round(float(w.probability), 2)}
+          for w in getattr(s, "words", None) or () if w.word.strip()]
+    if not ws:
+        t = captions.apply_dict(seg["text"], fixmap)
+        return dict(seg, text=t), int(t != seg["text"])
+    ws, n = captions.fix_words(ws, fixmap)
+    return dict(seg, text=" ".join(w["w"] for w in ws), words=ws), n
+
+
 def analyze_many(names, log, model="large-v3-turbo"):
-    return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
+    with _analysis_session():
+        return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
 
 
 def analyze(name, log, model="large-v3-turbo", step="1/1"):
+    with _analysis_session():
+        return _analyze(name, log, model, step)
+
+
+def _analyze(name, log, model, step):
     video = VIDEOS / name
     outdir = adir(name)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -281,18 +376,30 @@ def analyze(name, log, model="large-v3-turbo", step="1/1"):
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
-    from faster_whisper import WhisperModel
-    m = WhisperModel(model, device="cpu", compute_type="int8")
+    import captions
+    m = _whisper(model)
     # PyAV 버전 차이로 인한 오류를 피하려고, ffmpeg로 뽑은 wav를 직접 읽어 넘긴다
     import wave
     import numpy as np
     with wave.open(str(wav), "rb") as w:
         audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
-    segs, info = m.transcribe(audio, language="ko", vad_filter=True)
+    vocab = captions.load_dict(dict_path())
+    opts = _whisper_opts(m, vocab)
+    if vocab["terms"]:  # 힌트 길이 한도 때문에 뒤쪽 용어가 빠질 수 있어서 실제로 알려 준 수를 적음
+        sent = opts["initial_prompt"].count(", ") + 1 if opts.get("initial_prompt") else 0
+        n = len(vocab["terms"])
+        log(f"  용어 사전의 말 {n}개를 받아쓰기에 알려 줘요" if sent >= n else
+            f"  용어 사전의 말 {n}개 중 앞의 {sent}개를 받아쓰기에 알려 줘요 (힌트 길이 한도 · 중요한 말을 앞에 두세요)")
+    segs, info = m.transcribe(audio, language="ko", vad_filter=True, **opts)
     total = info.duration or 0
-    segments = []
+    segments, fixed, echoed = [], 0, 0
     for s in segs:
-        segments.append({"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()})
+        seg, n = _seg_of(s, vocab["fix"])
+        if captions.echo(seg.get("words"), vocab["terms"]):  # 말소리가 불분명한 곳에서 용어 목록만 따라 쓴 구간은 버림
+            echoed += 1
+            continue
+        segments.append(seg)
+        fixed += n
         if total:
             set_progress(label="편집점 찾는 중", item=name, step=step, pct=min(99, int(s.end * 100 / total)),
                          detail=f"대사 받아쓰는 중 · {_short(s.end)} / {_short(total)}")
@@ -314,7 +421,9 @@ def analyze(name, log, model="large-v3-turbo", step="1/1"):
         f.write(f"# 타임라인: {name}\n\n")
         for _, line in sorted(events):
             f.write(line + "\n")
-    log(f"  완료 · 대사 {len(segments)}줄 · 컷 후보 {len(sil)}곳 · 하이라이트 {len(peaks)}곳")
+    log(f"  완료 · 대사 {len(segments)}줄 · 컷 후보 {len(sil)}곳 · 하이라이트 {len(peaks)}곳"
+        + (f" · 용어 사전으로 {fixed}곳을 고쳤어요" if fixed else "")
+        + (f" · 말소리가 불분명해 용어 목록만 잘못 받아쓴 {echoed}곳은 뺐어요" if echoed else ""))
     return outdir
 
 

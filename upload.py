@@ -167,6 +167,27 @@ def _segments(x):
     return sorted((s for s in segs if s["text"]), key=lambda s: s["start"])
 
 
+# ---------- 짧게 나눈 자막 → 문장 (#5 단어 단위 자막) ----------
+
+_SENT_END = re.compile(r"(?:[.?!…]|(?:요|다|죠|까|니다|네|자|래)[~.?!]*)[\"'”’)]*$")
+SENT_GAP, SENT_MAX = 1.2, 120  # 이 안에 이어지는 말만 · 이은 문장은 이 글자까지
+
+
+def sentences(segs):
+    """읽기 좋게 짧게 나눈 자막(쇼츠형·롱폼형 덩어리)을 다시 문장으로 이음 — 설명 첫 줄·챕터 제목·주제어가 반쪽 문장이 되지 않게.
+    앞 자막이 문장 끝(마침표·'~요'·'~다' 등)이 아니고 사이가 1.2초 안이면 이어 붙임 (120글자까지)."""
+    out = []
+    for s in segs:
+        p = out[-1] if out else None
+        if (p and not _SENT_END.search(p["text"]) and s["start"] - p["end"] <= SENT_GAP
+                and len(p["text"]) + 1 + len(s["text"]) <= SENT_MAX):
+            p["text"] += " " + s["text"]
+            p["end"] = max(p["end"], s["end"])
+        else:
+            out.append(dict(s))
+    return out
+
+
 # ---------- 챕터 ----------
 
 def first_sentence(text, limit=CH_TITLE_MAX):
@@ -721,6 +742,7 @@ def build_kit(name, seq=None, save=True):
         markers = overlays = None
         source = {"id": "", "label": "원본 영상 그대로", "export": None}
 
+    segs = sentences(segs)  # 자막 덩어리(반쪽 문장)가 아니라 문장 단위로
     texts = [s["text"] for s in segs]
     topics = hooks.topic_keywords(texts)
     flow = hooks.in_order(topics[:3], texts)

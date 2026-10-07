@@ -20,6 +20,7 @@
 | `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` |
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |
+| `test_captions.py` (2차 작업 중, 커밋 전) | `captions` 자막 나누기·용어 사전·낱말 경계 고치기 · `core.analyze`(단어 시각·힌트·모델 한 번만·절전 막기, 가짜 faster_whisper) · 노래방 `\kf` · 단어 추임새 컷 · `/api/dict` |
 
 - **e2e 묶음은 저장소 밖** 관리자 작업 공간 `$SCRATCH`(경로는 `AGENTS.md` 5번)에 있다. 각 묶음은 저장소를 복사한 시험 앱(`config.json` 제외)과 자기 작업 폴더를 쓴다. 시험 앱의 `config.json` 은 `update_manifest_url` 이 닿지 않는 주소(`http://127.0.0.1:1/…`)라 실제 업데이트를 시도하지 않는다.
 - e2e 에는 Playwright(Python·Chromium) 외에 시스템 `ffmpeg`·`ffprobe`(편집실 결과 확인)와 numpy 가 필요하다. `style_test.py` 는 Chromium 실행 파일 경로가 코드에 박혀 있다.
