@@ -139,18 +139,24 @@ def _noise(rng, n):
     return rng.standard_normal(n)
 
 
+def _fast(n):
+    """FFT 가 빠른 길이 (2의 거듭제곱 · 큰 소수가 든 길이는 수십 배 느림)."""
+    return 1 << max(1, int(math.ceil(math.log2(max(2, n)))))
+
+
 def _band(x, lo, hi):
     """FFT 로 [lo, hi] Hz 만 남기기 (부드러운 가장자리)."""
     np = _np()
-    n = len(x)
-    X = np.fft.rfft(x)
+    n0 = len(x)
+    n = _fast(n0)
+    X = np.fft.rfft(x, n)
     f = np.fft.rfftfreq(n, 1 / SR)
     w = np.ones_like(f)
     if lo > 0:
         w *= 1 / (1 + (lo / np.maximum(f, 1e-3)) ** 4)
     if hi < SR / 2:
         w *= 1 / (1 + (f / hi) ** 4)
-    return np.fft.irfft(X * w, n)
+    return np.fft.irfft(X * w, n)[:n0]
 
 
 def _sweep_band(x, f0, f1, q=2.5, steps=24):
@@ -452,11 +458,12 @@ def _shaker(rng):
 def _lowpass(x, fc):
     """FFT 저역 통과 (부드럽게) — 패드·베이스를 둥글게."""
     np = _np()
-    n = len(x)
-    X = np.fft.rfft(x, axis=0)
+    n0 = len(x)
+    n = _fast(n0)
+    X = np.fft.rfft(x, n, axis=0)
     f = np.fft.rfftfreq(n, 1 / SR)
     w = 1 / (1 + (f / fc) ** 4)
-    return np.fft.irfft(X * (w[:, None] if X.ndim == 2 else w), n, axis=0)
+    return np.fft.irfft(X * (w[:, None] if X.ndim == 2 else w), n, axis=0)[:n0]
 
 
 def _reverb(x, rng, mix=0.18, sec=1.4):

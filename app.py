@@ -19,6 +19,7 @@ import claude_cli
 import core
 import editor
 import hooks
+import msg
 import plan
 import qa
 import refs
@@ -144,8 +145,8 @@ def _after_start():
     """앱이 잘 켜진 뒤(포트 확보): 업데이트 표시 정리·결과 알림, 다운로드 엔진은 뒤에서 확인 (3일마다 최신으로)."""
     try:
         import updater
-        for msg in updater.finish(core.APP_DIR):
-            log(msg)
+        for line in updater.finish(core.APP_DIR):
+            log(line)
     except Exception as e:
         log(f"업데이트 마무리 중 문제가 생겼어요 · {e}")
     if sys.platform in ("win32", "darwin"):
@@ -305,6 +306,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
             return self._send(200, {"styles": style.list_styles()})
+        # ---- MSG 자동 편집 스타일 (기본 스타일 · 배운 스타일 · 섞은 스타일 · D-023) ----
+        if u.path == "/api/style/presets":
+            return self._send(200, msg.sources_listing())
+        if u.path == "/api/style/mix":
+            try:
+                return self._send(200, msg.mix_view(q.get("name", [msg.DRAFT_NAME])[0]))
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
         # ---- 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) ----
         if u.path == "/api/refs":
             try:
@@ -670,6 +679,30 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/cancel":
             editor.cancel_export()
             return self._send(200, {"ok": True})
+        if path == "/api/edit/msg":  # MSG 후보 만들기 (작업 · 결과는 새 편집본 후보 + 효과음·배경음악·정지 화면 미디어)
+            try:
+                editor.video_path(b["name"])
+                specs = [x for x in (b.get("styles") or []) if isinstance(x, dict)][:3]
+                kinds = tuple(k for k in (b.get("kinds") or ["long"]) if k in ("long", "shorts")) or ("long",)
+                inten = b.get("intensity") if b.get("intensity") in msg.INTENSITY else "보통"
+                if not specs:
+                    raise ValueError("스타일을 하나 이상 골라 주세요")
+            except (KeyError, ValueError, FileNotFoundError) as e:
+                return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
+            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path in ("/api/style/mix", "/api/style/mix_pick"):  # 스타일 섞기 저장 · '이 후보의 ○○가 좋아요'
+            try:
+                nm = str(b.get("name") or msg.DRAFT_NAME)
+                if path == "/api/style/mix":
+                    msg.save_mix(nm, b.get("aspects") if isinstance(b.get("aspects"), dict) else None, b.get("intensity"))
+                else:
+                    msg.save_mix(nm, pick=(b.get("aspect"), b.get("source")))
+                return self._send(200, dict(msg.mix_view(nm), ok=True))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
         if path == "/api/edit/autoseq":  # 배운 스타일로 자동 가편집 (새 편집본으로 추가)
             n, sname = b["name"], b.get("style")
             st = next((x for x in style.list_styles() if x["name"] == sname), None)
