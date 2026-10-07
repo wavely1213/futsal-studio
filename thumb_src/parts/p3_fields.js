@@ -50,7 +50,7 @@ function charSet(l, k, v) {
   let r = curRange(l);
   if (r && r[0] <= 0 && r[1] >= l.text.length) r = null;  // 전체 선택 = 기본 스타일 바꾸기
   if (r) { const a = expand(l); for (let i = r[0]; i < r[1]; i++) a[i][k] = v; compress(l, a); }
-  else { setBase(l, k, v); for (const run of l.runs) delete run[k]; compress(l, expand(l)); }
+  else { setBase(l, k, v); for (const run of l.runs) delete run[k]; compress(l, expand(l)); if (k === "size") delete l.fitBox; }
   refitKeep(l);
 }
 function applyTextEdit(l, nt, caret) {
@@ -66,7 +66,7 @@ function applyTextEdit(l, nt, caret) {
   const del = ot.length - p - q;
   const inh = Object.assign({}, del > 0 ? a[p] : p > 0 && ot[p - 1] !== "\n" ? a[p - 1] : a[p] || {});
   a.splice(p, ot.length - p - q, ...Array.from({ length: nt.length - p - q }, () => Object.assign({}, inh)));
-  l.text = nt; compress(l, a); refitKeep(l);
+  l.text = nt; compress(l, a); refitKeep(l, true);
 }
 function scaleTextStyle(l, k) {
   const s = v => Math.round(v * k * 10) / 10;
@@ -78,7 +78,7 @@ function scaleTextStyle(l, k) {
 // 글자 레이어 크기를 바꾸면: 같은 비율이면 글자 크기에 반영, 다른 비율이면 가로/세로 비율로 저장
 function bakeText(l) {
   const m = textLayout(ctx, l), kx = l.w / (m.natW * l.hs), ky = l.h / (m.natH * l.vs), cx = l.x + l.w / 2, cy = l.y + l.h / 2;
-  if (Math.abs(kx - ky) <= 0.004 * Math.max(kx, ky)) { if (Math.abs(kx - 1) < 1e-4) return; scaleTextStyle(l, kx); fitText(l); }
+  if (Math.abs(kx - ky) <= 0.004 * Math.max(kx, ky)) { if (Math.abs(kx - 1) < 1e-4) return; scaleTextStyle(l, kx); fitText(l); delete l.fitBox; }
   else { l.hs = l.w / m.natW; l.vs = l.h / m.natH; }
   l.x = cx - l.w / 2; l.y = cy - l.h / 2;
 }
