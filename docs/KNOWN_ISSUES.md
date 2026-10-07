@@ -27,6 +27,14 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
+## I-034 | 2026-10-07 | AI 추천 썸네일: 공 찾기 한계 · 실제 채널 영상·Windows 실기 미검증 · 판정 점수는 레퍼런스보다 아래
+- **상태**: 열림
+- **심각도**: 낮음
+- **증상/내용**: (1) YOLOX-nano 는 멀리 있는 작은 공·발에 가려진 공을 자주 놓친다(공이 없으면 액션 배율·전술 화살표가 덜 맞음). 앉아 있는 선수(벤치)를 경기 장면과 구별하지 못한다. (2) 개발 판정은 무료 스톡 영상(Mixkit·Wikimedia Commons, Pexels·Pixabay 는 개발 환경에서 막힘)과 테스트 영상 1개로만 했다 — 소유자 채널 원본·Windows 실기에서는 확인하지 않았다. (3) 클로드 블라인드 판정 평균은 레퍼런스(쪼살·쌈바·해주호·JK)보다 아직 낮다(회차별 점수는 커밋 메시지·`TESTING_GUIDELINES.md` 판정 도구 설명 참고). (4) Gmarket Sans 등 레퍼런스가 쓰는 글꼴은 라이선스 확인 전이라 넣지 않았다(D-026).
+- **위치**: `detect.py`, `thumb.py` `frame_candidates`·`action_score`, `thumb_src/parts/p8_ai.js`
+- **해결 방향**: 소유자 실제 영상으로 '✨ AI 추천 썸네일 6개'를 써 보고 고른 것·고친 것을 모아 템플릿·점수식을 다듬는다. 공 찾기는 공 전용 작은 모델(라이선스 확인) 검토.
+
+
 ## I-033 | 2026-10-07 | 한 줄 자막: 글자 폭 어림 · 끊는 곳 품질 · Windows 실기 미검증
 - **상태**: 열림
 - **심각도**: 낮음
@@ -90,7 +98,7 @@
 - **해결 방향**: 지원 범위를 정해 `DEPENDENCY_POLICY.md` 3번에 적고, README 안내와 `.bat`의 버전 확인을 맞춘다.
 
 ## I-021 | 2026-10-06 | `/api/thumb/cut`의 장면 주소 이름을 검사하지 않음
-- **상태**: 열림
+- **상태**: 해결(2026-10-07) — `/frame?name=` 의 이름을 `editor.safe_name`·`video_path`로 확인하고, `/asset/` 경로는 `thumb.ASSETS` 안인지, 모델 이름은 `BG_MODELS` 안인지 확인한다 (`tests/test_thumb_pro.py` `ThumbRouteTests`)
 - **심각도**: 낮음
 - **증상/내용**: 누끼 요청의 `src`가 `/frame?name=…&t=…`이면 그 `name`을 `editor.safe_name` 없이 `thumb.grab`에 넘긴다. `core.VIDEOS / name`·`core.adir(name)`이 보관함 밖을 가리킬 수 있다. POST는 같은 출처만 받으므로 다른 사이트는 이 경로를 쓸 수 없다.
 - **위치**: `app.py` `do_POST` `/api/thumb/cut`

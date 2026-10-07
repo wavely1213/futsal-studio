@@ -20,11 +20,11 @@
         ▼
 [app.py]  ThreadingHTTPServer 127.0.0.1:FUTSAL_PORT(8765)  +  pywebview 창 (실패 시 브라우저)
    ├─ GET  /  /editor  /thumb      → ui.html · editor.html · thumb.html
-   ├─ GET/POST /api/* · /media · /frame · /asset/* · /fonts/*  → Handler (Host·Origin·파일 이름 검사)
+   ├─ GET/POST /api/* · /media · /frame · /asset/* · /fonts/* · /stickers/*  → Handler (Host·Origin·파일 이름 검사)
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · thumb · face · style · plan · refs · source · qa · bundle · upload · hooks · takes(2차 작업 중)
+[기능 모듈]  core · editor · thumb · face · detect · thumbcopy · style · plan · refs · source · qa · bundle · upload · hooks · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy
    ▼
@@ -40,7 +40,7 @@
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `detect` · `thumbcopy` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -56,8 +56,9 @@
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
-  - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
-  - `face` → `core`, `thumb`
+  - `thumb` → `core`, `updater`. `face`·`detect`·`avmodels`·`thumbcopy`·`editor`는 함수 안에서 지연 import한다.
+  - `face`·`detect` → `core`, `thumb`(모델 받기 `fetch_model`)
+  - `thumbcopy` → `core`, `hooks`. `editor`·`claude_cli`·`updater`는 함수 안에서 지연 import한다. `app`이 `thumbcopy`를 직접 쓴다(문구·판정 작업).
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
@@ -72,8 +73,10 @@
 | updater | `updater.py` | `--launch`(업데이트 확인 → `run_app`), `install`(zip 검사 → staging → 버전·sha256 → 문법·selftest → 백업 → 교체 → 지울 파일 정리), `rollback`, `check`/`finish`(새 버전 import 확인·알림), `.update_skip` |
 | core | `core.py` | `list_videos`(조회수 순), `download`(받는 폴더·archive·진행 이름·출처 기록 함수를 바꿀 수 있음 · 학습용 영상이 씀), 이름 → 파일·분석 폴더(`video_file`·`adir`: 보관함 먼저, 없으면 학습용 영상 · `kept_sig`), `analyze`(whisper 한국어 → transcript.json·analysis.json·subtitles.srt·timeline.md), 엔진 관리(`update_engine`·`engine_autoupdate` 3일·`ensure_deno`), `check_update`·`update_app`(pip는 요구사항이 바뀔 때만). `render`(컷 목록 → mp4 + EDL)와 `/api/render`는 현재 화면에서 부르지 않는 예전 기능이다 |
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소) |
-| thumb | `thumb.py` | `frame_candidates`(선명도·밝기·인물 × 얼굴·표정, 하이라이트·핵심어 순간, 캐시 `candidates3.json`), `grab`, `remove_bg`(누끼 ONNX), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256 확인 후 제자리에 둠) |
+| thumb | `thumb.py` | `frame_candidates`(v4: 선명도·밝기 × 흔들림 × 얼굴·표정 × 액션(선수·공) × 머리 잘림, 박힌 글자 감점(`text_area`), 같은 화면 dHash 3장까지, 후보 16개 · 장면마다 `kind`·`persons`·`ball`·`main`·`band`·자동 보정 `grade`, 캐시 `candidates5.json`), `analyze`(장면 → 주인공 자동 누끼 3장 → 문구, `cached_analysis`), `auto_grade`, `grab`, `remove_bg`·`cut_auto`(누끼 ONNX), `read_text`(검수 OCR), 브랜드 키트 `load_brand`·`save_brand`(`thumbnails/brand.json`), `export_ab`(A/B 묶음 + 모바일 비교), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256 확인 후 제자리에 둠) |
 | face | `face.py` | UltraFace 얼굴 + FER+ 표정 점수. `ensure()`가 처음에 모델을 받고, 실패하면 10분 동안 다시 시도하지 않고 조용히 False를 돌려줌 |
+| detect | `detect.py` | YOLOX-nano(D-025)로 사람·공 찾기 `people(rgb)` → {persons[[x,y,w,h,확률]], ball}. `ensure`·`ready`(face 와 같은 실패 규칙), 레터박스·격자 해석·NMS |
+| thumbcopy | `thumbcopy.py` | 썸네일 제목 문구: 주제어(`topics`)·규칙 틀(`rule_candidates` — 무조건 봐·비밀·반전 O/X·대사 핵심 문장 …)·점수·다양하게 고르기(`suggest`), 사용자 클로드로 더 만들기(`run_ai` → `analysis/<stem>/thumb_copy.json`), 검수 창 평가(`judge`) |
 | style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
 | plan | `plan.py` | 영상 기획 분석 (D-021). `extract_plan`(1초 한 장 640px 지문·복잡도·잔디·화면 글자 OCR(상한 400장)·소리 종류·화자 수 → `plan_events.json`), `detect`(티저·타이틀·정지·리플레이·삽입·흔들기·몽타주·웃음·효과음·펀치라인 줌·자막 사건 6종), `judge`(인트로·장르·형식·자막·재미 판단 문장 + 확신 + 근거 1~2개 · 채널 공식 한 문장 `headline`), `merge_plans`(길이×확신 투표 · 갈리면 `mixed` 표시), `plan_params`(절반 넘게 같은 판단일 때만 가편집 값), `claude_prompt`·`parse_ai`·`run_ai`(Claude 판단 저장) |
 | avmodels | `avmodels.py` | 기획 분석 모델: PP-OCRv5 글자 찾기·한국어 읽기, YAMNet 소리 종류. `ensure`(처음에 받기 · ✕ 로 멈춤, 실패하면 10분 쉬고 조용히 False · 불러오지 못한 파일은 지워 다시 받게), `usable`(기획 기록 재사용 판단), `ocr`, `tags` |
@@ -86,7 +89,7 @@
 | source | `source.py` | 보관함 영상의 출처(풋살사관학교·다른 채널·내 촬영본·모름) 판단과 기록(`videos/sources.json`, D-020). 받을 때 yt-dlp 채널 정보 기록, 예전 영상은 채널 목록 기억 → 뒤에서 천천히 영상 정보 조회(`start_backfill`), 직접 고르기(`set_manual`), 다른 채널은 채널별 묶음·고정 색(`channels`), 고르기 칩 개수(`summary`) |
 | refs | `refs.py` | 학습용 영상(스타일 배우기 전용) 보관함 (D-022): 기록 `refs/refs.json`(바꿔 끼우기·잠김 재시도·깨지면 `.bad`), 채널별 폴더·색(`source._register` 재사용, 보관함과 같은 색), `add_channel`(인기 영상 N개 → `core.download`를 받는 곳만 바꿔 → 채널 폴더 → '<채널명> 스타일' 배우기), `add_direction`(추천 방향 A/B/C), `prune`(배운 파일만 지우고 지문 `sig` 남김), `delete`(원본은 한 번 더 확인 · 빈 채널 폴더만 지움), `move_from_library`(보관함 → 학습용: 편집실 프로젝트에서 쓰는 영상은 건너뜀 `projects_using` · 분석 폴더 → 영상 → 기록, 실패하면 되돌림 · `archive.txt`에서 id 뺌), `restore`(학습용 → 보관함으로 되돌리기), `listing`(기록 없이 refs 하위 폴더에 있는 파일·받는 폴더에 남은 파일은 다시 기록 `_adopt`), `recommended`(`ref_channels.json`) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
-| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 7단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
+| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 7단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*` · 원본 `thumb_src/parts/p1~p9` — p1 렌더러(자동 보정·전술 도형·맞춤 상자), p8 'AI 추천 썸네일'(레퍼런스형 템플릿 `T_NEW` 롱폼 8·쇼츠 6 + 예전 `TPL.long` 7·`TPL.short` 5, 점수 `scoreDoc`, 고르기 `recommend`, 개발용 `window.__thumbAuto`), p9 전술 그래픽 메뉴·점 핸들·스티커·브랜드 키트·검수(모바일 미리보기·OCR·클로드 평가)·A/B 묶음) |
 
 ## 5. 데이터 모델 요약
 
@@ -95,14 +98,14 @@
 - 영상 1 : 1 분석 폴더 `analysis/<stem>/`
   - `transcript.json` [{start, end, text, words[{w, s, e, p}]}] (예전 받아쓰기는 `words` 없음), `analysis.json` {silences, loud_peaks}
   - `subtitles.srt`, `transcript_timeline.md`, `waveform_50.json`, `thumbs2.jpg/json`
-  - `frames/`(장면 캡처, `candidates3.json`), 묶음 영상이면 `bundle.json`
+  - `frames/`(장면 캡처, `candidates5.json`), `thumb_copy.json`(클로드 문구, 받아쓰기·제목 지문), 묶음 영상이면 `bundle.json`
 - 영상 1 : 1 편집 프로젝트 `projects/<stem>.json` = {source, info, captions[{id, start, end, text, words?}], sequences[], active, media[], v: 2, rev}
   - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
   - 백업: `projects/backup/<stem>__YYYYMMDD_HHMMSS[_태그].json`. 자동 백업은 5분마다 최근 10개, 태그 백업(재분석전·덮어쓰기전·변환전)은 따로 10개
-- 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·올린 그림)
+- 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·자동 누끼·올린 그림). 브랜드 키트 하나 `thumbnails/brand.json` {logo, logoPos, colors{hl, hl2, accent, neon, box}, font, series, seriesOn, handle(예전 값 · 화면에서 안 씀), apply}
 - 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필) + `plan`(영상 기획 분석: intro·genre·format·captions·fun·summary·apply·agree, Claude 판단 `ai`) · `refs[i].plan`(영상마다). `plan`이 없는 예전 파일도 그대로 읽는다
   - 영상마다 `analysis/<stem>/style_events.json`(구조, D-015)과 `plan_events.json`(기획 신호: 판 `v`·파일 `sig`·그때의 모델 상태·지문·OCR 줄·소리 점수·화자 수)을 따로 둔다
-- 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
+- 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`·A/B 묶음 `<stem>_썸네일_A.jpg`…`_모바일 비교.jpg`(같은 이름이 있으면 ` (2)`), 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
 - 학습용 영상(스타일 배우기 전용, D-022) `refs/<채널 폴더>/<영상>` · 분석 기록 `refs/<채널 폴더>/_analysis/<stem>/`(style_events·plan_events·옮겨 온 받아쓰기) · 받는 중 `refs/_받는 중/`. 기록 `refs/refs.json` = {channels{채널 열쇠: {name, names, handles, url, color, folder}}, files{파일 이름: {channelKey, folder, videoId, title, how(download·move·found), kind, saved, pruned, sig, original·origin(확인하고 옮긴 원본 · 자동으로 지우지 않음)}}, ids{}, ui{bannerDismissed}}. 채널 열쇠·색 규칙은 `sources.json`과 같다. 같은 이름이 보관함에도 있으면 보관함이 먼저다(`core.video_file`·`adir`). 보관함에 파일이 없으면 옛 `analysis/<stem>`이 남아 있어도 학습용 기록이 먼저다. channels 의 `original`: '풋살사관학교'·'내 촬영본' 칸(원본)
 - 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`
@@ -134,7 +137,7 @@
   - 파일을 내줄 때는 `resolve()` 후 허용 폴더 안인지 확인한다.
   - 서버는 `127.0.0.1`에만 bind한다.
 - **동시성**:
-  - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
+  - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`·`/api/thumb/analyze`는 캐시가 있으면 바로 응답한다 (분석이 없으면 작업 '썸네일 분석', 클로드 문구·평가도 작업 하나).
   - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`.
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
   - 멈추기(✕)는 `editor.CANCEL`, `run_killable`, `cancel_export`로 처리한다.
