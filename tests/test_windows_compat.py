@@ -365,6 +365,37 @@ class Locks(Work):
         self.assertEqual(p.read_text(encoding="utf-8"), "예전")
         self.assertEqual([x.name for x in self.tmp.iterdir() if x.name.endswith(".tmp")], [], "임시 파일은 지움")
 
+    @unittest.skipIf(sys.platform == "win32", "권한 비트는 POSIX 만")
+    def test_write_atomic_secret_mode_from_creation(self):
+        """유튜브 토큰·세션(yt.save_secret)과 합침(D-048): mode 를 주면 임시 파일이 처음부터 그 권한 — 바꿔 끼우기 전에도 남이 못 읽음."""
+        seen = []
+        real = updater.replace_retry
+
+        def spy(src, dst, secs=None):
+            seen.append(os.stat(src).st_mode & 0o777)
+            return real(src, dst, secs)
+        old = os.umask(0)
+        try:
+            with mock.patch.object(updater, "replace_retry", spy):
+                updater.write_atomic(self.tmp / "token.bin", b"FSY1P\n{}", mode=0o600)
+                updater.write_atomic(self.tmp / "글.json", "{}", mode=0o600)
+        finally:
+            os.umask(old)
+        self.assertEqual(seen, [0o600, 0o600])
+        self.assertEqual((self.tmp / "token.bin").read_bytes(), b"FSY1P\n{}")
+        self.assertEqual((self.tmp / "글.json").stat().st_mode & 0o777, 0o600)
+
+    def test_write_atomic_mode_fails_cleanly(self):
+        """mode 경로: 파일을 연 뒤 글 쪽 준비가 실패해도(잘못된 인코딩 등) 손잡이가 새지 않고 임시 파일은 지움
+        (open() 의 opener 로 열어 손잡이를 open() 이 맡음 · Windows 는 열린 채면 못 지움)."""
+        before = len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None
+        for _ in range(20):
+            with self.assertRaises(LookupError):
+                updater.write_atomic(self.tmp / "s.json", "{}", encoding="없는-인코딩", mode=0o600)
+        if before is not None:
+            self.assertLessEqual(len(os.listdir("/proc/self/fd")), before)
+        self.assertEqual([x.name for x in self.tmp.iterdir() if x.name.endswith(".tmp")], [], "임시 파일은 지움")
+
     def test_export_final_waits_for_antivirus(self):
         """완성본(final.mp4)을 백신이 1초 잡음: 예전에는 0.25초 뒤 포기하고 임시 폴더째 지워 렌더링을 잃었음."""
         d = core.OUT / ".render_abc"

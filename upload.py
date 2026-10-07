@@ -911,3 +911,20 @@ def open_template():
 
 def open_studio():
     webbrowser.open(STUDIO_URL)
+
+
+# ---------- 유튜브에 바로 올리기 (youtube_upload) 가 쓰는 파일 찾기 ----------
+
+def files_for(name, seq=None):
+    """올릴 파일 (읽기만): 편집본이면 가장 최근에 내보낸 영상과 그 옆의 .srt · 원본이면 보관함 영상과 analysis/<이름>/subtitles.srt.
+    → {"video": 경로 또는 None(아직 안 내보냄), "srt": 경로 또는 None, "srtWhere": "out"|"analysis"|None, "format": 편집본 형식|None, "export": 파일 이름|None}"""
+    path = editor.video_path(name)
+    sq, exp = _target(name, seq)
+    if sq:
+        srt = exp.with_suffix(".srt") if exp else None
+        ok = bool(srt and srt.is_file())
+        return {"video": exp, "srt": srt if ok else None, "srtWhere": "out" if ok else None,
+                "format": "shorts" if sq.get("format") == "shorts" else "long", "export": exp.name if exp else None}
+    srt = core.adir(name) / "subtitles.srt"
+    ok = srt.is_file()
+    return {"video": path, "srt": srt if ok else None, "srtWhere": "analysis" if ok else None, "format": None, "export": None}

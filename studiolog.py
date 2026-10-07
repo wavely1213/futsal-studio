@@ -4,7 +4,8 @@
   studio.log        화면 기록 줄 + 오류마다 '오류 위치' 한 줄(종류·내용·파일:줄) — 관리자에게 보내는 파일 (write·trace)
   studio-error.log  같은 오류의 traceback 전체 + 프로그램이 통째로 죽을 때의 위치(faulthandler) — pythonw(콘솔 없음)일 때만
                     (app._error_log 가 sys.stderr 를 이 파일로 돌림 · 콘솔로 켜면 콘솔에)
-  둘 다 비밀(터널 주소·알림 주제·영상 표·서명·연결 코드)은 remote.redact 로 '…' (redact).
+  둘 다 비밀(터널 주소·알림 주제·영상 표·서명·연결 코드 · 유튜브 토큰·세션 주소·로그인 코드·보안 비밀번호)은 remote.redact 로 '…'
+  (redact · 유튜브 올리기(youtube_upload·youtube_api)도 이 한 길로 · D-049).
 - write: 줄마다 연도가 붙은 시각 · MAX_BYTES 를 넘으면 studio.old.log 하나만 남기고 새로 시작 (계속 커지지 않게)
 - trace: 오류 위치(종류·내용·파일:줄·호출 경로)를 한 줄로 + 오류 출력(stderr)에 traceback 전체.
   앱은 pythonw(콘솔 없음)로 돌아 traceback 이 아무 데도 안 남았음 · 원격(remote._trace)·서버 요청 오류도 이것 하나로
@@ -107,34 +108,41 @@ def _frames(e):
     return " ← ".join(f"{_short(f.filename)}:{f.lineno} {f.name}" for f in pick)
 
 
-def where(e):
-    """오류 → "KeyError: 'ids' · app.py:469 <lambda> ← app.py:77 runner" (+ 원인 오류가 있으면 한 단계 더)."""
-    out = f"{type(e).__name__}: {_one_line(e)}"
+HIDDEN = "(내용은 비밀이 섞일 수 있어 뺌)"
+
+
+def where(e, detail=True):
+    """오류 → "KeyError: 'ids' · app.py:469 <lambda> ← app.py:77 runner" (+ 원인 오류가 있으면 한 단계 더).
+    detail=False: 오류 글은 빼고 종류·위치만 (redact 가 모르는 비밀이 섞일 수 있는 곳 — 유튜브 토큰 교환·저장 중 · D-049)."""
+    out = f"{type(e).__name__}: {_one_line(e) if detail else HIDDEN}"
     loc = _frames(e)
     if loc:
         out += f" · {loc}"
     cause = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
     if cause is not None and cause is not e:
-        out += f" · 원인 {type(cause).__name__}: {_one_line(cause, 200)}"
+        out += f" · 원인 {type(cause).__name__}: {_one_line(cause, 200) if detail else HIDDEN}"
         loc = _frames(cause)
         if loc:
             out += f" · {loc}"
     return out
 
 
-def _stderr(e, head=""):
-    """오류 출력(콘솔 · pythonw 면 studio-error.log)에 traceback 전체 — 비밀은 지우고. 출력이 없으면(pythonw 초기) 그냥 넘어감."""
+def _stderr(e, head="", detail=True):
+    """오류 출력(콘솔 · pythonw 면 studio-error.log)에 traceback 전체 — 비밀은 지우고. 출력이 없으면(pythonw 초기) 그냥 넘어감.
+    detail=False: 오류 글은 빼고 위치(format_tb)와 종류만."""
     if sys.stderr is None or e is None:
         return
     try:
-        sys.stderr.write(redact(head + "".join(traceback.format_exception(type(e), e, e.__traceback__))))
+        body = "".join(traceback.format_exception(type(e), e, e.__traceback__)) if detail else \
+            "Traceback (most recent call last):\n" + "".join(traceback.format_tb(e.__traceback__)) + f"{type(e).__name__} {HIDDEN}\n"
+        sys.stderr.write(redact(head + body))
     except Exception:  # noqa: BLE001
         pass
 
 
-def trace(e=None, what="오류 위치"):
+def trace(e=None, what="오류 위치", detail=True):
     """지금 처리 중인(또는 준) 오류의 위치를 studio.log 에 한 줄로 + 오류 출력에 traceback 전체(비밀은 지움).
-    같은 오류를 두 번 부르면(요청 처리 → 서버 오류 처리) 두 번째는 건너뜀."""
+    같은 오류를 두 번 부르면(요청 처리 → 서버 오류 처리) 두 번째는 건너뜀. detail=False: 오류 글 없이 종류·위치만 (where)."""
     e = e if e is not None else sys.exc_info()[1]
     if e is None or getattr(e, "_studio_traced", False):
         return
@@ -143,10 +151,10 @@ def trace(e=None, what="오류 위치"):
     except (AttributeError, TypeError):  # 속성을 못 붙이는 오류도 기록은 함
         pass
     try:
-        write(f"  {what} · {where(e)}")
+        write(f"  {what} · {where(e, detail)}")
     except Exception:  # noqa: BLE001
         pass
-    _stderr(e)
+    _stderr(e, detail=detail)
 
 
 def install_hooks():

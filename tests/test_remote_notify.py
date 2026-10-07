@@ -272,6 +272,37 @@ class NotifyTests(NotifyBase):
                                  remote.NOTE_TEXT["blocked"], remote.NOTE_TEXT["net"], "작업이 끝났어요 · 클로드로 전략 보기 (1분)"])
         self.assertFalse(any(t.startswith("작업이 끝났어요 · 채널") for t in texts))
 
+    def test_youtube_jobs_fixed_text_never_url_or_token(self):
+        """유튜브 바로 올리기와 합침(D-048): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
+        (영상 주소·번호·Google 오류 글·토큰이 결과에 있어도 넣지 않음) · 진행·[멈추기]는 보이고 시작은 휴대폰 허용 목록에 없음."""
+        import youtube_upload as yu
+        self.assertTrue({yu.JOB_NAME, yu.JOB_FINISH} <= remote.JOB_LABELS)
+        self.assertTrue({yu.JOB_NAME, yu.JOB_FINISH} <= remote.STOPPABLE)
+        self.assertFalse([a for a in remote.ACTIONS if "youtube" in a.lower() or "upload" in a.lower()])
+        self.turn_on()
+        url, tok = "https://youtu.be/AbCdEfGhIjK", "ya29.SECRETTOKEN"
+        self.svc.job_hook(yu.JOB_NAME, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": [], "locked": False}, None, 3)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["error"]), (True, None))
+        self.svc.job_hook(yu.JOB_NAME, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": ["썸네일 · 실패"], "locked": False}, None, 90)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["warn"], self.svc.last["error"]), (False, True, remote.YOUTUBE_MSG["warn"]))
+        self.svc.job_hook(yu.JOB_NAME, None, {"ok": False, "paused": True, "error": f"멈췄어요 {url}", "key": "k"}, None, 2)
+        self.assertEqual(self.svc.last["error"], remote.YOUTUBE_MSG["paused"])
+        self.svc.job_hook(yu.JOB_NAME, None, {"ok": False, "relogin": True, "error": f"다시 연결 {tok}"}, None, 40)
+        self.svc.job_hook(yu.JOB_FINISH, f"boom {tok} {url}?upload_id=XYZ", None, None, 70)
+        self.assertEqual(self.svc.last["error"], remote.YOUTUBE_MSG["failed"])
+        self.svc.job_hook(yu.JOB_FINISH, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": []}, None, 1)
+        self.assertEqual(self.svc.last["ok"], True)  # PC 에서 누른 짧은 마무리: '마지막 작업' 칸만, 알림은 없음
+        self.svc.job_hook(yu.JOB_FINISH, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": []}, None, 90)
+        got = self.notes(n=5)
+        time.sleep(0.3)
+        got = self.notes(n=5)
+        # 멈춤(PC·휴대폰에서 사람이 누름)은 알림 없이 칸만 · 짧은 마무리도 조용히
+        self.assertEqual([p[1] for p in got], [remote.YOUTUBE_MSG[k] for k in ("done", "warn", "relogin", "failed", "finish")])
+        blob = json.dumps(got, ensure_ascii=False) + json.dumps(self.svc.last, ensure_ascii=False)
+        for bad in ("youtu", "AbCdEfGhIjK", "ya29", "SECRET", "upload_id", "http"):
+            self.assertNotIn(bad, "\n".join(p[1] for p in got) + json.dumps(self.svc.last, ensure_ascii=False), bad)
+        self.assertNotIn("SECRETTOKEN", blob)
+
     def test_blocked_and_missed_are_attention(self):
         self.turn_on()
         self.svc.job_hook("학습용 영상 받기", None, {"ok": False, "error": "막힘", "blocked": True}, "휴대폰 · x", 30)

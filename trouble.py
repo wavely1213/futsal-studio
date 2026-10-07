@@ -192,6 +192,53 @@ BLOCKED_CARD = ("YouTube가 받기를 막고 있어요. 다운로드 엔진을 �
                 "아래에서 YouTube에 로그인해 둔 브라우저를 고르고 [이 브라우저로 다시 받기]를 눌러 주세요")
 
 
+# 유튜브에 바로 올리기 (7단계 · youtube_upload · D-049): Google 오류 종류(youtube_api.ApiError.kind) → 실패 카드 (종류, 정해진 한 줄, 할 일).
+# 문장은 늘 이 표의 것만 — 영상 주소·번호·토큰·세션 주소·Google 원문(reason 낱말 포함)·남은 시각 같은 바뀌는 값은 넣지 않는다.
+# 할 일: resume(이어 올리기) · relogin(다시 연결하기) · verify(채널 인증하러 가기 · 정해진 안내 열쇠) · thumb(썸네일 다시 올리기)
+#        · finish(마저 하기) · log · logfile — 실제로 보일 버튼은 7단계 화면이 그 영상의 세션·기록이 있는지 보고 정한다.
+YT_CARDS = {
+    "yt_quota": ("오늘 쓸 수 있는 유튜브 API 양을 다 썼어요. 미국 태평양 시각 자정(한국 시각 오후 4~5시)에 다시 채워지면 "
+                 "[이어 올리기]를 눌러 주세요 (올린 데까지는 남아 있어요)", ["resume"]),
+    "yt_limit": ("이 채널이 하루에 올릴 수 있는 영상 수를 넘었어요. 내일 [이어 올리기]를 눌러 주세요", ["resume"]),
+    "yt_relogin": ("유튜브 연결이 끊겼어요 (연결 기한이 지났거나 연결을 끊었어요). 7단계 위의 [다시 연결하기]를 누른 뒤 "
+                   "[이어 올리기]를 눌러 주세요", ["relogin", "resume"]),
+    "yt_forbidden": ("유튜브에 올릴 권한이 없어요. [다시 연결하기]를 누르고 Google 화면에서 모든 권한에 체크해 주세요",
+                     ["relogin", "resume"]),
+    "yt_thumb": ("영상은 올라갔지만 썸네일은 유튜브가 막았어요. 맞춤 썸네일은 채널 인증(전화번호 확인)이 필요해요. "
+                 "[채널 인증하러 가기]에서 인증한 뒤 [썸네일 다시 올리기]를 눌러 주세요", ["verify", "thumb"]),
+    "yt_relogin_left": ("영상은 올라갔지만 유튜브 연결이 끊겨서 썸네일·자막·재생목록 중 남은 것이 있어요. 7단계 위의 [다시 연결하기]를 "
+                        "누른 뒤 [마저 하기]를 눌러 주세요", ["relogin", "finish"]),
+    "yt_quota_left": ("영상은 올라갔지만 오늘 쓸 수 있는 유튜브 API 양을 다 써서 썸네일·자막·재생목록 중 남은 것이 있어요. "
+                      "미국 태평양 시각 자정(한국 시각 오후 4~5시)이 지나면 [마저 하기]를 눌러 주세요", ["finish"]),
+    "yt_net": ("인터넷 연결이 끊겨서 올리기를 멈췄어요. 인터넷이 다시 연결되면 [이어 올리기]를 눌러 주세요 "
+               "(올린 데까지는 남아 있어요)", ["resume"]),
+    "yt_server": ("유튜브 서버가 지금 불안정해요. 잠시 뒤 [이어 올리기]를 눌러 주세요 (올린 데까지는 남아 있어요)", ["resume"]),
+    "yt_other": ("유튜브에 올리지 못했어요. 잠시 뒤 다시 해 보고, 계속되면 작업 폴더의 studio.log 파일을 관리자에게 보내 주세요",
+                 ["resume", "log", "logfile"]),
+}
+# youtube_api.ApiError.kind → 카드 종류 (없는 종류는 카드를 만들지 않음: 설정·고르기 문제는 7단계 화면이 그 자리에서 알림)
+YT_KIND = {"quota": "yt_quota", "rate": "yt_quota", "upload_limit": "yt_limit", "relogin": "yt_relogin",
+           "forbidden": "yt_forbidden", "thumb_verify": "yt_thumb", "network": "yt_net", "network_long": "yt_net",
+           "server": "yt_server"}
+# 이 화면의 카드가 아닌 '받기' 쪽 규칙(로그인 정보·탭·주소·다운로드 엔진)이 유튜브 올리기에 걸리면 → 유튜브 쪽 일반 안내로
+_DOWNLOAD_ONLY = {"cookie_locked", "cookie_dpapi", "cookie_missing", "empty", "login", "unavailable", "blocked", "notab", "url",
+                  "engine"}
+
+
+def youtube_card(kind):
+    """카드 종류(yt_*) 또는 Google 오류 종류(quota·relogin·…) → {"kind", "msg", "actions"} (모르는 종류면 None)."""
+    k = kind if kind in YT_CARDS else YT_KIND.get(kind)
+    if not k:
+        return None
+    msg, actions = YT_CARDS[k]
+    return {"kind": k, "msg": msg, "actions": list(actions)}
+
+
+def youtube_kind_of(msg):
+    """정해진 카드 문장 → 카드 종류 (휴대폰 알림이 오류 글 대신 정해진 문장을 고를 때 · 모르는 글이면 None)."""
+    return next((k for k, (m, _a) in YT_CARDS.items() if m == msg), None)
+
+
 def korean_head(text):
     """우리 한국어 안내 + ' · 영어 원문' 꼴에서 우리 안내만 ('…요'로 끝나는 앞 토막들 · 없으면 '').
     Windows 의 한국어 오류('[WinError 32] … 없습니다: 경로')나 한글 파일 이름이 든 영어 원문은 우리 안내가 아님."""
@@ -208,12 +255,16 @@ def _one_line(s, n=400):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def explain(err, browser=None, blocked=None):
+def explain(err, browser=None, blocked=None, youtube=False):
     """작업 오류(예외 또는 글) → {"kind", "msg"(해요체 한 줄), "actions"[...]} (+ YouTube·쿠키 오류면 "browser"·"suggest").
     browser: 사용자가 고른 로그인 정보 브라우저(있으면 안내에 이름을 넣음) · blocked: 이 화면용 'YouTube가 막음' 안내 문구.
-    우리 한국어 안내 + 영어 원인(' · ' 뒤)이면: 원인 종류의 할 일을 붙이고, 원인 안내가 우리 안내에 없으면 뒤에 덧붙인다."""
+    우리 한국어 안내 + 영어 원인(' · ' 뒤)이면: 원인 종류의 할 일을 붙이고, 원인 안내가 우리 안내에 없으면 뒤에 덧붙인다.
+    youtube: 유튜브에 바로 올리기 작업(7단계) — Google 오류(youtube_api.ApiError: kind 가 있는 오류)는 YT_CARDS 의 정해진 문장으로,
+    그 밖의 오류도 받기 쪽 안내(로그인 정보·주소…) 대신 유튜브 쪽 안내로 (D-049)."""
     if isinstance(err, Trouble):
         return dict(err.info)
+    if youtube:
+        return _youtube_explain(err, browser, blocked)
     if isinstance(err, MemoryError):
         return {"kind": "memory", "msg": MEMORY, "actions": ["retry"]}
     text = (str(err) or type(err).__name__) if isinstance(err, BaseException) else str(err or "")
@@ -242,3 +293,22 @@ def explain(err, browser=None, blocked=None):
     if head:  # 이미 한국어 안내 (예: 소리를 꺼내지 못했어요 · 멈췄어요)
         return {"kind": "other", "msg": _one_line(head), "actions": ["retry", "log"]}
     return {"kind": "other", "msg": OTHER, "actions": ["retry", "log", "logfile"]}
+
+
+def _youtube_explain(err, browser=None, blocked=None):
+    """유튜브 올리기 작업의 오류 → 실패 카드. Google 오류 종류가 있으면 그 카드, 사용자가 멈춤이면 cancelled,
+    메모리·저장 공간·파일 잠김·파일 없음·인증서처럼 PC 쪽 원인은 위의 규칙 그대로, 나머지는 yt_other (원문은 studio.log 에만)."""
+    kind = getattr(err, "kind", None) if isinstance(err, BaseException) else None
+    if isinstance(kind, str) and getattr(err, "youtube", False):
+        if kind == "cancelled":
+            return {"kind": "cancelled", "msg": "멈췄어요 · [이어 올리기]로 올린 데부터 이어서 올려요", "actions": []}
+        card = youtube_card(kind)
+        if card:
+            return card
+        return youtube_card("yt_other")
+    info = explain(err, browser, blocked)
+    if info["kind"] in ("net", "server"):  # 인터넷·서버 문제는 유튜브 쪽 문장으로 (할 일은 [이어 올리기])
+        return youtube_card("yt_net" if info["kind"] == "net" else "yt_server")
+    if info["kind"] in _DOWNLOAD_ONLY or (info["kind"] == "other" and info["msg"] == OTHER):
+        return youtube_card("yt_other")
+    return info  # PC 쪽 원인(메모리·저장 공간·잠김·파일 없음·인증서) · 이미 우리 한국어 안내인 오류(예: UploadError)
