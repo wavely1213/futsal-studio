@@ -32,6 +32,7 @@ import forecast
 import hooks
 import refs
 import source
+import updater
 
 GROUPS = ("풋살 특화", "축구 레슨·기술", "축구 예능·챌린지", "리뷰·브이로그·분석")
 OWN = "own"                       # 우리 채널 열쇠 (주소는 config.json 의 channel_url)
@@ -598,7 +599,7 @@ def fetch_rss(cid):
     req = urllib.request.Request(RSS_URL.format(cid), headers={"User-Agent": f"futsal-studio/{core.VERSION}"})
     for attempt in (1, 2):
         try:
-            with urllib.request.urlopen(req, timeout=RSS_TIMEOUT) as r:
+            with updater.urlopen(req, RSS_TIMEOUT) as r:  # 업데이트와 같은 인증서 설정 (Python 3.13+ · 백신 'HTTPS 검사' · D-029)
                 raw = r.read(RSS_MAX + 1)
             return parse_rss(raw), None
         except urllib.error.HTTPError as e:

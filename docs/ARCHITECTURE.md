@@ -75,13 +75,13 @@
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
-  - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
+  - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠), `updater`(RSS 받기 `urlopen`). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
   - `forecast` → (표준 라이브러리 + numpy, numpy 는 함수 안에서). 파일·네트워크가 없는 계산만 한다. `strategy`만 쓴다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
   - `face` → `core`, `thumb`
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
-  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `tunnel`, `updater`(`_replace`·`UA`·`NET_ERRORS`). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
-  - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
+  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
+  - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기·`write_atomic`·자기 확인 `urlopen`). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
 - 순환 의존이 생기면 구현을 멈추고 구조를 먼저 보고한다.
@@ -166,14 +166,14 @@
   - POST는 Origin이 같은 출처인지 확인한다.
   - 영상·파일 이름 인자는 `editor.safe_name()`/`video_path()`로 경로·드라이브·`..`를 거절한다.
   - 파일을 내줄 때는 `resolve()` 후 허용 폴더 안인지 확인한다.
-  - 서버는 `127.0.0.1`에만 bind한다. Windows 에서는 SO_REUSEADDR 를 끈다(`app._Server` · 켜 두면 두 번째 실행이 같은 포트를 같이 잡음). 8765 를 못 쓰면(다른 프로그램·예약 포트) 8766~8799 중 하나로 켜고 작업 폴더 `.port` 에 남긴다. 두 번째 실행·실행기는 `GET /api/ping` 으로 그 포트가 이 앱인지 확인한 뒤에만 `/api/focus` 를 보낸다(D-030). 원격 리스너는 이 포트 창(`remote.app_ports`: 8765~8804 · `FUTSAL_PORT` 면 그 포트 하나)을 쓰지 않고, `/api/ping` 에는 403 이라 '이 앱'으로 잡히지 않는다(D-034).
+  - 서버는 `127.0.0.1`에만 bind한다. Windows 에서는 SO_REUSEADDR 를 끈다(`app._Server`·원격 리스너 `remote.RemoteServer` · 켜 두면 두 번째 실행이 같은 포트를 같이 잡음). 8765 를 못 쓰면(다른 프로그램·예약 포트) 8766~8799 중 하나로 켜고 작업 폴더 `.port` 에 남긴다. 두 번째 실행·실행기는 `GET /api/ping` 으로 그 포트가 이 앱인지 확인한 뒤에만 `/api/focus` 를 보낸다(D-030). 원격 리스너는 이 포트 창(`remote.app_ports`: 8765~8804 · `FUTSAL_PORT` 면 그 포트 하나)을 쓰지 않고, `/api/ping` 에는 403 이라 '이 앱'으로 잡히지 않는다(D-034).
 - **동시성**:
   - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
   - 휴대폰에서 시킨 작업도 같은 `start_job`(`by`='휴대폰 · <기기>')이라 PC 작업과 겹치지 않는다. 작업이 끝나면 `app.JOB_HOOKS`(지금은 `remote.Service.job_hook`: 휴대폰 알림·검수 결과 기억)를 부르고, 훅이 실패해도 작업 결과는 그대로다.
   - `start_job` 은 작업 번호를 돌려주고, 작업 시작 응답에 `jobId` 가 있다. 끝난 작업의 결과는 `app.DONE`(최근 20개)에 남고 `/api/state?job=<번호>` 의 `done` 으로 받는다. PC 화면(`ui.html`·`editor.html`·`thumb.html`)은 '작업이 비었을 때의 결과'가 아니라 **자기가 시킨 번호의 결과**만 쓴다(휴대폰이 바로 다음 작업을 시켜도 안 섞임). `/api/state` 의 `job_id`·`job_by` 로 지금 작업이 휴대폰에서 시킨 것인지 안다.
   - 휴대폰이 시킨 작업은 `core.no_self_update()` 안에서 돈다(이 스레드에서는 다운로드 엔진 pip·Deno 설치를 안 함).
   - 원격 쪽 스레드(보내기 `remote-publisher`·5초 점검 `remote-watch`·Windows 절전 막기 `remote-awake`·`tunnel`)는 작업·HTTP 를 기다리게 하지 않는다(ntfy 가 느려도 큐에만 넣음).
-  - 절전 막기는 `core.keep_awake()` 하나로만 쥔다(SetThreadExecutionState 를 부르는 곳은 core 뿐). Windows 는 그 상태를 스레드마다 세므로 작업 스레드(`start_job`)·같은 스레드 안의 편집점 찾기(`_analysis_session`, 들어올 때 상태로 되돌림)·`remote-awake`('켜 둔 동안 항상'·'작업할 때만')가 겹쳐도 한쪽이 놓을 때 다른 쪽 것이 풀리지 않는다(D-034).
+  - 절전 막기는 `core.keep_awake()` 하나로만 쥔다(SetThreadExecutionState 를 부르는 곳은 `updater.awake_state` 하나 — `core._keep_awake` 가 그것이고, 실행기는 업데이트 마무리 동안 `updater._awake` 로 같은 것을 씀). Windows 는 그 상태를 스레드마다 세므로 작업 스레드(`start_job`)·같은 스레드 안의 편집점 찾기(`_analysis_session`, 들어올 때 상태로 되돌림)·`remote-awake`('켜 둔 동안 항상'·'작업할 때만')가 겹쳐도 한쪽이 놓을 때 다른 쪽 것이 풀리지 않는다(D-034).
   - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`, `strategy._LOCK`(state·채널·기록 파일).
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
   - 멈추기(✕)는 `editor.CANCEL`, `run_killable`, `cancel_export`로 처리한다.
@@ -189,7 +189,8 @@
 - **업데이트 흐름**: 받기 → `testzip` → `.update_staging`에 풀기 → 버전·sha256 확인 → 모든 `.py` 문법 확인과 새 `updater.py --selftest` → 바뀔 파일을 `.rollback/v<이전>`에 복사 → `os.replace`로 교체(재시도) → manifest에서 빠진 파일 삭제(`config.json`·`.venv`·작업 폴더는 제외) → `.update_pending` 기록 → (core) 요구사항이 바뀌었으면 pip(`.req_hash` · Windows 는 먼저 pip 23.3 이상으로) → 재시작. 켜진 앱이 쓰는 .pyd/.dll 때문에 pip 가 실패하면 되돌리지 않고 `.req_pending` 을 남긴다(D-032). 다음 실행 때 실행기는 다음과 같이 처리한다.
   - 실행기끼리는 `.launch_lock` 으로 한 번에 하나다(겹친 실행은 앞 실행기가 끝낸 상태를 다시 읽음).
   - `.req_pending` 이 있으면 앱을 불러오기 전에 pip 를 하고, 실패하면 되돌린다.
-  - 업데이트 다시 시작(`app.restart`)의 순서: 휴대폰으로 보기 끄기(터널·리스너·마지막 비콘 · 켜 둠 표시는 그대로) → 실행기 띄우기(`FUTSAL_RESTART`·이 프로세스 번호 `FUTSAL_OLD_PID`) → 끝내기. 실행기는 `.launch_lock` 안에서 `.req_pending` 설치 전에 그 번호의 프로세스가 끝나길 기다린다(최대 `OLD_APP_WAIT` 20초 · .pyd 를 놓은 뒤에 pip) → 새 앱이 포트를 잡은 뒤 원격을 이어서 켠다(D-034).
+  - 업데이트 다시 시작은 도는 작업이 없을 때만 정한다(`/api/restart` 가 작업 확인과 `app.RESTARTING` 표시를 한 잠금 안에서 · 휴대폰이 그사이 시킨 작업이 있으면 409 busy → 화면이 끝날 때까지 다시 부름). 정한 뒤로는 `start_job` 이 PC·휴대폰의 새 작업을 받지 않는다(실행기를 못 띄우면 표시를 지우고 그대로 켜 둠).
+  - 업데이트 다시 시작(`app.restart`)의 순서: 휴대폰으로 보기 끄기(터널·리스너·마지막 비콘 · 켜 둠 표시는 그대로) → 실행기 띄우기(`FUTSAL_RESTART`·이 프로세스 번호 `FUTSAL_OLD_PID`) → 끝내기. 실행기는 `.launch_lock` 안에서 `.req_pending` 설치 전에 그 번호의 프로세스가 끝나길 기다린다(최대 `OLD_APP_WAIT` 20초 · .pyd 를 놓은 뒤에 pip) → 새 앱이 포트를 잡은 뒤 원격을 이어서 켠다(D-034). 이전 앱이 쥐던 절전 막기는 그 프로세스와 함께 풀리므로, 실행기가 확인·기다리기·pip·새 버전 확인 동안 `updater._awake` 로 이어 쥔다.
   - `import app, core, editor, thumb, style, qa`로 확인하고, 실패하면 되돌린 뒤 `.update_skip`에 기록한다.
   - 켜다가 멈추면 그 자리에서 되돌린다.
   - 창이 안 뜬 채로 1분이 지나서 두 번 더 켜면 되돌린다.

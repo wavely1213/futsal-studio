@@ -56,6 +56,8 @@ LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": N
 DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
 LOCK = threading.Lock()
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
+RESTARTING = threading.Event()  # 업데이트 다시 시작이 정해짐 → 새 작업(PC·휴대폰)을 받지 않음 (곧 이 프로세스가 끝나 그 작업이 끊기므로)
+RESTART_WAIT_MSG = "지금 하는 작업이 끝나면 다시 시작해요"
 JOB_HOOKS = []  # 작업이 끝나면 부름 (이름, 오류, 결과, 시킨 곳, 걸린 초) — 휴대폰 알림·결과 (remote.Service.job_hook)
 
 
@@ -81,7 +83,7 @@ def log(msg):
 def start_job(name, fn, by=None):
     """긴 작업 하나 시작 → 작업 번호(1부터 · 참) · 이미 돌고 있으면 False. by: 휴대폰에서 시켰으면 '휴대폰 · <기기 이름>'."""
     with LOCK:
-        if JOB["name"]:
+        if JOB["name"] or RESTARTING.is_set():
             return False
         jid = JOB["id"] + 1
         JOB.update(name=name, result=None, error=None, by=by, t0=time.time(), id=jid)
@@ -173,7 +175,12 @@ def restart():
         kw["start_new_session"] = True
     kw["env"] = dict(os.environ, FUTSAL_RESTART="1", FUTSAL_OLD_PID=str(os.getpid()))  # 새 프로세스는 '이미 실행 중' 확인을 건너뜀
     args = ["--browser"] if "--browser" in sys.argv else []
-    subprocess.Popen([_gui_python(), str(core.APP_DIR / "updater.py"), "--launch", *args], **kw)  # 새 버전이 열리는지 확인 후 실행
+    try:
+        subprocess.Popen([_gui_python(), str(core.APP_DIR / "updater.py"), "--launch", *args], **kw)  # 새 버전이 열리는지 확인 후 실행
+    except OSError as e:  # 실행기를 못 띄우면 끄지 않음 (작업은 다시 받음 · 휴대폰으로 보기는 다음에 켤 때 이어서)
+        log(f"다시 시작하지 못했어요 · {e} · 프로그램을 닫고 다시 켜 주세요")
+        RESTARTING.clear()
+        return
     _quit()
 
 
@@ -922,6 +929,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(404, {"error": "not found"})
         if path == "/api/restart":
+            with LOCK:  # 작업 확인과 '다시 시작' 표시를 한 번에 → 그 뒤로는 휴대폰도 새 작업을 시작하지 못함 (start_job)
+                busy = JOB["name"]
+                if not busy:
+                    RESTARTING.set()
+            if busy:  # 업데이트가 끝난 뒤 휴대폰이 시킨 작업 등: 끝까지 하고 다시 시작 (화면이 잠시 뒤 다시 부름 · 끊지 않음)
+                return self._send(409, {"ok": False, "busy": True, "error": RESTART_WAIT_MSG})
             self._send(200, {"ok": True})
             threading.Timer(0.5, restart).start()
             return
@@ -1193,8 +1206,8 @@ def _confirm_close(win):
     def got(r):
         ans["r"] = r
         done.set()
-    try:
-        win.evaluate_js(f"confirm({json.dumps(msg, ensure_ascii=False)})", callback=got)
+    try:  # pywebview 는 callback 을 Promise 일 때만 부름 (바로 값이면 부르지 않아 600초를 기다림) → 옆의 flushBeforeClose 처럼 Promise 로
+        win.evaluate_js(f"Promise.resolve(confirm({json.dumps(msg, ensure_ascii=False)}))", callback=got)
     except Exception:  # noqa: BLE001 — 물어볼 수 없으면 예전처럼 닫음
         return True
     if not done.wait(600):

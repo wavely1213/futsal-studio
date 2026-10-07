@@ -10,18 +10,24 @@
 - 저장: remote.json 은 write_atomic(0600 · 실패하면 임시 파일을 지움) · 터널 pid·설정 파일 · 휴대폰 미리보기는 백신 잠금이면 기다림
 - 기록·글자: 원격 리스너 오류가 studio-error.log(pythonw)로 가도 표·주제·터널 주소·서명·연결 코드가 남지 않음 ·
   반쪽 이모지가 든 휴대폰 요청·응답
+- 합친 뒤 검토 반영: 업데이트 다시 시작은 도는 작업(휴대폰이 시킨 것 포함)이 끝난 뒤에 · 그 뒤로 새 작업을 받지 않음 ·
+  실행기가 업데이트 마무리 동안 절전 막기 · 리스너도 Windows 에서 SO_REUSEADDR 끔 · 짝짓기 주제(fsp)도 지움 ·
+  ntfy·터널 자기 확인·채널 RSS 도 updater.urlopen
 인터넷은 쓰지 않는다. 실행: 저장소 폴더에서 python3 -m unittest tests.test_remote_windows
 """
 import errno
+import inspect
 import io
 import json
 import os
 import socket
+import ssl
 import stat
 import subprocess
 import sys
 import tempfile
 import threading
+import textwrap
 import time
 import types
 import unittest
@@ -38,6 +44,7 @@ import app  # noqa: E402
 import core  # noqa: E402
 import editor  # noqa: E402
 import remote  # noqa: E402
+import strategy  # noqa: E402
 import tunnel  # noqa: E402
 import updater  # noqa: E402
 from remote_fixture import ORIGIN, dev_env, http, make_home, pair_body, service  # noqa: E402
@@ -240,10 +247,14 @@ class KeepAwake(Home):
         self.assertTrue(wait_for(lambda: not self.es.awake()), "작업이 끝나고 원격도 놓으면 잠들 수 있음")
 
     def test_remote_never_calls_kernel32_itself(self):
-        """원격은 절전 막기를 core.keep_awake 로만 (SetThreadExecutionState 를 직접 부르는 곳은 core 하나)."""
+        """원격은 절전 막기를 core.keep_awake 로만 (SetThreadExecutionState 를 부르는 곳은 updater.awake_state 하나 ·
+        core._keep_awake 가 그것 · 실행기의 업데이트 마무리도 같은 것)."""
         src = (REPO / "remote.py").read_text(encoding="utf-8")
-        self.assertNotIn("kernel32.SetThreadExecutionState", src)
         self.assertIn("core.keep_awake()", src)
+        for name in ("remote.py", "tunnel.py", "core.py", "app.py"):
+            self.assertNotIn("kernel32.SetThreadExecutionState", (REPO / name).read_text(encoding="utf-8"), name)
+        self.assertEqual((REPO / "updater.py").read_text(encoding="utf-8").count("kernel32.SetThreadExecutionState"), 1)
+        self.assertIs(core._keep_awake, updater.awake_state)
 
 
 # ---------- 3. 포트: 원격 리스너 · 다른 포트로 켠 앱 · 실행기 ----------
@@ -432,6 +443,29 @@ class Restart(unittest.TestCase):
         updater._wait_gone(None, 5)
         self.assertLess(time.monotonic() - t0, 0.5)
 
+    def test_launcher_keeps_pc_awake_while_finishing_update(self):
+        """이전 앱이 끝나면 그 앱(작업·원격 '켜 둔 동안 항상')이 쥐던 절전 막기가 풀림 → 실행기가 이전 앱 기다리기·미룬 구성요소 설치
+        (몇 분)·새 버전 확인 동안 이어 쥠 · 끝나면 놓음 (새 앱의 작업·원격이 다시 쥠)."""
+        es = FakeES()
+        a = self.app_dir()
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["pip"] = (es.awake(), threading.get_ident() in es.holders())
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        def fake_check(app_dir, python=None):
+            seen["import"] = es.awake()
+            return True, ""
+        with mock.patch("ctypes.windll", types.SimpleNamespace(kernel32=types.SimpleNamespace(SetThreadExecutionState=es)), create=True), \
+                mock.patch.dict(os.environ, {"FUTSAL_RESTART": "1", "FUTSAL_OLD_PID": "0"}), \
+                mock.patch.object(updater, "_wait_gone", side_effect=lambda pid, secs: seen.setdefault("wait", es.awake())), \
+                mock.patch.object(updater.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(updater, "_import_check", side_effect=fake_check):
+            self.assertEqual(updater.check(a, log=lambda m: None), "ok")
+        self.assertEqual(seen, {"wait": True, "pip": (True, True), "import": True})
+        self.assertFalse(es.awake(), "확인이 끝나면 놓음")
+
 
 # ---------- 5. 저장: remote.json · 휴대폰 미리보기 ----------
 
@@ -578,6 +612,140 @@ class Secrets(Home):
                 st, _, out = http(s.port(), "GET", "/r/ping")
         self.assertEqual(st, 200)
         self.assertEqual(json.loads(out)["name"], "보관함 영상 🔥\ud83d")
+
+
+# ---------- 7. 합친 뒤 검토 반영 ----------
+
+class ReviewRestart(Home):
+    """업데이트 다시 시작: 휴대폰이 시킨 작업이 돌고 있으면 끝난 뒤에 · 다시 시작을 정한 뒤로는 새 작업(PC·휴대폰)을 받지 않음."""
+
+    def setUp(self):
+        super().setUp()
+        self.assertTrue(wait_job_idle(), "앞 시험의 작업이 아직 돌고 있음")
+        self.addCleanup(app.RESTARTING.clear)
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        self.port = self.srv.server_address[1]
+        p = mock.patch.object(app, "PORT", self.port)
+        p.start()
+        self.addCleanup(p.stop)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.server_close)
+        self.addCleanup(self.srv.shutdown)
+
+    def post(self, path):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"})
+        try:
+            with NOPROXY.open(req, timeout=20) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_restart_waits_for_phone_job_then_refuses_new_jobs(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.assertTrue(app.start_job("작은 미리보기 만들기", lambda: gate.wait(20), by="휴대폰 · iPhone · Safari"))
+        with mock.patch.object(app, "restart") as rs:
+            st, body = self.post("/api/restart")
+            self.assertEqual((st, body.get("busy"), body.get("error")), (409, True, app.RESTART_WAIT_MSG))
+            self.assertFalse(app.RESTARTING.is_set(), "도는 작업이 있으면 다시 시작을 정하지 않음 (화면이 잠시 뒤 다시 부름)")
+            time.sleep(0.8)
+            rs.assert_not_called()
+            self.assertEqual(app.JOB["name"], "작은 미리보기 만들기", "휴대폰 작업을 끊지 않음")
+            gate.set()
+            self.assertTrue(wait_job_idle())
+            st, body = self.post("/api/restart")
+            self.assertEqual((st, body.get("ok")), (200, True))
+            self.assertTrue(app.RESTARTING.is_set())
+            self.assertFalse(app.start_job("내보내기", lambda: None), "다시 시작을 정한 뒤 PC 작업은 받지 않음")
+            self.assertFalse(app.start_job("편집점 찾기", lambda: None, by="휴대폰 · iPhone · Safari"),
+                             "휴대폰 작업도 받지 않음 (remote._go 가 BUSY_MSG 409)")
+            self.assertTrue(wait_for(lambda: rs.called, 10))
+        self.assertIsNone(app.JOB["name"])
+
+    def test_launcher_failure_keeps_app_taking_jobs(self):
+        app.RESTARTING.set()
+        with mock.patch.object(remote.SVC, "shutdown"), mock.patch.object(app.subprocess, "Popen", side_effect=OSError("실행 파일 없음")), \
+                mock.patch.object(app, "_quit") as quit_, mock.patch.object(app, "log") as log:
+            app.restart()
+        quit_.assert_not_called()
+        self.assertFalse(app.RESTARTING.is_set(), "실행기를 못 띄우면 계속 작업을 받음")
+        self.assertIn("다시 시작하지 못했어요", log.call_args[0][0])
+
+
+class ReviewListenerAndSecrets(Home):
+    def test_listener_reuse_rule_matches_app(self):
+        """app._Server 와 같은 규칙 (D-030): Windows 에서는 SO_REUSEADDR 를 끔 → 다른 프로세스가 듣는 FUTSAL_REMOTE_PORT 를 같이 잡지 않음."""
+        self.assertEqual(remote.RemoteServer.allow_reuse_address, app._Server.allow_reuse_address)
+        src = textwrap.dedent(inspect.getsource(remote.RemoteServer))
+        for plat, want in (("win32", False), ("linux", True)):
+            ns = dict(vars(remote))
+            with mock.patch.object(sys, "platform", plat):
+                exec(compile(src, "remote.py", "exec"), ns)  # noqa: S102 — 클래스 몸통을 그 운영체제로 다시 계산
+            self.assertIs(bool(ns["RemoteServer"].allow_reuse_address), want, plat)
+
+    def test_busy_fixed_port_is_not_shared(self):
+        """정해 둔 원격 포트를 다른 프로그램이 듣고 있으면 같이 잡지 않고 '열지 못했어요' (Windows 는 위 규칙이 있어야 이렇게 됨)."""
+        with socket.socket() as other:
+            other.bind(("127.0.0.1", 0))
+            other.listen(1)
+            busy = other.getsockname()[1]
+            s, _ = self.svc()
+            with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_PORT": str(busy)}), mock.patch.object(remote.time, "sleep"), \
+                    self.assertRaisesRegex(RuntimeError, "열지 못했어요"):
+                s._new_listener()
+
+    def test_pair_topic_redacted(self):
+        topic = remote.derive_pair("ABCD2345EFGH")[0]
+        self.assertRegex(topic, r"^fsp[0-9a-f]{24}$")
+        for f in (remote.redact, remote.scrub):
+            out = f(f"만남 주제 {topic} · 비콘 {TOPIC}")
+            self.assertNotIn(topic, out)
+            self.assertNotIn(TOPIC, out)
+            self.assertIn("fs…", out)
+
+    def test_phone_https_calls_use_updater_urlopen(self):
+        """ntfy 보내기·마지막 비콘·터널 자기 확인·채널 RSS 도 updater.urlopen (Python 3.13+ 에서 백신 'HTTPS 검사' 인증서도 받음 · D-029)."""
+        seen = []
+        rss = (REPO / "tests" / "fixtures" / "strategy" / "rss_own.xml").read_bytes()
+
+        class Resp:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def read(self, n=-1):
+                return self.raw
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake(req, timeout):
+            seen.append(req.full_url)
+            return Resp(rss if "feeds" in req.full_url else b'{"api": 1}')
+        s, _ = self.svc()
+        with mock.patch.object(updater, "urlopen", side_effect=fake), \
+                mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("urllib.request.urlopen 을 바로 부름")):
+            self.assertTrue(s.pub._post("https://ntfy.example/post", b"a", {}))
+            self.assertTrue(s.pub.post_now("https://ntfy.example/last", b"b", {}))
+            self.assertTrue(tunnel._self_check("https://quiet-river.trycloudflare.com"))
+            r, err = strategy.fetch_rss("UC" + "a" * 22)
+        self.assertIsNone(err)
+        self.assertTrue(r["entries"])
+        for want in ("https://ntfy.example/post", "https://ntfy.example/last", "https://quiet-river.trycloudflare.com/r/ping", "feeds"):
+            self.assertTrue(any(want in u for u in seen), want)
+
+    def test_cert_failure_says_antivirus_without_secrets(self):
+        s, fb = self.svc()
+        err = urllib.error.URLError(ssl.SSLCertVerificationError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"))
+        with mock.patch.object(updater, "urlopen", side_effect=err), mock.patch.object(remote, "RETRY_DELAYS", ()):
+            self.assertFalse(s.pub._post(f"https://ntfy.example/{TOPIC}", b"a", {}))
+        lines = [x for x in fb.lines if "휴대폰 알림을 보내지 못했어요" in x]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("HTTPS 검사", lines[0])
+        self.assertNotIn(TOPIC, "\n".join(fb.lines))
 
 
 if __name__ == "__main__":

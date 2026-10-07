@@ -42,7 +42,7 @@
   3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. 주소 안에 든 이름(`/api/thumb/cut` 의 `src` 안 `/frame?name=`)도 `video_path` 를 거친다 (I-021 해결).
   4. 요청 본문 JSON 의 글자는 `core.clean_json` 이 짝 없는 대리 문자를 '�'로 바꾼 뒤 쓴다 (`KNOWN_ISSUES.md` I-038).
   - `GET /api/ping` 은 이 앱인지(`{"app": "futsal-studio", "version"}`)만 알려 준다 — 두 번째 실행·실행기가 그 포트의 주인을 확인할 때만 쓰고(D-030), 개인 정보는 없다. 같은 Host 검사를 거친다.
-  4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
+  5. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
 - **원격 경계(`remote.RemoteHandler`, D-027)**: 터널로 들어온 요청은 로컬 `Handler`가 아니라 이것만 받고, 다음 순서로 막는다. 새 `/r/*` 경로도 같은 순서를 따른다.
   1. Host 가 `remote.futsal.invalid`(cloudflared 가 붙임)인지 — 개발 모드(`FUTSAL_REMOTE_DEV=1`)에서만 `127.0.0.1:<원격 포트>` 도. 브라우저는 `.invalid` Host 를 만들 수 없어 DNS 리바인딩·같은 PC 의 다른 사이트를 막는다. 본문은 `Content-Length` 로만 받는다(`Transfer-Encoding` 이 있으면 읽지 않고 411 · 잠금 횟수에 안 셈).
   2. 메서드 GET·POST·OPTIONS 만.
@@ -54,7 +54,7 @@
 - **SQL 인젝션**: DB가 없다(JSON 파일 저장). 같은 자리의 위험은 **명령·필터 인젝션**이다.
   - 외부 프로그램은 항상 인자 목록으로 `core.run()`/`editor.run_killable()`을 통해 실행한다.
   - `shell=True`·`os.system`·`eval`은 쓰지 않는다(현재 0건).
-  - 예외는 Windows 바로가기를 만드는 PowerShell(`app.ensure_shortcut`) 하나다. 값을 작은따옴표 escape(`q()`)한 뒤 `-EncodedCommand`로 넘긴다. 사용자 입력을 넣지 않는다.
+  - 예외는 Windows 바로가기를 만드는 PowerShell 하나다(`winlink._powershell` — `winlink.prepare` 가 COM(`write_shortcut`)으로 못 만들 때만). 값을 작은따옴표 escape(`q()`)한 뒤 `-EncodedCommand`로 넘긴다. 사용자 입력을 넣지 않는다.
   - ffmpeg 필터 문자열에 사용자 경로·글자를 직접 넣지 않는다.
     - 자막은 임시 폴더의 `subs.ass`(상대 이름)로 넘기고, 글자는 `editor._ass_text()`로 `{}`·`\`를 무력화한다.
     - concat 목록은 고정 이름(`seg0000.mp4`)이나 `bundle._q()`로 쓴다.
@@ -80,7 +80,7 @@
   - 인가: 휴대폰은 허용 동작만 한다(동작 이름은 글자여야 하고 목록에 있어야 함 · 아니면 400). 지우기·설정·업데이트·재시작·Claude·폴더 열기·업로드·쿠키·임의 경로·채널 전략 작업(새로 고침·점검 · D-028)은 없다. 휴대폰에서 원격 접속을 **켤 수는 없다**(끄기·자기 기기 끊기·알림 시험만). 휴대폰이 시킨 받기·학습용 받기는 다운로드 엔진 pip 업데이트·Deno 설치를 하지 않는다(`core.no_self_update` · PC 에서만).
   - 끊기: PC 의 [끊기]·[모든 휴대폰 끊기]·휴대폰의 '이 휴대폰 끊기'는 열쇠·표·nonce 를 바로 버리고 ntfy 주제 둘을 새로 바꾼다(남은 기기에만 옛 비콘 주제로 새 주제를 암호로 알림 · 옛 알림 주제에는 '주제가 바뀌었어요' 정해진 안내만 한 번 — 새 주제는 쓰지 않음). 90일 정리는 비콘 주제만 바꾼다.
   - 원격 동작은 모두 `studio.log`에 `원격 · <기기> · <동작> · <대상>`으로 남는다(기기·파일 이름은 줄바꿈·제어 글자 빼고 80자).
-  - 원격 쪽 오류 추적은 `remote._trace()` 로만 오류 출력에 쓴다 — `remote.redact` 가 터널 주소·비콘/알림 주제·표(`/r/m/…`)·서명(`FSR2 …`)·연결 코드(`#pair=`·`&u=`)를 '…'로 지운다. 리스너의 `handle_error` 도 보낸 곳 주소 없이 이것만 쓴다. pythonw 에서는 이 출력이 `studio-error.log` 로 모이므로(D-034 · 예전에는 버려짐) 이 규칙을 지킨다. 휴대폰에 보내는 기록·오류 글(`scrub`)도 같은 지우기를 거친다.
+  - 원격 쪽 오류 추적은 `remote._trace()` 로만 오류 출력에 쓴다 — `remote.redact` 가 터널 주소·비콘/알림/짝짓기 만남 주제(`fsb`·`fsn`·`fsp` + 24자)·표(`/r/m/…`)·서명(`FSR2 …`)·연결 코드(`#pair=`·`&u=`)를 '…'로 지운다. 리스너의 `handle_error` 도 보낸 곳 주소 없이 이것만 쓴다. pythonw 에서는 이 출력이 `studio-error.log` 로 모이므로(D-034 · 예전에는 버려짐) 이 규칙을 지킨다. 휴대폰에 보내는 기록·오류 글(`scrub`)도 같은 지우기를 거친다.
   - 휴대폰에서 온 POST 본문도 로컬 서버처럼 `core.clean_json`(반쪽 이모지 → '�')을 거치고, 응답은 쓸 수 없는 글자가 있으면 `\uXXXX` 로 보낸다.
   - 휴대폰 페이지(`mulgyeol.kr/futsal`, 와벨리 저장소)는 엄격한 CSP(`script-src 'self'`, 연결은 `*.trycloudflare.com`·`ntfy.sh` 만), 밖에서 온 글은 `textContent` 로만, 짝짓기 QR 의 `#pair=` 는 읽자마자 주소창에서 지운다. 이미 연결된 PC 와 다른 PC 면 먼저 묻고, 새 주소에 기존 열쇠를 보내지 않는다.
 - **GET은 읽기 전용으로 둔다.** 다른 사이트의 `<img src="http://127.0.0.1:8765/…">`도 Host가 맞아 통과한다. 응답을 읽지는 못하지만 동작은 일어난다.
@@ -161,8 +161,7 @@
 
 - **의존성 취약점**: `DEPENDENCY_POLICY.md` 참고. audit 경고 발견 시 보고.
 - 밖으로 나가는 통신은 모두 HTTPS다. 업데이트·다운로드 주소를 `http://`로 바꾸지 않는다(`updater.download_and_install`은 형식상 `http`도 받으므로 주소 쪽에서 지킨다).
-  - 업데이트·Deno·모델 받기는 `updater.urlopen` 을 쓴다: 인증서 사슬·주소 확인은 그대로 하고 Python 3.13+ 의 `VERIFY_X509_STRICT` 만 끈다 (백신 'HTTPS 검사'·회사 프록시 인증서가 규격을 조금 벗어나도 3.12 처럼 받게 · I-047). `CERT_NONE`·`check_hostname=False` 로 바꾸지 않는다.
-- 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다.
+  - 업데이트·Deno·모델 받기·휴대폰 알림(ntfy)·터널 자기 확인·채널 RSS 는 `updater.urlopen` 을 쓴다: 인증서 사슬·주소 확인은 그대로 하고 Python 3.13+ 의 `VERIFY_X509_STRICT` 만 끈다 (백신 'HTTPS 검사'·회사 프록시 인증서가 규격을 조금 벗어나도 3.12 처럼 받게 · I-047). `CERT_NONE`·`check_hostname=False` 로 바꾸지 않는다.
 - 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다. 원격 리스너도 루프백 HTTP 이고(바깥 TLS 는 Cloudflare), 쿠키 대신 요청 서명을 쓴다.
 
 ## 6. AI 작업 시 보안 체크리스트

@@ -796,10 +796,20 @@ class Session(Work):
         class Win:
             def __init__(self, answer):
                 self.answer, self.destroyed, self.asked = answer, False, []
+                self.answered = threading.Event()
 
             def evaluate_js(self, js, callback=None):
+                """pywebview 처럼: callback 은 값이 Promise 일 때만 부름 (바로 값이면 그 값을 돌려주기만 함)."""
                 self.asked.append(js)
-                callback(self.answer if js.startswith("confirm(") else True)
+                value = self.answer if "confirm(" in js else True
+                if callback and js.startswith("Promise.resolve("):
+                    def later():
+                        callback(value)
+                        if "confirm(" in js:
+                            self.answered.set()
+                    threading.Thread(target=later, daemon=True).start()
+                    return "true"
+                return value
 
             def destroy(self):
                 self.destroyed = True
@@ -808,14 +818,63 @@ class Session(Work):
                 w = Win(answer)
                 h = app._on_closing(w)
                 self.assertFalse(h())
-                end = time.time() + 5
+                self.assertTrue(w.answered.wait(10), "확인 창의 대답이 돌아와야 함 (Promise 로 감싸지 않으면 callback 이 안 불림)")
+                end = time.time() + 10
                 while not w.destroyed and len(w.asked) < (2 if closed else 1) and time.time() < end:
                     time.sleep(0.02)
-                time.sleep(0.1)
+                time.sleep(0.3)
                 self.assertEqual(w.destroyed, closed, answer)
                 self.assertIn("편집점 찾기", w.asked[0])
                 if not closed:
                     self.assertFalse(h(), "닫지 않기로 했으면 다음 닫기에서 다시 물음")
+
+    @unittest.skipUnless(node(), "node 가 없음")
+    def test_close_confirm_through_real_pywebview_wrapper(self):
+        """pywebview 의 진짜 evaluate_js 가 만드는 글(Promise 일 때만 callback)을 node 로 돌려 봄: 확인·취소 모두 몇 초 안에 대답이 옴
+        (예전 'confirm(...)' 은 callback 이 안 불려 600초 기다렸고, 그사이 두 번째 ✕ 는 묻지도·저장하지도 않고 닫았음)."""
+        try:
+            import webview.window as ww
+        except ImportError:
+            self.skipTest("pywebview 가 없음")
+        raw = getattr(ww.Window.evaluate_js, "__wrapped__", None)
+        if raw is None:
+            self.skipTest("이 pywebview 는 evaluate_js 를 풀 수 없음")
+        prelude = ("const ANSWER = %s; globalThis.confirm = () => ANSWER; globalThis.window = globalThis; const out = [];"
+                   "globalThis.pywebview = {_isPromise: o => !!o && typeof o.then === 'function', stringify: v => JSON.stringify(v),"
+                   " _asyncCallback: (r, id) => out.push([r, id])};"
+                   "const r = eval(%s); setTimeout(() => console.log(JSON.stringify({r: r === undefined ? null : r, out})), 20);")
+
+        class Gui:
+            renderer = "edgechromium"
+
+            def __init__(self, win, answer):
+                self.win, self.answer = win, answer
+
+            def evaluate_js(self, script, uid, parse):
+                r = subprocess.run(["node", "-e", prelude % (json.dumps(self.answer), json.dumps(script))],
+                                   capture_output=True, text=True, timeout=60)
+                got = json.loads(r.stdout.strip().splitlines()[-1])
+                for res, cid in got["out"]:  # js_bridge → window._callbacks[id](값)
+                    cb = self.win._callbacks.pop(cid, None)
+                    if cb:
+                        threading.Thread(target=cb, args=(json.loads(res),), daemon=True).start()
+                return got["r"]
+
+        class Win:
+            def __init__(self, answer):
+                self._callbacks, self.uid = {}, "w"
+                self.gui = Gui(self, answer)
+
+            def evaluate_js(self, script, callback=None):
+                return raw(self, script, callback)
+        with mock.patch.dict(app.JOB, {"name": "작은 미리보기 만들기"}):
+            for answer in (True, False):
+                got = {}
+                th = threading.Thread(target=lambda: got.setdefault("r", app._confirm_close(Win(answer))), daemon=True)
+                th.start()
+                th.join(60)
+                self.assertFalse(th.is_alive(), "대답을 600초까지 기다리지 않음")
+                self.assertIs(got.get("r"), answer)
 
     def test_pythonw_errors_go_to_file(self):
         old = sys.stderr

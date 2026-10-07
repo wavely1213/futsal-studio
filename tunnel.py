@@ -246,7 +246,7 @@ def kill_stale(exe):
 def _self_check(url, timeout=10):
     try:
         req = urllib.request.Request(url + "/r/ping", headers=updater.UA)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with updater.urlopen(req, timeout) as r:  # 업데이트와 같은 인증서 설정 (백신 'HTTPS 검사' · D-029)
             return json.loads(r.read(4096) or b"{}").get("api") == 1
     except Exception:  # noqa: BLE001
         return False

@@ -166,7 +166,7 @@ def clean(s, n=80):
 # 기록에 남으면 안 되는 것: 터널 주소 · 비콘/알림 주제 · 영상·그림 표(ticket) · 서명 머리글 · 연결 코드와 터널 힌트
 _SECRETS = (
     (re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I), "https://….trycloudflare.com"),
-    (re.compile(r"\bfs[bn][0-9a-f]{24}\b"), "fs…"),
+    (re.compile(r"\bfs[bnp][0-9a-f]{24}\b"), "fs…"),  # 비콘(fsb)·알림(fsn)·짝짓기 만남(fsp, derive_pair) 주제
     (re.compile(r"/r/m/[A-Za-z0-9_-]+"), "/r/m/…"),
     (re.compile(r"FSR2 [^\s'\"]+"), "FSR2 …"),
     (re.compile(r"([#&?]pair=)[^&\s'\"]+"), r"\1…"),
@@ -795,29 +795,31 @@ class Publisher:
         self._post(self.svc.ntfy() + "/", json.dumps(msg, ensure_ascii=False).encode("utf-8"), {"Content-Type": "application/json"})
 
     def _post(self, url, data, headers):
+        cert = False
         for k in range(len(RETRY_DELAYS) + 1):
             try:
                 req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with updater.urlopen(req, 10) as r:  # 업데이트와 같은 인증서 설정 (Python 3.13+ · 백신 'HTTPS 검사' · D-029)
                     r.read(256)
                 return True
             except urllib.error.HTTPError as e:
                 if e.code < 500 and e.code != 429:
                     break
-            except updater.NET_ERRORS:
-                pass
+            except updater.NET_ERRORS as e:
+                cert = cert or "CERTIFICATE_VERIFY_FAILED" in updater._why(e)
             if k < len(RETRY_DELAYS):
                 time.sleep(RETRY_DELAYS[k])
         if self.svc.clock() - self.warned > 3600:
-            self.warned = self.svc.clock()
-            self.svc.log("  휴대폰 알림을 보내지 못했어요 · 인터넷 연결을 확인해 주세요")
+            self.warned = self.svc.clock()  # 정해진 문장만 (주소·주제가 든 오류 글은 기록하지 않음)
+            self.svc.log("  휴대폰 알림을 보내지 못했어요 · " + ("백신 프로그램의 'HTTPS 검사'·'웹 보호'를 잠시 끄고 다시 해 보세요" if cert
+                                                         else "인터넷 연결을 확인해 주세요"))
         return False
 
     def post_now(self, url, data, headers, timeout=2.0):
         """앱을 끌 때 마지막 비콘: 기다리지 않고 한 번만."""
         try:
             req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with updater.urlopen(req, timeout) as r:
                 r.read(256)
             return True
         except Exception:  # noqa: BLE001
@@ -1307,7 +1309,7 @@ class Service:
         self._awake_loop()
 
     def _awake_loop(self, stop=None, every=5):
-        """이 스레드에서 core.keep_awake() 를 쥐고 있다가 원하지 않게 되면 놓음 (SetThreadExecutionState 는 core 에서만).
+        """이 스레드에서 core.keep_awake() 를 쥐고 있다가 원하지 않게 되면 놓음 (SetThreadExecutionState 는 core·updater 에서만).
         Windows 는 그 상태를 스레드마다 세므로, 여기서 놓아도 작업 스레드(app.start_job 의 keep_awake · 편집점 찾기)가 쥔 것은
         그대로이고 반대로 작업이 끝나도 여기서 쥔 '켜 둔 동안 항상'은 그대로 — 서로를 일찍 풀지 않는다 (D-034)."""
         stop = stop or threading.Event()
@@ -1690,6 +1692,9 @@ ACTIONS = {"download": _a_download, "analyze": _a_analyze, "add_refs": _a_add_re
 class RemoteServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
+    # app._Server 와 같은 규칙 (D-030): Windows 의 SO_REUSEADDR 는 다른 프로세스가 듣고 있는 포트도 같이 잡음 →
+    # FUTSAL_REMOTE_PORT 가 쓰이는 중이면 조용히 같이 듣지 않고 _new_listener 가 기다렸다 '열지 못했어요'로
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(self, addr, svc):
         self.svc = svc

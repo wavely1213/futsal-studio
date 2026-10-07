@@ -131,6 +131,36 @@ def write_atomic(path, data, encoding="utf-8", fsync=False, secs=None, mode=None
     return path
 
 
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def awake_state(on, prev=None):
+    """Windows: 이 스레드가 PC 를 깨어 있게 쥠(on → 들어올 때 상태) · 놓음(그 상태 prev 로). 다른 운영체제는 아무 일도 안 함 (None).
+    SetThreadExecutionState 를 부르는 곳은 이것 하나 — 앱은 core.keep_awake(core._keep_awake 가 이것), 실행기는 _awake (D-034).
+    Windows 는 이 상태를 스레드마다 셈 (어느 스레드든 쥐고 있으면 깨어 있음)."""
+    import ctypes
+    try:
+        f = ctypes.windll.kernel32.SetThreadExecutionState
+    except AttributeError:
+        return None
+    f.restype, f.argtypes = ctypes.c_uint, [ctypes.c_uint]
+    if on:
+        return f(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) or None
+    f(prev if prev and prev & ES_CONTINUOUS else ES_CONTINUOUS)
+    return None
+
+
+@contextlib.contextmanager
+def _awake():
+    """실행기: 업데이트 마무리(이전 앱 기다리기·미룬 구성요소 설치·새 버전 열리는지 확인) 동안 PC 가 잠들지 않게.
+    이전 앱(작업·휴대폰으로 보기 '켜 둔 동안 항상')이 쥐던 것은 그 프로세스가 끝나면 풀리므로 여기서 이어 쥠 (D-034)."""
+    prev = awake_state(True)
+    try:
+        yield
+    finally:
+        awake_state(False, prev)
+
+
 def py_env(**extra):
     """파이썬 자식 프로세스(pip·확인 실행)의 환경: 출력을 UTF-8 로 (Windows 3.10~3.14 는 파이프에 cp949 로 써서
     한국어 오류·한글 경로가 '���' 로 깨짐 · PEP 686 이전)."""
@@ -793,7 +823,7 @@ def check(app_dir=APP_DIR, python=None, log=None):
         return "none"
     if not os.environ.get("FUTSAL_RESTART") and _app_running(app_dir):
         return "running"  # 켜져 있는 앱이 업데이트하는 중일 수도 있음 → 손대지 않음 (그 창이 앞으로 나옴)
-    with _launch_lock(app_dir):
+    with _launch_lock(app_dir), _awake():
         return _check_locked(app_dir, python, log)
 
 

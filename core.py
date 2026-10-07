@@ -558,7 +558,7 @@ def _peaks(wav, top=10):
 # ---------- 단어 단위 받아쓰기: 모델 한 번만 불러 쓰기 · 용어 사전 · 받아쓰는 동안 PC 잠들지 않게 ----------
 # 사전 형식·고치기·자막 나누기는 captions.py (표준 라이브러리만 쓰는 도우미라 core 가 불러 씀)
 _WHISPER, _WHISPER_LOCK, _SESSION = {}, threading.Lock(), threading.local()
-ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = updater.ES_CONTINUOUS, updater.ES_SYSTEM_REQUIRED
 
 
 def dict_path():
@@ -596,25 +596,16 @@ def _whisper(model):
         return _WHISPER[key]
 
 
-def _keep_awake(on, prev=None):
-    """Windows: 받아쓰는 동안 PC 가 절전으로 들어가지 않게 (SetThreadExecutionState) · 끝나면 원래대로. 다른 운영체제는 그대로."""
-    import ctypes
-    try:
-        f = ctypes.windll.kernel32.SetThreadExecutionState
-    except AttributeError:
-        return None
-    f.restype, f.argtypes = ctypes.c_uint, [ctypes.c_uint]
-    if on:
-        return f(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) or None
-    f(prev if prev and prev & ES_CONTINUOUS else ES_CONTINUOUS)
-    return None
+# Windows: 이 스레드가 PC 를 깨어 있게 쥠(on) · 들어올 때 상태로 되돌림 — 실행기(업데이트 마무리)와 같은 하나뿐인 호출 (D-034)
+_keep_awake = updater.awake_state
 
 
 @contextlib.contextmanager
 def keep_awake():
     """Windows: 이 스레드가 일하는 동안 PC 가 절전으로 들어가지 않게 (app.start_job 이 모든 작업에 씀 · 겹쳐 써도 됨).
     내보내기·묶기·받기는 CPU·디스크를 써도 Windows 가 '사용 중'으로 보지 않아 유휴 절전 시간이 지나면 잠듦.
-    절전 막기를 쥐는 곳은 모두 이것(또는 같은 스레드 안의 _analysis_session)으로만 — SetThreadExecutionState 를 직접 부르지 않는다.
+    절전 막기를 쥐는 곳은 모두 이것(또는 같은 스레드 안의 _analysis_session)으로만 — SetThreadExecutionState 를 직접 부르지 않는다
+    (부르는 곳은 updater.awake_state 하나 · 실행기는 업데이트 마무리 동안 updater._awake 로 같은 것을 씀).
     Windows 는 이 상태를 스레드마다 따로 세므로(어느 스레드든 쥐고 있으면 깨어 있음) 작업 스레드·편집점 찾기·휴대폰으로 보기
     (remote 의 자기 스레드 · '켜 둔 동안 항상')가 겹쳐도 한쪽이 놓을 때 다른 쪽 것이 풀리지 않는다 (D-034).
     같은 스레드 안에서 겹치면 들어올 때의 상태로 되돌린다 (바깥이 쥔 것은 그대로)."""

@@ -367,7 +367,7 @@ class RefreshTests(Base):
             def __exit__(self, *a):
                 return False
 
-        def fake(req, timeout=None):
+        def fake(req, timeout=None, context=None):  # updater.urlopen 이 인증서 설정(context)을 넘김
             calls.append(req.full_url)
             self.assertTrue(req.get_header("User-agent").startswith("futsal-studio/"))
             if len(calls) == 1:

@@ -92,7 +92,7 @@
 - 사람이 메모장으로 고칠 수 있는 설정 JSON(`config.json`·`dict.json`)은 `updater.read_config`·`updater.loads_tolerant` 로 읽는다 (BOM·ANSI(cp949)·`"D:\풋살작업"` 처럼 역슬래시 하나). 못 읽어도 앱은 켜지고(기본값) 이유를 알리며, 못 읽은 사용자 파일을 기본값으로 덮어쓰지 않는다 (`dict.json.bad`).
 - HTTP 핸들러에서 저장·삭제처럼 Windows 잠금으로 실패할 수 있는 일은 `try` 로 감싸 `{"ok": false, "error": "…"}`(500)로 답한다 — 예외가 핸들러 밖으로 나가면 연결이 응답 없이 끊겨 화면이 '저장 중…'에 멈춘다.
 - 외부 프로그램은 `core.run(cmd, timeout=None)`(인자 목록, utf-8, Windows 검은 창 안 띄움)으로, 출력을 흘려 읽어야 하면 `core.popen(cmd, …)`(= `subprocess.Popen` 과 같은 인자), 멈추기(✕)가 필요하면 `editor.run_killable`. `subprocess.Popen`·`run` 을 직접 쓰지 않는다 — 두 도우미가 자식을 **'앱이 꺼지면 같이 꺼짐' 묶음**(Windows Job Object, `core.track`)에 넣는다 (Windows 는 부모가 꺼져도 ffmpeg·pip·claude 를 끄지 않음). 앱보다 오래 살아야 하는 것(다시 시작·보이는 설치/로그인 창·탐색기·메모장)만 예외. ffmpeg 는 `core.ffmpeg()`(imageio-ffmpeg) — ffprobe 는 없으므로 `ffmpeg -i` 출력을 읽는다.
-  - 절전 막기는 `with core.keep_awake():` 로만 쥔다 (`SetThreadExecutionState` 를 직접 부르지 않음). Windows 가 스레드마다 세므로, 오래 쥐는 쪽(휴대폰으로 보기 `remote._awake_loop`)은 자기 스레드에서 쥐고 놓는다 — 다른 스레드가 쥔 것을 대신 풀 수 없고 풀려고 하지도 않는다(D-034).
+  - 절전 막기는 `with core.keep_awake():` 로만 쥔다 (`SetThreadExecutionState` 를 직접 부르지 않음 · 부르는 곳은 `updater.awake_state` 하나, 실행기는 `updater._awake`). Windows 가 스레드마다 세므로, 오래 쥐는 쪽(휴대폰으로 보기 `remote._awake_loop`)은 자기 스레드에서 쥐고 놓는다 — 다른 스레드가 쥔 것을 대신 풀 수 없고 풀려고 하지도 않는다(D-034).
   - 파이썬 자식(pip·확인 실행)은 출력을 UTF-8 로 쓰게 `updater.py_env()` 환경으로 (Windows 3.10~3.14 는 파이프에 cp949 로 써서 한국어 오류·한글 경로가 깨짐). `core.run` 은 `sys.executable` 을 부를 때 저절로 붙인다.
 - 무거운·선택적 서드파티(numpy, PIL, faster_whisper, onnxruntime, webview, yt_dlp)는 **함수 안에서** import 한다 (앱 시작·업데이트 import 확인을 가볍게, 없으면 예전 방식으로).
 - `updater.py` 는 표준 라이브러리만 쓰고 다른 앱 모듈을 import 하지 않는다 (모든 실행이 거치는 문).
