@@ -19,6 +19,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
+import numpy  # noqa: F401 — sys.modules 를 잠시 바꾸는 시험 전에 먼저 불러 둠 (되돌릴 때 지워지면 다시 못 불러옴)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import core  # noqa: E402
 import hooks  # noqa: E402
