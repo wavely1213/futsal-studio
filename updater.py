@@ -102,12 +102,16 @@ def replace_retry(src, dst, secs=None):
 
 def write_atomic(path, data, encoding="utf-8", fsync=False, secs=None, mode=None):
     """임시 파일(프로세스·스레드마다 다른 이름)에 다 쓴 뒤 바꿔 끼움 → 쓰다 꺼지거나 디스크가 차도 예전 파일은 그대로.
-    data: 글(str) 또는 바이트. mode: 바꿔 끼우기 전에 임시 파일 권한 (비밀 파일은 0o600 · Windows 는 읽기 전용 표시만 바뀌므로 무시).
-    실패하면 임시 파일을 지우고 오류를 그대로 올려 보냄."""
+    data: 글(str) 또는 바이트. mode: 임시 파일을 처음부터 이 권한으로 만들고 바꿔 끼우기 전에 한 번 더 (비밀 파일은 0o600 — 잠깐이라도
+    다른 사용자가 읽을 수 있는 틈이 없게 · Windows 는 읽기 전용 표시만 바뀌므로 무시). 실패하면 임시 파일을 지우고 오류를 그대로 올려 보냄."""
     path = Path(path)
     tmp = path.with_name(f"{path.name}.{os.getpid()}_{threading.get_ident()}.tmp")
     try:
-        if isinstance(data, bytes):
+        wb = isinstance(data, bytes)
+        if mode is not None:
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), mode)  # 줄바꿈은 open() 처럼 글 쪽이
+            f = os.fdopen(fd, "wb") if wb else os.fdopen(fd, "w", encoding=encoding)
+        elif wb:
             f = open(tmp, "wb")
         else:
             f = open(tmp, "w", encoding=encoding)  # Path.write_text 와 같게 (Windows 는 줄바꿈 \r\n)

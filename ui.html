@@ -389,6 +389,84 @@
   .up-meta { color: var(--ink-3); font-size: 12px; margin: -8px 0 14px; overflow-wrap: anywhere; }
   .up-meta:empty { display: none; }
   @media (max-width: 860px) { .up-grid { grid-template-columns: 1fr; } }
+  /* 7-2. 유튜브에 바로 올리기 (카드 · 설정 안내) — 색은 위 토큰만 (다크 모드 자동) */
+  .yt-card [hidden], .yt-guide [hidden], .yt-guide[hidden] { display: none !important; }
+  .yt-card { display: grid; gap: 10px; }
+  .yt-card h3 { margin: 0; }
+  .yt-card h3 .linkbtn { font-size: 12px; font-weight: 600; }
+  .yt-sec { display: grid; gap: 10px; min-width: 0; }
+  .yt-lab { display: block; font-size: 12px; font-weight: 700; color: var(--ink-2); margin: 2px 0 -4px; }
+  .yt-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  .yt-row .btn { padding: 6px 12px; font-size: 13px; }
+  .yt-row .sel { flex: 1 1 150px; min-width: 0; max-width: 100%; }
+  .yt-seg { display: flex; flex-wrap: wrap; width: 100%; }
+  .yt-seg button { flex: 1 1 auto; padding: 6px 8px; font-size: 13px; }
+  .yt-chk { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.45; cursor: pointer; }
+  .yt-chk input { margin-top: 2px; flex: none; }
+  .yt-chk small { display: block; color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+  .yt-kids { border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px 10px; margin: 0; display: grid; gap: 4px; font-size: 13px; min-width: 0; }
+  .yt-kids legend { font-size: 12px; font-weight: 700; color: var(--ink-2); padding: 0 4px; }
+  .yt-kids label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .yt-kids input { accent-color: var(--brand); }
+  .yt-note { background: var(--peak-soft); border-radius: 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .yt-red { border: 1px solid var(--danger); color: var(--danger); background: var(--surface); border-radius: 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .yt-red .linkbtn, .yt-note .linkbtn { color: inherit; text-decoration: underline; font-size: 13px; }
+  .yt-probs { display: grid; gap: 6px; }
+  .yt-probs:empty { display: none; }
+  .yt-ok { color: var(--brand); font-weight: 700; }
+  .yt-muted { color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+  .yt-ch { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; }
+  .yt-ch .sp { flex: 1; }
+  .yt-bar { height: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .yt-bar i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .4s; }
+  .yt-bar.ind i { width: 35%; animation: ytind 1.2s ease-in-out infinite; }
+  @keyframes ytind { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+  .yt-runtx { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .yt-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; background: var(--surface-2); min-width: 0; }
+  .yt-link { font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-2); overflow-wrap: anywhere; }
+  .yt-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+  .yt-steps li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .yt-steps .btn { padding: 3px 10px; font-size: 12px; }
+  .yt-quota { font-size: 12px; color: var(--ink-3); line-height: 1.55; overflow-wrap: anywhere; }
+  .yt-quota .linkbtn { font-size: 12px; color: var(--ink-2); }
+  .yt-pop .linkbtn { text-decoration: underline; font-size: 12.5px; }
+  .yt-pop { font-size: 12.5px; line-height: 1.6; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .yt-go { width: 100%; padding: 11px 14px; }
+  .yt-old { color: var(--ink-3); font-size: 12px; font-weight: 700; }
+  .yt-hist summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .yt-hist .row { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 12.5px; }
+  .yt-hist .row:last-child { border-bottom: 0; }
+  .yt-hist .row b { font-size: 13px; overflow-wrap: anywhere; }
+  .yt-hist .row .yt-row .btn { padding: 2px 8px; font-size: 12px; }
+  .yt-guide { position: fixed; top: 0; bottom: 0; left: 232px; right: 0; background: var(--bg); z-index: 5; overflow: auto; padding: 0 36px 80px; }
+  .yt-guide .gin { max-width: 860px; margin: 0 auto; display: grid; gap: 14px; }
+  .yt-ghead { position: sticky; top: 0; z-index: 1; background: var(--bg); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 20px 0 10px; border-bottom: 1px solid var(--line); }
+  .yt-ghead h2 { margin: 0; font-size: 20px; letter-spacing: -.3px; }
+  .yt-ghead .sp { flex: 1; }
+  .yt-intro { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; margin: 0; }
+  .yt-step { padding: 14px 18px; display: grid; gap: 8px; min-width: 0; }
+  .yt-sh { display: flex; align-items: center; gap: 10px; }
+  .yt-sh h3 { margin: 0; font-size: 15px; flex: 1; min-width: 0; }
+  .yt-n { width: 26px; height: 26px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex: none; }
+  .yt-step.done .yt-n { background: var(--brand); color: var(--brand-ink); }
+  .yt-step .yt-tick { color: var(--brand); font-weight: 700; font-size: 13px; display: none; }
+  .yt-step.done .yt-tick { display: inline; }
+  .yt-step ul, .yt-step ol { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.7; color: var(--ink-2); }
+  .yt-step b { color: var(--ink); }
+  .yt-en { color: var(--ink-3); font-size: 12px; }
+  .yt-shot { border: 1px dashed var(--line); border-radius: 10px; background: var(--surface-2); padding: 10px 12px; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+  .yt-shot b { color: var(--ink-2); margin-right: 6px; }
+  .yt-step .btn { justify-self: start; padding: 7px 14px; font-size: 13px; }
+  .yt-step textarea { min-height: 70px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  .yt-step .up-in { padding: 8px 10px; }
+  .yt-fields { display: grid; gap: 6px; }
+  .yt-trouble { padding: 14px 18px; display: grid; gap: 6px; font-size: 13px; }
+  .yt-trouble h3 { margin: 0 0 4px; font-size: 15px; }
+  .yt-trouble details { border-bottom: 1px dashed var(--line); padding: 6px 0; }
+  .yt-trouble details:last-child { border-bottom: 0; }
+  .yt-trouble summary { cursor: pointer; font-weight: 600; }
+  .yt-trouble p { margin: 6px 0 0; color: var(--ink-2); line-height: 1.6; }
+  @media (max-width: 860px) { .yt-guide { left: 0; padding: 0 16px 80px; } }
   /* 2-2. 용어 사전 (보관함) */
   .dict { padding: 16px; }
   .dict h3 { margin: 18px 0 2px; font-size: 14px; }
@@ -656,7 +734,7 @@
     <button class="step" data-p="cut"><span class="n">4</span><span><b>편집실</b><span class="d">가편집 자동 세팅</span></span></button>
     <button class="step" data-p="thumb"><span class="n">5</span><span><b>썸네일</b><span class="d">자동 후보 · 누끼</span></span></button>
     <button class="step" data-p="style"><span class="n">6</span><span><b>스타일 배우기</b><span class="d">잘 나가는 유튜버 편집 따라하기</span></span></button>
-    <button class="step" data-p="upload"><span class="n">7</span><span><b>올리기</b><span class="d">제목 · 설명 · 챕터 · 태그</span></span></button>
+    <button class="step" data-p="upload"><span class="n">7</span><span><b>올리기</b><span class="d">제목 · 설명 · 챕터 · 태그</span></span><span class="rdot" id="ytNavDot" title="유튜브에 올리다 멈춘 영상이 있어요"></span></button>
     <button class="step" data-p="strategy"><span class="n">8</span><span><b>채널 전략</b><span class="d">경쟁 채널 · 우리 전략 · 가능성</span></span><span class="rdot" title="점검할 때가 됐어요"></span></button>
     <div class="sp"></div>
     <div class="foot">
@@ -774,7 +852,7 @@
     </section>
     <!-- 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) -->
     <section class="panel" id="p-upload">
-      <div class="phead"><div><h1>올리기</h1><p>유튜브에 올릴 제목 후보·설명·챕터·태그를 영상 내용으로 만들어 드려요. 고쳐 쓴 뒤 칸마다 복사해서 유튜브 스튜디오에 붙여 넣으세요.</p></div></div>
+      <div class="phead"><div><h1>올리기</h1><p>유튜브에 올릴 제목 후보·설명·챕터·태그를 영상 내용으로 만들어 드려요. 고쳐 쓴 뒤 칸마다 복사해서 유튜브 스튜디오에 붙여 넣으세요 · 또는 [유튜브에 올리기]로 이 화면에서 바로 올려요.</p></div></div>
       <div class="bar">
         <select class="sel" id="upVid" title="올릴 영상"></select>
         <select class="sel" id="upSrc" title="원본 영상을 그대로 올릴지, 편집실에서 만든 편집본을 올릴지 골라요"></select>
@@ -803,6 +881,51 @@
           </div>
         </div>
         <div class="up-col">
+          <div class="card up-card yt-card" id="ytCard">
+            <h3>유튜브에 바로 올리기<span class="sp"></span><button class="linkbtn" id="ytGuideOpen">설정 안내</button></h3>
+            <div class="yt-sec" id="ytSetup" hidden>
+              <p class="yt-muted" style="font-size:13px">처음 한 번만 Google 설정(약 15분)을 하면 제목·설명·태그·썸네일·자막·재생목록까지 이 화면에서 한 번에 올라가요.
+                단, <b>공개로 올리려면 Google 감사(걸리는 기간은 Google도 정해 두지 않음)</b>를 받아야 해요 · 그 전에 올린 영상은 비공개로 잠겨서 시험용이에요 · 공개할 영상은 지금처럼 키트를 복사해 스튜디오에서 올려 주세요</p>
+              <button class="btn primary" id="ytGuideGo">설정 안내 열기</button>
+            </div>
+            <div class="yt-sec" id="ytConnect" hidden>
+              <p class="yt-muted" style="font-size:13px" id="ytConnMsg"></p>
+              <div class="yt-red" id="ytConnErr" hidden></div>
+              <div class="yt-note" id="ytRevokeNote" hidden>Google 쪽 연결은 끊지 못했어요 (인터넷이 끊겼거나 Google이 대답하지 않음) · <button class="linkbtn" data-ytopen="permissions">Google 권한 화면</button>에서 '풋살 스튜디오'를 직접 지워 주세요</div>
+              <div class="yt-row"><button class="btn primary" id="ytLogin">유튜브 계정 연결하기</button><button class="btn" id="ytCopyUrl" hidden>주소 복사</button><button class="btn" id="ytLoginCancel" hidden>그만두기</button></div>
+            </div>
+            <div class="yt-sec" id="ytChan" hidden></div>
+            <div class="yt-sec" id="ytOther" hidden></div>
+            <div class="yt-sec" id="ytPend" hidden></div>
+            <div class="yt-sec" id="ytRun" hidden>
+              <div class="yt-runtx" id="ytRunTx">올리는 중…</div>
+              <div class="yt-bar" id="ytBar"><i></i></div>
+              <div class="yt-muted" id="ytRunSub"></div>
+              <div class="yt-row"><button class="btn" id="ytPause">멈추기</button></div>
+            </div>
+            <div class="yt-sec" id="ytDone" hidden></div>
+            <div class="yt-sec" id="ytOpts" hidden>
+              <span class="yt-lab">공개 설정</span>
+              <div class="seg yt-seg" id="ytPriv"><button data-v="private">비공개</button><button data-v="unlisted">일부 공개</button><button data-v="public">공개</button><button data-v="scheduled">예약 공개</button></div>
+              <div class="yt-row" id="ytSched" hidden><input type="datetime-local" class="up-in" id="ytWhen" style="flex:1 1 180px;min-width:0"><span class="yt-muted" id="ytSchedNote">이 시각에 공개돼요 (그 전까지 비공개)</span></div>
+              <div class="yt-red" id="ytAudit" hidden>⚠ <b>Google 감사 전</b>이라 지금 올리는 영상은 <b>비공개로 올려도</b> 나중에 공개로 바꿀 수 없어요 (Google이 잠금 · 시험용) · 공개할 영상은 지금처럼 키트를 복사해 스튜디오에서 올려 주세요 <button class="linkbtn" data-ytstep="9">9단계 보기</button></div>
+              <fieldset class="yt-kids" id="ytKids"><legend>이 영상은 아동용인가요? (처음 한 번 골라 주세요 · 다음부터 기억해요)</legend>
+                <label><input type="radio" name="ytKids" value="no"> 아니요, 아동용이 아니에요</label>
+                <label><input type="radio" name="ytKids" value="yes"> 예, 아동용이에요</label>
+              </fieldset>
+              <span class="yt-lab">재생목록 (시리즈)</span>
+              <div class="yt-row"><select class="sel" id="ytPl"></select><button class="btn" id="ytPlLoad">불러오기</button></div>
+              <label class="yt-chk"><input type="checkbox" id="ytThumb"><span>썸네일 올리기<small id="ytThumbNote"></small></span></label>
+              <label class="yt-chk"><input type="checkbox" id="ytCaps"><span>자막 올리기<small id="ytCapsNote"></small></span></label>
+              <label class="yt-chk"><input type="checkbox" id="ytNotify"><span>구독자에게 알림 보내기</span></label>
+              <div class="yt-muted" id="ytShorts"></div>
+              <div class="yt-probs" id="ytProbs"></div>
+              <div class="yt-quota" id="ytQuota"></div>
+              <div class="yt-pop" id="ytQuotaPop" hidden></div>
+              <button class="btn primary yt-go" id="ytGo">유튜브에 올리기</button>
+            </div>
+            <details class="yt-hist" id="ytHist" hidden><summary>올린 기록</summary><div id="ytHistList"></div></details>
+          </div>
           <div class="card up-card up-thumb" id="upThumb"></div>
           <div class="card up-card">
             <h3>챕터<span class="sp"></span><button class="btn" data-upcopy="chapters" id="upChCopy">복사</button></h3>
@@ -817,6 +940,141 @@
         </div>
       </div>
       <div class="card empty" id="upEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
+      <!-- 7-2. Google 설정 안내 (처음 한 번) — 주소는 서버의 정해진 목록(youtube_upload.GUIDE_URLS)만 엶 · 그림 자리(.yt-shot)는 KNOWN_ISSUES I-050 -->
+      <div class="yt-guide" id="ytGuide" hidden>
+        <div class="gin">
+          <div class="yt-ghead"><h2>Google 설정 안내</h2><span class="yt-muted">처음 한 번 · 약 15분</span><span class="sp"></span><button class="btn" id="ytGuideClose">닫기</button></div>
+          <p class="yt-intro">유튜브에 바로 올리려면 <b>내 Google 계정에 '풋살 스튜디오'라는 작은 앱 자리</b>를 한 번 만들어야 해요. 돈은 들지 않아요.
+            Google Cloud 화면은 PC 설정에 따라 한국어나 영어로 보여서, 버튼 이름을 두 가지로 적었어요 <span class="yt-en">(영어 이름)</span>. 각 단계의 [열기]를 누르면 그 화면이 브라우저에 열려요.
+            결제 정보 입력·'무료 체험' <span class="yt-en">(Free trial)</span> 안내가 나와도 <b>건너뛰면 돼요</b> (이 기능은 결제가 필요 없어요).</p>
+          <div class="yt-red">꼭 알아 두세요 · 1~8단계(약 15분)를 마치면 바로 올릴 수 있지만, <b>9단계 Google 감사를 통과하기 전에 올린 영상은 비공개로 잠겨서 나중에도 공개로 바꿀 수 없어요</b> (Google 규칙 · 비공개로 올려도 마찬가지).
+            감사는 신청서를 내면 Google이 검토해요 · 걸리는 기간은 Google도 정해 두지 않았어요. 그때까지는 시험용으로만 올리고, 공개할 영상은 지금처럼 키트를 복사해 스튜디오에서 올려 주세요.</div>
+          <section class="card yt-step" data-step="1">
+            <div class="yt-sh"><span class="yt-n">1</span><h3>Google Cloud에 로그인</h3><span class="yt-tick">✓</span></div>
+            <ul>
+              <li><b>풋살사관학교 채널을 관리하는 Google 계정</b>으로 로그인해요. 채널이 브랜드 계정이면, 그 브랜드 계정을 관리하는 내 Gmail로 로그인하면 돼요.</li>
+              <li>처음이면 약관 화면이 나와요 → 동의하고 [동의 및 계속하기] <span class="yt-en">(Agree and continue)</span></li>
+            </ul>
+            <div class="yt-shot" data-shot="s1"><b>화면 모습</b>왼쪽 위에 'Google Cloud' 글자, 그 옆에 프로젝트를 고르는 칸이 있어요 <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="console">Google Cloud 열기</button>
+          </section>
+          <section class="card yt-step" data-step="2">
+            <div class="yt-sh"><span class="yt-n">2</span><h3>새 프로젝트 만들기</h3><span class="yt-tick">✓</span></div>
+            <ul>
+              <li>프로젝트 이름에 <b>풋살 스튜디오</b>처럼 넣고 [만들기] <span class="yt-en">(Create)</span></li>
+              <li>위치 <span class="yt-en">(Location)</span>는 '조직 없음' <span class="yt-en">(No organization)</span> 그대로 두어요.</li>
+              <li>다 만들면 위쪽 프로젝트 칸에 '풋살 스튜디오'가 골라져 있는지 봐요. 아니면 눌러서 골라요.</li>
+            </ul>
+            <div class="yt-shot" data-shot="s2"><b>화면 모습</b>'새 프로젝트' <span class="yt-en">(New Project)</span> 제목 아래 '프로젝트 이름' 칸과 파란 [만들기] 버튼 <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="project">새 프로젝트 화면 열기</button>
+          </section>
+          <section class="card yt-step" data-step="3">
+            <div class="yt-sh"><span class="yt-n">3</span><h3>YouTube Data API v3 켜기</h3><span class="yt-tick">✓ 켜져 있어요</span></div>
+            <ul>
+              <li>'YouTube Data API v3' 화면에서 파란 [사용] <span class="yt-en">(Enable)</span> 버튼을 눌러요.</li>
+              <li>이미 [관리] <span class="yt-en">(Manage)</span>가 보이면 켜져 있는 거예요. 켠 뒤 몇 분 걸릴 수 있어요.</li>
+            </ul>
+            <div class="yt-shot" data-shot="s3"><b>화면 모습</b>빨간 유튜브 아이콘과 'YouTube Data API v3' 제목, 그 아래 [사용] 버튼 <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="api">YouTube Data API 화면 열기</button>
+          </section>
+          <section class="card yt-step" data-step="4">
+            <div class="yt-sh"><span class="yt-n">4</span><h3>Google 인증 플랫폼 시작하기</h3><span class="yt-tick">✓</span></div>
+            <ul>
+              <li>'Google 인증 플랫폼' <span class="yt-en">(Google Auth Platform)</span> 화면에서 [시작하기] <span class="yt-en">(Get started)</span></li>
+              <li>앱 정보 <span class="yt-en">(App Information)</span>: 앱 이름 <b>풋살 스튜디오</b> · 사용자 지원 이메일 <span class="yt-en">(User support email)</span>에 내 Gmail → [다음]</li>
+              <li>대상 <span class="yt-en">(Audience)</span>: <b>외부</b> <span class="yt-en">(External)</span> → [다음]</li>
+              <li>연락처 정보 <span class="yt-en">(Contact Information)</span>: 내 Gmail → [다음] → 완료 <span class="yt-en">(Finish)</span>: 정책 동의에 체크 → [만들기] <span class="yt-en">(Create)</span></li>
+              <li>'데이터 액세스' <span class="yt-en">(Data Access)</span>에서 범위를 따로 넣지 않아도 돼요.</li>
+            </ul>
+            <div class="yt-shot" data-shot="s4"><b>화면 모습</b>'Google 인증 플랫폼이 아직 구성되지 않았습니다' 글과 [시작하기] 버튼 → 4칸짜리 순서 화면 <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="branding">Google 인증 플랫폼 열기</button>
+          </section>
+          <section class="card yt-step" data-step="5">
+            <div class="yt-sh"><span class="yt-n">5</span><h3>대상: 앱 게시하기 (추천)</h3><span class="yt-tick">✓</span></div>
+            <ol type="a">
+              <li><b>추천 · [앱 게시]</b> <span class="yt-en">(Publish app)</span> → [확인] <span class="yt-en">(Confirm)</span> → 게시 상태가 '프로덕션 단계' <span class="yt-en">(In production)</span>가 돼요.
+                이러면 <b>7일마다 연결이 끊기지 않아요.</b> Google 확인(심사)을 받으라는 안내가 나와도 혼자 쓰는 개인용이라 받지 않아도 돼요 (사용자 100명 제한은 상관없어요).
+                계정을 연결할 때 <b>'Google에서 확인하지 않은 앱'</b> <span class="yt-en">(Google hasn't verified this app)</span> 화면이 나오면 [고급] <span class="yt-en">(Advanced)</span> →
+                [풋살 스튜디오(으)로 이동(안전하지 않음)] <span class="yt-en">(Go to 풋살 스튜디오 (unsafe))</span>을 눌러요. 내가 만든 내 앱이라 괜찮아요.</li>
+              <li><b>또는 테스트 상태 그대로</b> 둘 때: '테스트 사용자' <span class="yt-en">(Test users)</span> → [+ 사용자 추가] <span class="yt-en">(+ Add users)</span> → 내 Gmail을 넣고 [저장] <span class="yt-en">(Save)</span>.
+                이때는 Google 규칙 때문에 <b>7일마다 연결이 끊겨서</b> [다시 연결하기]를 눌러야 해요.</li>
+            </ol>
+            <div class="yt-row"><span class="yt-muted">나는</span>
+              <label class="yt-chk"><input type="radio" name="ytConsent" value="production"><span>(a) 앱을 게시했어요</span></label>
+              <label class="yt-chk"><input type="radio" name="ytConsent" value="testing"><span>(b) 테스트 상태 그대로예요</span></label></div>
+            <div class="yt-shot" data-shot="s5"><b>화면 모습</b>'게시 상태' <span class="yt-en">(Publishing status)</span> 아래 '테스트 중' <span class="yt-en">(Testing)</span>과 [앱 게시] 버튼, 그 아래 '테스트 사용자' 목록 <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="audience">대상 화면 열기</button>
+          </section>
+          <section class="card yt-step" data-step="6">
+            <div class="yt-sh"><span class="yt-n">6</span><h3>클라이언트 만들기 (데스크톱 앱)</h3><span class="yt-tick">✓</span></div>
+            <ul>
+              <li>'클라이언트' <span class="yt-en">(Clients)</span> → [+ 클라이언트 만들기] <span class="yt-en">(+ Create client)</span></li>
+              <li>애플리케이션 유형 <span class="yt-en">(Application type)</span>: <b>데스크톱 앱</b> <span class="yt-en">(Desktop app)</span> — '웹 애플리케이션'이 아니에요. 이름은 '풋살 스튜디오 PC' → [만들기] <span class="yt-en">(Create)</span></li>
+              <li>나온 창에서 <b>바로 [JSON 다운로드]</b> <span class="yt-en">(Download JSON)</span>를 눌러요. 보안 비밀번호 <span class="yt-en">(Client secret)</span>는 이 창에서 <b>한 번만</b> 보여요.</li>
+              <li>놓쳤다면 만든 클라이언트를 눌러 [보안 비밀번호 추가] <span class="yt-en">(Add secret)</span>로 새로 만들고, 7단계 아래 칸에 붙여 넣어요.</li>
+              <li>받은 파일(<b>client_secret_….json</b>)은 비밀번호와 같아요. 다른 사람에게 보내지 마세요.</li>
+            </ul>
+            <div class="yt-shot" data-shot="s6"><b>화면 모습</b>'OAuth 클라이언트 생성됨' <span class="yt-en">(OAuth client created)</span> 창에 클라이언트 ID·보안 비밀번호와 [JSON 다운로드] <i>(그림 준비 중)</i></div>
+            <button class="btn" data-ytopen="clients">클라이언트 화면 열기</button>
+          </section>
+          <section class="card yt-step" data-step="7">
+            <div class="yt-sh"><span class="yt-n">7</span><h3>받은 JSON 파일을 여기에 넣기</h3><span class="yt-tick">✓ 넣었어요</span></div>
+            <div class="yt-row"><button class="btn primary" id="ytJsonPick">JSON 파일 고르기</button><input type="file" id="ytJsonFile" accept=".json,application/json" hidden><span class="yt-muted" id="ytClientHint"></span></div>
+            <details><summary class="yt-muted" style="cursor:pointer">파일 대신 붙여 넣기 · 보안 비밀번호만 따로 넣기</summary>
+              <div class="yt-fields" style="margin-top:8px">
+                <textarea class="up-in" id="ytJsonText" spellcheck="false" placeholder='{"installed": {"client_id": "…", "client_secret": "…"}} 를 그대로 붙여 넣어요'></textarea>
+                <input class="up-in" id="ytCid" spellcheck="false" autocomplete="off" placeholder="클라이언트 ID (…apps.googleusercontent.com)">
+                <div class="yt-row"><input class="up-in" id="ytSecret" type="password" autocomplete="off" spellcheck="false" placeholder="보안 비밀번호 (GOCSPX-…)" style="flex:1 1 200px;min-width:0"><button class="btn" id="ytSecretShow">보기</button></div>
+                <button class="btn" id="ytClientSave">저장</button>
+              </div>
+            </details>
+            <div class="yt-red" id="ytClientErr" hidden></div>
+            <div class="yt-note" id="ytClientWarn" hidden></div>
+            <div class="yt-row"><button class="linkbtn" id="ytClientClear" hidden>Google 설정 지우기</button></div>
+          </section>
+          <section class="card yt-step" data-step="8">
+            <div class="yt-sh"><span class="yt-n">8</span><h3>유튜브 계정 연결하기</h3><span class="yt-tick">✓ 연결됐어요</span></div>
+            <ol>
+              <li>아래 [계정 연결하기]를 누르면 브라우저가 열려요.</li>
+              <li>계정 고르기에서 <b>채널을 관리하는 내 Google 계정</b>을 골라요. 그 뒤(또는 그 앞)에 <b>채널·브랜드 계정을 고르는 화면</b>이 나오면 <b>풋살사관학교</b>를 골라요 <span class="yt-en">(Choose an account or brand account)</span>. 순서는 Google 화면에 따라 달라요.</li>
+              <li>'Google에서 확인하지 않은 앱' 화면이 나오면 [고급] → [풋살 스튜디오(으)로 이동(안전하지 않음)]</li>
+              <li><b>유튜브 권한 칸이 보이면 꼭 체크</b>하고 [계속] <span class="yt-en">(Continue)</span>을 눌러요.</li>
+              <li>'연결됐어요' 창이 나오면 그 탭은 닫고 스튜디오로 돌아와요.</li>
+            </ol>
+            <div class="yt-shot" data-shot="s8"><b>화면 모습</b>'풋살 스튜디오에서 Google 계정에 대한 추가 액세스를 요청합니다' 아래 권한 칸 하나와 [계속] <i>(그림 준비 중)</i></div>
+            <div class="yt-row"><button class="btn primary" id="ytGuideLogin">계정 연결하기</button><span class="yt-muted" id="ytGuideChan"></span></div>
+            <p class="yt-muted">권한 화면에 'YouTube 동영상·자막 … 보기·수정·영구 삭제'라고 나오는 까닭: 자막을 올리려면 Google이 이 권한을 요구해요. 이 앱은 영상을 올리고 썸네일·자막·재생목록을 넣기만 하고, <b>지우지 않아요.</b></p>
+          </section>
+          <section class="card yt-step" data-step="9">
+            <div class="yt-sh"><span class="yt-n">9</span><h3>공개로 올리려면 꼭: YouTube API 감사 신청</h3><span class="yt-tick">✓ 통과</span></div>
+            <ul>
+              <li>Google은 감사를 받지 않은 프로젝트(2020년 7월 뒤에 만든 프로젝트)로 올린 영상을 <b>'비공개(잠김)'</b>로 만들어요. <b>잠긴 영상은 나중에 공개로 바꿀 수 없어요</b> (다시 올려야 해요).</li>
+              <li>아래 [신청서 열기]에서 'YouTube API 서비스 감사' <span class="yt-en">(YouTube API Services - Audit and Quota Extension Form)</span>를 내요. 묻는 칸이 여러 개예요 (프로젝트 번호, 쓰는 방법, 화면 설명 등) · '내 채널에 내 영상을 올리는 개인용 도구'라는 점을 중심으로 적어요. Google이 추가 자료를 물어볼 수 있어요.</li>
+              <li>걸리는 기간은 <b>Google도 정해 두지 않았어요</b> (문서에는 '가능한 한 빨리'만 있어요) · 통과를 약속하지도 않아요.</li>
+              <li>통과 메일을 받기 전에 올린 영상은 <b>비공개로 올려도 잠겨요</b> (시험용). 공개할 영상은 그때까지 키트를 복사해 스튜디오에서 올려 주세요. 통과 메일을 받으면 아래에 체크해요.</li>
+            </ul>
+            <div class="yt-row"><button class="btn" data-ytopen="audit">신청서 열기</button><label class="yt-chk"><input type="checkbox" id="ytAudited"><span>감사를 통과했어요</span></label></div>
+          </section>
+          <section class="card yt-step" data-step="10">
+            <div class="yt-sh"><span class="yt-n">10</span><h3>(선택) 채널 인증 — 맞춤 썸네일 · 15분 넘는 영상</h3><span class="yt-tick">✓</span></div>
+            <ul>
+              <li>맞춤 썸네일을 올리거나 15분 넘는 영상을 올리려면 채널 인증(전화번호 확인)이 필요해요.</li>
+              <li>안 되어 있으면 영상은 올라가고, 썸네일만 '채널 인증이 필요해요'로 남아요 → 인증한 뒤 [썸네일 다시 올리기]</li>
+            </ul>
+            <button class="btn" data-ytopen="verify">youtube.com/verify 열기</button>
+          </section>
+          <section class="card yt-trouble">
+            <h3>문제 해결</h3>
+            <details><summary>'액세스 차단됨: … Google 인증 절차를 완료하지 않았습니다' · 오류 403: access_denied</summary><p>앱이 테스트 상태인데 테스트 사용자로 넣지 않은 계정이에요. 5단계에서 (a) [앱 게시]를 하거나, (b) 테스트 사용자에 내 Gmail을 넣어 주세요.</p></details>
+            <details><summary>오류 400: redirect_uri_mismatch</summary><p>클라이언트를 '웹 애플리케이션'으로 만들었어요. 6단계대로 <b>데스크톱 앱</b>으로 새로 만들고 7단계에서 새 JSON 파일을 넣어 주세요.</p></details>
+            <details><summary>'YouTube Data API v3 has not been used in project …' · API를 켜지 않았어요</summary><p>3단계에서 [사용]을 누르고 몇 분 기다린 뒤 다시 해 주세요. 위쪽에 고른 프로젝트가 '풋살 스튜디오'인지도 봐요.</p></details>
+            <details><summary>'오늘 쓸 수 있는 유튜브 API 양을 다 썼어요'</summary><p>유튜브 API는 하루에 쓸 수 있는 양이 정해져 있어요. 영상 올리기는 하루 100번, 썸네일·자막·재생목록·확인은 합쳐서 하루 10,000 단위예요(자막 하나 400). Google 기준 자정(한국 시간 오후 4시 · 겨울에는 5시)에 다시 채워져요. 그 뒤에 [이어 올리기]·[마저 하기]를 눌러 주세요.</p></details>
+            <details><summary>7일마다 연결이 끊겨요</summary><p>앱이 '테스트' 상태라서 그래요 (Google 규칙). 5단계 (a) [앱 게시]를 하면 더 끊기지 않아요. 끊겨도 [다시 연결하기]만 누르면 올리던 것은 [이어 올리기]로 이어져요.</p></details>
+            <details><summary>오래 안 썼더니 연결이 안 돼요</summary><p>6개월 넘게 쓰지 않으면 연결이 끊기고, 클라이언트가 지워질 수도 있어요. [다시 연결하기]가 안 되면 6·7단계를 다시 해 주세요.</p></details>
+            <details><summary>연결을 완전히 끊고 싶어요</summary><p>이 화면의 [연결 끊기]를 누르면 Google에도 연결을 끊어요. Google 계정의 '서드 파티 연결' 화면에서도 끊을 수 있어요. <button class="linkbtn" data-ytopen="permissions">Google 계정 연결 화면 열기</button></p></details>
+          </section>
+        </div>
+      </div>
     </section>
     <!-- 8. 채널 전략 (경쟁 채널 · 우리 전략 · 가져올 점 · 성공 솔루션 · 가능성 · 점검) -->
     <section class="panel" id="p-strategy">
@@ -1739,6 +1997,8 @@ checkUpdate();
 /* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */
 (() => {
   const up = { kit: null, name: "", seq: "", timer: null, vkey: "", ret: null };
+  window.upCtx = () => ({ name: up.name, seq: up.seq, kit: up.kit, flush });  // 7-2 유튜브에 바로 올리기가 읽음
+  window.upSelect = async (name, seq) => { await flush(); fillVids(); if (![...$("upVid").options].some(o => o.value === name)) return false; for (let i = 0; i < 3 && (up.name !== name || up.seq !== (seq || "")); i++) { $("upVid").value = name; await load(seq || ""); } return up.name === name; };  // 7-2 가 올리다 멈춘 영상으로 바로 감
   const ulen = s => [...(s || "")].length;
   const tagsOf = t => (t || "").split(/[,\n]/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const tagsLen = tags => tags.reduce((n, t) => n + ulen(t) + (t.includes(" ") ? 2 : 0), 0) + Math.max(0, tags.length - 1);  // 유튜브 스튜디오 방식
@@ -1793,6 +2053,7 @@ checkUpdate();
   }
   function render() {
     const k = up.kit;
+    queueMicrotask(() => document.dispatchEvent(new Event("up:kit")));  // 7-2 가 고른 영상·키트가 바뀐 것을 알게
     $("upBody").style.display = k ? "" : "none";
     $("upEmpty").style.display = k ? "none" : "";
     $("upEmpty").innerHTML = !up.name ? `<b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.`
@@ -1894,6 +2155,485 @@ checkUpdate();
     if (!up.timer || !up.kit) return;
     clearTimeout(up.timer); up.timer = null;
     navigator.sendBeacon("/api/upload/kit", new Blob([JSON.stringify({ name: up.name, seq: up.seq, edits: edits() })], { type: "text/plain;charset=UTF-8" }));  // 서버는 내용만 JSON 으로 읽음
+  });
+})();
+</script>
+<script>
+/* 7-2. 유튜브에 바로 올리기 (서버 youtube_upload.py · /api/youtube/* · D-035) — 연결·Google 설정 안내·올리기·멈추기·이어 올리기·기록
+   밖에서 온 글자(채널 이름·제목·오류·파일 이름)는 모두 esc() · 상태는 이 화면이 보일 때, 그리고 우리 작업 중·로그인 기다림에 1.5초마다
+   (다른 화면에 가 있어도 우리 작업이 끝나면 알림 · 멈추거나 실패하면 7단계 옆 빨간 점) · 링크는 서버가 시스템 브라우저로 엶(정해진 주소만)
+   공개 설정은 늘 '비공개'로 시작 (기억하지 않음) · 비공개가 아니면 매번 확인 · 감사 전에는 모든 업로드가 잠긴다고 늘 보여 줌 */
+(() => {
+  const JOBS = ["유튜브에 올리기", "유튜브 마무리"];
+  const PK = { private: "비공개", unlisted: "일부 공개", public: "공개", scheduled: "예약 공개" };
+  const STEP = { thumbnail: "썸네일", captions: "자막", playlist: "재생목록" };
+  const YT = { st: null, plan: null, planKey: "", wasOurs: false, jobId: null, opts: null, optsKey: "", lists: null, hist: null, histAt: 0, guide: false,
+               loginUrl: "", revokeNote: false, picked: new Set(), checks: {} };
+  const ctx = () => (window.upCtx ? window.upCtx() : { name: "", seq: "", kit: null, flush: async () => {} });
+  const keyOf = c => `${c.name}\n${c.seq || ""}`;
+  const visible = () => $("p-upload").classList.contains("on");
+  const ours = () => JOBS.includes(state.job);
+  const pad = n => String(n).padStart(2, "0");
+  const localDT = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const when = ts => { const d = new Date(ts * 1000); return `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const whenIso = iso => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const num = n => (+n || 0).toLocaleString();
+  const show = (id, on) => { $(id).hidden = !on; };
+  const schedMin = () => ((YT.st || {}).scheduleMinMinutes || 15);
+  const audited = () => !!((YT.st || {}).settings || {}).audited;
+  const privText = h => h.locked ? "비공개(잠김)" : `${PK[h.privacy] || ""}${h.preAudit ? "(감사 전 · 공개 불가)" : ""}`;
+  async function getJ(path) { try { const r = await fetch(path); return await r.json(); } catch (e) { return null; } }
+
+  async function loadStatus() {
+    const j = await getJ("/api/youtube/status");
+    if (j && j.ok) YT.st = j;
+    render();
+    navDot();
+    return j;
+  }
+  async function loadPlan() {
+    const c = ctx();
+    if (!c.name || !c.kit) { YT.plan = null; YT.planKey = keyOf(c); return render(); }
+    const k = keyOf(c);
+    const j = await getJ(`/api/youtube/plan?name=${encodeURIComponent(c.name)}&seq=${encodeURIComponent(c.seq || "")}`);
+    if (k !== keyOf(ctx())) return;  // 그사이 다른 영상·편집본을 고름
+    YT.plan = j && j.ok ? j : null;
+    YT.planKey = k;
+    render();
+  }
+  async function loadHist() {
+    const j = await getJ("/api/youtube/history?limit=10");
+    YT.hist = j && j.ok ? j.items : [];
+    renderHist();
+  }
+  const planNow = () => (YT.plan && YT.planKey === keyOf(ctx()) ? YT.plan : null);
+  const stopped = () => ((YT.st || {}).pending || []).filter(x => x.state !== "uploading" && x.state !== "starting");
+  function navDot() { $("ytNavDot").classList.toggle("on", !ours() && stopped().length > 0); }
+
+  // ---- 고른 값 (공개 설정은 늘 비공개로 시작 · 아동용은 처음 한 번 고르면 기억 · 쇼츠는 썸네일 끔) ----
+  function initOpts(p) {
+    const st = YT.st.settings || {};
+    if (!YT.opts) {
+      YT.opts = { privacy: "private", when: "", kids: st.madeForKids === true ? "yes" : st.madeForKids === false ? "no" : "", notify: st.notify !== false,
+                  playlistId: st.playlistId || "", playlistTitle: st.playlistTitle || "", thumbnail: true, captions: true };
+    }
+    if (!YT.opts.kids && typeof st.madeForKids === "boolean") YT.opts.kids = st.madeForKids ? "yes" : "no";
+    const k = YT.planKey;
+    if (p && p.files && YT.optsKey !== k) {  // 다른 키트를 고르면: 썸네일·자막은 그 키트에 맞게 · 공개 설정은 다시 비공개
+      YT.optsKey = k;
+      YT.opts.thumbnail = !!p.defaults.thumbnail;
+      YT.opts.captions = !!p.defaults.captions;
+      YT.opts.privacy = "private";
+      YT.opts.when = "";
+    }
+  }
+  function syncInputs(p) {
+    const o = YT.opts;
+    $("ytPriv").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === o.privacy));
+    show("ytSched", o.privacy === "scheduled");
+    $("ytWhen").min = localDT(new Date(Date.now() + schedMin() * 60e3));
+    if (document.activeElement !== $("ytWhen")) $("ytWhen").value = o.when;
+    $("ytSchedNote").textContent = o.when ? "이 시각에 공개돼요 (그 전까지 비공개)" : `공개할 날짜·시각을 골라 주세요 (지금부터 ${schedMin()}분 뒤부터)`;
+    show("ytAudit", !audited());
+    document.querySelectorAll('input[name="ytKids"]').forEach(r => (r.checked = r.value === o.kids));
+    const f = (p && p.files) || {};
+    $("ytThumb").checked = o.thumbnail && !!f.thumbnail;
+    $("ytThumb").disabled = !f.thumbnail;
+    $("ytThumbNote").textContent = f.thumbnail ? `${f.thumbnail}${f.shorts ? " · 쇼츠 맞춤 썸네일은 유튜브 앱·스튜디오에서 바꾸는 게 좋아요" : ""}` : "저장한 썸네일이 없어요 (유튜브가 장면을 골라요)";
+    $("ytCaps").checked = o.captions && !!f.srt;
+    $("ytCaps").disabled = !f.srt;
+    $("ytCapsNote").textContent = f.srt ? `${f.srt} · 한국어` : "자막 파일(.srt)이 없어요";
+    $("ytNotify").checked = o.notify;
+    const opts = [`<option value="">없음</option>`];
+    const seen = new Set([""]);
+    (YT.lists || []).forEach(l => { seen.add(l.id); opts.push(`<option value="${esc(l.id)}">${esc(l.title)}${l.count !== undefined && l.count !== null ? ` (${l.count})` : ""}</option>`); });
+    if (o.playlistId && !seen.has(o.playlistId)) opts.push(`<option value="${esc(o.playlistId)}">${esc(o.playlistTitle || "지난번 재생목록")}</option>`);
+    opts.push(`<option value="__new">+ 새 재생목록 만들기…</option>`);
+    const html = opts.join("");
+    if ($("ytPl").dataset.h !== html) { $("ytPl").innerHTML = html; $("ytPl").dataset.h = html; }
+    $("ytPl").value = o.playlistId;
+    $("ytShorts").textContent = f.video ? `${f.video} · ${f.sizeText} · ${f.w && f.h ? (f.h > f.w ? "세로" : f.h === f.w ? "정사각형" : "가로") + " · " : ""}${f.durationText}${f.shorts ? " → 유튜브가 쇼츠로 올려요" : ""}` : "";
+  }
+  function cost(p) {
+    const c = (p && p.costParts) || {}, o = YT.opts, parts = [];
+    let units = c.check || 1;
+    if (o.thumbnail && c.thumbnail) { units += c.thumbnail; parts.push(`썸네일 ${c.thumbnail}`); }
+    if (o.captions && c.captions) { units += c.captions; parts.push(`자막 ${c.captions}`); }
+    if (o.playlistId) { units += c.playlist || 50; parts.push(`재생목록 ${c.playlist || 50}`); }
+    parts.push(`확인 ${c.check || 1}`);
+    return { units, parts };
+  }
+  function goLabel(p) {  // 버튼에 고른 공개 설정을 그대로 (실수로 공개되지 않게)
+    const o = YT.opts, again = p && p.last ? " (또)" : "";
+    if (o.privacy === "scheduled") return o.when ? `${whenIso(o.when)}에 공개 예약으로 올리기${again}` : "예약 시각을 골라 주세요";
+    return `${PK[o.privacy]}로 유튜브에 올리기${again}`;
+  }
+
+  // ---- 그리기 ----
+  function render() {
+    const s = YT.st;
+    if (!s) return;
+    const c = ctx(), p = planNow(), run = ours(), login = s.login || {};
+    show("ytSetup", !s.configured);
+    show("ytConnect", s.configured && !s.connected);
+    show("ytChan", s.connected);
+    // 연결하기
+    if (s.configured && !s.connected) {
+      const waiting = login.state === "waiting";
+      $("ytConnMsg").textContent = waiting ? "브라우저에서 계정·'풋살사관학교' 채널을 고르고 유튜브 권한에 체크한 뒤 [계속]을 눌러 주세요 · 브라우저가 안 열렸으면 [주소 복사]로 주소를 브라우저에 붙여 넣어요"
+        : s.needsRelogin ? "" : "Google 설정을 넣었어요 · 이제 풋살사관학교 채널과 연결해요";
+      $("ytConnMsg").hidden = !$("ytConnMsg").textContent;
+      const err = s.needsRelogin && !waiting ? s.reloginMsg : login.state === "error" ? login.error : "";
+      $("ytConnErr").innerHTML = esc(err || "");
+      show("ytConnErr", !!err);
+      show("ytRevokeNote", YT.revokeNote && !waiting);
+      $("ytLogin").textContent = s.needsRelogin ? "다시 연결하기" : "유튜브 계정 연결하기";
+      $("ytLogin").disabled = waiting;
+      show("ytCopyUrl", waiting && !!YT.loginUrl);
+      show("ytLoginCancel", waiting);
+    }
+    // 연결된 채널
+    if (s.connected) {
+      const ch = s.channel || {};
+      let h = `<div class="yt-ch"><span>연결된 채널 · <b>${esc(ch.title || ch.id || "")}</b>${s.match === true ? ' <span class="yt-ok">✓</span>' : ""}</span><span class="sp"></span><button class="linkbtn" id="ytLogout"${run ? ' disabled title="올리는 중에는 끊을 수 없어요 · 먼저 [멈추기]"' : ""}>연결 끊기</button></div>`;
+      if (s.match === false) h += `<div class="yt-red">⚠ 설정한 풋살사관학교 채널이 아니에요 (연결: ${esc(ch.title || ch.id || "")}) · 다른 계정으로 [연결 끊기] 뒤 다시 연결하거나, 이 채널이 맞으면 <button class="linkbtn" id="ytChanOk">이 채널에 올릴게요</button></div>`;
+      if (s.testingWarn) h += `<div class="yt-note">${esc(s.testingWarn)} <button class="linkbtn" data-ytstep="5">5단계 보기</button></div>`;
+      $("ytChan").innerHTML = h;
+      $("ytLogout").onclick = logout;
+      if ($("ytChanOk")) $("ytChanOk").onclick = async () => {
+        if (!confirm(`'${ch.title || ch.id}' 채널에 올릴까요?`)) return;
+        await api("/api/youtube/settings", { settings: { channelOk: ch.id } }); loadStatus(); loadPlan();
+      };
+    }
+    // 이 키트의 올리던 것 (멈춤·실패) · 다른 영상의 올리던 것 · 올리는 중 · 올린 결과 · 고르기
+    const pend = (s.pending || []).find(x => x.name === c.name && (x.seq || "") === (c.seq || ""));
+    show("ytRun", run);
+    show("ytPend", !run && !!pend);
+    if (!run && pend) renderPend(pend, s);
+    if (run) renderRun();
+    renderOther(s, run);
+    const last = p && p.last;
+    show("ytDone", !run && !!last);
+    if (!run && last) renderDone(last, !!pend);
+    show("ytOpts", s.connected && !run && !!p);
+    if (s.connected && p) { initOpts(p); syncInputs(p); renderProbs(p); }
+    show("ytHist", s.configured);
+    renderGuide();
+  }
+  function renderRun() {
+    const pr = state.progress || {};
+    const fin = pr.label === "유튜브 마무리 중", pct = pr.pct;
+    $("ytRunTx").textContent = fin ? `마무리 중 · ${pr.detail || ""}${pr.step ? ` (${pr.step})` : ""}` : `올리는 중${pct !== null && pct !== undefined ? ` ${pct}%` : "…"}`;
+    $("ytRunSub").textContent = fin ? "영상은 올라갔어요 · 썸네일·자막·재생목록을 넣는 중이에요" : (pr.detail || "유튜브에 연결하는 중");
+    $("ytBar").classList.toggle("ind", fin || pct === null || pct === undefined);
+    $("ytBar").querySelector("i").style.width = fin || pct === null || pct === undefined ? "" : `${pct}%`;
+    $("ytPause").disabled = false;
+  }
+  function renderPend(x, s) {
+    const relog = s.needsRelogin || x.kind === "relogin";
+    const what = x.state === "paused" ? "올리다 멈췄어요" : "올리지 못했어요";
+    const why = relog ? (s.connected ? "연결이 끊겨서 멈췄어요 · 다시 연결했으니 [이어 올리기]를 눌러 주세요" : "연결이 끊겨서 멈췄어요 · 위의 [다시 연결하기]를 누른 뒤 [이어 올리기]를 눌러 주세요") : x.error;
+    $("ytPend").innerHTML = `<div class="yt-note"><b>${what}</b> · 지금 이 영상 · Google이 받은 양 ${x.pct}% (${esc(x.sizeText)})${x.at ? ` · ${when(x.at)}` : ""}${why ? `<br>${esc(why)}` : ""}</div>
+      <div class="yt-row"><button class="btn primary" id="ytResume"${relog && !s.connected ? " disabled" : ""}>이어 올리기</button>
+      <button class="btn" id="ytAgain">처음부터 다시</button><button class="btn" id="ytDiscard">그만 올리기</button></div>`;
+    $("ytResume").onclick = () => start("/api/youtube/resume", { key: x.key });
+    $("ytAgain").onclick = () => { if (confirm("처음부터 다시 올릴까요? (올리던 것은 버려요)")) go(true); };
+    $("ytDiscard").onclick = async () => {
+      if (!confirm("올리던 것을 그만둘까요? 지금까지 올린 부분은 버려요 (유튜브에는 아무것도 안 생겨요)")) return;
+      await api("/api/youtube/discard", { key: x.key }); loadStatus();
+    };
+  }
+  function renderOther(s, run) {  // 다른 영상·편집본에서 올리다 멈춘 것 (앱을 껐다 켜도 보이게)
+    const c = ctx();
+    const others = run ? [] : stopped().filter(x => !(x.name === c.name && (x.seq || "") === (c.seq || "")));
+    show("ytOther", others.length > 0);
+    if (!others.length) return;
+    $("ytOther").innerHTML = `<div class="yt-note"><b>올리다 멈춘 영상 ${others.length}개</b>${others.map((x, i) => `<div class="yt-row" style="margin-top:6px"><span style="flex:1 1 160px;min-width:0">${esc(x.title || x.file || x.name)} · ${x.pct}%${x.at ? ` · ${when(x.at)}` : ""}</span><button class="btn" data-ytgoto="${i}">이 영상으로 가기</button></div>`).join("")}</div>`;
+    $("ytOther").querySelectorAll("[data-ytgoto]").forEach(b => (b.onclick = async () => {
+      const x = others[+b.dataset.ytgoto];
+      if (!window.upSelect || !(await window.upSelect(x.name, x.seq))) toast("그 영상을 보관함에서 찾지 못했어요");
+    }));
+  }
+  function stepLine(name, st, vid) {
+    const s = st || { state: "skip" }, label = STEP[name];
+    const again = t => `<button class="btn" data-ytfin="${name}" data-vid="${esc(vid)}">${t}</button>`;
+    if (s.state === "ok") return `<li><span class="yt-ok">✓</span> ${label}${s.msg ? ` · ${esc(s.msg)}` : ""}</li>`;
+    if (s.state === "skip") return `<li><span class="yt-muted">– ${label} 안 올림</span></li>`;
+    if (s.state === "needs_verify") return `<li>⚠ ${label} · 채널 인증(전화번호 확인)이 필요해요 <button class="btn" data-ytopen="verify">인증하러 가기</button>${again("썸네일 다시 올리기")}<span class="yt-muted">인증한 뒤 [썸네일 다시 올리기]를 눌러 주세요 · 영상은 이미 올라갔어요</span></li>`;
+    if (s.state === "quota") return `<li>⏸ ${label} · ${esc(s.msg || "")} ${again("마저 하기")}</li>`;
+    if (s.state === "todo") return `<li>… ${label} · ${esc(s.msg || "아직 못 했어요")} ${again("마저 하기")}</li>`;
+    return `<li>⚠ ${label} · ${esc(s.msg || "")} ${again("다시 하기")}</li>`;
+  }
+  function renderDone(h, older) {
+    const left = ["thumbnail", "captions", "playlist"].filter(k => { const x = (h.steps || {})[k]; return x && !["ok", "skip"].includes(x.state); });
+    $("ytDone").innerHTML = `<div class="yt-box">${older ? `<div class="yt-old">지난번 올린 것</div>` : ""}<div><b class="yt-ok">올렸어요 ✓</b> · ${esc(privText(h))}${h.publishAt && !h.locked ? ` · ${whenIso(h.publishAt)} 공개` : ""}${h.shorts ? " · 쇼츠" : ""} <span class="yt-muted">(${when(h.at)})</span></div>
+      <div class="yt-link" id="ytUrl">${esc(h.url)}</div>
+      <div class="yt-row"><button class="btn" id="ytCopy">주소 복사</button><button class="btn" id="ytWatch">유튜브에서 보기</button><button class="btn" id="ytStudio">스튜디오에서 고치기</button></div>
+      ${h.processing && !h.problem ? `<div class="yt-muted">유튜브가 영상을 처리하는 중이에요 (보통 몇 분 · 화질은 차례로 올라가요) <button class="linkbtn" id="ytCheck">상태 다시 확인</button></div>` : ""}
+      ${h.problem ? `<div class="yt-red">${esc(h.problem)} <button class="linkbtn" id="ytCheck">상태 다시 확인</button></div>` : ""}
+      <ul class="yt-steps">${["thumbnail", "captions", "playlist"].map(k => stepLine(k, (h.steps || {})[k], h.videoId)).join("")}</ul>
+      ${left.length > 1 ? `<div class="yt-row"><button class="btn primary" data-ytfin="all" data-vid="${esc(h.videoId)}">남은 것 마저 하기 (${left.map(k => STEP[k]).join("·")})</button></div>` : ""}
+      ${h.locked ? `<div class="yt-red">${esc("Google이 이 프로젝트를 아직 확인(감사)하지 않아 영상이 '비공개(잠김)'로 올라갔어요 · 잠긴 영상은 공개로 바꿀 수 없어요 · 감사를 받은 뒤 다시 올려 주세요")} <button class="linkbtn" data-ytstep="9">9단계 보기</button></div>`
+        : h.preAudit ? `<div class="yt-red">Google 감사 전에 올린 영상이라 나중에도 공개로 바꿀 수 없어요 (시험용) · 공개할 영상은 키트를 복사해 스튜디오에서 올려 주세요 <button class="linkbtn" data-ytstep="9">9단계 보기</button></div>` : ""}</div>`;
+    $("ytCopy").onclick = async () => { await copyText(h.url); toast("주소를 복사했어요"); };
+    $("ytWatch").onclick = () => api("/api/youtube/open", { what: h.shorts ? "shorts" : "watch", videoId: h.videoId });
+    $("ytStudio").onclick = () => api("/api/youtube/open", { what: "studio", videoId: h.videoId });
+    if ($("ytCheck")) $("ytCheck").onclick = () => checkVideo(h.videoId, true);
+  }
+  async function checkVideo(vid, manual) {
+    YT.checks[vid] = Date.now();
+    let j = null;
+    if (manual) j = await api("/api/youtube/check", { videoId: vid });
+    else {  // 저절로 확인할 때는 오류를 띄우지 않음 (연결이 끊겼으면 다음 화면 그리기에서 보임)
+      try { j = await (await fetch("/api/youtube/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId: vid }) })).json(); } catch (e) {}
+    }
+    if (!j || !j.ok) { if (!manual) loadStatus(); return; }
+    if (manual) toast(j.problem ? j.problem : j.processing ? "아직 처리 중이에요 · 조금 뒤 다시 확인해 주세요" : "처리가 끝났어요 ✓");
+    loadPlan(); if (YT.hist) loadHist();
+  }
+  function autoCheck() {  // 처리 중인 영상: 올린 뒤 30분까지 1분마다 한 번 (videos.list 1단위)
+    const p = planNow(), h = p && p.last;
+    if (!h || !h.processing || h.problem || ours()) return;
+    if (Date.now() / 1000 - h.at > 30 * 60 || Date.now() - (YT.checks[h.videoId] || h.checkedAt * 1000 || 0) < 60e3) return;
+    checkVideo(h.videoId, false);
+  }
+  function pendOf() {
+    const c = ctx();
+    return ((YT.st || {}).pending || []).find(x => x.name === c.name && (x.seq || "") === (c.seq || ""));
+  }
+  function renderProbs(p) {
+    const items = [], pend = pendOf();
+    (p.problems || []).forEach(t => items.push(`<div class="yt-red">${esc(t)}</div>`));
+    (p.warnings || []).forEach(t => items.push(`<div class="yt-note">${esc(t)}</div>`));
+    $("ytProbs").innerHTML = items.join("");
+    const q = YT.st.quota, cs = cost(p);
+    if (q) {
+      const noUp = q.remaining.uploads < 1, short = !noUp && q.remaining.units < cs.units;
+      const can = Math.max(0, Math.min(q.remaining.uploads, Math.floor(q.remaining.units / Math.max(1, cs.units))));
+      $("ytQuota").innerHTML = `오늘 이런 영상을 약 ${num(can)}편 더 올릴 수 있어요 <button class="linkbtn" id="ytQuotaHelp">(?)</button>${
+        noUp ? `<div class="yt-red" style="margin-top:6px">오늘 올릴 수 있는 횟수를 다 썼을 수 있어요 · ${esc(q.resetText)} 뒤에 올려 주세요</div>`
+        : short ? `<div class="yt-red" style="margin-top:6px">오늘 남은 양이 모자라요 · ${esc(q.resetText)} 뒤에 올리거나, 자막·썸네일을 끄고 올려 주세요</div>` : ""}`;
+      $("ytQuotaHelp").onclick = () => {
+        $("ytQuotaPop").innerHTML = `유튜브 API는 하루에 쓸 수 있는 양이 정해져 있어요. 영상 올리기는 <b>하루 100번</b>, 썸네일(50)·자막(400)·재생목록(50)·확인(1)은 합쳐서 <b>하루 10,000</b>이에요 — 자막이 가장 커서 다 넣으면 하루 약 20편까지 올릴 수 있어요.<br>
+          오늘(이 앱 기준) 업로드 ${num(q.used.uploads)}/${num(q.limits.uploads)}번 · 그 밖 ${num(q.used.units)}/${num(q.limits.units)} · 이번에 쓰는 양 ${num(cs.units)} (${cs.parts.join("·")})<br>
+          Google 기준 자정(${esc(q.resetText)})에 다시 채워져요. 이 숫자는 이 앱이 쓴 양만 센 거라 Google Cloud의 '할당량' <span class="yt-en">(Quotas)</span> 화면과 조금 다를 수 있어요. <button class="linkbtn" data-ytopen="quotas">할당량 화면 열기</button>`;
+        $("ytQuotaPop").hidden = !$("ytQuotaPop").hidden;
+      };
+    }
+    $("ytGo").hidden = !!pend;
+    $("ytGo").disabled = !!(p.problems || []).length || ours() || (YT.opts.privacy === "scheduled" && !YT.opts.when);
+    $("ytGo").textContent = goLabel(p);
+  }
+  function renderHist() {
+    const items = YT.hist || [];
+    $("ytHistList").innerHTML = items.length ? items.map(h => `<div class="row"><b>${esc(h.title || h.videoId)}</b>
+      <span class="yt-muted">${when(h.at)} · ${esc(privText(h))}${h.shorts ? " · 쇼츠" : ""}${h.problem ? " · ⚠ 거절·처리 실패" : h.processing ? " · 처리 중" : ""} · ${["thumbnail", "captions", "playlist"].map(k => { const s = (h.steps || {})[k] || {}; return `${STEP[k]} ${s.state === "ok" ? "✓" : s.state === "skip" ? "–" : "⚠"}`; }).join(" ")}</span>
+      <div class="yt-row"><button class="btn" data-ythist="${h.shorts ? "shorts" : "watch"}" data-vid="${esc(h.videoId)}">보기</button><button class="btn" data-ythist="studio" data-vid="${esc(h.videoId)}">스튜디오</button>${h.processing || h.problem ? `<button class="btn" data-ytcheck="${esc(h.videoId)}">상태 다시 확인</button>` : ""}</div></div>`).join("")
+      : `<p class="yt-muted">아직 올린 영상이 없어요</p>`;
+  }
+  function renderGuide() {
+    const s = YT.st || {}, st = s.settings || {};
+    const done = { 3: s.connected, 5: !!st.consentMode, 7: s.configured, 8: s.connected, 9: !!st.audited };
+    document.querySelectorAll("#ytGuide .yt-step").forEach(el => el.classList.toggle("done", !!done[el.dataset.step]));
+    $("ytClientHint").textContent = s.configured ? `넣었어요 · ${s.clientHint || ""}${s.projectId ? ` (${s.projectId})` : ""}` : "아직 안 넣었어요";
+    show("ytClientClear", !!s.configured);
+    document.querySelectorAll('input[name="ytConsent"]').forEach(r => (r.checked = r.value === st.consentMode));
+    $("ytAudited").checked = !!st.audited;
+    $("ytGuideLogin").textContent = s.needsRelogin ? "다시 연결하기" : s.connected ? "다른 계정으로 다시 연결하기" : "계정 연결하기";
+    $("ytGuideLogin").disabled = !s.configured || (s.login || {}).state === "waiting" || ours();
+    $("ytGuideChan").textContent = s.connected ? `연결된 채널 · ${(s.channel || {}).title || ""}` : (s.login || {}).state === "waiting" ? "브라우저에서 허용을 기다리는 중…" : "";
+  }
+
+  // ---- 동작 ----
+  async function login() {
+    const j = await api("/api/youtube/login", {});
+    if (j.ok) { YT.loginUrl = j.url || ""; YT.revokeNote = false; toast("브라우저에서 계정을 고르고 [계속]을 눌러 주세요"); await loadStatus(); }
+  }
+  async function logout() {
+    if (ours()) { toast("올리는 중에는 끊을 수 없어요 · 먼저 [멈추기]를 눌러 주세요"); return; }
+    if (!confirm("유튜브 연결을 끊을까요? Google 쪽 연결도 끊어요 (다시 연결하면 돼요) · 올리다 멈춘 영상은 다음에 처음부터 올려요")) return;
+    const j = await api("/api/youtube/logout", {});
+    YT.revokeNote = !!(j.ok && j.hadToken && !j.revoked);
+    toast(YT.revokeNote ? "이 PC의 연결은 지웠지만 Google 쪽은 끊지 못했어요 · 아래 안내를 봐 주세요" : "연결을 끊었어요");
+    loadStatus(); loadPlan();
+  }
+  async function start(path, body) {
+    await ctx().flush();
+    const j = await api(path, body);
+    if (j.ok) {  // 시작 응답의 jobId(다른 작업과 같음) → 그 번호의 작업이 끝났을 때 결과를 봄
+      YT.wasOurs = true; YT.jobId = j.jobId || null; state.jobId = j.jobId || state.jobId;
+      state.job = path.endsWith("finish") ? JOBS[1] : JOBS[0]; state.progress = {}; render(); navDot(); return true;
+    }
+    if (j.problems) { toast(j.error); loadPlan(); }
+    return false;
+  }
+  async function go(again) {
+    await ctx().flush();
+    await loadPlan();
+    const p = planNow(), o = YT.opts, q = YT.st.quota, st = YT.st.settings || {};
+    if (!p) return;
+    if ((p.problems || []).length) { toast(p.problems[0]); return; }
+    if (o.kids !== "yes" && o.kids !== "no") { toast("이 영상이 아동용인지 골라 주세요 (처음 한 번 · 법으로 정해야 해요)"); $("ytKids") && $("ytKids").scrollIntoView({ block: "center" }); return; }
+    if (o.privacy === "scheduled" && (!o.when || new Date(o.when).getTime() < Date.now() + schedMin() * 60e3)) { toast(`예약 공개 시각은 지금부터 ${schedMin()}분 뒤로 골라 주세요`); return; }
+    if (p.duplicate && !confirm(`이 영상은 ${when(p.duplicate.at)}에 이미 올렸어요.\n또 올리면 같은 영상이 두 개가 돼요. 그래도 올릴까요?`)) return;
+    if (!st.audited && !st.preauditAck &&
+        !confirm("Google 감사(안내 9단계) 전이에요.\n지금 올리는 영상은 '비공개'로 올려도 Google이 잠가서, 나중에 공개로 바꿀 수 없어요 (시험용).\n공개할 영상은 키트를 복사해 스튜디오에서 올려 주세요.\n시험으로 올릴까요? (이 확인은 처음 한 번만 물어요)")) return;
+    if (o.privacy !== "private") {
+      const what = o.privacy === "scheduled" ? `${whenIso(o.when)}에 '공개'로 예약해서` : `'${PK[o.privacy]}'로`;
+      const tail = !st.audited ? "\n\n⚠ Google 감사 전이라 영상이 '비공개(잠김)'가 되고 나중에 공개로 바꿀 수 없어요." : o.privacy === "public" && o.notify ? "\n구독자에게 알림도 보내요." : "";
+      if (!confirm(`이 영상을 ${what} 올려요. 맞나요?${tail}`)) return;
+    }
+    const cs = cost(p);
+    if (q && q.remaining.uploads < 1 &&
+        !confirm(`오늘 유튜브에 올릴 수 있는 횟수(하루 ${q.limits.uploads}번)를 다 썼을 수 있어요.\n안 되면 ${q.resetText} 뒤에 [이어 올리기]로 다시 해요. 그래도 해 볼까요?`)) return;
+    if (q && q.remaining.uploads >= 1 && q.remaining.units < cs.units &&
+        !confirm(`오늘 남은 유튜브 API 양이 모자랄 수 있어요 (필요 ${cs.units} · 남음 ${q.remaining.units}).\n모자라면 영상까지만 올라가고 나머지는 ${q.resetText} 뒤에 [마저 하기]로 해요. 올릴까요?`)) return;
+    const opts = { privacy: o.privacy, madeForKids: o.kids === "yes", notify: o.notify, thumbnail: o.thumbnail && !!(p.files || {}).thumbnail,
+                   captions: o.captions && !!(p.files || {}).srt, playlistId: o.playlistId, playlistTitle: o.playlistTitle };
+    if (o.privacy === "scheduled") opts.publishAt = new Date(o.when).toISOString();
+    const c = ctx();
+    if (await start("/api/youtube/upload", { name: c.name, seq: c.seq || "", opts, again: !!again })) toast("유튜브에 올리기 시작했어요 · 다른 화면에 다녀와도 계속 올리고, 끝나면 알려 드려요");
+  }
+  async function finished() {  // 우리 작업이 끝남 (어느 화면에 있든)
+    await loadStatus();
+    if (visible()) await Promise.all([loadPlan(), loadHist()]);
+    const r = YT.st && YT.st.last;
+    if (!r) return;
+    const away = visible() ? "" : " · 7단계 '올리기'에서 봐 주세요";
+    if (r.ok) {
+      if (YT.opts) { YT.opts.privacy = "private"; YT.opts.when = ""; }  // 다음 영상은 다시 비공개부터
+      toast(r.locked ? `올렸지만 '비공개(잠김)'로 올라갔어요${away || " · 아래 안내를 봐 주세요"}` : `유튜브에 올렸어요 ✓ · ${r.privacyText || PK[r.privacy] || ""}${away}`);
+    } else if (r.paused) toast(`멈췄어요 · [이어 올리기]로 이어서 올려요${away}`);
+    else if (r.error) toast(`유튜브 · ${r.error}${away}`);
+    navDot();
+  }
+
+  $("ytGuideOpen").onclick = $("ytGuideGo").onclick = () => openGuide();
+  $("ytGuideClose").onclick = () => closeGuide();
+  function openGuide(step) {
+    $("ytGuide").hidden = false; YT.guide = true; renderGuide();
+    const el = step ? document.querySelector(`#ytGuide .yt-step[data-step="${step}"]`) : null;
+    if (el) el.scrollIntoView({ block: "start" }); else $("ytGuide").scrollTop = 0;
+  }
+  function closeGuide() { $("ytGuide").hidden = true; YT.guide = false; loadStatus(); loadPlan(); }
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && YT.guide) closeGuide(); });
+  $("ytLogin").onclick = login;
+  $("ytGuideLogin").onclick = login;
+  $("ytLoginCancel").onclick = async () => { await api("/api/youtube/login_cancel", {}); YT.loginUrl = ""; loadStatus(); };
+  $("ytCopyUrl").onclick = async () => { if (YT.loginUrl) { await copyText(YT.loginUrl); toast("주소를 복사했어요 · 브라우저 주소 칸에 붙여 넣어 주세요"); } };
+  $("ytPause").onclick = async () => { $("ytPause").disabled = true; const j = await api("/api/youtube/pause", {}); if (j.ok) toast("멈추는 중이에요…"); };
+  $("ytGo").onclick = () => go(false);
+  $("ytPriv").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { YT.opts.privacy = b.dataset.v; syncInputs(planNow()); renderProbs(planNow() || {}); }));
+  $("ytWhen").addEventListener("change", () => { YT.opts.when = $("ytWhen").value; syncInputs(planNow()); renderProbs(planNow() || {}); });
+  document.querySelectorAll('input[name="ytKids"]').forEach(r => r.addEventListener("change", () => (YT.opts.kids = r.value)));
+  $("ytThumb").addEventListener("change", () => { YT.opts.thumbnail = $("ytThumb").checked; renderProbs(planNow() || {}); });
+  $("ytCaps").addEventListener("change", () => { YT.opts.captions = $("ytCaps").checked; renderProbs(planNow() || {}); });
+  $("ytNotify").addEventListener("change", () => { YT.opts.notify = $("ytNotify").checked; renderProbs(planNow() || {}); });
+  $("ytPl").addEventListener("change", async () => {
+    const v = $("ytPl").value;
+    if (v !== "__new") { YT.opts.playlistId = v; YT.opts.playlistTitle = v ? $("ytPl").selectedOptions[0].textContent.replace(/ \(\d+\)$/, "") : ""; return renderProbs(planNow() || {}); }
+    $("ytPl").value = YT.opts.playlistId;
+    const title = (prompt("새 재생목록 이름 (예: 기본기 시리즈) · 공개 재생목록으로 만들어요") || "").trim();
+    if (!title) return;
+    const j = await api("/api/youtube/playlists", { create: { title, privacy: "public" } });
+    if (!j.ok) return;
+    YT.lists = (YT.lists || []).concat([{ id: j.playlist.id, title: j.playlist.title, count: 0 }]);
+    YT.opts.playlistId = j.playlist.id; YT.opts.playlistTitle = j.playlist.title;
+    toast(`재생목록 '${j.playlist.title}'을 만들었어요`);
+    loadStatus();
+  });
+  $("ytPlLoad").onclick = async () => {
+    $("ytPlLoad").disabled = true;
+    const j = await api("/api/youtube/playlists", {});
+    $("ytPlLoad").disabled = false;
+    if (j.ok) { YT.lists = j.items; toast(j.items.length ? `재생목록 ${j.items.length}개를 불러왔어요` : "아직 재생목록이 없어요 · '+ 새 재생목록 만들기'로 만들 수 있어요"); loadStatus(); }
+  };
+  $("ytHist").addEventListener("toggle", () => { if ($("ytHist").open) loadHist(); });
+  // 단계 버튼·링크 (카드·안내 어디서든)
+  document.addEventListener("click", async e => {
+    const o = e.target.closest("[data-ytopen]");
+    if (o) { api("/api/youtube/open", { what: "guide", key: o.dataset.ytopen }); toast("브라우저에서 열었어요"); return; }
+    const st = e.target.closest("[data-ytstep]");
+    if (st) return openGuide(st.dataset.ytstep);
+    const f = e.target.closest("[data-ytfin]");
+    if (f) return start("/api/youtube/finish", f.dataset.ytfin === "all" ? { videoId: f.dataset.vid } : { videoId: f.dataset.vid, steps: [f.dataset.ytfin] });
+    const ck = e.target.closest("[data-ytcheck]");
+    if (ck) return checkVideo(ck.dataset.ytcheck, true);
+    const h = e.target.closest("[data-ythist]");
+    if (h) api("/api/youtube/open", { what: h.dataset.ythist, videoId: h.dataset.vid });
+  });
+  // 설정 안내 7단계: JSON 파일 · 붙여 넣기 · 두 칸
+  async function saveClient(body) {
+    $("ytClientErr").hidden = true; $("ytClientWarn").hidden = true;
+    const r = await fetch("/api/youtube/client", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) { $("ytClientErr").textContent = j.error || "저장하지 못했어요"; $("ytClientErr").hidden = false; return; }
+    $("ytJsonText").value = ""; $("ytSecret").value = ""; $("ytCid").value = "";
+    if (j.warn) { $("ytClientWarn").textContent = j.warn; $("ytClientWarn").hidden = false; }
+    toast("Google 설정을 넣었어요 · 8단계에서 계정을 연결해 주세요");
+    await loadStatus();
+  }
+  $("ytJsonPick").onclick = () => $("ytJsonFile").click();
+  $("ytJsonFile").addEventListener("change", () => {
+    const f = $("ytJsonFile").files[0];
+    if (!f) return;
+    if (f.size > 65536) { $("ytClientErr").textContent = "파일이 너무 커요 · Google Cloud에서 받은 클라이언트 JSON 파일을 골라 주세요"; $("ytClientErr").hidden = false; return; }
+    const rd = new FileReader();
+    rd.onload = () => { saveClient({ json: String(rd.result || ""), client_secret: $("ytSecret").value.trim() || undefined }); $("ytJsonFile").value = ""; };
+    rd.readAsText(f);
+  });
+  $("ytClientSave").onclick = () => {
+    const t = $("ytJsonText").value.trim();
+    saveClient(t ? { json: t, client_secret: $("ytSecret").value.trim() || undefined } : { client_id: $("ytCid").value.trim(), client_secret: $("ytSecret").value.trim() });
+  };
+  $("ytSecretShow").onclick = () => { const i = $("ytSecret"); i.type = i.type === "password" ? "text" : "password"; $("ytSecretShow").textContent = i.type === "password" ? "보기" : "숨기기"; };
+  $("ytClientClear").onclick = async () => {
+    if (ours()) { toast("올리는 중에는 지울 수 없어요 · 먼저 [멈추기]를 눌러 주세요"); return; }
+    if (!confirm("넣은 Google 설정(클라이언트)과 연결을 모두 지울까요?")) return;
+    const j = await api("/api/youtube/client", { clear: true });
+    YT.revokeNote = false;
+    toast(j.ok && j.hadToken && !j.revoked ? "지웠어요 · Google 쪽 연결은 끊지 못했어요 · myaccount.google.com/connections 에서 '풋살 스튜디오'를 지워 주세요" : "Google 설정을 지웠어요");
+    loadStatus();
+  };
+  document.querySelectorAll('input[name="ytConsent"]').forEach(r => r.addEventListener("change", async () => { await api("/api/youtube/settings", { settings: { consentMode: r.value } }); loadStatus(); }));
+  $("ytAudited").addEventListener("change", async () => {
+    const on = $("ytAudited").checked;
+    if (on && !confirm("Google에서 감사 통과 메일을 받았나요? 통과 전에 올린 영상은 잠겨요")) { $("ytAudited").checked = false; return; }
+    await api("/api/youtube/settings", { settings: { audited: on } }); loadStatus();
+  });
+  // 키트를 고치면(제목·설명·태그) 잠깐 뒤 다시 확인 (5000바이트 등)
+  let editT = null;
+  ["upTitle", "upDesc", "upTags"].forEach(id => $(id).addEventListener("input", () => { clearTimeout(editT); editT = setTimeout(loadPlan, 2500); }));
+  document.addEventListener("up:kit", () => { if (visible()) { loadStatus(); loadPlan(); } });
+  // 7단계에 들어오면: 올리다 멈춘 영상이 있고 아직 그 영상으로 가 보지 않았으면 그 영상을 골라 줌 (앱을 껐다 켠 뒤에도 바로 보이게)
+  document.querySelector('.step[data-p="upload"]').addEventListener("click", () => setTimeout(async () => {
+    await loadStatus();
+    const x = stopped().find(p => !YT.picked.has(p.key));
+    if (!x || !window.upSelect) return;
+    YT.picked.add(x.key);
+    const c = ctx();
+    if (x.name === c.name && (x.seq || "") === (c.seq || "")) return;
+    if (await window.upSelect(x.name, x.seq)) toast("올리다 멈춘 영상을 골라 뒀어요 · [이어 올리기]를 눌러 주세요");
+  }, 300));
+  async function tick() {
+    const run = ours(), waiting = YT.st && YT.st.login && YT.st.login.state === "waiting";
+    if (!visible() && !run && !YT.wasOurs) return;  // 다른 화면: 우리 작업이 돌거나 막 끝났을 때만
+    if (run && visible()) renderRun();
+    if (run || (waiting && visible()) || YT.wasOurs) await loadStatus();
+    const ended = YT.wasOurs && (!run || (YT.jobId && state.jobId && state.jobId !== YT.jobId));  // 내가 시킨 번호가 끝남
+    if (ended) { YT.wasOurs = false; YT.jobId = null; finished(); }
+    else if (run) YT.wasOurs = true;
+    if (waiting && YT.st && YT.st.connected) { YT.loginUrl = ""; toast(`유튜브 계정을 연결했어요 · ${(YT.st.channel || {}).title || ""}`); loadPlan(); }
+    if (visible()) autoCheck();
+  }
+  setInterval(tick, 1500);
+  // 앱을 열 때 한 번: 올리다 멈춘 영상이 있으면 7단계 옆 빨간 점 + 알림 (파일만 읽음 · 인터넷 안 씀 · 저절로 이어 올리지 않음)
+  getJ("/api/youtube/status").then(j => {
+    if (!j || !j.ok) return;
+    YT.st = YT.st || j;
+    const n = (j.pending || []).filter(x => x.state !== "uploading" && x.state !== "starting").length;
+    $("ytNavDot").classList.toggle("on", n > 0);
+    if (n) setTimeout(() => toast(`유튜브에 올리다 멈춘 영상이 ${n}개 있어요 · 7단계 '올리기'에서 [이어 올리기]를 눌러 주세요`), 1500);
   });
 })();
 </script>

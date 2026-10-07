@@ -553,6 +553,22 @@ class Secrets(Home):
         self.assertIn("/r/m/", remote.redact(raw))
         self.assertEqual(remote.redact("내보내기 · 완성본.mp4"), "내보내기 · 완성본.mp4")
 
+    def test_redact_youtube_secrets(self):
+        """유튜브 바로 올리기와 합침(D-037): app.log·start_job 오류·추적도 remote.redact 를 거침 → Google 토큰·세션 주소·로그인 코드가 남지 않음."""
+        secrets_ = ["ya29.a0AfB_SECRET-xyz", "1//0gSECRETREFRESH", "GOCSPX-SecretValue_1", "UPLOADSESSIONID123", "4/0AeSECRETCODE", "STATEVALUE9"]
+        raw = (f"https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id={secrets_[3]} · Bearer {secrets_[0]} · "
+               f'{{"refresh_token": "{secrets_[1]}", "client_secret": "{secrets_[2]}"}} · http://127.0.0.1:5/?code={secrets_[4]}&state={secrets_[5]}')
+        out = remote.redact(raw)
+        for s in secrets_:
+            self.assertNotIn(s, out)
+        self.assertIn("uploadType=resumable", out)
+        self.assertEqual(remote.redact("유튜브에 올렸어요 · AbCdEfGhIjK"), "유튜브에 올렸어요 · AbCdEfGhIjK")
+        buf = io.StringIO()
+        with mock.patch.object(app, "LOGFILE", Path(os.devnull)), mock.patch.object(sys, "stdout", buf):
+            app.log(f"시험 · {secrets_[0]}")
+        self.assertNotIn(secrets_[0], app.LOG[-1])
+        self.assertNotIn(secrets_[0], buf.getvalue())
+
     def test_listener_error_goes_to_error_log_without_secrets(self):
         """pythonw 에서는 오류 출력이 studio-error.log(app._StampedErr)로 감 — 원격 리스너가 요청을 처리하다 난 오류에도 비밀이 없음."""
         with mock.patch.dict(os.environ, dev_env()):

@@ -35,6 +35,7 @@ import thumb
 import updater
 import upload
 import winlink
+import youtube_upload
 
 
 def _utf8_console():
@@ -67,6 +68,7 @@ STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기", "학습�
 
 def log(msg):
     msg = core.clean_text(str(msg))  # 반쪽 이모지가 섞이면 화면 응답(/api/state)·파일 기록이 오류로 멈춤 → '�'로
+    msg = remote.redact(msg)  # 비밀(터널 주소·주제·Google 토큰·업로드 세션 주소 등)이 섞여도 studio.log·화면·휴대폰 기록에 남지 않게 (D-037)
     with LOCK:
         LOG.append(msg)
     try:
@@ -95,9 +97,12 @@ def start_job(name, fn, by=None):
             with core.keep_awake():  # 켜 두고 자리를 비워도 Windows 가 절전으로 들어가 작업이 멈추지 않게 (모든 작업)
                 JOB["result"] = fn()
         except Exception as e:
-            JOB["error"] = str(e)
-            log(f"문제가 생겼어요 · {e}")
-            traceback.print_exc()
+            JOB["error"] = remote.redact(str(e))  # 화면·휴대폰·알림으로 가는 오류 글 — 비밀은 '…'로 (D-037)
+            log(f"문제가 생겼어요 · {JOB['error']}")
+            try:  # 추적도 비밀을 지우고 (pythonw 에서는 studio-error.log 로 감 · remote._trace 와 같은 규칙)
+                sys.stderr.write(remote.redact(traceback.format_exc()))
+            except Exception:  # noqa: BLE001
+                pass
         finally:
             core.set_progress()
             err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
@@ -509,6 +514,8 @@ class Handler(BaseHTTPRequestHandler):
         # ---- 용어 사전: 받아쓰기에 알려 줄 풋살 용어·이름 + 자주 틀리게 받아쓰는 말 (작업 폴더 dict.json) ----
         if u.path.startswith("/api/strategy"):  # 채널 전략 (8단계 · 읽기만)
             return self._strategy_get(u.path, q)
+        if u.path.startswith("/api/youtube/"):  # 유튜브에 바로 올리기 (7단계 · 읽기만 · 인터넷 안 씀)
+            return self._youtube_get(u.path, q)
         if u.path == "/api/dict":
             return self._send(200, dict(captions.load_dict(core.dict_path()), defaults=captions.default_dict()))
         self._send(404, {"error": "not found"})
@@ -928,6 +935,8 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"원격 접속 설정을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(404, {"error": "not found"})
+        if path.startswith("/api/youtube/"):  # 유튜브에 바로 올리기 (7단계)
+            return self._youtube_post(path, b)
         if path == "/api/restart":
             with LOCK:  # 작업 확인과 '다시 시작' 표시를 한 번에 → 그 뒤로는 휴대폰도 새 작업을 시작하지 못함 (start_job)
                 busy = JOB["name"]
@@ -1058,6 +1067,113 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"ok": False, "error": str(e)})
         except OSError as e:
             log(f"채널 전략을 저장하지 못했어요 · {e}")
+            return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+        return self._send(404, {"error": "not found"})
+
+    # ---- 유튜브에 바로 올리기 (7단계 · youtube_upload · D-035) ----
+    def _youtube_get(self, path, q):
+        """읽기만 (인터넷 안 씀 · 파일을 바꾸지 않음 · 토큰·보안 비밀번호·세션 주소는 응답에 없음)."""
+        yu = youtube_upload
+        try:
+            if path == "/api/youtube/status":
+                return self._send(200, dict(yu.status(), ok=True, job=JOB["name"]))
+            if path == "/api/youtube/plan":
+                try:
+                    n = editor.safe_name((q.get("name") or [""])[0])
+                    editor.video_path(n)
+                except (ValueError, FileNotFoundError):
+                    return self._send(404, {"ok": False, "error": "영상을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요"})
+                priv = (q.get("privacy") or [""])[0]
+                return self._send(200, yu.plan(n, (q.get("seq") or [""])[0] or None, priv if priv in yu.PRIVACY_KO else None))
+            if path == "/api/youtube/history":
+                lim = (q.get("limit") or ["10"])[0]
+                return self._send(200, yu.history(int(lim) if lim.isdigit() else 10))
+        except LookupError as e:  # 그사이 편집실에서 지운 편집본
+            return self._send(400, {"ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            log(f"유튜브 올리기 화면을 읽지 못했어요 · {type(e).__name__}")
+            return self._send(500, {"ok": False, "error": "유튜브 올리기 정보를 읽지 못했어요. 잠시 뒤 다시 열어 주세요"})
+        return self._send(404, {"error": "not found"})
+
+    def _youtube_post(self, path, b):
+        """설정·연결·작업 시작. 올리기·이어 올리기·마무리는 start_job (한 번에 하나 · 겹치면 409 · 응답은 다른 작업과 같은 _started:
+        jobId → 화면이 자기가 시킨 올리기의 끝만 받음). /api/youtube/* 는 모두 이 PC 화면 전용 — 휴대폰 원격(remote.ACTIONS) 허용 목록에
+        넣지 않음 (로그인·연결 끊기·설정·토큰 흐름 · 올리기 시작도 PC 에서만). 휴대폰은 진행·끝 알림·[멈추기]만 (D-037)."""
+        yu = youtube_upload
+        try:
+            if path == "/api/youtube/client":
+                if b.get("clear"):
+                    return self._send(200, yu.clear_all(log))
+                text = b.get("json")
+                if text is not None and not isinstance(text, str):
+                    return self._send(400, {"ok": False, "error": "JSON 파일 내용을 그대로 넣어 주세요"})
+                return self._send(200, yu.save_client(text, b.get("client_id"), b.get("client_secret"), log))
+            if path == "/api/youtube/login":
+                return self._send(200, yu.start_login(log))
+            if path == "/api/youtube/login_cancel":
+                return self._send(200, yu.cancel_login())
+            if path == "/api/youtube/logout":
+                return self._send(200, yu.logout(log))
+            if path == "/api/youtube/settings":
+                return self._send(200, {"ok": True, "settings": yu.save_settings(b.get("settings"))})
+            if path == "/api/youtube/playlists":
+                if isinstance(b.get("create"), dict):
+                    c = b["create"]
+                    return self._send(200, yu.create_playlist(c.get("title"), c.get("privacy") or "public"))
+                return self._send(200, yu.playlists())
+            if path == "/api/youtube/upload":
+                n = editor.safe_name(b.get("name"))
+                editor.video_path(n)
+                seq = b.get("seq") or None
+                opts = b.get("opts") if isinstance(b.get("opts"), dict) else {}
+                if seq is not None and not isinstance(seq, str):
+                    return self._send(400, {"ok": False, "error": "편집본을 다시 골라 주세요"})
+                p = yu.plan(n, seq, opts.get("privacy") if opts.get("privacy") in yu.PRIVACY_KO else None)
+                if p["problems"]:
+                    return self._send(400, {"ok": False, "error": p["problems"][0], "problems": p["problems"], "codes": p["codes"]})
+                again = bool(b.get("again"))
+                ok = start_job(yu.JOB_NAME, lambda: yu.run_upload(n, seq, opts, log, editor.CANCEL, again))
+                return self._send(200 if ok else 409, _started(ok))
+            if path == "/api/youtube/resume":
+                key = str(b.get("key") or "")
+                if not yu.KEY_RE.match(key):
+                    return self._send(400, {"ok": False, "error": "잘못된 요청이에요"})
+                ok = start_job(yu.JOB_NAME, lambda: yu.resume(key, log, editor.CANCEL))
+                return self._send(200 if ok else 409, _started(ok))
+            if path == "/api/youtube/finish":
+                vid = str(b.get("videoId") or "")
+                steps = b.get("steps") if isinstance(b.get("steps"), list) and all(isinstance(x, str) for x in b["steps"]) else None
+                if not yu.VIDEO_ID.match(vid):
+                    return self._send(400, {"ok": False, "error": "잘못된 영상이에요"})
+                ok = start_job(yu.JOB_FINISH, lambda: yu.finish(vid, steps, log, editor.CANCEL))
+                return self._send(200 if ok else 409, _started(ok))
+            if path == "/api/youtube/pause":  # 우리 작업일 때만 멈춤 (내보내기의 ffmpeg 를 끄지 않게)
+                with LOCK:
+                    mine = JOB["name"] in (yu.JOB_NAME, yu.JOB_FINISH)
+                    if mine:
+                        editor.CANCEL.set()
+                return self._send(200 if mine else 409, {"ok": True} if mine else {"ok": False, "error": "지금 유튜브에 올리는 중이 아니에요"})
+            if path == "/api/youtube/check":  # 처리 상태 다시 확인 (videos.list 1단위 · 작업 아님)
+                return self._send(200, yu.check(str(b.get("videoId") or "")))
+            if path == "/api/youtube/discard":
+                return self._send(200, yu.discard(b.get("key")))
+            if path == "/api/youtube/open":
+                yu.open_link(str(b.get("what") or ""), b.get("videoId"), b.get("key"))
+                return self._send(200, {"ok": True})
+        except yu.UploadError as e:
+            return self._send(400, {"ok": False, "error": str(e)})
+        except yu.yt.ApiError as e:  # 연결·재생목록·상태 확인처럼 바로 Google 에 묻는 것 (끊긴 연결 표시는 youtube_upload 가 그 연결에만)
+            log(f"유튜브 · {e.kind}" + (f" ({e.reason})" if e.reason else ""))
+            return self._send(502, {"ok": False, "error": yu.explain(e), "kind": e.kind, "relogin": e.kind == "relogin"})
+        except FileNotFoundError:
+            return self._send(404, {"ok": False, "error": "영상을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요"})
+        except (ValueError, LookupError) as e:
+            return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
+        except (BrokenPipeError, ConnectionResetError):  # 화면이 응답을 기다리지 않고 닫힘 (작업은 그대로)
+            return None
+        except OSError as e:
+            log(f"유튜브 올리기 설정을 저장하지 못했어요 · {type(e).__name__}")
             return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
         return self._send(404, {"error": "not found"})
 
