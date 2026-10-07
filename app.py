@@ -7,7 +7,6 @@ import time
 import subprocess
 import sys
 import threading
-import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,11 +18,14 @@ import claude_cli
 import core
 import editor
 import hooks
+import intake
 import plan
 import qa
 import refs
 import source
 import strategy
+import studiolog
+import trouble
 import style
 import thumb
 import upload
@@ -48,6 +50,7 @@ LOCK = threading.Lock()
 
 LOGFILE = core.WORK / "studio.log"
 STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기", "학습용 영상 받기", "학습용 스타일 배우기")   # 스타일 파일(plan)을 끝에 다시 쓰는 작업
+studiolog.setup(lambda: LOGFILE)  # studio.log 쓰기: 연도 붙은 시각 · 크기 제한 · 오류 위치 (시험은 LOGFILE 을 바꿔 끼움)
 
 
 def log(msg):
@@ -57,31 +60,33 @@ def log(msg):
         print(msg, flush=True)
     except Exception:  # 화면 출력이 안 돼도 작업·파일 기록은 계속
         pass
-    try:  # 콘솔 없이 실행되므로 파일에도 남김
-        with open(LOGFILE, "a", encoding="utf-8") as f:
-            f.write(time.strftime("%m-%d %H:%M:%S ") + msg + "\n")
-    except OSError:
-        pass
+    studiolog.write(msg)  # 콘솔 없이 실행되므로 파일에도 남김 (연도 붙은 시각 · 커지면 studio.old.log 로 · 실패해도 작업은 계속)
 
 
-def start_job(name, fn):
+def start_job(name, fn, ctx=None):
+    """작업 하나 시작 (다른 작업 중이면 False). 실패하면 JOB error(쉬운 한 줄)·fail(종류·할 일 · trouble.explain).
+    ctx: 오류 안내에 쓸 것 — browser(고른 로그인 정보 브라우저)·blocked(이 화면용 YouTube 막힘 안내)."""
     with LOCK:
         if JOB["name"]:
             return False
-        JOB.update(name=name, result=None, error=None)
+        JOB.update(name=name, result=None, error=None, fail=None)
 
     def runner():
+        studiolog.job(name)  # 실행 표시에 작업 이름 (작업 중에 갑자기 꺼지면 다음에 켤 때 알림)
         core.set_progress()
         editor.CANCEL.clear()  # 예전 작업에서 누른 멈추기(✕)가 다음 작업에 남지 않게
         try:
             JOB["result"] = fn()
         except Exception as e:
-            JOB["error"] = str(e)
-            log(f"문제가 생겼어요 · {e}")
-            traceback.print_exc()
+            info = dict(trouble.explain(e, **(ctx or {})), job=name)  # 영어 원문 → 쉬운 한 줄 + 할 일 (원문·위치는 studio.log 에만)
+            JOB["error"], JOB["fail"] = info["msg"], info
+            log(f"문제가 생겼어요 · {info['msg']}")
+            studiolog.write(f"  원문 · {' '.join(str(e).split())[:400]}")
+            studiolog.trace(e)
         finally:
             core.set_progress()
             JOB["name"] = None
+            studiolog.job(None)
 
     threading.Thread(target=runner, daemon=True).start()
     return True
@@ -98,7 +103,8 @@ def _refs_job(fn):
         if str(e) != core.BLOCKED_MSG:
             raise
         log(f"  {refs.BLOCKED_MSG}")
-        return {"ok": False, "error": refs.BLOCKED_MSG, "blocked": True}  # 이 화면의 '크롬 로그인 정보로 받기'를 가리킴
+        return {"ok": False, "error": refs.BLOCKED_MSG, "blocked": True,  # 이 화면의 '로그인 정보로 받기'를 가리킴
+                "fail": trouble.explain(e, blocked=refs.BLOCKED_MSG)}
 
 
 def open_folder(path):
@@ -113,6 +119,7 @@ def open_folder(path):
 def restart():
     """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후)."""
     log("다시 시작하는 중…")
+    studiolog.session_end()  # 정상 종료 (새 프로세스가 '갑자기 꺼짐'으로 보지 않게)
     kw = {"cwd": str(core.APP_DIR)}
     if sys.platform == "win32":
         kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
@@ -126,6 +133,7 @@ def restart():
 
 def _quit():
     """앱 끝내기: 저장 중인 프로젝트는 끝까지 쓰고, 남은 ffmpeg 는 끔 (Windows 는 자식 프로세스가 같이 안 꺼짐)."""
+    studiolog.session_end()
     editor.wait_saves(3)
     editor.cancel_export()
     os._exit(0)
@@ -151,6 +159,7 @@ def _after_start():
         log(f"업데이트 마무리 중 문제가 생겼어요 · {e}")
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=core.engine_autoupdate, args=(log,), daemon=True).start()
+    _session_start()
 
 
 def _redirect_to_updater():
@@ -167,6 +176,18 @@ def _redirect_to_updater():
         return True
     except Exception:
         return False
+
+
+def _session_start():
+    """포트를 잡은 뒤 한 번: 잡히지 않은 오류도 studio.log 에 위치를 남기게 하고, 지난번에 정상적으로 꺼지지 않았으면 기록
+    (작업 중에 꺼졌으면 화면에도 한 번 알림)."""
+    studiolog.install_hooks()
+    note = studiolog.session_start(core.VERSION)  # 보통 종료(브라우저로 쓰다 Ctrl+C 등)도 표시를 지우게 atexit 에 걸어 둠
+    if note:
+        log(note["log"])
+        if note["notice"]:
+            import updater
+            updater._NOTICES.append({"text": note["notice"], "warn": True})
 
 
 APP_NAME = "풋살사관학교 스튜디오"
@@ -278,6 +299,16 @@ class Handler(BaseHTTPRequestHandler):
     def _host_ok(self):
         """이 컴퓨터의 앱 창(127.0.0.1)에서 온 요청만 (다른 사이트가 주소를 바꿔 몰래 읽는 것 막기)."""
         return (self.headers.get("Host") or "") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
+
+    def handle_one_request(self):
+        """요청 처리 중 잡히지 않은 오류도 studio.log 에 위치를 남김 (pythonw 는 콘솔이 없어 사라졌음 · 처리는 예전 그대로)."""
+        try:
+            super().handle_one_request()
+        except (ConnectionError, TimeoutError):  # 화면이 먼저 끊은 연결(미리보기 앞뒤로 옮기기·새로 고침)은 오류가 아님
+            raise
+        except Exception as e:
+            studiolog.trace(e, f"요청 오류 · {getattr(self, 'command', '?')} {urlparse(getattr(self, 'path', '') or '').path}")
+            raise
 
     def do_GET(self):
         if not self._host_ok():
@@ -394,7 +425,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
                                         "recommend": editor.recommend(n)})
             except Exception as e:
-                traceback.print_exc()
+                studiolog.trace(e)
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
         if u.path == "/api/state":
             since = int(q.get("since", ["0"])[0])
@@ -402,9 +433,12 @@ class Handler(BaseHTTPRequestHandler):
                 lines = LOG[since:]
                 total = len(LOG)
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
+            intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
+                                    "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드)
+                                    "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local)})
         if u.path == "/api/timeline":
             n = q["name"][0]
@@ -461,12 +495,20 @@ class Handler(BaseHTTPRequestHandler):
                 editor.safe_name(n)
         except ValueError:
             return self._send(400, {"error": "잘못된 파일 이름이에요"})
-        ck = b.get("cookies") or None
+        try:  # 로그인 정보(쿠키)를 읽을 브라우저: 사용자가 고른 목록 안의 값만 (D-009)
+            ck = trouble.browser(b.get("cookies"))
+        except ValueError as e:
+            return self._send(400, {"ok": False, "error": str(e)})
+        if path in ("/api/analyze", "/api/bundle"):  # 아직 복사 중인 영상은 편집점을 찾지 않음 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)
+            busy = self._copying(b.get("names"))  # 이름 검사는 그 전(analyze)·뒤(bundle 경로) 그대로 — 잘못된 이름은 복사 중으로 세지 않음
+            if busy:
+                msg = intake.copying_msg(busy[0]) + (f" (복사 중인 영상 {len(busy)}개)" if len(busy) > 1 else "")
+                return self._send(409, {"ok": False, "error": msg, "copying": busy, "fail": {"kind": "copying", "msg": msg, "actions": ["retry"]}})
         jobs = {
             "/api/list": ("채널 불러오기", lambda: source.annotate_listing(hooks.remember_listing(  # 우리 채널이면 제목 패턴용으로 저장 (올리기 키트)
                 core.list_videos(b.get("kind", "videos"), ck, b.get("url"), log), b.get("kind", "videos"), b.get("url")), b.get("url"))),
             "/api/style/learn": ("스타일 배우기", lambda: style.learn(b.get("name") or "내 스타일", b["names"], log)),
-            "/api/download": ("보관함에 담기", lambda: source.remember_hints(b.get("sources")) or core.download(b["ids"], log, ck)),
+            "/api/download": ("보관함에 담기", lambda: self._download(b, ck)),
             "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
@@ -549,7 +591,7 @@ class Handler(BaseHTTPRequestHandler):
                 except style.StyleError as e:
                     return {"ok": False, "error": str(e)}
                 except Exception as e:  # noqa: BLE001
-                    traceback.print_exc()
+                    studiolog.trace(e)
                     log(f"점수를 매기지 못했어요 · {e}")
                     return {"ok": False, "error": fail}
             try:
@@ -562,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
             except style.StyleError as e:
                 return self._send(400, {"ok": False, "error": str(e)})
             except Exception as e:  # noqa: BLE001
-                traceback.print_exc()
+                studiolog.trace(e)
                 log(f"점수를 매기지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": fail})
         if path == "/api/thumb/frames":
@@ -751,9 +793,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._analyze({"names": [r["name"]], "model": b.get("model") or "large-v3-turbo"})
                     r["analyzed"] = True
                 except Exception as e:
-                    traceback.print_exc()
-                    log(f"묶은 영상은 만들었지만 편집점 찾기는 하지 못했어요 · {e} · 보관함에서 골라 '편집점 찾기'를 다시 눌러 주세요")
-                    r["analyze_error"] = str(e)
+                    studiolog.trace(e)
+                    why = trouble.explain(e)["msg"]
+                    log(f"묶은 영상은 만들었지만 편집점 찾기는 하지 못했어요 · {why} · 보관함에서 골라 '편집점 찾기'를 다시 눌러 주세요")
+                    r["analyze_error"] = why
                 return r
             ok = start_job("한 영상으로 묶기", run_bundle)
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
@@ -772,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, FileNotFoundError, LookupError) as e:
                 return self._send(400, {"ok": False, "error": str(e) or "영상을 찾지 못했어요"})
             except Exception as e:
-                traceback.print_exc()
+                studiolog.trace(e)
                 log(f"올리기 키트를 만들지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": f"올리기 키트를 만들지 못했어요 · {e}"})
         if path == "/api/upload/open":  # 유튜브 스튜디오 · 키트 파일 위치 · 설명 틀
@@ -811,7 +854,7 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/api/list", "/api/download", "/api/refs/add", "/api/refs/direction"):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
-            ok = start_job(name, fn)
+            ok = start_job(name, fn, {"browser": ck, "blocked": refs.BLOCKED_MSG if path.startswith("/api/refs/") else None})
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         self._send(404, {"error": "not found"})
 
@@ -837,7 +880,7 @@ class Handler(BaseHTTPRequestHandler):
         except strategy.forecast.ForecastError as e:
             return self._send(500, {"ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001
-            traceback.print_exc()
+            studiolog.trace(e)
             log(f"채널 전략을 읽지 못했어요 · {e}")
             return self._send(500, {"ok": False, "error": "채널 전략을 읽지 못했어요. 잠시 뒤 다시 열어 주세요"})
         return self._send(404, {"error": "not found"})
@@ -947,6 +990,24 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 names = ", ".join(q["name"] for q in proj["sequences"])
                 log(f"  가편집 완료 · {names}")
+        return out
+
+    @staticmethod
+    def _download(b, ck):
+        """보관함에 담기 → {failed: [영상 id], why: {영상 id: 쉬운 안내}} (화면이 실패 카드·다시 하기에 씀)."""
+        source.remember_hints(b.get("sources"))
+        why = {}
+        failed = core.download(b["ids"], log, ck, why=why)
+        return {"failed": failed, "why": why}
+
+    @staticmethod
+    def _copying(names):
+        """고른 영상 중 아직 들어오는 중(복사 중)인 것 (보관함 목록이 1초마다 지켜본 것 · 바로 답함)."""
+        out = []
+        for n in names if isinstance(names, list) else []:
+            p = core.VIDEOS / str(n)
+            if isinstance(n, str) and Path(n).name == n and p.is_file() and intake.copying(p):
+                out.append(n)
         return out
 
     @staticmethod
