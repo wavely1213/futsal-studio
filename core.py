@@ -67,40 +67,38 @@ def run(cmd):
 
 # ---------- 목록·다운로드 ----------
 
-def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
-    """채널 영상 목록 (조회수 순). url을 주면 다른 유튜버 채널, 영상 주소 하나면 그 영상만."""
-    log = log or print
-    opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
-    if cookies_browser:
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+def _listing_target(url, kind):
+    """채널·영상·재생목록 주소(또는 @핸들) → yt-dlp 에 넘길 주소 (공유 꼬리 ?si=·탭 이름 정리). 비우면 우리 채널.
+    list_videos 와 channel_listing(채널 전략)이 같이 씀."""
     from urllib.parse import parse_qs, urlsplit
-    opts["noplaylist"] = True  # 영상 주소에 붙은 재생목록(list=)은 펼치지 않음
     url = (url or "").strip()
     if not url:
-        target = f"{CONFIG['channel_url'].rstrip('/')}/{kind}"
+        return f"{CONFIG['channel_url'].rstrip('/')}/{kind}"
+    if not re.match(r"https?://", url, re.I):
+        if re.match(r"(?:(?:www|m|music)\.)?(?:youtube\.com|youtu\.be)/", url, re.I):
+            url = "https://" + url
+        else:
+            url = "https://www.youtube.com/" + (url if url.startswith("@") else "@" + url)
+    p = urlsplit(url)
+    host, q = p.netloc.lower(), parse_qs(p.query)
+    if host.endswith("youtu.be"):
+        vid = p.path.strip("/").split("/")[0] or None
+    elif p.path.rstrip("/") == "/watch":
+        vid = (q.get("v") or [None])[0]
     else:
-        if not re.match(r"https?://", url, re.I):
-            if re.match(r"(?:(?:www|m|music)\.)?(?:youtube\.com|youtu\.be)/", url, re.I):
-                url = "https://" + url
-            else:
-                url = "https://www.youtube.com/" + (url if url.startswith("@") else "@" + url)
-        p = urlsplit(url)
-        host, q = p.netloc.lower(), parse_qs(p.query)
-        if host.endswith("youtu.be"):
-            vid = p.path.strip("/").split("/")[0] or None
-        elif p.path.rstrip("/") == "/watch":
-            vid = (q.get("v") or [None])[0]
-        else:
-            m = re.match(r"/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})", p.path)
-            vid = m.group(1) if m else None
-        if vid:
-            target = f"https://www.youtube.com/watch?v={vid}"  # list=/si=/t= 제거
-        elif p.path.rstrip("/") == "/playlist":
-            target = url
-        else:
-            path = re.sub(r"/(videos|shorts|streams|featured|playlists|about|community)$", "", p.path.rstrip("/"))
-            target = f"https://www.youtube.com{path}/{kind}"  # ?si= 같은 공유 꼬리 제거
+        m = re.match(r"/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})", p.path)
+        vid = m.group(1) if m else None
+    if vid:
+        return f"https://www.youtube.com/watch?v={vid}"  # list=/si=/t= 제거
+    if p.path.rstrip("/") == "/playlist":
+        return url
+    path = re.sub(r"/(videos|shorts|streams|featured|playlists|about|community)$", "", p.path.rstrip("/"))
+    return f"https://www.youtube.com{path}/{kind}"  # ?si= 같은 공유 꼬리 제거
 
+
+def _extract_flat(target, opts, log):
+    """yt-dlp 목록 정보(받지 않음) · YouTube 가 막으면 엔진을 최신으로 바꾼 뒤 한 번만 다시 (BR-009).
+    그래도 막히면 RuntimeError(BLOCKED_MSG)."""
     def extract():
         opts.update(_js_opts())
         with _yt(log).YoutubeDL(opts) as ydl:
@@ -108,18 +106,39 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
 
     with _engine(log):
         try:
-            info = extract()
+            return extract()
         except Exception as e:
             if not _blocked(e):
                 raise
             log("YouTube가 막아서 다운로드 엔진을 최신으로 바꾼 뒤 한 번 더 불러올게요")
             update_engine(log)
             try:
-                info = extract()
+                return extract()
             except Exception as e2:
                 if _blocked(e2):
                     raise RuntimeError(BLOCKED_MSG) from e2
                 raise
+
+
+def channel_listing(url, kind, limit, log=None, lang=None, sleep_requests=0.75):
+    """채널 탭(videos·shorts) 목록 원본 정보 (채널 전략 · 최신순 · 받지 않음). limit = 앞에서부터 몇 개까지.
+    lang="ko" 면 원래 한국어 제목 (그 대신 조회수·구독자 수가 비어 옴). 요청 사이 sleep_requests 초 쉼 (YouTube 에 몰아서 묻지 않게)."""
+    log = log or print
+    opts = {"extract_flat": True, "quiet": True, "no_warnings": True, "noplaylist": True,
+            "playlistend": int(limit), "sleep_interval_requests": sleep_requests}
+    if lang:
+        opts["extractor_args"] = {"youtube": {"lang": [lang]}}
+    return _extract_flat(_listing_target(url, kind), opts, log)
+
+
+def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
+    """채널 영상 목록 (조회수 순). url을 주면 다른 유튜버 채널, 영상 주소 하나면 그 영상만."""
+    log = log or print
+    opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
+    if cookies_browser:
+        opts["cookiesfrombrowser"] = (cookies_browser,)
+    opts["noplaylist"] = True  # 영상 주소에 붙은 재생목록(list=)은 펼치지 않음
+    info = _extract_flat(_listing_target(url, kind), opts, log)
     ents = info.get("entries") if info.get("entries") is not None else [info]
     flat = []
     for e in ents:  # 탭이 여러 개로 묶여 오면 안쪽 영상까지 펼침
