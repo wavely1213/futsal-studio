@@ -24,6 +24,19 @@ import style
 import thumb
 import upload
 
+
+def _utf8_console():
+    """Windows 콘솔·기록 출력은 기본이 cp949 라 쪼개진 한글 자모(예: 'ᄃ')·이모지가 든 파일 이름을 쓰면 오류가 남
+    → UTF-8 로 바꾸고, 그래도 못 쓰는 글자는 대신 표시 (출력 때문에 작업이 멈추지 않게)."""
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # pythonw(콘솔 없음)는 None · 바꿀 수 없는 출력은 그대로
+            pass
+
+
+_utf8_console()
+
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
 LOG, JOB = [], {"name": None, "result": None, "error": None}
 LOCK = threading.Lock()
@@ -35,7 +48,10 @@ LOGFILE = core.WORK / "studio.log"
 def log(msg):
     with LOCK:
         LOG.append(msg)
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except Exception:  # 화면 출력이 안 돼도 작업·파일 기록은 계속
+        pass
     try:  # 콘솔 없이 실행되므로 파일에도 남김
         with open(LOGFILE, "a", encoding="utf-8") as f:
             f.write(time.strftime("%m-%d %H:%M:%S ") + msg + "\n")
