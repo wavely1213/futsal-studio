@@ -1,6 +1,8 @@
 {
   "version": "1.9.1",
   "notes": "영상 출처 구분: 보관함에서 풋살사관학교 · 다른 채널(슛포러브·도블락처럼 채널별) · 내 촬영본으로 나눠 보기, 배지 눌러 직접 바꾸기, 스타일 배우기에서 채널 영상 한 번에 고르기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/6e57d0167a300a1a4a35e6d0105082134eeec847.zip",
+  "commit": "6e57d0167a300a1a4a35e6d0105082134eeec847",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "4d9699d90acadfde33c4036d5de3af0867b7970edc1cb327adcf9b0bbf94b994",
