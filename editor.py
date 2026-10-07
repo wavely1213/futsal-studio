@@ -2317,8 +2317,9 @@ def _fc_opt():
     return _FC["o"]
 
 
-def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None):
-    """ffmpeg 실행 (진행률·취소 지원). abort: 이 작업만 멈추는 신호. enc: 그래픽카드 인코더면 그 문제인지 구분."""
+def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None, want_err=False):
+    """ffmpeg 실행 (진행률·취소 지원). abort: 이 작업만 멈추는 신호. enc: 그래픽카드 인코더면 그 문제인지 구분.
+    want_err: 끝나면 ffmpeg 가 남긴 글(측정값 등)을 돌려줌."""
     if CANCEL.is_set() or (abort is not None and abort.is_set()):
         raise Cancelled()
     with tempfile.TemporaryFile(dir=cwd) as errf:
@@ -2352,6 +2353,9 @@ def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=
                 e.session = bool(HW_SESSION.search(msg))
                 raise e
             raise RuntimeError(msg[-600:])
+        if want_err:
+            errf.seek(0)
+            return errf.read().decode("utf-8", "replace")
 
 
 # 그래픽카드 인코더 (있으면 내보내기가 몇 배 빨라짐) — 실제로 짧게 인코딩해 보고 되는 것만 씀
@@ -2646,6 +2650,30 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         dia = mus = None  # noqa: F841
 
 
+LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(dBFS) — 공 차는 소리·효과음처럼 순간만 큰 소리가 있으면
+#                   loudnorm 한 번(실시간)으로는 목표까지 못 올림 (최대 크기 제한에 걸려 -17 LUFS 처럼 작게 남음)
+
+
+def _loud_pre(mix, tmp, lufs, vol, abort=None):
+    """소리 크기 맞추기 전처리: 섞은 소리를 한 번 재서(ebur128) 목표까지 모자란 만큼 미리 키우고, 그때 넘치는 순간 소리만 리미터로 누름.
+    그다음 loudnorm 은 남은 1dB 안팎만 맞춤 → 목표 LUFS·최대 -1.5 dBTP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
+    try:
+        r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", f"volume={vol:.3f},ebur128=peak=true",
+                     "-f", "null", "-"], tmp, abort=abort, want_err=True)
+    except RuntimeError:
+        return []
+    I = re.findall(r"I:\s+(-?[\d.]+) LUFS", r or "")
+    P = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", r or "")
+    if not I or not P:
+        return []
+    i_in, tp = float(I[-1]), float(P[-1])
+    gain = lufs - i_in
+    if i_in < -60 or gain <= 0.5 or tp + gain <= -1.5:  # 조용한 영상 · 이미 크거나 그냥 올려도 넘치지 않으면 loudnorm 만
+        return []
+    gain = min(gain, 24.0)
+    return [f"volume={gain:.2f}dB", f"alimiter=limit={10 ** (LOUD_PEAK / 20):.4f}:attack=2:release=80:level=0:asc=1"]
+
+
 PRESETS = {
     "youtube": {"label": "유튜브 1080p", "long": (1920, 1080), "shorts": (1080, 1920), "crf": 19, "preset": "veryfast"},
     "hq": {"label": "고화질 4K", "long": (3840, 2160), "shorts": (2160, 3840), "crf": 18, "preset": "veryfast"},
@@ -2814,6 +2842,7 @@ def export(name, proj, opts, log):
                     af = [f"volume={float(m.get('volume', 1.0)):.3f}"]
                     if nm:
                         lufs = min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))
+                        af += _loud_pre(mix, tmp, lufs, float(m.get("volume", 1.0)), abort_a)
                         af.append(f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11")
                     af += ["aresample=48000", "asetpts=N/SR/TB"]  # 소리 크기 맞추기 뒤 시각을 다시 매겨 끝이 잘리거나 길어지지 않게
                     _run_ff(["-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",

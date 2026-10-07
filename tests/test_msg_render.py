@@ -69,8 +69,8 @@ def bbox(gray, thr=200):
     return (xs.min(), ys.min(), xs.max(), ys.max()) if len(xs) else None
 
 
-class RenderedFrames(unittest.TestCase):
-    """실제로 내보내 프레임에서 확인 (720p, 흰 글씨 · 검은 바탕)."""
+class _Render(unittest.TestCase):
+    """실제로 내보내 프레임에서 확인 (720p, 흰 글씨 · 검은 바탕) — 시험 재료 준비만."""
 
     @classmethod
     def setUpClass(cls):
@@ -108,6 +108,9 @@ class RenderedFrames(unittest.TestCase):
                              capture_output=True).stdout
         return np.frombuffer(raw, np.uint8).reshape(720, 1280)
 
+
+
+class RenderedFrames(_Render):
     def test_stamp_scale_matches_preview_curve(self):
         """쾅 찍기: 0초 165% → 0.12초 100% (미리보기 sc = 1.65 - 0.65·e/0.12 와 같은 직선)."""
         f = self.render([title("a", "가나다", 0, 2, effect="stamp", fill="#FFFFFF", strokeW=0, y=0.6, size=120)])
@@ -149,6 +152,32 @@ class RenderedFrames(unittest.TestCase):
         # 0.067초(2프레임): 미리보기 각도 = -6 + 12×(0.067-0.06)/0.06 ≈ -4.7° (반시계 → 오른쪽 끝이 위) · 0.3초 뒤엔 0°
         self.assertLess(tilt(2), -8)
         self.assertLess(abs(tilt(12)), 4)
+
+
+class Loudness(_Render):
+    """공 소리처럼 순간만 큰 소리가 섞이면 loudnorm 한 번으로는 목표까지 못 올리던 것 (-17 LUFS 로 남음) → 미리 키우고 순간 소리만 눌러 맞춤."""
+
+    def test_peaky_mix_reaches_target_loudness(self):
+        work = core.WORK
+        r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i",
+                      "aevalsrc='0.05*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*3*t))+0.95*lt(mod(t,2),0.01)*sin(2*PI*90*t)':s=48000:d=12",
+                      "-ac", "2", str(work / "edit_media" / "peaky.wav")])
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        md = {"id": "pk", "kind": "audio", "src": "assets", "file": "peaky.wav", "dur": 12.0, "w": 0, "h": 0, "fps": 30.0, "audio": True}
+        items = [{"id": "v", "track": "V1", "media": "bk", "start": 0, "in": 0, "out": 2, "speed": 1, "rev": False, "link": None, "fit": "auto", "fx": {}, "color": {}},
+                 {"id": "v2", "track": "V1", "media": "bk", "start": 2, "in": 0, "out": 2, "speed": 1, "rev": False, "link": None, "fit": "auto", "fx": {}, "color": {}},
+                 {"id": "a", "track": "A1", "media": "pk", "start": 0, "in": 0, "out": 4, "speed": 1, "rev": False, "link": None, "fx": {}, "gain": 0, "fadeIn": 0,
+                  "fadeOut": 0, "mute": False}]
+        p = {"id": "s", "name": "소리 크기", "format": "long", "v": 2, "captionsOn": False, "captionStyle": dict(editor.LONG_STYLE), "titles": [], "shapes": [],
+             "layout": {"mode": "fill"}, "master": {"volume": 1, "normalize": True, "lufs": -14}, "duck": {"on": False}, "tracks": editor.default_tracks(),
+             "items": items, "trans": [], "markers": [], "captions": [], "info": {"duration": 2.0, "width": 320, "height": 180, "fps": 30.0},
+             "source": "시험.mp4", "media": self.media + [md]}
+        out = editor.export("시험.mp4", p, {"preset": "small", "hw": False, "xml": False, "srt": False}, lambda m: None)
+        err = core.run([FF, "-hide_banner", "-nostats", "-i", str(core.OUT / out[0]), "-af", "ebur128=peak=true", "-f", "null", "-"]).stderr
+        i_out = float(re.findall(r"I:\s+(-?[\d.]+) LUFS", err)[-1])
+        tp = float(re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)[-1])
+        self.assertLessEqual(abs(i_out + 14.0), 1.0, i_out)
+        self.assertLessEqual(tp, -0.9, tp)
 
 
 if __name__ == "__main__":
