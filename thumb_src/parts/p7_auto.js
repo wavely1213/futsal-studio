@@ -176,13 +176,15 @@ function renderAuto() {
   const opts = titleOptions(), t0 = opts[0] || ["제목", ""], prev = { a: $("aL1") && $("aL1").value, b: $("aL2") && $("aL2").value };
   $("tab-auto").innerHTML = `<div class="pg"><h4>만들 형식</h4><div class="row2">${Object.entries(FMT).map(([k, f]) => `<button class="btn ${AUTO_FMT === k ? "pri" : ""}" data-act="autoFmt" data-v="${k}">${f.label}</button>`).join("")}</div>
       <div class="hint">쇼츠 썸네일은 쇼츠 화면(9:16, 1080×1920) 그대로 만들어요.</div></div>
+    <div id="aiSec"></div>
+    <details class="oldc" id="oldCands" open><summary>예전 템플릿 후보 <span class="hint">제목 두 줄을 직접 넣어 템플릿 14종으로</span></summary>
     <div class="pg"><h4>제목 문구</h4>
       <input class="s" id="aL1" placeholder="첫째 줄"><input class="s" id="aL2" placeholder="둘째 줄" style="margin-top:6px">
       <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(o.join(" ").slice(0, 16))}</button>`).join("")}</div>
       <div class="row2"><button class="btn pri" id="aMake">후보 다시 만들기</button><button class="btn" id="aCutMake">${CUT_AUTO ? "누끼 넣은 후보 ✓" : "인물 누끼 넣어서 만들기"}</button></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라내기)</label>
       <div class="hint">영상에서 선명한 장면을 골라 템플릿으로 만들어요. 누르면 편집 화면으로 불러와요.</div></div>
-    <div class="designs" id="designs"></div><div class="cands ${AUTO_FMT}" id="cands"></div>`;
+    <div class="designs" id="designs"></div><div class="cands ${AUTO_FMT}" id="cands"></div></details>`;
   $("aL1").value = prev.a ?? t0[0]; $("aL2").value = prev.b ?? (t0[1] || "");
   document.querySelectorAll("[data-ti]").forEach(b => (b.onclick = () => { const o = opts[+b.dataset.ti]; $("aL1").value = o[0]; $("aL2").value = o[1] || ""; makeCands(); }));
   $("aMake").onclick = makeCands; $("aSub").onchange = e => { SUBCROP = e.target.checked; makeCands(); };
@@ -192,7 +194,8 @@ function renderAuto() {
     if (!j.ok) return toast(j.error || "지금은 할 수 없어요");
     const r = await watchJob(); if (r) { CUT_AUTO = r; renderAuto(); }
   };
-  renderDesigns(); makeCands();
+  renderDesigns(); makeCands(); renderAI();
+  if (AI.results.length && AI.results[0].doc.h > AI.results[0].doc.w !== (AUTO_FMT === "short")) aiRun(AI.seed);  // 형식을 바꾸면 그 형식으로 다시 추천
 }
 function makeCands() {
   if (!FRAMES.length) { $("cands").innerHTML = `<div class="hint" style="padding:10px">장면을 고르는 중이에요…</div>`; return; }
@@ -419,6 +422,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
     await new Promise(r2 => setTimeout(r2, 3000));
   }
   renderStrip(); makeCands();
+  loadBrand(); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
   const d0 = DOCS.designs[0];
   if (d0 && !d0.doc.layers.length && FRAMES.length) {
     if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; refreshUI(); }

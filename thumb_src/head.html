@@ -186,6 +186,28 @@
   .qabody .qi[data-ql] { cursor: pointer; } .qabody .qi[data-ql]:hover { background: var(--panel-3); }
   .qabody .qi b { display: block; } .qabody .qi.warn { box-shadow: inset 3px 0 0 #ffb020; } .qabody .qi.bad { box-shadow: inset 3px 0 0 #ff4d4d; } .qabody .qi.ok { box-shadow: inset 3px 0 0 #2ecc71; }
   .qabody .score { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+  /* AI 추천 썸네일 */
+  .aibox h4 { flex-wrap: wrap; }
+  .aigo { font-size: 14px; padding: 8px 14px; background: linear-gradient(90deg, #2d8ceb, #8a4dff); border: 0; }
+  .aicards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .aicards.short { grid-template-columns: 1fr 1fr 1fr; }
+  .aicard { border-radius: 6px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line-2); }
+  .aicard canvas { display: block; width: 100%; }
+  .aicard .meta { font-size: 11px; padding: 4px 6px 2px; line-height: 1.35; }
+  .aicard .meta b { color: #ffd24d; }
+  .aicard .row { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 6px 6px; }
+  .copychips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .cchip { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 3px 9px; cursor: pointer; font-size: 11.5px; }
+  .cchip:hover, .cchip.on { border-color: var(--accent); }
+  .cchip em { font-style: normal; color: #ffd24d; }
+  .cchip i { font-style: normal; color: #b98cff; margin-left: 4px; font-size: 10px; }
+  .aiframes { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .aiframes .af { flex: none; width: 112px; aspect-ratio: 16/9; position: relative; border-radius: 4px; overflow: hidden; cursor: pointer; border: 2px solid transparent; background: #222; }
+  .aiframes .af.on, .aiframes .af:hover { border-color: var(--accent); }
+  .aiframes .af img { width: 100%; height: 100%; object-fit: cover; }
+  .aiframes .af b { position: absolute; left: 2px; top: 1px; font-size: 10px; background: rgba(0,0,0,.72); padding: 0 3px; border-radius: 3px; }
+  .aiframes .af span { position: absolute; right: 2px; bottom: 1px; font-size: 10px; background: rgba(0,0,0,.7); padding: 0 3px; border-radius: 3px; }
+  details.oldc > summary { padding: 8px 12px; cursor: pointer; color: var(--ink-2); border-bottom: 1px solid var(--line); }
 </style>
 </head>
 <body>

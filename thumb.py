@@ -183,17 +183,41 @@ def _sat_after(a, g):
 
 
 def _band(path):
-    """영상에 박힌 자막·자막 띠가 있는 곳 ('bottom' · 'top' · None) — _sharpness 의 감점과 같은 기준."""
+    """영상에 박힌 자막·방송 띠: ('bottom'|'top'|None, 띠가 시작(끝)하는 높이 0~1).
+    글자 줄 = 세로 경계가 촘촘한(15% 넘는) 줄이 2~12줄 이어지고 그 위아래는 한산함. 띠 경계선(가로 경계)이 가까이 있거나 아주 한산해야 인정
+    (철망·관중석처럼 넓게 촘촘한 무늬는 글자로 보지 않음)."""
     import numpy as np
     from PIL import Image
     with Image.open(path) as im:
         g = np.asarray(im.convert("L").resize((320, 180)), np.float32)
-    gx = np.abs(np.diff(g, axis=1)) > 70
-    if float(gx[120:180].mean()) > 0.06:
-        return "bottom"
-    if float(gx[0:30].mean()) > 0.06:
-        return "top"
-    return None
+    dens = (np.abs(np.diff(g, axis=1)) > 60).mean(1)
+    edge = np.abs(np.diff(g, axis=0)).mean(1)
+
+    def runs(lo, hi):
+        y = lo
+        while y < hi:
+            if dens[y] > 0.15:
+                z = y
+                while z + 1 < hi and dens[z + 1] > 0.15:
+                    z += 1
+                yield y, z
+                y = z + 1
+            y += 1
+    for y0, y1 in runs(126, 178):  # 아래쪽
+        n = y1 - y0 + 1
+        around = max(float(dens[max(0, y0 - 3):y0].mean()), float(dens[y1 + 1:y1 + 4].mean()) if y1 + 1 < 179 else 0.0)
+        cand = list(range(max(100, y0 - 14), y0))
+        sep = max(cand, key=lambda y: edge[y]) if cand and edge[cand].max() > 40 else None  # 띠 경계 = 가장 뚜렷한 가로 경계
+        if 2 <= n <= 12 and around < 0.07 and (sep is not None or around < 0.04):
+            return "bottom", round((sep if sep is not None else y0 - 4) / 180, 3)
+    for y0, y1 in runs(1, 54):  # 위쪽
+        n = y1 - y0 + 1
+        around = max(float(dens[max(0, y0 - 3):y0].mean()) if y0 > 0 else 0.0, float(dens[y1 + 1:y1 + 4].mean()))
+        cand = list(range(y1 + 1, min(80, y1 + 14)))
+        sep = max(cand, key=lambda y: edge[y]) if cand and edge[cand].max() > 40 else None
+        if 2 <= n <= 12 and around < 0.07 and (sep is not None or around < 0.04):
+            return "top", round(((sep if sep is not None else y1 + 4) + 1) / 180, 3)
+    return None, None
 
 
 def blur_penalty(blur):
@@ -226,9 +250,13 @@ def action_score(persons, ball):
 
 
 def main_person(persons, ball):
-    """주인공: 공과 가장 가까운 선수(발 기준), 공이 없으면 가장 큰 선수 → 번호 또는 -1."""
+    """주인공: 화면을 크게 차지한 사람(높이 60% 이상 · 인터뷰·클로즈업)이 있으면 그 사람, 아니면 공과 가장 가까운 선수(발 기준),
+    공이 없으면 가장 큰 선수 → 번호 또는 -1."""
     if not persons:
         return -1
+    big = max(range(len(persons)), key=lambda i: persons[i][3])
+    if persons[big][3] >= 0.6:
+        return big
     if ball:
         bx, by = ball[0] + ball[2] / 2, ball[1] + ball[3] / 2
         return min(range(len(persons)), key=lambda i: (persons[i][0] + persons[i][2] / 2 - bx) ** 2 + (persons[i][1] + persons[i][3] - by) ** 2)
@@ -354,7 +382,8 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
             sc *= face.boost(fs)
         sc *= blur_penalty(blur) * action_score(persons, ball)
         m = face.main(fs) if fs else None
-        info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb), "band": _band(p),
+        band, band_y = _band(p)
+        info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb), "band": band, "bandY": band_y,
                 "kind": scene_kind(m["box"][3] if m else 0, persons or []), "det": det is not None}
         info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
         return sc, fs, info
@@ -378,7 +407,7 @@ def frame_candidates(name, n=TOP_N):
     점수 = 선명도·밝기·인물(_sharpness) × 흔들림 감점 × 얼굴 크기·웃음/놀람·얼굴 선명도(얼굴이 안 보이면 ×0.6) × 액션(선수 수·크기·공).
     고르게 나눈 36장 + 하이라이트 + 대사 핵심어 순간 + 장면 바뀐 직후 0.5초를 보고, 같은 장면(지문)은 3장까지만,
     뽑힌 장면은 ±0.2·0.4초 옆 장면 중 표정이 가장 좋은 것으로. 영상·편집점 분석·모델 유무가 바뀌면 다시 고름.
-    항목: {t, url, score, kind, persons[[x,y,w,h,확률]], ball, main, blur, band, grade, hash, (faces, emo, face)}"""
+    항목: {t, url, score, kind, persons[[x,y,w,h,확률]], ball, main, blur, band, bandY, grade, hash, (faces, emo, face)}"""
     from editor import media_info  # 순환 import 피함
     import face
     import detect
@@ -435,7 +464,8 @@ def frame_candidates(name, n=TOP_N):
     for t in sorted(picked, key=lambda x: -scored[x][0]):
         sc, fs, info = scored[t]
         it = {"t": t, "url": f"/frame?name={name}&t={t}", "score": round(sc, 3), "kind": info["kind"], "persons": info["persons"], "ball": info["ball"],
-              "main": main_person(info["persons"], info["ball"]), "blur": info["blur"], "band": info["band"], "grade": info["grade"], "hash": info["hash"]}
+              "main": main_person(info["persons"], info["ball"]), "blur": info["blur"], "band": info["band"], "bandY": info["bandY"],
+              "grade": info["grade"], "hash": info["hash"]}
         if fs:
             m = face.main(fs)
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)

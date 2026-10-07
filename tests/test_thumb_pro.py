@@ -247,8 +247,30 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(thumb.main_person(two, ball), 1, "공과 가까운 선수")
         self.assertEqual(thumb.main_person(two, None), 0, "공이 없으면 가장 큰 선수")
         self.assertEqual(thumb.main_person([], ball), -1)
+        self.assertEqual(thumb.main_person([[0.3, 0.05, 0.6, 0.9, 0.9], [0.6, 0.5, 0.05, 0.2, 0.8]], ball), 0, "인터뷰처럼 크게 나온 사람이 주인공")
         tangle = [[0.4, 0.3, 0.12, 0.4, 0.9], [0.45, 0.32, 0.12, 0.38, 0.9]]
         self.assertGreater(thumb.action_score(tangle, None), thumb.action_score([tangle[0], [0.8, 0.3, 0.1, 0.4, 0.9]], None))
+
+    def test_burned_in_band(self):
+        """방송 띠(아래쪽 회색 띠 + 작은 글자)를 찾고 띠가 시작하는 높이를 알려 줌 · 띠 없는 장면은 None."""
+        from PIL import Image, ImageDraw
+        tmp = Path(tempfile.mkdtemp(prefix="띠 "))
+        try:
+            im = Image.open(FIX / "futsal_court_pd.jpg").convert("RGB").resize((640, 360))
+            clean = tmp / "깨끗.jpg"
+            im.save(clean)
+            self.assertEqual(thumb._band(clean), (None, None))
+            d = ImageDraw.Draw(im)
+            d.rectangle([0, 322, 640, 360], fill=(235, 235, 235))
+            for x in range(10, 630, 14):
+                d.text((x, 332), "가", fill=(20, 20, 20))
+            banded = tmp / "띠.jpg"
+            im.save(banded, quality=95)
+            pos, y = thumb._band(banded)
+            self.assertEqual(pos, "bottom")
+            self.assertTrue(0.85 <= y <= 0.92, y)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_kind(self):
         self.assertEqual(thumb.scene_kind(0.3, []), "close")
