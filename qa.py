@@ -87,7 +87,8 @@ def check_video(path, fmt=None, master=None, run=None):
         elif lufs < QUIET:  # 목표와 상관없이: 유튜브는 작은 소리를 키워 주지 않음 → 다른 영상보다 작게 들림
             how = (f"편집실 '소리 크기 맞추기' 목표가 {tgt:g} LUFS예요. -14로 바꿔 다시 내보내세요." if tgt is not None and tgt < QUIET
                    else "편집실에서 '소리 크기 맞추기'를 켜고(목표 -14) 다시 내보내세요." if tgt is None
-                   else f"목표({tgt:g})까지 키우지 못했어요. 다시 내보내 보세요.")
+                   else f"목표({tgt:g})보다 {tgt - lufs:.1f}dB 작게 나왔어요(순간만 큰 소리가 있으면 덜 키워져요). "
+                        f"'소리 크기 맞추기' 목표를 {min(-9.0, float(round(2 * tgt - lufs + 0.3))):g}로 올려 다시 내보내세요.")
             add("warn", "소리가 작아요", f"{lufs:.1f} LUFS — 유튜브는 작은 소리를 키워 주지 않아서 다른 영상보다 작게 들려요. {how}")
         elif lufs > LOUD:
             add("warn", "소리가 커요", f"{lufs:.1f} LUFS — 유튜브가 -14 근처로 줄여서 틀어요(그만큼 소리가 납작해져요). -14 근처가 좋아요.")
