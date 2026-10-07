@@ -173,7 +173,7 @@ class EmphasisAutoSeqTest(AutoSeqBase):
         W, H = editor.frame_size("long")
         calls = []
 
-        def fake_faces(name, items, a, b):
+        def fake_faces(name, items, a, b, **kw):
             calls.append((a, b))
             return [TALKING_FACE]
         st = {"emphasisTitles": {"perMin": 3.3, "color": "#FFE14D"}, "captionPos": "bottom"}
@@ -201,12 +201,11 @@ class EmphasisAutoSeqTest(AutoSeqBase):
     def test_zoomed_clip_face_boxes(self):
         # 확대한 클립의 얼굴은 화면에서 그만큼 크게·바깥쪽으로 (가운데 기준)
         import face
-        import thumb
         items = editor._items_from_cuts([{"in": 0.0, "out": 10.0, "zoom": True}], zoom=1.2)
         img = self.tmp / "frame.jpg"
         img.write_bytes(b"x")
         with mock.patch.object(face, "ready", return_value=True), mock.patch.object(face, "ensure", return_value=True), \
-                mock.patch.object(thumb, "grab", return_value=img), \
+                mock.patch.object(editor, "_grab_small", return_value=img), \
                 mock.patch.object(face, "faces", return_value=[{"box": [0.45, 0.1, 0.1, 0.2]}]):
             fs = editor._faces_on_screen(self.name, items, 2.0, 3.5)
         self.assertEqual(len(fs), 2)
@@ -216,8 +215,68 @@ class EmphasisAutoSeqTest(AutoSeqBase):
             self.assertAlmostEqual(w, 0.12)
             self.assertAlmostEqual(h, 0.24)
         with mock.patch.object(face, "ready", return_value=True), mock.patch.object(face, "ensure", return_value=True), \
-                mock.patch.object(thumb, "grab", side_effect=OSError("잠김")):
+                mock.patch.object(editor, "_grab_small", side_effect=OSError("잠김")):
             self.assertIsNone(editor._faces_on_screen(self.name, items, 2.0, 3.5), "장면을 못 보면 모름(None) → 흔한 얼굴 자리")
+
+
+    def test_face_lookup_is_batched_capped_and_leaves_no_cache(self):
+        # E6 검토: 장면 하나씩(0.5~0.8초) 차례로 보면 10분 영상에 1분 넘게 · 640px 장면을 썸네일 캐시(frames/h_*.jpg, 1920)에 남기면
+        # 같은 시각 썸네일이 흐려짐 · 진행 표시가 남음
+        import face
+        items = editor._items_from_cuts([{"in": 0.0, "out": 600.0}])
+        grabbed, folders = [], set()
+
+        def fake_grab(name, t, folder):
+            grabbed.append(t)
+            folders.add(str(folder))
+            p = Path(folder) / f"f_{t:09.3f}.jpg"
+            p.write_bytes(b"x")
+            return p
+        core.set_progress(label="썸네일 만드는 중", item="다른 영상", pct=40)
+
+        def fake_ensure(item=None, label=""):
+            core.set_progress(label=label, item=item, pct=None, detail="얼굴·표정 모델 준비 중…")
+            return True
+        with mock.patch.object(face, "ready", return_value=True), mock.patch.object(face, "ensure", side_effect=fake_ensure), \
+                mock.patch.object(editor, "_grab_small", side_effect=fake_grab), \
+                mock.patch.object(face, "faces", return_value=[{"box": list(TALKING_FACE)}]):
+            place = editor.emphasis_placer(self.name, items, "long", dict(editor.LONG_STYLE), True)
+            few = [(10.0 * k, 10.0 * k + editor.EMPH_DUR) for k in range(1, 6)]
+            place.prefetch(few)
+            self.assertEqual(len(grabbed), 10)  # 글씨 5개 × 처음·끝
+            n = len(grabbed)
+            for a, b in few:
+                place("인사이드!", dict(editor.TITLE_STYLE, size=88, y=0.3), a, b)
+            self.assertEqual(len(grabbed), n, "미리 본 장면은 다시 안 뽑음")
+            self.assertEqual(core.PROGRESS.get("label"), "썸네일 만드는 중", "진행 표시는 원래대로")
+            grabbed.clear()
+            many = [(12.0 * k, 12.0 * k + editor.EMPH_DUR) for k in range(1, 41)]  # 10분 · 1분에 4개
+            editor.emphasis_placer(self.name, items, "long", dict(editor.LONG_STYLE), True).prefetch(many)
+            self.assertLessEqual(len(grabbed), editor.FACE_FRAMES_MAX)
+            self.assertEqual(len(grabbed), 40, "한도를 넘으면 글씨마다 가운데 한 장면")
+        for f in folders:
+            self.assertFalse(Path(f).exists(), "얼굴 찾기 장면은 임시 폴더째 지움")
+        frames = core.adir(self.name) / "frames"
+        self.assertFalse(frames.exists() and any(frames.iterdir()), "썸네일 장면 캐시에 640px 그림을 남기지 않음")
+        core.set_progress()
+
+    def test_emphasis_label_does_not_repeat_caption(self):
+        # E6 검토: 도블락 렌더 '세번째 포인트.' 가 대사 자막과 강조 글씨로 한 화면에 두 번 · 끝 마침표까지
+        self.assertEqual(editor.emphasis_label("세번째 포인트.", {})[0], "세번째 포인트")
+        self.assertIsNone(editor.emphasis_label("세번째 포인트.", {}, short=False)[0])
+        st = {"emphasisTitles": {"perMin": 3.3, "color": "#FFE14D"}}
+        with mock.patch.object(editor, "_faces_on_screen", return_value=None):
+            q = editor.auto_sequences(self.name, self.info, st, ("long",))[0]
+        segs = {editor._norm(s["text"]) for s in json.loads((core.adir(self.name) / "transcript.json").read_text(encoding="utf-8"))}
+        em = [t for t in q["titles"] if t.get("plan") == "emphasis"]
+        self.assertTrue(q.get("captionsOn", True) and em, [t["text"] for t in em])
+        for t in em:
+            self.assertNotIn(editor._norm(t["text"]), segs, t)
+            self.assertFalse(t["text"].endswith((".", ",")), t)
+
+    def test_placer_is_long_form_only(self):
+        with self.assertRaises(ValueError):
+            editor.emphasis_placer(self.name, [], "shorts")
 
 
 @unittest.skipUnless(__import__("face").ready(), "얼굴·표정 모델이 없어요 (~/.futsal-studio/models)")

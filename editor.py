@@ -941,8 +941,8 @@ def _find_emph(toks):
     return None
 
 
-def emphasis_label(txt, terms=None):
-    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+def emphasis_label(txt, terms=None, short=True):
+    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로(끝 마침표·쉼표는 뗌 · short=False 면 안 씀), 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
     기술 이름도 강조 낱말도 낱말 전체가 맞을 때만 — 낱말 조각('잘하!'·'턴!')은 만들지 않음."""
     terms = terms if terms is not None else _emph_terms()
     toks = _tokens(txt)
@@ -952,8 +952,8 @@ def emphasis_label(txt, terms=None):
         return None, 0
     flat = re.sub(r"\s+", " ", str(txt or "")).strip()
     score = len(found) + (2 if emph else 0)
-    if len(flat.replace(" ", "")) <= EMPH_SHORT:
-        return flat, score
+    if len(flat.replace(" ", "")) <= EMPH_SHORT and short:
+        return re.sub(r"[\s.,。、…]+$", "", flat) or flat, score
     if found and emph:
         return f"{found[0][2]} {emph}!", score
     if found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
@@ -1026,10 +1026,11 @@ def _src_to_tl(items, t):
     return None
 
 
-def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None):
+def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None, captions_on=False):
     """받아쓰기에서 기술 이름·강조 낱말이 든 말을 골라 1.5초 큰 색 글씨(titles)로 — 1분에 per_min 개까지, 서로 EMPH_GAP 초 넘게 떨어뜨림.
     teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀).
-    place(글, 모양, 시작, 끝) → (x, y): 자리 고르기 (emphasis_placer · 없으면 예전처럼 화면 위 30%)."""
+    place(글, 모양, 시작, 끝) → (x, y): 자리 고르기 (emphasis_placer · 없으면 예전처럼 화면 위 30%).
+    captions_on: 대사 자막이 켜져 있으면 짧은 말을 그대로 띄우지 않음 (같은 글이 자막과 강조 글씨로 한 화면에 두 번) — '기술 이름 + 강조 낱말!' 만."""
     total = max([i_end(it) for it in items] or [0.0])
     cap = int(per_min * total / 60.0 + 1e-9)
     if cap <= 0 or not segs:
@@ -1038,7 +1039,7 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None):
     cands = []
     for s in segs:
         txt = str(s.get("text") or "").strip()
-        label, score = emphasis_label(txt, terms)
+        label, score = emphasis_label(txt, terms, short=not captions_on)
         if not label:
             continue
         t = float(s["start"])
@@ -1060,6 +1061,8 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None):
     fill = str(color or "").upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color or "")) else "#FFE14D"
     sty = dict(TITLE_STYLE, fill=fill, size=88, y=0.3)
     out = []
+    if place is not None and hasattr(place, "prefetch"):  # 볼 장면을 한꺼번에 (하나씩 보면 10분 영상에 1분 넘게 걸림)
+        place.prefetch([(tl, tl + EMPH_DUR) for tl, _ in picked])
     for tl, label in sorted(picked):
         st1 = dict(sty)
         if place is not None:  # 그 장면 얼굴·자막을 피한 빈자리
@@ -1076,7 +1079,7 @@ FACE_GUESS = [[0.35, 0.12, 0.30, 0.26]]  # 얼굴을 못 찾을 때(모델 없�
 
 def emphasis_spot(text, st, W, H, faces, avoid=()):
     """강조 글씨를 놓을 자리 (x, y) — 얼굴 상자 faces [[x, y, w, h] 0~1] 와 피할 띠 avoid [(위, 아래)] (대사 자막·쇼츠 훅)와
-    겹치지 않는 곳 중 먼저: 원래 자리(스타일 x·y) → 머리 위 → 옆(오른쪽·왼쪽) → 얼굴 아래 → 자막 위 빈 띠 → 화면 위쪽.
+    겹치지 않는 곳 중 먼저: 원래 자리(스타일 x·y) → 머리 위 → 옆(오른쪽·왼쪽) → 화면 위쪽 빈 띠 → 자막 위 빈 띠 → 얼굴 아래(몸·공).
     다 겹치면 얼굴과 가장 적게 겹치는 곳."""
     fb = [(f[0] - FACE_PAD[0], f[1] - FACE_PAD[1], f[0] + f[2] + FACE_PAD[2], f[1] + f[3] + FACE_PAD[3]) for f in faces or ()]
     x0, y0 = float(st.get("x", 0.5)), float(st.get("y", 0.3))
@@ -1086,11 +1089,12 @@ def emphasis_spot(text, st, W, H, faces, avoid=()):
     if fb:
         f = max(fb, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))  # 주인공 얼굴 (가장 큰 얼굴)
         cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
-        cands += [(cx, f[1] - TXT_GAP), (f[2] + TXT_GAP + bw / 2, cy + bh / 2), (f[0] - TXT_GAP - bw / 2, cy + bh / 2),
-                  (cx, f[3] + TXT_GAP + bh)]
+        cands += [(cx, f[1] - TXT_GAP), (f[2] + TXT_GAP + bw / 2, cy + bh / 2), (f[0] - TXT_GAP - bw / 2, cy + bh / 2)]
     low = min([a for a, b in avoid if a > 0.5] or [EMPH_SAFE[3]]) - TXT_GAP
     high = max([b for a, b in avoid if b < 0.5] or [EMPH_SAFE[1]]) + TXT_GAP + bh
-    cands += [(0.5, low), (0.5, high)]
+    cands += [(0.5, high), (0.5, low)]
+    if fb:  # 얼굴 바로 아래(가슴·공 — 시범 동작을 가림)는 마지막에
+        cands.append((cx, f[3] + TXT_GAP + bh))
 
     def fit(x, y):  # 화면 안으로 (가로만 밀어 넣음)
         return min(max(x, EMPH_SAFE[0] + bw / 2), EMPH_SAFE[2] - bw / 2), y
@@ -1114,39 +1118,94 @@ def emphasis_spot(text, st, W, H, faces, avoid=()):
     return best[1]
 
 
-def _faces_on_screen(name, items, a, b):
-    """타임라인 a~b 초 동안 화면의 얼굴 상자 [[x, y, w, h]] (클립 확대 반영) — 처음·끝 두 장면.
-    얼굴 모델이 없거나(내려받지 않음) 장면을 하나도 못 보면 None."""
+FACE_W = 640           # 얼굴 찾기용 장면 가로 크기 (썸네일 장면 캐시와 따로 · 임시 폴더에 만들고 지움)
+FACE_FRAMES_MAX = 48   # 강조 글씨 자리 찾기에 볼 장면 수 한도 — 넘으면 글씨마다 가운데 한 장면만 (긴 레슨도 가편집이 오래 안 걸리게)
+FACE_LABEL = "자동 가편집 만드는 중"
+
+
+def _face_ready(name):
+    """얼굴 모델이 이미 있으면 불러 둠 (없으면 내려받지 않고 False). 부르는 동안 띄운 진행 표시는 원래대로 돌려놓음
+    (가편집은 작업(job)이 아니라 바로 답하는 요청이라 진행 표시를 지워 줄 곳이 없음)."""
     try:
         import face
-        import thumb
-        if not face.ready() or not face.ensure(item=name, label="자동 가편집 만드는 중"):
-            return None
+        if not face.ready():
+            return False
+        before = dict(core.PROGRESS)
+        try:
+            return bool(face.ensure(item=name, label=FACE_LABEL))
+        finally:
+            if core.PROGRESS.get("label") == FACE_LABEL:
+                core.set_progress(**before)
     except Exception:  # noqa: BLE001
-        return None
-    out, seen = [], 0
-    for t in (a + 0.2, b - 0.2):
+        return False
+
+
+def _face_samples(items, a, b, one=False):
+    """타임라인 a~b 초 동안 볼 장면 [(원본 시각, 확대 배율)] — 처음·끝 (one 이면 가운데 하나). 원본이 아닌 클립(사진 등)은 뺌."""
+    out = []
+    for t in (((a + b) / 2,) if one else (a + 0.2, b - 0.2)):
         it = next((it for it in items if it.get("track") == "V1" and float(it["start"]) - 1e-6 <= t < i_end(it)), None)
         if it is None or it.get("media", "main") != "main":
             continue
         src = i_mt(it, t)
-        s = float(kf_at(param(it, "scale"), src)) / 100.0
+        out.append((round(src, 2), float(kf_at(param(it, "scale"), src)) / 100.0))
+    return out
+
+
+def _grab_small(name, t, folder):
+    """원본 t 초 장면 → folder 안 FACE_W 크기 그림 (못 만들면 None) · 썸네일 장면 캐시(frames/h_*.jpg, 1920)와 섞이지 않게 따로."""
+    out = Path(folder) / f"f_{t:09.3f}.jpg"
+    r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(core.VIDEOS / name), "-frames:v", "1",
+                  "-vf", f"scale='min({FACE_W},iw)':-2", "-q:v", "3", str(out)])
+    return out if r.returncode == 0 and out.is_file() and out.stat().st_size > 0 else None
+
+
+def _faces_at(name, srcs, cache):
+    """원본 시각들의 얼굴 상자를 cache {시각: [[x, y, w, h]] | None} 에 채움 — 없는 것만, 4장씩 함께 (ffmpeg 장면 뽑기가 대부분의 시간)."""
+    todo = sorted({t for t in srcs if t not in cache})
+    if not todo:
+        return cache
+    import face
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(t, folder):
         try:
-            p = thumb.grab(name, round(src, 2), 640)
-            fs = face.faces(p) if p.is_file() else None
+            p = _grab_small(name, t, folder)
+            fs = face.faces(p) if p else None
         except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
             fs = None
+        return t, None if fs is None else [list(f["box"]) for f in fs]
+    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4) as ex:
+        for t, fs in ex.map(lambda x: one(x, folder), todo):
+            cache[t] = fs
+    return cache
+
+
+def _faces_on_screen(name, items, a, b, cache=None, one=False):
+    """타임라인 a~b 초 동안 화면의 얼굴 상자 [[x, y, w, h]] (롱폼 · 클립 확대 반영) — 처음·끝 두 장면 (one 이면 가운데 하나).
+    얼굴 모델이 없거나(내려받지 않음) 장면을 하나도 못 보면 None. cache: 장면별로 찾은 얼굴 (emphasis_placer 가 미리 채움)."""
+    if not _face_ready(name):
+        return None
+    cache = {} if cache is None else cache
+    smp = _face_samples(items, a, b, one)
+    _faces_at(name, [t for t, _ in smp], cache)
+    out, seen = [], 0
+    for t, s in smp:
+        fs = cache.get(t)
         if fs is None:
             continue
         seen += 1
-        for f in fs:
-            x, y, w, h = f["box"]
+        for x, y, w, h in fs:
             out.append([0.5 + (x - 0.5) * s, 0.5 + (y - 0.5) * s, w * s, h * s])
     return out if seen else None
 
 
 def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=None):
-    """_emphasis_titles 에 넘길 자리 고르기 — 그 장면 얼굴(못 보면 흔한 얼굴 자리)·대사 자막 줄·쇼츠 훅 제목을 피함."""
+    """_emphasis_titles 에 넘길 자리 고르기 (롱폼만) — 그 장면 얼굴(못 보면 흔한 얼굴 자리)·대사 자막 줄·hook(제목 상자)을 피함.
+    place.prefetch([(a, b)]) 로 볼 장면을 한꺼번에(4장씩 함께) 찾아 둠 · 장면이 FACE_FRAMES_MAX 넘으면 글씨마다 가운데 한 장면만.
+    쇼츠는 영상이 9:16 화면 안 상자(BOX_LAYOUT)에 들어가 얼굴 좌표를 그대로 못 써서 아직 안 받음."""
+    if fmt != "long":
+        raise ValueError("emphasis_placer: 롱폼만 (쇼츠는 상자 배치 좌표 변환이 없음)")
     W, H = frame_size(fmt)
     avoid = []
     if captions_on and cap_style:
@@ -1154,10 +1213,18 @@ def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=Non
     if hook:
         hb = text_box(hook["text"], hook["style"], W, H)
         avoid.append((hb[1], hb[3]))
+    state = {"cache": {}, "one": False}
+
+    def prefetch(spans):
+        spans = list(spans)
+        state["one"] = 2 * len(spans) > FACE_FRAMES_MAX
+        if spans and _face_ready(name):
+            _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
 
     def place(text, st, a, b):
-        fs = _faces_on_screen(name, items, a, b)
+        fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
         return emphasis_spot(text, st, W, H, FACE_GUESS if fs is None else fs, avoid)
+    place.prefetch = prefetch
     return place
 
 
@@ -1218,7 +1285,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
         cl = cap(LONG_STYLE)
         if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막 (그 장면 얼굴·대사 자막을 피한 자리)
             titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0,
-                                       emphasis_placer(name, items, "long", cl, caps_on))
+                                       emphasis_placer(name, items, "long", cl, caps_on), captions_on=caps_on)
         W, H = frame_size("long")
         for t in titles:  # 위쪽 자막 스타일: 티저 제목이 대사 자막과 같은 자리면 제목을 자막 아래로
             tb = text_box(t["text"], t["style"], W, H)
