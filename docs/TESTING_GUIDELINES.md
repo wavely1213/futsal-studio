@@ -18,7 +18,7 @@
 | `test_update.py` | `updater.py`(설치·되돌리기·실행기·selftest) · `release.sh` 지문 · `core` 다운로드 엔진/Deno |
 | `test_bundle.py` | `bundle.py` 촬영본 묶기 + `/api/bundle` |
 | `test_source.py` | `source.py` 영상 출처: 채널 주소 꼴별 판단 · 받을 때 기록(가짜 yt-dlp) · 예전 영상 찾기(채널 목록 기억·가짜 조회·멈추기) · 직접 고르기 · 채널별 묶기·개수·이름 바뀜·색 · 깨진 기록 파일 · 잠깐 못 읽은 기록 덮어쓰지 않기 · 제목 짐작(조회 뒤) · `/c/`·`/user/` 주소 채널 id 로 바꾸기 · 막히면 쉬기 · 이상한 기록 한 줄 · `/api/source`·`/api/state`·`/api/list` |
-| `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` |
+| `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` · 제목 틀 배우기(BR-021: 우리 채널 실제 목록 `fixtures/channel_cache_own.json`, 회차 표시·행사·초대 손님·영어 풀이·조회수 자랑 빼기, 기술 이름 통째로 주제 자리, 주제어 겹침 버리기, 훅 없는 롱폼 첫 제목) · 주제어(기술 이름·용어 사전·사람 이름 빼기·붙여 쓰기·풀이말·긴 이름 먼저·키트 전체에 들어감) |
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |
 | `test_style_content.py` | 영상 기획 분석 `plan.py`: 자막 6종 분류·색 이름·인트로 유형 5가지·장르·재미 정도·여러 영상 합치기·화자 군집 · 정답 영상(`make_fixture.make_plan_fixture`)으로 티저·타이틀·정지·슬로 리플레이·자막 종류(OCR 모델이 있을 때) · 모델 없을 때 어림 표시·캐시·멈추기 · 가편집 인트로 티저·강조 자막(꺼지면 예전과 같음) · `avmodels` 실패 표시 · `claude_cli`(가짜 claude: 성공·로그인·한도·시간 초과·멈추기·예전 판 옵션·환경 변수·임시 폴더) · `/api/claude/*`·`/api/style/plan_*` · 검토 회귀(`TestReview*`): 긴 장면·처음/끝 같은 자리는 티저 아님, 대사를 따라 크게 띄운 강조 자막, 레슨 대사의 흔한 낱말, 강조 자막 낱말 조각 금지, 인사 뒤 진행 질문, 갈린 판단 요약·가편집 끔, 대결 형식·잔디 구장, 티저 장면 고르기, Claude 프롬프트 본편 표본, `--help` 실패 시 안전 옵션 유지·예전 판 안내·표준 오류 폭주, 소리 없는 영상 기록 재사용·깨진 모델·내려받기 멈춤, 일치 점수에서 기획 값 제외, 작업 중 붙여 넣기 거절 |
@@ -38,6 +38,7 @@
 | 묶음 | 대상 | 시험 앱 띄우기 → 실행 |
 |---|---|---|
 | `ed2_test.py` | 편집실 (`editor.html`·`editor.py`·내보내기, 193개 확인) | `python3 $SCRATCH/ed2_test.py [--no-export] [--backend-only]` — 스스로 `$SCRATCH/edtest2/srv.sh` 를 불러 저장소를 `edtest2/app` 으로 복사(`config.json`·`tests` 제외)하고 8766 포트에 띄운다. 다른 포트로 따로 돌리려면 `bash $SCRATCH/ed2_clone.sh <이름> <포트>` 로 폴더를 만든 뒤 `ED_DIR=<그 폴더> ED_PORT=<포트> python3 $SCRATCH/ed2_test.py` (`ED_REPO` 로 저장소 위치 지정) |
+| `edlayout_e2e.py` | 편집실 창 크기별 배치 (D-031): 1920×1009·1600×1000·1366×697·1280×657·1093×614·960×640 에서 화면 넘침 없음·타임라인 40%·미리보기 크기·자막 ＋ 버튼·도구 줄 한 줄·재생 조작 줄·탭·위쪽 버튼, 손잡이 보임·올리면 파랑·높이 끌기(비율로 기억·창을 키우면 같이)·두 번 누르면 처음 크기, 좌우 너비 끌기·가운데 360px·다시 열어도 기억, 좌우 접기·펴기·기억, 접은 채 타이틀 넣으면 오른쪽 패널 펴짐, 쇼츠 미리보기, 예전 px 높이 → 비율 · 75개 확인 · 스크린샷 | `D=$(bash $SCRATCH/ed2_clone.sh <이름> <포트>)` → `LAY_DIR=$D LAY_PORT=<포트> LAY_REPO=<저장소> python3 $SCRATCH/edlayout_e2e.py <스크린샷 폴더> [--sizes-only]` (편집실 e2e 와 같은 시험 영상 · `--sizes-only` 는 창 크기 검사만 — 예전 판과 견줄 때) |
 | `th2_test.py` | 썸네일 편집기 (`thumb.html`·`thumb.py`) | `bash $SCRATCH/th_run.sh` (저장소를 `thtest/app` 에 복사하고 8765 포트에 띄움, 작업 폴더 `thtest/work`) → `python3 $SCRATCH/th2_test.py <스크린샷 폴더> [--cut]` (`--cut` 은 누끼까지). 다른 시험 앱이면 `TH_PORT=<포트> TH_OUTDIR=<그 앱의 out 폴더>` |
 | `style_test.py` | 스타일 배우기 화면 (`ui.html`·`style.py`·`plan.py`·`claude_cli.py`) | `th_run.sh` 로 띄운 같은 시험 앱(8765, 보관함에 `STYLETEST01·02` 영상이 있음) → `python3 $SCRATCH/style_test.py <스크린샷 폴더>`. 기획 분석·클로드 카드까지: `bash $SCRATCH/plan_run.sh`(8911, `plantest/app`, 기획 정답 영상·예전 스타일·가짜 claude) → `STYLE_PORT=8911 PLAN_DIR=$SCRATCH/plantest python3 $SCRATCH/style_test.py <폴더>` |
 

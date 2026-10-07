@@ -21,10 +21,17 @@
   button, input, select, textarea { font: inherit; color: inherit; }
   input[type=range] { accent-color: var(--accent); }
   svg { display: block; }
-  .app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 340px; grid-template-rows: 40px minmax(200px, 1fr) var(--tlh, 400px); gap: 2px; background: var(--line); position: relative; }
+  /* 배치: 좌우 패널·타임라인 기본 크기는 창에 비례 (1600×1000 창이면 예전과 같은 300·340·400px) · 끌어서 바꾼 값 --lw·--rw·--tlh · 접으면 0 */
+  .app { --lwd: clamp(220px, 20vw, 300px); --rwd: clamp(280px, 23vw, 340px); --lwc: min(var(--lw, var(--lwd)), 34vw); --rwc: min(var(--rw, var(--rwd)), 38vw);
+    --tlc: clamp(200px, var(--tlh, 40vh), calc(100vh - 240px));
+    display: grid; height: 100vh; grid-template-columns: var(--lwc) minmax(0, 1fr) var(--rwc); grid-template-rows: 40px minmax(150px, 1fr) var(--tlc); gap: 2px; background: var(--line); position: relative; }
+  .app.noleft { --lwc: 0px; } .app.noright { --rwc: 0px; }
+  .app.noleft > .lp, .app.noright > .props, .app.noleft > #lsplit, .app.noright > #rsplit { display: none; }
+  .lp, .props, .monp, .tl { container-type: inline-size; }
   .panel { background: var(--panel); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .ph { display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; overflow: hidden; }
-  .ph .tab { border: 0; background: none; padding: 5px 8px; color: var(--ink-2); cursor: pointer; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+  .ph .tab { border: 0; background: none; padding: 5px 8px; color: var(--ink-2); cursor: pointer; border-radius: 4px; font-weight: 600; white-space: nowrap; flex: 0 1 auto; min-width: 2.6em; overflow: hidden; text-overflow: ellipsis; }
+  @container (max-width: 300px) { .ph .tab { padding: 5px 5px; } }
   .ph .tab.on { color: var(--ink); background: var(--panel-3); }
   .ph .t { font-weight: 700; padding: 0 6px; color: var(--ink-2); }
   .ph .sp, .sp { flex: 1; }
@@ -49,7 +56,7 @@
 
   /* 자막 목록 */
   .search { margin: 8px; display: flex; gap: 6px; }
-  .search input { flex: 1; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 8px; }
+  .search input { flex: 1; min-width: 0; width: 0; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 8px; }
   .captools { margin: -2px 8px 8px; display: flex; gap: 6px; align-items: center; }
   .capban { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid rgba(45,140,235,.35); background: var(--accent-soft); border-radius: 6px; line-height: 1.45; }
   .capban .acts { display: flex; gap: 6px; margin-top: 6px; }
@@ -107,6 +114,14 @@
   .ctl { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--line); }
   .tcbig { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--play); font-size: 14px; min-width: 96px; }
   .tcdim { font-variant-numeric: tabular-nums; color: var(--ink-3); min-width: 96px; text-align: right; }
+  .tcbig, .tcdim { white-space: nowrap; flex: none; }
+  #monFmt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .ph .seg { flex: none; flex-wrap: nowrap; }
+  /* 좁은 창 (가운데 칸 너비 기준): 모니터 조작 줄은 간격을 줄이고 끝 시간·규격 글자는 숨김 (키보드·위쪽 칸으로 알 수 있음) */
+  @container (max-width: 640px) {
+    #monFmt, .ctl .tcdim { display: none; }
+    .ctl { gap: 2px; padding: 6px 6px; } .ctl .ic { padding: 4px 3px; } .ctl .tcbig { min-width: 0; font-size: 12.5px; }
+  }
   .scrub { flex: none; height: 16px; margin: 0 10px 6px; position: relative; background: var(--panel-2); border-radius: 3px; cursor: pointer; }
   .scrub .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); border-radius: 3px; }
   .scrub .knob { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--play); }
@@ -119,6 +134,7 @@
   .pg h4 .dot { width: 8px; height: 8px; border-radius: 2px; }
   .f { display: grid; grid-template-columns: 88px 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
   .f label { color: var(--ink-2); }
+  @container (max-width: 300px) { .f { grid-template-columns: 72px 1fr auto; gap: 6px; } }
   .f .v { color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; font-size: 11.5px; }
   .f input[type=range] { width: 100%; }
   .f input[type=color], input[type=color].c { width: 30px; height: 22px; border: 1px solid var(--line-2); background: none; padding: 0; border-radius: 4px; }
@@ -210,6 +226,12 @@
   .tools hr { width: 22px; border: 0; border-top: 1px solid var(--line-2); margin: 3px 0; }
   .tl { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .tlbar { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--line); flex: none; }
+  .tlbar .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+  .tlbar .tcbig, .tlbar .ic, .tlbar .zl { flex: none; }
+  .tlbar .zi { display: none; flex: none; color: var(--ink-3); } .tlbar .zi svg { width: 14px; height: 14px; }
+  #zoom { width: 130px; flex: none; }
+  @container (max-width: 640px) { #toolHint, .tlbar .zl { display: none; } .tlbar .zi { display: block; } #zoom { width: 96px; } }
+  @container (max-width: 480px) { #tlInfo { display: none; } #zoom { width: 72px; } .tlbar { gap: 6px; } }
   .tlscroll { flex: 1; overflow: auto; position: relative; min-height: 0; isolation: isolate; }
   .tracks { position: relative; min-width: 100%; }
   .row { display: flex; height: 34px; border-bottom: 1px solid #191919; position: relative; }
@@ -312,7 +334,15 @@
   .cmenu button:hover span { color: #dbe9ff; }
   .cmenu hr { border: 0; border-top: 1px solid var(--line-2); margin: 3px 0; }
   .ghost { position: fixed; z-index: 49; pointer-events: none; background: var(--accent); color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 11.5px; display: none; opacity: .9; }
-  .split { position: absolute; left: 302px; right: 342px; height: 6px; cursor: row-resize; z-index: 30; }
+  /* 패널 사이 손잡이: 가운데 짧은 막대로 보이고 올리면 파랗게 (끌어서 크기 · 두 번 누르면 처음 크기) */
+  .split, .vsplit { position: absolute; z-index: 30; display: grid; place-items: center; }
+  .split { left: calc(var(--lwc) + 2px); right: calc(var(--rwc) + 2px); bottom: calc(var(--tlc) - 3px); height: 8px; cursor: row-resize; }
+  .vsplit { top: 42px; bottom: 0; width: 8px; cursor: col-resize; }
+  #lsplit { left: calc(var(--lwc) - 3px); } #rsplit { right: calc(var(--rwc) - 3px); }
+  .split::after, .vsplit::after { content: ""; border-radius: 2px; background: #555; }
+  .split::after { width: 44px; height: 3px; } .vsplit::after { width: 3px; height: 44px; }
+  .split:hover, .vsplit:hover, .split.drag, .vsplit.drag { background: rgba(45,140,235,.22); }
+  .split:hover::after, .vsplit:hover::after, .split.drag::after, .vsplit.drag::after { background: var(--accent); }
 </style>
 </head>
 <body>
@@ -328,6 +358,8 @@
     <span class="tg on" id="linkBtn" title="연결해서 선택 — 영상과 그 소리를 함께 고르고 옮겨요 (Alt+클릭: 한쪽만)"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 9.5l3-3M7 4.5l1.5-1.5a2.5 2.5 0 013.5 3.5L10.5 8M9 11.5L7.5 13a2.5 2.5 0 01-3.5-3.5L5.5 8"/></svg>연결 선택</span>
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3L2 6l3 3"/><path d="M2 6h7a4 4 0 010 8H6"/></svg></button>
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 3l3 3-3 3"/><path d="M14 6H7a4 4 0 000 8h3"/></svg></button>
+    <button class="ic" id="lpBtn" title="왼쪽 패널 접기 (자막·편집본) — 미리보기를 넓게"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/><path d="M3 5.5h1.5M3 8h1.5" stroke-width="1.2"/></svg></button>
+    <button class="ic" id="rpBtn" title="오른쪽 패널 접기 (효과 컨트롤·색보정·오디오) — 미리보기를 넓게"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/><path d="M11.5 5.5H13M11.5 8H13" stroke-width="1.2"/></svg></button>
     <button class="ic" id="help" title="단축키 보기">⌨</button>
     <button class="btn" id="toThumb" title="이 영상으로 썸네일 만들기">썸네일 만들기</button>
     <span class="pill" id="busy"><span id="busyTxt">내보내는 중</span><span class="bar"><i id="busyBar"></i></span><span id="busyPct"></span><button class="ic" id="busyStop" title="내보내기 멈추기">✕</button></span>
@@ -335,7 +367,7 @@
   </div>
 
   <!-- 왼쪽 위 -->
-  <div class="panel" style="grid-column:1;grid-row:2">
+  <div class="panel lp" style="grid-column:1;grid-row:2">
     <div class="ph" id="ltabs"><button class="tab on" data-lt="caps">자막</button><button class="tab" data-lt="rec">추천 · 자동 편집</button><button class="tab" data-lt="fxl">효과</button><button class="tab" data-lt="gfx">그래픽</button></div>
     <div class="body" id="lt-caps">
       <div class="search"><input id="capSearch" placeholder="자막 검색"><button class="btn" id="capAdd" title="현재 위치에 자막 추가">＋</button></div>
@@ -349,7 +381,7 @@
   </div>
 
   <!-- 가운데 위: 프로그램 모니터 -->
-  <div class="panel" style="grid-column:2;grid-row:2">
+  <div class="panel monp" style="grid-column:2;grid-row:2">
     <div class="ph" id="mtabs"><button class="tab on" data-mon="prog" title="편집한 결과 (프로그램 모니터)">프로그램</button><button class="tab" data-mon="src" title="넣기 전에 미리 보고 필요한 부분만 고르기 (소스 모니터)">소스</button><span class="hint" id="monFmt" style="margin-left:6px"></span><div class="sp"></div>
       <div class="seg" id="fmtSeg"><button data-v="shorts">쇼츠 9:16</button><button data-v="long">롱폼 16:9</button></div></div>
     <div id="srcView" style="display:none;flex:1;min-height:0;flex-direction:column">
@@ -393,7 +425,7 @@
   </div>
 
   <!-- 왼쪽 아래: 프로젝트 -->
-  <div class="panel bin" style="grid-column:1;grid-row:3">
+  <div class="panel bin lp" style="grid-column:1;grid-row:3">
     <div class="ph" id="btabs"><button class="tab on" data-bt="seqs">편집본</button><button class="tab" data-bt="media">미디어</button><div class="sp"></div><span class="hint" id="binCount"></span></div>
     <div class="body" id="bt-seqs"></div>
     <div class="body" id="bt-media" style="display:none"></div>
@@ -409,13 +441,15 @@
         <div class="sp"></div>
         <span class="hint" id="toolHint"></span>
         <button class="ic" id="zoomFit" title="전체 보기 (\)">⤢</button>
-        <span class="hint">확대</span><input type="range" id="zoom" min="0" max="1000" value="500" style="width:130px">
+        <span class="hint zl">확대</span><span class="zi" title="확대"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/></svg></span><input type="range" id="zoom" min="0" max="1000" value="500" title="타임라인 확대 (= · −)">
       </div>
       <div class="tlscroll" id="tlscroll"><div class="tracks" id="tracks"></div></div>
     </div>
     <div class="meter" title="전체 소리 크기"><div class="m"><i id="mL"></i></div><div class="m"><i id="mR"></i></div></div>
   </div>
-  <div class="split" id="split" title="끌어서 타임라인 높이 조절"></div>
+  <div class="split" id="split" title="끌어서 타임라인 높이 조절 · 두 번 누르면 처음 크기"></div>
+  <div class="vsplit" id="lsplit" title="끌어서 왼쪽 패널 너비 조절 · 두 번 누르면 처음 크기"></div>
+  <div class="vsplit" id="rsplit" title="끌어서 오른쪽 패널 너비 조절 · 두 번 누르면 처음 크기"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -2259,7 +2293,7 @@ function addTitle() {
   commit("타이틀 추가");
   const t = { id: nid(), text: "제목을 입력하세요", start: fr(T), dur: 3, style: baseTitle() };
   S.titles.push(t); selX = { k: "title", id: t.id }; selI.clear(); setRtab("fx"); changed(false);
-  setTimeout(() => { const el = $("pTitleText"); if (el) { el.focus(); el.select(); } }, 50);
+  setTimeout(() => { const el = $("pTitleText"); if (el) { showPanel("r"); el.focus(); el.select(); } }, 50);  // 접어 둔 오른쪽 패널은 펴서 글자 칸을 보여 줌
 }
 // 에센셜 그래픽 프리셋
 const GFX = {
@@ -2325,6 +2359,7 @@ function renderCaps() {
 function focusCap(id, edit) {
   const r = document.querySelector(`.caprow[data-id="${id}"]`); if (!r) return;
   document.querySelectorAll(".caprow").forEach(x => x.classList.toggle("sel", x === r));
+  if (edit) showPanel("l");  // 접어 둔 왼쪽 패널은 펴서 고칠 자막을 보여 줌
   r.scrollIntoView({ block: "nearest" }); if (edit) r.querySelector("textarea").focus();
 }
 $("capSearch").oninput = renderCaps;
@@ -3453,18 +3488,57 @@ $("tracks").addEventListener("dblclick", e => {
   const ce = e.target.closest(".clip[data-id]"); if (ce && tool === "select") { setRtab("fx"); }
 });
 addEventListener("resize", () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); } });
-// 모니터 · 타임라인 사이 높이 조절
+// 패널 크기: 타임라인 높이(창 높이 비율) · 좌우 패널 너비 · 접기 — 끌어서 바꾸고 두 번 누르면 처음 크기, 이 PC 에만 기억
+// 기본값은 CSS(.app)가 창 크기에 비례해 정함 · 여기 값은 그 위에 덮는 사용자 선택
+const PANEL_MIN = { l: 200, r: 260, mid: 360 };  // 왼쪽·오른쪽 패널 최소 너비 · 가운데(미리보기·타임라인) 최소 너비
+const TL_RATIO = [0.22, 0.72];  // 타임라인 높이: 창 높이의 22%~72%
 (() => {
-  const sp_ = $("split"), app = $("app");
-  const place = () => { const r = app.getBoundingClientRect(), h = parseFloat(getComputedStyle(app).getPropertyValue("--tlh")) || 400; sp_.style.top = r.height - h - 4 + "px"; };
-  sp_.onmousedown = ev => {
-    ev.preventDefault();
-    const mv = e => { const h = clamp(innerHeight - e.clientY - 2, 200, innerHeight - 260); app.style.setProperty("--tlh", h + "px"); place(); layoutFrame(); };
-    const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); renderTimeline(); try { localStorage.setItem("ed_tlh", app.style.getPropertyValue("--tlh")); } catch (e) {} };
+  const app = $("app"), sp_ = $("split");
+  const keep = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, String(v)); } catch (e) {} };
+  const read = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const refresh = () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); } };
+  const setTl = r => r == null ? app.style.removeProperty("--tlh") : app.style.setProperty("--tlh", (clamp(r, ...TL_RATIO) * 100).toFixed(2) + "vh");
+  const setW = (sd, px) => px == null ? app.style.removeProperty(`--${sd}w`) : app.style.setProperty(`--${sd}w`, Math.round(px) + "px");
+  const width = sel => { const e = document.querySelector(sel); return e && e.offsetParent ? e.getBoundingClientRect().width : 0; };
+  // 예전 판은 타임라인 높이를 px 로 기억 → 지금 창 높이에 대한 비율로
+  let r = parseFloat(read("ed_tlr"));
+  const oldPx = parseFloat(read("ed_tlh"));
+  if (!(r > 0) && oldPx > 0) { r = oldPx / innerHeight; keep("ed_tlr", r.toFixed(4)); }
+  keep("ed_tlh", null);
+  if (r > 0) setTl(r);
+  for (const sd of ["l", "r"]) { const w = parseFloat(read(`ed_${sd}w`)); if (w > 0) setW(sd, w); }
+  const NAMES = { l: ["왼쪽", "자막·편집본"], r: ["오른쪽", "효과 컨트롤·색보정·오디오"] };
+  const fold = (sd, on, save = true) => {
+    app.classList.toggle(sd === "l" ? "noleft" : "noright", on);
+    const b = $(sd + "pBtn"); b.classList.toggle("on", on);
+    b.title = on ? `${NAMES[sd][0]} 패널 펴기 (${NAMES[sd][1]})` : `${NAMES[sd][0]} 패널 접기 (${NAMES[sd][1]}) — 미리보기를 넓게`;
+    if (save) keep(`ed_${sd}fold`, on ? "1" : null);
+    refresh();
+  };
+  window.showPanel = sd => { if (app.classList.contains(sd === "l" ? "noleft" : "noright")) fold(sd, false); };
+  for (const sd of ["l", "r"]) {
+    $(sd + "pBtn").onclick = () => fold(sd, !app.classList.contains(sd === "l" ? "noleft" : "noright"));
+    if (read(`ed_${sd}fold`) === "1") fold(sd, true, false);
+  }
+  // 끌기: 움직이는 동안은 미리보기만 다시 맞추고, 놓으면 타임라인을 다시 그림
+  const drag = (el, move, done) => el.onmousedown = ev => {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); el.classList.add("drag");
+    const mv = e => { move(e); layoutFrame(); layoutSrc(); };
+    const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); el.classList.remove("drag"); renderTimeline(); done(); };
     addEventListener("mousemove", mv); addEventListener("mouseup", up);
   };
-  try { const v = localStorage.getItem("ed_tlh"); if (v) app.style.setProperty("--tlh", v); } catch (e) {}
-  addEventListener("resize", place); setTimeout(place, 0);
+  drag(sp_, e => setTl(clamp(innerHeight - e.clientY - 1, 200, innerHeight - 240) / innerHeight),
+    () => keep("ed_tlr", (parseFloat(app.style.getPropertyValue("--tlh")) / 100).toFixed(4)));
+  drag($("lsplit"), e => setW("l", clamp(e.clientX - 1, PANEL_MIN.l, innerWidth - width(".props") - PANEL_MIN.mid)),
+    () => keep("ed_lw", parseFloat(app.style.getPropertyValue("--lw"))));
+  drag($("rsplit"), e => setW("r", clamp(innerWidth - e.clientX - 1, PANEL_MIN.r, innerWidth - width(".lp") - PANEL_MIN.mid)),
+    () => keep("ed_rw", parseFloat(app.style.getPropertyValue("--rw"))));
+  sp_.ondblclick = () => { setTl(null); keep("ed_tlr", null); refresh(); };
+  $("lsplit").ondblclick = () => { setW("l", null); keep("ed_lw", null); refresh(); };
+  $("rsplit").ondblclick = () => { setW("r", null); keep("ed_rw", null); refresh(); };
+  // 좁아서 줄여 보이는 탭은 올리면 전체 이름
+  document.querySelectorAll(".ph .tab").forEach(b => { if (!b.title) b.title = b.textContent; });
 })();
 addEventListener("beforeunload", e => {
   if (!P || !dirty || conflict) return;

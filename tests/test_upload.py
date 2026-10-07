@@ -232,6 +232,128 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(all(0 < len(t) <= 100 for t in out))
 
 
+# 풋살사관학교 실제 목록(2026-10-07 · 롱폼 48 · 쇼츠 24): 회차 번호·행사·영어 풀이·조회수 자랑이 든 제목이 많음
+OWN_CACHE = Path(__file__).resolve().parent / "fixtures" / "channel_cache_own.json"
+
+
+class TitlePatternTests(unittest.TestCase):
+    """제목 틀 배우기 (D-030): 옛 회차 번호·행사 이름·그 영상만의 기술 이름을 새 제목에 베끼지 않음."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="제목 틀 테스트 "))
+        self.p = mock.patch.object(core, "WORK", self.tmp)
+        self.p.start()
+        self.cache = json.loads(OWN_CACHE.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.p.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def sk(self, title):
+        return hooks.skeletons([{"title": title, "views": 1}], 1)
+
+    def test_real_channel_skeletons_have_no_series_or_event(self):
+        for kind in ("videos", "shorts"):
+            for sk in hooks.skeletons(hooks._top(self.cache, kind), 10):
+                self.assertNotRegex(sk, r"차시|\d\s*부|\d\s*탄|#\d|ep\.|\(\s*[A-Za-z]|20\d\d|CUP|대회|만뷰|feat", sk)
+                self.assertNotRegex(sk, r"스네이크 \{|각\{|시저스 \{", sk)  # 기술 이름의 반쪽만 바꾸지 않음
+
+    def test_real_channel_long_titles(self):
+        out = hooks.title_candidates(["퍼스트 터치", "패스", "슈팅"], None, "long", self.cache)
+        self.assertTrue(3 <= len(out) <= 5, out)
+        self.assertIn("풋살 퍼스트 터치로 중앙을 파괴?", out)  # '[2차시] 풋살 시저스 드리블로 중앙을 파괴?'
+        self.assertNotRegex(out[0], r"차시|\(\d부\)|스네이크")  # 훅 없는 롱폼은 첫 후보가 기본 제목
+        for t in out:
+            self.assertNotRegex(t, r"\[\d차시\]|\(\d부\)|스네이크 퍼스트|FK CUP", t)
+
+    def test_doubled_topic_dropped(self):
+        out = hooks.title_candidates([], None, "shorts", self.cache, dur=40)  # 주제어를 못 찾으면 '풋살'
+        self.assertTrue(3 <= len(out) <= 5, out)
+        for t in out:
+            self.assertNotIn("풋살 풋살", t)
+            self.assertLessEqual(t.count("풋살"), 1, t)
+        self.assertNotIn("테크노 댄스를 접목한 풋살 풋살", out)
+
+    def test_shorts_titles_keep_pattern_with_technique(self):
+        out = hooks.title_candidates(["팬텀 드리블"], None, "shorts", self.cache, dur=40)
+        self.assertIn('🔥풋살기술🔥 "팬텀 드리블" 속성강의', out)  # '🔥600만뷰 풋살기술🔥 "영재 플랩" 속성강의' — 조회수 자랑은 뺌
+        self.assertIn("풋살 국가대표 팬텀 드리블 강좌", out)  # 'in-in 플립플랩' 통째로 주제 자리
+
+    def test_series_markers_removed(self):
+        self.assertEqual(self.sk("[3차시] 패스 이렇게 하세요 (2부)"), ["{주제} 이렇게 하세요"])
+        self.assertEqual(self.sk('"1탄" 패스의 기본'), ["{주제}의 기본"])
+        self.assertEqual(self.sk("드리블 꿀팁 2탄"), ["{주제} 꿀팁"])
+        self.assertEqual(self.sk("슈팅 잘하는 법 #3"), ["{주제} 잘하는 법"])
+        self.assertEqual(self.sk("[풋린이들 과외하기#2] 슈팅 잘하는 법 ep.2"), ["{주제} 잘하는 법"])
+        self.assertEqual(self.sk("[풋살사관학교] 패스 잘하는 법 (Part 1)"), ["[풋살사관학교] {주제} 잘하는 법"])
+
+    def test_event_and_guest_titles_skipped(self):
+        for t in ("[풋살사관학교] 아쉽게 마무리된 2019 FK CUP 대회. 감사드립니다.", "드리블 대회 우승!", "강원FC 슈팅 훈련",
+                  "현역 국가대표가 말하는 슈팅의 중요성!! (feat. 김영권)", "패스 이벤트 당첨자 발표", "프로 vs 아마 드리블"):
+            self.assertEqual(self.sk(t), [], t)
+
+    def test_english_gloss_and_other_brackets_removed(self):
+        self.assertEqual(self.sk("바디 페인팅이란? (Body Feint)"), ["{주제:이란}?"])
+        self.assertEqual(hooks.fill("{주제:이란}?", ["슈팅"]), "슈팅이란?")
+        self.assertEqual(hooks.fill("{주제:이란}?", ["패스"]), "패스란?")
+        self.assertEqual(self.sk("드리블 꿀팁 (1인칭 시점)"), ["{주제} 꿀팁"])
+
+    def test_technique_name_is_one_slot(self):
+        self.assertEqual(self.sk("사이드 농락하기 -스네이크 드리블"), ["사이드 농락하기 -{주제}"])
+        self.assertEqual(self.sk("사이드 농락하기 -각드리블 (2부)"), ["사이드 농락하기 -{주제}"])
+        self.assertEqual(self.sk("풋살 시저스 드리블로 중앙을 파괴?"), ["풋살 {주제:으로} 중앙을 파괴?"])
+        self.assertEqual(self.sk("프로처럼 드리블 하는 법"), ["프로처럼 {주제} 하는 법"])  # 꾸밈말은 그대로
+        self.assertEqual(self.sk("드리블러가 되는 법"), [])  # 주제어가 다른 낱말의 일부
+        self.assertEqual(self.sk("발바닥 연습 꿀팁"), ["{주제} 연습 꿀팁"])
+        self.assertEqual(self.sk("발바닥 위치 바꾸기"), [])  # 주제어가 뒤 이름말을 꾸밈 ('발바닥 위치')
+
+
+class TopicTermTests(unittest.TestCase):
+    """주제어 (D-030): 기술 이름 · 용어 사전 · 붙여 쓰기 · 긴 이름 먼저."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="주제어 테스트 "))
+        self.p = mock.patch.object(core, "WORK", self.tmp)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_skill_names_found(self):
+        for text, want in (("피벗 플레이를 해 봐요", "피벗 플레이"), ("패스하고 바로 움직이세요", "패스"), ("바디 페인팅이란 뭘까요", "바디 페인팅"),
+                           ("체크백", "체크백"), ("드래그백", "드래그백"), ("스쿱턴", "스쿱턴"), ("엘라스티코", "엘라스티코"),
+                           ("팬텀 드리블", "팬텀 드리블"), ("팬텀드리블 꿀팁", "팬텀 드리블"), ("패스해 주세요 패스받고 돌아요", "패스"),
+                           ("피보라고 불러요", "피보")):
+            self.assertEqual(hooks.topic_keywords([text]), [want], text)
+
+    def test_longer_name_wins_over_part(self):
+        self.assertEqual(hooks.topic_keywords(["팬텀 드리블 알려 드릴게요.", "드리블할 때 공을 안 건드려요.", "팬텀 드리블 꼭 해 보세요."]), ["팬텀 드리블"])
+        many = ["드리블은 몸을 낮춰요."] * 9 + ["팬텀 드리블도 있어요.", "드리블 연습!"]
+        self.assertEqual(hooks.topic_keywords(many)[0], "드리블")  # 한 번 스친 기술 이름이 영상 전체 주제가 되지 않음
+
+    def test_dictionary_terms_and_names(self):
+        captions = __import__("captions")
+        captions.save_dict(core.dict_path(), {"terms": ["라보나", "박영재 선수", "풋살사관학교", "최경진 감독"], "fix": {"라보너": "라보나"}})
+        terms = hooks.topic_terms()
+        self.assertIn("라보나", terms)
+        self.assertNotIn("박영재 선수", terms)
+        self.assertNotIn("풋살사관학교", terms)
+        self.assertNotIn("최경진 감독", terms)
+        self.assertEqual(hooks.topic_keywords(["라보나 차는 법", "라보나는 다리를 꼬아요"]), ["라보나"])
+        lens = [len(t.replace(" ", "")) for t in terms]
+        self.assertEqual(lens, sorted(lens, reverse=True))  # 긴 이름부터
+
+    def test_default_dictionary_without_file(self):
+        self.assertFalse(core.dict_path().exists())
+        self.assertIn("파라렐라", hooks.topic_terms())  # 기본 사전 (captions.DEFAULT_TERMS)
+        self.assertEqual(hooks.topic_keywords(["파라렐라로 돌아 들어가요"]), ["파라렐라"])
+
+    def test_no_false_hits(self):
+        self.assertEqual(hooks.topic_keywords(["패턴을 바꿔요 패턴", "리턴"]), [])
+        self.assertEqual(hooks.topic_keywords(["킥보드 타고 왔어요"]), [])
+
+
 class KitBase(unittest.TestCase):
     NAME = "풋살 레슨 [꿀팁] 1편.mp4"
 
@@ -386,6 +508,30 @@ class KitTests(KitBase):
         self.assertIn("고친 제목", (self.out / "풋살 레슨 [꿀팁] 1편_올리기.txt").read_text(encoding="utf-8-sig"))
         with self.assertRaises(LookupError):
             upload.save_edits(self.add_video("다른 영상.mp4"), None, title="x")
+
+
+class TopicKitTests(KitBase):
+    """주제어가 키트 전체(제목·해시태그·태그·설명 둘째 줄)에 들어감 · 우리 채널 실제 목록으로 만든 첫 제목 (D-030)."""
+
+    def test_shorts_kit_uses_technique_name(self):
+        segs = [{"start": 1, "end": 5, "text": "오늘은 팬텀 드리블 알려 드릴게요."}, {"start": 6, "end": 12, "text": "드리블할 때 공을 건드리는 척만 하세요."},
+                {"start": 13, "end": 20, "text": "팬텀드리블은 몸을 먼저 속이는 게 핵심이에요!"}]
+        name = self.add_video("팬텀 쇼츠.mp4", "short", segs)
+        kit = upload.build_kit(name)
+        self.check_rules(kit)
+        self.assertEqual(kit["topics"][0], "팬텀 드리블")
+        self.assertTrue(any("팬텀 드리블" in t for t in kit["titles"]), kit["titles"])
+        self.assertIn("#팬텀드리블", kit["hashtags"])
+        self.assertIn("팬텀 드리블", kit["tags"])
+        self.assertIn("팬텀 드리블 꿀팁", kit["description"].split("\n")[1])
+
+    def test_long_kit_first_title_from_real_channel_is_clean(self):
+        shutil.copy(OWN_CACHE, self.work / "channel_cache.json")
+        kit = upload.build_kit(self.add_video(self.NAME))
+        self.check_rules(kit)
+        self.assertEqual(kit["title"], kit["titles"][0])
+        for t in kit["titles"]:
+            self.assertNotRegex(t, r"차시|\(\d부\)|스네이크|FK CUP|대회", t)
 
 
 class ThumbTests(KitBase):
