@@ -145,18 +145,27 @@ class TestSplitRhythm(RhythmBase):
             self.assertTrue(prev - 0.05 <= x <= nxt + 0.05, (x, prev, nxt))
 
     def test_alternating_framing(self):
+        # E6: 잘라 낸 자리(점프 컷)마다 화면 크기를 뒤집고, 이어진 말 안에서는 나눈 곳에서만 뒤집음
+        # (예전: 컷의 첫 조각은 늘 원래 크기 → 점프 컷 16곳 중 11곳이 같은 크기로 붙어 머리가 튐)
         v = self.v1(self.after)
         sc = [float(((it.get("fx") or {}).get("scale") or {}).get("v", 100.0)) for it in v]
+        sp = [float(it.get("speed") or 1.0) for it in v]
+        jumps = 0
         for k, (x, y) in enumerate(zip(v, v[1:])):
-            if abs(x["out"] - y["in"]) < 1e-6:  # 나눈 곳: 원래 크기 ↔ 확대 번갈아
-                self.assertNotEqual(sc[k], sc[k + 1])
-        for k, it in enumerate(v):  # 원래 컷의 첫 조각(안 나눈 컷·시범 포함)은 원래 화면 그대로
-            if k == 0 or abs(v[k - 1]["out"] - it["in"]) >= 1e-6:
-                self.assertEqual(sc[k], 100.0, it)
+            if abs(x["out"] - y["in"]) >= 1e-6:  # 잘라 낸 자리: 늘 뒤집음
+                jumps += 1
+                self.assertNotEqual(sc[k], sc[k + 1], (x, y))
+            elif sc[k] == sc[k + 1]:  # 이어진 곳에서 크기가 그대로면 말이 1초 넘게 쉬는 곳의 빠르기 바꾸기뿐
+                self.assertNotEqual(sp[k], sp[k + 1], (x, y))
+                prev = max(e for s_, e in self.words if e <= y["in"] + 0.2)
+                nxt = min(s_ for s_, e in self.words if s_ >= y["in"] - 0.2)
+                self.assertGreater(nxt - prev, editor.DEMO_GAP, (y["in"], prev, nxt))
+        self.assertGreater(jumps, 3)
+        self.assertEqual(sc[0], 100.0)
         self.assertEqual(max(sc), round(self.params["zoomScale"] * 100, 1))
 
     def test_no_zoom_style_stays_mild(self):
-        """확대 컷이 없는 레퍼런스: 안 나눈 컷은 그대로, 나눈 곳만 살짝(1.08배) — 스타일 설명과 어긋나지 않게."""
+        """확대 컷이 없는 레퍼런스: 살짝(1.08배)만 — 나눈 곳·잘라 낸 자리마다 원래 크기 ↔ 1.08배 (스타일 설명과 어긋나지 않게)."""
         ev = ref_events(3.0, cps=self.coach * 1.06)
         ev["zooms"] = []
         ref = style.summarize(ev)
@@ -167,10 +176,9 @@ class TestSplitRhythm(RhythmBase):
         v = self.v1(self.seq(p)[0])
         sc = [float(((it.get("fx") or {}).get("scale") or {}).get("v", 100.0)) for it in v]
         self.assertEqual(set(sc), {100.0, 108.0})
-        whole = [k for k, it in enumerate(v) if (k == 0 or abs(v[k - 1]["out"] - it["in"]) >= 1e-6)
-                 and (k == len(v) - 1 or abs(it["out"] - v[k + 1]["in"]) >= 1e-6)]
-        self.assertTrue(whole, "안 나눈 컷도 있음")
-        self.assertTrue(all(sc[k] == 100.0 for k in whole), "안 나눈 컷은 확대 안 함")
+        for k, (x, y) in enumerate(zip(v, v[1:])):
+            if abs(x["out"] - y["in"]) >= 1e-6:
+                self.assertNotEqual(sc[k], sc[k + 1], "잘라 낸 자리는 크기를 바꿔 점프 컷을 숨김")
 
     def test_median_shot_near_target(self):
         prof = style.profile_from_sequence(self.proj(), self.after)
@@ -215,11 +223,36 @@ class TestSplitRhythm(RhythmBase):
 
     def test_demo_cut_not_split(self):
         v = self.v1(self.after)
-        for a, b in DEMO:  # 시범(첫 단어 ~ 마지막 단어)은 앞 말 컷에 붙어 있어도 한 컷 그대로
+        for a, b in DEMO:  # 시범(첫 단어 ~ 마지막 단어) 안에서는 화면 크기가 안 바뀜 (나누지 않음 · 빠르기만 말이 끝난 뒤 쉼에서 바뀔 수 있음)
             ws = [w for s in self.segs if s["start"] == a for w in s["words"]]
             inside = [it for it in v if it["in"] < ws[-1]["e"] and it["out"] > ws[0]["s"]]
-            self.assertEqual(len(inside), 1, "말이 드문 시범은 한 컷 그대로")
-            self.assertEqual(float(inside[0].get("speed") or 1.0), 1.0)
+            self.assertTrue(inside)
+            self.assertEqual(len({json.dumps(it.get("fx") or {}, sort_keys=True) for it in inside}), 1, "말이 드문 시범은 한 화면 그대로")
+            mid = next(it for it in inside if it["in"] <= ws[1]["s"] and ws[1]["e"] <= it["out"])
+            self.assertEqual(float(mid.get("speed") or 1.0), 1.0, "시범은 원래 빠르기")
+
+    def test_no_split_or_speed_change_inside_captions(self):
+        # E6 재현 (MSGRAW01 스타일 가편집: 도블락 93개 중 27개 자막 깜빡임 · 슛포러브 문장 가운데 속도 바뀜 '공으로 | 칠까요?')
+        # → 이어진 이음은 자막이 바뀌는 곳에만 · 그래서 같은 자막이 이음에서 다시 시작하지 않음
+        caps = editor._captions_of(self.segs, self.info)
+        for q in self.seq(self.params, ("long", "shorts")):
+            v = self.v1(q)
+            for x, y in zip(v, v[1:]):
+                if abs(x["out"] - y["in"]) < 1e-6:
+                    inside = [c["text"] for c in caps if c["start"] + 0.06 < y["in"] < c["end"] - 0.06]
+                    self.assertEqual(inside, [], (q["name"], y["in"]))
+            tc = editor.timeline_captions(dict(q, captions=caps, info=self.info, source=NAME))
+            for x, y in zip(tc, tc[1:]):
+                bound = [it for it in v if abs(it["start"] - y["start"]) < 0.06 and abs(it["in"] - next(
+                    (p["out"] for p in v if abs(editor.i_end(p) - it["start"]) < 1e-3), -1)) < 1e-6]
+                self.assertFalse(x["text"] == y["text"] and abs(y["start"] - x["end"]) < 0.06 and bound, (q["name"], x, y))
+
+    def test_speed_one_per_continuous_speech(self):
+        v = self.v1(self.after)
+        for x, y in zip(v, v[1:]):  # 이어진 이음에서 빠르기가 바뀌면 그 자리는 말이 1초 넘게 쉬는 곳
+            if abs(x["out"] - y["in"]) < 1e-6 and float(x.get("speed") or 1) != float(y.get("speed") or 1):
+                talking = [(s_, e) for s_, e in self.words if s_ - 0.1 < y["in"] < e + 0.1]
+                self.assertEqual(talking, [], y["in"])
 
 
 class TestTempo(RhythmBase):
@@ -246,13 +279,15 @@ class TestTempo(RhythmBase):
             self.assertTrue(all(1.0 <= float(it.get("speed") or 1.0) <= 1.12 for it in items))
             self.assertAlmostEqual(q["titles"][0]["dur"], round(editor.seq_total(q), 2), delta=0.01, msg="제목은 끝까지")
 
-    def test_no_style_unchanged(self):
-        """스타일 없이 만든 가편집(그냥 가편집)은 예전 그대로: 나누지 않고 빠르기 1."""
+    def test_no_style_flips_only_at_jump_cuts(self):
+        """스타일 없이 만든 가편집(그냥 가편집): 나누지 않고 빠르기 1 · 잘라 낸 자리마다 원래 크기 ↔ 살짝(1.08배) (E6 — 예전엔 확대 0)."""
         rough = self.seq(None)[0]
         self.assertTrue(all(float(it.get("speed") or 1.0) == 1.0 for it in rough["items"]))
-        self.assertTrue(all(not (it.get("fx") or {}).get("scale") for it in rough["items"]))
         rec = editor.recommend(NAME)
-        self.assertEqual(len(self.v1(rough)), len(rec["tidy"]))
+        v = self.v1(rough)
+        self.assertEqual(len(v), len(rec["tidy"]))
+        sc = [float(((it.get("fx") or {}).get("scale") or {}).get("v", 100.0)) for it in v]
+        self.assertEqual(sc, [100.0 if k % 2 == 0 else 108.0 for k in range(len(v))])
 
 
 class TestCurve3(RhythmBase):
@@ -292,8 +327,9 @@ class TestCurve3(RhythmBase):
         (core.adir(NAME) / "transcript.json").write_text(json.dumps(segs, ensure_ascii=False), encoding="utf-8")
         p = style.edit_params(style.summarize(ref_events(3.0)))
         got = self.v1(self.seq(dict(p, tempo=0))[0])
-        want = editor._punch(editor.recommend(NAME, keep_pause=p["keepPause"])["tidy"], segs, p["zoomEvery"])
+        want = editor._punch(editor.recommend(NAME, keep_pause=p["keepPause"])["tidy"], segs, p["zoomEvery"], editor._captions_of(segs, self.info))
         self.assertEqual([(it["in"], it["out"]) for it in got], [(c["in"], c["out"]) for c in want])
+        self.assertGreater(len(got), len(editor.recommend(NAME, keep_pause=p["keepPause"])["tidy"]), "확대 컷 리듬으로 나눔")
 
 
 class TestTempoAudio(unittest.TestCase):
