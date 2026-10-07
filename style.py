@@ -591,6 +591,11 @@ def _ok3(c):
     return isinstance(c, list) and len(c) == 3 and all(isinstance(x, (int, float)) and x > 0 for x in c)
 
 
+def _auto_lufs(v):
+    import editor as ed
+    return ed.auto_lufs(v)
+
+
 def edit_params(prof):
     """스타일 프로필 → 자동 가편집에 쓸 값."""
     keep_pause = round(min(0.8, max(0.12, prof["pauseP75"] * 0.9)), 2)
@@ -606,7 +611,7 @@ def edit_params(prof):
         "zoomScale": min(1.6, max(1.08, prof["avgZoom"])),
         "captions": prof["captionRatio"] >= 0.25,
         "captionPos": prof["captionPos"], "captionColor": prof["captionColor"],
-        "lufs": prof["lufs"] if prof.get("lufs") is not None else -14.0,
+        "lufs": _auto_lufs(prof.get("lufs")),          # 소리 크기 목표: 유튜브 기준(-16~-13) 안으로 (레퍼런스가 -27 이어도)
         "splitShot": split, "curve3": c3 if split else [0, 0, 0],
         "tempo": round(cps, 2) if cps > 0 and prof.get("tempoOn", True) is not False else 0,
         # 영상 기획 분석 (plan) — 인트로 티저·강조 자막. plan 이 없는 예전 스타일은 값 자체가 없음 (가편집·값이 예전과 똑같음)
@@ -1189,7 +1194,7 @@ PLAN_PARAM_KEYS = ("introTeaser", "emphasisTitles")
 def score_video(style_name, name, log=None, analyze=False):
     """배운 스타일로 만든 자동 가편집(롱폼)이 그 스타일과 얼마나 닮았는지 — 내보내지 않고 편집본 JSON 으로 바로.
     원본을 아직 안 살펴봤으면(점프 컷이 화면에 티가 나는지 알 수 없음) NeedsAnalysis — analyze=True(작업)면 먼저 살펴봄.
-    소리 크기는 가편집이 스타일 값으로 맞추기만 하므로 보여 주기만 하고 전체 점수에서는 뺌 (fixed)."""
+    소리 크기는 가편집이 유튜브 기준(-16~-13)으로 맞추므로 보여 주기만 하고 전체 점수에서는 뺌 (fixed)."""
     import editor as ed
     st, segs = _score_inputs(style_name, name)
     if _cached_events(name) is None and not _failed_before(name):
@@ -1213,7 +1218,7 @@ def score_video(style_name, name, log=None, analyze=False):
                        "h": info["height"], "fps": info.get("fps", 30.0), "audio": True}]}
     prof = profile_from_sequence(proj, seq)
     mst = seq.get("master") or {}
-    # 소리 크기를 맞추면(normalize) 가편집은 스타일 값(-24~-9 안으로)을 그대로 씀 → 늘 '스타일대로'
+    # 소리 크기를 맞추면(normalize) 가편집은 유튜브 기준(-16~-13)으로 맞춤 — 스타일과 일부러 다를 수 있어 점수에서는 늘 뺌
     fixed = ["소리"] if (mst.get("normalize", True) and prof.get("lufs") is not None) else []
     res = distance(st["profile"], prof, params=params, fixed=fixed)
     res.update(style=style_name, name=name, guessed=_cached_events(name) is None, rough={k: prof[k] for k in ("cutsPerMin", "avgShot", "zoomCutsPerMin", "pauseP75",

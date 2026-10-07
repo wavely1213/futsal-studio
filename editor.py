@@ -906,6 +906,19 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0):
             for tl, label in sorted(picked)]
 
 
+AUTO_LUFS = (-16.0, -13.0)  # 자동 가편집의 소리 크기 목표 범위 — 유튜브는 -14 LUFS 로 맞춰 틀고 작은 소리는 키워 주지 않음
+
+
+def auto_lufs(v):
+    """배운 스타일의 소리 크기(레퍼런스 원본을 잰 값, 예: -27) → 가편집 목표 (-16~-13 · 모르면 -14).
+    레퍼런스가 작게 올라가 있어도 우리 영상까지 유튜브에서 8~10dB 작게 들리면 안 되므로 범위 안으로만."""
+    try:
+        x = float(v) if v is not None else -14.0
+    except (TypeError, ValueError):
+        x = -14.0
+    return round(min(AUTO_LUFS[1], max(AUTO_LUFS[0], x if math.isfinite(x) else -14.0)), 1)
+
+
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
     style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기·컷 리듬·말 빠르기) — 있으면 그 스타일대로."""
@@ -915,7 +928,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     every, zoom = float(st.get("zoomEvery") or 0), min(1.6, max(1.0, float(st.get("zoomScale") or 1.0)))
     if every <= 0:  # 컷 리듬 (#7): 확대 컷이 거의 없는 스타일 → 나눈 곳만 살짝
         zoom = min(zoom, SOFT_ZOOM)
-    master = {"volume": 1.0, "normalize": True, "lufs": round(min(-9.0, max(-24.0, float(st.get("lufs") or -14.0))), 1)}
+    master = {"volume": 1.0, "normalize": True, "lufs": auto_lufs(st.get("lufs"))}
 
     def cap(base):
         c = dict(base)
