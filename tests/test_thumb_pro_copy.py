@@ -56,6 +56,11 @@ class RuleTests(unittest.TestCase):
         self.assertIn("wow", pids, "대사에 감탄 → 놀람 질문형")
         ox = next(c for c in C if c["pid"] == "ox")
         self.assertEqual(ox["ox"], ["슛", "드래그"], "반전 O/X: 슛? X / 드래그 O")
+        # 판정 피드백: '무조건 봐'·'진짜 쉽게' 처럼 흔한 말보다 주제(기술 이름)가 큰 줄이어야 무슨 영상인지 바로 보임
+        for pid in ("must", "easy", "howto"):
+            c = next(c for c in C if c["pid"] == pid)
+            self.assertEqual(c["emph"][0], 0, pid)
+            self.assertEqual(c["l1"][c["emph"][1]:c["emph"][2]], tp[0], pid)
 
     def test_context_boost_by_topic(self):
         self.assertGreater(tc.context_boost("오프더볼 공간")["secret"], 0)

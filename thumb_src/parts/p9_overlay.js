@@ -147,7 +147,6 @@ async function openBrand() {
       <div><h4>색</h4>${BRAND_ROLES.map(([k, t]) => `<div class="f"><label>${t}</label><input type="color" data-bc="${k}" value="${toHex(b.colors[k])}"><span class="hint">${toHex(b.colors[k]).toUpperCase()}</span></div>`).join("")}</div></div>
       <div class="f"><label>기본 글꼴</label><select class="s" id="bkFont">${FONT_OPTS.filter(([v]) => v !== "Dokdo").map(([v, t]) => `<option value="${v}" ${b.font === v ? "selected" : ""}>${t}</option>`).join("")}</select><span></span></div>
       <div class="f"><label>시리즈 이름</label><input class="s" id="bkSeries" maxlength="20" value="${esc(b.series || "")}"><span></span></div>
-      <div class="f"><label>채널 이름</label><input class="s" id="bkHandle" maxlength="30" value="${esc(b.handle || "")}"><span></span></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSeriesOn" ${b.seriesOn ? "checked" : ""}> 모든 추천에 시리즈 이름 넣기 (강좌 시리즈 템플릿은 늘 넣어요)</label>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkApply" ${b.apply !== false ? "checked" : ""}> 새 추천에 적용</label>`;
     body.querySelectorAll("[data-bc]").forEach(i => (i.oninput = () => { b.colors[i.dataset.bc] = i.value.toUpperCase(); i.nextElementSibling.textContent = i.value.toUpperCase(); }));
@@ -160,7 +159,7 @@ async function openBrand() {
   };
   draw(); m.classList.add("show");
   $("brandSave").onclick = async () => {
-    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), handle: $("bkHandle").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked });
+    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked });
     const j = await post("/api/thumb/brand", { brand: b });
     if (!j.ok) return toast(j.error || "저장하지 못했어요");
     AI.brand = j.brand; m.classList.remove("show"); toast("브랜드 키트를 저장했어요 · 새 추천부터 반영돼요");

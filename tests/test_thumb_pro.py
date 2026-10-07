@@ -213,6 +213,31 @@ class GradeTests(unittest.TestCase):
 class SceneTests(unittest.TestCase):
     """장면 정보: 지문·흔들림·액션 배율·주인공·종류."""
 
+    def test_headless_frame(self):
+        """다리·몸통만 보이는 장면(주인공 머리가 위로 잘림·얼굴 없음)은 감점 대상, 얼굴을 찾았거나 전신이면 아님."""
+        legs = [[0.49, 0.0, 0.5, 0.74, 0.85], [0.38, 0.43, 0.13, 0.24, 0.76]]
+        self.assertTrue(thumb.headless(legs, None, []))
+        self.assertFalse(thumb.headless(legs, None, [{"box": [0.5, 0.1, 0.1, 0.2]}]))
+        self.assertFalse(thumb.headless([[0.4, 0.2, 0.1, 0.5, 0.9]], None, []))
+        self.assertFalse(thumb.headless([], None, None))
+        self.assertFalse(thumb.headless([[0.2, 0.0, 0.6, 1.0, 0.9]], None, []), "화면을 꽉 채운 인터뷰는 아님")
+
+    def test_burned_text_penalty(self):
+        """영상에 이미 박힌 큰 글자(다른 썸네일·타이틀 화면)는 감점 — 자막 띠 안·작은 글자는 셈하지 않음, 모델이 없으면 그대로."""
+        import avmodels
+        lines = [{"box": [0.1, 0.1, 0.5, 0.2], "h": 0.1, "text": "더 힘들까", "conf": 0.9},     # 큰 제목 글자: 0.04
+                 {"box": [0.1, 0.85, 0.9, 0.95], "h": 0.1, "text": "자막", "conf": 0.9},       # 아래 자막 띠 안: 뺌
+                 {"box": [0.5, 0.5, 0.55, 0.53], "h": 0.03, "text": "10", "conf": 0.9}]       # 작은 등번호: 뺌
+        with mock.patch.object(avmodels, "available", return_value=True), mock.patch.object(avmodels, "ocr", return_value=lines):
+            a = thumb.text_area(_img((90, 140, 70)), "bottom", 0.8)
+        self.assertAlmostEqual(a, 0.04, places=3)
+        self.assertAlmostEqual(thumb.text_penalty(a), 1 - thumb.TEXT_K * 0.04, places=3)
+        self.assertEqual(thumb.text_penalty(0.5), thumb.TEXT_FLOOR, "아무리 많아도 바닥 값까지만")
+        self.assertEqual(thumb.text_penalty(None), 1.0)
+        self.assertEqual(thumb.text_penalty(0), 1.0)
+        with mock.patch.object(avmodels, "available", return_value=False), mock.patch.object(avmodels, "ready", return_value=False):
+            self.assertIsNone(thumb.text_area(_img((90, 140, 70))), "글자 읽기 모델이 없으면 내려받지 않고 None")
+
     def test_dhash_same_and_different(self):
         a, b = _img((90, 140, 70), seed=1), _img((90, 140, 70), seed=1)
         self.assertEqual(thumb.dhash(a), thumb.dhash(b))

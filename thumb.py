@@ -263,6 +263,17 @@ def main_person(persons, ball):
     return max(range(len(persons)), key=lambda i: persons[i][3])
 
 
+HEADLESS = 0.7   # 주인공 머리가 화면 위로 잘렸는데 얼굴도 안 보이는 장면(다리·몸통만) 배율
+
+
+def headless(persons, ball, faces):
+    """주인공이 위로 잘려 다리·몸통만 보이는지 (얼굴을 찾았으면 아님)."""
+    if faces or not persons:
+        return False
+    m = persons[main_person(persons, ball)]
+    return m[1] < 0.01 and m[3] < 0.97
+
+
 def scene_kind(face_h, persons):
     """장면 종류 (템플릿 궁합): close 얼굴 크게 · mid 사람 크게 · wide 선수 여럿 작게 · scene 사람 없음."""
     if face_h and face_h >= 0.18:
@@ -277,7 +288,7 @@ def scene_kind(face_h, persons):
     return "scene"
 
 
-CANDIDATES = "candidates4.json"
+CANDIDATES = "candidates5.json"
 N_EVEN = 36         # 고르게 나눠 보는 장면 수
 TOP_N = 16          # 후보로 남길 장면 수
 SAME_HASH = 10      # 지문 해밍 거리 이하면 같은 장면
@@ -293,7 +304,8 @@ def _cand_sig(name):
     mt = [int(f.stat().st_mtime) if f.exists() else 0 for f in (d / "analysis.json", d / "transcript.json")]
     import face
     import detect
-    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready()]
+    import avmodels  # 지연 import: avmodels → thumb
+    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready(), avmodels.ready("ocr")]
 
 
 def cached_candidates(name):
@@ -380,7 +392,7 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
             except Exception:
                 fs = []
             sc *= face.boost(fs)
-        sc *= blur_penalty(blur) * action_score(persons, ball)
+        sc *= blur_penalty(blur) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0)
         m = face.main(fs) if fs else None
         band, band_y = _band(p)
         info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb), "band": band, "bandY": band_y,
@@ -402,6 +414,33 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
     return out
 
 
+TEXT_K = 6.0        # 영상에 이미 박힌 큰 글자(다른 썸네일·타이틀 화면) 넓이 1% 마다 6% 감점
+TEXT_FLOOR = 0.35   # 감점은 여기까지 (글자 있는 장면만 있는 영상도 후보는 남게)
+TEXT_MIN_H = 0.06   # 글자 상자 높이가 화면의 6% 보다 낮으면(간판·등번호·작은 자막) 셈하지 않음
+
+
+def text_area(rgb, band=None, band_y=None):
+    """장면에 이미 박혀 있는 큰 글자 넓이(0~1). 글자 읽기 모델이 받아져 있을 때만 (여기서 내려받지 않음) · 없으면 None.
+    템플릿이 잘라 내는 자막·방송 띠 안 글자는 셈하지 않음."""
+    import numpy as np
+    import avmodels  # 지연 import: avmodels → thumb
+    if not (avmodels.available("ocr") or (avmodels.ready("ocr") and avmodels.ensure("ocr", label="썸네일 분석"))):
+        return None
+    a = 0.0
+    for x in avmodels.ocr(np.asarray(rgb)) or []:
+        x0, y0, x1, y1 = x["box"]
+        cy = (y0 + y1) / 2
+        if x["h"] < TEXT_MIN_H or (band == "bottom" and band_y and cy > band_y) or (band == "top" and band_y and cy < band_y):
+            continue
+        a += (x1 - x0) * (y1 - y0)
+    return round(min(1.0, a), 4)
+
+
+def text_penalty(area):
+    """박힌 글자 넓이 → 점수 배율 (글자 위에 제목을 또 얹으면 겹쳐 지저분함)."""
+    return 1.0 if not area else max(TEXT_FLOOR, 1 - TEXT_K * area)
+
+
 def frame_candidates(name, n=TOP_N):
     """썸네일 배경 후보 장면 n개(최대 16) — 좋은 순.
     점수 = 선명도·밝기·인물(_sharpness) × 흔들림 감점 × 얼굴 크기·웃음/놀람·얼굴 선명도(얼굴이 안 보이면 ×0.6) × 액션(선수 수·크기·공).
@@ -409,6 +448,7 @@ def frame_candidates(name, n=TOP_N):
     뽑힌 장면은 ±0.2·0.4초 옆 장면 중 표정이 가장 좋은 것으로. 영상·편집점 분석·모델 유무가 바뀌면 다시 고름.
     항목: {t, url, score, kind, persons[[x,y,w,h,확률]], ball, main, blur, band, bandY, grade, hash, (faces, emo, face)}"""
     from editor import media_info  # 순환 import 피함
+    from PIL import Image
     import face
     import detect
     items = cached_candidates(name)
@@ -461,15 +501,23 @@ def frame_candidates(name, n=TOP_N):
             best += [x for x in opts if x == t or all(abs(x - q) > gap for q in others)][:1]
         picked = best
     items = []
-    for t in sorted(picked, key=lambda x: -scored[x][0]):
+    for k, t in enumerate(sorted(picked, key=lambda x: -scored[x][0])):
         sc, fs, info = scored[t]
+        core.set_progress(label="장면 고르는 중", item=name, pct=99, detail=f"글자가 박힌 장면 살피는 중 {k + 1}/{len(picked)}")
+        try:  # 다른 썸네일·타이틀 화면처럼 큰 글자가 이미 있는 장면은 뒤로
+            with Image.open(grab(name, t)) as im:
+                ta = text_area(im.convert("RGB"), info["band"], info["bandY"])
+        except Exception:
+            ta = None
+        sc *= text_penalty(ta)
         it = {"t": t, "url": f"/frame?name={name}&t={t}", "score": round(sc, 3), "kind": info["kind"], "persons": info["persons"], "ball": info["ball"],
               "main": main_person(info["persons"], info["ball"]), "blur": info["blur"], "band": info["band"], "bandY": info["bandY"],
-              "grade": info["grade"], "hash": info["hash"]}
+              "grade": info["grade"], "hash": info["hash"], "text": ta}
         if fs:
             m = face.main(fs)
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)
         items.append(it)
+    items.sort(key=lambda x: -x["score"])
     cache = _frames_dir(name) / CANDIDATES
     try:  # 임시 파일에 쓴 뒤 바꿔치기 (중간에 꺼져도 깨진 캐시가 남지 않게)
         tmp = cache.with_suffix(".tmp")

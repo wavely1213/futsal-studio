@@ -2644,7 +2644,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
 // 픽셀은 언제나 이 화면의 renderDoc 하나로 그림 (편집기·카드·내보내기·개발용 판정 모두 같은 그림). 백엔드는 숫자만 줌 (thumb.analyze).
 const BRAND_DEF = { logo: "", logoPos: "tr", colors: { hl: "#FFE14D", hl2: "#FFFFFF", accent: "#FF3B30", neon: "#00D1FF", box: "#111111" }, font: "Black Han Sans", series: "풋사관 강좌", seriesOn: false, handle: "@풋살사관학교", apply: true };
 const AI = { frames: [], cuts: {}, copy: [], topics: [], brand: null, seed: 0, results: [], busy: false, pick: null, ab: new Set(), copySel: null, loaded: false, ai: false };
-const STICKER_OF = { 놀람: "face-screaming-in-fear.png", 보기: "eyes.png", 정답: "check-mark-button.png", 오답: "cross-mark.png", 불: "fire.png", 질문: "thinking-face.png" };
+const TEXTY = 0.05;  // 장면에 박힌 큰 글자 넓이가 이만큼 넘으면 배경을 흐림 (thumb.text_area)
 const SAFE = { long: { x0: 0.035, y0: 0.04, x1: 0.965, y1: 0.95, dur: [0.84, 0.86] }, short: { x0: 0.06, y0: 0.07, x1: 0.84, y1: 0.76 } };
 const brandOf = () => (AI.brand && AI.brand.apply !== false ? AI.brand : BRAND_DEF);
 const mix = (a, b, t) => "#" + [1, 3, 5].map(i => Math.round(parseInt(toHex(a).slice(i, i + 2), 16) * (1 - t) + parseInt(toHex(b).slice(i, i + 2), 16) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
@@ -2668,6 +2668,7 @@ function frameLayer(ctx, o = {}) {
   const f = ctx.frame, W0 = ctx.W, H0 = ctx.H, ar = ctx.ar, z = clamp(o.zoom || 1, 1, maxZoom(ctx));  // 1 보다 작으면 캔버스를 다 못 덮음
   const l = L("image", Object.assign({ name: "배경", src: frameSrc(f.t), x: 0, y: 0, w: W0 * z, h: H0 * z, fit: "cover" }, o.extra || {}));
   if (f.grade && o.grade !== false) l.grade = Object.assign({}, f.grade, { amt: o.gradeAmt ?? 1 });
+  if ((f.text || 0) >= TEXTY) Object.assign(l, { blur: Math.round(W0 * 0.009), bright: 70 });  // 장면에 큰 글자가 박혀 있으면 제목과 다투지 않게 흐리고 어둡게
   if (ctx.band === "bottom" && o.crop !== false) l.cropB = clamp(1 - (f.bandY || 0.76) + 0.01, 0.05, 0.3);  // 영상에 박힌 자막·방송 띠는 잘라냄
   if (ctx.band === "top" && o.crop !== false) l.cropT = clamp((f.bandY || 0.2) + 0.01, 0.05, 0.3);
   const [u, v] = o.focus || ctx.focus, [tx, ty] = o.target || [W0 / 2, H0 / 2], r = imgRect(l, ar);
@@ -2748,16 +2749,24 @@ function headline(ctx, box, o = {}) {
   const layers = order.filter(Boolean);
   return { layers, box: bbox(layers), big: t.big, small: t.small };
 }
-function subBox(ctx, text, x, y, size, o = {}) {  // 작은 보조 문구 (어두운 둥근 상자)
-  if (!text) return null;
-  const l = L("text", Object.assign({ text, name: "보조 문구" }, tStyle(ctx, size, { fill: o.fill || ctx.brand.colors.hl2, sw: 0, noShadow: true, font: o.font || "Pretendard Black", align: o.align || "left" }),
-    { box: { on: true, color: o.boxColor || ctx.brand.colors.box, pad: Math.round(size * 0.32), radius: Math.round(size * 0.36) }, opacity: o.opacity ?? 0.94 }));
-  if (o.emph) l.runs = [{ s: o.emph[0], e: o.emph[1], fill: ctx.brand.colors.hl }];
-  fitText(l); const ax = o.align === "center" ? 0.5 : o.align === "right" ? 1 : 0; l.x = x - l.w * ax; l.y = y; return l;
+// 상자 제목 (자막형): 큰 줄은 강조색 상자에 검은 글자, 작은 줄은 어두운 상자에 흰 글자 · 왼쪽 아래부터 쌓음 → {layers, box, big}
+function boxHead(ctx, x, yBottom, maxW, o = {}) {
+  const c = ctx.copy, b = ctx.brand.colors, two = !!c.l2, bigI = two ? (c.emph ? c.emph[0] : 1) : 0;
+  const mk = (t, size, fill, box, name) => {
+    const l = L("text", Object.assign({ text: t, name }, tStyle(ctx, size, { fill, sw: 0, noShadow: true, align: "left" }),
+      { box: { on: true, color: box, pad: Math.round(size * 0.14), radius: Math.round(size * 0.1) }, shadow: { on: true, color: "#000000", blur: Math.round(size * 0.25), dx: 0, dy: Math.round(size * 0.06), opacity: 0.55 } }));
+    fitText(l); fitW(l, maxW); return l;
+  };
+  const big = mk(two ? (bigI ? c.l2 : c.l1) : c.l1, o.size || ctx.H * 0.19, "#111111", b.hl, "제목 큰 줄");
+  const small = two ? mk(bigI ? c.l1 : c.l2, (o.size || ctx.H * 0.19) * (o.ratio || 0.58), "#FFFFFF", b.box, "제목 작은 줄") : null;
+  const gap = Math.round(ctx.H * 0.03), order = !small ? [big] : bigI ? [small, big] : [big, small];
+  let y = yBottom - order.reduce((a, l) => a + l.h, 0) - gap * (order.length - 1);
+  for (const l of order) { l.x = x; l.y = y; y += l.h + gap; if (o.rot) l.rot = o.rot; }
+  return { layers: order, box: bbox(order), big };
 }
 function seriesLabel(ctx, x, y) {
   const s = (ctx.brand.series || "").trim(); if (!s) return null;
-  const l = L("text", Object.assign({ text: s, name: "시리즈 이름" }, tStyle(ctx, Math.round(ctx.H * 0.052), { fill: "#D8D8D8", font: "Pretendard Black", sw: 0.12, align: "left" })));
+  const l = L("text", Object.assign({ text: s, name: "시리즈 이름" }, tStyle(ctx, Math.round(ctx.H * 0.062), { fill: "#EDEDED", font: "Pretendard Black", sw: 0.12, align: "left" })));
   l.shadow = { on: true, color: "#000000", blur: 8, dx: 0, dy: 3, opacity: 0.8 }; fitText(l); l.x = x; l.y = y; return l;
 }
 function logoLayer(ctx, avoid) {  // 채널 로고 (높이 0.11H) — 제목·안전 영역과 겹치면 반대쪽, 그래도 겹치면 뺌
@@ -2770,17 +2779,10 @@ function logoLayer(ctx, avoid) {  // 채널 로고 (높이 0.11H) — 제목·�
   }
   return null;
 }
-function stickerLayer(ctx, near, avoid, o = {}) {  // 문구 감정 → 이모지 스티커 하나 (제목 옆, ±10° 기울임)
-  const f = STICKER_OF[ctx.copy.tag] || (o.force ? "fire.png" : null); if (!f) return null;
-  const s = Math.round(ctx.H * (o.size || (ctx.short ? 0.085 : 0.17))), r = rng(ctx.seed + 31);
-  const spots = o.spots || [[near.x + near.w + s * 0.05, near.y + near.h / 2 - s * 0.6], [near.x - s * 1.05, near.y + near.h / 2 - s * 0.6], [near.x + near.w - s * 0.4, near.y - s * 0.85]];
-  for (const [x, y] of spots) {
-    const l = L("image", { name: "스티커", src: `/stickers/${f}`, fit: "contain", x, y, w: s, h: s, rot: Math.round((r() * 2 - 1) * 10),
-      shadow: { on: true, color: "#000000", blur: 10, dx: 0, dy: 6, opacity: 0.55 } });
-    const b = bbox([l]);
-    if (inSafe(ctx, b, 0) && !avoid.some(a => overlap(b, a, 6))) return l;
-  }
-  return null;
+function hamming(a, b) {  // 장면 지문(16자리 16진수) 사이 다른 비트 수 (thumb.hamming 과 같음)
+  if (!a || !b || a.length !== b.length) return 64;
+  let n = 0; for (let i = 0; i < a.length; i++) { let v = parseInt(a[i], 16) ^ parseInt(b[i], 16); if (Number.isNaN(v)) return 64; while (v) { n += v & 1; v >>= 1; } }
+  return n;
 }
 const overlap = (a, b, pad = 0) => a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
 function inSafe(ctx, b, pad = 0) {
@@ -2790,49 +2792,74 @@ function inSafe(ctx, b, pad = 0) {
   return true;
 }
 
-/* ----- 전술 그래픽 자동 배치: 주인공 발밑 원 · 빈 공간으로 곡선 화살표 + '공간' 칩 · 동료에게 패스 점선 · 혼자면 스포트라이트 ----- */
+/* ----- 전술 그래픽 자동 배치: 주인공 발밑 원 · 빈 공간으로 곡선 화살표 + '공간' 칩 · 다른 선수 움직임 화살표(네온) · 동료에게 패스 점선 ----- */
 function tacShape(shape, o) { return normLayer(L("shape", Object.assign({ shape, name: TAC_NAMES[shape] }, o))); }
+function arrowLayer(ctx, s, e, col, gid, o = {}) {  // s → e 로 위로 휘는 굵은 네온 곡선 화살표
+  const scale = ctx.W / 1280, [sx, sy] = s, [ex, ey] = e;
+  const mx2 = (sx + ex) / 2, my2 = (sy + ey) / 2, len = Math.hypot(ex - sx, ey - sy) || 1, nx = -(ey - sy) / len, ny = (ex - sx) / len;
+  const bend = (ny < 0 ? -1 : 1) * (o.bend ?? 0.28) * len, cx = mx2 + nx * bend * (ny < 0 ? -1 : 1), cy = my2 - Math.abs(ny * bend) - 0.05 * len;
+  const xs = [sx, cx, ex], ys = [sy, cy, ey], x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(30, Math.max(...xs) - x0), h = Math.max(30, Math.max(...ys) - y0);
+  return tacShape("arrow2", { name: o.name || TAC_NAMES.arrow2, x: x0, y: y0, w, h, pts: xs.map((x, i) => [(x - x0) / w, (ys[i] - y0) / h]), fill: col,
+    width: Math.round((o.width || 16) * scale), head: Math.round((o.head || 62) * scale), core: "#FFFFFF", gid, glow: { on: true, color: col, size: Math.round(34 * scale), opacity: 1 } });
+}
 function tactics(ctx, bg, avoid, o = {}) {
   const f = ctx.frame, ps = f.persons || [], ar = ctx.ar, out = [], W0 = ctx.W, H0 = ctx.H, gid = "tac" + nid().slice(0, 4), b = ctx.brand.colors;
   if (!ps.length || f.main < 0) return out;
   const mb = boxC(bg, ps[f.main], ar), feet = [mb.x + mb.w / 2, mb.y + mb.h], scale = W0 / 1280;
+  const taken = [];  // 이미 놓은 전술 그래픽 (서로 겹치지 않게)
   const ok = l => { const bb = bbox([l]); return bb.x > -bb.w * 0.2 && bb.x + bb.w < W0 + bb.w * 0.2 && bb.y + bb.h < H0 && bb.y > 0 && !avoid.some(a => overlap(bb, a, 12)); };
+  const put = l => { out.push(l); taken.push(bbox([l])); };
   if (o.ring !== false) {
     const rw = clamp(mb.w * 1.5, 70 * scale, 380 * scale), rh = rw * 0.3;
-    const ring = tacShape("ring", { x: feet[0] - rw / 2, y: feet[1] - rh * 0.55, w: rw, h: rh, fill: o.ringColor || b.neon, width: Math.round(8 * scale), gid,
-      glow: { on: true, color: o.ringColor || b.neon, size: Math.round(22 * scale), opacity: 1 } });
-    if (ok(ring)) out.push(ring);
+    const ring = tacShape("ring", { x: feet[0] - rw / 2, y: feet[1] - rh * 0.55, w: rw, h: rh, fill: o.ringColor || b.neon, width: Math.round(9 * scale), gid,
+      glow: { on: true, color: o.ringColor || b.neon, size: Math.round(26 * scale), opacity: 1 } });
+    if (ok(ring)) put(ring);
   }
-  // 빈 공간: 다른 선수 발에서 가장 먼 곳 (화면 아래 2/3, 제목·안전 영역 밖, 주인공에서 0.18~0.32W)
-  const others = ps.filter((p, i) => i !== f.main).map(p => { const q = boxC(bg, p, ar); return [q.x + q.w / 2, q.y + q.h]; }).filter(p => p[0] > -50 && p[0] < W0 + 50);
-  let best = null;
-  for (let gx = 0.08; gx <= 0.92; gx += 0.04) for (let gy = 0.36; gy <= 0.9; gy += 0.04) {
-    const x = gx * W0, y = gy * H0, d = Math.hypot(x - feet[0], y - feet[1]);
-    if (d < 0.18 * W0 || d > 0.34 * W0) continue;
-    const chip = { x: x - 0.08 * H0, y: y - 0.08 * H0, w: 0.16 * H0, h: 0.16 * H0 };
-    if (avoid.some(a => overlap(chip, a, 16)) || !inSafe(ctx, chip, 0)) continue;
-    const free = others.length ? Math.min(...others.map(p => Math.hypot(p[0] - x, p[1] - y))) : 0.3 * W0;
-    const sc = free + (Math.abs(y - feet[1]) < 0.25 * H0 ? 20 : 0);
-    if (!best || sc > best.sc) best = { x, y, sc, free };
-  }
+  // 빈 공간: 다른 선수 발에서 가장 먼 곳 (화면 아래 2/3, 제목·안전 영역 밖, 출발점에서 dmin~dmax)
+  const others = ps.map((p, i) => [p, i]).filter(([p, i]) => i !== f.main).map(([p]) => { const q = boxC(bg, p, ar); return [q.x + q.w / 2, q.y + q.h, q.h]; }).filter(p => p[0] > 0.03 * W0 && p[0] < 0.97 * W0 && p[1] < H0 * 0.97);
+  const cs = Math.round((ctx.short ? 0.09 : 0.2) * H0);
+  const freeCell = (from, dmin, dmax, away = []) => {
+    let best = null;
+    for (let gx = 0.08; gx <= 0.92; gx += 0.04) for (let gy = 0.36; gy <= 0.9; gy += 0.04) {
+      const x = gx * W0, y = gy * H0, d = Math.hypot(x - from[0], y - from[1]);
+      if (d < dmin * W0 || d > dmax * W0 || away.some(q => Math.hypot(q[0] - x, q[1] - y) < 0.2 * W0)) continue;
+      const chip = { x: x - 0.08 * H0, y: y - 0.08 * H0, w: 0.16 * H0, h: 0.16 * H0 };
+      if (avoid.some(a => overlap(chip, a, 16)) || taken.some(a => overlap(chip, a, 6)) || !inSafe(ctx, chip, 0)) continue;
+      const free = others.length ? Math.min(...others.map(p => Math.hypot(p[0] - x, p[1] - y))) : 0.3 * W0;
+      const sc = free + (Math.abs(y - from[1]) < 0.25 * H0 ? 20 : 0);
+      if (!best || sc > best.sc) best = { x, y, sc };
+    }
+    return best;
+  };
+  const best = freeCell(feet, 0.18, 0.34);
   if (best && o.arrow !== false) {
-    const cs = Math.round((ctx.short ? 0.085 : 0.17) * H0), sx0 = feet[0] + (best.x > feet[0] ? 1 : -1) * mb.w * 0.25, sy = feet[1] - mb.h * 0.05;
+    const sx0 = feet[0] + (best.x > feet[0] ? 1 : -1) * mb.w * 0.25, sy = feet[1] - mb.h * 0.05;
     const dd = Math.hypot(best.x - sx0, best.y - sy), cut = o.chip === false ? 0 : (cs * 0.62) / dd;
-    const sx = sx0, ex = best.x - (best.x - sx0) * cut, ey = best.y - (best.y - sy) * cut;
-    const mx2 = (sx + ex) / 2, my2 = (sy + ey) / 2, len = Math.hypot(ex - sx, ey - sy), nx = -(ey - sy) / len, ny = (ex - sx) / len;
-    const bend = (ny < 0 ? -1 : 1) * 0.28 * len, cx = mx2 + nx * bend * (ny < 0 ? -1 : 1), cy = my2 - Math.abs(ny * bend) - 0.05 * len;
-    const xs = [sx, cx, ex], ys = [sy, cy, ey], x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(30, Math.max(...xs) - x0), h = Math.max(30, Math.max(...ys) - y0);
-    const pts = xs.map((x, i) => [(x - x0) / w, (ys[i] - y0) / h]);
     const col = o.arrowColor || b.accent;
-    const arr = tacShape("arrow2", { x: x0, y: y0, w, h, pts, fill: col, width: Math.round(13 * scale), head: Math.round(50 * scale), core: "#FFFFFF", gid,
-      glow: { on: true, color: col, size: Math.round(28 * scale), opacity: 1 } });
+    const arr = arrowLayer(ctx, [sx0, sy], [best.x - (best.x - sx0) * cut, best.y - (best.y - sy) * cut], col, gid);
     if (ok(arr)) {
-      out.push(arr);
+      put(arr);
       if (o.chip !== false) {
         const chip = tacShape("marker", { name: "공간 칩", x: best.x - cs / 2, y: best.y - cs / 2, w: cs, h: cs, fill: col, label: o.chipText || "공간",
-          stroke: { color: "#FFFFFF", width: Math.round(5 * scale) }, gid, glow: { on: true, color: col, size: Math.round(24 * scale), opacity: 1 } });
-        if (ok(chip)) out.push(chip);
+          stroke: { color: "#FFFFFF", width: Math.round(5 * scale) }, gid, glow: { on: true, color: col, size: Math.round(26 * scale), opacity: 1 } });
+        if (ok(chip)) put(chip);
+        if (o.sparkle) {  // 칩 옆 반짝이 두 개
+          for (const [dx, dy, k] of [[0.62, -0.62, 0.42], [-0.7, -0.35, 0.26]]) {
+            const s = cs * k, sp = tacShape("sparkle", { name: "반짝이", x: best.x + dx * cs - s / 2, y: best.y + dy * cs - s / 2, w: s, h: s, fill: "#FFFFFF", gid,
+              glow: { on: true, color: col, size: Math.round(16 * scale), opacity: 1 } });
+            if (ok(sp) && !taken.slice(0, -1).some(a => overlap(bbox([sp]), a, 2))) put(sp);
+          }
+        }
       }
+    }
+  }
+  // 두 번째 화살표 (네온): 다른 선수(없으면 주인공)에서 다른 빈 공간으로 · 첫 화살표와 다른 방향
+  if (o.second && best) {
+    const from = others.filter(p => Math.hypot(p[0] - feet[0], p[1] - feet[1]) > 0.1 * W0).sort((p, q) => q[1] - p[1])[0] || feet;
+    const c2 = freeCell(from, 0.13, 0.3, [[best.x, best.y], feet]);
+    if (c2) {
+      const col2 = o.secondColor || b.neon, a2 = arrowLayer(ctx, [from[0], from[1] - (from[2] || mb.h) * 0.05], [c2.x, c2.y], col2, gid, { name: "움직임 화살표", width: 14, head: 54, bend: 0.22 });
+      if (ok(a2) && !taken.some(a => overlap(bbox([a2]), a, -Math.min(a.w, a.h) * 0.3))) put(a2);
     }
   }
   if (o.pass !== false && others.length) {  // 가장 가까운 다른 선수에게 점선
@@ -2840,8 +2867,8 @@ function tactics(ctx, bg, avoid, o = {}) {
     if (near) {
       const [px, py] = near[0], x0 = Math.min(feet[0], px), y0 = Math.min(feet[1], py) - 0.06 * H0, w = Math.max(20, Math.abs(px - feet[0])), h = Math.max(20, Math.abs(py - feet[1]) + 0.06 * H0);
       const P = [[feet[0], feet[1]], [(feet[0] + px) / 2, Math.min(feet[1], py) - 0.06 * H0], [px, py]].map(([x, y]) => [(x - x0) / w, (y - y0) / h]);
-      const pass = tacShape("pass", { x: x0, y: y0, w, h, pts: P, fill: b.hl2, width: Math.round(7 * scale), gid, glow: { on: true, color: b.neon, size: Math.round(14 * scale), opacity: 0.9 } });
-      if (ok(pass)) out.push(pass);
+      const pass = tacShape("pass", { x: x0, y: y0, w, h, pts: P, fill: b.hl2, width: Math.round(8 * scale), gid, glow: { on: true, color: b.neon, size: Math.round(16 * scale), opacity: 0.9 } });
+      if (ok(pass)) put(pass);
     }
   }
   return out;
@@ -2857,22 +2884,45 @@ function ctxFor(frame, copy, fmt, seed) {
 const T_NEW = {
   long: {
     "전술 해설 (쪼살형)": { needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
-      const bg = frameLayer(ctx, { zoom: 1.12, target: [ctx.W * 0.5, ctx.H * 0.62] }), ls = [bg];
-      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.58, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.66 }));
+      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.42, 1.05, 1.6), target: [ctx.W * 0.5, ctx.H * 0.6] }), ls = [bg];  // 주인공이 화면 높이 42% 쯤
+      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.58, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.74 }));
       const hd = headline(ctx, { x: ctx.W * 0.05, y: ctx.H * 0.035, w: ctx.W * 0.9, h: ctx.H * 0.46 }, { style: "line", size: Math.round(ctx.H * 0.27), ratio: 0.52 });
       const avoid = [hd.box];
-      const tac = tactics(ctx, bg, avoid);
+      const tac = tactics(ctx, bg, avoid, { sparkle: true });
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 5, glow: ctx.brand.colors.neon });
       const ring = tac.filter(l => l.shape === "ring"), rest = tac.filter(l => l.shape !== "ring");
       ls.push(...ring); if (cut) ls.push(cut); ls.push(...rest, ...hd.layers);
-      const st = stickerLayer(ctx, hd.big, avoid.concat(rest.map(l => bbox([l])))); if (st) ls.push(st);
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
+      return ls;
+    } },
+    "큰 제목 + 네온 화살표 (쪼살형 2)": { needs: { kinds: ["wide", "mid"], persons: 2, tactics: true }, fn: ctx => {
+      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.48, 1.1, 1.6), target: [ctx.W * 0.5, ctx.H * 0.62] }), ls = [bg];
+      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.72 }));
+      const hd = headline(ctx, { x: ctx.W * 0.06, y: ctx.H * 0.03, w: ctx.W * 0.88, h: ctx.H * 0.42 }, { style: "line", size: Math.round(ctx.H * 0.28), ratio: 0.5 });
+      const avoid = [hd.box];
+      const tac = tactics(ctx, bg, avoid, { second: true, pass: false, chip: false, arrowColor: ctx.brand.colors.hl, ringColor: ctx.brand.colors.hl });
+      const cut = cutLayer(ctx, bg, { outline: ctx.brand.colors.neon, ow: 5 });
+      ls.push(...tac.filter(l => l.shape === "ring")); if (cut) ls.push(cut); ls.push(...tac.filter(l => l.shape !== "ring"), ...hd.layers);
+      const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
+      return ls;
+    } },
+    "상자 제목 (자막형)": { needs: { kinds: ["close", "mid"] }, fn: ctx => {
+      const m = ctx.frame.main >= 0 ? ctx.persons[ctx.frame.main] : null, fc = ctx.frame.faces && ctx.frame.faces[0] ? ctx.frame.faces[0].box : null;
+      const cx = fc ? fc[0] + fc[2] / 2 : m ? m[0] + m[2] / 2 : 0.5, right = cx >= 0.4;  // 사람이 있는 쪽 반대편에 상자
+      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.95, 1.05, 1.8), target: [ctx.W * (right ? 0.68 : 0.32), ctx.H * 0.48] }), ls = [bg];
+      ls.push(L("shape", { name: right ? "왼쪽 어둡게" : "오른쪽 어둡게", x: right ? 0 : ctx.W * 0.45, y: 0, w: ctx.W * 0.55, h: ctx.H, fill: right ? "#000000" : "rgba(0,0,0,0)", fill2: right ? "rgba(0,0,0,0)" : "#000000", gradAngle: 0, opacity: 0.55 }));
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 6 }); if (cut) ls.push(cut);
+      const hd = boxHead(ctx, ctx.W * (right ? 0.045 : 0.43), ctx.H * 0.84, ctx.W * 0.56, { size: ctx.H * 0.23, rot: -2 });
+      if (!right) for (const l of hd.layers) l.x = ctx.W * 0.955 - l.w;
+      ls.push(...hd.layers);
+      const sl = ctx.brand.seriesOn ? seriesLabel(ctx, right ? ctx.W * 0.045 : ctx.W * 0.6, ctx.H * 0.06) : null; if (sl) ls.push(sl);
+      const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
     "강좌 시리즈 (쌈바형)": { needs: { cut: true }, fn: ctx => {
       const main = ctx.frame.main >= 0 ? ctx.persons[ctx.frame.main] : null, left = main ? main[0] + main[2] / 2 < 0.5 : false;
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.85, 1, 2), target: [ctx.W * (left ? 0.36 : 0.64), ctx.H * 0.5] }), ls = [bg];
-      Object.assign(bg, { bright: 62, blur: 5, vignette: 55 });
+      Object.assign(bg, { bright: 68, blur: 3, vignette: 55 });
       ls.push(L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.45, w: ctx.W, h: ctx.H * 0.55, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.8 }));
       const cut = cutLayer(ctx, bg, { outline: ctx.brand.colors.hl, ow: 10 }); if (cut) { cut.blur = 0; cut.bright = 100; ls.push(cut); }
       const al = left ? "right" : "left", bx = { x: ctx.W * 0.045, y: ctx.H * 0.42, w: ctx.W * 0.91, h: ctx.H * 0.52 };
@@ -2886,21 +2936,19 @@ const T_NEW = {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.9, 1.05, 2), target: [ctx.W * 0.27, ctx.H * 0.5] }), ls = [bg];
       ls.push(L("shape", { name: "오른쪽 어둡게", x: ctx.W * 0.38, y: 0, w: ctx.W * 0.62, h: ctx.H, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 0, opacity: 0.72 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
-      const hd = headline(ctx, { x: ctx.W * 0.48, y: ctx.H * 0.1, w: ctx.W * 0.48, h: ctx.H * 0.66 }, { style: "word", align: "center", anchor: "middle", size: Math.round(ctx.H * 0.26), ratio: 0.62, rot: -4, emphFill: ctx.brand.colors.accent, emphScale: 1.12 });
+      const hd = headline(ctx, { x: ctx.W * 0.46, y: ctx.H * 0.1, w: ctx.W * 0.5, h: ctx.H * 0.7 }, { style: "word", align: "center", anchor: "middle", size: Math.round(ctx.H * 0.3), ratio: 0.6, rot: -2, emphFill: ctx.brand.colors.accent, emphScale: 1.12 });
       for (const l of hd.layers) for (const r of l.runs || []) if (r.fill === ctx.brand.colors.accent) { r.s2c = "#FFFFFF"; r.s2w = Math.round((r.size || l.size) * 0.07); }
       ls.push(...hd.layers);
-      const sb = subBox(ctx, ctx.copy.sub, ctx.W * 0.73, hd.box.y + hd.box.h + ctx.H * 0.03, Math.round(ctx.H * 0.05), { align: "center" });
-      if (sb && inSafe(ctx, bbox([sb]))) ls.push(sb);
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
     "질문 훅 (JK형)": { needs: {}, fn: ctx => {
-      const bg = frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.55, ctx.H * 0.6] }), ls = [bg];
-      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.42, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.55 }));
-      const hd = headline(ctx, { x: ctx.W * 0.04, y: ctx.H * 0.045, w: ctx.W * 0.8, h: ctx.H * 0.48 }, { style: "word", align: "left", size: Math.round(ctx.H * 0.24), ratio: 0.88, sw: 0.17, emphScale: 1.0 });
+      const close = ctx.frame.kind === "close";  // 얼굴이 큰 장면은 얼굴을 오른쪽으로 보내고 제목은 왼쪽에만
+      const bg = frameLayer(ctx, { zoom: 1.05, target: close ? [ctx.W * 0.72, ctx.H * 0.5] : [ctx.W * 0.55, ctx.H * 0.6] }), ls = [bg];
+      ls.push(close ? L("shape", { name: "왼쪽 어둡게", x: 0, y: 0, w: ctx.W * 0.6, h: ctx.H, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 0, opacity: 0.6 })
+        : L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.42, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.55 }));
+      const hd = headline(ctx, { x: ctx.W * 0.045, y: ctx.H * 0.05, w: ctx.W * (close ? 0.5 : 0.86), h: ctx.H * (close ? 0.6 : 0.5) }, { style: "word", align: "left", size: Math.round(ctx.H * 0.28), ratio: 0.8, sw: 0.17, emphScale: 1.0 });
       ls.push(...hd.layers);
-      const st = stickerLayer(ctx, hd.big, [hd.box], { force: true }); if (st) ls.push(st);
-      if (ctx.copy.sub) { const sb = subBox(ctx, ctx.copy.sub, ctx.W * 0.04, ctx.H * 0.8, Math.round(ctx.H * 0.06), {}); if (sb && inSafe(ctx, bbox([sb]))) ls.push(sb); }
       return ls;
     } },
     "반전 O/X": { needs: { ox: true }, fn: ctx => {
@@ -2920,11 +2968,9 @@ const T_NEW = {
     "리액션 클로즈업": { needs: { kinds: ["close"] }, fn: ctx => {
       const fc = ctx.frame.faces[0].box, z = clamp(0.5 / Math.max(0.12, fc[3]), 1, 1.6);
       const bg = frameLayer(ctx, { zoom: z, focus: [fc[0] + fc[2] / 2, fc[1] + fc[3] / 2], target: [ctx.W * 0.66, ctx.H * 0.4] }), ls = [bg];
-      ls.push(L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#FFFFFF", opacity: 0.22, lines: 64, inner: 0.55 }));
       ls.push(L("shape", { name: "왼쪽 어둡게", x: 0, y: 0, w: ctx.W * 0.6, h: ctx.H, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 0, opacity: 0.7 }));
       const hd = headline(ctx, { x: ctx.W * 0.04, y: ctx.H * 0.08, w: ctx.W * 0.52, h: ctx.H * 0.82 }, { style: "word", align: "left", anchor: "middle", size: Math.round(ctx.H * 0.25), ratio: 0.6 });
       ls.push(...hd.layers);
-      const fb = boxC(bg, fc, ctx.ar), st = stickerLayer(ctx, fb, [hd.box], { force: true, spots: [[fb.x + fb.w * 0.95, fb.y - ctx.H * 0.04], [fb.x - ctx.H * 0.2, fb.y]] }); if (st) ls.push(st);
       return ls;
     } },
   },
@@ -2932,42 +2978,50 @@ const T_NEW = {
     "쇼츠 · 전술": { needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: 1, target: [ctx.W * 0.48, ctx.H * 0.6] }), ls = [bg];
       ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.46, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.9 }));
-      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.28 }, { style: "line", size: Math.round(ctx.W * 0.23), ratio: 0.55 });
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.28 }, { style: "line", size: Math.round(ctx.W * 0.23), ratio: 0.66 });
       const tac = tactics(ctx, bg, [hd.box, { x: ctx.W * 0.84, y: ctx.H * 0.4, w: ctx.W, h: ctx.H }, { x: 0, y: ctx.H * 0.8, w: ctx.W, h: ctx.H }], { pass: false });
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 6 });
       ls.push(...tac.filter(l => l.shape === "ring")); if (cut) ls.push(cut); ls.push(...tac.filter(l => l.shape !== "ring"), ...hd.layers);
-      const sb = subBox(ctx, ctx.copy.sub, ctx.W * 0.45, hd.box.y + hd.box.h + ctx.H * 0.012, Math.round(ctx.W * 0.05), { align: "center" }); if (sb && inSafe(ctx, bbox([sb]))) ls.push(sb);
       return ls;
     } },
     "쇼츠 · 레터박스 질문": { needs: {}, fn: ctx => {
       const ls = [L("shape", { name: "검은 바탕", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#000000" })];
-      const ph = ctx.H * 0.4, py = ctx.H * 0.3;
-      const f = frameLayer({ ...ctx, W: ctx.W, H: ph }, { zoom: 1, target: [ctx.W * 0.5, ph * 0.5] }); f.y += py; ls.push(f);
-      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.075, w: ctx.W * 0.76, h: ctx.H * 0.21 }, { style: "word", align: "center", anchor: "bottom", size: Math.round(ctx.W * 0.17), ratio: 0.86, sw: 0.12 });
+      const py = ctx.H * 0.3, ph = ctx.H - py, sub = { ...ctx, W: ctx.W, H: ph };  // 위 검은 띠에 제목, 아래는 끝까지 사진 (아래가 비면 미완성처럼 보인다는 평)
+      const f = frameLayer(sub, { zoom: zoomFor(sub, 0.75, 1, 1.6), target: [ctx.W * 0.5, ph * 0.5] }); f.y += py; ls.push(f);
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.075, w: ctx.W * 0.76, h: ctx.H * 0.21 }, { style: "word", align: "center", anchor: "bottom", size: Math.round(ctx.W * 0.19), ratio: 0.66, sw: 0.14 });
       ls.push(...hd.layers);
-      const sub = ctx.copy.sub || "";
-      if (sub) { const t = lineLayer(ctx, sub, Math.round(ctx.W * 0.068), { fill: ctx.brand.colors.hl, align: "center", name: "보조 문구", sw: 0.16 }); fitW(t, ctx.W * 0.76); t.x = ctx.W * 0.45 - t.w / 2; t.y = py + ph + ctx.H * 0.008; if (inSafe(ctx, bbox([t]))) ls.push(t); }
       return ls;
     } },
     "쇼츠 · 누끼 크게": { needs: { cut: true }, fn: ctx => {
       const z = zoomFor(ctx, 0.5, 1, 1.8), bg = frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] });
       const ls = [Object.assign(frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] }), { name: "흐린 배경", blur: 20, bright: 55, vignette: 60 })];
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 12, glow: ctx.brand.colors.hl }); if (cut) ls.push(cut);
-      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.27 }, { style: "word", size: Math.round(ctx.W * 0.19), ratio: 0.55, emphScale: 1.1 });
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.27 }, { style: "word", size: Math.round(ctx.W * 0.19), ratio: 0.66, emphScale: 1.1 });
       ls.push(...hd.layers);
-      const st = stickerLayer(ctx, hd.big, [hd.box]); if (st) ls.push(st);
       return ls;
     } },
-    "쇼츠 · 브랜드 바": { needs: {}, fn: ctx => {
-      const bg = frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.48, ctx.H * 0.52] }), ls = [bg];
-      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.42, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.85 }));
-      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.26 }, { style: "line", size: Math.round(ctx.W * 0.19), ratio: 0.55 });
+    "쇼츠 · 위 제목 + 아래 누끼": { needs: { cut: true }, fn: ctx => {
+      const z = zoomFor(ctx, 0.58, 1, 1.8), bg = frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] }), ls = [bg];
+      Object.assign(bg, { bright: 70, blur: 4 });
+      ls.push(L("shape", { name: "위 판", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: ctx.brand.colors.box, fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.96 }));
+      const cut = cutLayer(ctx, bg, { outline: ctx.brand.colors.hl, ow: 12 }); if (cut) { cut.blur = 0; cut.bright = 100; ls.push(cut); }
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.08, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "word", size: Math.round(ctx.W * 0.2), ratio: 0.66, emphScale: 1.1, grad: false });
       ls.push(...hd.layers);
-      const by = ctx.H * 0.685, bh = ctx.H * 0.07;
-      ls.push(L("shape", { name: "브랜드 바", x: 0, y: by, w: ctx.W, h: bh, fill: ctx.brand.colors.box, opacity: 0.88 }));
-      const hl = L("text", Object.assign({ text: ctx.brand.handle || "@풋살사관학교", name: "채널 이름" }, tStyle(ctx, Math.round(bh * 0.5), { fill: "#FFFFFF", sw: 0, noShadow: true, font: "Pretendard Black", align: "left" })));
-      fitText(hl); hl.x = ctx.W * 0.07 + (ctx.brand.logo ? bh : 0); hl.y = by + (bh - hl.h) / 2; ls.push(hl);
-      if (ctx.brand.logo) ls.push(L("image", { name: "로고", src: ctx.brand.logo, fit: "contain", x: ctx.W * 0.06, y: by + bh * 0.12, w: bh * 0.76, h: bh * 0.76 }));
+      return ls;
+    } },
+    "쇼츠 · 질문 훅 (JK)": { needs: {}, fn: ctx => {
+      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.45, 1.05, 1.6), target: [ctx.W * 0.5, ctx.H * 0.56] }), ls = [bg];
+      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.45, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.8 }));
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.08, w: ctx.W * 0.76, h: ctx.H * 0.3 }, { style: "word", align: "left", size: Math.round(ctx.W * 0.22), ratio: 0.8, sw: 0.17, emphScale: 1.0 });
+      ls.push(...hd.layers);
+      return ls;
+    } },
+    "쇼츠 · 상자 제목": { needs: {}, fn: ctx => {
+      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.55, 1.05, 1.7), target: [ctx.W * 0.46, ctx.H * 0.4] }), ls = [bg];
+      ls.push(L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.42, w: ctx.W, h: ctx.H * 0.58, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.75 }));
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 8 }); if (cut) ls.push(cut);
+      const hd = boxHead(ctx, ctx.W * 0.07, ctx.H * 0.745, ctx.W * 0.76, { size: ctx.W * 0.17, ratio: 0.7 });
+      ls.push(...hd.layers);
       return ls;
     } },
   },
@@ -2996,6 +3050,8 @@ function fits(t, ctx) {
 }
 function buildDoc(name, t, ctx) {
   const layers = t.fn(ctx).filter(Boolean).map(normLayer);
+  if ((ctx.frame.text || 0) >= TEXTY && !layers.some(l => l.name === "누끼"))  // 글자 박힌 장면인데 누끼가 없으면 주인공까지 흐려지지 않게 덜 흐림
+    for (const l of layers) if (l.type === "image" && l.name === "배경" && l.blur) l.blur = Math.round(ctx.W * 0.004);
   return { w: ctx.W, h: ctx.H, bg: "#000000", layers };
 }
 
@@ -3036,10 +3092,10 @@ function scoreDoc(doc, meta) {
     if (short && e.x + e.w > Wd * 0.86 && e.y + e.h > Hd * 0.42 && e.y < Hd * 0.87) gates.push(`쇼츠 버튼 자리: ${lname(l)}`);
     if (short && e.y + e.h > Hd * 0.8) gates.push(`쇼츠 제목 자리: ${lname(l)}`);
   }
-  // 2) 작게 봤을 때 글자 높이 (헤드라인 ≥ 12px, 나머지 글자 ≥ 7px)
+  // 2) 작게 봤을 때 글자 높이 (헤드라인 ≥ 12px, 나머지 글자 ≥ 8px)
   const hpx = heads.length ? Math.max(...heads.map(l => glyphPx(l, Wd, small))) : 0;
   if (hpx < 12) gates.push(`작게 보면 안 읽힘 (${hpx.toFixed(1)}px)`);
-  for (const l of texts) if (glyphPx(l, Wd, small) < 7 && !/시리즈|채널/.test(l.name || "")) gates.push(`작은 글자: ${lname(l)}`);
+  for (const l of texts) if (glyphPx(l, Wd, small) < 8 && !/시리즈|채널/.test(l.name || "")) gates.push(`작은 글자: ${lname(l)}`);
   // 3) 대비 (획이 약하면 정밀 단계에서 배경 밝기로 다시 봄)
   const weak = heads.filter(l => !strongStroke(l));
   // 4) 얼굴 가림 · 전술 그래픽과 제목 겹침
@@ -3048,7 +3104,7 @@ function scoreDoc(doc, meta) {
   if (bg && f.faces && f.faces[0]) {
     const fb = boxC(bg, f.faces[0].box, frameAspect()), fa = fb.w * fb.h;
     for (const b of hb) { const ix = Math.max(0, Math.min(b.x + b.w, fb.x + fb.w) - Math.max(b.x, fb.x)), iy = Math.max(0, Math.min(b.y + b.h, fb.y + fb.h) - Math.max(b.y, fb.y)); faceHit += fa ? ix * iy / fa : 0; }
-    if (faceHit > 0.1) gates.push(`얼굴을 가림 (${Math.round(faceHit * 100)}%)`);
+    if (faceHit > 0.06) gates.push(`얼굴을 가림 (${Math.round(faceHit * 100)}%)`);
   }
   const tac = doc.layers.filter(l => l.type === "shape" && TAC_DEF[l.shape]);
   if (tac.some(t => hb.some(b => overlap(bbox([t]), b, 0)))) gates.push("전술 그래픽이 제목과 겹침");
@@ -3099,7 +3155,7 @@ function regionLumDoc(doc, l) {
 function aiFrames(n = 6) {
   let fs = [...AI.frames].sort((a, b) => (b.score || 0) - (a.score || 0));
   if (AI.pick != null) { const f = fs.find(x => x.t === AI.pick); return f ? [f] : fs.slice(0, 1); }
-  const sharp = fs.filter(f => (f.blur ?? 0) <= 0.6); if (sharp.length >= 3) fs = sharp;
+  const sharp = fs.filter(f => (f.blur ?? 0) <= 0.45); if (sharp.length >= 3) fs = sharp;
   const anyP = fs.some(f => (f.persons || []).length);
   if (anyP) { const np = fs.filter(f => !(f.persons || []).length); fs = fs.filter(f => (f.persons || []).length).concat(np.slice(0, 1)); }
   const out = [];
@@ -3121,28 +3177,37 @@ function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set()) {
   for (const f of frames) for (const c of copies) for (const [name, t] of Object.entries(tpls)) {
     const cx = ctxFor(f, c, fmt, seed + Math.round(f.t * 10)); if (!fits(t, cx)) continue;
     let doc; try { doc = buildDoc(NAME, t, cx); } catch (e) { console.warn("템플릿 실패", name, e); continue; }
+    if (t.needs && t.needs.tactics && !doc.layers.some(l => l.shape === "arrow2")) continue;  // 전술 템플릿인데 화살표 놓을 자리가 없으면 다른 템플릿에 양보
     const meta = { frame: f, copy: c, legacy: !!t.legacy, maxFrame, copyMin, copyMax }, sc = scoreDoc(doc, meta);
     const key = `${name}|${f.t}|${c.l1}/${c.l2}`;
     cands.push(Object.assign({ tpl: name, t: f.t, copy: c, doc, key, legacy: !!t.legacy }, sc, { base: sc.score - (avoidKeys.has(key) ? 25 : 0) }));
   }
   cands.sort((a, b) => b.base - a.base);
   for (const x of cands.slice(0, 20)) if (x.weak.length && !x.gates.length) { const r = preciseContrast(x.doc, x.weak); if (r < 4.5) { x.gates.push(`대비 ${r.toFixed(1)}:1`); x.score = Math.min(x.score, 40); x.base = Math.min(x.base, 40); } }
-  const pool = cands.filter(x => !x.gates.length).length >= n ? cands.filter(x => !x.gates.length) : cands;
-  const sim = (a, b) => (a.tpl === b.tpl ? 0.5 : 0) + (a.t === b.t ? 0.3 : 0) + (a.copy === b.copy ? 0.2 : 0);
+  // 게이트 통과한 것만 · 새(레퍼런스형) 템플릿만으로 6개(3종 이상)를 채울 수 있으면 예전 템플릿은 빼고, 모자라면 예전 템플릿으로 채움
+  const clean = cands.filter(x => !x.gates.length), fresh = clean.filter(x => !x.legacy);
+  // (판정: 예전 템플릿 5~6점 < 같은 새 템플릿 두 번 6.5~7점 → 새 템플릿이 3가지만 돼도 새 템플릿으로)
+  const pool = fresh.length >= n && new Set(fresh.map(x => x.tpl)).size >= 3 && new Set(fresh.map(x => x.t)).size >= Math.min(3, frames.length) ? fresh : clean.length >= n ? clean : cands;
+  // 장면은 지문(dHash)이 비슷하면 같은 장면으로 봄 (시각만 다른 같은 화면이 여러 번 나오지 않게)
+  const scene = {}; for (const f of frames) scene[f.t] = (frames.find(g => g === f || hamming(g.hash, f.hash) <= 10) || f).t;
+  for (const x of pool) x.sc = scene[x.t] ?? x.t;
+  const sim = (a, b) => (a.tpl === b.tpl ? 0.5 : 0) + (a.sc === b.sc ? 0.3 : 0) + (a.copy === b.copy ? 0.2 : 0);
   const out = [];
-  const need = { tpl: Math.min(4, new Set(pool.map(x => x.tpl)).size), t: Math.min(3, new Set(pool.map(x => x.t)).size), copy: Math.min(3, new Set(pool.map(x => x.copy)).size) };
+  const tplCap = new Set(pool.map(x => x.tpl)).size >= n ? 1 : 2;
+  const need = { tpl: Math.min(4, new Set(pool.map(x => x.tpl)).size), sc: Math.min(3, new Set(pool.map(x => x.sc)).size), copy: Math.min(3, new Set(pool.map(x => x.copy)).size) };
   while (out.length < n && out.length < pool.length) {
     const left = n - out.length, have = k => new Set(out.map(x => x[k])).size;
     let best = null, bv = -1e9;
     for (const x of pool) {
       if (out.includes(x)) continue;
       // 다양성 강제: 남은 자리로 채워야 할 종류가 있으면 새 종류만
-      if ((["tpl", "t", "copy"]).some(k => need[k] - have(k) >= left && out.some(o => o[k] === x[k]))) continue;
-      if (out.filter(o => o.tpl === x.tpl).length >= 2 || out.filter(o => o.t === x.t).length >= 2) continue;  // 같은 템플릿·같은 장면은 많아야 2개
+      if ((["tpl", "sc", "copy"]).some(k => need[k] - have(k) >= left && out.some(o => o[k] === x[k]))) continue;
+      if (out.filter(o => o.tpl === x.tpl).length >= tplCap || out.filter(o => o.sc === x.sc).length >= 2) continue;  // 같은 템플릿(템플릿이 6가지 넘으면 1개)·같은 장면은 많아야 2개
+      if (out.some(o => o.tpl === x.tpl && o.sc === x.sc)) continue;  // 같은 템플릿 + 같은 장면은 문구만 다른 거의 같은 그림
       const v = 0.7 * x.base - 0.3 * 100 * Math.max(0, ...out.map(o => sim(o, x)));
       if (v > bv) { bv = v; best = x; }
     }
-    if (!best) best = pool.find(x => !out.includes(x));
+    if (!best) best = pool.find(x => !out.includes(x) && !out.some(o => o.tpl === x.tpl && o.sc === x.sc)) || pool.find(x => !out.includes(x));
     if (!best) break;
     out.push(best);
   }
@@ -3412,7 +3477,6 @@ async function openBrand() {
       <div><h4>색</h4>${BRAND_ROLES.map(([k, t]) => `<div class="f"><label>${t}</label><input type="color" data-bc="${k}" value="${toHex(b.colors[k])}"><span class="hint">${toHex(b.colors[k]).toUpperCase()}</span></div>`).join("")}</div></div>
       <div class="f"><label>기본 글꼴</label><select class="s" id="bkFont">${FONT_OPTS.filter(([v]) => v !== "Dokdo").map(([v, t]) => `<option value="${v}" ${b.font === v ? "selected" : ""}>${t}</option>`).join("")}</select><span></span></div>
       <div class="f"><label>시리즈 이름</label><input class="s" id="bkSeries" maxlength="20" value="${esc(b.series || "")}"><span></span></div>
-      <div class="f"><label>채널 이름</label><input class="s" id="bkHandle" maxlength="30" value="${esc(b.handle || "")}"><span></span></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSeriesOn" ${b.seriesOn ? "checked" : ""}> 모든 추천에 시리즈 이름 넣기 (강좌 시리즈 템플릿은 늘 넣어요)</label>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkApply" ${b.apply !== false ? "checked" : ""}> 새 추천에 적용</label>`;
     body.querySelectorAll("[data-bc]").forEach(i => (i.oninput = () => { b.colors[i.dataset.bc] = i.value.toUpperCase(); i.nextElementSibling.textContent = i.value.toUpperCase(); }));
@@ -3425,7 +3489,7 @@ async function openBrand() {
   };
   draw(); m.classList.add("show");
   $("brandSave").onclick = async () => {
-    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), handle: $("bkHandle").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked });
+    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked });
     const j = await post("/api/thumb/brand", { brand: b });
     if (!j.ok) return toast(j.error || "저장하지 못했어요");
     AI.brand = j.brand; m.classList.remove("show"); toast("브랜드 키트를 저장했어요 · 새 추천부터 반영돼요");
