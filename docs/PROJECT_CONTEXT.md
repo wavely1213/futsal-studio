@@ -71,7 +71,7 @@ refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 �
 ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
 strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
 forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
-strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트는 저장소 밖)
+strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 takes.py            NG 테이크·슬레이트·말더듬 찾기 (2차 작업 중, 아직 커밋 전)
 ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기 · 8 채널 전략)
 editor.html         편집실 화면 (프리미어식)
