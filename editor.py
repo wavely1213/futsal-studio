@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 import captions
 import core
+import studiolog
 import takes
 
 PROJECTS = core.WORK / "projects"
@@ -3035,7 +3036,7 @@ def export(name, proj, opts, log):
             err = "내보내기를 멈췄어요"
         except Exception as e:  # noqa: BLE001 — 열린 임시 파일을 놓기 위해 오류 정보만 남기고 정리
             if not isinstance(e, RuntimeError):
-                traceback.print_exc()
+                studiolog.trace(e)  # 오류 위치를 studio.log 에 (pythonw 는 콘솔이 없음)
             traceback.clear_frames(e.__traceback__)
             err = f"영상을 만들지 못했어요 · {str(e)[-300:]}"
         finally:

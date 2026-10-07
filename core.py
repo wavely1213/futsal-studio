@@ -154,9 +154,11 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
-def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None):
+def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None,
+             why=None, blocked_msg=None):
     """영상 받기 → 받지 못한 영상 id 목록. 기본은 편집용 보관함(VIDEOS · archive.txt · 출처는 sources.json).
-    학습용 영상(refs)은 dest(받는 폴더)·archive(False 면 쓰지 않음)·label(진행 표시)·remember(받은 영상 정보 [dict] 를 받는 함수)를 바꿔 씀."""
+    학습용 영상(refs)은 dest(받는 폴더)·archive(False 면 쓰지 않음)·label(진행 표시)·remember(받은 영상 정보 [dict] 를 받는 함수)를 바꿔 씀.
+    why(dict 를 주면): 받지 못한 영상 id → 쉬운 안내 {kind, msg, actions} (trouble.explain) · blocked_msg: 이 화면용 막힘 안내."""
     import source
     cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}, "infos": {}}
 
@@ -220,15 +222,23 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
                             opts.update(_js_opts())
                             ydl = _yt(log).YoutubeDL(opts)
                             continue
-                        msg = str(e)
-                        if _blocked_text(msg):
-                            msg = BLOCKED_MSG
-                        log(f"  담지 못했어요 · {msg}")
+                        _failed_one(vid, e, log, cookies_browser, blocked_msg, why)
                         failed.append(vid)
                     break
         finally:
             ydl.close()
     return failed
+
+
+def _failed_one(vid, e, log, browser, blocked_msg, why):
+    """영상 하나를 받지 못함: 화면 기록에는 쉬운 한 줄, studio.log 에만 원문 (영어 원문이 화면에 보이지 않게)."""
+    import studiolog
+    import trouble
+    info = trouble.explain(e, browser=browser, blocked=blocked_msg)  # 막힘: 이 화면용 안내 (없으면 '브라우저를 골라 다시 받아 보세요')
+    if why is not None:
+        why[vid] = info
+    log(f"  담지 못했어요 · {info['msg']}")
+    studiolog.write(f"    원문 · {vid} · {' '.join(str(e).split())[:400]}")
 
 
 def _remember_source(cur, log, remember=None):
@@ -421,13 +431,33 @@ def _seg_of(s, fixmap):
 
 
 def analyze_many(names, log, model="large-v3-turbo"):
+    for n in names:  # 하나라도 아직 복사 중이면 아무것도 시작하지 않음
+        _not_copying(n)
     with _analysis_session():
-        return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
+        return [str(_analyze_kept(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
 
 
 def analyze(name, log, model="large-v3-turbo", step="1/1"):
+    _not_copying(name)
     with _analysis_session():
-        return _analyze(name, log, model, step)
+        return _analyze_kept(name, log, model, step)
+
+
+def _analyze_kept(name, log, model, step):
+    """편집점 찾기 + 찾기 시작할 때의 파일 크기 기록 (나중에 파일이 바뀌면(덜 복사된 채 찾았음) 보관함이 알려 줌)."""
+    import intake
+    sig = intake.sig(VIDEOS / name)
+    out = _analyze(name, log, model, step)
+    intake.remember(out, sig)
+    return out
+
+
+def _not_copying(name):
+    """아직 다른 프로그램이 쓰는 중(복사 중)인 영상이면 편집점 찾기를 멈춤 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)."""
+    import intake
+    import trouble
+    if intake.busy(VIDEOS / name):
+        raise trouble.Trouble("copying", intake.copying_msg(name), ["retry"])
 
 
 def _analyze(name, log, model, step):
@@ -569,8 +599,8 @@ DENO_MIN = (2, 3, 0)
 DENO_ZIP = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
 DENO_ZIP_ALT = "https://dl.deno.land/release/{ver}/deno-x86_64-pc-windows-msvc.zip"
 DENO_AUTO = sys.platform == "win32"  # 자동 설치는 Windows 만
-BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
-               "소재 찾기의 '다운로드가 계속 실패하나요?' → '크롬 로그인 정보로 받기'를 켜고 다시 해 보세요.")
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(크롬·엣지·웨일·"
+               "파이어폭스)를 소재 찾기의 '다운로드가 계속 실패하나요?' → '로그인 정보로 받기'에서 고른 뒤 다시 해 보세요.")
 _ENGINE_LOCK = threading.RLock()  # pip 로 엔진을 바꾸는 동안만 목록·다운로드가 기다림 (같은 작업 안의 재시도는 통과)
 _DENO_LOCK = threading.Lock()     # Deno 설치는 한 번에 하나 (엔진 잠금과 따로: 받는 동안 목록 불러오기는 기다리지 않음)
 _DENO_PROG = {}                   # 받는 중인 Deno 진행률 (기다리는 다운로드 작업이 화면에 보여 줌)
