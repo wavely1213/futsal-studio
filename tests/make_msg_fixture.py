@@ -98,6 +98,9 @@ def make_msg_fixture(work):
         assert p.wait() == 0, err[-400:]
     segs = [{"start": a, "end": b, "text": t, "words": _words(a, b, t)} for a, b, t in LINES]
     (ana / "transcript.json").write_text(json.dumps(segs, ensure_ascii=False), encoding="utf-8")
+    # 지금 방식 받아쓰기 · 소리에 맞춘 단어 시각이라고 표시 (시험에서 받아쓰기 모델로 다시 듣지 않게)
+    import msg
+    (ana / "asr.json").write_text(json.dumps({"v": core.ASR_VER, "model": "시험", "aligned": msg.ALIGN_VER}), encoding="utf-8")
     sil = []
     prev = 0.0
     for a, b, _ in LINES:

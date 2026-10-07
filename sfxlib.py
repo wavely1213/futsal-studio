@@ -349,18 +349,46 @@ def sfx_file_name(name):
     return f"효과음_{name}.wav"
 
 
+_PEAKS = {}
+
+
+def peak_db(path):
+    """WAV 파일의 최대 크기(dBFS · 표본 기준) — 파일이 그대로면 다시 안 잼. 읽지 못하면 PEAK_DB."""
+    path = Path(path)
+    try:
+        st = path.stat()
+    except OSError:
+        return PEAK_DB
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in _PEAKS:
+        np = _np()
+        try:
+            with wave.open(str(path), "rb") as w:
+                x = np.frombuffer(w.readframes(w.getnframes()), "<i2")
+            pk = float(np.abs(x.astype(np.int32)).max()) / 32767.0 if len(x) else 0.0
+            _PEAKS[key] = round(20 * math.log10(pk), 2) if pk > 1e-6 else -120.0
+        except (OSError, EOFError, wave.Error):
+            _PEAKS[key] = PEAK_DB
+    return _PEAKS[key]
+
+
 def ensure_sfx(name, assets):
-    """효과음 하나를 편집실 미디어 폴더에 준비 → 파일 이름. 실은 소리는 WAV 로 바꿔 둠 (모든 PC에서 미리 듣기가 되게)."""
+    """효과음 하나를 편집실 미디어 폴더에 준비 → 파일 이름. 실은 소리는 WAV 로 바꾸며 최대 크기를 PEAK_DB 로 맞춤
+    (Kenney 소리 중에는 원래 -50 dBFS 처럼 아주 작은 것이 있어 그대로 쓰면 편집본에서 안 들림 · 모든 PC에서 미리 듣기가 되게).
+    예전 판(v2.0.0)이 크기를 맞추지 않고 만든 파일은 한 번 다시 만듦."""
     if name not in CATALOG:
         raise KeyError(f"모르는 효과음이에요 · {name}")
     assets = Path(assets)
     assets.mkdir(parents=True, exist_ok=True)
     out = assets / sfx_file_name(name)
-    if out.exists() and out.stat().st_size > 44:
-        return out.name
     src = CATALOG[name][0]
+
+    def ready():
+        return out.exists() and out.stat().st_size > 44 and (src.startswith("@") or peak_db(out) >= PEAK_DB - 1.0)
+    if ready():
+        return out.name
     with _LOCK:
-        if out.exists() and out.stat().st_size > 44:
+        if ready():
             return out.name
         if src.startswith("@"):
             _write_atomic(out, synth(src[1:]))
@@ -375,6 +403,9 @@ def ensure_sfx(name, assets):
             data = pr.stdout
             np = _np()
             x = np.frombuffer(data[:len(data) // 4 * 4], "<i2").reshape(-1, 2).astype(np.float64) / 32767.0
+            pk = float(np.abs(x).max()) if len(x) else 0.0
+            if pk > 1e-6:  # 최대 크기를 PEAK_DB 로 (작은 소리는 키우고 큰 소리는 줄임)
+                x = x * (10 ** (PEAK_DB / 20) / pk)
             _write_atomic(out, _wav_bytes(x))
     return out.name
 

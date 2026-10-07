@@ -65,6 +65,12 @@ def run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **NO_WINDOW)
 
 
+def run_bytes(cmd):
+    """명령을 실행하고 표준 출력 바이트 (실패하면 None)."""
+    r = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
+    return r.stdout if r.returncode == 0 else None
+
+
 # ---------- 목록·다운로드 ----------
 
 def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
@@ -385,14 +391,17 @@ def _whisper_opts(m, vocab):
     h = captions.hotwords(vocab["terms"], 60, count) if "hotwords" in params else ""
     if h:
         opts["hotwords"] = h
+    if "condition_on_previous_text" in params:  # 앞 문장에 기대지 않음 (같은 말 되풀이·지어내기 막기)
+        opts["condition_on_previous_text"] = False
     return opts
 
 
-def _seg_of(s, fixmap):
-    """받아쓴 구간 하나 → {start, end, text(, words)} · 사전 고치기 · 글은 단어를 이은 것과 똑같게. (구간, 고친 곳 수)"""
+def _seg_of(s, fixmap, off=0.0):
+    """받아쓴 구간 하나 → {start, end, text(, words)} · 사전 고치기 · 글은 단어를 이은 것과 똑같게. (구간, 고친 곳 수)
+    off: 소리 일부만 다시 들었을 때 그 시작 시각 (구간·단어 시각에 더함)."""
     import captions
-    seg = {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
-    ws = [{"w": w.word.strip(), "s": round(float(w.start), 2), "e": round(float(w.end), 2), "p": round(float(w.probability), 2)}
+    seg = {"start": round(s.start + off, 2), "end": round(s.end + off, 2), "text": s.text.strip()}
+    ws = [{"w": w.word.strip(), "s": round(float(w.start) + off, 2), "e": round(float(w.end) + off, 2), "p": round(float(w.probability), 2)}
           for w in getattr(s, "words", None) or () if w.word.strip()]
     if not ws:
         t = captions.apply_dict(seg["text"], fixmap)
@@ -406,24 +415,24 @@ def analyze_many(names, log, model="large-v3-turbo"):
         return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
 
 
-def analyze(name, log, model="large-v3-turbo", step="1/1"):
+def analyze(name, log, model="large-v3-turbo", step="1/1", label="편집점 찾는 중"):
     with _analysis_session():
-        return _analyze(name, log, model, step)
+        return _analyze(name, log, model, step, label)
 
 
-def _analyze(name, log, model, step):
+def _analyze(name, log, model, step, label="편집점 찾는 중"):
     video = VIDEOS / name
     outdir = adir(name)
     outdir.mkdir(parents=True, exist_ok=True)
     wav = outdir / "audio.wav"
-    log(f"편집점 찾는 중 · {name}")
-    set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="소리 추출 중")
+    log(f"{label} · {name}")
+    set_progress(label=label, item=name, step=step, pct=None, detail="소리 추출 중")
     r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
     if r.returncode or not wav.exists():
         raise RuntimeError(f"영상에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
-    set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
+    set_progress(label=label, item=name, step=step, pct=None, detail="받아쓰기 준비 중")
     import captions
     m = _whisper(model)
     # PyAV 버전 차이로 인한 오류를 피하려고, ffmpeg로 뽑은 wav를 직접 읽어 넘긴다
@@ -432,47 +441,146 @@ def _analyze(name, log, model, step):
     with wave.open(str(wav), "rb") as w:
         audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
     vocab = captions.load_dict(dict_path())
-    opts = _whisper_opts(m, vocab)
     if vocab["terms"]:  # 힌트 길이 한도 때문에 뒤쪽 용어가 빠질 수 있어서 실제로 알려 준 수를 적음
+        opts = _whisper_opts(m, vocab)
         sent = opts["initial_prompt"].count(", ") + 1 if opts.get("initial_prompt") else 0
         n = len(vocab["terms"])
         log(f"  용어 사전의 말 {n}개를 받아쓰기에 알려 줘요" if sent >= n else
             f"  용어 사전의 말 {n}개 중 앞의 {sent}개를 받아쓰기에 알려 줘요 (힌트 길이 한도 · 중요한 말을 앞에 두세요)")
-    segs, info = m.transcribe(audio, language="ko", vad_filter=True, **opts)
-    total = info.duration or 0
-    segments, fixed, echoed = [], 0, 0
-    for s in segs:
-        seg, n = _seg_of(s, vocab["fix"])
-        if captions.echo(seg.get("words"), vocab["terms"]):  # 말소리가 불분명한 곳에서 용어 목록만 따라 쓴 구간은 버림
-            echoed += 1
-            continue
-        segments.append(seg)
-        fixed += n
+
+    def on_seg(t, total, k):
         if total:
-            set_progress(label="편집점 찾는 중", item=name, step=step, pct=min(99, int(s.end * 100 / total)),
-                         detail=f"대사 받아쓰는 중 · {_short(s.end)} / {_short(total)}")
-        if len(segments) % 20 == 0:
-            log(f"  {_short(s.end)}까지 받아씀")
-    set_progress(label="편집점 찾는 중", item=name, step=step, pct=99, detail="컷 후보·하이라이트 찾는 중")
+            set_progress(label=label, item=name, step=step, pct=min(99, int(t * 100 / total)),
+                         detail=f"대사 받아쓰는 중 · {_short(t)} / {_short(total)}")
+        if k % 20 == 0:
+            log(f"  {_short(t)}까지 받아씀")
+    segments, fixed, echoed, unheard = transcribe_audio(m, audio, vocab, on_seg)
+    set_progress(label=label, item=name, step=step, pct=99, detail="컷 후보·하이라이트 찾는 중")
     sil, peaks = _silences(wav), _peaks(wav)
     wav.unlink()
 
-    (outdir / "transcript.json").write_text(json.dumps(segments, ensure_ascii=False, indent=1), encoding="utf-8")
     (outdir / "analysis.json").write_text(json.dumps({"silences": sil, "loud_peaks": peaks}, ensure_ascii=False, indent=1), encoding="utf-8")
-    with open(outdir / "subtitles.srt", "w", encoding="utf-8") as f:
-        for i, s in enumerate(segments, 1):
-            f.write(f"{i}\n{_ts(s['start'])} --> {_ts(s['end'])}\n{s['text']}\n\n")
-    events = [(s["start"], f"[{_short(s['start'])}] {s['text']}") for s in segments]
-    events += [(x["start"], f"[{_short(x['start'])}] ── 무음 {x['end'] - x['start']:.1f}초 (컷 후보)") for x in sil]
-    events += [(p["time"], f"[{_short(p['time'])}] ▲ 음량 피크 {p['rms_db']}dB (하이라이트 후보)") for p in peaks]
-    with open(outdir / "transcript_timeline.md", "w", encoding="utf-8") as f:
-        f.write(f"# 타임라인: {name}\n\n")
-        for _, line in sorted(events):
-            f.write(line + "\n")
+    write_transcript(name, segments, sil, peaks, asr={"v": ASR_VER, "model": model})
     log(f"  완료 · 대사 {len(segments)}줄 · 컷 후보 {len(sil)}곳 · 하이라이트 {len(peaks)}곳"
         + (f" · 용어 사전으로 {fixed}곳을 고쳤어요" if fixed else "")
-        + (f" · 말소리가 불분명해 용어 목록만 잘못 받아쓴 {echoed}곳은 뺐어요" if echoed else ""))
+        + (f" · 말소리가 불분명해 용어 목록만 잘못 받아쓴 {echoed}곳은 뺐어요" if echoed else "")
+        + (f" · 말소리가 없는 곳에서 잘못 들은 {unheard}곳은 뺐어요" if unheard else ""))
     return outdir
+
+
+def write_transcript(name, segments, sil=None, peaks=None, asr=None):
+    """받아쓰기 결과 파일들 (transcript.json · subtitles.srt · transcript_timeline.md · 받아쓰기 방식 asr.json) — 임시 파일에 쓰고 바꿔 끼움.
+    sil·peaks 가 없으면 analysis.json 의 것을 씀 (MSG 가 받아쓰기만 다시 고칠 때)."""
+    outdir = adir(name)
+    if sil is None or peaks is None:
+        try:
+            extra = json.loads((outdir / "analysis.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            extra = {}
+        sil, peaks = extra.get("silences") or [], extra.get("loud_peaks") or []
+    srt = "".join(f"{i}\n{_ts(s['start'])} --> {_ts(s['end'])}\n{s['text']}\n\n" for i, s in enumerate(segments, 1))
+    events = [(s["start"], f"[{_short(s['start'])}] {s['text']}") for s in segments]
+    events += [(x["start"], f"[{_short(x['start'])}] ── 무음 {x['end'] - x['start']:.1f}초 (컷 후보)") for x in sil]
+    events += [(p["time"], f"[{_short(p['time'])}] ▲ 음량 피크 {p.get('rms_db', p.get('db', ''))}dB (하이라이트 후보)") for p in peaks]
+    md = f"# 타임라인: {name}\n\n" + "".join(line + "\n" for _, line in sorted(events))
+    files = [("transcript.json", json.dumps(segments, ensure_ascii=False, indent=1)), ("subtitles.srt", srt), ("transcript_timeline.md", md)]
+    if asr is not None:
+        files.append(("asr.json", json.dumps(asr, ensure_ascii=False)))
+    for fn, text in files:
+        _write_replace(outdir / fn, text)
+
+
+def _write_replace(path, text):
+    tmp = path.with_name(path.name + f".{os.getpid()}_{threading.get_ident()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for k in range(10):  # Windows: 백신·OneDrive·편집실이 잠깐 잡고 있으면 조금 뒤 다시
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if k == 9:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.1)
+
+
+def asr_info(name):
+    """받아쓰기 방식 기록 (asr.json) · 없으면(v2.0.0 까지의 받아쓰기) {}."""
+    try:
+        d = json.loads((adir(name) / "asr.json").read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+# ---------- 받아쓰기 (전체를 듣고, 말소리가 없는 곳의 글만 버림) ----------
+# v2.0.0 까지는 faster-whisper 의 말 찾기(VAD)로 말소리만 이어 붙여 받아썼는데, 짧은 감탄('어? 이것도 들어갔어요. 대박!')·
+# 작은 말이 통째로 빠지고 앞 문장에 끌려 같은 말을 되풀이했다('네 번째 빗나갔어요. 네번째 빗나갔어요.').
+# 지금은 소리 전체를 앞 문장에 기대지 않고 듣고(condition_on_previous_text=False), 느슨한 말 찾기로 말소리가 있는 곳을 따로 찾아
+# 그 밖에서 나온 글(무음·음악에서 지어낸 '시청해 주셔서 감사합니다')만 버린다.
+ASR_VER = 2
+SPEECH_VAD = {"threshold": 0.2, "min_speech_duration_ms": 80, "min_silence_duration_ms": 500, "speech_pad_ms": 300}
+SPEECH_PAD = 0.35   # 말소리 구간 앞뒤 여유(초) — 단어 시각이 조금 밀려도 버리지 않게
+
+
+def speech_regions(audio, sr=16000):
+    """말소리가 있을 만한 곳 [(a, b)] (느슨한 문턱 0.2 · 짧은 감탄도 잡음) · 말 찾기 모델을 못 쓰면 None."""
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except ImportError:
+        return None
+    out = []
+    for x in get_speech_timestamps(audio, VadOptions(**SPEECH_VAD), sampling_rate=sr):
+        a, b = x["start"] / sr - SPEECH_PAD, x["end"] / sr + SPEECH_PAD
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([max(0.0, a), b])
+    return [(round(a, 2), round(b, 2)) for a, b in out]
+
+
+def heard(seg, regions):
+    """받아쓴 구간이 말소리가 있는 곳에서 나왔는지 (단어 가운데 시각의 절반 넘게 말소리 구간 안) · 단어 시각이 없으면 구간 가운데."""
+    ws = seg.get("words") or [{"s": seg["start"], "e": seg["end"]}]
+    inside = sum(1 for w in ws if any(a <= (float(w["s"]) + float(w["e"])) / 2 <= b for a, b in regions))
+    return 2 * inside > len(ws)
+
+
+def transcribe_audio(m, audio, vocab, on_seg=None, sr=16000):
+    """소리(16kHz float) → (구간 목록, 사전으로 고친 수, 용어 목록만 따라 쓴 구간 수, 말소리 없는 곳에서 나와 버린 구간 수).
+    faster-whisper 가 단어 시각을 맞추다 가끔 멈추면(IndexError · 말 없는 소리에서) 그 뒤는 예전 방식(말 찾기)으로 마저 들음."""
+    import captions
+    opts = _whisper_opts(m, vocab)
+    total = len(audio) / sr
+    regions = speech_regions(audio, sr)
+    segments, fixed, echoed, unheard = [], 0, 0, 0
+    off, vad = 0.0, regions is None  # 말 찾기 모델이 없으면 예전 방식 그대로
+    while off < max(0.3, total - 0.3):
+        part = audio[int(off * sr):]
+        last = off
+        try:
+            segs, _ = m.transcribe(part, language="ko", vad_filter=vad, **opts)
+            for s in segs:
+                seg, n = _seg_of(s, vocab["fix"], off)
+                last = max(last, seg["end"])
+                if captions.echo(seg.get("words"), vocab["terms"]):  # 말소리가 불분명한 곳에서 용어 목록만 따라 쓴 구간은 버림
+                    echoed += 1
+                    continue
+                if regions is not None and not heard(seg, regions):
+                    unheard += 1
+                    continue
+                if segments and seg["start"] < segments[-1]["end"] - 0.5 and seg["text"] == segments[-1]["text"]:
+                    continue  # 다시 들은 곳의 겹친 구간
+                segments.append(seg)
+                fixed += n
+                if on_seg:
+                    on_seg(seg["end"], total, len(segments))
+            break
+        except (IndexError, ValueError):
+            if vad:
+                break
+            off, vad = max(off, last), True
+    return segments, fixed, echoed, unheard
 
 
 def timeline_events(name):

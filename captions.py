@@ -17,13 +17,17 @@ GAP_FILL = 0.3    # 자막 사이 빈틈이 이보다 짧으면 앞 자막을 �
 # 이렇게 끝나는 말 뒤는 끊어 읽기 좋은 곳 (조사·이음말) · 문장 끝
 _NICE = re.compile(r"(?:은|는|이|가|을|를|에|도|만|로|고|서|면|데|며|게|와|과|요|다|죠|까|네|야)[,.?!…~]*$")  # '~지 말고'·'~의' 뒤는 안 끊음
 _END = re.compile(r"[.?!…]$")
+# 뒤 낱말을 꾸미는 말: 자막 끝에 혼자 남으면 어색함 ('패스하고 그' / '자리에 서 있으면' · '항상 두' / '개쯤') → 뒤 낱말과 같은 자막에
+_MOD = {"그", "이", "저", "이런", "그런", "저런", "어떤", "무슨", "몇", "첫", "각", "모든", "매", "온", "새", "다른", "딴"}
+_NUM = {"한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "스무"}
+_COUNTER = re.compile(r"^(?:번|개|명|걸음|가지|골|바퀴|시간|분|초|살|발|판|세트|회|차|군데|마리|잔|장|줄|칸|박자)")
 # 사전 고치기: 낱말 뒤에 붙어도 되는 조사 (최대 두 개 · '피버를'은 고치고 '피버트'는 안 고침)
 _JOSA = "(?:이에요|예요|입니다|이랑|에서|에게|한테|으로|부터|까지|처럼|보다|하고|은|는|이|가|을|를|의|에|로|와|과|도|만|랑|씩)"
 # 요·야·죠는 낱말 바로 뒤에 혼자 붙을 때만 ('피버요'는 고치고, '가요'·'가야' 같은 말끝이 붙은 '피버가요'는 그대로)
 _TAIL = "(?:이요|요|이야|야|이죠|죠)"
 
 DEFAULT_TERMS = ["풋살사관학교", "최경진 감독", "피벗", "픽소", "아라", "고레이로", "토킥", "인사이드 패스", "아웃사이드 패스",
-                 "볼 컨트롤", "트래핑", "퍼스트 터치", "2대1 패스", "스위칭", "프레스", "킥인", "코너킥", "골키퍼", "수비 라인",
+                 "볼 컨트롤", "트래핑", "퍼스트 터치", "디딤발", "골대", "2대1 패스", "스위칭", "프레스", "킥인", "코너킥", "골키퍼", "수비 라인",
                  "파라렐라", "디아고날", "오버래핑", "빌드업", "파워플레이", "세트피스", "로테이션", "발바닥 터치", "드리블",
                  "페인팅", "터닝", "슈팅", "리턴 패스"]
 DEFAULT_FIX = {"피버": "피벗", "픽쏘": "픽소", "고레이루": "고레이로", "풋살 사관학교": "풋살사관학교", "퍼스트터치": "퍼스트 터치"}
@@ -104,8 +108,10 @@ def prompt(terms, budget=180, count=len):
 
 
 def hotwords(terms, budget=60, count=len):
-    """매 구간마다 알려 줄 용어 (hotwords) — 길면 받아쓸 자리가 줄어서 짧게."""
-    return _fit(terms, budget, count, " ")
+    """매 구간마다 알려 줄 용어 (hotwords) — 길면 받아쓸 자리가 줄어서 짧게.
+    쉼표·마침표를 붙임: 받아쓰기는 힌트 글의 모양을 따라 써서, 띄어쓰기만으로 이으면 문장 부호 없는 받아쓰기가 나옴."""
+    body = _fit(terms, budget - count("."), count)
+    return body + "." if body else ""
 
 
 def echo(words, terms, run=6):
@@ -237,6 +243,13 @@ def _term_joints(texts, terms):
     return inside
 
 
+def _modifier(w, nxt):
+    """w 가 바로 뒤 낱말 nxt 를 꾸미는 말인지 (지시·수 관형사 · 수는 뒤에 단위가 올 때만 — '네' 대답·'세' 같은 다른 뜻과 가름)."""
+    if not w or re.search(r"[,.?!…~]$", w):
+        return False
+    return w in _MOD or (w in _NUM and bool(_COUNTER.match(nxt or "")))
+
+
 def _lines(texts, inside):
     """롱폼 두 줄: 가장 고르게 나뉘는 단어 사이 (끊어 읽기 좋은 곳 · 아래 줄이 같거나 길게 · 용어 안쪽은 피함)."""
     if len(texts) < 2 or sum(_chars(t) for t in texts) <= LINE:
@@ -245,7 +258,7 @@ def _lines(texts, inside):
     for m in range(1, len(texts)):
         a, b = sum(_chars(t) for t in texts[:m]), sum(_chars(t) for t in texts[m:])
         sc = abs(a - b) + (0 if _NICE.search(texts[m - 1]) or texts[m - 1][-1] in ",.?!…" else 2.5) \
-            + (8 if m - 1 in inside else 0) + (0.1 if a > b else 0)
+            + (8 if m - 1 in inside or _modifier(texts[m - 1], texts[m]) else 0) + (0.1 if a > b else 0)
         if best is None or sc < best:
             best, at = sc, m
     return " ".join(texts[:at]) + "\n" + " ".join(texts[at:])
@@ -254,7 +267,8 @@ def _lines(texts, inside):
 def chunk(words, fmt="long", breaks=(), terms=()):
     """단어 [{w, s, e}] → 자막 덩어리 [{start, end, text, words}] — 단어 사이에서만 나눔.
     쇼츠: 12글자(띄어쓰기 빼고)·2초까지 한 줄 / 롱폼: 22글자·3.5초까지, 12글자가 넘으면 두 줄('\\n').
-    한 단어가 혼자 그보다 길면 그 단어만 따로. 0.6초보다 짧은 자투리는 되도록 앞뒤와 합침.
+    한 단어가 혼자 그보다 길면 그 단어만 따로. 0.6초보다 짧은 자투리는 되도록 앞뒤와 합침 (짧은 한 문장은 뒤가 비어 있으면 혼자 둠).
+    뒤 낱말을 꾸미는 말('그'·'두' + 단위)은 자막·줄 끝에 남기지 않음.
     breaks: 이 번호(words 기준)의 단어 뒤에서 되도록 나눔 (받아쓰기 구간 끝) · terms: 안 나눌 여러 단어 용어.
     시작·끝은 첫 단어 시작·마지막 단어 끝 그대로."""
     ws, brk = [], set()
@@ -277,23 +291,28 @@ def chunk(words, fmt="long", breaks=(), terms=()):
     for t in texts:
         cum.append(cum[-1] + _chars(t))
     gap = [ws[k + 1]["s"] - ws[k]["e"] for k in range(n - 1)]
+    mod = [_modifier(texts[k], texts[k + 1]) for k in range(n - 1)] + [False]
     join, cut = [0.0], [0.0] * n  # join: k 와 k+1 을 한 자막에 둘 때 · cut: k 뒤에서 나눌 때 (클수록 나쁨)
     for k in range(n - 1):  # 문장 끝(마침표 등)이 가장 강한 끊을 곳 · 받아쓰기 구간 끝은 문장 중간일 때도 있어 그보다 약하게
         end, seg, g = bool(_END.search(texts[k])), k in brk, gap[k]
-        join.append(join[-1] + (10 if end else 4 if seg else 3 if texts[k].endswith(",") else 0) + 12 * max(0.0, g - 0.25))
+        join.append(join[-1] + (10 if end else 4 if seg else 3 if texts[k].endswith(",") else 0) + (0.0 if mod[k] else 12 * max(0.0, g - 0.25)))
         cut[k] = (0.0 if end or g >= 0.4 else 0.5 if seg else 1.0 if _NICE.search(texts[k]) or g >= 0.2 else 2.5) \
-            + (8 if k in inside else 0)
+            + (8 if k in inside else 0) + (12 if mod[k] else 0)
 
     best, prev = [0.0] + [float("inf")] * n, [0] * (n + 1)
     for j in range(1, n + 1):
         for i in range(j - 1, -1, -1):
             chars, dur = cum[j] - cum[i], ws[j - 1]["e"] - ws[i]["s"]
-            if j - i > 1 and (gap[i] >= GAP_MAX or chars > mc or dur > md):
+            if j - i > 1 and (gap[i] >= GAP_MAX and not mod[i] or chars > mc or dur > md):
                 break
             short = max(0.0, 1 - chars / (0.7 * mc))
             c = best[i] + 3.0 + join[j - 1] - join[i] + (cut[j - 1] if j < n else 0.0) + 4 * short * short
             if dur < MIN_DUR:
-                c += 40 + 100 * (MIN_DUR - dur)
+                # 짧은 한 문장('좋습니다.')은 뒤가 비어 있으면 MIN_DUR 까지 늘려 보여 줄 수 있어(from_segments) 혼자 둬도 됨 —
+                # 다음 문장 가운데를 잘라 앞 문장에 붙이는 것('좋습니다. 이렇게 패스와' / '동시에 …')보다 나음
+                room = gap[j - 1] if j < n else MIN_DUR
+                whole = _END.search(texts[j - 1]) and (i == 0 or _END.search(texts[i - 1]) or gap[i - 1] >= 0.4)
+                c += 8 + 30 * (MIN_DUR - dur) if whole and dur + room >= MIN_DUR else 40 + 100 * (MIN_DUR - dur)
             if c < best[j]:
                 best[j], prev[j] = c, i
     spans, j = [], n

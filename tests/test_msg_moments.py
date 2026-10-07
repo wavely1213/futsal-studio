@@ -113,7 +113,7 @@ class Lines(unittest.TestCase):
                 m("section", 20, "세 번째"), m("success", 24, "나이스"), m("section", 24.5, "세 번째"), m("fail", 26, "빗나갔어요")]
         sb = msg._scoreboard(moms)
         self.assertEqual([x["text"] for x in sb], ["1/5 · 0골", "2/5 · 1골", "3/5 · 2골"])
-        self.assertAlmostEqual(sb[1]["t"], 16.9)
+        self.assertAlmostEqual(sb[1]["t"], 16.0)  # 결과 말과 같은 때 바뀜 (효과 글자와 한 화면 사건)
         self.assertEqual(msg._scoreboard(moms[:5]), [])
         # 받아쓰기가 '네 번째'만 듣고 세 번째를 놓침 → 골 수를 모르니 거기서 멈춤 · '네 번째 빗나갔어요' 를 두 번 말해도 한 번
         gap = moms[:5] + [m("section", 22, "세 번째"), m("success", 25, "들어갔어요"), m("section", 40, "네 번째"), m("fail", 44, "빗나갔어요"),

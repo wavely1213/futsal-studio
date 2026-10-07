@@ -1503,6 +1503,8 @@ def track_state(seq, track_id, t, trans):
 
 
 CAP_JOIN = 0.06  # 같은 자막 조각 사이가 이만큼 안이면 이어진 것 (프레임 반올림 여유)
+CAP_MIN = 0.7    # 타임라인 자막 조각은 (다음 자막 전까지) 적어도 이만큼(초) 보임 — 읽을 틈
+CAP_CPS = 14.0   # 자막 1초에 읽을 글자 수 한도 (띄어쓰기 빼고) — 넘으면 다음 자막 전까지 조금 더 보임
 
 
 def timeline_captions(proj):
@@ -1513,7 +1515,8 @@ def timeline_captions(proj):
     vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev") and not it.get("noCaps")],
                   key=lambda x: x["start"])
     shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
-    for cap0 in proj["captions"]:
+    # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
+    for cap0 in proj.get("msgCaps") or proj["captions"]:
         for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
             toks = str(cap.get("text") or "").split()
             for it in vids:
@@ -1550,6 +1553,16 @@ def timeline_captions(proj):
                 p["text"] = " ".join(p["_toks"][k] for k in p["_keep"]) if len(p["_keep"]) < p["_n"] else p["_full"]
             continue
         out.append(c)
+    # 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막이 나오기 전까지 CAP_MIN 초는 보이게 (editor.html capsTL 과 같은 규칙)
+    # (바로 이어지는 다음 자막이 넉넉하면 그 시작을 조금 늦춰 자리를 만듦)
+    # 글자가 많으면 1초에 CAP_CPS 글자를 넘지 않게 읽을 시간도 (다음 자막 전까지)
+    for k, c in enumerate(out):
+        need = max(CAP_MIN, len(re.sub(r"\s+", "", c["text"])) / CAP_CPS)
+        if c["end"] - c["start"] < need:
+            n = out[k + 1] if k + 1 < len(out) else None
+            if n is not None and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
+                n["start"] = c["start"] + need
+            c["end"] = max(c["end"], min(c["start"] + need, n["start"] if n is not None else total))
     for c in out:
         for k in ("_k", "_keep", "_n", "_toks", "_full"):
             c.pop(k, None)

@@ -689,7 +689,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("스타일을 하나 이상 골라 주세요")
             except (KeyError, ValueError, FileNotFoundError) as e:
                 return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
-            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log))
+            proof = b.get("proofread") is True  # '클로드로 자막 오타 고치기'를 켰을 때만 (사용자 클로드 계정으로 대사 글만 보냄)
+            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log, proofread=proof))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path in ("/api/style/mix", "/api/style/mix_pick"):  # 스타일 섞기 저장 · '이 후보의 ○○가 좋아요'
             try:

@@ -62,6 +62,7 @@ style.py            스타일 배우기 → WORK/styles/<이름>.json
 plan.py             영상 기획 분석 (인트로·장르·형식·자막·재미 판단) → 스타일의 plan
 avmodels.py         기획 분석 모델 (화면 글자 OCR · 소리 종류 YAMNet, 처음 쓸 때 받음)
 claude_cli.py       클로드 계정으로 쓰기 (사용자 PC의 Claude Code CLI 호출)
+proofread.py        받아쓰기 오타 고치기 (MSG · 켰을 때만 claude_cli 로 대사 글을 보내고 단어 시각을 다시 나눔)
 qa.py               내보낸 영상 자동 검수
 bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
@@ -122,7 +123,7 @@ icon.ico / icon.png 앱 아이콘
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
 | GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` | 없음 |
 | ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
-| Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
+| Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). MSG 화면의 '클로드로 자막 오타 고치기'를 켰을 때만: 우리 영상 받아쓰기 글·제목·용어 목록을 보냄 (D-025). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |
 | Hugging Face Hub | faster-whisper가 받아쓰기 모델을 처음 한 번 받음 (라이브러리 기본 동작) | 없음 |
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
