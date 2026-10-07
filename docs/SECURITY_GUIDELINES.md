@@ -70,7 +70,8 @@
 - **인가는 모든 요청에서 서버 측 검증**: IDOR 대신 **경로 탈출**을 막는다.
   - 화면이 목록에 보여 준 이름만 보낸다고 믿지 않는다. 서버가 2번의 이름 검사와 허용 폴더 확인을 매번 한다.
   - 폴더·파일·주소 열기는 정해진 목록에서만 한다.
-    - `/api/open`: `videos`·`analysis`·`out` 중 하나
+    - `/api/open`: `videos`·`analysis`·`out`·`refs`·`work`(작업 폴더) 중 하나, 또는 `log`(작업 폴더의 studio.log 를 탐색기에서 골라 보여 줌 · `app.reveal`)
+    - `/api/convert`(MP4로 바꾸기): 보관함 폴더의 못 쓰는 형식 목록(`intake.unusable`)에 있는 파일 이름만 · 결과는 같은 폴더에 새 이름, 원본은 그 안 `바꾸기 전 원본` 폴더로 (덮어쓰지 않음)
     - `upload.reveal`: `core.OUT` 안 파일 이름
     - `upload.open_studio`: 고정 주소 `STUDIO_URL`
 - 관리자 기능·권한 등급은 없다. 사실상의 관리자는 **배포하는 사람(= `main` 푸시 권한)**이다.

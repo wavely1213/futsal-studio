@@ -27,30 +27,37 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
+## I-041 | 2026-10-07 | 개발 PC 의 ffmpeg(imageio 7.0.2 정적 빌드)는 MPEG-TS(.MTS·.ts)를 열면 죽음
+- **상태**: 열림
+- **심각도**: 낮음
+- **증상/내용**: 리눅스 개발 PC 에서 `core.ffmpeg()`(imageio-ffmpeg 의 johnvansickle 7.0.2 정적 빌드)로 `-i x.MTS` 를 하면 어떤 MPEG-TS 든 segfault(139)로 끝난다(H.264·MPEG-2 · 소리 유무 상관없음). 그래서 개발 PC 에서는 [MP4로 바꾸기](`intake.convert`)가 '영상을 찾지 못했어요'로 실패한다. 단위 테스트(`tests.test_intake` ConvertTests)와 화면 시험(`$SCRATCH/e1fix_ui` · 저장소 밖)은 MPEG-TS 를 읽는 시스템 ffmpeg(6.1)로 돌린다. 사용자 Windows PC 의 ffmpeg 는 다른 빌드라 같은 문제가 있는지는 모른다.
+- **위치**: `intake.convert`·`_probe_codecs`, `tests/test_intake.py` `_ts_ffmpeg`
+- **해결 방향**: 소유자 PC 에서 캠코더 .MTS 하나로 [MP4로 바꾸기]를 해 본다(I-036). Windows 에서도 죽으면 `core.ffmpeg()` 대신 쓸 수 있는 ffmpeg 를 찾는다.
+
 ## I-040 | 2026-10-07 | 편집실 창 크기별 배치: Windows 실기 미검증
 - **상태**: 열림
 - **심각도**: 낮음
-- **증상/내용**: 창 크기에 비례하는 배치·패널 접기·손잡이 끌기(D-031)는 개발 PC 의 Chromium 으로 1920×1009·1600×1000·1366×697·1280×657·1093×614·960×640 에서만 확인했다(`$SCRATCH/edlayout_e2e.py` · 저장소 밖). Windows WebView2 의 배율(125%·150%)·창을 끌어 줄일 때·작은 노트북 화면에서 실제 모양은 아직 못 봤다. 1093×614 처럼 낮은 창에서는 타임라인이 246px 라 V1 아래 소리 트랙은 타임라인 안에서 굴려야 보인다(예전에는 페이지가 넘쳐 아예 잘렸음). 오른쪽 패널을 최소(260px)로 끌면 몇 줄(속도 % 등)이 좁아진다.
+- **증상/내용**: 창 크기에 비례하는 배치·패널 접기·손잡이 끌기(D-031)는 개발 PC 의 Chromium 으로 1920×1009·1600×1000·1366×697·1280×657·1093×614·960×640 에서만 확인했다(`$SCRATCH/edlayout_e2e.py` · 저장소 밖). Windows WebView2 의 배율(125%·150%)·창을 끌어 줄일 때·작은 노트북 화면에서 실제 모양은 아직 못 봤다. 노트북 창(1280×657·1366×697·1093×614·960×640)은 타임라인에 C1~A3 가 다 안 들어가서, 열 때·창 크기가 바뀔 때 V1·A1 경계를 가운데로 굴린다(D-035 · 예전엔 A1 이 5~21px 만 보이거나 V1 까지 잘렸음 · 개발 PC 확인 `$SCRATCH/e1fix_ui/ed_test.py`). WebView2 는 스크롤 막대가 보여 높이가 몇 px 다를 수 있다. 낮은 창에서는 미리보기가 칸 높이에 맞춰져서 좌우를 접어도 커지지 않는다 — 접기 버튼 안내와 한 번 뜨는 토스트로 높이 손잡이를 알려 준다. 오른쪽 패널을 최소(260px)로 끌면 몇 줄(속도 % 등)이 좁아진다.
 - **위치**: `editor.html` `.app` 그리드·`@container` 규칙·패널 크기 블록(`PANEL_MIN`·`TL_RATIO`)
 - **해결 방향**: 소유자 노트북에서 편집실을 열어 미리보기·도구 줄·＋ 버튼을 보고, 손잡이 끌기·패널 접기를 한 번씩 해 본다 (I-009 와 함께).
 
 ## I-039 | 2026-10-07 | 올리기 키트 제목 틀·주제어: 규칙으로 고르는 한계
 - **상태**: 열림
 - **심각도**: 낮음
-- **증상/내용**: (1) 제목 틀은 회차·행사·영어 풀이·초대 손님을 빼지만(BR-021), 나머지 말은 그 영상의 이야기일 수 있다 — 실제 목록에서 '사이드에서 상대방 농락해 버리기?! -{주제}'가 첫 후보가 된다(측면 돌파가 아닌 영상에도). 사람 별명('형컴과')처럼 규칙으로 모르는 고유 이름도 남을 수 있다. (2) 이름말·꾸밈말 판단은 낱말 끝 모양과 짧은 목록(`_KEEP_LEFT`·`_TITLE_WORDS`)으로만 한다(형태소 분석 없음). (3) 용어 사전에 넣은 사람 이름은 끝이 감독·선수·코치·님이 아니면 주제어가 될 수 있다. (4) 채널 전략(8단계)의 주제어는 여전히 `TERMS` + `strategy.TOPIC_EXTRA`이고 `SKILLS`·용어 사전을 읽지 않는다.
-- **위치**: `hooks.skeletons`·`_slot`·`topic_terms`, `strategy._TOPIC_RES`
+- **증상/내용**: (1) 제목 틀은 회차·행사·영어 풀이·초대 손님을 빼고(BR-021), 주제 자리가 꼬리표인 틀('… 버리기?! -{주제}')은 버리고, 그 영상 이야기가 남은 틀('풋살 {주제:으로} 중앙을 파괴?')은 같은 갈래 주제에만 쓰고, 첫 후보는 늘 기본 틀이다(D-033). 그래도 갈래 안에서는 맞지 않을 수 있고('시저스로 중앙을 파괴?'는 되지만 드리블 기초 레슨에도 나옴), '어느 주제에나 맞는 틀' 판단(`_generic`)은 낱말 끝 모양과 짧은 목록뿐이라 낯선 이름말이 있으면 갈래 틀로 보고 덜 쓴다. 갈래를 모르는 말(용어 사전에만 있는 말)은 우리 채널 틀 중 어느 주제에나 맞는 것만 쓴다. 사람 별명('형컴과')처럼 규칙으로 모르는 고유 이름도 남을 수 있다. (2) 이름말·꾸밈말 판단은 낱말 끝 모양과 짧은 목록(`_KEEP_LEFT`·`_TITLE_WORDS`·`_GENERIC`)으로만 한다(형태소 분석 없음). (3) 용어 사전의 사람 이름은 팀·장소 꼴, 흔한 성 다섯(김·이·박·최·정)으로 시작하는 세 글자, 대사에서 '선수·님…'으로 부른 말만 뺀다 — 다른 성('한지성')·네 글자·부름말 없는 이름은 주제어가 될 수 있다. '오늘은 X' 소개 판단도 몇 가지 말투뿐이다. (4) 채널 전략(8단계)의 주제어는 여전히 `TERMS` + `strategy.TOPIC_EXTRA`이고 `SKILLS`·용어 사전·띄어 쓴 이름(`_kit_re`)을 읽지 않는다.
+- **위치**: `hooks.skeleton_info`·`_slot`·`_generic`·`category`·`topic_terms`·`topic_keywords`, `strategy._TOPIC_RES`
 - **임시방편**: 7단계 화면에서 후보를 고르거나 제목 칸을 고쳐 쓴다(고친 제목은 그대로 저장 · BR-007).
-- **해결 방향**: 쓸모없는 틀이 자주 나오면 그 낱말을 `_EVENT`·`_KEEP_LEFT`에 더한다. 채널 전략 주제어를 키트와 맞추려면 `strategy._TOPIC_RES` 를 `hooks.topic_terms()` 로 바꾸고 `tests.test_strategy*` 기대값을 확인한다.
+- **해결 방향**: 쓸모없는 틀이 자주 나오면 그 낱말을 `_EVENT`·`_KEEP_LEFT`·`_GENERIC`에, 새 기술 이름은 `SKILLS` 와 `_CATEGORY` 에 더한다. 채널 전략 주제어를 키트와 맞추려면 `strategy._TOPIC_RES` 를 `hooks.topic_terms()`·`_kit_re` 로 바꾸고 `tests.test_strategy*` 기대값을 확인한다.
 
 ## I-038 | 2026-10-07 | studio.log: 실행기 줄은 아직 연도 없음 · 네이티브 충돌 기록은 Windows 대비 작업 몫 · '갑자기 꺼짐'은 PC 끄기와 구별 못 함
 - **상태**: 열림
 - **심각도**: 낮음
 - **증상/내용**: (1) `updater.studio_log`(앱이 켜지기 전·업데이트 되돌리기)는 아직 `MM-DD HH:MM:SS` 로 쓴다 — 같은 함수를 Windows 대비 작업(feat_win)이 고치고 있어 이번에 건드리지 않았다. (2) faulthandler(WebView2·onnxruntime 같은 네이티브 충돌)와 traceback 전체는 Windows 대비 작업의 `studio-error.log`(pythonw 의 stderr) 몫이라 이 작업(studiolog)은 하지 않았다 — 두 작업을 합치기 전에는 네이티브 충돌의 위치가 남지 않고, studio.log 에는 '지난번 실행이 정상적으로 끝나지 않았어요'만 남는다. (3) 실행 표시(`studio.running.json`)는 PC 를 끄거나 로그아웃할 때 창 닫기가 끝까지 안 돌아도 남는다 → 다음에 켤 때 기록 한 줄(작업 중이 아니면 화면 알림은 없음). (4) 같은 작업 폴더로 앱 두 개를 띄우면(보통은 막힘) 두 번째가 첫 번째를 '갑자기 꺼짐'으로 적을 수 있다.
 - **위치**: `studiolog.py`, `updater.studio_log`, `app._session_start`·`_quit`·`restart`
-- **해결 방향**: feat_win 을 합칠 때 `updater.studio_log` 의 시각을 `studiolog.stamp()` 와 같은 꼴로, 갑자기 꺼짐 기록에 studio-error.log 를 가리키는 한 줄을 더한다.
+- **해결 방향**: feat_win 을 합칠 때 `updater.studio_log` 의 시각을 `studiolog.stamp()` 와 같은 꼴로, 갑자기 꺼짐 기록에 studio-error.log 를 가리키는 한 줄을 더한다. 그때 함께: (a) 문서가 어긋남 — `docs/CODING_STANDARDS.md` 는 'studio.log 하나', feat_win 의 `docs/ARCHITECTURE.md` 는 '두 파일을 함께 받는다' → 한쪽으로 맞춘다. (b) 갑자기 꺼짐 알림·`trouble.OTHER`·[studio.log 위치 열기](D-032)가 studio.log 만 말한다 → studio-error.log 도 같은 작업 폴더에 있다고 한 줄. (c) 편집실 패널 접기·너비 기억(localStorage `ed_*` · D-031)은 feat_win 의 webview `private_mode=False` 가 있어야 Windows 에서 다시 켜도 남는다(없으면 WebView2 가 지움).
 
 ## I-037 | 2026-10-07 | 캠코더 .MTS·.AVI·.WMV 등은 아직 못 씀 (보관함에 줄로만 보임)
-- **상태**: 열림
+- **상태**: 해결(2026-10-07) — 줄에 [MP4로 바꾸기](`intake.convert` · D-034). Windows 실기 확인은 I-036·I-041
 - **심각도**: 중간
 - **증상/내용**: 영상이지만 `core.VIDEO_EXTS`(mp4·mov·m4v·mkv·webm) 밖의 형식(`intake.UNUSABLE_EXTS`)은 보관함에 '이 형식은 아직 못 써요 (.MTS)' 줄로 보이고 고를 수 없다(예전에는 말없이 빠졌음). ffmpeg 는 이 형식을 읽지만 편집실 미리보기(WebView2 `<video>`)가 열지 못해 편집점 찾기·편집실 흐름에 넣지 않았다.
 - **위치**: `intake.unusable`, `ui.html` `renderLocal`
@@ -62,7 +69,8 @@
 - **심각도**: 중간
 - **증상/내용**: 아래는 Linux 개발 PC 에서 흉내(가짜 yt-dlp·자라는 파일·`_writer_open` 흉내)로만 확인했다. (1) 탐색기 복사 중인 파일을 `CreateFileW(GENERIC_READ, FILE_SHARE_READ)` 로 열면 공유 위반(32)이 나는지 — 탐색기·카메라 가져오기·OneDrive 마다 다를 수 있음. 백신·미리보기처럼 읽기만 하는 프로그램은 막지 않아야 함. (2) 처음 본 파일은 기다리지 않는다 — Windows 는 쓰기 손잡이로 복사 중을 알고, 그 밖(개발 PC)은 1초 뒤 다음 관찰에서 크기가 바뀌어야 안다. 탐색기가 크기를 처음에 다 잡아 두고 쓰기 손잡이도 없이 쓰는 도구가 있다면 놓친다. (3) 크롬·엣지·웨일이 켜져 있을 때의 'Could not copy Chrome cookie database'(#7271), 크롬 127+ 'Failed to decrypt with DPAPI'(#10927)가 실제로 그 문구로 오는지, 엣지·웨일도 새 보안 기능을 쓰는지(그러면 안내의 '엣지나 파이어폭스'를 '파이어폭스'로). (4) 안내는 영어 원문 패턴(`trouble._RULES`)에 기대므로 yt-dlp 가 문구를 바꾸면 '예상하지 못한 문제'로 떨어진다. (5) WebView2 에서 실패 카드의 고르기·버튼·스크롤.
 - **위치**: `intake._writer_open`·`copying`·`busy`, `trouble._RULES`, `ui.html` `showFail`
-- **해결 방향**: 소유자 PC 에서: 몇 GB 촬영본을 탐색기로 보관함에 끌어 넣으며 '복사 중' 칩이 끝까지 붙는지, 크롬을 켠 채·끈 채로 '이 브라우저로 다시 받기', 없는 채널 주소, 인터넷을 끈 채 불러오기. studio.log 의 '원문 ·' 줄로 새 문구를 모아 `_RULES` 에 더한다.
+- **추가 (D-032·D-034)**: (6) 브라우저 순서(파이어폭스 먼저 · 크롬은 맨 뒤 '최신 크롬은 안 될 수 있어요')와 이 PC 에 있는 브라우저 판단(`trouble.installed`: %APPDATA%\Mozilla\Firefox\Profiles · %LOCALAPPDATA%\Microsoft\Edge\User Data · …\Naver\Naver Whale\User Data · …\Google\Chrome\User Data). 엣지의 시작 부스트·백그라운드 실행이 창을 다 닫아도 로그인 정보 파일을 잡는지, 안내의 메뉴 이름('설정 › 시스템 및 성능', 크롬 '설정 › 시스템')이 맞는지, 엣지·웨일도 새 보안 기능(App-Bound)을 쓰는지. (7) [studio.log 위치 열기] = `explorer /select,"…"` 가 그 파일을 골라 보여 주는지(한글·공백 경로). (8) 쓰기 확인을 `FILE_SHARE_READ|FILE_SHARE_DELETE` 로 바꾼 뒤에도 탐색기 복사 중에 공유 위반(32)이 나는지 · 탐색기 복사가 끝날 때 원래 수정 시각을 붙여 '파일이 바뀌었어요'가 잡히는지(MTP 휴대폰·네트워크 드라이브 포함). (9) [MP4로 바꾸기]: 캠코더 AVCHD(1080i·AC-3) .MTS 가 화질 그대로 담기고 편집실에서 소리가 나는지, 몇 GB 파일의 시간.
+- **해결 방향**: 소유자 PC 에서: 몇 GB 촬영본을 탐색기로 보관함에 끌어 넣으며 '복사 중' 칩이 끝까지 붙는지, 크롬·엣지를 켠 채·끈 채로 '이 브라우저로 다시 받기', 없는 채널 주소, 인터넷을 끈 채 불러오기, 캠코더 .MTS [MP4로 바꾸기]. studio.log 의 '원문 ·' 줄로 새 문구를 모아 `_RULES` 에 더한다.
 
 ## I-035 | 2026-10-07 | 채널 전략 할 일: 편집실(MSG)·썸네일 편집기 안에는 아직 안 보임
 - **상태**: 열림
