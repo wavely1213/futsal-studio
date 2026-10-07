@@ -644,7 +644,10 @@ function capsTL() {
     }
   }
   out.sort((a, b) => a.s - b.s);
-  _caps = { v: ver, list: out }; return out;
+  // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · editor.py timeline_captions 와 같은 규칙)
+  const joined = [];
+  for (const c of out) { const p = joined[joined.length - 1]; if (p && p.cap === c.cap && Math.abs(c.s - p.e) <= 0.06) p.e = Math.max(p.e, c.e); else joined.push({ ...c }); }
+  _caps = { v: ver, list: joined }; return joined;
 }
 function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 

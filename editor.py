@@ -1498,6 +1498,9 @@ def track_state(seq, track_id, t, trans):
     return None
 
 
+CAP_JOIN = 0.06  # 같은 자막 조각 사이가 이만큼 안이면 이어진 것 (프레임 반올림 여유)
+
+
 def timeline_captions(proj):
     """자막을 타임라인 시간으로 (V1 의 원본 클립을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨)."""
     res = []
@@ -1516,8 +1519,24 @@ def timeline_captions(proj):
                         c = {"start": s, "end": e, "text": cap["text"]}
                         if ws:  # 노래방 자막용 단어 시각도 타임라인으로
                             c["words"] = [{"w": w.get("w", ""), "s": i_tl(it, float(w["s"])), "e": i_tl(it, float(w["e"]))} for w in ws]
+                        c["_k"] = id(cap)
                         res.append(c)
-    return sorted(res, key=lambda x: x["start"])
+    # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
+    # (editor.html capsTL 과 같은 규칙)
+    out = []
+    for c in sorted(res, key=lambda x: x["start"]):
+        p = out[-1] if out else None
+        if p is not None and p["_k"] == c["_k"] and abs(c["start"] - p["end"]) <= CAP_JOIN:
+            p["end"] = max(p["end"], c["end"])
+            if "words" in p and "words" in c:
+                p["words"] = p["words"] + c["words"]
+            else:
+                p.pop("words", None)
+            continue
+        out.append(c)
+    for c in out:
+        c.pop("_k", None)
+    return out
 
 
 # ---------- 단어 시각 · 쇼츠형 자막 나누기 (#5) ----------
