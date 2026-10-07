@@ -21,7 +21,9 @@ import editor
 import hooks
 import plan
 import qa
+import qr
 import refs
+import remote
 import source
 import style
 import thumb
@@ -41,8 +43,9 @@ def _utf8_console():
 _utf8_console()
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
-LOG, JOB = [], {"name": None, "result": None, "error": None}
+LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None}
 LOCK = threading.Lock()
+JOB_HOOKS = []  # 작업이 끝나면 부름 (이름, 오류, 결과, 시킨 곳, 걸린 초) — 휴대폰 알림·결과 (remote.Service.job_hook)
 
 
 LOGFILE = core.WORK / "studio.log"
@@ -63,11 +66,12 @@ def log(msg):
         pass
 
 
-def start_job(name, fn):
+def start_job(name, fn, by=None):
+    """긴 작업 하나 시작 (이미 돌고 있으면 False). by: 휴대폰에서 시켰으면 '휴대폰 · <기기 이름>'."""
     with LOCK:
         if JOB["name"]:
             return False
-        JOB.update(name=name, result=None, error=None)
+        JOB.update(name=name, result=None, error=None, by=by, t0=time.time())
 
     def runner():
         core.set_progress()
@@ -80,10 +84,33 @@ def start_job(name, fn):
             traceback.print_exc()
         finally:
             core.set_progress()
+            err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
             JOB["name"] = None
+            for h in list(JOB_HOOKS):
+                try:  # 알림 같은 곁가지가 작업을 깨뜨리지 않게
+                    h(name, err, res, by, secs)
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
 
     threading.Thread(target=runner, daemon=True).start()
     return True
+
+
+def _job_snapshot():
+    """휴대폰 화면용 지금 작업 모습 (remote.Bridge.job)."""
+    with LOCK:
+        return {"name": JOB["name"], "by": JOB["by"], "t0": JOB["t0"], "progress": dict(core.PROGRESS),
+                "result": JOB["result"], "error": JOB["error"]}
+
+
+def _log_lines(since):
+    with LOCK:
+        return LOG[since:], len(LOG)
+
+
+def _remote_bridge():
+    return remote.Bridge(log=log, start_job=start_job, job=_job_snapshot, logs=_log_lines, analyze=Handler._analyze,
+                         refs_job=_refs_job, version=core.VERSION)
 
 
 def _refs_job(fn):
@@ -124,7 +151,8 @@ def restart():
 
 
 def _quit():
-    """앱 끝내기: 저장 중인 프로젝트는 끝까지 쓰고, 남은 ffmpeg 는 끔 (Windows 는 자식 프로세스가 같이 안 꺼짐)."""
+    """앱 끝내기: 휴대폰에 '앱을 껐어요'를 알리고 터널을 끔 → 저장 중인 프로젝트는 끝까지 쓰고, 남은 ffmpeg 는 끔 (Windows 는 자식 프로세스가 같이 안 꺼짐)."""
+    remote.SVC.shutdown(timeout=2)
     editor.wait_saves(3)
     editor.cancel_export()
     os._exit(0)
@@ -404,7 +432,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
-                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local)})
+                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
+                                    "remote": remote.SVC.brief()})
+        if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
+            if not remote.SVC.store:
+                return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})
+            st = remote.SVC.pc_status()
+            if st["pair"]:
+                st["pair"]["qr"] = qr.encode(st["pair"]["link"])
+            return self._send(200, st)
         if u.path == "/api/timeline":
             n = q["name"][0]
             return self._send(200, {"text": core.timeline(n), "events": core.timeline_events(n)})
@@ -798,6 +834,45 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"용어 사전을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": f"용어 사전을 저장하지 못했어요 · {e}"})
             return self._send(200, dict(d, ok=True))
+        if path.startswith("/api/remote/"):  # 휴대폰으로 보기: 켜기·끄기·연결·끊기·설정 (PC 화면에서만 · 켜는 길은 여기뿐)
+            svc = remote.SVC
+            if not svc.store:
+                return self._send(503, {"ok": False, "error": "원격 접속을 준비하는 중이에요"})
+            try:
+                if path == "/api/remote/on":
+                    ok = svc.turn_on()
+                    return self._send(200 if ok else 400, {"ok": ok, "error": None if ok else svc.error, "state": svc.state})
+                if path == "/api/remote/off":
+                    svc.turn_off("user")
+                    return self._send(200, {"ok": True})
+                if path == "/api/remote/pair":
+                    pair = svc.pair_start()
+                    pair["qr"] = qr.encode(pair["link"])
+                    return self._send(200, {"ok": True, "pair": pair})
+                if path == "/api/remote/pair/cancel":
+                    svc.pairing.cancel()
+                    return self._send(200, {"ok": True})
+                if path == "/api/remote/revoke":
+                    if b.get("all") is True:
+                        n = svc.revoke(everyone=True)
+                    elif isinstance(b.get("id"), str):
+                        n = svc.revoke([b["id"]])
+                    else:
+                        return self._send(400, {"ok": False, "error": "끊을 휴대폰을 골라 주세요"})
+                    return self._send(200, {"ok": True, "removed": n})
+                if path == "/api/remote/settings":
+                    return self._send(200, {"ok": True, "settings": svc.set_settings(b)})
+                if path == "/api/remote/test":
+                    if not svc.store.data["devices"]:
+                        return self._send(400, {"ok": False, "error": "먼저 휴대폰을 연결해 주세요"})
+                    svc.test_notify()
+                    return self._send(200, {"ok": True})
+            except (remote.PairError, ValueError) as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"원격 접속 설정을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(404, {"error": "not found"})
         if path == "/api/restart":
             self._send(200, {"ok": True})
             threading.Timer(0.5, restart).start()
@@ -906,6 +981,12 @@ def main():
     _after_start()
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
+        remote.init(_remote_bridge())
+        JOB_HOOKS.append(remote.SVC.job_hook)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        log(f"휴대폰으로 보기를 준비하지 못했어요 · {e}")
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=ensure_shortcut, daemon=True).start()
     if "--browser" not in sys.argv:

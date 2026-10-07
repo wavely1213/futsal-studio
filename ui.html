@@ -306,6 +306,37 @@
   .drawer header .sp { flex: 1; }
   .drawer pre { margin: 0; height: 220px; overflow: auto; padding: 12px 20px; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-2); white-space: pre-wrap; }
 
+  /* 휴대폰으로 보기 (원격 접속 · remote.py) */
+  .rdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 6px; vertical-align: 1px; opacity: .55; }
+  .rdot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
+  .rdot.wait { background: var(--peak); opacity: 1; }
+  .rdot.err { background: var(--danger); opacity: 1; }
+  .rmask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 8; padding: 20px; }
+  .rmask.show { display: flex; }
+  .rbox { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; }
+  .rbox h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.3px; display: flex; align-items: center; gap: 8px; }
+  .rbox h2 .sp { flex: 1; }
+  .rbox .lead { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .rbox .small { font-size: 12px; color: var(--ink-3); margin-top: 8px; line-height: 1.5; }
+  .rbox .rsec { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+  .rbox .rsec h3 { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+  .rbox .rbar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 10px 0 4px; }
+  .rbox .rbar i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
+  .rbox .rok { color: var(--brand); font-weight: 700; }
+  .rbox .rerr { color: var(--danger); font-weight: 600; font-size: 13.5px; line-height: 1.55; }
+  .rbox .rpair { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; background: var(--surface-2); border-radius: 12px; padding: 14px; margin-top: 10px; }
+  .rbox .rpair svg { width: 220px; height: 220px; border-radius: 8px; display: block; }
+  .rbox .rcode { font: 700 22px/1.3 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 1px; margin: 6px 0; user-select: all; }
+  .rbox .rdev { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .rbox .rdev:last-child { border-bottom: 0; }
+  .rbox .rdev b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .rbox .rdev span { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+  .rbox .rrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+  .rbox .rrow > span:first-child { min-width: 110px; color: var(--ink-2); }
+  .rbox .rrow label { display: inline-flex; align-items: center; gap: 4px; }
+  .rbox .rtopic { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--surface-2); padding: 2px 6px; border-radius: 6px; user-select: all; }
+  .rbox .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .rbox .rbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   @media (max-width: 860px) {
     .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     .side { flex-direction: row; align-items: center; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -398,6 +429,7 @@
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
+      <button class="linkbtn" id="btnRemote" title="PC 작업을 휴대폰에서 보고 시키기"><i class="rdot" id="rmDot"></i>휴대폰으로 보기</button>
       <button class="linkbtn" id="btnUpdate">업데이트 확인</button>
       <div id="workspace" title=""></div>
     </div>
@@ -557,6 +589,7 @@
 
 <div class="topright"><span class="pill prog" id="busy"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="ptxt"><b><span id="busyTxt"></span><span class="pct" id="busyPct"></span></b><small id="busyDetail"></small></span></span><span class="pill upd" id="updPill"></span></div>
 <div class="toast" id="toast"></div>
+<div class="rmask" id="rmMask"><div class="card rbox" id="rmBox" role="dialog" aria-modal="true" aria-label="휴대폰으로 보기"></div></div>
 <div class="drawer" id="drawer"><header>작업 기록<span class="sp"></span><button class="linkbtn" id="btnLogClose">닫기</button></header><pre id="logtxt"></pre></div>
 
 <script>
@@ -1384,6 +1417,7 @@ async function poll() {
   state.progress = s.progress;
   state.local = s.local;
   state.sources = s.sources;
+  if (typeof remoteDot === "function") remoteDot(s.remote);
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
   if (wasBusy && !s.job && pending) {
     const f = pending; pending = null;
@@ -1589,6 +1623,101 @@ checkUpdate();
     navigator.sendBeacon("/api/upload/kit", new Blob([JSON.stringify({ name: up.name, seq: up.seq, edits: edits() })], { type: "text/plain;charset=UTF-8" }));  // 서버는 내용만 JSON 으로 읽음
   });
 })();
+</script>
+<script>
+/* 휴대폰으로 보기: 원격 접속 켜기·휴대폰 연결(QR·코드)·연결된 휴대폰·설정 (/api/remote*, remote.py) — 창을 연 동안만 2초마다 새로 */
+const RM = { open: false, iv: null, key: "", d: null };
+function remoteDot(r) {
+  const d = $("rmDot"); if (!d || !r) return;
+  d.className = "rdot " + ({ on: "on", error: "err", off: "" }[r.state] ?? "wait");
+  d.title = { on: `켜져 있어요 · 휴대폰 ${r.devices}대`, error: "문제가 생겼어요", off: "꺼져 있어요" }[r.state] || "준비하는 중";
+}
+const rmAgo = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; };
+const rmClock = t => new Date(t * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
+function rmQr(rows) {  // 서버가 준 '0'·'1' 줄 → SVG (글자를 그대로 넣지 않음)
+  const n = rows.length, q = 4, s = n + q * 2;
+  let p = "";
+  rows.forEach((r, y) => { for (let x = 0; x < n; x++) if (r[x] === "1") p += `M${x + q},${y + q}h1v1h-1z`; });
+  return `<svg viewBox="0 0 ${s} ${s}" shape-rendering="crispEdges" aria-label="연결 QR"><rect width="${s}" height="${s}" fill="#fff"/><path d="${p}" fill="#000"/></svg>`;
+}
+function rmRender(d) {
+  const st = d.state, set = d.settings || {}, nt = set.notify || {};
+  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen)]), set, d.notify.topic]);
+  if (key === RM.key) return;
+  RM.key = key;
+  let h = `<h2>휴대폰으로 보기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
+  if (st === "off") {
+    h += `<p class="lead">PC에서 하는 작업을 휴대폰으로 보고, 밖에서도 영상 받기·편집점 찾기·내보내기를 시킬 수 있어요. 켜 둔 동안에는 PC를 켜 두세요.</p>
+      <button class="btn primary" data-rm="on">원격 접속 켜기</button>
+      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>`;
+  } else if (st === "preparing") {
+    h += `<p class="lead">연결 도구 받는 중${d.prep != null ? " · " + esc(d.prep) + "%" : "…"}</p><div class="rbar"><i style="width:${Math.max(3, +d.prep || 0)}%"></i></div>
+      <div class="rbtns"><button class="btn" data-rm="off">그만두기</button></div>`;
+  } else if (st === "starting" || st === "restarting") {
+    h += `<p class="lead">${st === "starting" ? "연결하는 중이에요…" : "연결을 다시 잡는 중이에요…"} <span class="spin" style="display:inline-block;vertical-align:-2px"></span></p>
+      <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
+  } else if (st === "error") {
+    h += `<p class="rerr">${esc(d.error || "원격 접속을 켜지 못했어요")}</p>
+      <div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
+  } else {
+    const site = esc(String(d.site || "https://mulgyeol.kr/futsal").replace(/^https?:\/\//, ""));
+    h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰에서 <b>${site}</b> 을 열어 주세요</p>`;
+    if (d.pair) {
+      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">또는 휴대폰 화면에서 코드로 연결</div>
+        <div class="rcode">${esc(d.pair.code)}</div><div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
+        <div class="rbtns"><button class="btn sm" data-rm="pcancel">취소</button></div></div></div>`;
+    } else {
+      h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button>`
+        + (d.devices.length >= d.maxDevices ? `<div class="small">휴대폰은 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 휴대폰을 먼저 끊어 주세요</div>` : "");
+    }
+    h += `<div class="rsec"><h3>연결된 휴대폰</h3>` + (d.devices.length ? d.devices.map(x =>
+        `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmAgo(x.lastSeen))}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
+        + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 휴대폰 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
+    const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
+      .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
+    h += `<div class="rsec"><h3>설정</h3>
+      <div class="rrow"><span>자동으로 끄기</span><select class="inp" style="min-width:0;padding:5px 8px" data-rm="autoOff">${offOpt}</select></div>
+      <div class="rrow"><span>PC 잠들지 않게</span><div class="seg"><button data-rm="awake" data-v="job" class="${set.keepAwake !== "always" ? "on" : ""}">작업할 때만</button><button data-rm="awake" data-v="always" class="${set.keepAwake === "always" ? "on" : ""}">켜 둔 동안 항상</button></div></div>
+      <div class="rrow"><span>알림</span>${[["done", "작업 끝"], ["failed", "멈춤"], ["attention", "확인 필요"]].map(([k, t]) =>
+        `<label><input type="checkbox" data-rm="notify" data-k="${k}"${nt[k] !== false ? " checked" : ""}> ${t}</label>`).join("")}
+        <button class="btn sm" data-rm="test"${d.devices.length ? "" : " disabled"}>알림 시험</button></div>
+      <div class="small">알림은 ntfy 앱으로 받아요 · 휴대폰 화면 '더보기 → 알림 받기'에서 바로 켤 수 있어요 · 주제 이름 <span class="rtopic">${esc(d.notify.topic)}</span> <button class="linkbtn" data-rm="copyTopic">복사</button></div></div>
+      <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
+  }
+  $("rmBox").innerHTML = h;
+}
+async function rmLoad() {
+  let d;
+  try { d = await (await fetch("/api/remote")).json(); } catch (e) { return; }
+  if (!d || !d.state) return;
+  RM.d = d; remoteDot({ state: d.state, devices: d.devices.length });
+  if (RM.open) rmRender(d);
+}
+function rmOpen() { RM.open = true; RM.key = ""; $("rmMask").classList.add("show"); rmLoad(); clearInterval(RM.iv); RM.iv = setInterval(rmLoad, 2000); }
+function rmClose() { RM.open = false; clearInterval(RM.iv); RM.iv = null; $("rmMask").classList.remove("show"); }
+async function rmPost(path, body) { const r = await api(path, body || {}); RM.key = ""; await rmLoad(); return r; }
+$("btnRemote").onclick = rmOpen;
+$("rmMask").addEventListener("click", e => { if (e.target === $("rmMask")) rmClose(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && RM.open) rmClose(); });
+$("rmBox").addEventListener("click", async e => {
+  const b = e.target.closest("[data-rm]"); if (!b || b.tagName === "SELECT" || b.tagName === "INPUT") return;
+  const a = b.dataset.rm;
+  if (a === "close") return rmClose();
+  if (a === "on") return rmPost("/api/remote/on");
+  if (a === "off") { if (RM.d && RM.d.state === "on" && !confirm("원격 접속을 끌까요? 휴대폰에서는 PC를 볼 수 없게 돼요.")) return; return rmPost("/api/remote/off"); }
+  if (a === "pair") return rmPost("/api/remote/pair");
+  if (a === "pcancel") return rmPost("/api/remote/pair/cancel");
+  if (a === "revoke") { if (!confirm(`'${b.dataset.name}' 연결을 끊을까요?\n그 휴대폰에서는 더 이상 이 PC를 볼 수 없어요.`)) return; return rmPost("/api/remote/revoke", { id: b.dataset.id }); }
+  if (a === "revokeAll") { if (!confirm("연결된 휴대폰을 모두 끊을까요?\n다시 쓰려면 휴대폰마다 다시 연결해야 해요.")) return; return rmPost("/api/remote/revoke", { all: true }); }
+  if (a === "awake") return rmPost("/api/remote/settings", { keepAwake: b.dataset.v });
+  if (a === "test") { const r = await rmPost("/api/remote/test"); if (r.ok) toast("알림을 보냈어요 · 휴대폰을 확인해 주세요"); return; }
+  if (a === "copyTopic") { await copyText(RM.d.notify.topic); toast("주제 이름을 복사했어요"); }
+});
+$("rmBox").addEventListener("change", e => {
+  const t = e.target;
+  if (t.dataset.rm === "autoOff") rmPost("/api/remote/settings", { autoOffHours: +t.value });
+  if (t.dataset.rm === "notify") { const n = {}; $("rmBox").querySelectorAll('[data-rm="notify"]').forEach(c => n[c.dataset.k] = c.checked); rmPost("/api/remote/settings", { notify: n }); }
+});
 </script>
 </body>
 </html>
