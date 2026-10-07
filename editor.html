@@ -200,6 +200,7 @@
   .strip .bt { display: flex; gap: 3px; }
   .strip .bt button { width: 22px; height: 20px; border: 1px solid var(--line-2); background: var(--panel-3); border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; padding: 0; }
   .strip .bt button.m.on { background: #7a2a2d; color: #fff; } .strip .bt button.s.on { background: #8a7316; color: #fff; }
+  @container (max-width: 310px) { .mixer { gap: 4px; padding: 10px 6px; } .strip { width: 58px; } }  /* 오른쪽 패널 기본 너비(280~)에 A1~A3 + 전체가 다 보이게 */
 
   /* 기록 */
   .hrow { display: flex; gap: 8px; padding: 5px 12px; cursor: pointer; border-bottom: 1px solid #191919; }
@@ -311,6 +312,16 @@
   .pill #busyTxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(16px); background: #fff; color: #111; padding: 9px 16px; border-radius: 8px; font-weight: 700; opacity: 0; transition: .2s; pointer-events: none; z-index: 50; max-width: 80vw; }
   .toast.show { opacity: 1; transform: translateX(-50%); }
+  /* 작업 실패 카드 (내보내기·미리보기 파일): 쉬운 안내 전체 + 할 일 버튼, 닫을 때까지 남음 */
+  .failbar { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 60; width: min(680px, calc(100vw - 32px)); background: var(--panel-2); border: 1px solid var(--line-2); border-left: 4px solid var(--danger); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+  .failbar[hidden] { display: none; }
+  .failbar .ft { display: flex; gap: 10px; align-items: flex-start; }
+  .failbar .fic { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--danger); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 12px; margin-top: 1px; }
+  .failbar .ftx { flex: 1; min-width: 0; line-height: 1.55; -webkit-user-select: text; user-select: text; }
+  .failbar .ftx b { display: block; overflow-wrap: anywhere; }
+  .failbar .ftx small { color: var(--ink-3); }
+  .failbar .fbtns { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 30px; }
+  .ic.folded { color: var(--ink); background: var(--panel-3); box-shadow: inset 0 -2px 0 var(--peak); }  /* 접힌 패널 (켜짐(파란색)과 다르게) */
   .qabody { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
   .qabody .qi { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--panel-2); line-height: 1.5; }
   .qabody .qi[data-qt] { cursor: pointer; } .qabody .qi[data-qt]:hover { background: var(--panel-3); }
@@ -358,8 +369,8 @@
     <span class="tg on" id="linkBtn" title="연결해서 선택 — 영상과 그 소리를 함께 고르고 옮겨요 (Alt+클릭: 한쪽만)"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 9.5l3-3M7 4.5l1.5-1.5a2.5 2.5 0 013.5 3.5L10.5 8M9 11.5L7.5 13a2.5 2.5 0 01-3.5-3.5L5.5 8"/></svg>연결 선택</span>
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3L2 6l3 3"/><path d="M2 6h7a4 4 0 010 8H6"/></svg></button>
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 3l3 3-3 3"/><path d="M14 6H7a4 4 0 000 8h3"/></svg></button>
-    <button class="ic" id="lpBtn" title="왼쪽 패널 접기 (자막·편집본) — 미리보기를 넓게"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/><path d="M3 5.5h1.5M3 8h1.5" stroke-width="1.2"/></svg></button>
-    <button class="ic" id="rpBtn" title="오른쪽 패널 접기 (효과 컨트롤·색보정·오디오) — 미리보기를 넓게"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/><path d="M11.5 5.5H13M11.5 8H13" stroke-width="1.2"/></svg></button>
+    <button class="ic" id="lpBtn" title="왼쪽 패널 접기 (자막·편집본) — 타임라인을 넓게 (미리보기를 크게 하려면 타임라인 위 손잡이를 아래로 끌어요)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/><path d="M3 5.5h1.5M3 8h1.5" stroke-width="1.2"/></svg></button>
+    <button class="ic" id="rpBtn" title="오른쪽 패널 접기 (효과 컨트롤·색보정·오디오) — 타임라인을 넓게 (미리보기를 크게 하려면 타임라인 위 손잡이를 아래로 끌어요)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/><path d="M11.5 5.5H13M11.5 8H13" stroke-width="1.2"/></svg></button>
     <button class="ic" id="help" title="단축키 보기">⌨</button>
     <button class="btn" id="toThumb" title="이 영상으로 썸네일 만들기">썸네일 만들기</button>
     <span class="pill" id="busy"><span id="busyTxt">내보내는 중</span><span class="bar"><i id="busyBar"></i></span><span id="busyPct"></span><button class="ic" id="busyStop" title="내보내기 멈추기">✕</button></span>
@@ -453,6 +464,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="failbar" id="failbar" role="alert" hidden></div>
 <div class="dtip" id="dtip"></div>
 <div class="ghost" id="ghost"></div>
 <div class="cmenu" id="cmenu"></div>
@@ -1206,7 +1218,7 @@ async function makeProxy(md) {
     $("busyTxt").textContent = "미리보기 파일 · " + (pr.detail || ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
     if (!s.job) {
       clearInterval(iv); $("busy").classList.remove("show");
-      if (s.error) return toast(s.error.includes("멈췄어요") ? "미리보기 파일 만들기를 멈췄어요" : "미리보기 파일 실패 · " + s.error.slice(0, 80));
+      if (s.error) return s.error.includes("멈췄어요") ? toast("미리보기 파일 만들기를 멈췄어요") : showEdFail(s, "미리보기 파일 만들기", () => makeProxy(md));
       md.proxy = true; for (const e of [...POOL.values()]) if (e.mid === md.id) killEntry(e);
       scheduleSave(); frameDirty = true; renderMediaBin(); toast("미리보기 파일 완성 · 이제 부드럽게 재생돼요 (내보내기는 원본 화질)");
     }
@@ -2286,7 +2298,7 @@ const SHAPES = {
 function addShape(kind) {
   commit("도형 추가");
   const sh = { id: nid(), name: kind, start: fr(T), dur: Math.min(5, Math.max(1, total() - T)), ...SHAPES[kind]() };
-  S.shapes.push(sh); selX = { k: "shape", id: sh.id }; selI.clear(); setRtab("fx"); changed(false); toast(`${kind}을(를) 넣었어요 · 오른쪽에서 위치·크기·색 조절`);
+  S.shapes.push(sh); selX = { k: "shape", id: sh.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`${kind}을(를) 넣었어요 · 오른쪽에서 위치·크기·색 조절`);
 }
 const baseTitle = () => ({ ...S.captionStyle, weight: "Black", size: 104, y: 0.2, fill: "#FFD400", stroke: "#000000", strokeW: 8, bgOn: false, effect: "pop", x: 0.5, align: "center" });
 function addTitle() {
@@ -2315,7 +2327,7 @@ function addGfx(name, at) {
   let last = null;
   for (const s of g.shapes) { const sh = { id: nid(), start: t0, dur: g.dur, ...s }; S.shapes.push(sh); }
   for (const tt of g.titles) { last = { id: nid(), start: t0, dur: g.dur, ...tt }; S.titles.push(last); }
-  if (last) selX = { k: "title", id: last.id }; selI.clear(); setRtab("fx"); changed(false); toast(`"${name}"을(를) 넣었어요 · 글자는 오른쪽에서 바꿔요`);
+  if (last) selX = { k: "title", id: last.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`"${name}"을(를) 넣었어요 · 글자는 오른쪽에서 바꿔요`);
 }
 
 /* ---------- 자막 목록 ---------- */
@@ -2570,11 +2582,12 @@ async function dropOn(kind, name, e, mode, atT) {
   commit("장면 전환 넣기");
   const tr = addTransAt(it, side, name);
   if (!tr) { uncommit(); return; }
-  selX = { k: "trans", id: tr.id }; selI.clear(); setRtab("fx"); changed(false); toast(`${TRN[name]}을(를) 넣었어요 · 길이는 오른쪽에서 조절`);
+  selX = { k: "trans", id: tr.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`${TRN[name]}을(를) 넣었어요 · 길이는 오른쪽에서 조절`);
 }
 
 /* ---------- 오른쪽 패널 ---------- */
-function setRtab(t) {
+function setRtab(t, open) {  // open: 사용자가 속성을 보려고 한 동작(두 번 누르기·넣기) → 접어 둔 오른쪽 패널을 폄
+  if (open && window.showPanel) showPanel("r");
   const was = rtab; rtab = t; document.querySelectorAll("#rtabs .tab").forEach(b => b.classList.toggle("on", b.dataset.rt === t));
   for (const k of ["fx", "color", "audio", "seq", "hist"]) { $("rt-" + k).style.display = k === t ? "" : "none"; if (k !== t) $("rt-" + k).innerHTML = ""; } // 숨긴 탭은 비움 (같은 id 가 두 벌 생기지 않게)
   renderPanels(); if (t === "hist" && was !== "hist") loadBackups();
@@ -3293,11 +3306,37 @@ $("exGo").onclick = async () => {
   const opts = { video: $("exVideo").checked, xml: $("exXml").checked, srt: $("exSrt").checked, hw: $("exHw").checked, preset: EXP.preset, fps: EXP.fps, range: EXP.range === "io" ? [markIn, markOut] : null };
   EXP_JOB = { t0, fmt: S.format, seq: S.id, master: { normalize: S.master.normalize !== false, lufs: S.master.lufs ?? -14 } };
   await saveNow();
-  const r = await (await post("/api/edit/export", { name: NAME, project: proj, opts })).json();
+  LAST_EXPORT = { body: { name: NAME, project: proj, opts }, job: { ...EXP_JOB } };
+  startExport();
+};
+async function startExport() {  // 내보내기 시작 (실패 카드의 [다시 내보내기]도 같은 편집본·설정으로)
+  hideEdFail();
+  EXP_JOB = { ...LAST_EXPORT.job };
+  const r = await (await post("/api/edit/export", LAST_EXPORT.body)).json();
   if (!r.ok) return toast(r.error || "지금은 내보낼 수 없어요");
   toast("내보내기 시작 · 그동안 계속 편집해도 돼요"); watchJob("내보내기");
-};
-let EXP_JOB = { t0: 0, fmt: null, seq: null, master: null }, JOBNAME = "";
+}
+let EXP_JOB = { t0: 0, fmt: null, seq: null, master: null }, JOBNAME = "", LAST_EXPORT = null;
+// 편집실에서 쓰는 실패 안내: 내보내기에서 변환 도구가 멈춘 경우는 내보내기에 맞는 말 · 편집실에 없는 [업데이트 확인]은 스튜디오 창을 가리킴
+const ED_FAIL_TEXT = { ffmpeg: "완성본을 만들다가 영상 변환 도구(ffmpeg)가 멈췄어요. 효과·전환을 줄이거나 내보내기 창의 '그래픽카드로 빠르게 만들기'를 끄고 다시 내보내 보세요" };
+function hideEdFail() { const b = $("failbar"); b.hidden = true; b.innerHTML = ""; }
+function showEdFail(s, what, again) {
+  const f = s.fail || { kind: "other", msg: s.error, actions: ["retry"] }, bar = $("failbar");
+  const msg = ((what === "내보내기" && ED_FAIL_TEXT[f.kind]) || f.msg || s.error || "문제가 생겼어요").replace("[업데이트 확인]", "스튜디오 창 왼쪽 아래 [업데이트 확인]");
+  const now = new Date(), hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const acts = [...(again ? [["again", what === "내보내기" ? "다시 내보내기" : "다시 만들기"]] : []),
+    ...(what === "내보내기" ? [["out", "완성본 폴더 열기"]] : (f.actions || []).includes("folder") ? [["videos", "보관함 폴더 열기"]] : []), ["log", "studio.log 위치 열기"]];
+  bar.innerHTML = `<div class="ft"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(what)} · ${hm}</small></div><button class="ic" data-fx title="닫기" aria-label="닫기">✕</button></div>`
+    + `<div class="fbtns">${acts.map(([k, l], i) => `<button class="btn${i ? "" : " pri"}" data-fa="${k}">${l}</button>`).join("")}</div>`;
+  bar.hidden = false;
+  bar.querySelector("[data-fx]").onclick = hideEdFail;
+  bar.querySelectorAll("[data-fa]").forEach(b => b.onclick = () => {
+    const a = b.dataset.fa;
+    if (a === "again") { hideEdFail(); again(); }
+    else if (a === "log") post("/api/open", { which: "log" });
+    else post("/api/open", { which: a });
+  });
+}
 const etaTxt = s => s == null ? "" : s >= 60 ? `약 ${Math.floor(s / 60)}분 ${s % 60}초 남음` : `약 ${s}초 남음`;
 function watchJob(name) {
   JOBNAME = name || "내보내기";
@@ -3308,8 +3347,8 @@ function watchJob(name) {
     $("busyTxt").textContent = (pr.detail || (qaRunning ? "검수 중" : "내보내는 중")) + (pr.eta != null ? " · " + etaTxt(pr.eta) : ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
     if (!s.job) {
       clearInterval(iv); $("busy").classList.remove("show"); $("exportBtn").disabled = false;
-      if (s.error && qaRunning) { qaRunning = null; toast(s.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수 실패 · " + s.error.slice(0, 80)); post("/api/open", { which: "out" }); }
-      else if (s.error) { toast(s.error.includes("멈췄어요") ? "내보내기를 멈췄어요" : "실패 · " + s.error.slice(0, 100)); }
+      if (s.error && qaRunning) { qaRunning = null; toast(s.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수는 못 했어요 · 완성본 폴더를 열게요 · " + s.error); post("/api/open", { which: "out" }); }
+      else if (s.error) { if (s.error.includes("멈췄어요")) toast("내보내기를 멈췄어요"); else showEdFail(s, "내보내기", LAST_EXPORT && startExport); }
       else if (qaRunning) { if (s.result && s.result.items) showVideoQA(s.result); else qaRunning = null; }
       else if (Array.isArray(s.result) && /\.mp4$/i.test(s.result[0] || "") && $("exQa").checked) runVideoQA(s.result[0]);
       else { toast("내보냈어요! 완성본 폴더를 열게요"); post("/api/open", { which: "out" }); }
@@ -3485,9 +3524,21 @@ $("tracks").addEventListener("click", e => {
 $("tracks").addEventListener("dblclick", e => {
   const mk = e.target.closest(".umk");
   if (mk) { const m = S.markers[+mk.dataset.mk], n = prompt("마커 이름 (메모)", m.name || ""); if (n !== null) { commit("마커 이름"); m.name = n.trim(); changed(false); } return; }
-  const ce = e.target.closest(".clip[data-id]"); if (ce && tool === "select") { setRtab("fx"); }
+  const ce = e.target.closest(".clip[data-id], .clip[data-gk], .trn[data-tr]"); if (ce && tool === "select") { setRtab("fx", true); }
 });
-addEventListener("resize", () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); } });
+addEventListener("resize", () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); seatTracks(); } });
+// 낮은 타임라인(노트북 창)에서도 V1(영상)·A1(대사 소리)이 보이게: 둘 다 안 보이면 영상·소리 경계를 가운데로 (프리미어처럼)
+// 다 보이면 그대로 (사용자가 굴려 둔 자리를 건드리지 않음) · 열 때 · 창 크기·타임라인 높이·패널 접기가 바뀔 때
+function seatTracks() {
+  const sc = $("tlscroll"), v1 = document.querySelector('#tracks .row[data-tk="V1"]'), a1 = document.querySelector('#tracks .row[data-tk="A1"]');
+  if (!sc || !v1 || !a1) return;
+  const ru = document.querySelector("#tracks .row.ruler"), rh = ru ? ru.offsetHeight : 0, top0 = sc.getBoundingClientRect().top - sc.scrollTop;
+  const y = el => el.getBoundingClientRect().top - top0;  // 굴리기 전 기준 위치
+  const vt = y(v1), ab = y(a1) + a1.offsetHeight;
+  if (vt >= sc.scrollTop + rh && ab <= sc.scrollTop + sc.clientHeight) return;
+  const mid = y(a1), view = sc.clientHeight - rh;  // 둘이 다 들어가면 경계를 가운데로, 안 들어가면 V1 위를 맨 위로
+  sc.scrollTop = clamp(ab - vt <= view ? mid - rh - view / 2 : vt - rh, 0, Math.max(0, sc.scrollHeight - sc.clientHeight));
+}
 // 패널 크기: 타임라인 높이(창 높이 비율) · 좌우 패널 너비 · 접기 — 끌어서 바꾸고 두 번 누르면 처음 크기, 이 PC 에만 기억
 // 기본값은 CSS(.app)가 창 크기에 비례해 정함 · 여기 값은 그 위에 덮는 사용자 선택
 const PANEL_MIN = { l: 200, r: 260, mid: 360 };  // 왼쪽·오른쪽 패널 최소 너비 · 가운데(미리보기·타임라인) 최소 너비
@@ -3496,7 +3547,7 @@ const TL_RATIO = [0.22, 0.72];  // 타임라인 높이: 창 높이의 22%~72%
   const app = $("app"), sp_ = $("split");
   const keep = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, String(v)); } catch (e) {} };
   const read = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
-  const refresh = () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); } };
+  const refresh = () => { if (P) { layoutFrame(); layoutSrc(); renderTimeline(); seatTracks(); } };
   const setTl = r => r == null ? app.style.removeProperty("--tlh") : app.style.setProperty("--tlh", (clamp(r, ...TL_RATIO) * 100).toFixed(2) + "vh");
   const setW = (sd, px) => px == null ? app.style.removeProperty(`--${sd}w`) : app.style.setProperty(`--${sd}w`, Math.round(px) + "px");
   const width = sel => { const e = document.querySelector(sel); return e && e.offsetParent ? e.getBoundingClientRect().width : 0; };
@@ -3509,11 +3560,17 @@ const TL_RATIO = [0.22, 0.72];  // 타임라인 높이: 창 높이의 22%~72%
   for (const sd of ["l", "r"]) { const w = parseFloat(read(`ed_${sd}w`)); if (w > 0) setW(sd, w); }
   const NAMES = { l: ["왼쪽", "자막·편집본"], r: ["오른쪽", "효과 컨트롤·색보정·오디오"] };
   const fold = (sd, on, save = true) => {
+    const fr = $("frame"), w0 = fr ? fr.getBoundingClientRect().width : 0;
     app.classList.toggle(sd === "l" ? "noleft" : "noright", on);
-    const b = $(sd + "pBtn"); b.classList.toggle("on", on);
-    b.title = on ? `${NAMES[sd][0]} 패널 펴기 (${NAMES[sd][1]})` : `${NAMES[sd][0]} 패널 접기 (${NAMES[sd][1]}) — 미리보기를 넓게`;
+    const b = $(sd + "pBtn"); b.classList.toggle("folded", on);
+    b.title = on ? `${NAMES[sd][0]} 패널 펴기 (${NAMES[sd][1]})` : `${NAMES[sd][0]} 패널 접기 (${NAMES[sd][1]}) — 타임라인을 넓게 (미리보기를 크게 하려면 타임라인 위 손잡이를 아래로 끌어요)`;
     if (save) keep(`ed_${sd}fold`, on ? "1" : null);
     refresh();
+    // 미리보기는 칸 높이에 맞춰져서, 낮은 창에서는 접어도 커지지 않음 → 크게 보는 방법을 한 번 알려 줌 (이 PC 에 한 번)
+    if (save && on && fr && fr.getBoundingClientRect().width < w0 + 8 && read("ed_foldtip") !== "1") {
+      keep("ed_foldtip", "1");
+      toast("미리보기는 창 높이에 맞춰져 있어요 · 더 크게 보려면 타임라인 위 손잡이를 아래로 끌어 주세요 (두 번 누르면 처음 높이)");
+    }
   };
   window.showPanel = sd => { if (app.classList.contains(sd === "l" ? "noleft" : "noright")) fold(sd, false); };
   for (const sd of ["l", "r"]) {
@@ -3529,7 +3586,7 @@ const TL_RATIO = [0.22, 0.72];  // 타임라인 높이: 창 높이의 22%~72%
     addEventListener("mousemove", mv); addEventListener("mouseup", up);
   };
   drag(sp_, e => setTl(clamp(innerHeight - e.clientY - 1, 200, innerHeight - 240) / innerHeight),
-    () => keep("ed_tlr", (parseFloat(app.style.getPropertyValue("--tlh")) / 100).toFixed(4)));
+    () => { keep("ed_tlr", (parseFloat(app.style.getPropertyValue("--tlh")) / 100).toFixed(4)); seatTracks(); });
   drag($("lsplit"), e => setW("l", clamp(e.clientX - 1, PANEL_MIN.l, innerWidth - width(".props") - PANEL_MIN.mid)),
     () => keep("ed_lw", parseFloat(app.style.getPropertyValue("--lw"))));
   drag($("rsplit"), e => setW("r", clamp(innerWidth - e.clientX - 1, PANEL_MIN.r, innerWidth - width(".lp") - PANEL_MIN.mid)),
@@ -3563,7 +3620,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;
   for (const m of P.media) if (m.id !== "main") loadBundle(m);
   setTool("select");
-  layoutFrame(); zoomFit(); renderCaps(); renderPanels(); renderBin(); showCapBan(j.capLong);
+  layoutFrame(); zoomFit(); renderCaps(); renderPanels(); renderBin(); showCapBan(j.capLong); seatTracks();
   $("saved").textContent = "자동 저장 켜짐";
   requestAnimationFrame(loop);
   const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기") watchJob("내보내기");
