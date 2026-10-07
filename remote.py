@@ -24,7 +24,6 @@ import secrets
 import sys
 import threading
 import time
-import traceback
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,14 +95,17 @@ NOTE_TEXT = {
     "tunnel": "확인이 필요해요 · 원격 연결이 자꾸 끊겨요",
     "blocked": "확인이 필요해요 · YouTube가 막았어요",
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
+    "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
     "moved": "알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · mulgyeol.kr/futsal 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
-MISSED_MSG = "받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요"
+MISSED_MSG = ("받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 "
+              "브라우저를 골라 다시 받아 주세요")
+PARTIAL_MSG = "편집점을 찾지 못한 영상이 {n}개 있어요 · {why}"  # 여러 영상 중 그 파일만의 문제(깨짐 등)로 건너뜀 (core.analyze_many)
 NOT_STOPPABLE_MSG = "이 작업은 중간에 멈출 수 없어요 · 끝나면 알려 드릴게요"
 BLOCKED_PHONE_MSG = ("YouTube가 막았어요 · PC 스튜디오에서 '업데이트 확인'으로 다운로드 엔진을 최신으로 바꾸거나 "
-                     "'크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요")
+                     "'로그인 정보로 받기'에서 YouTube에 로그인해 둔 브라우저를 골라 다시 받아 주세요")
 # 채널 전략 새로 고침·점검은 멈추거나 막혀도 ok:true (끝난 채널은 저장) → 휴대폰에는 stopped·blocked·net 으로 '멈췄어요'·'확인이 필요해요' (D-028)
 STRATEGY_REFRESHING = {strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK}
 STRATEGY_MSG = {
@@ -192,12 +194,21 @@ def scrub(s):
 
 
 def _trace():
-    """방금 난 오류의 추적을 오류 출력으로 — 비밀은 지우고. pythonw 에서는 app._error_log 가 이것을 studio-error.log 에 남긴다
-    (예전에는 버려졌던 출력이라 원격 쪽 추적에 표·주소가 섞여도 몰랐음 · D-034)."""
+    """방금 난 오류를 기록 — studiolog.trace 하나로 (D-044): studio.log 에 '휴대폰 연결 오류 위치' 한 줄 + 오류 출력(pythonw 면
+    app._error_log 의 studio-error.log)에 traceback 전체. 둘 다 비밀(redact)은 지움 (예전에는 버려졌던 출력이라 원격 쪽 추적에
+    표·주소가 섞여도 몰랐음 · D-034)."""
     try:
-        sys.stderr.write(redact(traceback.format_exc()))
+        import studiolog
+        studiolog.trace(sys.exc_info()[1], "휴대폰 연결 오류 위치")
     except Exception:  # noqa: BLE001 — 기록 실패가 요청·끄기를 막지 않게
         pass
+
+
+def _missed(result):
+    """받기 작업 결과 → 못 받은 영상 id 목록 (휴대폰 받기는 목록 · PC 화면 받기는 {failed, why})."""
+    if isinstance(result, dict):
+        result = result.get("failed")
+    return result if isinstance(result, list) else []
 
 
 def _lru_put(d, k, v, cap=LRU_MAX):
@@ -1232,8 +1243,13 @@ class Service:
                 blocked = bool(result.get("blocked"))
                 ok, warn, note = False, True, "blocked" if blocked else "net"
                 err = STRATEGY_MSG[note]
-        elif name == "보관함에 담기" and isinstance(result, list) and result:  # 받기 작업은 못 받은 영상 id 목록을 돌려줌
-            ok, warn, err = False, True, MISSED_MSG.format(n=len(result))
+        elif name == "보관함에 담기" and _missed(result):  # 받기: 못 받은 영상 id 목록 (PC 화면이 시킨 받기는 {failed, why})
+            ok, warn, err = False, True, MISSED_MSG.format(n=len(_missed(result)))
+        elif isinstance(result, dict) and isinstance(result.get("failed"), list) and result["failed"] \
+                and isinstance(result.get("why"), dict):  # 편집점 찾기: 일부 영상만 건너뜀 → 쉬운 한 줄 (trouble.explain)
+            first = result["why"].get(result["failed"][0]) or {}
+            ok, warn, note = False, True, "partial"
+            err = scrub(PARTIAL_MSG.format(n=len(result["failed"]), why=first.get("msg") or ""))
         self.last = {"name": name, "ok": ok, "warn": warn, "error": err, "blocked": blocked, "endedAt": int(self.clock()), "by": by}
         if name == "영상 검수" and isinstance(result, dict) and result.get("file"):  # 검수 결과는 완성본 목록에 같이 보여 줌
             summary = {k: result.get(k) for k in ("score", "bad", "warn", "duration", "width", "height")}
@@ -1589,9 +1605,9 @@ def _a_download(svc, dev, a, tok):
     log = svc.bridge.log
 
     def run():
-        failed = core.download([vid], log, None)  # 원격에서는 쿠키를 쓰지 않음 (D-009) — 막히면 PC 에서 '크롬 로그인 정보로 받기'
+        failed = core.download([vid], log, None)  # 원격에서는 쿠키를 쓰지 않음 (D-009 · 브라우저 고르기는 PC 화면에서만) — 막히면 PC 에서 '로그인 정보로 받기'
         if failed:
-            log("  PC에서 '크롬 로그인 정보로 받기'로 다시 받아 주세요")
+            log("  PC에서 '로그인 정보로 받기'로 브라우저를 골라 다시 받아 주세요")
         return failed
     return svc._go(dev, "보관함에 담기", run, vid)
 

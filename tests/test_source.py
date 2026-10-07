@@ -488,7 +488,7 @@ class RouteTests(Base):
         self.assertEqual((res[0]["source"]["kind"], res[0]["source"]["channel"], res[0]["source"]["channelKey"]), ("other", "슛포러브", OTHER_ID))
         self.assertEqual(res[0]["title"], "남의 영상")
 
-        def fake_download(ids, log, ck=None):
+        def fake_download(ids, log, ck=None, **kw):  # why= (받지 못한 까닭) 등 새 인자도 받음
             for v in ids:
                 (self.videos / yt_name(v)).write_bytes(b"\0")
             return []

@@ -33,8 +33,8 @@ TRIES, WAIT = 20, 0.1           # Windows: 백신·탐색기·편집실이 잠�
 SETTLE_SECS = 60                # 막 받은 큰 영상은 백신(Defender)이 오래 검사함 → 받는 폴더에서 옮길 때는 더 오래 기다림
 ORIGINAL_NAMES = ("풋살사관학교", "내 촬영본")  # 보관함에서 확인하고 옮긴 원본(우리 채널·촬영본) 채널 이름
 READ_TRIES = 5
-BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
-               "이 화면 '채널 추가' 칸의 '크롬 로그인 정보로 받기'를 켜고 다시 받아 보세요.")
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(파이어폭스·엣지·웨일·"
+               "크롬)를 이 화면 '채널 추가' 칸의 '로그인 정보로 받기'에서 고른 뒤 다시 받아 보세요.")
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 _LOCK = threading.RLock()
@@ -879,7 +879,8 @@ _FETCHING = [0]  # 받는 중인 작업 수 (그동안은 받는 폴더의 파�
 
 def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
     """items [{id, channel…(힌트), title, kind, url}] → 학습용으로 받기. 이미 학습용에 있거나 편집용 보관함에 있는 영상은 건너뜀.
-    → {"got": [파일 이름], "failed": [영상 id], "skipped": [영상 id], "library": [보관함에 있는 영상 id], "locked": [영상 id]}"""
+    → {"got": [파일 이름], "failed": [영상 id], "skipped": [영상 id], "library": [보관함에 있는 영상 id], "locked": [영상 id],
+       "why": {영상 id: 받지 못한 까닭(쉬운 안내 · 막히면 이 화면용 BLOCKED_MSG)}}"""
     have = _have_ids()
     todo, skipped, lib = [], [], []
     for it in items:
@@ -894,9 +895,9 @@ def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
             todo.append(it)
     if lib:
         log(f"  편집용 보관함에 이미 있는 영상 {len(lib)}개는 건너뛰어요 (보관함에서 '학습용으로 옮기기'로 옮길 수 있어요)")
-    got, failed, locked = [], [], []
+    got, failed, locked, why = [], [], [], {}
     if not todo:
-        return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked}
+        return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked, "why": why}
     hints = {it["id"]: it for it in todo}
     done = {}  # 영상 id → 상태 (new·dup·locked·error)
 
@@ -921,7 +922,8 @@ def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
     with _LOCK:
         _FETCHING[0] += 1
     try:
-        failed = core.download([it["id"] for it in todo], log, cookies, dest=root() / INCOMING, archive=False, label=label, remember=remember)
+        failed = core.download([it["id"] for it in todo], log, cookies, dest=root() / INCOMING, archive=False, label=label, remember=remember,
+                               why=why, blocked_msg=BLOCKED_MSG)
         for it in todo:  # 정보 없이 끝났거나(훅이 안 불림) 잠겨서 못 옮긴 영상 → 더 오래 기다리며 다시
             vid = it["id"]
             if vid not in failed and done.get(vid) in (None, "locked", "error"):
@@ -941,7 +943,7 @@ def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
         elif st != "new" and vid not in failed:
             failed.append(vid)
             log(f"  받은 영상 파일을 찾지 못했어요 · {vid}")
-    return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked}
+    return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked, "why": why}
 
 
 def channel_names(key):

@@ -368,7 +368,7 @@ def studio_log(app_dir, msg):
         ws = workspace(app_dir)
         ws.mkdir(parents=True, exist_ok=True)
         with open(ws / "studio.log", "a", encoding="utf-8", errors="replace") as f:
-            f.write(time.strftime("%m-%d %H:%M:%S ") + str(msg) + "\n")
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + str(msg) + "\n")  # studiolog.stamp 와 같은 꼴 (연도 포함)
     except (OSError, ValueError):
         pass
 

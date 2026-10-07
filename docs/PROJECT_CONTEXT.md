@@ -71,6 +71,9 @@ refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 �
 ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
 strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
 forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
+intake.py           보관함에 들어오는 영상 살피기 (복사 중·못 쓰는 형식·편집점을 찾은 뒤 바뀐 파일)
+trouble.py          작업 오류 → 쉬운 한 줄 + 할 일 (화면의 실패 카드) · 로그인 정보 브라우저 목록
+studiolog.py        studio.log 쓰기 (연도 붙은 시각·크기 제한·오류 위치·갑자기 꺼짐 표시)
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027)
 tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
@@ -94,7 +97,7 @@ icon.ico / icon.png 앱 아이콘
 
 - **저장소 밖에 있는 것 (주의)**: 아래 파일은 저장소가 아니라 리드 개발 환경의 scratchpad(`$SCRATCH`, 경로는 `AGENTS.md` 5번)에 있다. 잃어버릴 위험이 있다 (`KNOWN_ISSUES.md` I-018).
   - 썸네일 화면 원본: 저장소 안 `thumb_src/head.html` + `thumb_src/parts/p1_core.js` … `p7_auto.js`. 이것을 `python3 thumb_src/build.py`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
-  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
+  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상), `e1a_ui/ui_test.py`(복사 중·실패 카드·브라우저 고르기·studio.log). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
   - 작업 목록: `backlog.json`(순위별 기능·범위·버린 것), `batch1_result.json`(1차 결과).
 - 상세 모듈 구조와 의존 방향은 `ARCHITECTURE.md` 참고.
 
@@ -123,7 +126,7 @@ icon.ico / icon.png 앱 아이콘
 
 | 서비스 | 용도 | 키 관리 위치 |
 |---|---|---|
-| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '크롬 로그인 정보로 받기'를 켤 때만 그 브라우저에서 읽음 (`cookiesfrombrowser`) |
+| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '로그인 정보로 받기'에서 브라우저(크롬·엣지·웨일·파이어폭스)를 고를 때만 그 브라우저에서 읽음 (`cookiesfrombrowser` · D-036) |
 | YouTube 공개 RSS (`www.youtube.com/feeds/videos.xml?channel_id=UC…`) | 채널 전략: 채널마다 최근 15개 영상의 정확한 날짜·조회수·좋아요·원제. 사용자가 [새로 고침]·[지금 점검하기]를 누를 때와 8단계를 열 때 우리 채널 하루 한 번만 (D-024 · BR-016) · 시간 제한 20초 · 응답 2MB 까지 · DOCTYPE/ENTITY 가 든 응답은 거절 · 429·5xx 는 5초 뒤 한 번만 다시 | 키 없음. 쿠키 없음 (User-Agent `futsal-studio/<버전>`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치(켜진 앱이 쓰는 파일 때문에 못 하면 다음 실행 때 실행기가). Python 지원이 끝날 무렵(3.N 은 2016+N 년 7월부터)에만 `pypi.org/pypi/yt-dlp/json` 으로 최신 yt-dlp 가 받는 Python 을 확인 (`core._engine_needs_newer_python`) | 없음 |
 | Microsoft (aka.ms) | `시작하기 (Windows).bat` 이 Visual C++ 구성요소(msvcp140)가 없을 때만 `vc_redist.x64.exe` 를 받아 설치 (D-033) | 없음 |
@@ -145,4 +148,4 @@ icon.ico / icon.png 앱 아이콘
 
 - 기획 문서: 저장소 안에는 없다. 기능 우선순위·범위는 저장소 밖 `$SCRATCH/backlog.json`(리드의 작업 목록)에 있다. 사용자 안내와 관리자 배포 방법은 `README.md`에 있다.
 - 디자인: 별도 디자인 파일 없음. 화면 HTML 자체가 기준이다. 편집실은 Premiere Pro, 썸네일은 Photoshop의 화면 구성과 단축키를 따른다.
-- 운영 대시보드: 없음. 저장소는 https://github.com/wavely1213/futsal-studio 이다. 사용자 PC에서 문제가 생기면 작업 폴더의 `studio.log`를 받아서 본다.
+- 운영 대시보드: 없음. 저장소는 https://github.com/wavely1213/futsal-studio 이다. 사용자 PC에서 문제가 생기면 작업 폴더의 `studio.log`를 받아서 본다(오류 위치 한 줄·지난번 갑자기 꺼짐이 들어 있음 · 2MB 가 넘어 나뉘었으면 `studio.old.log` 도 · D-037). 같은 오류의 traceback 전체·바깥 코드가 죽은 위치는 같은 폴더의 `studio-error.log`(pythonw 일 때 · D-044).

@@ -269,7 +269,7 @@ class NotifyTests(NotifyBase):
         self.turn_on()
         self.svc.job_hook("학습용 영상 받기", None, {"ok": False, "error": "막힘", "blocked": True}, "휴대폰 · x", 30)
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (False, True))
-        self.assertIn("크롬 로그인 정보로 받기", self.svc.last["error"])
+        self.assertIn("로그인 정보로 받기", self.svc.last["error"])  # E1: 브라우저 고르기 (D-044)
         self.svc.job_hook("보관함에 담기", None, ["AbCdEfGhIjK"], "휴대폰 · x", 30)
         texts = [p[1] for p in self.notes(n=2)]
         self.assertEqual(texts, ["확인이 필요해요 · YouTube가 막았어요", "확인이 필요해요 · 받지 못한 영상이 있어요"])
@@ -280,7 +280,7 @@ class NotifyTests(NotifyBase):
         last = self.svc.last
         self.assertEqual((last["ok"], last["warn"]), (False, True))
         self.assertEqual(last["error"], remote.MISSED_MSG.format(n=1))
-        self.assertIn("크롬 로그인 정보로 받기", last["error"])
+        self.assertIn("로그인 정보로 받기", last["error"])  # E1: 브라우저 고르기 (D-044)
         self.svc.job_hook("보관함에 담기", None, [], "휴대폰 · x", 30)  # 다 받음
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (True, False))
 
