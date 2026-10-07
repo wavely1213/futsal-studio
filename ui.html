@@ -382,6 +382,209 @@
     .brand { padding-bottom: 10px; }
     .step { padding-top: 7px; padding-bottom: 7px; }
   }
+  /* 8. 채널 전략 (경쟁 채널 · 우리 전략 · 가져올 점 · 성공 솔루션 · 가능성 · 점검) — 리스트는 구분선, 카드는 라운드·그림자 */
+  .step .rdot { width: 8px; height: 8px; border-radius: 50%; background: var(--peak); margin-left: auto; flex: none; display: none; }
+  .step .rdot.on { display: block; }
+  .sx-sum { padding: 14px 16px; margin-bottom: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; }
+  .sx-sum .k { font-size: 12px; color: var(--ink-3); }
+  .sx-sum .v { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+  .sx-sum .v small { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-left: 4px; }
+  .sx-sum .s { font-size: 12px; color: var(--ink-2); }
+  .sx-tabs { margin-bottom: 14px; max-width: 100%; overflow-x: auto; }
+  .sx-pane[hidden] { display: none; }
+  .sx-note { font-size: 12px; color: var(--ink-3); margin: -6px 0 12px; line-height: 1.55; }
+  .sx-seed { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--cut-soft); color: var(--cut); margin-left: 6px; white-space: nowrap; vertical-align: 1px; }
+  .sx-gbadge { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+  .sx-act { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ink-3); flex: none; }
+  .sx-act.a0 { background: var(--brand); } .sx-act.a1 { background: var(--ink-2); } .sx-act.a2 { background: var(--peak); } .sx-act.a3 { background: var(--line); border: 1px solid var(--ink-3); }
+  .sx-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; margin-bottom: 14px; }
+  .sx-gcard { padding: 12px 14px; font-size: 12px; color: var(--ink-2); line-height: 1.6; }
+  .sx-gcard b { color: var(--ink); font-size: 13px; display: block; margin-bottom: 2px; }
+  .sx-gcard .w { margin-top: 4px; color: var(--ink); }
+  .sx-table { overflow: hidden; }
+  .sx-tr { display: grid; grid-template-columns: minmax(170px, 1.6fr) .7fr 1fr 1fr .9fr .6fr 1fr minmax(140px, 1.5fr); gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .sx-tr:last-child { border-bottom: 0; }
+  .sx-tr:hover { background: var(--surface-2); }
+  .sx-tr.own { background: var(--brand-soft); cursor: default; }
+  .sx-tr.head { cursor: default; background: var(--surface-2); font-size: 12px; color: var(--ink-3); font-weight: 700; }
+  .sx-tr.head button { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .sx-tr.head button.on { color: var(--ink); }
+  .sx-tr .nm { min-width: 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .sx-tr .nm b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .sx-tr .sub { color: var(--ink-3); font-size: 11.5px; }
+  .sx-tr .str { color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+  .sx-tr .lab { display: none; color: var(--ink-3); font-size: 11px; margin-right: 4px; }
+  .sx-arr { font-size: 11px; font-weight: 700; margin-left: 3px; }
+  .sx-arr.up { color: var(--brand); } .sx-arr.dn { color: var(--peak); }
+  .sx-detail { padding: 14px 16px; margin: 4px 10px 12px; display: grid; gap: 12px; cursor: default; font-size: 13px; }
+  .sx-detail h4 { margin: 0 0 6px; font-size: 12px; color: var(--ink-3); letter-spacing: .2px; }
+  .sx-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 10px; }
+  .sx-vids a { color: inherit; text-decoration: none; display: grid; gap: 4px; font-size: 12px; }
+  .sx-vids a img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
+  .sx-vids a .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sx-vids a .vv { color: var(--ink-3); }
+  .sx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sx-chip { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+  .sx-chip b { color: var(--ink); font-weight: 700; }
+  .sx-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; line-height: 1.5; }
+  .sx-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sx-dacts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .sx-dacts .btn, .sx-mini { padding: 6px 10px; font-size: 12px; }
+  .sx-add { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 10px; }
+  .sx-add[hidden] { display: none; }
+  .sx-add .row1 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .sx-add .row1 .inp { flex: 1 1 240px; min-width: 0; }
+  .sx-err { color: var(--danger); font-size: 12px; }
+  .sx-pausebar { padding: 10px 14px; margin-bottom: 12px; background: var(--peak-soft); border-color: transparent; box-shadow: none; font-size: 13px; }
+  /* 우리 전략 */
+  .sx-dirs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; margin-bottom: 14px; }
+  .sx-dir { padding: 12px 14px; display: grid; gap: 6px; font-size: 12px; color: var(--ink-2); line-height: 1.5; align-content: start; }
+  .sx-dir.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .sx-dir b { color: var(--ink); font-size: 14px; }
+  .sx-dir .btn { justify-self: start; padding: 6px 10px; font-size: 12px; }
+  .sx-form { padding: 16px; display: grid; gap: 14px; }
+  .sx-field { display: grid; gap: 6px; }
+  .sx-field > label, .sx-field > .lb { font-size: 13px; font-weight: 700; }
+  .sx-field .hint { font-size: 12px; color: var(--ink-3); }
+  .sx-field textarea { width: 100%; min-height: 70px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface); resize: vertical; line-height: 1.55; }
+  .sx-tog { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sx-tog button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 13px; color: var(--ink-2); }
+  .sx-tog button.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 700; }
+  .sx-frow { display: grid; grid-template-columns: 1fr 120px auto auto; gap: 8px; align-items: center; }
+  .sx-frow .inp, .sx-srow .inp { min-width: 0; width: 100%; }
+  .sx-step { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .sx-step button { border: 0; background: var(--surface-2); width: 32px; height: 34px; cursor: pointer; font-size: 16px; }
+  .sx-step span { min-width: 74px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sx-srow { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 8px; align-items: center; }
+  .sx-total { font-size: 13px; color: var(--ink-2); }
+  .sx-total b { color: var(--ink); }
+  .sx-goals { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+  .sx-goals .inp { min-width: 0; width: 140px; }
+  .sx-ownc { padding: 14px 16px; margin-top: 14px; font-size: 13px; display: grid; gap: 8px; }
+  .sx-ownc .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; color: var(--ink-2); }
+  .sx-ownc .kv b { color: var(--ink); font-weight: 600; }
+  .sx-gap { font-size: 12px; } .sx-gap.good { color: var(--brand); } .sx-gap.bad { color: var(--peak); }
+  .sx-savebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  /* 가져올 점 · 할 일 */
+  .sx-take { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+  .sx-tcards { display: grid; gap: 10px; }
+  .sx-tcard { padding: 12px 14px; display: grid; gap: 8px; font-size: 13px; }
+  .sx-tcard.hid { opacity: .55; }
+  .sx-tcard .top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sx-tcard .tx { font-weight: 600; line-height: 1.5; font-size: 14px; }
+  .sx-fit { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .sx-fit .bar { width: 54px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; display: inline-block; }
+  .sx-fit .bar i { display: block; height: 100%; background: var(--brand); border-radius: 3px; }
+  .sx-tag { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; background: var(--cut-soft); color: var(--cut); }
+  .sx-tag.cat { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .sx-tag.hi { background: var(--brand-soft); color: var(--brand); }
+  .sx-tag.new { background: var(--peak-soft); color: var(--peak); }
+  .sx-ev { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+  .sx-ev li { padding-left: 12px; position: relative; overflow-wrap: anywhere; }
+  .sx-ev li::before { content: ""; position: absolute; left: 0; top: .6em; width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3); }
+  .sx-ev a { color: var(--ink); }
+  .sx-tbtns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sx-tbtns .btn { padding: 5px 10px; font-size: 12px; }
+  .sx-done { color: var(--brand); font-size: 12px; font-weight: 700; }
+  .sx-todos { padding: 12px 14px; display: grid; gap: 8px; position: sticky; top: 0; }
+  .sx-todos h3 { margin: 0; font-size: 14px; }
+  .sx-todo { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: start; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); line-height: 1.45; }
+  .sx-todo:last-of-type { border-bottom: 0; }
+  .sx-todo.done .t { text-decoration: line-through; color: var(--ink-3); }
+  .sx-todo .c { display: block; font-size: 11px; color: var(--ink-3); }
+  .sx-todoadd { display: grid; gap: 6px; }
+  .sx-todoadd .inp { min-width: 0; width: 100%; }
+  .sttodo { padding: 12px 16px; margin-bottom: 14px; display: grid; gap: 6px; font-size: 13px; }
+  .sttodo[hidden] { display: none; }
+  .sttodo h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .sttodo h3 .sp { flex: 1; }
+  .sttodo label { display: flex; gap: 8px; align-items: flex-start; line-height: 1.45; cursor: pointer; }
+  /* 성공 솔루션 */
+  .sx-phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .sx-phase { padding: 14px; display: grid; gap: 10px; align-content: start; font-size: 13px; }
+  .sx-phase h3 { margin: 0; font-size: 15px; }
+  .sx-phase h3 small { display: block; font-size: 12px; color: var(--ink-3); font-weight: 600; }
+  .sx-phase h4 { margin: 0; font-size: 12px; color: var(--ink-3); }
+  .sx-pri { padding: 12px 14px; margin-bottom: 14px; }
+  .sx-pri ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; line-height: 1.5; }
+  .sx-pri .imp { color: var(--brand); font-weight: 700; white-space: nowrap; }
+  .sx-ai { padding: 14px 16px; display: grid; gap: 10px; font-size: 13px; }
+  .sx-ai .cbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sx-ai .cbtns .btn { padding: 6px 10px; font-size: 12px; }
+  .sx-ai textarea { width: 100%; min-height: 90px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--surface); font-size: 12px; }
+  .sx-ai details summary { cursor: pointer; font-weight: 700; }
+  /* 가능성 */
+  .sx-honest { padding: 12px 16px; margin-bottom: 14px; background: var(--peak-soft); border-color: transparent; box-shadow: none; font-size: 13px; line-height: 1.6; }
+  .sx-mtab { overflow: hidden; margin-bottom: 14px; }
+  .sx-mr { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr); gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: center; font-size: 13px; }
+  .sx-mr:last-child { border-bottom: 0; }
+  .sx-mr.head { background: var(--surface-2); color: var(--ink-3); font-size: 12px; font-weight: 700; }
+  .sx-mcell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .sx-mcell .pv { font-weight: 700; min-width: 64px; }
+  .sx-mcell .rg { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+  .sx-mcell svg { width: 120px; height: 16px; flex: none; }
+  .sx-mcell svg:focus { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+  .sx-conf { font-size: 11px; color: var(--ink-3); }
+  .sx-fan { padding: 14px 16px; margin-bottom: 14px; position: relative; }
+  .sx-fan h3 { margin: 0 0 4px; font-size: 14px; }
+  .sx-fan svg { width: 100%; height: auto; display: block; }
+  .sx-fan .key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  .sx-fan .key i { display: inline-block; width: 16px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+  .sx-tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 10px; padding: 8px 10px; font-size: 12px; color: var(--ink-2); display: none; z-index: 3; min-width: 150px; line-height: 1.5; }
+  .sx-tip b { color: var(--ink); font-size: 14px; display: block; }
+  .sx-sens { padding: 12px 14px; margin-bottom: 14px; }
+  .sx-sens ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; line-height: 1.5; }
+  .sx-sens .small { color: var(--ink-3); }
+  .sx-how { padding: 12px 14px; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+  .sx-how summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+  .sx-how h4 { margin: 12px 0 4px; font-size: 13px; color: var(--ink); }
+  .sx-how table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sx-how td, .sx-how th { padding: 3px 10px 3px 0; text-align: left; border-bottom: 1px solid var(--line); }
+  /* 점검 */
+  .sx-ckbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 12px; }
+  .sx-ckbar label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+  .sx-studio { padding: 12px 14px; margin-bottom: 12px; font-size: 13px; }
+  .sx-studio summary { cursor: pointer; font-weight: 700; }
+  .sx-studio .row1 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .sx-studio .inp { min-width: 0; width: 160px; }
+  .sx-ck { padding: 14px 16px; display: grid; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+  .sx-ck table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sx-ck td, .sx-ck th { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  .sx-ck th { color: var(--ink-3); font-size: 12px; }
+  .sx-ok { color: var(--brand); font-weight: 700; } .sx-no { color: var(--peak); font-weight: 700; }
+  .sx-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .sx-3 > div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .sx-3 h4 { margin: 0 0 6px; font-size: 13px; }
+  .sx-3 ul { margin: 0; padding-left: 16px; display: grid; gap: 4px; line-height: 1.5; font-size: 12.5px; }
+  .sx-hist { padding: 12px 14px; font-size: 13px; }
+  .sx-hist summary { cursor: pointer; font-weight: 700; }
+  .sx-hist .row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .sx-hist .row:last-child { border-bottom: 0; }
+  .sx-trend svg { width: 100%; max-width: 640px; height: auto; display: block; margin-top: 8px; }
+  @media (max-width: 860px) {
+    .sx-tr { grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+    .sx-tr.head { display: none; }
+    .sx-tr .nm, .sx-tr .str { grid-column: 1 / -1; }
+    .sx-tr .lab { display: inline; }
+    .sx-two, .sx-take, .sx-phases, .sx-3 { grid-template-columns: 1fr; }
+    .sx-mr { grid-template-columns: 1fr 1fr; }
+    .sx-mr > :first-child { grid-column: 1 / -1; font-weight: 700; }
+    .sx-frow { grid-template-columns: 1fr 1fr; }
+    .sx-srow { grid-template-columns: 1fr; }
+    .sx-todos { position: static; }
+  }
+  .sx-svg .grid { stroke: var(--line); stroke-width: 1; }
+  .sx-svg .ax { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .sx-svg .b80 { fill: var(--brand); fill-opacity: .12; }
+  .sx-svg .b50 { fill: var(--brand); fill-opacity: .22; }
+  .sx-svg .p50 { fill: none; stroke: var(--brand); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .sx-svg .goal { stroke: var(--peak); stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .sx-svg .act { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+  .sx-svg .act.br { fill: var(--brand); }
+  .sx-svg .cross { stroke: var(--ink-3); stroke-width: 1; }
+  .sx-svg .trk { stroke: var(--line); stroke-width: 1; }
+  .sx-svg .rg { fill: var(--brand); fill-opacity: .28; }
+  .sx-svg .pt { fill: var(--brand); stroke: var(--surface); stroke-width: 2; }
 </style>
 </head>
 <body>
@@ -395,6 +598,7 @@
     <button class="step" data-p="thumb"><span class="n">5</span><span><b>썸네일</b><span class="d">자동 후보 · 누끼</span></span></button>
     <button class="step" data-p="style"><span class="n">6</span><span><b>스타일 배우기</b><span class="d">잘 나가는 유튜버 편집 따라하기</span></span></button>
     <button class="step" data-p="upload"><span class="n">7</span><span><b>올리기</b><span class="d">제목 · 설명 · 챕터 · 태그</span></span></button>
+    <button class="step" data-p="strategy"><span class="n">8</span><span><b>채널 전략</b><span class="d">경쟁 채널 · 우리 전략 · 가능성</span></span><span class="rdot" title="점검할 때가 됐어요"></span></button>
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
@@ -504,6 +708,7 @@
     </section>
     <section class="panel" id="p-thumb">
       <div class="phead"><div><h1>썸네일</h1><p>영상에서 선명한 장면을 골라 후보를 자동으로 만들어요. 고른 후보를 포토샵처럼 고치고(글자·도형·누끼), 유튜브용 이미지로 저장해요.</p></div></div>
+      <div class="card sttodo" id="thTodos" hidden></div>
       <div class="grid" id="thList"></div>
       <div class="card empty" id="thEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
     </section>
@@ -519,6 +724,7 @@
       </div>
       <div class="up-meta" id="upMeta"></div>
       <div class="up-notes" id="upNotes"></div>
+      <div class="card sttodo" id="upTodos" hidden></div>
       <div class="up-grid" id="upBody" style="display:none">
         <div class="up-col">
           <div class="card up-card">
@@ -551,6 +757,19 @@
         </div>
       </div>
       <div class="card empty" id="upEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
+    </section>
+    <!-- 8. 채널 전략 (경쟁 채널 · 우리 전략 · 가져올 점 · 성공 솔루션 · 가능성 · 점검) -->
+    <section class="panel" id="p-strategy">
+      <div class="phead"><div><h1>채널 전략</h1><p>비슷한 채널들이 어떻게 하고 있는지 보고, 우리 채널 계획과 될 가능성을 함께 점검해요</p></div></div>
+      <div class="card banner" id="sxRemind" hidden><span class="tx" id="sxRemindTx"></span><button class="btn primary" id="sxRemindGo">지금 점검하기</button></div>
+      <div class="card sx-sum" id="sxSum"><div class="s">불러오는 중…</div></div>
+      <div class="sx-tabs"><div class="seg" id="sxTabs"><button class="on" data-v="comp">경쟁 채널</button><button data-v="plan">우리 전략</button><button data-v="take">가져올 점</button><button data-v="sol">성공 솔루션</button><button data-v="prob">가능성</button><button data-v="check">점검</button></div></div>
+      <div class="sx-pane" id="sxComp"></div>
+      <div class="sx-pane" id="sxPlan" hidden></div>
+      <div class="sx-pane" id="sxTake" hidden></div>
+      <div class="sx-pane" id="sxSol" hidden></div>
+      <div class="sx-pane" id="sxProb" hidden></div>
+      <div class="sx-pane" id="sxCheck" hidden></div>
     </section>
   </div>
 </div>
@@ -615,6 +834,9 @@ function go(p) {
   if (p === "points") loadEvents();
   if (p === "style") { loadStyles(); loadRefs(); if (!claude.state) claudeStatus(false); }
   if (p === "library") checkSources();
+  if (p === "strategy" && window.sxLoad) window.sxLoad();
+  if (p === "thumb" && window.sxTodoBox) window.sxTodoBox("thTodos", ["thumb"]);
+  if (p === "upload" && window.sxTodoBox) window.sxTodoBox("upTodos", ["title", "upload"]);
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
@@ -1588,6 +1810,606 @@ checkUpdate();
     clearTimeout(up.timer); up.timer = null;
     navigator.sendBeacon("/api/upload/kit", new Blob([JSON.stringify({ name: up.name, seq: up.seq, edits: edits() })], { type: "text/plain;charset=UTF-8" }));  // 서버는 내용만 JSON 으로 읽음
   });
+})();
+</script>
+<script>
+/* 8. 채널 전략 — 경쟁 채널 · 우리 전략 · 가져올 점 · 성공 솔루션 · 가능성(%) · 점검 (서버 strategy.py · forecast.py)
+   숫자는 1.2만/3,750 꼴(views 와 같음) · 밖에서 온 글자(채널 이름·제목)는 모두 esc() · 고른 탭은 localStorage(없어도 동작) */
+(() => {
+  const SX = { ov: null, fc: null, sol: null, fcErr: null, tab: "comp", group: "all", sort: { k: "subs", d: -1 }, open: new Set(), cat: "all",
+               tsort: "fit", showHidden: false, draft: null, dirty: false, loading: false, fcLoading: false, addOpen: false, autoTried: false };
+  try { SX.tab = localStorage.getItem("sxTab") || "comp"; } catch (e) {}
+  const TABS = { comp: "sxComp", plan: "sxPlan", take: "sxTake", sol: "sxSol", prob: "sxProb", check: "sxCheck" };
+  if (!TABS[SX.tab]) SX.tab = "comp";
+  const N = n => n === null || n === undefined || isNaN(n) ? "—" : n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "")}만` : Math.round(n).toLocaleString();
+  const V = n => n === null || n === undefined ? "—" : views(Math.round(n));
+  const P = x => x === null || x === undefined ? "—" : `${Math.round(x * 100)}%`;
+  const R = x => x === null || x === undefined ? "—" : `${+(+x).toFixed(2)}`;
+  const pad = n => String(n).padStart(2, "0");
+  const dayOf = ts => { if (!ts) return ""; const d = new Date(ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const ago = ts => { if (!ts) return "—"; const d = Math.floor((Date.now() / 1000 - ts) / 86400); return d <= 0 ? "오늘" : `${d}일 전`; };
+  const ACT = { "활발": "a0", "보통": "a1", "쉬는 중": "a2", "멈춤": "a3" };
+  const actDot = c => c ? `<i class="sx-act ${ACT[c.activity] || ""}" title="${esc(c.activity)} · 마지막 업로드 ${c.lastDays}일 전"></i>` : `<i class="sx-act" title="업로드 날짜를 아직 몰라요"></i>`;
+  const perWeek = c => c && c.perWeek ? `주 ${(+c.perWeek.all).toFixed(1)}회${c.atLeast ? " 이상" : ""}` : "—";
+  const share = s => s ? (s.shortsShare.rss !== null && s.shortsShare.rss !== undefined ? s.shortsShare.rss : s.shortsShare.count) : null;
+  const tk = id => ((SX.ov && SX.ov.takeaways) || []).find(t => t.id === id);
+
+  async function getJSON(path) { const r = await fetch(path); return r.json(); }
+  async function load(withFc = true) {
+    if (SX.loading) return;
+    SX.loading = true;
+    let j = null;
+    try { j = await getJSON("/api/strategy"); } catch (e) {}
+    SX.loading = false;
+    if (!j || !j.ok) { $("sxSum").innerHTML = `<div class="s">${esc((j && j.error) || "채널 전략을 읽지 못했어요. 잠시 뒤 다시 열어 주세요")}</div>`; return; }
+    SX.ov = j;
+    if (!SX.dirty) SX.draft = JSON.parse(JSON.stringify(j.strategy));
+    renderAll();
+    autoOwn();
+    remindCheck();
+    if (withFc) loadFc();
+  }
+  async function loadFc() {
+    SX.fcLoading = true;
+    renderProb();
+    let r = null;
+    try { r = await getJSON("/api/strategy/forecast"); } catch (e) {}
+    SX.fcLoading = false;
+    if (r && r.ok) { SX.fc = r.forecast; SX.sol = r.solution; SX.fcErr = null; } else SX.fcErr = (r && r.error) || "가능성을 계산하지 못했어요. 잠시 뒤 다시 열어 주세요";
+    renderSum(); renderSol(); renderProb();
+  }
+  window.sxLoad = () => load(true);
+  function runJob(path, body, msg, after) {  // 작업 시작 → 끝나면 다시 읽음 (busy 표시·멈추기는 공통 작업 표시와 같음)
+    job(path, body, r => { if (r && r.ok === false && r.error) toast(r.error); else if (msg) toast(typeof msg === "function" ? msg(r) : msg); if (after) after(r); load(true); });
+  }
+  function autoOwn() {  // 8단계를 열 때 우리 채널 기록이 하루 넘게 지났으면 조용히 '우리 채널 숫자 기록' (다른 작업 중이면 건너뜀 · 설정에서 끔)
+    const o = SX.ov;
+    if (SX.autoTried || !o.settings.ownAuto || !o.refresh.ownStale || o.refresh.pause || state.job) return;
+    SX.autoTried = true;
+    fetch("/api/strategy/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ own: true }) })
+      .then(r => r.json()).then(j => { if (j.ok) { state.job = "…"; pending = () => load(true); sync(); showBusy(); } }).catch(() => {});
+  }
+
+  function renderAll() { renderSum(); renderTabs(); renderComp(); renderPlan(); renderTake(); renderSol(); renderProb(); renderCheck(); renderRemind(); }
+  function nextGoal() {
+    const s0 = (SX.ov.own.stats.subs || 0);
+    return (SX.fc && SX.fc.goal) || [1000, 10000, 20000, 50000, 100000].find(g => g > s0);
+  }
+  function renderSum() {
+    const o = SX.ov; if (!o) return;
+    const s = o.own.stats, g = nextGoal(), fc = SX.fc;
+    const m = fc && g ? (fc.milestones || []).find(x => x.id === `subs${g}_12`) : null;
+    const ck = o.checkups.latest;
+    $("sxSum").innerHTML = `
+      <div><div class="k">구독자</div><div class="v">${N(s.subs)}<small>${esc((o.own.entry && o.own.entry.name) || "우리 채널")}</small></div><div class="s">${s.src === "seed" ? "2026-10-07 조사 숫자" : "기록 " + ago(o.refresh.ownAt)}</div></div>
+      <div><div class="k">최근 4주 업로드</div><div class="v">${o.own.last28.n}개</div><div class="s">롱폼 ${o.own.last28.L} · 쇼츠 ${o.own.last28.S}</div></div>
+      <div><div class="k">다음 목표</div><div class="v">${g ? N(g) : "—"}</div><div class="s">${g ? `${N(g)}까지 ${Math.max(0, g - (s.subs || 0)).toLocaleString()}명` : ""}</div></div>
+      <div><div class="k">${g ? `${N(g)} (12개월) 가능성` : "가능성"}</div><div class="v">${m ? (m.achieved ? "이미 달성" : esc(m.text)) : SX.fcLoading ? "계산 중…" : "—"}</div><div class="s">${m && !m.achieved ? `범위 ${esc(m.range)} · 어림` : "어림이에요 · 가능성 탭 참고"}</div></div>
+      <div><div class="k">마지막 새로 고침 · 점검</div><div class="v" style="font-size:15px">${ago(o.refresh.lastAt)} · ${ck ? ago(ck.at) : "아직"}</div><div class="s">${o.refresh.seedOnly ? "아직 새로 고치지 않아 조사 자료로 보여 드려요" : `새로 고친 채널 ${o.refresh.liveN}곳`}</div></div>`;
+  }
+  function renderTabs() {
+    $("sxTabs").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === SX.tab));
+    Object.entries(TABS).forEach(([k, id]) => { $(id).hidden = k !== SX.tab; });
+  }
+  $("sxTabs").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    SX.tab = b.dataset.v;
+    try { localStorage.setItem("sxTab", SX.tab); } catch (e) {}
+    renderTabs();
+  }));
+
+  /* ---- (1) 경쟁 채널 ---- */
+  const SORTS = { name: c => (c.stats && c.stats.name || c.entry.name || ""), subs: c => c.stats && c.stats.subs, L: c => c.stats && c.stats.L.median, S: c => c.stats && c.stats.S.median,
+                  reach: c => c.stats && c.stats.S.reach, share: c => share(c.stats), week: c => c.stats && c.stats.cadence && c.stats.cadence.perWeek.all };
+  function arrow(v, med) { if (v === null || v === undefined || !med) return ""; return v >= med ? `<span class="sx-arr up" title="분류 중앙값 ${R(med)}보다 높아요">▲</span>` : `<span class="sx-arr dn" title="분류 중앙값 ${R(med)}보다 낮아요">▼</span>`; }
+  function rowCells(s, own, gm) {
+    const c = s.cadence;
+    return `<div><span class="lab">구독자</span>${N(s.subs)}</div>
+      <div><span class="lab">롱폼 보통/평균</span>${N(s.L.median)} / ${N(s.L.mean)}${own ? arrow(s.L.median, gm.L) : ""}</div>
+      <div><span class="lab">쇼츠 보통/평균</span>${N(s.S.median)} / ${N(s.S.mean)}${own ? arrow(s.S.median, gm.S) : ""}</div>
+      <div><span class="lab">구독자 대비 조회</span>${R(s.L.reach)} / ${R(s.S.reach)}${own ? arrow(s.S.reach, gm.reachS) : ""}</div>
+      <div><span class="lab">쇼츠 비율</span>${P(share(s))}</div>
+      <div><span class="lab">업로드</span>${perWeek(c)}${c ? `<div class="sub">마지막 ${c.lastDays}일 전</div>` : ""}</div>`;
+  }
+  function renderComp() {
+    const o = SX.ov, r = o.refresh, est = r.estimate, gs = o.groups;
+    const info = r.lastAt ? `마지막 새로 고침 ${ago(r.lastAt)} · 오래된 채널 ${r.staleN}곳` : "아직 새로 고치지 않았어요 · 2026-10-07 조사 자료로 보여 드려요";
+    const comps = o.competitors.filter(c => SX.group === "all" || (c.entry.group === SX.group));
+    const k = SX.sort.k, f = SORTS[k];
+    comps.sort((a, b) => { const x = f(a), y = f(b); if (x === y) return 0; if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1; return (x < y ? -1 : 1) * SX.sort.d; });
+    const cnt = g => o.competitors.filter(c => c.entry.group === g).length;
+    const groupsShown = SX.group === "all" ? o.groupNames : [SX.group];
+    const own = o.own, os = own.stats, og = gs[own.entry.group] || {};
+    const head = (key, lab) => `<button data-sort="${key}" class="${SX.sort.k === key ? "on" : ""}">${lab}${SX.sort.k === key ? (SX.sort.d < 0 ? " ▼" : " ▲") : ""}</button>`;
+    $("sxComp").innerHTML = `
+      <div class="bar"><button class="btn primary" id="sxRefresh" title="오래된 채널만 새로 고쳐요 (3일 안에 받은 채널은 건너뛰어요)">새로 고침${est.n ? ` (${est.n}곳 · 약 ${est.min}분)` : ""}</button>
+        <button class="btn" id="sxRefreshAll" title="최근에 받은 채널까지 모두 다시 받아요 (시간이 더 걸려요)">모두 다시</button>
+        <button class="btn" id="sxStop" hidden>멈추기</button><span class="sx-note" style="margin:0">${esc(info)}</span><div class="sp"></div>
+        <button class="btn" id="sxAddBtn">채널 추가</button></div>
+      ${r.pause ? `<div class="card sx-pausebar">YouTube가 잠시 막았어요. 몇 시간 뒤 다시 눌러 주세요 (날짜·최근 조회수는 새로 고쳤어요) · ${esc(dayOf(r.pause.until))} ${new Date(r.pause.until * 1000).toTimeString().slice(0, 5)}부터 다시 돼요</div>` : ""}
+      <div class="card sx-add" id="sxAdd"${SX.addOpen ? "" : " hidden"}>
+        <div class="row1"><input class="inp" id="sxUrl" maxlength="300" placeholder="채널 주소나 @핸들 (예: @Cho_sal)">
+          <select class="sel" id="sxGroup">${o.groupNames.map(g => `<option>${esc(g)}</option>`).join("")}</select>
+          <label class="liblbl"><input type="checkbox" id="sxAddRef" checked> 넣고 바로 숫자 받기</label>
+          <button class="btn primary" id="sxAddGo">넣기</button></div>
+        <div class="sx-err" id="sxAddErr"></div>
+        ${o.groupNames.map(g => `<div><div class="sx-note" style="margin:4px 0">${esc(g)} 추천 채널</div><div class="sx-chips">${o.recommended.filter(c => c.group === g).map(c =>
+          `<button class="sx-chip" data-rec="${esc(c.url || "")}" data-recg="${esc(c.group)}" ${c.added ? "disabled" : ""} title="${esc(c.tip || "")}">${c.added ? "✓ " : "+ "}${esc(c.name)} <span>${N(c.subs)}</span></button>`).join("")}</div></div>`).join("")}
+      </div>
+      <div class="filters" style="margin-bottom:12px"><button data-grp="all" class="${SX.group === "all" ? "on" : ""}">전체 ${o.competitors.length}</button>${o.groupNames.map(g => `<button data-grp="${esc(g)}" class="${SX.group === g ? "on" : ""}">${esc(g)} ${cnt(g)}</button>`).join("")}</div>
+      <div class="sx-groups">${groupsShown.map(g => { const x = gs[g] || {}; return `<div class="card sx-gcard"><b>${esc(g)}</b>
+        ${x.n ? `채널 ${x.n}곳 · 보통 구독자 ${N(x.subs)}<br>롱폼 보통 ${V(x.L)} · 쇼츠 보통 ${V(x.S)}<br>구독자 대비 조회 롱 ${R(x.reachL)} · 쇼 ${R(x.reachS)} · 쇼츠 비율 ${P(x.shortsShare)} · ${x.perWeek ? `주 ${(+x.perWeek).toFixed(1)}회` : "주기 모름"}
+        <div class="w">잘 되는 공식: ${x.works && x.works.length ? x.works.slice(0, 2).map(w => esc(w.label)).join(" · ") : "아직 몰라요"}</div>` : "알고 있는 채널이 없어요"}</div>`; }).join("")}</div>
+      <p class="sx-note">분류 숫자는 알고 있는 채널 전부(조사 자료 포함)의 중앙값이에요. '보통 조회수'는 최근 30개의 가운데 값, '구독자 대비 조회'는 보통 조회수 ÷ 구독자예요.</p>
+      <div class="card sx-table">
+        <div class="sx-tr head"><div>${head("name", "채널")}</div><div>${head("subs", "구독자")}</div><div>${head("L", "롱폼 보통/평균")}</div><div>${head("S", "쇼츠 보통/평균")}</div><div>${head("reach", "구독자 대비 (롱/쇼)")}</div><div>${head("share", "쇼츠 비율")}</div><div>${head("week", "업로드")}</div><div>강점</div></div>
+        <div class="sx-tr own" title="우리 채널 (분류 중앙값보다 높으면 ▲, 낮으면 ▼)"><div class="nm">${actDot(os.cadence)}<b>${esc((own.entry && own.entry.name) || "우리 채널")}</b><span class="sx-gbadge">우리 채널</span>${os.src === "seed" ? `<span class="sx-seed">조사 자료</span>` : ""}</div>
+          ${rowCells(os, true, og)}<div class="str">${own.gaps.map(x => `<span class="sx-gap ${x.good ? "good" : "bad"}">${esc(x.text)}</span>`).join("<br>")}</div></div>
+        ${comps.length ? comps.map(c => { const s = c.stats, key = c.entry.key, opened = SX.open.has(key);
+          return `<div class="sx-tr" data-ck="${esc(key)}" tabindex="0" aria-expanded="${opened}"><div class="nm">${actDot(s && s.cadence)}<b>${esc((s && s.name) || c.entry.name)}</b><span class="sx-gbadge">${esc(c.entry.group)}</span>${s && s.src === "seed" ? `<span class="sx-seed" title="아직 새로 고치지 않아 2026-10-07 조사 숫자예요">조사 자료</span>` : ""}${c.stale ? `<span class="sx-seed" title="받은 지 3일이 넘었어요">오래됨</span>` : ""}</div>
+            ${s ? rowCells(s, false, {}) : `<div style="grid-column: span 6" class="sub">아직 자료가 없어요 — [새로 고침]을 눌러 주세요</div>`}<div class="str">${esc((c.strengths || [])[0] || "")}</div></div>
+            ${opened ? detail(c) : ""}`; }).join("") : `<div class="empty"><b>이 분류에 경쟁 채널이 없어요</b>[채널 추가]에서 넣어 주세요.</div>`}
+      </div>`;
+    bindComp();
+    syncJobUi();
+  }
+  function detail(c) {
+    const s = c.stats, e = c.entry;
+    if (!s) return `<div class="card sx-detail">아직 자료가 없어요 — [새로 고침]을 눌러 주세요<div class="sx-dacts">${detailActs(e)}</div></div>`;
+    const tops = [...(s.L.top || []), ...(s.S.top || [])].sort((a, b) => b.v - a.v).slice(0, 3);
+    const sty = c.styles || [], memo = c.memo;
+    return `<div class="card sx-detail">
+      ${tops.length ? `<div><h4>대표 영상</h4><div class="sx-vids">${tops.map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener"><img src="${thumb(esc(v.id))}" loading="lazy" alt="" onerror="this.remove()"><span class="t">${esc(v.t)}</span><span class="vv">조회수 ${V(v.v)}</span></a>`).join("")}</div></div>` : ""}
+      <div class="sx-two">
+        <div><h4>자주 다루는 주제 (보통 조회 대비 ×배)</h4>${c.topics.length ? `<div class="sx-chips">${c.topics.map(t => `<span class="sx-chip">${esc(t.w)} <b>×${t.mult}</b> <span title="영상 수">${t.n}편</span></span>`).join("")}</div>` : `<div class="sx-note" style="margin:0">${c.nKo ? "눈에 띄는 주제가 아직 없어요" : "한국어 제목이 적어 아직 몰라요 (새로 고치면 원래 제목을 받아요)"}</div>`}</div>
+        <div><h4>제목 공식 (쓰는 비율 · 쓴 영상 조회 ×배)</h4>${c.formulas.length ? `<ul class="sx-list">${c.formulas.map(x => `<li>${esc(x.label)} (${esc(x.fmt)}) · ${P(x.share)} · ×${x.mult ?? "—"}${x.ok ? "" : ` <span class="sx-note">근거 적음</span>`}</li>`).join("")}</ul>` : `<div class="sx-note" style="margin:0">아직 몰라요</div>`}</div>
+      </div>
+      <div class="sx-two">
+        <div><h4>시리즈·코너</h4>${c.series.length ? `<ul class="sx-list">${c.series.map(x => `<li>${esc(x.name)} · ${x.n}편 · 보통 ${V(x.median)}${x.mult ? ` · ×${x.mult}` : ""}</li>`).join("")}</ul>` : `<div class="sx-note" style="margin:0">눈에 띄는 시리즈가 없어요</div>`}
+          ${c.hashtags.length ? `<h4 style="margin-top:10px">쇼츠 고정 해시태그</h4><div class="sx-chips">${c.hashtags.map(h => `<span class="sx-chip">${esc(h.tag)} ${h.n}/${h.of}</span>`).join("")}</div>` : ""}</div>
+        <div><h4>썸네일·편집</h4>${sty.length ? sty.map(x => `<div>배운 스타일 ‘${esc(x.name)}’: ${esc(x.headline || "")}${x.captions ? `<div class="sx-note" style="margin:2px 0 0">자막: ${esc(x.captions)}</div>` : ""}</div>`).join("")
+          : memo ? `<div>${esc(memo.tip || "")}</div><div class="sx-note" style="margin:4px 0">${esc(memo.format || "")} · 조사 메모 ${esc(memo.at)}</div>` : `<div class="sx-note" style="margin:0">아직 몰라요</div>`}
+          ${!sty.length ? `<button class="btn sx-mini" data-learn="${esc(e.url || "")}" style="margin-top:6px">이 채널 스타일 배우기</button>` : ""}</div>
+      </div>
+      ${(c.strengths || []).length ? `<div><h4>강점</h4><ul class="sx-list">${c.strengths.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${s.errors && s.errors.length ? `<div class="sx-note" style="margin:0">지난 새로 고침: ${esc(s.errors[0].what || "")} ${esc(s.errors[0].error || "")}</div>` : ""}
+      <div class="sx-dacts">${detailActs(e)}</div></div>`;
+  }
+  function detailActs(e) {
+    return `<label class="liblbl">분류 <select class="sel sx-mini" data-cg="${esc(e.key)}">${SX.ov.groupNames.map(g => `<option${g === e.group ? " selected" : ""}>${esc(g)}</option>`).join("")}</select></label>
+      <button class="btn sx-mini" data-cref="${esc(e.key)}">이 채널만 새로 고침</button><button class="btn sx-mini" data-crm="${esc(e.key)}">이 채널 빼기</button>`;
+  }
+  function bindComp() {
+    const q = s => $("sxComp").querySelectorAll(s);
+    $("sxRefresh").onclick = () => runJob("/api/strategy/refresh", {}, r => r && r.paused ? "새로 고쳤어요 · YouTube가 막아 일부는 날짜만 새로 고쳤어요" : "경쟁 채널 숫자를 새로 고쳤어요");
+    $("sxRefreshAll").onclick = () => { if (confirm(`채널 ${SX.ov.competitors.length + 1}곳을 모두 다시 받아요. 몇 분 걸려요. 할까요?`)) runJob("/api/strategy/refresh", { all: true }, "모두 다시 받았어요"); };
+    $("sxStop").onclick = () => { api("/api/edit/cancel", {}); toast("멈추는 중이에요 · 끝난 채널은 저장돼요"); };
+    $("sxAddBtn").onclick = () => { SX.addOpen = !SX.addOpen; $("sxAdd").hidden = !SX.addOpen; if (SX.addOpen) $("sxUrl").focus(); };
+    $("sxUrl").onkeydown = e => { if (e.key === "Enter") $("sxAddGo").click(); };
+    $("sxAddGo").onclick = () => addChannel($("sxUrl").value.trim(), $("sxGroup").value);
+    q("[data-rec]").forEach(b => b.onclick = () => addChannel(b.dataset.rec, b.dataset.recg));
+    q("[data-grp]").forEach(b => b.onclick = () => { SX.group = b.dataset.grp; renderComp(); });
+    q("[data-sort]").forEach(b => b.onclick = e => { e.stopPropagation(); const k = b.dataset.sort; SX.sort = { k, d: SX.sort.k === k ? -SX.sort.d : (k === "name" ? 1 : -1) }; renderComp(); });
+    q(".sx-tr[data-ck]").forEach(rw => {
+      const tog = () => { const k = rw.dataset.ck; SX.open.has(k) ? SX.open.delete(k) : SX.open.add(k); renderComp(); };
+      rw.onclick = tog; rw.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tog(); } };
+    });
+    q("[data-cg]").forEach(s => { s.onclick = e => e.stopPropagation(); s.onchange = async () => { const r = await api("/api/strategy/channels", { group: { key: s.dataset.cg, group: s.value } }); if (r.ok) { toast("분류를 바꿨어요"); load(true); } }; });
+    q("[data-crm]").forEach(b => b.onclick = async e => { e.stopPropagation(); if (!confirm("이 채널을 경쟁 채널에서 뺄까요? (받아 둔 숫자는 가능성 계산에 그대로 써요)")) return; const r = await api("/api/strategy/channels", { remove: { key: b.dataset.crm } }); if (r.ok) { SX.open.delete(b.dataset.crm); toast("뺐어요"); load(true); } });
+    q("[data-cref]").forEach(b => b.onclick = e => { e.stopPropagation(); runJob("/api/strategy/refresh", { keys: [b.dataset.cref] }, "이 채널을 새로 고쳤어요"); });
+    q("[data-learn]").forEach(b => b.onclick = e => { e.stopPropagation(); learnStyle(b.dataset.learn); });
+  }
+  async function addChannel(url, group) {
+    $("sxAddErr").textContent = "";
+    if (!url) { $("sxAddErr").textContent = "채널 주소나 @핸들을 넣어 주세요"; $("sxUrl").focus(); return; }
+    const refresh = $("sxAddRef").checked && !state.job;
+    let r;
+    try { r = await (await fetch("/api/strategy/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ add: { url, group, refresh } }) })).json(); } catch (e) { r = { error: "넣지 못했어요. 잠시 뒤 다시 눌러 주세요" }; }
+    if (!r.ok) { $("sxAddErr").textContent = r.error || "넣지 못했어요"; return; }
+    $("sxUrl").value = "";
+    toast(`‘${r.entry.name}’을 넣었어요` + (r.job ? " · 숫자를 받는 중이에요" : ""));
+    if (r.job) { state.job = "…"; pending = () => load(true); sync(); showBusy(); }
+    load(true);
+  }
+  function learnStyle(url) {  // 6단계 스타일 배우기의 '채널 추가'를 이 채널 주소로 열어 줌
+    go("style");
+    if ($("refAdd").hidden) $("refAddBtn").click();
+    $("refUrl").value = url || "";
+    $("refUrl").dispatchEvent(new Event("input"));
+    $("refUrl").scrollIntoView({ behavior: "smooth", block: "center" });
+    toast("이 채널의 인기 영상을 받아 스타일을 배워요 · [인기 영상 받기]를 눌러 주세요");
+  }
+
+  /* ---- (2) 우리 전략 ---- */
+  const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
+  const fmtW = x => `주 ${(+x).toString()}개`;
+  function totals(d) { let L = 0, S = 0; (d.formats || []).forEach(f => { if (f.kind === "shorts") S += +f.perWeek || 0; else L += +f.perWeek || 0; }); return { L, S }; }
+  function renderPlan() {
+    const o = SX.ov, d = SX.draft || o.strategy, t = totals(d), own = o.own, s = own.stats;
+    $("sxPlan").innerHTML = `
+      ${o.saved ? "" : `<p class="sx-note">아직 저장한 전략이 없어서 조사 결과 1순위인 방향 A 초안을 보여 드려요. 고친 뒤 [저장]을 눌러 주세요.</p>`}
+      <div class="sx-dirs">${o.presets.map(p => `<div class="card sx-dir${d.direction === p.key ? " on" : ""}"><b>방향 ${p.key}. ${esc(p.title)}</b><span>${esc(p.desc)}</span><span class="sx-note" style="margin:0">참고 채널: ${esc((p.who || []).join(", "))}</span><button class="btn" data-preset="${p.key}">이 방향으로 초안 채우기</button></div>`).join("")}</div>
+      <div class="card sx-form" id="sxForm">
+        <div class="sx-field"><label for="sxDir">방향</label><select class="sel" id="sxDir">${["A", "B", "C", "custom"].map(k => `<option value="${k}"${d.direction === k ? " selected" : ""}>${k === "custom" ? "" : k + ". "}${esc(o.directionNames[k])}</option>`).join("")}</select></div>
+        <div class="sx-field"><span class="lb">목표 시청자</span><div class="sx-tog" id="sxTarget">${o.targets.map(x => `<button data-tg="${esc(x)}" class="${(d.target || []).includes(x) ? "on" : ""}">${esc(x)}</button>`).join("")}</div>
+          <input class="inp" id="sxTNote" maxlength="500" placeholder="메모 (예: 플랩 레벨 2~3 사이 직장인)" value="${esc(d.targetNote || "")}"></div>
+        <div class="sx-field"><span class="lb">주력 형식</span>
+          ${(d.formats || []).map((f, i) => `<div class="sx-frow"><input class="inp" data-fn="${i}" maxlength="100" value="${esc(f.name)}" placeholder="형식 이름"><select class="sel" data-fk="${i}"><option value="long"${f.kind !== "shorts" ? " selected" : ""}>롱폼</option><option value="shorts"${f.kind === "shorts" ? " selected" : ""}>쇼츠</option></select>
+            <span class="sx-step"><button data-fm="${i}" aria-label="줄이기">−</button><span>${fmtW(f.perWeek)}</span><button data-fp="${i}" aria-label="늘리기">+</button></span><button class="linkbtn" data-fx="${i}">빼기</button></div>`).join("")}
+          <div><button class="btn sx-mini" id="sxFAdd"${(d.formats || []).length >= 12 ? " disabled" : ""}>형식 더하기</button></div>
+          <div class="sx-total">합계: <b>롱폼 주 ${t.L}개 · 쇼츠 주 ${t.S}개</b> (가능성 계산에 그대로 써요)</div></div>
+        <div class="sx-field"><span class="lb">올리는 요일 (선택)</span><div class="sx-tog" id="sxDays">${DAYS.map(x => `<button data-day="${x}" class="${(d.days || []).includes(x) ? "on" : ""}">${x}</button>`).join("")}</div></div>
+        <div class="sx-field"><label for="sxDiff">차별화</label><textarea id="sxDiff" maxlength="2000" placeholder="다른 채널과 다른 점">${esc(d.differentiation || "")}</textarea></div>
+        <div class="sx-field"><span class="lb">시리즈 아이디어</span>
+          ${(d.series || []).map((x, i) => `<div class="sx-srow"><input class="inp" data-sn="${i}" maxlength="100" value="${esc(x.name)}" placeholder="이름"><input class="inp" data-sd="${i}" maxlength="300" value="${esc(x.desc || "")}" placeholder="한 줄 설명"><button class="linkbtn" data-sx="${i}">빼기</button></div>`).join("")}
+          <div><button class="btn sx-mini" id="sxSAdd"${(d.series || []).length >= 20 ? " disabled" : ""}>시리즈 더하기</button></div></div>
+        <div class="sx-field"><span class="lb">목표 구독자 (선택)</span><div class="sx-goals">6개월 <input class="inp" id="sxG6" inputmode="numeric" value="${(d.goals || {}).m6 || ""}" placeholder="예: 10000"> 12개월 <input class="inp" id="sxG12" inputmode="numeric" value="${(d.goals || {}).m12 || ""}" placeholder="예: 20000"></div><span class="hint">넣으면 가능성 표에 '우리 목표' 줄이 생겨요</span></div>
+        <div class="sx-field"><label for="sxStart">시작한 날</label><input class="inp" type="date" id="sxStart" value="${esc(dayOf(d.startedAt) || dayOf(own.revivedAt) || "")}" style="width:180px"><span class="hint">점검은 이날부터(또는 지난 점검부터) 계획과 실제를 비교해요</span></div>
+        <div class="sx-savebar"><button class="btn primary" id="sxSave">저장</button><span class="sx-note" style="margin:0" id="sxSaveState">${SX.dirty ? "고친 내용이 있어요 · [저장]을 눌러야 반영돼요" : o.saved ? "저장된 전략이에요" : ""}</span></div>
+      </div>
+      <div class="card sx-ownc"><b>우리 채널 숫자</b>${s.src === "seed" ? ` <span class="sx-seed">조사 자료 · 새로 고치면 바뀌어요</span>` : ""}
+        <div class="kv"><span>구독자</span><b>${N(s.subs)}</b><span>롱폼 보통 · 평균</span><b>${V(s.L.median)} · ${V(s.L.mean)} (구독자 대비 ${R(s.L.reach)})</b>
+          <span>쇼츠 보통 · 평균</span><b>${V(s.S.median)} · ${V(s.S.mean)} (구독자 대비 ${R(s.S.reach)})</b><span>업로드</span><b>${perWeek(s.cadence)}${s.cadence ? ` · 마지막 ${s.cadence.lastDays}일 전 · ${esc(s.cadence.activity)}` : ""}</b>
+          <span>좋아요 비율</span><b>${s.likeRatio ? (s.likeRatio * 100).toFixed(1) + "%" : "—"}</b><span>영상 수</span><b>롱폼 ${s.L.n}개 · 쇼츠 ${s.S.n}개</b>
+          <span>다시 시작한 날</span><b><input class="inp" type="date" id="sxRev" value="${esc(dayOf(own.revivedAt))}" style="width:160px;min-width:0;padding:4px 8px"> <button class="btn sx-mini" id="sxRevSave">고치기</button>${own.revivedManual ? "" : ` <span class="sx-note">90일 넘게 쉰 뒤 첫 업로드로 찾았어요</span>`}</b>
+          <span>다시 시작한 뒤</span><b>${own.revivedAt ? `영상 ${own.sinceRevive.n}개 (롱폼 ${own.sinceRevive.L} · 쇼츠 ${own.sinceRevive.S}) · 조회수 합 ${V(own.sinceRevive.views)}` : "—"}</b></div>
+        ${own.gaps.map(x => `<div class="sx-gap ${x.good ? "good" : "bad"}">${x.good ? "▲" : "▼"} ${esc(x.text)}</div>`).join("")}</div>`;
+    bindPlan();
+  }
+  function readForm() {
+    const d = SX.draft, f = $("sxForm");
+    d.direction = $("sxDir").value;
+    d.targetNote = $("sxTNote").value;
+    f.querySelectorAll("[data-fn]").forEach(x => { d.formats[+x.dataset.fn].name = x.value; });
+    f.querySelectorAll("[data-fk]").forEach(x => { d.formats[+x.dataset.fk].kind = x.value; });
+    d.differentiation = $("sxDiff").value;
+    f.querySelectorAll("[data-sn]").forEach(x => { d.series[+x.dataset.sn].name = x.value; });
+    f.querySelectorAll("[data-sd]").forEach(x => { d.series[+x.dataset.sd].desc = x.value; });
+    const num = v => v.replace(/[^0-9]/g, "") ? +v.replace(/[^0-9]/g, "") : null;
+    d.goals = { m6: num($("sxG6").value), m12: num($("sxG12").value) };
+    d.startedAt = $("sxStart").value || null;
+  }
+  function touched() { SX.dirty = true; const s = $("sxSaveState"); if (s) s.textContent = "고친 내용이 있어요 · [저장]을 눌러야 반영돼요"; }
+  function bindPlan() {
+    const f = $("sxForm"), rer = () => { readForm(); touched(); renderPlan(); };
+    f.querySelectorAll("input, textarea, select").forEach(x => x.addEventListener("input", () => { readForm(); touched(); }));
+    $("sxDir").onchange = () => { readForm(); touched(); };
+    f.querySelectorAll("[data-tg]").forEach(b => b.onclick = () => { readForm(); const d = SX.draft, x = b.dataset.tg; d.target = (d.target || []).includes(x) ? d.target.filter(y => y !== x) : [...(d.target || []), x]; touched(); renderPlan(); });
+    f.querySelectorAll("[data-day]").forEach(b => b.onclick = () => { readForm(); const d = SX.draft, x = b.dataset.day; d.days = (d.days || []).includes(x) ? d.days.filter(y => y !== x) : [...(d.days || []), x]; touched(); renderPlan(); });
+    f.querySelectorAll("[data-fm]").forEach(b => b.onclick = () => { readForm(); const fm = SX.draft.formats[+b.dataset.fm]; fm.perWeek = Math.max(0, (+fm.perWeek || 0) - 0.5); touched(); renderPlan(); });
+    f.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { readForm(); const fm = SX.draft.formats[+b.dataset.fp]; fm.perWeek = Math.min(14, (+fm.perWeek || 0) + 0.5); touched(); renderPlan(); });
+    f.querySelectorAll("[data-fx]").forEach(b => b.onclick = () => { readForm(); SX.draft.formats.splice(+b.dataset.fx, 1); touched(); renderPlan(); });
+    f.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => { readForm(); SX.draft.series.splice(+b.dataset.sx, 1); touched(); renderPlan(); });
+    $("sxFAdd").onclick = () => { readForm(); SX.draft.formats.push({ id: "f" + Date.now(), name: "새 형식", kind: "shorts", perWeek: 1 }); rer(); };
+    $("sxSAdd").onclick = () => { readForm(); SX.draft.series.push({ name: "", desc: "" }); rer(); };
+    $("sxPlan").querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+      if ((SX.dirty || SX.ov.saved) && !confirm("지금 칸에 적은 내용을 이 방향 초안으로 바꿀까요? (목표·시작한 날은 그대로)")) return;
+      readForm();
+      const p = SX.ov.presets.find(x => x.key === b.dataset.preset), keep = { goals: SX.draft.goals, startedAt: SX.draft.startedAt };
+      SX.draft = Object.assign(JSON.parse(JSON.stringify(p.draft)), keep);
+      touched(); renderPlan();
+      toast(`방향 ${p.key} 초안을 채웠어요 · [저장]을 눌러야 반영돼요`);
+    });
+    $("sxSave").onclick = async () => {
+      readForm();
+      const body = JSON.parse(JSON.stringify(SX.draft));
+      $("sxSave").disabled = true;
+      const r = await api("/api/strategy/save", { strategy: body }).catch(() => ({}));
+      $("sxSave").disabled = false;
+      if (!r.ok) { if (!r.error) toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return; }
+      SX.dirty = false; SX.fc = null; SX.sol = null;
+      toast("저장했어요 · 성공 솔루션과 가능성을 다시 계산했어요");
+      load(true);
+    };
+    $("sxRevSave").onclick = async () => { const v = $("sxRev").value; if (!v) return; const r = await api("/api/strategy/save", { revivedAt: v }); if (r.ok) { toast("다시 시작한 날을 고쳤어요"); load(true); } };
+  }
+
+  /* ---- (3) 가져올 점 · 할 일 ---- */
+  const lvlCls = l => l === "상" ? "hi" : "";
+  function renderTake() {
+    const o = SX.ov, all = o.takeaways.filter(t => SX.showHidden || !t.hidden);
+    const counts = {}; all.forEach(t => { counts[t.category] = (counts[t.category] || 0) + 1; });
+    let list = all.filter(t => SX.cat === "all" || t.category === SX.cat);
+    if (SX.tsort === "effort") { const ord = { "쉬움": 0, "보통": 1, "큼": 2 }; list = [...list].sort((a, b) => ord[a.effort] - ord[b.effort] || b.fit.score - a.fit.score); }
+    const todos = o.todos;
+    $("sxTake").innerHTML = `
+      <div class="bar"><div class="filters"><button data-cat="all" class="${SX.cat === "all" ? "on" : ""}">전체 ${all.length}</button>${o.cats.map(c => `<button data-cat="${esc(c)}" class="${SX.cat === c ? "on" : ""}">${esc(c)} ${counts[c] || 0}</button>`).join("")}</div><div class="sp"></div>
+        <select class="sel" id="sxTSort"><option value="fit"${SX.tsort === "fit" ? " selected" : ""}>맞춤 점수 순</option><option value="effort"${SX.tsort === "effort" ? " selected" : ""}>품이 적은 순</option></select>
+        <label class="liblbl"><input type="checkbox" id="sxShowHid"${SX.showHidden ? " checked" : ""}> 숨긴 것도 보기</label></div>
+      <p class="sx-note">맞춤 점수는 규칙에 따른 어림이에요: 비슷한 분류·규모 30% + 근거(조회 배수·채널 수·영상 수) 30% + 우리 방향과 맞음 25% + 품 15%. 상 70 이상 · 중 45~69 · 하 45 아래.</p>
+      <div class="sx-take"><div class="sx-tcards">${list.length ? list.map(t => `<div class="card sx-tcard${t.hidden ? " hid" : ""}">
+          <div class="top"><span class="sx-tag cat">${esc(t.category)}</span><span class="sx-fit" title="분류·규모 ${t.fit.G} · 근거 ${t.fit.E} · 방향 ${t.fit.D} · 품 ${t.fit.F}">맞춤 <b>${esc(t.fit.level)}</b><span class="bar"><i style="width:${t.fit.score}%"></i></span>${t.fit.score}</span>
+            <span class="sx-tag ${t.effort === "쉬움" ? "hi" : ""}">품 ${esc(t.effort)}</span>${t.notUsed ? `<span class="sx-tag new">아직 안 쓰고 있어요</span>` : ""}${t.rule === "R-RESEARCH-TIP" ? `<span class="sx-tag">조사 메모</span>` : ""}</div>
+          <div class="tx">${esc(t.text)}</div>
+          <ul class="sx-ev">${t.evidence.map(e => `<li><b>${esc(e.channel)}</b>${e.video ? ` · <a href="${esc(e.video.url)}" target="_blank" rel="noopener">${esc((e.video.title || "영상").slice(0, 40))}</a>` : ""} · ${esc(e.numbers)}</li>`).join("")}</ul>
+          <div class="sx-tbtns">${t.todo ? `<span class="sx-done">할 일에 있어요 ✓</span>` : `<button class="btn primary" data-mk="${esc(t.id)}">작업으로 만들기</button>`}
+            <button class="btn" data-hide="${esc(t.id)}" data-h="${t.hidden ? 0 : 1}">${t.hidden ? "다시 보이기" : "숨기기"}</button></div></div>`).join("")
+        : `<div class="card empty"><b>${o.takeaways.length ? "이 분류에는 가져올 점이 없어요" : "아직 자료가 없어요"}</b>${o.takeaways.length ? "" : "[경쟁 채널]에서 [새로 고침]을 눌러 주세요"}</div>`}</div>
+        <div class="card sx-todos"><h3>할 일 ${todos.filter(x => !x.done).length}</h3>
+          ${todos.length ? [...todos].sort((a, b) => a.done - b.done).map(x => `<div class="sx-todo${x.done ? " done" : ""}"><input type="checkbox" data-td="${esc(x.id)}"${x.done ? " checked" : ""} aria-label="끝냈어요"><span class="t">${esc(x.text)}<span class="c">${esc(x.category)}${(x.use || []).includes("thumb") ? " · 썸네일 화면에도 보여요" : (x.use || []).includes("upload") || (x.use || []).includes("title") ? " · 올리기 화면에도 보여요" : ""}</span></span><button class="linkbtn" data-tdx="${esc(x.id)}" aria-label="지우기">✕</button></div>`).join("") : `<div class="sx-note" style="margin:0">가져올 점의 [작업으로 만들기]를 누르거나 직접 적어 주세요</div>`}
+          <div class="sx-todoadd"><input class="inp" id="sxTdText" maxlength="300" placeholder="할 일 직접 적기"><select class="sel" id="sxTdCat">${o.cats.map(c => `<option>${esc(c)}</option>`).join("")}</select><button class="btn" id="sxTdAdd">넣기</button></div></div></div>`;
+    bindTake();
+  }
+  async function makeTodo(id) {
+    const r = await api("/api/strategy/todo", { add: { takeaway: id } }).catch(() => ({}));
+    if (!r.ok) return;
+    const t = tk(id); if (t) t.todo = r.todo.id;
+    if (!SX.ov.todos.some(x => x.id === r.todo.id)) SX.ov.todos.push(r.todo);
+    toast("할 일에 넣었어요" + ((r.todo.use || []).includes("thumb") ? " · 썸네일 화면에도 보여요" : (r.todo.use || []).some(u => u === "title" || u === "upload") ? " · 올리기 화면에도 보여요" : ""));
+    renderTake(); renderSol();
+  }
+  function bindTake() {
+    const q = s => $("sxTake").querySelectorAll(s);
+    q("[data-cat]").forEach(b => b.onclick = () => { SX.cat = b.dataset.cat; renderTake(); });
+    $("sxTSort").onchange = () => { SX.tsort = $("sxTSort").value; renderTake(); };
+    $("sxShowHid").onchange = () => { SX.showHidden = $("sxShowHid").checked; renderTake(); };
+    q("[data-mk]").forEach(b => b.onclick = () => { b.disabled = true; makeTodo(b.dataset.mk); });
+    q("[data-hide]").forEach(b => b.onclick = async () => {
+      const hide = b.dataset.h === "1", r = await api("/api/strategy/takeaway", { id: b.dataset.hide, hide }).catch(() => ({}));
+      if (!r.ok) return;
+      const t = tk(b.dataset.hide); if (t) t.hidden = hide;
+      toast(hide ? "숨겼어요 · '숨긴 것도 보기'로 다시 볼 수 있어요" : "다시 보여요");
+      renderTake();
+    });
+    q("[data-td]").forEach(c => c.onchange = async () => {
+      const r = await api("/api/strategy/todo", { update: { id: c.dataset.td, done: c.checked } }).catch(() => ({}));
+      if (r.ok) { const x = SX.ov.todos.find(t => t.id === c.dataset.td); if (x) Object.assign(x, r.todo); renderTake(); }
+    });
+    q("[data-tdx]").forEach(b => b.onclick = async () => {
+      if (!confirm("이 할 일을 지울까요?")) return;
+      const r = await api("/api/strategy/todo", { remove: { id: b.dataset.tdx } }).catch(() => ({}));
+      if (r.ok) { SX.ov.todos = SX.ov.todos.filter(t => t.id !== b.dataset.tdx); SX.ov.takeaways.forEach(t => { if (t.todo === b.dataset.tdx) t.todo = null; }); renderTake(); renderSol(); }
+    });
+    $("sxTdAdd").onclick = async () => {
+      const text = $("sxTdText").value.trim();
+      if (!text) { toast("할 일을 적어 주세요"); $("sxTdText").focus(); return; }
+      const r = await api("/api/strategy/todo", { add: { text, category: $("sxTdCat").value } }).catch(() => ({}));
+      if (r.ok) { SX.ov.todos.push(r.todo); renderTake(); }
+    };
+    $("sxTdText").onkeydown = e => { if (e.key === "Enter") $("sxTdAdd").click(); };
+  }
+
+  /* ---- (4) 성공 솔루션 ---- */
+  function renderSol() {
+    const o = SX.ov; if (!o) return;
+    const sol = SX.sol;
+    if (!sol) { $("sxSol").innerHTML = `<div class="card empty"><b>${SX.fcErr ? esc(SX.fcErr) : "계획을 만드는 중이에요…"}</b>${SX.fcErr ? "" : "가능성 계산이 끝나면 30/60/90일 계획이 보여요"}</div>`; return; }
+    const why = id => { const t = tk(id), e = t && t.evidence[0]; return e ? `${e.channel} · ${e.numbers}` : ""; };
+    const ai = o.ai, cs = (typeof claude !== "undefined" && claude.state) || null;
+    $("sxSol").innerHTML = `
+      <p class="sx-note">${sol.changed ? `자료나 전략이 바뀌어 다시 만들었어요 (${esc(dayOf(sol.at))} ${new Date(sol.at * 1000).toTimeString().slice(0, 5)})` : `계획 기준: 롱폼 주 ${sol.rates.L}개 · 쇼츠 주 ${sol.rates.S}개 (우리 전략 탭에서 바꿔요)`}</p>
+      <div class="sx-phases">${sol.phases.map(p => `<div class="card sx-phase"><h3>${esc(p.title)}<small>${esc(p.span)}</small></h3>
+        <div><h4>올릴 것</h4><ul class="sx-list">${p.uploads.length ? p.uploads.map(u => `<li>${esc(u.name)} ${u.count}개${u.examples.length ? ` <span class="sx-note">(예: ${esc(u.examples.join(", "))})</span>` : ""}</li>`).join("") : "<li>올릴 형식이 없어요 (우리 전략에서 주당 개수를 넣어 주세요)</li>"}</ul></div>
+        <div><h4>할 일</h4>${p.todos.length ? `<ul class="sx-list">${p.todos.map(t => `<li>${esc(t.text)} <span class="sx-tag">${esc(t.effort)}</span> ${(tk(t.id) || {}).todo || t.todo ? `<span class="sx-done">✓</span>` : `<button class="linkbtn" data-smk="${esc(t.id)}">작업으로</button>`}${why(t.id) ? `<div class="sx-note" style="margin:2px 0 0">왜: ${esc(why(t.id))}</div>` : ""}</li>`).join("")}</ul>` : `<div class="sx-note" style="margin:0">${p.span.startsWith("61") ? "앞 구간 할 일을 다듬는 때예요: 잘 된 영상은 같은 주제로 2탄, 반응이 약한 형식은 줄이고, 점검 결과로 계획을 고쳐요" : "이 구간에 맞는 가져올 점이 없어요"}</div>`}</div>
+        <div><h4>KPI (목표 숫자)</h4><ul class="sx-list">${p.kpi.map(k => `<li>${esc(k.text)}</li>`).join("")}</ul></div></div>`).join("")}</div>
+      <div class="card sx-pri"><b>먼저 할 것</b> <span class="sx-note">(가능성을 가장 많이 올리는 것 ÷ 품 · 영향은 12개월 다음 목표 기준 어림)</span>
+        <ol>${sol.priorities.map(x => `<li>${esc(x.text)} ${x.impact ? `<span class="imp">+${x.impact}%p 안팎</span>` : ""} <span class="sx-tag">품 ${esc(x.effort)}</span></li>`).join("") || "<li>아직 없어요</li>"}</ol></div>
+      <div class="card sx-ai"><b>🤖 클로드로 더 깊게 보기 (선택)</b>
+        <div class="sx-note" style="margin:0">위 계획은 내 PC 규칙만으로 만든 것이에요. 클로드에게는 버튼을 누를 때만 공개 채널 숫자와 우리 전략 글을 보내요 (영상·대사는 보내지 않아요). 상태: ${esc(cs ? ((CLAUDE_TXT[cs.state] || ["확인 중"])[0]) : "확인 중")}</div>
+        <div class="cbtns"><button class="btn" id="sxAi">클로드로 더 깊게 보기</button><button class="btn" id="sxAsk">Claude에게 물어볼 내용 복사</button><button class="btn" id="sxPasteBtn">Claude 대답 붙여 넣기</button></div>
+        <div id="sxPasteBox" hidden><textarea id="sxPaste" placeholder="claude.ai 의 대답을 그대로 붙여 넣어 주세요"></textarea><div><button class="btn primary" id="sxPasteSave">저장</button></div></div>
+        ${ai ? `<details open><summary>(Claude 의견) ${esc(ai.by === "paste" ? "붙여 넣은 대답" : "내 클로드 계정")} · ${esc(dayOf(ai.at))}${o.aiStale ? " · 지금 자료 전의 의견이에요" : ""}</summary>
+          ${ai.summary ? `<p>${esc(ai.summary)}</p>` : ""}
+          ${(ai.diagnosis || []).length ? `<b>진단</b><ul class="sx-list">${ai.diagnosis.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${(ai.actions || []).length ? `<b>할 일</b><ol class="sx-list">${ai.actions.map(x => `<li>${esc(x.text)}${x.why ? ` <span class="sx-note">— ${esc(x.why)}</span>` : ""}</li>`).join("")}</ol>` : ""}
+          ${(ai.titles || []).length ? `<b>제목 예시</b><ul class="sx-list">${ai.titles.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${(ai.risks || []).length ? `<b>주의할 점</b><ul class="sx-list">${ai.risks.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</details>` : ""}</div>`;
+    $("sxSol").querySelectorAll("[data-smk]").forEach(b => b.onclick = () => { b.disabled = true; makeTodo(b.dataset.smk); });
+    $("sxAi").onclick = async () => {
+      if (cs && cs.state !== "ready" && cs.state !== "unknown") { toast(cs.state === "missing" ? "먼저 6단계 '클로드 계정으로 쓰기'에서 클로드 프로그램을 설치해 주세요" : "먼저 6단계 '클로드 계정으로 쓰기'에서 로그인해 주세요"); return; }
+      runJob("/api/strategy/ai", {}, r => r && r.ok ? "클로드 의견을 받았어요 · '(Claude 의견)'으로 보여 줘요" : (r && r.error) || "클로드 의견을 받지 못했어요");
+    };
+    $("sxAsk").onclick = async () => { const r = await api("/api/strategy/prompt"); if (!r.ok) return; await copyText(r.prompt); toast("복사했어요 · claude.ai 에 붙여 넣고, 대답을 [Claude 대답 붙여 넣기]로 넣어 주세요 (무료)"); };
+    $("sxPasteBtn").onclick = () => { $("sxPasteBox").hidden = !$("sxPasteBox").hidden; if (!$("sxPasteBox").hidden) $("sxPaste").focus(); };
+    $("sxPasteSave").onclick = async () => {
+      const t = $("sxPaste").value.trim(); if (!t) { toast("대답을 붙여 넣어 주세요"); return; }
+      const r = await api("/api/strategy/ai_paste", { text: t }).catch(() => ({}));
+      if (r.ok) { toast("Claude 의견을 저장했어요"); SX.ov.ai = r.ai; SX.ov.aiStale = false; renderSol(); }
+    };
+    if (typeof claude !== "undefined" && !claude.state) claudeStatus(false).then(() => { if (SX.tab === "sol") renderSol(); });
+  }
+
+  /* ---- (5) 가능성 (%) ---- */
+  function rangeSvg(m) {
+    const x = p => 6 + p / 100 * 108, lab = `${m.label} · ${m.text} · 범위 ${m.range}`;
+    return `<svg class="sx-svg" viewBox="0 0 120 16" role="img" tabindex="0" aria-label="${esc(lab)}"><title>${esc(lab)} (0~100% 눈금)</title>
+      <line class="trk" x1="6" x2="114" y1="8" y2="8"/><rect class="rg" x="${x(m.lo)}" y="4" width="${Math.max(3, x(m.hi) - x(m.lo))}" height="8" rx="4"/><circle class="pt" cx="${x(m.p)}" cy="8" r="4"/></svg>`;
+  }
+  function mcell(m) {
+    if (!m) return `<div class="sx-mcell"><span class="sx-note" style="margin:0">—</span></div>`;
+    if (m.achieved) return `<div class="sx-mcell"><span class="chip ok">이미 달성</span></div>`;
+    if (m.none) return `<div class="sx-mcell"><span class="sx-note" style="margin:0">${esc(m.text)}</span></div>`;
+    return `<div class="sx-mcell"><span class="pv">${esc(m.text)}</span>${rangeSvg(m)}<span class="rg">범위 ${esc(m.range)}</span><span class="sx-conf">확신 ${esc(m.confidence)}${m.wide ? " · 아주 불확실" : ""}</span></div>`;
+  }
+  const FAN_W = 960;  // 그림 좌표 폭 (화면 폭에 맞춰 늘고 줄어듦)
+  function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); return [1, 2, 2.5, 5, 10].map(k => k * p).find(s => s >= raw) || 10 * p; }
+  function fanSvg(fc, trend) {
+    const W = FAN_W, H = 300, L = 58, Rt = 70, T = 14, B = 34, tr = fc.trajectory, s0 = fc.s0 || 0, t0 = fc.at;
+    const act = (trend || []).map(r => ({ w: (r.at - t0) / 604800, s: r.subs })).filter(p => p.w >= -8 && p.w <= 52.5);
+    const pts = k => [[0, s0], ...tr.weeks.map((w, i) => [w, tr[k][i]])];
+    const goal = fc.goal, xmin = Math.min(0, ...act.map(p => p.w)), xmax = 52;
+    const vals = [...tr.p10, ...tr.p90, s0, ...act.map(p => p.s)];
+    if (goal && goal <= Math.max(...tr.p90) * 1.8) vals.push(goal);
+    let ymin = Math.min(...vals), ymax = Math.max(...vals);
+    const step = niceStep(Math.max(1, (ymax - ymin) / 4));
+    ymin = Math.max(0, Math.floor(ymin / step) * step); ymax = Math.ceil(ymax / step) * step || step;
+    const X = w => L + (w - xmin) / (xmax - xmin) * (W - L - Rt), Y = s => T + (1 - (s - ymin) / (ymax - ymin)) * (H - T - B);
+    const area = (lo, hi) => { const a = pts(lo), b = pts(hi).reverse(); return "M" + a.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("L") + "L" + b.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("L") + "Z"; };
+    const line = k => "M" + pts(k).map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("L");
+    let g = "";
+    for (let v = ymin; v <= ymax + 1e-9; v += step) g += `<line class="grid" x1="${L}" x2="${W - Rt}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${N(v)}</text>`;
+    [[0, "지금"], [13, "3개월"], [26, "6개월"], [39, "9개월"], [52, "12개월"]].forEach(([w, lab]) => { g += `<text class="ax" x="${X(w)}" y="${H - 12}" text-anchor="middle">${lab}</text>`; });
+    const gl = goal && goal <= ymax && goal >= ymin ? `<line class="goal" x1="${L}" x2="${W - Rt}" y1="${Y(goal)}" y2="${Y(goal)}"/><text class="ax gl" x="${W - Rt + 6}" y="${Y(goal) + 4}">목표 ${N(goal)}</text>` : "";
+    const last = tr.p50[tr.p50.length - 1];
+    return `<svg class="sx-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="12개월 구독자 예상: 가운데 ${N(last)}명, 80% 범위 ${N(tr.p10[51])}~${N(tr.p90[51])}명">
+      ${g}<path class="b80" d="${area("p10", "p90")}"/><path class="b50" d="${area("p25", "p75")}"/>${gl}
+      <path class="p50" d="${line("p50")}"/><text class="ax" x="${X(52) + 6}" y="${Y(last) + 4}">${N(last)}</text>
+      ${act.map(p => `<circle class="act" cx="${X(p.w).toFixed(1)}" cy="${Y(p.s).toFixed(1)}" r="4"><title>${esc(dayOf(t0 + p.w * 604800))} 실제 ${p.s.toLocaleString()}명</title></circle>`).join("")}
+      <line class="cross" id="sxCross" x1="0" x2="0" y1="${T}" y2="${H - B}" style="display:none"/>
+      <rect id="sxHit" x="${L}" y="${T}" width="${W - L - Rt}" height="${H - T - B}" fill="transparent"/></svg>`;
+  }
+  function bindFan(fc) {
+    const svg = $("sxProb").querySelector(".sx-fan svg"), hit = $("sxHit"), tip = $("sxTip");
+    if (!svg || !hit) return;
+    const tr = fc.trajectory, W = FAN_W, L = 58, Rt = 70, vb = svg.viewBox.baseVal;
+    const x2w = (px) => {  // 화면 좌표 → 주 (가장 가까운 주로)
+      const r = svg.getBoundingClientRect(), x = (px - r.left) / r.width * vb.width;
+      const xmin = +svg.dataset.xmin || 0; return Math.round(xmin + (x - L) / (W - L - Rt) * (52 - xmin));
+    };
+    const show = e => {
+      const w = Math.max(1, Math.min(52, x2w(e.clientX))), i = w - 1, r = svg.getBoundingClientRect();
+      const xmin = +svg.dataset.xmin || 0, xs = L + (w - xmin) / (52 - xmin) * (W - L - Rt);
+      const cr = $("sxCross"); cr.setAttribute("x1", xs); cr.setAttribute("x2", xs); cr.style.display = "";
+      tip.textContent = "";
+      const b = document.createElement("b"); b.textContent = `${tr.p50[i].toLocaleString()}명`; tip.appendChild(b);
+      [`${w}주 뒤 (${dayOf(fc.at + w * 604800)}) 가운데 예상`, `50% 범위 ${tr.p25[i].toLocaleString()}~${tr.p75[i].toLocaleString()}명`, `80% 범위 ${tr.p10[i].toLocaleString()}~${tr.p90[i].toLocaleString()}명`]
+        .forEach(t => { const d = document.createElement("div"); d.textContent = t; tip.appendChild(d); });
+      const host = tip.parentElement.getBoundingClientRect(), px = xs / vb.width * r.width + (r.left - host.left);
+      tip.style.display = "block"; tip.style.top = (r.top - host.top + 10) + "px";
+      tip.style.left = Math.min(host.width - tip.offsetWidth - 8, Math.max(8, px + 12)) + "px";
+    };
+    const hide = () => { tip.style.display = "none"; $("sxCross").style.display = "none"; };
+    hit.addEventListener("pointermove", show); hit.addEventListener("pointerleave", hide);
+  }
+  function renderProb() {
+    const o = SX.ov; if (!o) return;
+    const fc = SX.fc;
+    const honest = `<div class="card sx-honest">아래 숫자는 비슷한 채널 ${fc ? fc.calibration.n_peers : "여러"}곳의 공개 숫자로 계산한 <b>어림</b>이에요. 영상 한 편이 크게 터지거나 묻히는 운은 맞힐 수 없어서 한 숫자 대신 범위로 보여 드려요. 점검할수록 우리 채널 숫자로 다시 맞춰져요.</div>`;
+    if (!fc) { $("sxProb").innerHTML = honest + `<div class="card empty"><b>${SX.fcErr ? esc(SX.fcErr) : "계산하는 중이에요… (1~2초)"}</b></div>`; return; }
+    const ms = fc.milestones, find = id => ms.find(m => m.id === id);
+    const subsGoals = [...new Set(ms.filter(m => m.kind === "subs").map(m => m.target + (m.user ? "u" : "")))];
+    const rows = subsGoals.map(k => { const g = parseInt(k), u = k.endsWith("u"), m6 = ms.find(m => m.kind === "subs" && m.target === g && m.horizon === 6 && !!m.user === u), m12 = ms.find(m => m.kind === "subs" && m.target === g && m.horizon === 12 && !!m.user === u);
+      return `<div class="sx-mr"><div>${esc((m6 || m12).label)}</div>${mcell(m6)}${mcell(m12)}</div>`; }).join("")
+      + ["avgS_6", "avgL_6"].map(id => { const m = find(id); return m ? `<div class="sx-mr"><div>${esc(m.label)} <span class="sx-note">(6개월 안에 올린 영상)</span></div>${mcell(m)}${mcell(null)}</div>` : ""; }).join("");
+    const c = fc.calibration, fw = o.checkups.forward, sens = fc.sensitivity || [];
+    const tbl = [4, 8, 13, 17, 22, 26, 30, 35, 39, 43, 48, 52].map((w, k) => `<tr><td>${k + 1}개월</td><td>${fc.trajectory.p10[w - 1].toLocaleString()}</td><td>${fc.trajectory.p50[w - 1].toLocaleString()}</td><td>${fc.trajectory.p90[w - 1].toLocaleString()}</td></tr>`).join("");
+    $("sxProb").innerHTML = honest + `
+      <div class="card sx-mtab"><div class="sx-mr head"><div>목표</div><div>6개월 안에</div><div>12개월 안에</div></div>${rows}</div>
+      <div class="card sx-fan"><h3>구독자 예상 (12개월)</h3><div class="sx-note" style="margin:0 0 6px">6개월 뒤 ${esc(fc.subs6.text)} · 12개월 뒤 ${esc(fc.subs12.text)}</div>
+        ${fanSvg(fc, o.checkups.trend)}
+        <div class="key"><span><i style="background:var(--brand);height:2px"></i>가운데 예상</span><span><i style="background:var(--brand);opacity:.35"></i>가능성 50% 범위</span><span><i style="background:var(--brand);opacity:.15"></i>80% 범위</span><span><i style="background:var(--ink);border-radius:50%;width:8px"></i>실제 기록</span>${fc.goal ? `<span><i style="border-top:2px dashed var(--peak);height:0"></i>목표 ${N(fc.goal)}</span>` : ""}</div>
+        <div class="sx-tip" id="sxTip"></div>
+        <details class="sx-note" style="margin:8px 0 0"><summary>표로 보기</summary><table class="sx-how"><tr><th>지금부터</th><th>80% 범위 아래</th><th>가운데</th><th>80% 범위 위</th></tr>${tbl}</table></details></div>
+      <div class="card sx-sens"><b>이렇게 바꾸면</b> <span class="sx-note">(${fc.goal ? `${N(fc.goal)}(12개월) 기준 · ` : ""}같은 운으로 계획만 바꿔 다시 계산)</span>
+        <ul>${sens.map(s => `<li class="${s.small ? "small" : ""}">${esc(s.text)}</li>`).join("") || "<li>계산할 목표가 없어요</li>"}</ul></div>
+      <details class="card sx-how"><summary>어떻게 계산했나요?</summary>
+        <h4>가정</h4><ul class="sx-list">${fc.assumptions.map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+        <h4>데이터</h4><div>비교 채널 ${c.n_peers}곳 (롱폼 회귀 ${c.nL}곳 · 쇼츠 ${c.nS}곳) · 새로 고친 채널 ${fc.liveN || 0}곳, 나머지는 ${esc(fc.seedAt || "2026-10-07")} 조사 자료 · 계산 ${esc(dayOf(fc.at))} · 시뮬레이션 ${c.boot}×${c.sims}번${c.defaults_used ? " · 일부는 2026-10-07 기본값을 썼어요" : ""}</div>
+        <h4>얼마나 믿을 만한가요?</h4>
+        <table><tr><th>확인</th><th>결과</th></tr>
+          <tr><td>채널 하나씩 빼고 다시 맞춰 본 80% 범위 적중 (목표 70~90%)</td><td>롱폼 ${c.loo.L.n ? `${c.loo.L.hit}/${c.loo.L.n} = ${c.loo.L.pct}%` : "—"} · 쇼츠 ${c.loo.S.n ? `${c.loo.S.hit}/${c.loo.S.n} = ${c.loo.S.pct}%` : "—"}</td></tr>
+          <tr><td>구독 전환을 맞춘 채널 (평생 목록을 끝까지 받은 곳)</td><td>${c.conv_n}곳${c.conv_defaults ? " (부족해서 기본값)" : ""} · 롱폼 1,000회당 ${(c.conv_range.cL[0] * 1000).toFixed(1)}~${(c.conv_range.cL[1] * 1000).toFixed(1)}명</td></tr>
+          <tr><td>영상 단위: 쇼츠 1만 회 넘는 비율 (비교 채널 최근 영상)</td><td>${c.video.S.n ? `예측 ${c.video.S.pred}% · 실제 ${c.video.S.obs}% (${c.video.S.n}편)` : "—"}</td></tr>
+          <tr><td>영상 단위: 롱폼 5천 회 넘는 비율</td><td>${c.video.L.n ? `예측 ${c.video.L.pred}% · 실제 ${c.video.L.obs}% (${c.video.L.n}편)` : "—"}</td></tr>
+          <tr><td>기록으로 거꾸로 시험 (4주 넘게 떨어진 기록이 있는 채널)</td><td>${c.backtest.enough ? `${c.backtest.n}곳 중 띠 안 ${c.backtest.hit}%${c.inflate > 1 ? ` · 흔들림 ${c.inflate}배로 넓힘` : ""}` : `아직 ${c.backtest.n}곳 · 기록이 쌓이면 확인해요`}</td></tr>
+          <tr><td>지난 예측 맞춤 기록 (점검 때 저장한 띠)</td><td>${fw.n ? `${fw.n}번 중 ${fw.inside}번 띠 안 (${fw.pct}%)${fw.brier !== null ? ` · Brier ${fw.brier}` : ""}` : "아직 없어요 · 점검할수록 쌓여요"}</td></tr></table></details>`;
+    const svg = $("sxProb").querySelector(".sx-fan svg");
+    if (svg) svg.dataset.xmin = Math.min(0, ...((o.checkups.trend || []).map(r => (r.at - fc.at) / 604800).filter(w => w >= -8 && w <= 52.5)));
+    bindFan(fc);
+  }
+
+  /* ---- (6) 점검 ---- */
+  function trendSvg(tr) {
+    const pts = (tr || []).filter(r => r.subs !== null && r.subs !== undefined);
+    if (pts.length < 2) return `<div class="sx-note" style="margin:6px 0 0">기록이 2개 이상 쌓이면 구독자 추이를 그려 드려요</div>`;
+    const W = 640, H = 140, L = 54, Rt = 16, T = 10, B = 24, t0 = pts[0].at, t1 = pts[pts.length - 1].at || t0 + 1;
+    let lo = Math.min(...pts.map(p => p.subs)), hi = Math.max(...pts.map(p => p.subs));
+    if (hi - lo < 10) { lo -= 10; hi += 10; }
+    const X = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - Rt), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    return `<div class="sx-trend"><svg class="sx-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="구독자 추이 ${pts[0].subs.toLocaleString()}명에서 ${pts[pts.length - 1].subs.toLocaleString()}명">
+      <line class="grid" x1="${L}" x2="${W - Rt}" y1="${Y(lo)}" y2="${Y(lo)}"/><line class="grid" x1="${L}" x2="${W - Rt}" y1="${Y(hi)}" y2="${Y(hi)}"/>
+      <text class="ax" x="${L - 6}" y="${Y(lo) + 4}" text-anchor="end">${N(lo)}</text><text class="ax" x="${L - 6}" y="${Y(hi) + 4}" text-anchor="end">${N(hi)}</text>
+      <text class="ax" x="${L}" y="${H - 6}">${esc(dayOf(t0))}</text><text class="ax" x="${W - Rt}" y="${H - 6}" text-anchor="end">${esc(dayOf(t1))}</text>
+      <path class="p50" d="M${pts.map(p => `${X(p.at).toFixed(1)},${Y(p.subs).toFixed(1)}`).join("L")}"/>
+      ${pts.map(p => `<circle class="act br" cx="${X(p.at).toFixed(1)}" cy="${Y(p.subs).toFixed(1)}" r="4"><title>${esc(dayOf(p.at))} · ${p.subs.toLocaleString()}명</title></circle>`).join("")}</svg></div>`;
+  }
+  function renderCheck() {
+    const o = SX.ov, ck = o.checkups.latest, st = o.settings;
+    const yes = b => b ? `<span class="sx-ok">✓</span>` : `<span class="sx-no">✕</span>`;
+    let body = `<div class="card empty"><b>아직 점검 기록이 없어요</b>[지금 점검하기]를 누르면 우리 채널 숫자를 새로 받아 계획과 비교해요.</div>`;
+    if (ck) {
+      const a = ck.actual, md = a.median || {}, sb = ck.subs || {};
+      const r = (lab, plan, act, ok) => `<tr><td>${lab}</td><td>${plan}</td><td>${act}</td><td>${ok === null ? "—" : yes(ok)}</td></tr>`;
+      body = `<div class="card sx-ck"><b>${esc(dayOf(ck.at))} 점검 · ${esc(dayOf(ck.period.from))}부터 ${ck.period.weeks}주</b>
+        <table><tr><th>항목</th><th>계획·목표</th><th>실제</th><th></th></tr>
+          ${r("롱폼 올린 수", `${ck.plan.L}개`, `${a.L}개`, ck.plan.L >= 1 ? a.L >= 0.7 * ck.plan.L : null)}
+          ${r("쇼츠 올린 수", `${ck.plan.S}개`, `${a.S}개`, ck.plan.S >= 1 ? a.S >= 0.7 * ck.plan.S : null)}
+          ${r("롱폼 보통 조회수 (14일 지난 영상)", md.L && md.L.kpi ? V(md.L.kpi) : "—", md.L && md.L.median ? `${V(md.L.median)} (${md.L.n}편)` : "아직 없어요", md.L && md.L.median && md.L.kpi ? md.L.median >= md.L.kpi : null)}
+          ${r("쇼츠 보통 조회수 (7일 지난 영상)", md.S && md.S.kpi ? V(md.S.kpi) : "—", md.S && md.S.median ? `${V(md.S.median)} (${md.S.n}편)` : "아직 없어요", md.S && md.S.median && md.S.kpi ? md.S.median >= md.S.kpi : null)}
+          ${r("구독자 변화", ck.band ? `예상 ${ck.band.p10.toLocaleString()}~${ck.band.p90.toLocaleString()}명` : "다음 점검부터 예상과 비교", sb.delta !== null && sb.delta !== undefined ? `${sb.from !== null ? sb.from.toLocaleString() : "—"} → ${sb.to !== null && sb.to !== undefined ? sb.to.toLocaleString() : "—"}명 (${sb.delta >= 0 ? "+" : ""}${sb.delta})` : "—", ck.band ? ck.band.inside : null)}
+          ${ck.studio ? r("스튜디오 숫자 (지난 28일)", "", `조회수 ${ck.studio.views28 !== undefined ? ck.studio.views28.toLocaleString() : "—"} · 구독자 ${ck.studio.subs28 !== undefined ? (ck.studio.subs28 >= 0 ? "+" : "") + ck.studio.subs28 : "—"}`, null) : ""}</table>
+        ${sb.src === "rounded" ? `<div class="sx-note" style="margin:0">구독자 수는 YouTube가 반올림해 보여 줘서 10명 단위(1만 명이 넘으면 100명 단위)로만 알 수 있어요. 정확히 보려면 아래 '스튜디오 숫자'를 넣어 주세요.</div>` : ""}
+        <div class="sx-3"><div><h4 class="sx-ok">잘 되는 것</h4><ul>${(ck.good || []).map(x => `<li>${esc(x)}</li>`).join("") || "<li>아직 없어요</li>"}</ul></div>
+          <div><h4 class="sx-no">안 되는 것</h4><ul>${(ck.bad || []).map(x => `<li>${esc(x)}</li>`).join("") || "<li>없어요</li>"}</ul></div>
+          <div><h4>바꿀 것</h4><ul>${(ck.change || []).map(x => `<li>${esc(x)}</li>`).join("") || "<li>지금처럼 이어 가요</li>"}</ul></div></div></div>`;
+    }
+    $("sxCheck").innerHTML = `
+      <div class="sx-ckbar"><button class="btn primary" id="sxCheckGo">지금 점검하기</button>
+        <label><input type="checkbox" id="sxRemOn"${st.remind ? " checked" : ""}> 매주 점검 알림 (7일 지나면 왼쪽 8단계에 점)</label>
+        <label title="8단계를 열 때 우리 채널 숫자가 하루 넘게 지났으면 조용히 새로 받아 추이를 기록해요"><input type="checkbox" id="sxOwnAuto"${st.ownAuto ? " checked" : ""}> 열 때 우리 채널 숫자 하루 한 번 기록</label></div>
+      <details class="card sx-studio"><summary>YouTube 스튜디오 숫자 넣기 (선택 · 더 정확해요)</summary><div class="sx-note" style="margin:6px 0 0">스튜디오 → 분석 → 지난 28일의 조회수와 구독자 증가를 넣고 [지금 점검하기]를 누르면 그 숫자를 먼저 써요.</div>
+        <div class="row1">조회수 <input class="inp" id="sxV28" inputmode="numeric" placeholder="예: 12000"> 구독자 증가 <input class="inp" id="sxS28" inputmode="numeric" placeholder="예: 85"></div></details>
+      ${body}
+      <details class="card sx-hist"${o.checkups.items.length > 1 ? "" : " open"}><summary>지난 점검 ${o.checkups.items.length}번 · 구독자 추이</summary>
+        ${o.checkups.items.map(x => `<div class="row"><span>${esc(dayOf(x.at))}</span><span>잘 되는 것 ${x.good}</span><span>안 되는 것 ${x.bad}</span><span>구독자 ${x.subs !== null && x.subs !== undefined ? x.subs.toLocaleString() : "—"}</span></div>`).join("")}
+        ${trendSvg(o.checkups.trend)}</details>`;
+    $("sxCheckGo").onclick = () => {
+      const v = $("sxV28").value.replace(/[^0-9-]/g, ""), s = $("sxS28").value.replace(/[^0-9-]/g, "");
+      const studio = v || s ? { views28: v ? +v : undefined, subs28: s ? +s : undefined } : null;
+      runJob("/api/strategy/checkup", studio ? { studio } : {}, "점검했어요 · 잘 되는 것 / 안 되는 것 / 바꿀 것을 확인해 보세요", () => { SX.tab = "check"; try { localStorage.setItem("sxTab", "check"); } catch (e) {} });
+    };
+    $("sxRemOn").onchange = async () => { const r = await api("/api/strategy/settings", { remind: $("sxRemOn").checked }).catch(() => ({})); if (r.ok) { SX.ov.settings = r.settings; toast(r.settings.remind ? "매주 점검 알림을 켰어요" : "점검 알림을 껐어요"); remindCheck(); } };
+    $("sxOwnAuto").onchange = async () => { const r = await api("/api/strategy/settings", { ownAuto: $("sxOwnAuto").checked }).catch(() => ({})); if (r.ok) { SX.ov.settings = r.settings; toast(r.settings.ownAuto ? "열 때 우리 채널 숫자를 하루 한 번 기록해요" : "자동 기록을 껐어요 (새로 고침을 눌러 받아요)"); } };
+  }
+
+  /* ---- 점검 알림 · 작업 중 표시 ---- */
+  function renderRemind() {
+    const r = SX.ov && SX.ov.remind;
+    $("sxRemind").hidden = !(r && r.due);
+    if (r && r.due) $("sxRemindTx").textContent = r.never ? `전략을 시작한 지 ${r.days}일이 지났어요. 첫 점검을 해 볼까요?` : `지난 점검 뒤 ${r.days}일이 지났어요. 계획대로 가고 있는지 점검해 볼까요?`;
+  }
+  $("sxRemindGo").onclick = () => { SX.tab = "check"; renderTabs(); $("sxCheckGo") && $("sxCheckGo").click(); };
+  async function remindCheck() {
+    let r = null;
+    try { r = await getJSON("/api/strategy/remind"); } catch (e) { return; }
+    const dot = document.querySelector('.step[data-p="strategy"] .rdot');
+    if (dot) dot.classList.toggle("on", !!(r && r.due));
+    if (r && r.due) {
+      let today = new Date().toDateString(), shown = null;
+      try { shown = localStorage.getItem("sxRemindToast"); } catch (e) {}
+      if (shown !== today) {
+        toast(r.never ? "채널 전략: 첫 점검을 해 볼 때예요 (8단계)" : `채널 전략: 지난 점검 뒤 ${r.days}일이 지났어요 (8단계에서 점검)`);
+        try { localStorage.setItem("sxRemindToast", today); } catch (e) {}
+      }
+    }
+  }
+  function syncJobUi() {
+    const busy = !!state.job;
+    ["sxRefresh", "sxRefreshAll", "sxCheckGo", "sxAi"].forEach(id => { const b = $(id); if (b) b.disabled = busy; });
+    const st = $("sxStop"); if (st) st.hidden = !(busy && /채널 전략|우리 채널|채널 점검|클로드로 전략/.test(((state.progress || {}).label || "") + (state.job || "")));
+  }
+  setInterval(() => { if ($("p-strategy").classList.contains("on")) syncJobUi(); }, 1000);
+
+  /* ---- 5·7단계: 전략에서 만든 할 일 (체크하면 끝) ---- */
+  window.sxTodoBox = async (id, uses) => {
+    const box = $(id); if (!box) return;
+    const list = [];
+    for (const u of uses) {
+      let r = null;
+      try { r = await getJSON(`/api/strategy/todos?use=${encodeURIComponent(u)}`); } catch (e) {}
+      ((r && r.todos) || []).forEach(t => { if (!list.some(x => x.id === t.id)) list.push(t); });
+    }
+    box.hidden = !list.length;
+    box.innerHTML = `<h3>전략에서 만든 할 일 ${list.length}<span class="sp"></span><button class="linkbtn" data-gost>채널 전략 열기</button></h3>`
+      + list.map(t => `<label><input type="checkbox" data-bd="${esc(t.id)}"><span>${esc(t.text)} <span class="sx-tag cat">${esc(t.category)}</span></span></label>`).join("");
+    box.querySelector("[data-gost]").onclick = () => { SX.tab = "take"; try { localStorage.setItem("sxTab", "take"); } catch (e) {} go("strategy"); };
+    box.querySelectorAll("[data-bd]").forEach(c => c.onchange = async () => {
+      const r = await api("/api/strategy/todo", { update: { id: c.dataset.bd, done: c.checked } }).catch(() => ({}));
+      if (r.ok) { toast("할 일을 끝냈어요 ✓"); window.sxTodoBox(id, uses); }
+    });
+  };
+  remindCheck();
+  window.sxTodoBox("thTodos", ["thumb"]);
+  window.sxTodoBox("upTodos", ["title", "upload"]);
 })();
 </script>
 </body>
