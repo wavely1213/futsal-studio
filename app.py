@@ -18,6 +18,7 @@ import bundle
 import captions
 import claude_cli
 import core
+import cutout_worker
 import editor
 import hooks
 import plan
@@ -637,9 +638,10 @@ class Handler(BaseHTTPRequestHandler):
                     sp = thumb.grab(qq["name"][0], float(qq["t"][0]))
                 else:
                     sp = (thumb.ASSETS / Path(urlparse(src).path).name).resolve()
-                out = thumb.remove_bg(sp, b.get("kind", "hq"))
-                log("  누끼 완료")
-                return {"cut": thumb.asset_url(out), "src": src}
+                # 따로 프로세스에서 (끝나면 메모리 반환 · 죽어도 앱은 그대로 · 메모리가 모자라면 빠른 누끼)
+                out, used, note = cutout_worker.remove_bg(sp, b.get("kind", "hq"), editor.CANCEL, editor._PROCS, log)
+                log(f"  누끼 완료{' · ' + note if note else ''}")
+                return {"cut": thumb.asset_url(out), "src": src, "kind": used, "note": note}
             ok = start_job("누끼 따기", do_cut)
             return self._send(200 if ok else 409, _started(ok))
         if path == "/api/thumb/upload":
