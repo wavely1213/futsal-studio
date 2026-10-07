@@ -1,6 +1,8 @@
 {
   "version": "2.0.0",
   "notes": "스타일 배우기가 영상 기획 분석으로: 인트로 구성·장르·형식·자막 처리·재미 요소를 판단하고 우리 영상에 적용할 점 제안, 클로드 계정으로 더 깊게 보기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/1e1bf0dcd51b9d09d45dd4fd318c12956cb00cce.zip",
+  "commit": "1e1bf0dcd51b9d09d45dd4fd318c12956cb00cce",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "e36177ba5a6b9b188deb7c7b402910af35622accf558d796f16b2f7c2b6add4f",
