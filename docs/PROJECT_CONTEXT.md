@@ -65,7 +65,7 @@ claude_cli.py       클로드 계정으로 쓰기 (사용자 PC의 Claude Code C
 qa.py               내보낸 영상 자동 검수
 bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
-youtube_upload.py   유튜브에 바로 올리기 (키트 그대로 올리기·이어 올리기·마무리·기록·할당량) → WORK/youtube/ (D-045)
+youtube_upload.py   유튜브에 바로 올리기 (키트 그대로 올리기·이어 올리기·마무리·기록·할당량) → WORK/youtube/ (D-046)
 youtube_api.py      Google OAuth(루프백·PKCE)·비밀 저장(DPAPI)·YouTube Data API(재개 가능한 업로드 등) · 표준 라이브러리만
 hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어)
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
@@ -114,7 +114,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_PORT`: 로컬 서버 포트 (기본 8765)
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
-  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-045·D-046)
+  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-046·D-047)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`, `FUTSAL_OLD_PID`: 내부용. 재시작·실행기 경유·다시 시작 전 앱 프로세스 번호(미룬 구성요소 설치가 그 프로세스가 끝나길 기다림, D-034)를 표시하며 직접 설정하지 않는다.
   - 휴대폰으로 보기(D-027): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의 · 앱 화면 포트 창 8765~8804 안이면 켜지 않음, D-034), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR 이 가리킬 페이지 주소 · 개발 모드만), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
@@ -146,7 +146,7 @@ icon.ico / icon.png 앱 아이콘
 | Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-027)를 켠 동안만: 휴대폰 → 원격 리스너. 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
 | ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
 | mulgyeol.kr/futsal (저장소 밖: 와벨리 저장소 `public/futsal/`, Vercel) | 휴대폰 화면(정적 PWA). 와벨리 `main`에 병합되면 공개된다 | 없음 |
-| Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-045): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
+| Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-046): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
 | YouTube Data API v3 (`www.googleapis.com/youtube/v3` · `/upload/youtube/v3`) | 7단계 [유튜브에 올리기]를 누를 때만: 재개 가능한 업로드(videos.insert) · thumbnails.set · captions.insert · playlists list/insert · playlistItems.insert · videos.list(상태) · channels.list(연결 확인). 할당량: 업로드 하루 100번 + 그 밖 하루 10,000 단위(2026-06-01 기준) | 위 토큰 (사용자 본인 계정) |
 
 ## 7. 참고 링크

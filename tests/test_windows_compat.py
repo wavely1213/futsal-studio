@@ -367,7 +367,7 @@ class Locks(Work):
 
     @unittest.skipIf(sys.platform == "win32", "권한 비트는 POSIX 만")
     def test_write_atomic_secret_mode_from_creation(self):
-        """유튜브 토큰·세션(yt.save_secret)과 합침(D-047): mode 를 주면 임시 파일이 처음부터 그 권한 — 바꿔 끼우기 전에도 남이 못 읽음."""
+        """유튜브 토큰·세션(yt.save_secret)과 합침(D-048): mode 를 주면 임시 파일이 처음부터 그 권한 — 바꿔 끼우기 전에도 남이 못 읽음."""
         seen = []
         real = updater.replace_retry
 

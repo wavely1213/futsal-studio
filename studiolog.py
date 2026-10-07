@@ -5,7 +5,7 @@
   studio-error.log  같은 오류의 traceback 전체 + 프로그램이 통째로 죽을 때의 위치(faulthandler) — pythonw(콘솔 없음)일 때만
                     (app._error_log 가 sys.stderr 를 이 파일로 돌림 · 콘솔로 켜면 콘솔에)
   둘 다 비밀(터널 주소·알림 주제·영상 표·서명·연결 코드 · 유튜브 토큰·세션 주소·로그인 코드·보안 비밀번호)은 remote.redact 로 '…'
-  (redact · 유튜브 올리기(youtube_upload·youtube_api)도 이 한 길로 · D-048).
+  (redact · 유튜브 올리기(youtube_upload·youtube_api)도 이 한 길로 · D-049).
 - write: 줄마다 연도가 붙은 시각 · MAX_BYTES 를 넘으면 studio.old.log 하나만 남기고 새로 시작 (계속 커지지 않게)
 - trace: 오류 위치(종류·내용·파일:줄·호출 경로)를 한 줄로 + 오류 출력(stderr)에 traceback 전체.
   앱은 pythonw(콘솔 없음)로 돌아 traceback 이 아무 데도 안 남았음 · 원격(remote._trace)·서버 요청 오류도 이것 하나로
@@ -113,7 +113,7 @@ HIDDEN = "(내용은 비밀이 섞일 수 있어 뺌)"
 
 def where(e, detail=True):
     """오류 → "KeyError: 'ids' · app.py:469 <lambda> ← app.py:77 runner" (+ 원인 오류가 있으면 한 단계 더).
-    detail=False: 오류 글은 빼고 종류·위치만 (redact 가 모르는 비밀이 섞일 수 있는 곳 — 유튜브 토큰 교환·저장 중 · D-048)."""
+    detail=False: 오류 글은 빼고 종류·위치만 (redact 가 모르는 비밀이 섞일 수 있는 곳 — 유튜브 토큰 교환·저장 중 · D-049)."""
     out = f"{type(e).__name__}: {_one_line(e) if detail else HIDDEN}"
     loc = _frames(e)
     if loc:

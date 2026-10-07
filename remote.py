@@ -90,7 +90,7 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               "학습용 영상 지우기", "배운 영상 파일 지우기", "보관함으로 되돌리기", "학습용으로 옮기기",
               # 채널 전략 (PC 에서만 시작 · 휴대폰에는 진행·알림·멈추기만 · D-028)
               strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,
-              # 유튜브에 바로 올리기 (PC 7단계에서만 시작 · 휴대폰에는 진행('유튜브에 올리는 중')·알림·멈추기만 · D-047)
+              # 유튜브에 바로 올리기 (PC 7단계에서만 시작 · 휴대폰에는 진행('유튜브에 올리는 중')·알림·멈추기만 · D-048)
               youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
@@ -119,7 +119,7 @@ STRATEGY_MSG = {
     "blocked": "YouTube가 잠시 막아 6시간 쉬어요 · 남은 채널은 최근 날짜·조회수만 새로 고쳤어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
     "net": "PC 인터넷이 끊겨 일부 채널만 새로 고쳤어요 · 인터넷을 확인한 뒤 PC 8단계 '채널 전략'에서 다시 새로 고쳐 주세요",
 }
-# 유튜브 올리기 끝 — 휴대폰 '마지막 작업' 칸·알림에는 이 정해진 문장만 (영상 주소·번호·토큰·Google 오류 글은 넣지 않음 · D-047)
+# 유튜브 올리기 끝 — 휴대폰 '마지막 작업' 칸·알림에는 이 정해진 문장만 (영상 주소·번호·토큰·Google 오류 글은 넣지 않음 · D-048)
 YOUTUBE_JOBS = {youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}
 YOUTUBE_MSG = {
     "done": "유튜브에 올렸어요 · PC 7단계에서 확인해 주세요",
@@ -128,7 +128,7 @@ YOUTUBE_MSG = {
     "paused": "유튜브 올리기를 멈췄어요 · PC 7단계에서 [이어 올리기]를 눌러 주세요",
     "relogin": "유튜브 연결이 끊겼어요 · PC 7단계에서 다시 연결해 주세요",
     "failed": "유튜브에 올리지 못했어요 · PC 7단계에서 확인해 주세요",
-    # 실패 카드 종류별 (trouble.YT_CARDS · D-048) — 이것도 정해진 문장만 (남은 시각·주소·Google 원문 없음)
+    # 실패 카드 종류별 (trouble.YT_CARDS · D-049) — 이것도 정해진 문장만 (남은 시각·주소·Google 원문 없음)
     "quota": "유튜브 올리기를 멈췄어요 · 오늘 쓸 수 있는 유튜브 API 양을 다 썼어요 · 한국 시각 오후 4~5시가 지나면 PC 7단계에서 [이어 올리기]를 눌러 주세요",
     "net": "유튜브 올리기를 멈췄어요 · PC 인터넷이 끊겼거나 유튜브 서버가 불안정해요 · PC 7단계에서 [이어 올리기]를 눌러 주세요",
     "thumb": "유튜브에 올렸지만 썸네일은 막혔어요 · 채널 인증(전화번호 확인)이 필요해요 · PC 7단계에서 확인해 주세요",
@@ -198,15 +198,19 @@ _SECRETS = (
     (re.compile(r"FSR2 [^\s'\"]+"), "FSR2 …"),
     (re.compile(r"([#&?]pair=)[^&\s'\"]+"), r"\1…"),
     (re.compile(r"([#&?]u=)[^&\s'\"]+"), r"\1…"),
-    # 유튜브 바로 올리기 (D-047): 업로드 세션 주소(upload_id)·로그인 코드·state·PKCE·토큰·클라이언트 보안 비밀번호
+    # 유튜브 바로 올리기 (D-048): 업로드 세션 주소(upload_id)·로그인 코드·state·PKCE·토큰·클라이언트 보안 비밀번호
     (re.compile(r"([?&](?:upload_id|code|state|code_verifier|access_token|refresh_token|client_secret|token)=)[^&\s'\"]+"), r"\1…"),
-    # 주소 밖에 놓인 같은 이름(기록 글·예외 글 · 'upload_id=…') — code·state·token 처럼 흔한 낱말은 주소 안에서만 (D-048)
-    (re.compile(r"\b((?:upload_id|code_verifier|access_token|refresh_token|client_secret)=)[^&\s'\"]+"), r"\1…"),
+    # 주소 밖에 놓인 같은 이름(기록 글·예외 글 · 'upload_id=…') — code·state·token 처럼 흔한 낱말은 주소 안에서만 (D-049)
+    (re.compile(r"\b((?:upload_id|code_verifier|access_token|refresh_token|client_secret)\s*[=:]\s*)[^&\s'\",}]+"), r"\1…"),
     (re.compile(r"\bya29\.[A-Za-z0-9._~+/=-]+"), "ya29.…"),
     (re.compile(r"\b1//[A-Za-z0-9._~+/=-]+"), "1//…"),
     (re.compile(r"\bGOCSPX-[A-Za-z0-9_-]+"), "GOCSPX-…"),
     (re.compile(r"\b(Bearer )[^\s'\"]+"), r"\1…"),
+    # JSON('"…": "…"')·파이썬 사전 repr("{'access_token': '…'}") 둘 다 — 요청 값·응답을 통째로 찍은 예외 글 (D-049 보강)
     (re.compile(r'("(?:access_token|refresh_token|client_secret|code_verifier|uri)"\s*:\s*")[^"]*'), r"\1…"),
+    (re.compile(r"('(?:access_token|refresh_token|client_secret|code_verifier|uri)'\s*:\s*')[^']*"), r"\1…"),
+    # Google 로그인 코드(4/0…) — 주소 밖(요청 값 repr 등)에 놓여도
+    (re.compile(r"\b4/0[A-Za-z0-9_-]{10,}"), "4/0…"),
 )
 
 
@@ -1275,12 +1279,14 @@ class Service:
         """last: 휴대폰 '마지막 작업' 칸 — ok(끝)·warn(확인이 필요해요: 막힘·못 받은 영상)·실패. 알림은 정해진 문장만."""
         ok, err, blocked, warn, note = True, None, False, False, "missed"
         yt_msg, yt_quiet = None, False
-        if name in YOUTUBE_JOBS:  # 유튜브: 결과의 오류 글·주소 대신 정해진 문장만 (D-047)
+        if name in YOUTUBE_JOBS:  # 유튜브: 결과의 오류 글·주소 대신 정해진 문장만 (D-048)
             r = result if isinstance(result, dict) else {}
             card = (r.get("fail") or {}).get("kind") if isinstance(r.get("fail"), dict) else None
             card = card or (trouble.youtube_kind_of(error) if error else None)  # 작업 밖으로 나온 예외: start_job 이 만든 카드 문장
+            # 멈춤(✕)이 작업 밖으로 예외로 나온 경우(start_job 의 cancelled 안내 '멈췄어요 · …')도 멈춤 — 실패 알림 안 울림
+            paused = r.get("paused") or bool(error and not card and trouble.CANCELLED.search(error))
             if error or r.get("ok") is False:
-                key = "paused" if r.get("paused") else YOUTUBE_FAIL_KEY.get(card) or ("relogin" if r.get("relogin") else "failed")
+                key = "paused" if paused else YOUTUBE_FAIL_KEY.get(card) or ("relogin" if r.get("relogin") else "failed")
                 ok, err, yt_msg = False, YOUTUBE_MSG[key], YOUTUBE_MSG[key]
                 yt_quiet = key == "paused"  # 멈춤은 PC·휴대폰에서 사람이 직접 누른 것 → '마지막 작업' 칸만, 알림은 안 울림
             else:

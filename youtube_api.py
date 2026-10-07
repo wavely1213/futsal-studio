@@ -5,7 +5,7 @@
   불러올 때 아무것도 실행하지 않음 (Windows DPAPI·HTTPS 설정도 쓸 때만).
 - 로그인: 사용자가 만든 Google Cloud 'OAuth 클라이언트(데스크톱 앱)'로, 127.0.0.1 의 아무 포트에 한 번만 여는 작은 서버가 결과를 받음
   (state·Host 확인, 한 번만, 10분 제한). 범위는 youtube.force-ssl 하나 — captions.insert 가 force-ssl(또는 youtubepartner)만 받고,
-  videos.insert·thumbnails.set·playlistItems.insert·playlists.list 도 이것으로 됨 (D-045).
+  videos.insert·thumbnails.set·playlistItems.insert·playlists.list 도 이것으로 됨 (D-046).
 - 토큰·클라이언트 보안 비밀번호·업로드 세션 주소는 비밀 → Windows 는 DPAPI(이 사용자만 풂), 그 밖은 권한 600 파일.
   기록·오류 문장·화면 응답에 넣지 않음 (오류 문장은 한국어 틀 + Google 의 reason 낱말만).
 - 업로드: 재개 가능한 업로드(8 MiB 조각 · 308 Resume Incomplete + Range · 끊기면 기다렸다가 상태를 물어 이어서 · 404 = 세션 만료).
@@ -165,7 +165,7 @@ def reset_text():
 class ApiError(Exception):
     """사용자에게 보여 줄 한국어 안내(str) + 종류(kind) + HTTP 상태 + Google 의 reason 낱말. 토큰·주소·응답 원문은 담지 않음."""
 
-    youtube = True  # trouble.explain(youtube=True) 가 kind 로 7단계 실패 카드를 고름 (trouble 은 이 모듈을 불러오지 않음 · D-048)
+    youtube = True  # trouble.explain(youtube=True) 가 kind 로 7단계 실패 카드를 고름 (trouble 은 이 모듈을 불러오지 않음 · D-049)
 
     def __init__(self, kind, msg=None, status=None, reason=None):
         if msg is None and kind == "quota":
@@ -320,7 +320,7 @@ _OPENER = []
 def _opener():
     """Google 요청용 opener (처음 쓸 때 한 번): 시스템 프록시(회사망)는 그대로 · 다른 주소로 보내는 응답은 따라가지 않음(_NoRedirect) ·
     HTTPS 인증서 설정은 updater.urlopen 과 같음(updater._ssl_context — 백신 'HTTPS 검사'에도 받게, 사슬·주소 확인은 그대로 · I-047).
-    updater.urlopen 은 리디렉트를 따라가므로 그대로 쓰지 않고 같은 인증서 설정만 합침 (D-047)."""
+    updater.urlopen 은 리디렉트를 따라가므로 그대로 쓰지 않고 같은 인증서 설정만 합침 (D-048)."""
     if not _OPENER:
         _OPENER.append(urllib.request.build_opener(_Keep308, _NoRedirect, _HTTP, _HTTPS(context=updater._ssl_context())))
     return _OPENER[0]
@@ -740,7 +740,7 @@ class LoginFlow:
             h._page(200, "연결하지 못했어요", f"{e} · 이 창은 닫고 스튜디오에서 다시 해 주세요")
             return self._finish(srv, "error", str(e))
         except Exception as e:  # noqa: BLE001 — 예상 못한 오류도 화면에는 쉬운 말로 (기록에는 위치와 종류만)
-            # 오류 글은 남기지 않음 — 토큰 교환·저장 중이라 redact 가 모르는 모양의 비밀이 섞일 수 있음 (D-047) · 기록은 studiolog 한 길로 (D-048)
+            # 오류 글은 남기지 않음 — 토큰 교환·저장 중이라 redact 가 모르는 모양의 비밀이 섞일 수 있음 (D-048) · 기록은 studiolog 한 길로 (D-049)
             studiolog.trace(e, "유튜브 연결 오류 위치", detail=False)
             msg = "연결하는 중에 문제가 생겼어요 · 스튜디오에서 다시 눌러 주세요"
             h._page(200, "연결하지 못했어요", msg)

@@ -71,7 +71,7 @@ studiolog.setup(lambda: LOGFILE)  # studio.log 쓰기: 연도 붙은 시각 · �
 
 def log(msg):
     msg = core.clean_text(str(msg))  # 반쪽 이모지가 섞이면 화면 응답(/api/state)·파일 기록이 오류로 멈춤 → '�'로
-    msg = remote.redact(msg)  # 비밀(터널 주소·주제·Google 토큰·업로드 세션 주소 등)이 섞여도 studio.log·화면·휴대폰 기록에 남지 않게 (D-047)
+    msg = remote.redact(msg)  # 비밀(터널 주소·주제·Google 토큰·업로드 세션 주소 등)이 섞여도 studio.log·화면·휴대폰 기록에 남지 않게 (D-048)
     with LOCK:
         LOG.append(msg)
     try:
@@ -83,7 +83,7 @@ def log(msg):
 
 # 프로그램 오류가 아닌 실패(사용자가 멈춤·복사 중·YouTube 막힘·비공개 영상·로그인·탭 없음): studio.log 에 원문 줄만 — 오류 위치·traceback 은 남기지 않음
 EXPECTED_KINDS = {"cancelled", "copying", "blocked", "unavailable", "login", "notab",
-                  # 유튜브 올리기: 할당량·연결 끊김·권한·썸네일 막힘·인터넷·서버 (Google 이 알려 준 사정 · D-048)
+                  # 유튜브 올리기: 할당량·연결 끊김·권한·썸네일 막힘·인터넷·서버 (Google 이 알려 준 사정 · D-049)
                   "yt_quota", "yt_limit", "yt_relogin", "yt_forbidden", "yt_thumb", "yt_net", "yt_server", "yt_relogin_left", "yt_quota_left"}
 YT_JOBS = (youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH)
 YT_CTX = {"youtube": True}  # 유튜브 올리기 작업의 start_job ctx → trouble.explain(youtube=True): 7단계 실패 카드 (받기 쪽 안내 대신)
@@ -111,9 +111,11 @@ def start_job(name, fn, by=None, ctx=None):
             _fail_extra(info, e)
             JOB["error"], JOB["fail"] = info["msg"], info
             log(f"문제가 생겼어요 · {info['msg']}")
-            studiolog.write(f"  원문 · {' '.join(str(e).split())[:400]}")
+            yt_job = bool((ctx or {}).get("youtube"))  # 유튜브 올리기: 토큰 새로 받기·저장 중 오류 글엔 redact 가 모르는 비밀이 섞일 수 있음
+            studiolog.write(f"  원문 · {type(e).__name__}" if yt_job else  # → 원문 글 없이 종류만 (로그인 콜백과 같은 기준 · D-049)
+                            f"  원문 · {' '.join(str(e).split())[:400]}")
             if info["kind"] not in EXPECTED_KINDS:  # 사용자 쪽 사정(멈춤·복사 중·막힘…)은 원문 줄만
-                studiolog.trace(e)
+                studiolog.trace(e, detail=not yt_job)
         finally:
             core.set_progress()
             err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
@@ -1159,14 +1161,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
         return self._send(404, {"error": "not found"})
 
-    # ---- 유튜브에 바로 올리기 (7단계 · youtube_upload · D-045) ----
+    # ---- 유튜브에 바로 올리기 (7단계 · youtube_upload · D-046) ----
     def _youtube_get(self, path, q):
         """읽기만 (인터넷 안 씀 · 파일을 바꾸지 않음 · 토큰·보안 비밀번호·세션 주소는 응답에 없음)."""
         yu = youtube_upload
         try:
             if path == "/api/youtube/status":
                 want = (q.get("job") or [""])[0]
-                with LOCK:  # ?job=<번호>: 7단계가 시킨 작업이 끝났으면 그 실패 안내 (작업 밖으로 나온 예외 · trouble.explain 카드 · D-048)
+                with LOCK:  # ?job=<번호>: 7단계가 시킨 작업이 끝났으면 그 실패 안내 (작업 밖으로 나온 예외 · trouble.explain 카드 · D-049)
                     d = DONE.get(int(want)) if want.isdigit() else None
                     done = {"id": int(want), "error": d["error"], "fail": d["fail"]} if d and d["name"] in YT_JOBS else None
                 return self._send(200, dict(yu.status(), ok=True, job=JOB["name"], done=done))
@@ -1184,7 +1186,7 @@ class Handler(BaseHTTPRequestHandler):
         except LookupError as e:  # 그사이 편집실에서 지운 편집본
             return self._send(400, {"ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001
-            studiolog.trace(e, "유튜브 올리기 화면 오류 위치")  # 기록은 한 길로 (studio.log 한 줄 + 오류 출력 · 비밀은 remote.redact · D-048)
+            studiolog.trace(e, "유튜브 올리기 화면 오류 위치")  # 기록은 한 길로 (studio.log 한 줄 + 오류 출력 · 비밀은 remote.redact · D-049)
             log(f"유튜브 올리기 화면을 읽지 못했어요 · {type(e).__name__}")
             return self._send(500, {"ok": False, "error": "유튜브 올리기 정보를 읽지 못했어요. 잠시 뒤 다시 열어 주세요"})
         return self._send(404, {"error": "not found"})
@@ -1192,7 +1194,7 @@ class Handler(BaseHTTPRequestHandler):
     def _youtube_post(self, path, b):
         """설정·연결·작업 시작. 올리기·이어 올리기·마무리는 start_job (한 번에 하나 · 겹치면 409 · 응답은 다른 작업과 같은 _started:
         jobId → 화면이 자기가 시킨 올리기의 끝만 받음). /api/youtube/* 는 모두 이 PC 화면 전용 — 휴대폰 원격(remote.ACTIONS) 허용 목록에
-        넣지 않음 (로그인·연결 끊기·설정·토큰 흐름 · 올리기 시작도 PC 에서만). 휴대폰은 진행·끝 알림·[멈추기]만 (D-047)."""
+        넣지 않음 (로그인·연결 끊기·설정·토큰 흐름 · 올리기 시작도 PC 에서만). 휴대폰은 진행·끝 알림·[멈추기]만 (D-048)."""
         yu = youtube_upload
         try:
             if path == "/api/youtube/client":

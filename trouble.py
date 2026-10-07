@@ -192,7 +192,7 @@ BLOCKED_CARD = ("YouTube가 받기를 막고 있어요. 다운로드 엔진을 �
                 "아래에서 YouTube에 로그인해 둔 브라우저를 고르고 [이 브라우저로 다시 받기]를 눌러 주세요")
 
 
-# 유튜브에 바로 올리기 (7단계 · youtube_upload · D-048): Google 오류 종류(youtube_api.ApiError.kind) → 실패 카드 (종류, 정해진 한 줄, 할 일).
+# 유튜브에 바로 올리기 (7단계 · youtube_upload · D-049): Google 오류 종류(youtube_api.ApiError.kind) → 실패 카드 (종류, 정해진 한 줄, 할 일).
 # 문장은 늘 이 표의 것만 — 영상 주소·번호·토큰·세션 주소·Google 원문(reason 낱말 포함)·남은 시각 같은 바뀌는 값은 넣지 않는다.
 # 할 일: resume(이어 올리기) · relogin(다시 연결하기) · verify(채널 인증하러 가기 · 정해진 안내 열쇠) · thumb(썸네일 다시 올리기)
 #        · finish(마저 하기) · log · logfile — 실제로 보일 버튼은 7단계 화면이 그 영상의 세션·기록이 있는지 보고 정한다.
@@ -260,7 +260,7 @@ def explain(err, browser=None, blocked=None, youtube=False):
     browser: 사용자가 고른 로그인 정보 브라우저(있으면 안내에 이름을 넣음) · blocked: 이 화면용 'YouTube가 막음' 안내 문구.
     우리 한국어 안내 + 영어 원인(' · ' 뒤)이면: 원인 종류의 할 일을 붙이고, 원인 안내가 우리 안내에 없으면 뒤에 덧붙인다.
     youtube: 유튜브에 바로 올리기 작업(7단계) — Google 오류(youtube_api.ApiError: kind 가 있는 오류)는 YT_CARDS 의 정해진 문장으로,
-    그 밖의 오류도 받기 쪽 안내(로그인 정보·주소…) 대신 유튜브 쪽 안내로 (D-048)."""
+    그 밖의 오류도 받기 쪽 안내(로그인 정보·주소…) 대신 유튜브 쪽 안내로 (D-049)."""
     if isinstance(err, Trouble):
         return dict(err.info)
     if youtube:

@@ -1,4 +1,4 @@
-"""유튜브 바로 올리기 × E1(실패 카드·studio.log) 합침 시험 (D-048) — 가짜 Google(tests/fake_google.py)로만, 인터넷 없이.
+"""유튜브 바로 올리기 × E1(실패 카드·studio.log) 합침 시험 (D-049) — 가짜 Google(tests/fake_google.py)로만, 인터넷 없이.
 - 올리기 작업의 실패 카드: 할당량·연결 끊김(토큰 만료·취소)·썸네일 막힘(403)·인터넷 → trouble.YT_CARDS 의 정해진 문장 + 할 일
 - start_job(name, fn, by, ctx={"youtube": True}): 작업 밖으로 나온 예외도 같은 카드 (받기 쪽 '로그인 정보·주소' 안내가 아니게)
 - 휴대폰(remote.job_hook): 카드 종류별 정해진 문장 (주소·번호·토큰·Google 원문 없음)
@@ -126,6 +126,19 @@ class LogPathTests(unittest.TestCase):
         self.assertIn("ValueError: " + studiolog.HIDDEN, self.text())
         self.assertIn("test_youtube_trouble.py", self.text())
         self.assertIn("Traceback", err.getvalue())
+
+    def test_redact_dict_repr_colon_form_and_login_code(self):
+        """예외 글에 요청 값·응답을 통째로 찍은 꼴(파이썬 사전 repr · '키: 값') · 주소 밖 로그인 코드(4/0…)도 지움."""
+        cases = ["{'access_token': 'zzzSECRET', 'refresh_token': 'RTSECRET'}", "access_token: zzzSECRET",
+                 "client_secret : CLIENTSECRET", "{'code': '4/0AbcLOGINCODE_x-y', 'client_secret': 'CLIENTSECRET'}",
+                 "code=4/0AbcLOGINCODE_x-y", '{"code_verifier": "VERIFSECRET"}']
+        for c in cases:
+            out = remote.redact(c)
+            for bad in ("zzzSECRET", "RTSECRET", "CLIENTSECRET", "LOGINCODE", "VERIFSECRET"):
+                self.assertNotIn(bad, out, c)
+        self.assertEqual(remote.redact("{'access_token': 'zzzSECRET'}"), "{'access_token': '…'}")
+        self.assertEqual(remote.redact("code=4/0AbcLOGINCODE_x"), "code=4/0…")
+        self.assertEqual(remote.redact("4/0 경기 · 1/2 쪽"), "4/0 경기 · 1/2 쪽")  # 짧은 숫자 꼴은 그대로
 
     def test_login_flow_unexpected_error_goes_through_studiolog_without_text(self):
         flow = yt.LoginFlow()
@@ -318,6 +331,26 @@ class StartJobCardTests(ty.ServiceBase):
         self.assertNotIn("오류 위치", log)  # Google 이 알려 준 사정 (EXPECTED_KINDS) → 원문 줄만
         self.assertIn("원문 · ", log)
 
+    def test_youtube_crash_logs_no_error_text_even_for_unknown_secret_shapes(self):
+        """토큰 새로 받기·저장 중 오류 글엔 redact 가 모르는 비밀이 섞일 수 있음 → 유튜브 작업은 원문 글 없이 종류·위치만."""
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            done, log = self.run_crash(RuntimeError("token save failed WEIRDTOKENshape-123"))
+        self.assertEqual(done["fail"]["kind"], "yt_other")
+        self.assertNotIn("WEIRDTOKEN", log + err.getvalue())
+        self.assertIn("원문 · RuntimeError", log)
+        self.assertIn("RuntimeError: " + studiolog.HIDDEN, log)
+        self.assertIn("Traceback", err.getvalue())
+        # 다른 작업(받기·내보내기…)은 원문 그대로 (E1 그대로)
+        self.app.start_job("내보내기", lambda: (_ for _ in ()).throw(RuntimeError("EXPORTDETAIL kept")))
+        self.wait_job()
+        self.assertIn("EXPORTDETAIL kept", (self.work / "studio.log").read_text(encoding="utf-8"))
+
+    def test_cancel_escaping_job_is_paused_not_failed(self):
+        done, _log = self.run_crash(yt.Cancelled())
+        self.assertEqual(done["fail"]["kind"], "cancelled")
+        self.assertTrue(trouble.CANCELLED.search(self.hooked[-1][1]))
+
     def test_finish_crash_from_network(self):
         name, _ = self.ready()
         with mock.patch.object(yu, "finish", side_effect=OSError("<urlopen error timed out>")):
@@ -376,6 +409,19 @@ class PhoneTests(unittest.TestCase):
         self.assertEqual(self.hook(yu.JOB_NAME, f"boom {tok}", None)["error"], remote.YOUTUBE_MSG["failed"])
         for k in ("quota", "net", "thumb", "quota_left"):
             self.assertIsNone(URLISH.search(remote.YOUTUBE_MSG[k]), k)
+
+    def test_cancel_escaping_job_is_quiet_paused(self):
+        """멈춤(yt.Cancelled)이 작업 밖으로 예외로 나와도(start_job 의 cancelled 안내) '멈췄어요' · 실패 알림 안 울림."""
+        msg = trouble.explain(yt.Cancelled(), youtube=True)["msg"]
+        with mock.patch.object(self.svc, "pub") as pub, mock.patch.object(self.svc, "state", "on"), \
+                mock.patch.dict(self.svc.store.data, {"devices": {"d": {}}}):
+            last = self.hook(yu.JOB_NAME, msg, None)
+            self.assertEqual(last["error"], remote.YOUTUBE_MSG["paused"])
+            pub.notify.assert_not_called()
+            self.hook(yu.JOB_NAME, "boom", None)  # 카드도 멈춤도 아닌 글 → 실패 알림 (대조)
+            self.assertEqual(pub.notify.call_args[0][:2], ("failed", remote.YOUTUBE_MSG["failed"]))
+        # 인터넷 끊김 카드(문장에 '멈췄어요'가 있어도)는 멈춤이 아니라 인터넷 문장
+        self.assertEqual(self.hook(yu.JOB_NAME, trouble.YT_CARDS["yt_net"][0], None)["error"], remote.YOUTUBE_MSG["net"])
 
     def test_thumb_card_on_success_is_attention_not_done(self):
         """예전엔 썸네일만 막히면(경고 없음) '올렸어요'로 알렸음 → 이제 '확인이 필요해요' 알림."""

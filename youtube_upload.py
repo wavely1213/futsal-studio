@@ -1,4 +1,4 @@
-"""유튜브에 바로 올리기 (7단계 '올리기' · D-045) — 올리기 키트의 제목·설명(챕터 포함)·태그와 썸네일·자막(.srt)·재생목록을
+"""유튜브에 바로 올리기 (7단계 '올리기' · D-046) — 올리기 키트의 제목·설명(챕터 포함)·태그와 썸네일·자막(.srt)·재생목록을
 사용자 본인 채널에 그대로 올림. 카테고리 스포츠(17) · 언어 한국어 · 아동용은 늘 직접 정해서 보냄.
 
 - 연결: 사용자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)로 로그인 (youtube_api.LoginFlow · 범위 youtube.force-ssl 하나).
@@ -11,7 +11,7 @@
 - 기록(log)에는 파일 이름·종류·videoId·% 만. 제목·토큰·코드·보안 비밀번호·세션 주소·이메일은 남기지 않음.
 - 키트 파일(*_올리기.json) 형식은 바꾸지 않음 (DEVELOPMENT_RULES 6) · 상태는 모두 새 파일에.
 - 실패 카드: 결과의 fail = trouble.youtube_card(…) (할당량·연결 끊김·권한·썸네일 막힘·인터넷·서버 → 정해진 문장 + 할 일 ·
-  주소·토큰·Google 원문 없음) → 7단계 화면 카드 · 휴대폰은 remote.YOUTUBE_MSG 의 정해진 문장 (D-048).
+  주소·토큰·Google 원문 없음) → 7단계 화면 카드 · 휴대폰은 remote.YOUTUBE_MSG 의 정해진 문장 (D-049).
   작업 밖으로 나온 예외는 app.start_job(ctx={"youtube": True}) 이 trouble.explain(youtube=True) 로 같은 카드를 만든다.
 """
 import hashlib
@@ -38,14 +38,14 @@ CATEGORY, LANG = "17", "ko"   # 스포츠 · 한국어
 PRIVACY = ("private", "unlisted", "public")
 PRIVACY_KO = {"private": "비공개", "unlisted": "일부 공개", "public": "공개", "scheduled": "예약 공개"}
 # 할당량 (developers.google.com/youtube/v3/determine_quota_cost · revision history 2025-12-04·2026-06-01 · 2026-10-07 확인):
-# videos.insert 는 따로 '하루 100번'(한 번에 1) · 나머지는 '하루 10,000 단위'를 함께 씀 · 미국 태평양 시각 자정에 다시 채워짐 (D-045)
+# videos.insert 는 따로 '하루 100번'(한 번에 1) · 나머지는 '하루 10,000 단위'를 함께 씀 · 미국 태평양 시각 자정에 다시 채워짐 (D-046)
 COST = {"videos.insert": ("uploads", 1), "thumbnails.set": ("units", 50), "captions.insert": ("units", 400),
         "playlistItems.insert": ("units", 50), "playlists.insert": ("units", 50), "playlists.list": ("units", 1),
         "channels.list": ("units", 1), "videos.list": ("units", 1)}
 LIMITS = {"uploads": 100, "units": 10000}
 TITLE_MAX, DESC_BYTES, TAGS_MAX, HASHTAG_MAX = 100, 5000, 500, 15   # 설명은 '5000바이트' (videos 문서) — 한글은 한 글자 3바이트
 SHORTS_MAX, VERIFY_LEN = 180, 900          # 쇼츠: 세로·정사각형 3분까지 (2024-10-15~) · 15분 넘으면 채널 인증 필요
-THUMB_API_MAX = 50 * 1024 * 1024           # thumbnails.set 50MB (2026-09-14~ · BR-006 의 2MB 는 스튜디오 기준, I-057)
+THUMB_API_MAX = 50 * 1024 * 1024           # thumbnails.set 50MB (2026-09-14~ · BR-006 의 2MB 는 스튜디오 기준, I-062)
 SESSION_DAYS = 6                           # Google 세션은 약 1주 → 6일 넘으면 새로
 HISTORY_MAX = 500
 SCHEDULE_MIN, SCHEDULE_MAX = 15 * 60, 365 * 86400   # 예약 공개: 이 앱의 여유(15분 · Google 규칙은 '지금보다 뒤')
@@ -1078,7 +1078,7 @@ def _fail(sess, e, log, state="failed", c=None):
     if kind == "quota":
         _exhausted("videos.insert")
     sess.update(state=state, error=msg, kind=kind)
-    card = None if state == "paused" else trouble.youtube_card(kind)  # 7단계 실패 카드 (정해진 문장 · 할당량·연결 끊김·인터넷·서버 · D-048)
+    card = None if state == "paused" else trouble.youtube_card(kind)  # 7단계 실패 카드 (정해진 문장 · 할당량·연결 끊김·인터넷·서버 · D-049)
     try:
         _save_session(sess)
     except OSError:
@@ -1201,7 +1201,7 @@ def _after_upload(c, sess, video, log, cancel, notes):
              "locked": False, "status": {}, "preAudit": not get_settings()["audited"], "processing": True, "problem": None}
     _history_put(entry)  # 영상 번호를 받자마자 기록 (뒤 단계가 실패·앱이 꺼져도 남게)
     _delete_session(sess["key"])
-    log(f"유튜브에 올렸어요 · {sess['file']}")  # 영상 번호는 기록에 넣지 않음 — 이 기록은 휴대폰 /r/status 로도 감 (주소는 7단계 기록에만 · D-047)
+    log(f"유튜브에 올렸어요 · {sess['file']}")  # 영상 번호는 기록에 넣지 않음 — 이 기록은 휴대폰 /r/status 로도 감 (주소는 7단계 기록에만 · D-048)
     warnings = _post(c, entry, log, cancel)
     return _done(_result(entry, warnings, notes))
 
@@ -1215,7 +1215,7 @@ def privacy_text(entry):
 
 
 def step_card(steps):
-    """마무리 단계(썸네일·자막·재생목록)에서 사용자가 할 일이 남았으면 7단계 실패 카드 (영상은 올라감 · 정해진 문장 · D-048):
+    """마무리 단계(썸네일·자막·재생목록)에서 사용자가 할 일이 남았으면 7단계 실패 카드 (영상은 올라감 · 정해진 문장 · D-049):
     연결 끊김(남은 단계를 못 함) > 썸네일 막힘(채널 인증 · thumbnails.set 403) > 할당량. 없으면 None."""
     st = [x for x in (steps or {}).values() if isinstance(x, dict)]
     if any(x.get("state") == "todo" and x.get("msg") == RELOGIN_STEP for x in st):
@@ -1229,7 +1229,7 @@ def step_card(steps):
 
 def _result(entry, warnings, notes=None):
     return {"ok": True, "videoId": entry["videoId"], "url": entry["url"], "studio": entry["studio"], "privacy": entry["privacy"],
-            "fail": step_card(entry.get("steps")),  # 영상은 올라갔지만 할 일이 남음 → 7단계 카드 (D-048)
+            "fail": step_card(entry.get("steps")),  # 영상은 올라갔지만 할 일이 남음 → 7단계 카드 (D-049)
             "privacyText": privacy_text(entry), "publishAt": entry.get("publishAt"), "shorts": entry["shorts"],
             "steps": entry["steps"], "warnings": warnings, "notes": list(notes or []), "locked": entry["locked"],
             "lockedMsg": LOCKED_MSG if entry["locked"] else None, "channel": entry.get("channel"), "preAudit": bool(entry.get("preAudit")),

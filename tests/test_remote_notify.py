@@ -273,7 +273,7 @@ class NotifyTests(NotifyBase):
         self.assertFalse(any(t.startswith("작업이 끝났어요 · 채널") for t in texts))
 
     def test_youtube_jobs_fixed_text_never_url_or_token(self):
-        """유튜브 바로 올리기와 합침(D-047): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
+        """유튜브 바로 올리기와 합침(D-048): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
         (영상 주소·번호·Google 오류 글·토큰이 결과에 있어도 넣지 않음) · 진행·[멈추기]는 보이고 시작은 휴대폰 허용 목록에 없음."""
         import youtube_upload as yu
         self.assertTrue({yu.JOB_NAME, yu.JOB_FINISH} <= remote.JOB_LABELS)
