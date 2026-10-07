@@ -6,17 +6,22 @@
   (취소면 error=access_denied · 테스트 상태에서 테스트 사용자가 아니면 '액세스 차단됨' 화면에서 멈춤)
   /token: authorization_code(client_secret 필수 · redirect_uri 같아야 · PKCE S256 확인 · 코드 한 번만) · refresh_token
   (테스트 상태면 동의한 지 7일 뒤 invalid_grant · 취소된 토큰 invalid_grant) · /revoke
+  · refresh_token_expires_in 은 '시간 제한 액세스'(time_based 모드)일 때만 줌 — 테스트 상태 7일은 응답에 없음 (native-app 문서)
 - YouTube: Bearer 확인(401 authError) · 범위 확인(403 insufficientPermissions) · Google 형식 오류
   {"error": {"code", "message", "errors": [{"reason", "domain", "message"}], "status"}} · 할당량(업로드 100회 · 그 밖 10,000 단위)
-  - 재개 가능한 업로드: POST …/videos?uploadType=resumable → 200 + Location · PUT Content-Range bytes a-b/total
+  - 재개 가능한 업로드: POST …/videos?uploadType=resumable → 200 + Location · PUT 마다 Authorization: Bearer (문서의 3·4단계 예시
+    그대로 · 401 authError · lenient_put_auth 모드면 안 봄) · PUT Content-Range bytes a-b/total
     (마지막이 아닌 조각은 256 KiB 배수) → 308 Resume Incomplete + Range: bytes=0-N (0바이트면 Range 없음) → 끝 201(또는 200)
     · 빈 PUT bytes */total = 상태 묻기 · 끊긴 요청은 256 KiB 단위로 내림해 받은 데까지 남김 · 만료·모르는 세션은 404
   - thumbnails.set(JPEG/PNG 확인) · captions.insert(multipart/related) · playlists list/insert · playlistItems.insert ·
-    videos.list(status, processingDetails) · channels.list(mine)
+    videos.list(status, processingDetails · 올린 직후 processing_calls 번은 uploaded/processing · 거절은 처리 뒤) · channels.list(mine)
+  - 할당량은 인증 뒤·내용 확인 전에 셈 (실패한 요청도 셈) · 단 videos.insert 의 '업로드 수'는 세션을 만들 때만
 - 조종: POST /_fake/mode (JSON 합침) · /_fake/reset · /_fake/clock {"advance": 초} · GET /_fake/state · /_fake/secrets
   모드: testing · verified · test_users · client_type · auto{account, grant, deny} · unverified_lock · thumb_forbidden ·
   thumb_rate · quota_exhausted_at(작업 이름) · upload_limit · api_disabled · fail_put_once · drop_after(바이트) ·
-  expire_sessions(지금 세션 모두 만료) · rate(바이트/초) · final200 · reject_length · playlist_full
+  expire_sessions(지금 세션 모두 만료) · rate(바이트/초) · final200 · reject_length · playlist_full ·
+  time_based · lenient_put_auth · processing_calls(기본 1) · fail_ops{작업: [HTTP 코드…]}(503 backendError · 404 videoNotFound) ·
+  stuck_put(그 수만큼 308 을 받은 데 그대로 돌려줌) · redirect_api(API GET 을 다른 곳으로 302)
 
 실행: python3 tests/fake_google.py --port 8941 [--rate 1000000]
 """
@@ -72,7 +77,8 @@ DEFAULT_MODES = {"testing": True, "verified": False, "test_users": ["owner.futsa
                  "client_type": "installed", "auto": None, "unverified_lock": False, "thumb_forbidden": False, "thumb_rate": False,
                  "quota_exhausted_at": None, "upload_limit": False, "api_disabled": False, "fail_put_once": False,
                  "drop_after": None, "rate": None, "final200": False, "reject_length": False, "playlist_full": False,
-                 "access_ttl": 3599}
+                 "access_ttl": 3599, "time_based": False, "lenient_put_auth": False, "processing_calls": 1, "fail_ops": {},
+                 "stuck_put": 0, "redirect_api": None}
 SESSION_TTL = 7 * 86400
 TESTING_TTL = 7 * 86400
 
@@ -304,7 +310,7 @@ class FakeGoogle:
                 at = self._issue(rt)
                 out = {"access_token": at, "expires_in": self.modes.get("access_ttl") or 3599, "refresh_token": rt,
                        "scope": " ".join(c["scopes"]), "token_type": "Bearer"}
-                if self.modes.get("testing"):
+                if self.modes.get("time_based"):  # 사용자가 '시간 제한 액세스'를 고른 때만 (테스트 상태 7일은 알려 주지 않음)
                     out["refresh_token_expires_in"] = TESTING_TTL - 1
                 self.log.append("token:code")
                 return 200, out
@@ -328,6 +334,8 @@ class FakeGoogle:
         tok = (form.get("token") or [""])[0]
         with self.lock:
             if tok in self.refresh:
+                if self.refresh[tok]["revoked"]:  # 이미 끊긴 토큰
+                    return 400, {"error": "invalid_token", "error_description": "Token expired or revoked"}
                 self.refresh[tok]["revoked"] = True
                 for a in [a for a, v in self.access.items() if v["refresh"] == tok]:
                     del self.access[a]
@@ -365,6 +373,17 @@ class FakeGoogle:
                           info="ACCESS_TOKEN_SCOPE_INSUFFICIENT")
         acc = self._account(rt["account"])
         return acc, acc["channel"]
+
+    def fail_op(self, op):
+        """fail_ops 모드: 그 작업의 다음 호출을 정해 둔 코드로 실패 (올린 직후 처리 중 흉내)."""
+        with self.lock:
+            codes = (self.modes.get("fail_ops") or {}).get(op) or []
+            if not codes:
+                return
+            code = codes.pop(0)
+        if code == 404:
+            raise ApiFail(404, "videoNotFound", "The video that you are trying to update cannot be found.")
+        raise ApiFail(code, "backendError", "Backend Error", "global")
 
     def charge(self, op):
         with self.lock:
@@ -421,6 +440,7 @@ class FakeGoogle:
     def playlist_items(self, headers, q, body):
         acc, ch = self.auth(headers, "playlistItems.insert")
         self.charge("playlistItems.insert")
+        self.fail_op("playlistItems.insert")
         sn = (body or {}).get("snippet") or {}
         pid, vid = sn.get("playlistId"), ((sn.get("resourceId") or {}).get("videoId"))
         with self.lock:
@@ -444,6 +464,11 @@ class FakeGoogle:
             for vid in ids:
                 v = self.videos.get(vid)
                 if not v or v["channel"] != (ch or {}).get("id"):
+                    continue
+                v["checks"] = v.get("checks", 0) + 1
+                if v["checks"] <= int(self.modes.get("processing_calls") or 0):  # 올린 직후: 아직 처리 중
+                    items.append({"kind": "youtube#video", "id": vid, "status": dict(v["status"], uploadStatus="uploaded"),
+                                  "processingDetails": {"processingStatus": "processing"}})
                     continue
                 st = dict(v["status"], uploadStatus="processed")
                 if self.modes.get("reject_length"):
@@ -524,6 +549,8 @@ class FakeGoogle:
 
     def thumbnail(self, headers, q, raw, ctype):
         acc, ch = self.auth(headers, "thumbnails.set")
+        self.charge("thumbnails.set")
+        self.fail_op("thumbnails.set")
         vid = (q.get("videoId") or [""])[0]
         with self.lock:
             v = self.videos.get(vid)
@@ -539,7 +566,6 @@ class FakeGoogle:
             raise ApiFail(400, "invalidImage", "The provided image content is invalid.")
         if len(raw) > 50 * 1024 * 1024:
             raise ApiFail(413, "mediaBodyTooLarge", "The image is too large.")
-        self.charge("thumbnails.set")
         with self.lock:
             v["thumbnail"] = {"sha256": hashlib.sha256(raw).hexdigest(), "type": "png" if raw[:4] == b"\x89PNG" else "jpeg", "bytes": len(raw)}
         url = f"https://i.ytimg.com/vi/{vid}/default.jpg"
@@ -547,6 +573,8 @@ class FakeGoogle:
 
     def caption(self, headers, q, raw, ctype):
         acc, ch = self.auth(headers, "captions.insert")
+        self.charge("captions.insert")
+        self.fail_op("captions.insert")
         if (q.get("uploadType") or [""])[0] != "multipart":
             raise ApiFail(400, "badRequest", "uploadType must be multipart here")
         m = re.search(r'boundary="?([^";]+)"?', ctype)
@@ -575,7 +603,6 @@ class FakeGoogle:
             raise ApiFail(400, "invalidMetadata", "The caption file could not be read.")
         if any(c["language"] == sn["language"] and c["name"] == sn["name"] for c in v["captions"]):
             raise ApiFail(409, "captionExists", "The specified video already has a caption track with the given snippet.language and snippet.name values.")
-        self.charge("captions.insert")
         cid = "AUieDa" + _rid(30)
         with self.lock:
             v["captions"].append({"id": cid, "language": sn["language"], "name": sn["name"], "isDraft": bool(sn.get("isDraft")),
@@ -674,6 +701,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._reply(200, f.snapshot())
             if u.path == "/_fake/secrets":
                 return self._reply(200, f.secret_values())
+            if f.modes.get("redirect_api") and u.path.startswith("/youtube/v3/"):  # 이상한 프록시 흉내: 다른 곳으로 보냄
+                self.send_response(302)
+                self.send_header("Location", f.modes["redirect_api"])
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if u.path == "/youtube/v3/channels":
                 return self._send_api(f.channels(self.headers, q))
             if u.path == "/youtube/v3/playlists":
@@ -743,6 +776,12 @@ class _Handler(BaseHTTPRequestHandler):
         if expired:
             self._drain(n)
             return self._reply(404, "Not Found", "text/plain")
+        if not f.modes.get("lenient_put_auth"):  # 문서의 PUT 예시마다 Authorization: Bearer
+            try:
+                f.auth(self.headers, "videos.insert")
+            except ApiFail as e:
+                self._drain(n)
+                return self._send_api(e.resp)
         if s.get("video"):
             self._drain(n)
             return self._done(s["video"])
@@ -766,6 +805,11 @@ class _Handler(BaseHTTPRequestHandler):
                 f.modes["fail_put_once"] = False
             self._drain(n)
             return self._reply(503, "Service Unavailable", "text/plain")
+        if f.modes.get("stuck_put"):  # 받았다고 하지 않음 (내용을 버리는 프록시 흉내)
+            with f.lock:
+                f.modes["stuck_put"] = int(f.modes["stuck_put"]) - 1
+            self._drain(n)
+            return self._incomplete(s)
         if a != len(s["data"]):  # 받은 데와 다른 곳부터 → 지금 받은 데를 알려 줌 (내용은 버림)
             self._drain(n)
             return self._incomplete(s)

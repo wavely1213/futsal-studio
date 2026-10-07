@@ -4,17 +4,18 @@
 - 연결: 사용자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)로 로그인 (youtube_api.LoginFlow · 범위 youtube.force-ssl 하나).
   client.bin·token.bin 은 ~/.futsal-studio/youtube/ (사용자 폴더 · 앱 폴더·config.json 밖 · Windows 는 DPAPI · 기록에 남기지 않음).
 - 올리기는 작업 하나(start_job · JOB_NAME): 재개 가능한 업로드 → 썸네일 → 자막 → 재생목록 → 상태 확인(잠긴 비공개).
-  올리던 세션(주소는 비밀처럼 보호)은 WORK/youtube/uploads/<열쇠>.json 에 남겨, 멈추기·인터넷 끊김·앱을 껐다 켜도 [이어 올리기].
+  올리던 세션은 WORK/youtube/uploads/<열쇠>.json(비밀 아닌 것만) + 세션 주소는 ~/.futsal-studio/youtube/sessions/<열쇠>.bin
+  (DPAPI·600 · 작업 폴더가 OneDrive·NAS 여도 주소를 바꿔 넣을 수 없게) → 멈추기·인터넷 끊김·앱을 껐다 켜도 [이어 올리기].
   videoId 를 받으면 바로 기록(history.json)에 남김 → 뒤 단계가 실패해도 [마저 하기](JOB_FINISH).
 - 할당량: 이 앱이 쓴 양을 Google 하루(미국 태평양 시각 자정 · tzdata 없이 계산)마다 셈 (quota.json · Google 콘솔 숫자와 다를 수 있음).
 - 기록(log)에는 파일 이름·종류·videoId·% 만. 제목·토큰·코드·보안 비밀번호·세션 주소·이메일은 남기지 않음.
 - 키트 파일(*_올리기.json) 형식은 바꾸지 않음 (DEVELOPMENT_RULES 6) · 상태는 모두 새 파일에.
 """
-import base64
 import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import webbrowser
@@ -42,7 +43,10 @@ SHORTS_MAX, VERIFY_LEN = 180, 900          # 쇼츠: 세로·정사각형 3분�
 THUMB_API_MAX = 50 * 1024 * 1024           # thumbnails.set 50MB (2026-09-14~ · BR-006 의 2MB 는 스튜디오 기준, I-038)
 SESSION_DAYS = 6                           # Google 세션은 약 1주 → 6일 넘으면 새로
 HISTORY_MAX = 500
-SCHEDULE_MIN, SCHEDULE_MAX = 10 * 60, 365 * 86400
+SCHEDULE_MIN, SCHEDULE_MAX = 15 * 60, 365 * 86400   # 예약 공개: 이 앱의 여유(15분 · Google 규칙은 '지금보다 뒤')
+POST_RETRY = (5, 15, 45)                   # 올린 직후 썸네일·자막·재생목록이 5xx·videoNotFound 면 기다렸다 다시 (처리 중일 수 있음)
+FRESH_SECS = 600                           # 올린 지 이만큼 안이면 '처리 중'으로 봄
+CHECK_UNTIL = 30 * 60                      # 올린 뒤 이만큼은 화면이 처리 상태를 다시 물음 (1단위씩)
 HOME = core.ENGINE_HOME / "youtube"
 GUIDE_URLS = {
     "console": "https://console.cloud.google.com/",
@@ -67,14 +71,20 @@ STEP_OP = {"thumbnail": "thumbnails.set", "captions": "captions.insert", "playli
 LOCKED_MSG = ("Google이 이 프로젝트를 아직 확인(감사)하지 않아 영상이 '비공개(잠김)'로 올라갔어요 · 잠긴 영상은 공개로 바꿀 수 없어요 · "
               "감사를 받은 뒤 다시 올려 주세요 (안내 9단계)")
 LENGTH_MSG = "15분이 넘는 영상은 채널 인증(전화번호 확인)이 있어야 올라가요 · youtube.com/verify 에서 인증한 뒤 다시 올려 주세요"
+PAST_SCHEDULE = "예약 공개 시각이 지났어요 · 새 시각을 골라 [처음부터 다시]로 올려 주세요"
 RELOGIN_STEP = "유튜브 연결이 끊겼어요 · 위에서 [다시 연결하기]를 누른 뒤 [마저 하기]를 눌러 주세요"
 TESTING_HINT = "Google Cloud 앱이 '테스트' 상태라 7일마다 끊겨요 · 안내 5단계의 [앱 게시]를 하면 더 끊기지 않아요"
-SETTINGS_DEFAULT = {"v": 1, "privacy": "private", "madeForKids": False, "notify": True, "thumbnail": True, "captions": True,
-                    "playlistId": "", "playlistTitle": "", "audited": False, "consentMode": None, "channelOk": ""}
+# privacy 는 기억하지 않음 (늘 비공개로 시작 · 예전 파일의 값은 읽지 않음) · madeForKids 는 처음 한 번 직접 고르기 전엔 None
+SETTINGS_DEFAULT = {"v": 1, "madeForKids": None, "notify": True, "thumbnail": True, "captions": True,
+                    "playlistId": "", "playlistTitle": "", "audited": False, "consentMode": None, "channelOk": "", "preauditAck": False}
+REJECT_MSG = {"duplicate": "유튜브가 '이미 올린 영상과 같다'며 거절했어요 · 스튜디오에서 확인해 주세요",
+              "length": LENGTH_MSG}
+PROCESS_FAIL_MSG = "유튜브가 영상을 처리하지 못했어요 ({reason}) · 편집실에서 다시 내보낸 뒤 올려 주세요"
 
 LOGIN = yt.LoginFlow()
 _LOCK = threading.RLock()
 _ACTIVE = {"key": None}
+_JOB = {"cancel": None}   # 지금 도는 유튜브 작업의 멈추기 Event (연결 끊기·설정 지우기 때 먼저 멈춤)
 _STATE = {"last": None, "lastAt": None}
 _PROBE, _QUICK = {}, {}
 
@@ -103,6 +113,10 @@ def _wdir():
 
 def _session_path(key):
     return _wdir() / "uploads" / f"{key}.json"
+
+
+def _uri_path(key):
+    return _home() / "sessions" / f"{key}.bin"
 
 
 def _read_json(p, default=None, fix=False):
@@ -138,18 +152,13 @@ def _bad(p):
         pass
 
 
-def _write_json(p, obj, private=False):
-    """임시 파일에 다 쓴 뒤 바꿔 끼움 (Windows 잠금은 잠깐 뒤 다시 · editor 와 같은 방식)."""
+def _write_json(p, obj):
+    """임시 파일에 다 쓴 뒤 바꿔 끼움 (Windows 잠금은 잠깐 뒤 다시 · editor 와 같은 방식). 비밀은 여기 쓰지 않음 (yt.save_secret)."""
     p = Path(p)
     with _LOCK:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + ".tmp")
         tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
-        if private:
-            try:
-                os.chmod(tmp, 0o600)
-            except OSError:
-                pass
         try:
             editor._replace_retry(tmp, p)
         except OSError:
@@ -281,9 +290,9 @@ def quota_view():
 # ---------- 설정 ----------
 
 def _valid(k, v):
-    if k == "privacy":
-        return v in PRIVACY + ("scheduled",)
-    if k in ("madeForKids", "notify", "thumbnail", "captions", "audited"):
+    if k in ("notify", "thumbnail", "captions", "audited", "preauditAck"):
+        return isinstance(v, bool)
+    if k == "madeForKids":
         return isinstance(v, bool)
     if k == "playlistId":
         return isinstance(v, str) and (v == "" or bool(PLAYLIST_RE.match(v)))
@@ -326,19 +335,35 @@ def _creds():
     return yt.load_secret(_client_path()), yt.load_secret(_token_path())
 
 
-def _save_token(tok):
+def _save_token(tok, force=False):
+    """새로 받은 access_token 저장. force 가 아니면 token.bin 이 '같은 연결'(같은 refresh_token)일 때만 —
+    그사이 [연결 끊기]를 했거나 다른 계정으로 다시 연결했으면 옛 작업의 토큰은 버림 (끊은 연결이 되살아나지 않게)."""
     with _LOCK:
+        if not force:
+            cur = yt.load_secret(_token_path()) or {}
+            if not cur.get("refresh_token") or cur.get("refresh_token") != tok.get("refresh_token"):
+                return False
         yt.save_secret(_token_path(), tok)
+        return True
 
 
-def _mark_relogin():
-    """연결이 끊김(invalid_grant·401): 열쇠는 지우고 채널 정보만 남겨 '다시 연결하기'를 보여 줌."""
+def _mark_relogin(expected=None):
+    """연결이 끊김(invalid_grant·401): 열쇠는 지우고 채널 정보만 남겨 '다시 연결하기'를 보여 줌.
+    expected(그 작업이 쓰던 refresh_token)를 주면 token.bin 이 그 연결일 때만 (새로 연결한 다른 계정을 지우지 않게)."""
     with _LOCK:
         tok = yt.load_secret(_token_path())
-        if tok:
-            keep = {k: v for k, v in tok.items() if k not in ("refresh_token", "access_token", "expires_at")}
-            keep["relogin"] = True
-            yt.save_secret(_token_path(), keep)
+        if not tok:
+            return
+        if expected is not None and tok.get("refresh_token") and tok.get("refresh_token") != expected:
+            return
+        keep = {k: v for k, v in tok.items() if k not in ("refresh_token", "access_token", "expires_at")}
+        keep["relogin"] = True
+        yt.save_secret(_token_path(), keep)
+
+
+def _rt(c):
+    """Client 가 쓰던 refresh_token (_mark_relogin 의 expected · 없으면 '')."""
+    return str(((c.token if c is not None else None) or {}).get("refresh_token") or "")
 
 
 def own_channel():
@@ -366,13 +391,34 @@ def _match(ch, st):
 
 
 def _relogin_msg(tok=None, st=None):
+    """'다시 연결해 주세요' + (테스트 상태라고 했거나, 모르는데 6.5일 넘게 쓴 연결이면) 7일 안내.
+    Google 은 테스트 상태 7일을 토큰 응답에 알려 주지 않음 (refresh_token_expires_in 은 '시간 제한 액세스' 때만) → 설정 안내 5단계의 고른 값으로."""
     tok = tok if tok is not None else (yt.load_secret(_token_path()) or {})
     st = st or get_settings()
     msg = yt.MSG["relogin"]
     age = time.time() - float(tok.get("connected_at") or tok.get("obtained_at") or time.time())
-    if tok.get("refresh_expires_at") or (st.get("consentMode") != "production" and age >= 6.5 * 86400):
+    if st.get("consentMode") == "testing" or (st.get("consentMode") is None and age >= 6.5 * 86400):
         msg += " · " + TESTING_HINT
     return msg
+
+
+def _testing_warn(tok, st, connected):
+    """연결 카드의 알림: 테스트 상태(5단계에서 고름)면 처음부터 'N일 뒤 끊겨요' · 모르면 6일 넘었을 때 · Google 이 기한을 알려 줬으면 그 날짜로."""
+    if not connected:
+        return None
+    since = float(tok.get("connected_at") or tok.get("obtained_at") or time.time())
+    mode = st.get("consentMode")
+    tail = "안내 5단계의 [앱 게시]를 하면 더 끊기지 않아요"
+    if mode == "testing":
+        left = (since + 7 * 86400 - time.time()) / 86400
+        return (f"테스트 상태라 약 {max(1, int(left + 0.999))}일 뒤 연결이 끊겨요 · " if left < 3 else "테스트 상태라 7일마다 연결이 끊겨요 · ") + tail
+    exp = tok.get("refresh_expires_at")
+    if exp:
+        left = (float(exp) - time.time()) / 86400
+        return f"Google이 정한 연결 기한까지 약 {max(1, int(left + 0.999))}일 남았어요 · 그 뒤에는 [다시 연결하기]를 눌러 주세요"
+    if mode is None and time.time() - since > 6 * 86400:
+        return "테스트 상태라면 곧 연결이 끊겨요 · " + tail
+    return None
 
 
 def explain(e):
@@ -391,6 +437,17 @@ def _api(cancel=None):
     return yt.Client(client, tok, on_token_saved=_save_token, on_call=charge, cancel=cancel)
 
 
+def _relogin_guard(fn):
+    """바로 Google 에 묻는 것(재생목록·상태 확인): 연결이 끊겼으면 그 연결만 '다시 연결하기'로."""
+    c = _api()
+    try:
+        return fn(c)
+    except yt.ApiError as e:
+        if e.kind == "relogin":
+            _mark_relogin(_rt(c))
+        raise
+
+
 def status():
     """7단계 카드 상태 (인터넷 안 씀 · 아무것도 바꾸지 않음 · 토큰·보안 비밀번호·세션 주소는 절대 넣지 않음)."""
     client, tok = _creds()
@@ -399,24 +456,20 @@ def status():
     ch = tok.get("channel") if isinstance(tok.get("channel"), dict) else None
     connected = bool(tok.get("refresh_token"))
     since = tok.get("connected_at") or tok.get("obtained_at")
-    warn, exp = None, tok.get("refresh_expires_at")
-    if connected and exp:  # Google 이 '언제까지'를 알려 준 연결 = 테스트 상태 앱
-        left = (float(exp) - time.time()) / 86400
-        warn = (f"테스트 상태라 약 {max(0, int(left)) or 1}일 뒤 연결이 끊겨요 · " if left < 3 else "테스트 상태라 7일마다 연결이 끊겨요 · ") + \
-            "안내 5단계의 [앱 게시]를 하면 더 끊기지 않아요"
-    elif connected and since and st.get("consentMode") != "production" and time.time() - float(since) > 6 * 86400:
-        warn = "테스트 상태라면 곧 연결이 끊겨요 · 안내 5단계의 [앱 게시]를 하면 더 끊기지 않아요"
+    warn, exp = _testing_warn(tok, st, connected), tok.get("refresh_expires_at")
     return {"configured": bool(client), "clientHint": (client["client_id"][:12] + "…") if client and client.get("client_id") else None,
             "projectId": (client or {}).get("project_id") or None, "connected": connected, "needsRelogin": bool(tok.get("relogin")),
             "reloginMsg": _relogin_msg(tok, st) if tok.get("relogin") else None, "channel": ch, "own": own_channel(),
             "match": _match(ch, st), "connectedAt": since, "testingWarn": warn, "refreshExpiresAt": exp,
             "login": _login_snapshot(), "settings": st, "quota": quota_view(), "pending": pending(), "active": _ACTIVE["key"],
-            "last": _STATE["last"], "lastAt": _STATE["lastAt"]}
+            "last": _STATE["last"], "lastAt": _STATE["lastAt"], "scheduleMinMinutes": SCHEDULE_MIN // 60,
+            "running": bool(_JOB["cancel"])}
 
 
 def _login_snapshot():
+    """로그인 상태 (주소는 넣지 않음 — state·PKCE challenge 가 든 주소는 [유튜브 계정 연결하기]의 응답으로만 · 원격으로 새지 않게)."""
     s = LOGIN.snapshot()
-    return {k: s.get(k) for k in ("state", "url", "error", "channel")}
+    return {k: s.get(k) for k in ("state", "error", "channel")}
 
 
 def save_client(text=None, client_id=None, client_secret=None, log=None):
@@ -438,30 +491,49 @@ def save_client(text=None, client_id=None, client_secret=None, log=None):
     return {"ok": True, "clientHint": c["client_id"][:12] + "…", "warn": warn}
 
 
-def clear_all(log=None):
-    """Google 설정 지우기: 연결 끊기(되도록 Google 에도) + client.bin·token.bin 지움."""
+def _stop_job(wait=10.0):
+    """도는 유튜브 작업을 멈추고 끝날 때까지 조금 기다림 (그 작업이 끊은 연결의 토큰을 다시 쓰지 않게)."""
+    ev = _JOB["cancel"]
+    if ev is None:
+        return
+    ev.set()
+    t = time.monotonic() + wait
+    while _JOB["cancel"] is not None and time.monotonic() < t:
+        time.sleep(0.05)
+
+
+def _forget_sessions():
+    """올리던 세션 주소(채널에 올릴 권한이 담김)를 모두 지움 → 다음에는 처음부터 (작업 폴더의 기록은 남아 '처음부터 다시'로 보임)."""
+    try:
+        for p in (_home() / "sessions").glob("*.bin"):
+            yt.delete_secret(p)
+    except OSError:
+        pass
+
+
+def _disconnect(log, msg, clear_client):
     LOGIN.cancel()
+    _stop_job()
     with _LOCK:
         tok = yt.load_secret(_token_path())
-        if tok:
-            yt.revoke(tok)
+        revoked = bool(tok) and yt.revoke(tok)
         yt.delete_secret(_token_path())
-        yt.delete_secret(_client_path())
+        if clear_client:
+            yt.delete_secret(_client_path())
+        _forget_sessions()
     if log:
-        log("유튜브 바로 올리기 · Google 설정을 지웠어요")
-    return {"ok": True}
+        log(msg + ("" if revoked or not tok else " · Google 쪽 연결은 끊지 못함 (권한 화면에서 직접)"))
+    return {"ok": True, "revoked": revoked, "hadToken": bool(tok)}
+
+
+def clear_all(log=None):
+    """Google 설정 지우기: 도는 작업 멈춤 → 연결 끊기(되도록 Google 에도) → client.bin·token.bin·세션 주소 지움.
+    → {"ok", "revoked": Google 이 끊었는지 (False 면 화면이 myaccount.google.com/connections 를 권함)}."""
+    return _disconnect(log, "유튜브 바로 올리기 · Google 설정을 지웠어요", True)
 
 
 def logout(log=None):
-    LOGIN.cancel()
-    with _LOCK:
-        tok = yt.load_secret(_token_path())
-        if tok:
-            yt.revoke(tok)
-        yt.delete_secret(_token_path())
-    if log:
-        log("유튜브 연결을 끊었어요")
-    return {"ok": True}
+    return _disconnect(log, "유튜브 연결을 끊었어요", False)
 
 
 def _on_token(client, tok, log):
@@ -475,7 +547,7 @@ def _on_token(client, tok, log):
     now = time.time()
     rec = dict(c.token, v=1, connected_at=now, channel=ch)
     rec.pop("relogin", None)
-    _save_token(rec)
+    _save_token(rec, force=True)
     if log:
         log(f"유튜브 계정을 연결했어요 · {ch['title'] or ch['id']}")
     return ch
@@ -499,8 +571,7 @@ def cancel_login():
 
 
 def playlists():
-    c = _api()
-    return {"ok": True, "items": c.playlists()}
+    return {"ok": True, "items": _relogin_guard(lambda c: c.playlists())}
 
 
 def create_playlist(title, privacy="public"):
@@ -509,7 +580,7 @@ def create_playlist(title, privacy="public"):
         raise UploadError("재생목록 이름을 넣어 주세요 (150자까지 · < > 안 됨)")
     if privacy not in PRIVACY:
         privacy = "public"
-    p = _api().create_playlist(title, privacy)
+    p = _relogin_guard(lambda c: c.create_playlist(title, privacy))
     save_settings({"playlistId": p["id"], "playlistTitle": p["title"][:150]})
     return {"ok": True, "playlist": p}
 
@@ -674,28 +745,40 @@ def plan(name, seq=None, privacy=None):
 
 # ---------- 세션 (올리던 것) ----------
 
-def _wrap(uri):
-    kind, data = yt.protect(uri.encode("utf-8"))
-    return {"p": kind, "v": base64.b64encode(data).decode("ascii")}
+def _store_uri(sess, uri):
+    """세션 주소는 사용자 폴더의 비밀 파일에만 (작업 폴더 JSON 에는 '시작함' 표시와 짝 번호 sid 만)."""
+    sess["sid"] = secrets.token_hex(8)
+    yt.save_secret(_uri_path(sess["key"]), {"v": 1, "sid": sess["sid"], "uri": uri})
+    sess["uri"] = True
 
 
-def _unwrap(d):
-    try:
-        return yt.unprotect(d["p"], base64.b64decode(d["v"])).decode("utf-8")
-    except Exception:  # noqa: BLE001 — 다른 PC·사용자에서 옮겨 온 파일 등 → 새 세션
+def _load_uri(sess):
+    """저장해 둔 세션 주소 → 문자열 또는 None (없음·다른 PC·짝 번호가 다름·Google 업로드 주소가 아님 → '처음부터')."""
+    if not sess.get("uri") or not sess.get("sid"):
         return None
+    d = yt.load_secret(_uri_path(sess["key"])) or {}
+    uri = d.get("uri")
+    if d.get("sid") != sess.get("sid") or not isinstance(uri, str) or not yt.valid_session_uri(uri):
+        return None
+    return uri
+
+
+def _drop_uri(sess):
+    yt.delete_secret(_uri_path(sess["key"]))
+    sess.update(uri=None, sid=None)
 
 
 def _save_session(s):
     s["updatedAt"] = time.time()
-    _write_json(_session_path(s["key"]), s, private=True)
+    _write_json(_session_path(s["key"]), s)
 
 
 def _delete_session(key):
-    try:
-        _session_path(key).unlink()
-    except FileNotFoundError:
-        pass
+    for p in (_session_path(key), _uri_path(key)):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _pending_view(s):
@@ -746,9 +829,19 @@ def _stale(s, inner, ch):
         return "올리던 연결이 오래돼서(6일 넘음) 처음부터 다시 올려요"
     if (s.get("channel") or {}).get("id") != (ch or {}).get("id"):
         return "연결한 채널이 바뀌어서 처음부터 다시 올려요"
-    if s.get("uri") and not _unwrap(s["uri"]):
+    if s.get("uri") and not _load_uri(s):
         return "올리던 연결 정보를 읽지 못해서 처음부터 다시 올려요"
+    pa = (s.get("meta") or {}).get("publishAt")
+    if pa and not s.get("uri") and _iso_ts(pa) < time.time() + 60:
+        return PAST_SCHEDULE
     return None
+
+
+def _iso_ts(iso):
+    try:
+        return datetime.strptime(str(iso)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return 0.0
 
 
 # ---------- 기록 ----------
@@ -807,7 +900,7 @@ def _remote_label():
 def _options(opts, shorts):
     st = get_settings()
     o = opts if isinstance(opts, dict) else {}
-    priv = o.get("privacy", st["privacy"])
+    priv = o.get("privacy", "private")
     if priv not in PRIVACY + ("scheduled",):
         raise UploadError("공개 설정을 골라 주세요")
     pa = None
@@ -820,7 +913,7 @@ def _options(opts, shorts):
         except ValueError:
             raise UploadError("예약 공개 시각을 골라 주세요") from None
         if not time.time() + SCHEDULE_MIN <= ts <= time.time() + SCHEDULE_MAX:
-            raise UploadError("예약 공개 시각은 지금부터 15분 뒤 ~ 1년 안으로 골라 주세요")
+            raise UploadError(f"예약 공개 시각은 지금부터 {SCHEDULE_MIN // 60}분 뒤 ~ 1년 안으로 골라 주세요")
         pa = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     mfk = o.get("madeForKids", st["madeForKids"])
     if not isinstance(mfk, bool):
@@ -872,6 +965,25 @@ def _video_path(s):
     return editor.video_path(s["file"])
 
 
+def _job(at):
+    """유튜브 작업 하나 (run_upload·resume·finish): 도는 동안 멈추기 Event(at 번째 인자 · cancel=)를 알려 둠 (연결 끊기가 먼저 멈추게)."""
+    def deco(fn):
+        def wrap(*a, **kw):
+            cancel = kw.get("cancel", a[at] if len(a) > at else None)
+            outer = _JOB["cancel"] is None
+            if outer:
+                _JOB["cancel"] = cancel if cancel is not None else threading.Event()
+            try:
+                return fn(*a, **kw)
+            finally:
+                if outer:
+                    _JOB["cancel"] = None
+        wrap.__name__, wrap.__doc__ = fn.__name__, fn.__doc__
+        return wrap
+    return deco
+
+
+@_job(4)
 def run_upload(name, seq, opts, log, cancel, again=False):
     """[유튜브에 올리기] 작업: 확인 → 세션(이어 올리기면 그대로) → 올리기 → 썸네일·자막·재생목록 → 상태 확인."""
     _remote_label()
@@ -886,11 +998,13 @@ def run_upload(name, seq, opts, log, cancel, again=False):
         o = _options(opts, inner.get("shorts"))
     except UploadError as e:
         return _done({"ok": False, "error": str(e)})
-    keep = {k: o[k] for k in ("privacy", "madeForKids", "notify", "captions", "playlistId", "playlistTitle")}
+    keep = {k: o[k] for k in ("madeForKids", "notify", "captions", "playlistId", "playlistTitle")}
     if not inner.get("shorts"):
         keep["thumbnail"] = o["thumbnail"]
+    if not get_settings()["audited"]:
+        keep["preauditAck"] = True  # 감사 전 업로드를 한 번 확인함 (화면이 처음 한 번 물음)
     try:
-        save_settings(keep)  # 고른 값이 다음 기본값 (예약 시각은 빼고)
+        save_settings(keep)  # 고른 값이 다음 기본값 · 공개 설정은 기억하지 않음 (늘 비공개로 시작 · 실수로 공개되지 않게)
     except (UploadError, OSError):
         pass
     _, tok = _creds()
@@ -917,6 +1031,7 @@ def run_upload(name, seq, opts, log, cancel, again=False):
     return _drive(sess, log, cancel, notes)
 
 
+@_job(2)
 def resume(key, log, cancel):
     """[이어 올리기]: 저장해 둔 세션으로 (파일이 바뀌었으면 키트로 처음부터)."""
     _remote_label()
@@ -937,10 +1052,13 @@ def resume(key, log, cancel):
     _, tok = _creds()
     why = _stale(sess, inner, (tok or {}).get("channel"))
     notes = []
+    pa = (sess.get("meta") or {}).get("publishAt")
+    if why and pa and _iso_ts(pa) < time.time() + SCHEDULE_MIN:  # 처음부터 다시 올려야 하는데 예약 시각이 이미 지났거나 너무 가까움
+        why = PAST_SCHEDULE
     if why:
         log(f"  {why}")
-        if pub["kit"] is None:
-            return _done({"ok": False, "error": why})
+        if pub["kit"] is None or why == PAST_SCHEDULE:
+            return _done({"ok": False, "error": why, "key": key})
         o = {"privacy": sess["meta"]["privacy"], "madeForKids": sess["meta"]["madeForKids"], "notify": sess["meta"]["notify"]}
         if sess["meta"].get("privacy") == "scheduled":
             o["publishAt"] = sess["meta"].get("publishAt")
@@ -962,12 +1080,12 @@ def _done(r):
     return r
 
 
-def _fail(sess, e, log, state="failed"):
+def _fail(sess, e, log, state="failed", c=None):
     """올리기 실패: 세션은 남겨 두고(이어 올리기) 쉬운 말로."""
     kind = e.kind if isinstance(e, yt.ApiError) else "error"
     msg = explain(e)
     if kind == "relogin":
-        _mark_relogin()
+        _mark_relogin(_rt(c) if c is not None else None)
         msg = _relogin_msg()
     if kind == "quota":
         _exhausted("videos.insert")
@@ -1016,13 +1134,28 @@ def _drive(sess, log, cancel, notes=None, restarted=False):
                           detail=f"{_mb(sent)} / {_mb(size)}MB" + (f" · 남은 시간 약 {_eta_text(eta)}" if eta else ""),
                           eta=int(eta) if eta else None)
 
+    def on_wait(n, confirmed, why):
+        """끊겨서 기다리는 동안: 막대는 Google 이 받았다고 한 데까지로 · 남은 시간은 빼고 '다시 연결하는 중'."""
+        t0[0], t0[1] = time.monotonic(), int(confirmed)
+        head = "인터넷이 끊겼어요" if why == "network" else "유튜브 서버가 대답하지 않아요"
+        core.set_progress(label="유튜브에 올리는 중", item=sess["name"], step="1/4", pct=min(99, int(confirmed * 100 / size)),
+                          detail=f"{head} · 다시 연결하는 중 ({n}번째) · 올라간 양 {_mb(confirmed)} / {_mb(size)}MB", eta=None)
+        if n == 1:
+            log(f"  유튜브 올리기 · {why} · 기다렸다 이어서 ({int(confirmed * 100 / size)}%)")
+
     try:
         video = None
-        uri = _unwrap(sess["uri"]) if sess.get("uri") else None
+        uri = _load_uri(sess) if sess.get("uri") else None
         if not uri:
+            pa = sess["meta"].get("publishAt")
+            if pa and _iso_ts(pa) < time.time() + 60:  # 오래 멈췄다가 처음부터 다시 → 예약 시각이 이미 지남
+                sess.update(state="failed", error=PAST_SCHEDULE, kind="schedule")
+                _save_session(sess)
+                return _done({"ok": False, "error": PAST_SCHEDULE, "key": sess["key"]})
             core.set_progress(label="유튜브에 올리는 중", item=sess["name"], step="1/4", pct=0, detail="유튜브에 연결하는 중")
             uri = c.start_upload(_body(sess["meta"]), size, sess.get("mime") or yt._mime(path), bool(sess["meta"].get("notify", True)))
-            sess.update(uri=_wrap(uri), offset=0, state="uploading", error=None, kind=None, startedAt=time.time())
+            _store_uri(sess, uri)
+            sess.update(offset=0, state="uploading", error=None, kind=None, startedAt=time.time())
             _save_session(sess)
             _clear_exhausted("videos.insert")
             log(f"유튜브에 올리기 시작 · {sess['file']} ({_mb(size)}MB · {PRIVACY_KO.get(sess['meta']['privacy'], '')})")
@@ -1039,22 +1172,23 @@ def _drive(sess, log, cancel, notes=None, restarted=False):
             t0[0], t0[1] = time.monotonic(), int(sess.get("offset") or 0)
             progress(t0[1])
             video = c.upload_file(uri, path, size, int(sess.get("offset") or 0), cancel=cancel, progress=progress,
-                                  on_offset=on_offset, mime=sess.get("mime"))
+                                  on_offset=on_offset, mime=sess.get("mime"), on_wait=on_wait)
     except yt.Cancelled:
-        r = _fail(sess, yt.Cancelled(), log, "paused")
+        r = _fail(sess, yt.Cancelled(), log, "paused", c)
         r["error"] = yt.MSG["cancelled"]
         log(f"  유튜브 올리기를 멈췄어요 · {r['pct']}%")
         return r
     except yt.ApiError as e:
         if e.kind == "session_expired" and not restarted:
             log("  올리던 연결이 만료돼서 처음부터 다시 올려요")
-            sess.update(uri=None, offset=0, state="starting")
+            _drop_uri(sess)
+            sess.update(offset=0, state="starting")
             notes.append(yt.MSG["session_expired"])
             _ACTIVE["key"] = None
             return _drive(sess, log, cancel, notes, restarted=True)
-        return _fail(sess, e, log)
+        return _fail(sess, e, log, c=c)
     except FileNotFoundError:
-        return _fail(sess, yt.ApiError("file"), log)
+        return _fail(sess, yt.ApiError("file"), log, c=c)
     finally:
         _ACTIVE["key"] = None
     return _after_upload(c, sess, video, log, cancel, notes)
@@ -1063,7 +1197,8 @@ def _drive(sess, log, cancel, notes=None, restarted=False):
 def _after_upload(c, sess, video, log, cancel, notes):
     vid = str((video or {}).get("id") or "")
     if not VIDEO_ID.match(vid):
-        sess.update(uri=None, state="failed", error="유튜브가 영상 번호를 돌려주지 않았어요 · 스튜디오에서 올라갔는지 확인해 주세요")
+        _drop_uri(sess)
+        sess.update(state="failed", error="유튜브가 영상 번호를 돌려주지 않았어요 · 스튜디오에서 올라갔는지 확인해 주세요")
         _save_session(sess)
         return _done({"ok": False, "error": sess["error"], "key": sess["key"]})
     meta = sess["meta"]
@@ -1074,7 +1209,7 @@ def _after_upload(c, sess, video, log, cancel, notes):
              "madeForKids": meta.get("madeForKids"), "channel": sess.get("channel"), "url": lk["url"], "studio": lk["studio"],
              "quick": sess.get("quick"), "size": sess["size"], "want": sess.get("want") or {},
              "steps": {k: {"state": "todo" if (sess.get("want") or {}).get(k) else "skip"} for k in STEP_ORDER},
-             "locked": False, "status": {}}
+             "locked": False, "status": {}, "preAudit": not get_settings()["audited"], "processing": True, "problem": None}
     _history_put(entry)  # 영상 번호를 받자마자 기록 (뒤 단계가 실패·앱이 꺼져도 남게)
     _delete_session(sess["key"])
     log(f"유튜브에 올렸어요 · {vid}")
@@ -1082,11 +1217,20 @@ def _after_upload(c, sess, video, log, cancel, notes):
     return _done(_result(entry, warnings, notes))
 
 
+def privacy_text(entry):
+    """기록·결과의 공개 설정 글자: 감사 전에 올린 것은 '공개 불가'까지 (Google 이 잠금 · 비공개로 올렸어도)."""
+    if entry.get("locked"):
+        return "비공개(잠김)"
+    t = PRIVACY_KO.get(entry.get("privacy"), "")
+    return f"{t}(감사 전 · 공개 불가)" if entry.get("preAudit") else t
+
+
 def _result(entry, warnings, notes=None):
     return {"ok": True, "videoId": entry["videoId"], "url": entry["url"], "studio": entry["studio"], "privacy": entry["privacy"],
-            "privacyText": PRIVACY_KO.get(entry["privacy"], ""), "publishAt": entry.get("publishAt"), "shorts": entry["shorts"],
+            "privacyText": privacy_text(entry), "publishAt": entry.get("publishAt"), "shorts": entry["shorts"],
             "steps": entry["steps"], "warnings": warnings, "notes": list(notes or []), "locked": entry["locked"],
-            "lockedMsg": LOCKED_MSG if entry["locked"] else None, "channel": entry.get("channel")}
+            "lockedMsg": LOCKED_MSG if entry["locked"] else None, "channel": entry.get("channel"), "preAudit": bool(entry.get("preAudit")),
+            "processing": bool(entry.get("processing")), "problem": entry.get("problem")}
 
 
 def _srt_path(w, name):
@@ -1106,10 +1250,53 @@ def _thumb_path(w, entry):
     return core.OUT / th["file"] if th.get("file") else p
 
 
+def _step_call(fn, entry, cancel):
+    """썸네일·자막·재생목록 한 번: 올린 지 FRESH_SECS 안이면 5xx·videoNotFound 는 처리 중일 수 있어 POST_RETRY 만큼 기다렸다 다시."""
+    for i in range(len(POST_RETRY) + 1):
+        try:
+            return fn()
+        except yt.ApiError as e:
+            fresh = time.time() - float(entry.get("at") or 0) < FRESH_SECS
+            transient = e.kind == "server" or (e.kind == "not_found" and e.reason != "playlistNotFound")
+            if not (fresh and transient):
+                raise
+            if i == len(POST_RETRY):
+                if e.kind == "not_found":
+                    raise yt.ApiError("processing", status=e.status, reason=e.reason) from None
+                raise
+            if cancel is not None:
+                if cancel.wait(POST_RETRY[i]):
+                    raise yt.Cancelled() from None
+            else:
+                time.sleep(POST_RETRY[i])
+
+
+def _apply_status(entry, v):
+    """videos.list 결과 → 기록 (처리 중 · 잠김 · 거절·처리 실패 안내)."""
+    s = (v or {}).get("status") or {}
+    pd = (v or {}).get("processingDetails") or {}
+    entry["status"] = {k: s.get(k) for k in ("uploadStatus", "privacyStatus", "publishAt", "rejectionReason", "failureReason")}
+    entry["status"]["processingStatus"] = pd.get("processingStatus")
+    entry["checkedAt"] = time.time()
+    up = s.get("uploadStatus")
+    entry["processing"] = up == "uploaded" or pd.get("processingStatus") == "processing"
+    want_priv, got = entry["privacy"], s.get("privacyStatus")
+    if (want_priv in ("public", "unlisted") and got == "private") or (want_priv == "scheduled" and got and not s.get("publishAt")):
+        entry["locked"] = True
+    if up == "rejected":
+        r = str(s.get("rejectionReason") or "")
+        entry["problem"] = REJECT_MSG.get(r) or f"유튜브가 이 영상을 거절했어요 ({yt._clean_reason(r) or '이유 모름'}) · 스튜디오에서 확인해 주세요"
+    elif up == "failed" or pd.get("processingStatus") == "failed":
+        entry["problem"] = PROCESS_FAIL_MSG.format(reason=yt._clean_reason(s.get("failureReason")) or "이유 모름")
+    elif up in ("processed", "uploaded"):
+        entry["problem"] = None
+
+
 def _post(c, entry, log, cancel, only=None, check=True):
     """썸네일 → 자막 → 재생목록 → 상태 확인. 단계마다 따로 (하나가 실패해도 다음으로) · 끝날 때마다 기록."""
     vid, want, steps = entry["videoId"], entry.get("want") or {}, entry["steps"]
     warnings, dead = [], False  # dead: 연결이 끊김 → 남은 단계는 부르지 않고 '다시 연결한 뒤 마저 하기'로
+    label = {"thumbnail": "썸네일", "captions": "자막", "playlist": "재생목록"}
     for i, name in enumerate(STEP_ORDER, 2):
         w = want.get(name)
         if only is not None and name not in only:
@@ -1127,13 +1314,17 @@ def _post(c, entry, log, cancel, only=None, check=True):
                           detail={"thumbnail": "썸네일 올리는 중", "captions": "자막 올리는 중", "playlist": "재생목록에 넣는 중"}[name])
         try:
             if name == "thumbnail":
-                c.set_thumbnail(vid, _thumb_path(w, entry))
+                p = _thumb_path(w, entry)
+                _step_call(lambda: c.set_thumbnail(vid, p), entry, cancel)
             elif name == "captions":
-                c.insert_caption(vid, _srt_path(w, entry["name"]).read_bytes(), LANG, "한국어")
+                raw = _srt_path(w, entry["name"]).read_bytes()
+                _step_call(lambda: c.insert_caption(vid, raw, LANG, "한국어"), entry, cancel)
             else:
-                c.add_to_playlist(w["id"], vid)
+                _step_call(lambda: c.add_to_playlist(w["id"], vid), entry, cancel)
             steps[name] = {"state": "ok"}
             _clear_exhausted(STEP_OP[name])
+        except yt.Cancelled:
+            steps[name] = {"state": "todo", "msg": "멈췄어요 · [마저 하기]를 눌러 주세요"}
         except yt.ApiError as e:
             if e.kind == "exists":
                 steps[name] = {"state": "ok", "msg": "이미 올라가 있어요"}
@@ -1143,37 +1334,60 @@ def _post(c, entry, log, cancel, only=None, check=True):
             elif e.kind == "thumb_verify":
                 steps[name] = {"state": "needs_verify", "msg": str(e)}
             elif e.kind == "relogin":
-                _mark_relogin()
+                _mark_relogin(_rt(c))
                 dead = True
                 steps[name] = {"state": "todo", "msg": RELOGIN_STEP}
+            elif e.kind == "processing":
+                steps[name] = {"state": "todo", "msg": str(e)}
             else:
                 steps[name] = {"state": "error", "msg": explain(e)}
-            log(f"  {({'thumbnail': '썸네일', 'captions': '자막', 'playlist': '재생목록'})[name]} · {steps[name]['state']}"
-                + (f" ({e.reason})" if e.reason else ""))
+            log(f"  {label[name]} · {steps[name]['state']}" + (f" ({e.reason})" if e.reason else ""))
         except (OSError, ValueError):
             steps[name] = {"state": "error", "msg": "파일을 읽지 못했어요 · " +
                            ("썸네일 편집기에서 다시 저장해 주세요" if name == "thumbnail" else "편집실에서 다시 내보내 주세요")}
-            log(f"  {({'thumbnail': '썸네일', 'captions': '자막', 'playlist': '재생목록'})[name]} · 파일을 읽지 못함")
+            log(f"  {label[name]} · 파일을 읽지 못함")
         _history_put(entry)
     if check and not dead and not (cancel is not None and cancel.is_set()):
         core.set_progress(label="유튜브 마무리 중", item=entry["name"], step="4/4", pct=None, detail="올라간 상태 확인하는 중")
         try:
-            v = c.video_status(vid) or {}
-            s = v.get("status") or {}
-            entry["status"] = {k: s.get(k) for k in ("uploadStatus", "privacyStatus", "publishAt", "rejectionReason", "failureReason")}
-            want_priv = entry["privacy"]
-            got = s.get("privacyStatus")
-            if (want_priv in ("public", "unlisted") and got == "private") or (want_priv == "scheduled" and got and not s.get("publishAt")):
-                entry["locked"] = True
+            _apply_status(entry, c.video_status(vid) or {})
+            if entry["locked"]:
                 log("  비공개(잠김)로 올라갔어요 · Google 감사 전 프로젝트")
-            if s.get("rejectionReason") == "length":
-                warnings.append(LENGTH_MSG)
+            if entry.get("problem"):
+                warnings.append(entry["problem"])
         except yt.ApiError as e:
+            if e.kind == "relogin":
+                _mark_relogin(_rt(c))
             warnings.append("올라간 상태를 확인하지 못했어요 · 스튜디오에서 확인해 주세요 (" + explain(e) + ")")
         _history_put(entry)
     return warnings
 
 
+def check(video_id):
+    """[상태 다시 확인] (작업 아님 · videos.list 1단위): 처리 중이던 영상이 끝났는지 · 잠김 · 거절(15분 넘음 등) → 기록을 고침."""
+    if not VIDEO_ID.match(str(video_id or "")):
+        raise UploadError("잘못된 영상이에요")
+    entry = next((x for x in _history() if x.get("videoId") == video_id), None)
+    if not entry:
+        raise UploadError("올린 기록을 찾지 못했어요")
+    v = _relogin_guard(lambda c: c.video_status(video_id))
+    if v is None:
+        entry["problem"] = yt.MSG["not_found"]
+        entry["processing"] = False
+        entry["checkedAt"] = time.time()
+    else:
+        _apply_status(entry, v)
+    with _LOCK:
+        cur = next((x for x in _history(True) if x.get("videoId") == video_id), None)
+        if cur:  # 그사이 [마저 하기]가 단계를 고쳤을 수 있으니 상태만 바꿔 넣음
+            for k in ("status", "processing", "problem", "locked", "checkedAt"):
+                cur[k] = entry.get(k)
+            _history_put(cur)
+            entry = cur
+    return dict(_result(entry, [entry["problem"]] if entry.get("problem") else []), at=entry.get("at"))
+
+
+@_job(3)
 def finish(video_id, which, log, cancel):
     """[마저 하기]·[썸네일 다시 올리기]: 기록에 남은 영상의 썸네일·자막·재생목록 중 끝나지 않은 것 (which 를 주면 그것만)."""
     _remote_label()
@@ -1192,7 +1406,7 @@ def finish(video_id, which, log, cancel):
         return _done({"ok": False, "error": str(e)})
     except yt.ApiError as e:
         if e.kind == "relogin":
-            _mark_relogin()
+            _mark_relogin(None)
         return _done({"ok": False, "error": explain(e), "kind": e.kind, "relogin": e.kind == "relogin"})
     entry.setdefault("steps", {})
     log(f"유튜브 마무리 · {video_id} · {', '.join(only)}")

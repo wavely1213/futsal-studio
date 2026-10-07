@@ -32,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
-ENV = "FUTSAL_GOOGLE_API"  # 시험용: http://127.0.0.1:<포트> (가짜 Google) — 루프백 http 만 받음
+ENV = "FUTSAL_GOOGLE_API"  # 시험용: http://127.0.0.1:<포트> (가짜 Google) — 개발 폴더(tests/fake_google.py 가 있음)에서만 · 127.0.0.1 http 만
 ENDPOINTS = {"auth": "https://accounts.google.com/o/oauth2/v2/auth", "token": "https://oauth2.googleapis.com/token",
              "revoke": "https://oauth2.googleapis.com/revoke", "api": "https://www.googleapis.com/youtube/v3",
              "upload": "https://www.googleapis.com/upload/youtube/v3"}
@@ -40,6 +40,8 @@ UNIT = 256 * 1024                 # 마지막이 아닌 조각은 이 배수
 CHUNK = 8 * 1024 * 1024           # 한 번에 보내는 양 (8 MiB)
 BACKOFF = (1, 2, 4, 8, 16, 32, 60, 60)   # 끊기거나 5xx 일 때 기다리는 초 (+ 흔들기)
 JITTER = 1.0
+NET_PATIENCE = 30 * 60            # 인터넷이 끊기면 이만큼은 1분마다 다시 해 봄 (세션 주소는 며칠 유효 · [멈추기]는 바로 들음)
+STUCK_MAX = 3                     # 308 인데 받은 데가 늘지 않는 일이 이만큼 이어지면 쉬었다가 상태를 물음 (끝없이 같은 조각을 보내지 않게)
 RATE_WAIT = 60                    # rateLimitExceeded 면 한 번만 이만큼 쉬고 다시
 TIMEOUT = 60
 MAX_JSON = 2 * 1024 * 1024
@@ -51,15 +53,55 @@ _CID = re.compile(r"^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$")
 _REASON = re.compile(r"[^A-Za-z0-9_.-]")
 
 
-def endpoints():
-    """Google 주소들. FUTSAL_GOOGLE_API 가 루프백 http 주소면 (가짜 Google 시험) 그쪽으로."""
+_FAKE_MARK = Path(__file__).resolve().parent / "tests" / "fake_google.py"   # 배포본(manifest·업데이트)에는 tests/ 가 없음
+_NOTED = []
+
+
+def _test_base():
+    """시험 스위치: FUTSAL_GOOGLE_API=http://127.0.0.1:<포트> 이고 개발 폴더(tests/fake_google.py 가 있음)일 때만. 그 밖은 None.
+    (배포한 앱에서는 환경 변수가 있어도 진짜 Google https 만 씀 · localhost 는 hosts 파일을 타서 받지 않음)"""
     base = (os.environ.get(ENV) or "").strip().rstrip("/")
-    if base:
+    if not base or not _FAKE_MARK.is_file():
+        return None
+    try:
         p = urllib.parse.urlsplit(base)
-        if p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost") and p.port and not p.path and not p.query:
-            return {"auth": base + "/o/oauth2/v2/auth", "token": base + "/token", "revoke": base + "/revoke",
-                    "api": base + "/youtube/v3", "upload": base + "/upload/youtube/v3"}
+        port = p.port
+    except ValueError:
+        return None
+    if p.scheme != "http" or p.hostname != "127.0.0.1" or not port or p.path or p.query or p.username or p.password:
+        return None
+    if not _NOTED:
+        _NOTED.append(1)
+        print("유튜브 바로 올리기 · 시험용 가짜 Google 주소를 써요 (FUTSAL_GOOGLE_API)", flush=True)
+    return base
+
+
+def endpoints():
+    """Google 주소들. 시험 스위치(_test_base)가 켜졌으면 가짜 Google 로."""
+    base = _test_base()
+    if base:
+        return {"auth": base + "/o/oauth2/v2/auth", "token": base + "/token", "revoke": base + "/revoke",
+                "api": base + "/youtube/v3", "upload": base + "/upload/youtube/v3"}
     return dict(ENDPOINTS)
+
+
+def valid_session_uri(uri):
+    """업로드 세션 주소가 Google 업로드 주소인지 (토큰·영상을 다른 곳으로 보내지 않게 · 보낼 때마다 확인).
+    https + www.googleapis.com 또는 *.googleapis.com (기본 포트) + /upload/youtube/v3/videos… · 시험 때는 가짜 Google 주소만."""
+    try:
+        a = urllib.parse.urlsplit(str(uri or ""))
+        port = a.port
+    except ValueError:
+        return False
+    if a.username or a.password or not a.hostname or not a.path.startswith("/upload/youtube/v3/videos"):
+        return False
+    b = urllib.parse.urlsplit(endpoints()["upload"])
+    if (a.scheme, a.netloc) == (b.scheme, b.netloc):
+        return True
+    if b.scheme != "https":  # 시험 중에는 가짜 Google 말고는 안 됨
+        return False
+    host = a.hostname.lower()
+    return a.scheme == "https" and port in (None, 443) and (host == "googleapis.com" or host.endswith(".googleapis.com"))
 
 
 # ---------- 오류 ----------
@@ -79,19 +121,27 @@ MSG = {
     "invalidDescription": "설명은 5000바이트(한글 약 1,600자)까지예요 · < > 안 됨",
     "invalidTags": "태그는 합계 500자까지예요 (< > 안 됨)",
     "invalidCategoryId": "카테고리(스포츠)를 유튜브가 받지 않았어요 · 계속되면 스튜디오에서 골라 주세요",
-    "invalidPublishAt": "예약 시각이 지났거나 잘못됐어요 · 지금보다 15분 넘게 뒤로 골라 주세요",
+    "invalidPublishAt": "예약 시각이 지났거나 잘못됐어요 · 새 시각을 골라 다시 올려 주세요",
+    "defaultLanguageNotSet": "영상 언어(한국어) 설정을 유튜브가 받지 않았어요 · 잠시 뒤 다시 올리고, 계속되면 studio.log를 보내 주세요",
     "forbiddenPrivacySetting": "이 공개 설정으로는 올릴 수 없어요 · '비공개'로 올린 뒤 스튜디오에서 바꿔 주세요",
     "invalidVideoMetadata": "영상 정보(제목·설명·태그·공개 설정) 중 유튜브가 받지 않은 것이 있어요 · 고친 뒤 다시 올려 주세요",
     "forbidden": "유튜브에 올릴 권한이 없어요 · [다시 연결하기]에서 모든 권한에 체크해 주세요",
-    "thumb_verify": "맞춤 썸네일을 올리려면 채널 인증(전화번호 확인)이 필요해요 · youtube.com/verify 에서 인증한 뒤 [썸네일 다시 올리기]를 눌러 주세요 · 영상은 이미 올라갔어요",
+    "thumb_verify": "맞춤 썸네일을 올리려면 채널 인증(전화번호 확인)이 필요해요 · youtube.com/verify 에서 인증한 뒤 [썸네일 다시 올리기]를 눌러 주세요 · 영상은 이미 올라갔어요 "
+                    "(이미 인증했다면 이 채널에 썸네일 권한이 없는 계정일 수 있어요 · [다시 연결하기]로 채널을 확인해 주세요)",
     "thumb_rate": "썸네일을 최근에 너무 많이 바꿨어요 · 나중에 [썸네일 다시 올리기]를 눌러 주세요",
     "thumb_bad": "썸네일 그림을 유튜브가 읽지 못했어요 · 썸네일 편집기에서 JPG로 다시 저장해 주세요",
     "caption_bad": "자막 파일(.srt)을 유튜브가 받지 않았어요 · 편집실에서 다시 내보내 주세요",
     "playlist_missing": "재생목록을 찾지 못했어요 · 지웠다면 다른 것을 골라 주세요",
     "playlist_full": "재생목록이 꽉 찼어요 · 다른 재생목록을 골라 주세요",
+    "playlist_series": "이 영상은 이미 다른 시리즈 재생목록에 있어요 · 한 영상은 시리즈 하나에만 넣을 수 있어요 · 스튜디오에서 바꿔 주세요",
+    "playlist_sort": "이 재생목록은 순서를 직접 정하게 되어 있지 않아요 · 스튜디오에서 넣어 주세요",
+    "playlist_denied": "이 재생목록에는 넣을 수 없어요 (권한이 없거나 넣을 수 없는 종류) · 다른 재생목록을 골라 주세요",
     "playlist_title": "재생목록 이름을 넣어 주세요 (150자까지)",
     "not_found": "올린 영상을 찾지 못했어요 · 스튜디오에서 지웠는지 확인해 주세요",
+    "processing": "유튜브가 아직 영상을 처리하는 중이에요 · 몇 분 뒤 [마저 하기]를 눌러 주세요",
+    "redirect3xx": "유튜브가 이상한 응답(다른 주소로 보냄)을 줬어요 · 회사·학교 인터넷이나 백신 프로그램이 막고 있을 수 있어요",
     "network": "인터넷 연결이 끊겼어요 · 연결되면 [이어 올리기]를 눌러 주세요 (올린 데까지는 남아 있어요)",
+    "network_long": "인터넷이 30분 넘게 끊겨서 멈췄어요 · 연결되면 [이어 올리기]를 눌러 주세요 (올린 데까지는 남아 있어요)",
     "server": "유튜브 서버가 지금 불안정해요 · 잠시 뒤 [이어 올리기]를 눌러 주세요",
     "session_expired": "올리던 연결이 만료됐어요 · 처음부터 다시 올려요",
     "cancelled": "멈췄어요 · [이어 올리기]로 올린 데부터 이어서 올려요",
@@ -186,21 +236,33 @@ def classify(op, status, reason):
     if op in ("playlistItems.insert", "playlists.insert"):
         if r == "playlistNotFound":
             return ApiError("not_found", MSG["playlist_missing"], status, r)
-        if r in ("playlistContainsMaximumNumberOfVideos", "manualSortRequired"):
+        if r == "playlistContainsMaximumNumberOfVideos":
             return ApiError("bad_meta", MSG["playlist_full"], status, r)
+        if r == "videoAlreadyInAnotherSeriesPlaylist":
+            return ApiError("bad_meta", MSG["playlist_series"], status, r)
+        if r == "manualSortRequired":
+            return ApiError("bad_meta", MSG["playlist_sort"], status, r)
+        if r in ("playlistItemsNotAccessible", "playlistOperationUnsupported"):
+            return ApiError("forbidden", MSG["playlist_denied"], status, r)
         if r in ("playlistTitleRequired", "invalidPlaylistSnippet"):
             return ApiError("bad_meta", MSG["playlist_title"], status, r)
     if r == "uploadLimitExceeded":
         return ApiError("upload_limit", status=status, reason=r)
     if r in ("invalidTitle", "invalidDescription", "invalidTags", "invalidCategoryId", "invalidPublishAt",
-             "forbiddenPrivacySetting", "invalidVideoMetadata"):
+             "forbiddenPrivacySetting", "invalidVideoMetadata", "defaultLanguageNotSet"):
         return ApiError("bad_meta", MSG[r], status, r)
+    if r == "forbiddenLicenseSetting":
+        return ApiError("bad_meta", MSG["invalidVideoMetadata"], status, r)
+    if r == "mediaBodyRequired" and op in ("upload", "videos.insert"):
+        return ApiError("file", status=status, reason=r)
     if r == "videoNotFound" or (status == 404 and op != "upload"):
         return ApiError("not_found", status=status, reason=r)
     if status == 403:
         return ApiError("forbidden", status=status, reason=r)
     if status and status >= 500:
         return ApiError("server", status=status, reason=r)
+    if status and 300 <= status < 400:  # Google API 는 다른 주소로 보내지 않음 (따라가지 않음 · _NoRedirect)
+        return ApiError("server", MSG["redirect3xx"], status, r)
     return ApiError("error", MSG["unknown"].format(reason=r or f"HTTP {status}"), status, r)
 
 
@@ -237,7 +299,15 @@ class _HTTPS(_Track, urllib.request.HTTPSHandler):
     pass
 
 
-_OPENER = urllib.request.build_opener(_Keep308, _HTTP, _HTTPS)  # 시스템 프록시(회사망)는 그대로 씀
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """다른 주소로 보내는 응답(301·302·303·307·308 Location)을 따라가지 않음 — urllib 은 따라갈 때 Authorization 도 그대로 옮겨서
+    (다른 곳·http 로도) 토큰이 새어 나갈 수 있음. Google API 는 다른 주소로 보내지 않으므로 그 응답은 오류로 (classify)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_Keep308, _NoRedirect, _HTTP, _HTTPS)  # 시스템 프록시(회사망)는 그대로 씀
 
 
 def _abort(box):
@@ -388,20 +458,26 @@ def save_secret(path, obj):
         raise
 
 
+def platform_kind():
+    """이 PC 가 쓰는 저장 방식 (Windows 'dpapi' · 그 밖 'plain'). 읽을 때도 이 방식만 받음 — Windows 에 놓인 평문 파일을 쓰지 않게."""
+    return "dpapi" if _use_dpapi() else "plain"
+
+
 def load_secret(path):
-    """비밀 파일 → dict. 없거나 깨졌거나(다른 PC·다른 사용자 DPAPI 포함) 머리가 다르면 None ('다시 연결해 주세요')."""
+    """비밀 파일 → dict. 없거나 깨졌거나(다른 PC·다른 사용자 DPAPI 포함) 머리가 이 PC 방식이 아니면 None ('다시 연결해 주세요')."""
     try:
         raw = Path(path).read_bytes()
     except OSError:
         return None
-    for kind, hdr in _HDR.items():
-        if raw.startswith(hdr):
-            try:
-                d = json.loads(unprotect(kind, raw[len(hdr):]).decode("utf-8"))
-            except Exception:  # noqa: BLE001 — DPAPI 실패·깨진 내용 모두 '없음'
-                return None
-            return d if isinstance(d, dict) else None
-    return None
+    kind = platform_kind()
+    hdr = _HDR[kind]
+    if not raw.startswith(hdr):
+        return None
+    try:
+        d = json.loads(unprotect(kind, raw[len(hdr):]).decode("utf-8"))
+    except Exception:  # noqa: BLE001 — DPAPI 실패·깨진 내용 모두 '없음'
+        return None
+    return d if isinstance(d, dict) else None
 
 
 def delete_secret(path):
@@ -491,7 +567,7 @@ def _token_record(d, prev=None):
         out["refresh_token"] = d["refresh_token"]
     if d.get("scope"):
         out["scope"] = d["scope"]
-    if d.get("refresh_token_expires_in"):  # 테스트 상태 앱: 동의한 때부터 7일
+    if d.get("refresh_token_expires_in"):  # '시간 제한 액세스'를 고른 때만 옴 (테스트 상태 앱의 7일과는 다름 · 그것은 알려 주지 않음)
         out["refresh_expires_at"] = now + int(d["refresh_token_expires_in"])
     return out
 
@@ -516,7 +592,7 @@ def refresh(client, tok):
 
 
 def revoke(tok, timeout=5):
-    """연결 끊기 (되도록 · 실패해도 계속)."""
+    """연결 끊기 (되도록 · 실패해도 계속) → Google 이 끊었으면 True (인터넷 끊김·시간 초과·거절이면 False)."""
     t = (tok or {}).get("refresh_token") or (tok or {}).get("access_token")
     if not t:
         return False
@@ -561,6 +637,17 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self._page(405, "잘못된 요청", "이 주소는 쓰지 않아요")
 
 
+class _LoopbackServer(ThreadingHTTPServer):
+    """로그인 결과를 받는 한 번짜리 서버: 같은 포트를 다른 프로그램이 함께 잡지 못하게 (SO_REUSEADDR 끔 · Windows 는 SO_EXCLUSIVEADDRUSE)."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self):
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class LoginFlow:
     """'유튜브 계정 연결하기' 한 번: 127.0.0.1 의 빈 포트에 작은 서버를 열고 Google 이 돌려보내는 결과를 한 번만 받음."""
 
@@ -578,8 +665,7 @@ class LoginFlow:
         self.cancel()
         verifier, chal = pkce_pair()
         state = secrets.token_urlsafe(24)
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), _CallbackHandler)
-        srv.daemon_threads = True
+        srv = _LoopbackServer(("127.0.0.1", 0), _CallbackHandler)
         srv.flow = self
         port = srv.server_address[1]
         redirect = f"http://127.0.0.1:{port}/"
@@ -736,11 +822,13 @@ class Client:
             time.sleep(secs)
 
     def request(self, op, method, url, data=None, headers=None, ok=(200,), timeout=TIMEOUT, charge=True):
-        """Google API 한 번 (401 → 새 토큰으로 한 번 더 · rateLimit → RATE_WAIT 쉬고 한 번 더) → (상태, 헤더, JSON)."""
-        if charge and self.on_call:
-            self.on_call(op)
-        rated = False
+        """Google API 한 번 (401 → 새 토큰으로 한 번 더 · rateLimit → RATE_WAIT 쉬고 한 번 더) → (상태, 헤더, JSON).
+        할당량은 보내는 요청마다 셈 (rateLimit 뒤 다시 보내는 것도 Google 이 셈 · 401 은 인증 전에 막혀 세지 않음)."""
+        rated, was401 = False, False
         for attempt in range(3):
+            if charge and self.on_call and not was401:
+                self.on_call(op)
+            was401 = False
             h = dict(headers or {})
             h["Authorization"] = "Bearer " + self.access_token(force=attempt > 0 and not rated)
             try:
@@ -752,6 +840,7 @@ class Client:
             reason, _ = parse_google_error(raw)
             err = classify(op, st, reason)
             if st == 401 and err.kind == "relogin" and attempt == 0:
+                was401 = True
                 continue
             if err.kind == "rate" and not rated and op != "thumbnails.set":
                 rated = True
@@ -829,13 +918,24 @@ class Client:
                                   {"Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Length": str(int(size)),
                                    "X-Upload-Content-Type": mime}, ok=(200, 201))
         loc = (hdrs.get("Location") or "") if hdrs else ""
-        a, b = urllib.parse.urlsplit(loc), urllib.parse.urlsplit(up)
-        if not loc or (a.scheme, a.netloc) != (b.scheme, b.netloc) or not a.path.startswith(b.path + "/videos"):
+        if not valid_session_uri(loc):
+            try:  # 주인 PC 확인용: 주소 전체(세션 번호)는 남기지 않고 호스트만
+                host = urllib.parse.urlsplit(loc).hostname
+            except ValueError:
+                host = None
+            print(f"유튜브 업로드 세션 주소가 예상과 달라요 · host={_REASON.sub('', str(host or '-'))[:80]}", flush=True)
             raise ApiError("server", "유튜브가 이상한 업로드 주소를 돌려줬어요 · 잠시 뒤 다시 올려 주세요")
         return loc
 
+    @staticmethod
+    def _check_uri(uri):
+        """보낼 때마다: 저장해 둔 세션 주소가 Google 업로드 주소가 아니면 토큰을 붙이지 않고 '새로 시작'(session_expired)."""
+        if not valid_session_uri(uri):
+            raise ApiError("session_expired", reason="badSessionUri")
+
     def upload_status(self, uri, size, _again=False):
         """올린 데까지 묻기 → ("incomplete", 받은 바이트) | ("done", 영상 정보). 404·410 = 세션 만료."""
+        self._check_uri(uri)
         h = {"Authorization": "Bearer " + self.access_token(force=_again), "Content-Range": f"bytes */{int(size)}", "Content-Length": "0"}
         try:
             st, hdrs, raw = _send("PUT", uri, b"", h, TIMEOUT)
@@ -852,14 +952,18 @@ class Client:
         reason, _ = parse_google_error(raw)
         raise classify("upload", st, reason)
 
-    def upload_file(self, uri, path, size, offset=0, *, chunk=None, cancel=None, progress=None, on_offset=None, mime=None):
-        """offset 부터 끝까지 조각으로 보냄 → 영상 정보(dict). 끊기면 BACKOFF 만큼 기다리고 상태를 물어 이어서."""
+    def upload_file(self, uri, path, size, offset=0, *, chunk=None, cancel=None, progress=None, on_offset=None, mime=None, on_wait=None):
+        """offset 부터 끝까지 조각으로 보냄 → 영상 정보(dict). 끊기면 BACKOFF 만큼 기다리고 상태를 물어 이어서.
+        인터넷이 끊기면 NET_PATIENCE(30분) 동안은 1분마다 다시 해 봄 · 5xx 는 BACKOFF 까지.
+        308 인데 받은 데가 늘지 않으면(STUCK_MAX 번) 쉬었다가 상태를 물음 → 계속 그러면 server 오류 (세션은 남아 이어 올리기).
+        on_wait(n번째, Google 이 받은 바이트, "network"|"server"): 기다리기 전에 (화면에 '다시 연결하는 중')."""
+        self._check_uri(uri)
         chunk = int(chunk or CHUNK)
         if chunk % UNIT:
             raise ValueError("조각 크기는 256 KiB 배수여야 해요")
         mime = mime or _mime(path)
         cancel = cancel or self.cancel
-        fails, refreshed = 0, False
+        fails, refreshed, stuck, down_since = 0, False, 0, None
         while True:
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
@@ -886,16 +990,22 @@ class Client:
                 raise Cancelled()
             if st in (200, 201):
                 return _json(raw)
+            reason = None
             if st == 308:
                 new = _range_end(hdrs)
-                fails = 0
+                down_since = None
+                if new > offset:
+                    fails, stuck = 0, 0
+                else:
+                    stuck += 1
                 if new != offset and on_offset:
                     on_offset(new)
                 offset = new
-                continue
-            if st in (404, 410):
+                if stuck < STUCK_MAX:
+                    continue
+            elif st in (404, 410):
                 raise ApiError("session_expired", status=st)
-            if st == 401 and not refreshed:
+            elif st == 401 and not refreshed:
                 refreshed = True
                 self.access_token(force=True)
                 kind, val = self.upload_status(uri, size)
@@ -903,15 +1013,21 @@ class Client:
                     return val
                 offset = val
                 continue
-            reason = None
-            if st is not None:
+            elif st is not None:
                 reason, _ = parse_google_error(raw)
-            retry = st is None or st >= 500 or st == 429 or reason in ("rateLimitExceeded", "userRateLimitExceeded", "backendError")
-            if not retry:
-                raise classify("upload", st, reason)
-            if fails >= len(BACKOFF):
-                raise ApiError("network" if st is None else "server", status=st, reason=reason)
-            self._wait_or_cancel(cancel, BACKOFF[fails] + random.random() * JITTER)
+                retry = st >= 500 or st == 429 or reason in ("rateLimitExceeded", "userRateLimitExceeded", "backendError")
+                if not retry:
+                    raise classify("upload", st, reason)
+            why = "network" if st is None else "server"
+            if st is None:
+                down_since = down_since or time.monotonic()
+                if fails >= len(BACKOFF) and time.monotonic() - down_since >= NET_PATIENCE:
+                    raise ApiError("network", MSG["network_long"] if NET_PATIENCE >= 600 else None)
+            elif fails >= len(BACKOFF):
+                raise ApiError("server", status=st if st != 308 else None, reason=reason or ("stuck" if st == 308 else None))
+            if on_wait:
+                on_wait(fails + 1, offset, why)
+            self._wait_or_cancel(cancel, BACKOFF[min(fails, len(BACKOFF) - 1)] + random.random() * JITTER)
             fails += 1
             try:
                 kind, val = self.upload_status(uri, size)
@@ -921,6 +1037,8 @@ class Client:
                 raise
             if kind == "done":
                 return val
+            if val > offset:
+                stuck = 0
             if val != offset and on_offset:
                 on_offset(val)
             offset = val

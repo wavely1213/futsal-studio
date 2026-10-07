@@ -53,7 +53,7 @@ class FakeBase(unittest.TestCase):
         self.fake.set_mode({"auto": {"account": "acc-brand"}})
         self._p = [mock.patch.dict(os.environ, {yt.ENV: self.base}), mock.patch.object(yt, "CHUNK", UNIT),
                    mock.patch.object(yt, "BACKOFF", (0.01,) * 8), mock.patch.object(yt, "JITTER", 0.0),
-                   mock.patch.object(yt, "RATE_WAIT", 0.01)]
+                   mock.patch.object(yt, "RATE_WAIT", 0.01), mock.patch.object(yt, "NET_PATIENCE", 0)]
         for p in self._p:
             p.start()
         self.addCleanup(lambda: [p.stop() for p in self._p])
@@ -141,9 +141,44 @@ class PkceAndClientTests(unittest.TestCase):
     def test_endpoint_override_only_loopback_http(self):
         with mock.patch.dict(os.environ, {yt.ENV: "http://127.0.0.1:9/"}):
             self.assertEqual(yt.endpoints()["token"], "http://127.0.0.1:9/token")
-        for bad in ("https://evil.example", "http://evil.example:80", "http://127.0.0.1", "http://127.0.0.1:9/x", "file:///etc"):
+            with mock.patch.object(yt, "_FAKE_MARK", Path(tempfile.gettempdir()) / "없는 폴더" / "fake_google.py"):
+                self.assertEqual(yt.endpoints(), yt.ENDPOINTS)  # 배포본(tests/ 없음)에서는 환경 변수가 있어도 진짜 Google
+        for bad in ("https://evil.example", "http://evil.example:80", "http://127.0.0.1", "http://127.0.0.1:9/x", "file:///etc",
+                    "http://localhost:9", "http://u:p@127.0.0.1:9", "http://127.0.0.1:99999"):
             with mock.patch.dict(os.environ, {yt.ENV: bad}):
                 self.assertEqual(yt.endpoints(), yt.ENDPOINTS, bad)
+
+    def test_session_uri_must_be_google_upload(self):
+        with mock.patch.dict(os.environ, {yt.ENV: ""}):
+            ok = ["https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=x",
+                  "https://youtube.googleapis.com/upload/youtube/v3/videos?upload_id=x",
+                  "https://www.googleapis.com:443/upload/youtube/v3/videos?upload_id=x"]
+            bad = ["http://www.googleapis.com/upload/youtube/v3/videos?upload_id=x", "https://evil.example/upload/youtube/v3/videos",
+                   "https://googleapis.com.evil.example/upload/youtube/v3/videos", "https://u@www.googleapis.com/upload/youtube/v3/videos",
+                   "https://www.googleapis.com:8443/upload/youtube/v3/videos", "https://www.googleapis.com/youtube/v3/videos",
+                   "http://127.0.0.1:9/upload/youtube/v3/videos", "", None, "https://[::1/x"]
+            for u in ok:
+                self.assertTrue(yt.valid_session_uri(u), u)
+            for u in bad:
+                self.assertFalse(yt.valid_session_uri(u), u)
+        with mock.patch.dict(os.environ, {yt.ENV: "http://127.0.0.1:9"}):  # 시험 중에는 가짜 Google 만
+            self.assertTrue(yt.valid_session_uri("http://127.0.0.1:9/upload/youtube/v3/videos?upload_id=x"))
+            self.assertFalse(yt.valid_session_uri("http://127.0.0.1:10/upload/youtube/v3/videos?upload_id=x"))
+            self.assertFalse(yt.valid_session_uri(ok[0]))
+
+    def test_login_listener_does_not_share_its_port(self):
+        import socket as so
+        self.assertFalse(yt._LoopbackServer.allow_reuse_address)
+        srv = yt._LoopbackServer(("127.0.0.1", 0), yt._CallbackHandler)
+        try:
+            self.assertEqual(srv.socket.getsockopt(so.SOL_SOCKET, so.SO_REUSEADDR), 0)
+            other = so.socket()
+            other.setsockopt(so.SOL_SOCKET, so.SO_REUSEADDR, 1)
+            with self.assertRaises(OSError):  # 다른 프로그램이 같은 포트를 함께 잡지 못함
+                other.bind(srv.server_address)
+            other.close()
+        finally:
+            srv.server_close()
 
 
 class SecretStoreTests(unittest.TestCase):
@@ -191,6 +226,10 @@ class SecretStoreTests(unittest.TestCase):
             self.assertEqual(yt.load_secret(p)["refresh_token"], "1//SECRETVALUE")
             p.write_bytes(b"FSY1D\nnot-dpapi")  # 다른 PC·다른 사용자 → 없음
             self.assertIsNone(yt.load_secret(p))
+            p.write_bytes(b'FSY1P\n{"refresh_token": "1//PLANTED"}')  # Windows 에 놓인 평문 파일은 받지 않음
+            self.assertIsNone(yt.load_secret(p))
+        p.write_bytes(b"FSY1D\nDPAPI....")  # 리눅스에서는 DPAPI 머리를 받지 않음
+        self.assertIsNone(yt.load_secret(p))
         self.assertEqual(calls[:2], [True, False])
         kind, data = yt.protect(b"abc")  # 리눅스는 그대로
         self.assertEqual((kind, yt.unprotect(kind, data)), ("plain", b"abc"))
@@ -209,7 +248,7 @@ class LoginTests(FakeBase):
         self.assertEqual(snap["channel"]["id"], fake_google.OWN_CHANNEL)
         self.assertTrue(tok["refresh_token"].startswith("1//FAKE"))
         self.assertIn(yt.SCOPE, tok["scope"].split())
-        self.assertGreater(tok["refresh_expires_at"], time.time() + 6 * 86400)  # 테스트 상태 앱 → 7일
+        self.assertNotIn("refresh_expires_at", tok)  # 테스트 상태 7일은 Google 이 알려 주지 않음 (시간 제한 액세스 때만)
         la = self.fake.snapshot()["last_auth"]
         self.assertEqual((la["code_challenge_method"], la["access_type"], la["scope"]), ("S256", "offline", yt.SCOPE))
         self.assertRegex(la["redirect_uri"], r"^http://127\.0\.0\.1:\d+/$")
@@ -917,6 +956,7 @@ class UploadFlowTests(ServiceBase):
 
     def test_revoked_connection_then_reconnect_and_resume(self):
         name, k = self.ready()
+        yu.save_settings({"consentMode": "testing"})  # 설정 안내 5단계에서 '테스트 상태 그대로'를 고름
         self.mode(rate=150 * KB)
         threading.Timer(0.6, self.cancel.set).start()
         with mock.patch.object(yt, "CHUNK", 64 * UNIT):
@@ -934,7 +974,10 @@ class UploadFlowTests(ServiceBase):
         self.assertTrue(st["needsRelogin"])
         self.assertFalse(st["connected"])
         self.assertIn("다시 연결하기", st["reloginMsg"])
-        self.assertIn("7일마다", st["reloginMsg"])  # 테스트 상태 앱 안내
+        self.assertIn("7일마다", st["reloginMsg"])  # 테스트 상태 앱 안내 (5단계에서 고른 값으로)
+        yu.save_settings({"consentMode": "production"})
+        self.assertNotIn("7일마다", yu.status()["reloginMsg"])
+        yu.save_settings({"consentMode": "testing"})
         self.assertIn("다시 연결하기", yu.plan(name)["problems"][0])
         self.connect()
         self.assertFalse(yu.status()["needsRelogin"])
@@ -942,8 +985,9 @@ class UploadFlowTests(ServiceBase):
         self.assertTrue(r["ok"], r)
         self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
 
-    def test_connection_lost_after_video_steps_wait_for_reconnect(self):
-        """세션 주소로 영상은 끝까지 올라갔는데 연결이 끊김 → 썸네일·자막·재생목록은 '다시 연결한 뒤 마저 하기'(Google 을 더 두드리지 않음)."""
+    def test_connection_lost_mid_upload_needs_reconnect_then_resumes(self):
+        """올리는 중에 연결이 끊김(취소·7일): 세션 PUT 에도 Bearer 가 필요해서(문서) 영상도 멈춤 → '다시 연결하기' → [이어 올리기]는
+        같은 세션으로 이어서 (새 videos.insert 없음) · 썸네일·자막·재생목록까지."""
         name, k = self.ready()
         pl = yu.create_playlist("기본기", "public")["playlist"]
         self.mode(rate=150 * KB)
@@ -953,8 +997,33 @@ class UploadFlowTests(ServiceBase):
         self.mode(rate=None)
         yt.revoke(yt.load_secret(yu._token_path()))
         self.cancel.clear()
-        before = self.fake.snapshot()["log"].count("token:refresh")
         r = yu.resume(yu.session_key(name, None), self.log, self.cancel)
+        self.assertFalse(r["ok"], r)
+        self.assertTrue(r["relogin"])
+        self.assertEqual(self.fake.snapshot()["videos"], [])
+        self.assertTrue(yu.status()["needsRelogin"])
+        self.assertEqual([x["state"] for x in yu.pending()], ["failed"])
+        self.connect()
+        r2 = yu.resume(yu.session_key(name, None), self.log, self.cancel)
+        self.assertTrue(r2["ok"], r2)
+        self.assertEqual({k2: v["state"] for k2, v in r2["steps"].items()}, {"thumbnail": "ok", "captions": "ok", "playlist": "ok"})
+        self.assertEqual(self.video()["playlists"], [pl["id"]])
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
+
+    def test_connection_lost_after_video_steps_wait_for_reconnect(self):
+        """영상은 다 올라간 뒤 연결이 끊김 → 썸네일·자막·재생목록은 '다시 연결한 뒤 마저 하기'(Google 을 더 두드리지 않음)."""
+        name, k = self.ready()
+        pl = yu.create_playlist("기본기", "public")["playlist"]
+        real = yt.Client.set_thumbnail
+
+        def revoke_then(c, vid, path):  # 영상 업로드가 끝난 바로 뒤 (첫 단계 직전) 사용자가 연결을 끊음
+            yt.revoke(c.token)
+            c.token["expires_at"] = 0
+            return real(c, vid, path)
+
+        before = self.fake.snapshot()["log"].count("token:refresh")
+        with mock.patch.object(yt.Client, "set_thumbnail", revoke_then):
+            r = self.run_up(opts={"playlistId": pl["id"]})
         self.assertTrue(r["ok"], r)
         self.assertEqual({k2: v["state"] for k2, v in r["steps"].items()}, {"thumbnail": "todo", "captions": "todo", "playlist": "todo"})
         self.assertEqual(r["steps"]["captions"]["msg"], yu.RELOGIN_STEP)
@@ -1168,16 +1237,18 @@ class SmallRuleTests(unittest.TestCase):
             self.assertTrue(url.startswith("https://"), k)
 
     def test_settings_whitelist(self):
+        self.assertIsNone(yu.get_settings()["madeForKids"])  # 처음에는 고르지 않음 (직접 한 번 골라야 함)
         st = yu.save_settings({"privacy": "public", "evil": "<script>", "madeForKids": False, "consentMode": "production"})
         self.assertNotIn("evil", st)
-        self.assertEqual((st["privacy"], st["consentMode"]), ("public", "production"))
-        for bad in ({"privacy": "everyone"}, {"madeForKids": "no"}, {"playlistId": "../x"}, {"channelOk": "UC123"}):
+        self.assertNotIn("privacy", st)  # 공개 설정은 기억하지 않음 (늘 비공개로 시작)
+        self.assertEqual((st["madeForKids"], st["consentMode"]), (False, "production"))
+        for bad in ({"madeForKids": None}, {"madeForKids": "no"}, {"playlistId": "../x"}, {"channelOk": "UC123"}, {"preauditAck": 1}):
             with self.assertRaises(yu.UploadError):
                 yu.save_settings(bad)
         with self.assertRaises(yu.UploadError):
             yu.save_settings(None)
-        (self.tmp / "youtube" / "settings.json").write_text('{"privacy": 3, "notify": false}', encoding="utf-8")
-        self.assertEqual((yu.get_settings()["privacy"], yu.get_settings()["notify"]), ("private", False))
+        (self.tmp / "youtube" / "settings.json").write_text('{"privacy": "public", "notify": false, "madeForKids": 3}', encoding="utf-8")
+        self.assertEqual((yu.get_settings().get("privacy"), yu.get_settings()["notify"], yu.get_settings()["madeForKids"]), (None, False, None))
 
     def test_history_is_capped(self):
         d = {"v": 1, "items": [{"videoId": f"v{i:010d}", "at": i} for i in range(yu.HISTORY_MAX + 5)]}
@@ -1335,6 +1406,9 @@ class RouteTests(ServiceBase):
         code, j = self.call("/api/youtube/finish", {"videoId": r["videoId"], "steps": ["captions"]})
         self.assertEqual(code, 200)
         self.assertEqual(self.wait_job()["steps"]["captions"]["state"], "ok")
+        code, j = self.call("/api/youtube/check", {"videoId": r["videoId"]})  # 처리 상태 다시 확인 (작업 아님)
+        self.assertEqual((code, j["ok"], j["processing"]), (200, True, False))
+        self.assertEqual(self.call("/api/youtube/check", {"videoId": "../x"})[0], 400)
         # 시크릿 위생: 기록·작업 폴더·응답 어디에도 토큰·코드·보안 비밀번호·세션 주소가 없음 (사용자 폴더의 .bin 만 예외)
         sec = self.fake.secret_values()
         values = [sec["client_secret"]] + sec["access"] + sec["refresh"] + sec["codes"] + sec["upload_ids"]
@@ -1355,7 +1429,7 @@ class RouteTests(ServiceBase):
         code, j = self.call("/api/youtube/upload", {"name": name, "opts": {}})
         self.assertEqual(code, 400)
         self.assertEqual(j["codes"], ["kit"])
-        code, j = self.call("/api/youtube/settings", {"settings": {"privacy": "nope"}})
+        code, j = self.call("/api/youtube/settings", {"settings": {"madeForKids": "nope"}})
         self.assertEqual(code, 400)
         code, j = self.call("/api/youtube/settings", {"settings": {"audited": True}})
         self.assertEqual((code, j["settings"]["audited"]), (200, True))
@@ -1367,6 +1441,283 @@ class RouteTests(ServiceBase):
         code, j = self.call("/api/youtube/playlists", {})
         self.assertEqual((code, j["kind"]), (502, "api_off"))
 
+
+
+class ReviewFixTests(ServiceBase):
+    """검토에서 나온 것들: 세션 주소 보호 · 토큰 경쟁 · 다른 주소로 보내기 · Google 연결 끊기 결과 · 처리 중 · 다시 하기 · 공개 설정."""
+
+    def _pause(self, opts=None):
+        name, k = self.ready()
+        self.mode(rate=150 * KB)
+        threading.Timer(0.6, self.cancel.set).start()
+        with mock.patch.object(yt, "CHUNK", 64 * UNIT):
+            r = self.run_up(opts=opts)
+        self.assertTrue(r["paused"], r)
+        self.mode(rate=None)
+        self.cancel.clear()
+        return name, yu.session_key(name, None)
+
+    def test_session_uri_lives_outside_work_and_tampering_restarts(self):
+        name, key = self._pause()
+        sess = json.loads(yu._session_path(key).read_text(encoding="utf-8"))
+        self.assertIs(sess["uri"], True)  # 작업 폴더에는 주소가 없음
+        self.assertNotIn("upload_id", yu._session_path(key).read_text(encoding="utf-8"))
+        self.assertTrue(yu._uri_path(key).is_file())
+        self.assertTrue(str(yu._uri_path(key)).startswith(str(self.home)))
+        # 작업 폴더(OneDrive·NAS)의 JSON 을 고쳐도 주소는 바뀌지 않음: 짝 번호가 다르면 '처음부터'
+        sess["sid"] = "0" * 16
+        yu._session_path(key).write_text(json.dumps(sess), encoding="utf-8")
+        seen = []
+        real = yt._send
+        with mock.patch.object(yt, "_send", side_effect=lambda m, u, *a, **kw: (seen.append(u), real(m, u, *a, **kw))[1]):
+            r = yu.resume(key, self.log, self.cancel)
+        self.assertTrue(r["ok"], r)
+        self.assertIn("올리던 연결 정보를 읽지 못해서 처음부터 다시 올려요", r["notes"])
+        self.assertTrue(all(u.startswith(self.base) for u in seen))
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 2)
+
+    def test_bad_session_uri_never_gets_the_token(self):
+        c = yt.Client(CLIENT, self.login()[1])
+        with mock.patch.object(yt, "_send") as send:
+            for fn in (lambda: c.upload_status("http://127.0.0.1:1/upload/youtube/v3/videos?upload_id=x", 10),
+                       lambda: c.upload_file("https://evil.example/upload/youtube/v3/videos?x", __file__, 10)):
+                with self.assertRaises(yt.ApiError) as cm:
+                    fn()
+                self.assertEqual(cm.exception.kind, "session_expired")
+        send.assert_not_called()
+        # 저장된 비밀 파일 안의 주소가 바뀌어도 (다른 곳) → 읽지 않음 → 처음부터
+        name, key = self._pause()
+        d = yt.load_secret(yu._uri_path(key))
+        yt.save_secret(yu._uri_path(key), dict(d, uri="https://evil.example/upload/youtube/v3/videos?upload_id=x"))
+        r = yu.resume(key, self.log, self.cancel)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 2)
+
+    def test_logout_during_job_stops_it_and_does_not_come_back(self):
+        name, k = self.ready()
+        self.mode(rate=100 * KB)
+        done = {}
+        with mock.patch.object(yt, "CHUNK", 16 * UNIT), mock.patch.object(yt, "revoke", return_value=False):
+            t = threading.Thread(target=lambda: done.update(r=self.run_up()))
+            t.start()
+            for _ in range(200):
+                if yu._ACTIVE["key"]:
+                    break
+                time.sleep(0.02)
+            time.sleep(0.3)
+            out = yu.logout(self.log)  # Google 쪽 끊기가 실패해도 (인터넷) 로컬은 지움 · 작업은 먼저 멈춤
+            t.join(30)
+        self.assertEqual((out["ok"], out["revoked"]), (True, False))
+        self.assertTrue(done["r"]["paused"], done["r"])
+        self.assertIsNone(yt.load_secret(yu._token_path()))  # 옛 작업이 토큰을 다시 쓰지 않음
+        self.assertFalse(list((yu._home() / "sessions").glob("*.bin")))  # 세션 주소도 지움
+        self.assertIn("Google 쪽 연결은 끊지 못함", self.logs[-1])
+
+    def test_stale_job_cannot_resurrect_or_wipe_tokens(self):
+        self.connect()
+        a = yt.load_secret(yu._token_path())
+        self.assertFalse(yu._save_token(dict(a, refresh_token="1//OTHER", access_token="ya29.X")))  # 다른 연결 → 버림
+        self.assertEqual(yt.load_secret(yu._token_path())["refresh_token"], a["refresh_token"])
+        yt.delete_secret(yu._token_path())
+        self.assertFalse(yu._save_token(a))  # 끊은 뒤 → 되살리지 않음
+        self.assertIsNone(yt.load_secret(yu._token_path()))
+        yu._save_token(dict(a, refresh_token="1//NEWACCOUNT", channel={"id": "UC_B"}), force=True)  # 다른 계정으로 다시 연결
+        yu._mark_relogin(a["refresh_token"])  # 옛 작업의 '연결 끊김' → 새 계정은 그대로
+        self.assertEqual(yt.load_secret(yu._token_path())["refresh_token"], "1//NEWACCOUNT")
+        yu._mark_relogin("1//NEWACCOUNT")
+        self.assertTrue(yt.load_secret(yu._token_path())["relogin"])
+
+    def test_revoke_failure_is_reported(self):
+        self.connect()
+        tok = yt.load_secret(yu._token_path())
+        yt.revoke(tok)  # 이미 끊긴 토큰 → Google 이 400
+        r = yu.logout(self.log)
+        self.assertEqual((r["revoked"], r["hadToken"]), (False, True))
+        self.connect()
+        self.assertTrue(yu.clear_all(self.log)["revoked"])
+
+    def test_status_has_no_login_url(self):
+        yu.save_client(json.dumps({"installed": CLIENT}))
+        self.mode(auto=None)
+        with mock.patch.object(yu.webbrowser, "open"):
+            r = yu.start_login(self.log)
+        self.assertIn("code_challenge=", r["url"])  # [주소 복사]는 이 응답으로만
+        st = yu.status()
+        self.assertEqual(st["login"]["state"], "waiting")
+        self.assertNotIn("url", st["login"])
+        self.assertNotIn("code_challenge", json.dumps(st))
+        yu.cancel_login()
+
+    def test_testing_warning_from_consent_choice(self):
+        self.connect()
+        self.assertIsNone(yu.status()["testingWarn"])  # 모름 + 막 연결 → 알림 없음
+        yu.save_settings({"consentMode": "testing"})
+        self.assertIn("7일마다", yu.status()["testingWarn"])
+        tok = yt.load_secret(yu._token_path())
+        yt.save_secret(yu._token_path(), dict(tok, connected_at=time.time() - 5.5 * 86400))
+        self.assertIn("약 2일 뒤", yu.status()["testingWarn"])
+        yu.save_settings({"consentMode": "production"})
+        self.assertIsNone(yu.status()["testingWarn"])
+        yt.save_secret(yu._token_path(), dict(tok, refresh_expires_at=time.time() + 3 * 86400))  # 시간 제한 액세스
+        self.assertIn("Google이 정한 연결 기한", yu.status()["testingWarn"])
+        self.mode(time_based=True)
+        self.connect()
+        self.assertIn("refresh_expires_at", yt.load_secret(yu._token_path()))
+
+    def test_processing_then_check_and_length_rejection(self):
+        self.ready()
+        self.mode(reject_length=True)
+        r = self.run_up()
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(r["processing"])  # 올린 직후 videos.list 는 아직 처리 중
+        self.assertIsNone(r["problem"])
+        h = yu.check(r["videoId"])
+        self.assertFalse(h["processing"])
+        self.assertEqual(h["problem"], yu.LENGTH_MSG)
+        self.assertEqual(yu.history()["items"][0]["problem"], yu.LENGTH_MSG)
+        self.assertEqual(yu.history()["items"][0]["steps"]["captions"]["state"], "ok")  # 단계 기록은 그대로
+        with self.assertRaises(yu.UploadError):
+            yu.check("../x")
+
+    def test_post_steps_retry_transient_errors_right_after_upload(self):
+        self.ready()
+        self.mode(fail_ops={"thumbnails.set": [503, 404], "captions.insert": [404, 404, 404, 404]})
+        with mock.patch.object(yu, "POST_RETRY", (0.01, 0.01, 0.01)):
+            r = self.run_up()
+        self.assertEqual(r["steps"]["thumbnail"]["state"], "ok")
+        self.assertEqual(r["steps"]["captions"], {"state": "todo", "msg": yt.MSG["processing"]})
+        self.assertNotIn("지웠는지", r["steps"]["captions"]["msg"])
+        r2 = yu.finish(r["videoId"], None, self.log, self.cancel)
+        self.assertEqual(r2["steps"]["captions"]["state"], "ok")
+        q = self.fake.snapshot()["quota"]["units"]
+        self.assertEqual(yu.quota_view()["used"]["units"], q)  # 다시 한 요청도 함께 셈
+
+    def test_stuck_308_gives_up_and_short_stall_recovers(self):
+        name, k = self.ready()
+        self.mode(stuck_put=2)
+        r = self.run_up()
+        self.assertTrue(r["ok"], r)
+        self.mode(stuck_put=10 ** 6)
+        r = self.run_up(again=True)
+        self.assertEqual(r["kind"], "server", r)
+        self.assertEqual([x["state"] for x in yu.pending()], ["failed"])
+
+    def test_network_outage_keeps_trying_and_shows_waiting(self):
+        name, k = self.ready()
+        real, calls, waits = yt._send, [], []
+
+        def flaky(method, url, *a, **kw):
+            if method == "PUT":
+                calls.append(1)
+                if 2 <= len(calls) <= 14:  # 첫 조각 뒤 한동안 인터넷이 끊김 (BACKOFF 8번보다 오래)
+                    raise yt._Net("down")
+            return real(method, url, *a, **kw)
+
+        prog = []
+        with mock.patch.object(yt, "_send", side_effect=flaky), mock.patch.object(yt, "NET_PATIENCE", 30), \
+                mock.patch.object(yu.core, "set_progress", side_effect=lambda **kw: prog.append(kw)):
+            r = self.run_up()
+        self.assertTrue(r["ok"], r)
+        waiting = [p for p in prog if "다시 연결하는 중" in str(p.get("detail"))]
+        self.assertTrue(waiting)
+        self.assertTrue(all(p.get("eta") is None for p in waiting))
+        self.assertIn("올라간 양", waiting[0]["detail"])
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
+
+    def test_redirects_are_not_followed_with_the_token(self):
+        got = []
+
+        class Catch(fake_google.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                got.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+        from http.server import ThreadingHTTPServer
+        other = ThreadingHTTPServer(("127.0.0.1", 0), Catch)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        self.addCleanup(other.server_close)
+        self.addCleanup(other.shutdown)
+        c = yt.Client(CLIENT, self.login()[1])
+        self.mode(redirect_api=f"http://localhost:{other.server_address[1]}/x")
+        with self.assertRaises(yt.ApiError) as cm:
+            c.channel_mine()
+        self.assertEqual((cm.exception.kind, cm.exception.status), ("server", 302))
+        self.assertEqual(got, [])
+
+    def test_privacy_is_not_remembered_and_pre_audit_is_marked(self):
+        self.ready()
+        yu.save_settings({"audited": True})
+        r = self.run_up(opts={"privacy": "public"})
+        self.assertTrue(r["ok"])
+        self.assertFalse(r["preAudit"])
+        self.assertNotIn("privacy", yu.get_settings())
+        self.assertEqual(yu._options({"madeForKids": False}, False)["privacy"], "private")  # 다음 기본은 늘 비공개
+        yu.save_settings({"audited": False})
+        r2 = self.run_up(again=True)
+        self.assertTrue(r2["preAudit"])
+        self.assertEqual(r2["privacyText"], "비공개(감사 전 · 공개 불가)")
+        self.assertTrue(yu.get_settings()["preauditAck"])
+        self.assertTrue(yu.history()["items"][0]["preAudit"])
+
+    def test_made_for_kids_must_be_chosen_once(self):
+        self.ready()
+        r = yu.run_upload(self.NAME, None, {"privacy": "private"}, self.log, self.cancel)
+        self.assertFalse(r["ok"])
+        self.assertIn("아동용", r["error"])
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 0)
+        self.assertTrue(self.run_up(opts={"madeForKids": False})["ok"])
+        self.assertIs(yu.get_settings()["madeForKids"], False)  # 한 번 고르면 기억
+
+    def test_past_schedule_on_restart_asks_for_new_time(self):
+        when = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() + 3600))
+        name, key = self._pause({"privacy": "scheduled", "publishAt": when})
+        sess = json.loads(yu._session_path(key).read_text(encoding="utf-8"))
+        sess["meta"]["publishAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - 60))
+        sess["createdAt"] -= 7 * 86400  # 오래돼서 처음부터 다시 → 예약 시각이 이미 지남
+        yu._session_path(key).write_text(json.dumps(sess), encoding="utf-8")
+        r = yu.resume(key, self.log, self.cancel)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], yu.PAST_SCHEDULE)
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
+        self.assertEqual(yu.SCHEDULE_MIN, 15 * 60)
+        self.assertEqual(yu.status()["scheduleMinMinutes"], 15)
+
+
+class MoreClassifyTests(unittest.TestCase):
+    def test_new_reasons(self):
+        for op, st, reason, kind, msg in (
+                ("playlistItems.insert", 400, "videoAlreadyInAnotherSeriesPlaylist", "bad_meta", yt.MSG["playlist_series"]),
+                ("playlistItems.insert", 400, "manualSortRequired", "bad_meta", yt.MSG["playlist_sort"]),
+                ("playlistItems.insert", 403, "playlistItemsNotAccessible", "forbidden", yt.MSG["playlist_denied"]),
+                ("playlistItems.insert", 400, "playlistOperationUnsupported", "forbidden", yt.MSG["playlist_denied"]),
+                ("videos.insert", 400, "defaultLanguageNotSet", "bad_meta", yt.MSG["defaultLanguageNotSet"]),
+                ("videos.insert", 400, "forbiddenLicenseSetting", "bad_meta", yt.MSG["invalidVideoMetadata"]),
+                ("upload", 400, "mediaBodyRequired", "file", yt.MSG["file"]),
+                ("videos.list", 302, None, "server", yt.MSG["redirect3xx"])):
+            e = yt.classify(op, st, reason)
+            self.assertEqual((e.kind, str(e)), (kind, msg), reason)
+        self.assertNotIn("15분", yt.MSG["invalidPublishAt"])
+
+    def test_rate_limit_retry_is_charged_again_but_401_is_not(self):
+        ops, sends = [], []
+        c = yt.Client(CLIENT, {"access_token": "a", "expires_at": time.time() + 3600, "refresh_token": "r"}, on_call=ops.append)
+        replies = [(403, {}, json.dumps(fake_google.gerror(403, "rateLimitExceeded", "x")[1]).encode()), (200, {}, b"{}")]
+        with mock.patch.object(yt, "_send", side_effect=lambda *a, **k: (sends.append(1), replies.pop(0))[1]), \
+                mock.patch.object(yt, "RATE_WAIT", 0):
+            c.request("videos.list", "GET", "http://127.0.0.1:9/x")
+        self.assertEqual(ops, ["videos.list", "videos.list"])
+        ops.clear()
+        replies = [(401, {}, b'{"error": {"errors": [{"reason": "authError"}]}}'), (200, {}, b"{}")]
+        with mock.patch.object(yt, "_send", side_effect=lambda *a, **k: replies.pop(0)), \
+                mock.patch.object(yt, "refresh", side_effect=lambda cl, t: dict(t, access_token="b", expires_at=time.time() + 3600)):
+            c.request("videos.list", "GET", "http://127.0.0.1:9/x")
+        self.assertEqual(ops, ["videos.list"])
 
 if __name__ == "__main__":
     unittest.main()

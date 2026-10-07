@@ -962,7 +962,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def _youtube_post(self, path, b):
-        """설정·연결·작업 시작. 올리기·이어 올리기·마무리는 start_job (한 번에 하나 · 겹치면 409 · 응답 모양은 다른 작업과 같음)."""
+        """설정·연결·작업 시작. 올리기·이어 올리기·마무리는 start_job (한 번에 하나 · 겹치면 409 · 응답 모양은 다른 작업과 같음).
+        /api/youtube/* 는 모두 이 PC 화면 전용 — 휴대폰 원격(remote) 허용 목록에 넣지 않음 (로그인·연결 끊기·설정·토큰 흐름)."""
         yu = youtube_upload
         busy = {"ok": False, "error": "다른 작업이 끝난 뒤에 다시 눌러 주세요"}
         try:
@@ -1018,6 +1019,8 @@ class Handler(BaseHTTPRequestHandler):
                     if mine:
                         editor.CANCEL.set()
                 return self._send(200 if mine else 409, {"ok": True} if mine else {"ok": False, "error": "지금 유튜브에 올리는 중이 아니에요"})
+            if path == "/api/youtube/check":  # 처리 상태 다시 확인 (videos.list 1단위 · 작업 아님)
+                return self._send(200, yu.check(str(b.get("videoId") or "")))
             if path == "/api/youtube/discard":
                 return self._send(200, yu.discard(b.get("key")))
             if path == "/api/youtube/open":
@@ -1025,9 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
         except yu.UploadError as e:
             return self._send(400, {"ok": False, "error": str(e)})
-        except yu.yt.ApiError as e:  # 연결·재생목록처럼 바로 Google 에 묻는 것
-            if e.kind == "relogin":
-                yu._mark_relogin()
+        except yu.yt.ApiError as e:  # 연결·재생목록·상태 확인처럼 바로 Google 에 묻는 것 (끊긴 연결 표시는 youtube_upload 가 그 연결에만)
             log(f"유튜브 · {e.kind}" + (f" ({e.reason})" if e.reason else ""))
             return self._send(502, {"ok": False, "error": yu.explain(e), "kind": e.kind, "relogin": e.kind == "relogin"})
         except FileNotFoundError:
