@@ -147,8 +147,11 @@ class FindJunkTest(unittest.TestCase):
         self.assertEqual(takes.find_junk(segs, []), [])
 
     def test_stutter_across_segments_keeps_last(self):
+        # E6: 줄마다 나뉜 외친 강조('빠르게,' → '빠르게!')는 한 구간 안의 강조와 똑같이 그대로 (예전에는 앞의 것을 말더듬으로 지움)
         split = [S(1.0, 4.0, "공을 받을 때는"), S(4.5, 4.9, "빠르게,"), S(5.3, 5.8, "빠르게!"), S(6.4, 9.0, "몸을 돌려서 패스하세요")]
-        self.assertEqual(takes.find_junk(split, []), [(4.5, 5.3, STUTTER)])
+        self.assertEqual(takes.find_junk(split, []), [])
+        mumble = [S(1.0, 4.0, "공을 받을 때는"), S(4.5, 4.9, "그래서"), S(5.3, 5.8, "그래서"), S(6.4, 9.0, "몸을 돌려서 패스하세요")]
+        self.assertEqual(takes.find_junk(mumble, []), [(4.5, 5.3, STUTTER)])  # 외치지 않은 같은 말 반복은 그대로 말더듬
         false_start = [S(1.0, 1.4, "퍼스트"), S(1.9, 2.3, "퍼스트"), S(2.8, 6.0, "퍼스트 터치는 발 안쪽으로 받아요")]
         self.assertEqual(takes.find_junk(false_start, []), [(1.0, 1.9, STUTTER), (1.9, 2.8, STUTTER)])
         slow = [S(4.5, 4.9, "빠르게"), S(6.2, 8.0, "빠르게 돌아서 패스")]  # 1.3초 뒤 → 말더듬 아님
@@ -157,6 +160,53 @@ class FindJunkTest(unittest.TestCase):
         steps = [S(10, 11.2, "받고"), S(11.6, 12.9, "받고 돌고"), S(13.3, 15.5, "받고 돌고 슈팅"), S(16, 19, "이 순서로 연습하세요")]
         self.assertEqual(takes.find_junk(steps, []), [])
         self.assertEqual(takes.find_junk([S(1, 2.2, "하나 둘"), S(2.6, 3.9, "하나 둘 셋")], []), [])
+
+    def test_drill_counts_and_cheers_split_by_line_are_kept(self):
+        # E6 (탐색 7회차): 받아쓰기가 구령·환호를 줄마다 나눠도 말더듬이 아님 — 시범 박자 구령과 성공 리액션이 가편집에서 빠지면 안 됨
+        cases = {
+            "숫자 구령": [S(113.64, 114.42, "하나, 둘, 셋."), S(114.96, 118.2, "하나, 둘, 셋.")],  # MSGRAW01 실측 받아쓰기 그대로
+            "외친 구령": [S(10, 11.5, "하나, 둘, 셋!"), S(12, 13.5, "하나, 둘, 셋!")],
+            "환호": [S(123.88, 124.52, "나이스!"), S(124.8, 125.4, "나이스!")],
+            "칭찬": [S(10, 10.6, "좋아요."), S(10.9, 11.5, "좋아요.")],
+            "재촉": [S(10, 10.6, "빠르게!"), S(10.9, 11.5, "빠르게!")],
+            "골": [S(10, 10.4, "골!"), S(10.8, 11.2, "골!")],
+            "리듬 말 세 번": [S(10, 11.5, "왼발, 오른발,"), S(12, 13.5, "왼발, 오른발,"), S(14, 15.5, "왼발, 오른발,")],
+            "영어 구령": [S(10, 10.8, "원, 투"), S(11.2, 12.0, "원, 투")],
+            "숫자로 받아쓴 구령": [S(10, 10.8, "1, 2, 3"), S(11.2, 12.0, "1, 2, 3")],
+            "추임새 붙은 구령": [S(10, 10.8, "자 하나 둘"), S(11.2, 12.0, "하나 둘")],
+        }
+        for k, segs in cases.items():
+            with self.subTest(k):
+                self.assertEqual(takes.find_junk(segs, []), [])
+        # 구령이 들어가도 설명 문장이 붙으면 구령이 아님 (끊긴 첫마디는 그대로 말더듬)
+        self.assertFalse(takes.is_chant("하나 둘 셋 리듬으로 움직여 보세요"))
+        self.assertFalse(takes.is_chant("이게 중요해요"))
+        self.assertFalse(takes.is_chant("음"))
+        self.assertTrue(takes.is_chant("좋아요!"))
+        self.assertTrue(takes.is_chant("하나둘셋"))
+        # 구령 낱말이어도 짧게 끊긴 첫마디('패스' → '패스할 때는 …')는 말더듬 (같은 말 반복만 구령으로 봄)
+        self.assertEqual(takes.find_junk([S(0, 0.4, "패스"), S(0.8, 4, "패스할 때는 발 안쪽으로 밀어 주세요")], []), [(0, 0.8, STUTTER)])
+        self.assertEqual(takes.find_junk([S(0, 0.4, "퍼스트"), S(0.8, 4, "퍼스트 터치는 발 안쪽으로 받아요")], []), [(0, 0.8, STUTTER)])
+
+    def test_same_explanation_around_demo_is_not_ng(self):
+        # E6 (탐색 7회차): '같은 설명 → 시범 → 같은 설명 → 시범' 드릴 — 사이에 시범(말 없는 3초 넘는 장면·큰 소리)이 있고
+        # 슬레이트 말이 없으면 첫 설명·첫 시범을 지우지 않음
+        line = "패스하고 바로 앞으로 뛰어나가세요."
+        segs = [S(10, 12.5, line), S(20, 22.5, line)]
+        self.assertEqual(takes.find_junk(segs, []), [])  # 조용한 곳 정보가 없으면 7.5초 빈 곳은 시범으로 봄
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 19.9}]), [(10, 20, NG)])  # 다 조용하면 다시 찍으려 쉰 것
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 19.9}], [{"time": 15.0, "rms_db": -8.0}]), [])  # 공 차는 소리
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 19.9}], [15.0]), [])  # 시각만 넘겨도 됨
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 15.0}, {"start": 16.5, "end": 19.9}]), [(10, 20, NG)])  # 말 없는 소리 1.5초
+        self.assertEqual(takes.find_junk(segs, [{"start": 12.6, "end": 14.0}, {"start": 18.5, "end": 19.9}]), [])  # 4.5초 시범 소리
+        show = [S(10, 12, "한 번 더 보여 드릴게요."), S(20, 22, "한 번 더 보여 드릴게요.")]
+        self.assertEqual(takes.find_junk(show, []), [])
+        # 슬레이트 말이 있으면 시범이 있어도 NG · 끊긴 앞 테이크도 그대로 NG
+        self.assertEqual(takes.find_junk([S(10, 12.5, line), S(13, 14, "아 다시 할게요"), S(20, 22.5, line)], []), [(10, 20, NG)])
+        self.assertEqual(takes.find_junk([S(10, 11.5, "패스하고 바로 앞으로"), S(20, 22.5, line)], []), [(10, 20, NG)])
+        self.assertEqual(takes.find_junk([S(10, 12.5, "패스하고 어 바로 앞으로 뛰어나가세요."), S(20, 22.5, line)], []), [(10, 20, NG)])
+        # 사이가 3초 이하면 시범으로 안 봄 (같은 말을 바로 다시 한 것)
+        self.assertEqual(takes.find_junk([S(10, 12.5, line), S(15.5, 18, line)], []), [(10, 15.5, NG)])
 
     def test_slate_from_preceding_silence(self):
         # (c) 1초 이상 조용한 곳의 시작부터 슬레이트 말 끝까지 (1초보다 짧은 조용함은 안 봄)
@@ -309,6 +359,28 @@ class RecommendTest(unittest.TestCase):
         r = self.rec(segs, [])
         self.assertEqual(r["junk_list"], [])
         self.assertEqual(r["tidy"], [{"in": 0.85, "out": 8.25}, {"in": 15.85, "out": 24.25}])
+
+    def test_drill_lesson_tidy_keeps_counts_cheers_and_first_demo(self):
+        # E6 재현 (MSGRAW01 113.64~114.96 '하나, 둘, 셋.' 이 말더듬으로 잘림 · 드릴 레슨 첫 설명·첫 시범이 'NG 앞 테이크'로 사라짐)
+        line = "패스하고 바로 앞으로 뛰어나가세요."
+        segs = [S(1.0, 4.0, "오늘은 패스 앤 무브 드릴을 해 볼게요"), S(10, 12.5, line),
+                S(13.64, 14.42, "하나, 둘, 셋."), S(14.96, 18.2, "하나, 둘, 셋."), S(23.88, 24.52, "나이스!"), S(24.8, 25.4, "나이스!"),
+                S(26.0, 26.4, "골!"), S(30, 32.5, line), S(33.0, 34.5, "왼발, 오른발,"), S(35.0, 36.5, "왼발, 오른발,"),
+                S(37.0, 38.5, "왼발, 오른발,"), S(40.0, 43.0, "좋아요 오늘은 여기까지 할게요")]
+        quiet = [{"start": 4.1, "end": 9.8}, {"start": 18.3, "end": 23.7}, {"start": 26.5, "end": 29.8}]
+        r = self.rec(segs, quiet)
+        self.assertEqual(r["junk_list"], [])
+        kept = lambda a, b: sum(max(0.0, min(b, c["out"]) - max(a, c["in"])) for c in r["tidy"]) / (b - a)  # noqa: E731
+        for s in segs:
+            self.assertGreater(kept(s["start"], s["end"]), 0.99, s["text"])
+        # 시범 소리 봉우리는 analysis.json loud_peaks 그대로 씀 (사이가 조용해도 공 차는 소리가 있으면 같은 설명이 둘 다 남음)
+        demo = [S(10, 12.5, line), S(20, 22.5, line)]
+        d = core.adir(self.name)
+        (d / "transcript.json").write_text(json.dumps(demo, ensure_ascii=False), encoding="utf-8")
+        (d / "analysis.json").write_text(json.dumps({"silences": [{"start": 12.6, "end": 19.9}], "loud_peaks": [{"time": 16.0, "rms_db": -6.0}]}),
+                                         encoding="utf-8")
+        self.assertEqual(editor.recommend(self.name)["junk_list"], [])
+        self.assertEqual(self.rec(demo, [{"start": 12.6, "end": 19.9}])["junk_list"], [{"a": 10, "b": 20, "why": NG}])  # 소리 없이 쉬었으면 NG
 
     def test_shorts_cuts_never_touch_ng_parts(self):
         segs = [S(1.0, 4.5, "오늘은 퍼스트 터치 꿀팁을 알려드릴게요"), S(5.0, 8.0, "공이 오면 발 안쪽으로 부드럽게"),

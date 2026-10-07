@@ -1,6 +1,6 @@
 """NG 테이크·슬레이트 말·말더듬 찾기 — 받아쓴 대사 구간만 보고 규칙으로 판단 (AI 없이 PC에서 계산).
 find_junk(segs, silences) → [(시작, 끝, 이유)] · editor.recommend 가 가편집·쇼츠 후보에서 이 구간을 뺌.
-한 구간(segment) 안의 강조 반복('빠르게, 빠르게!')은 건드리지 않음.
+한 구간(segment) 안의 강조 반복('빠르게, 빠르게!')은 건드리지 않음 · 받아쓰기가 줄마다 나눈 구령·환호('하나, 둘, 셋!' · '나이스!')도 그대로 (is_chant).
 find_fillers(segs) → 단어 시각이 있으면 말 사이에 홀로 떨어진 추임새 단어('음' · '어') 구간 (recommend 가 함께 뺌)."""
 import difflib
 import functools
@@ -11,6 +11,7 @@ SIMILAR, MIN_CHARS = 0.7, 6         # 글자 비슷한 정도 · 이보다 짧�
 LOOSE_MAX = 20                      # 두 테이크 사이에 '다시 한 말'로 설명 안 되는 글자가 이보다 많으면 다른 내용 (슬레이트 말이 없으면 0)
 COVER = 0.8                         # 슬레이트 말이 없으면 뒤 테이크가 앞 테이크 말을 이만큼 이상 다시 해야 함 (나란한 설명은 그대로)
 QUIET_MAX = 15.0                    # 두 테이크 사이에 말 없이 이보다 길게 비면(시범 장면일 수 있음) 슬레이트 말이 있을 때만
+DEMO_MIN = 3.0                      # 두 테이크 사이에 조용하지 않은데 말이 없는 곳이 이보다 길거나 큰 소리 봉우리(공 차는 소리·환호)가 있으면 시범
 SLATE_SIL = 1.0                     # 슬레이트 말 앞의 이만큼 이상 조용한 곳부터 지움
 STUTTER_GAP, STUTTER_MAX = 1.0, 10  # 말더듬: 이 초 안에 다시 시작한, 이 글자 이하의 짧은 말
 CUTOFF_MAX = 0.6                    # 끊긴 첫마디로 볼 최대 길이 (초)
@@ -40,6 +41,16 @@ SLATE = [(re.compile(p, re.I), strong) for p, strong in (
 SORRY = {"죄송합니다", "죄송해요", "죄송", "미안합니다", "미안해요", "미안"}
 # 슬레이트 말에 붙은 실수 말 ('아 이거 아닌데 다시 할게요') — 남는 글자로 안 셈
 OOPS = re.compile(r"(?:이거|이게|그게)?(?:아닌데|아니네|아니다|아니야|아니지)|아이고|아이구|어이쿠|아차|이런")
+# 구령·리듬 말·환호 — 받아쓰기가 줄마다 나눠도 말더듬이 아님 ('하나, 둘, 셋!' · '왼발, 오른발' · '나이스! 나이스!' · '골!')
+CHANT_WORDS = (
+    "하나", "둘", "셋", "넷", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "원", "투", "쓰리", "포", "파이브",  # ('일, 이, 삼'은 '이'·'사' 같은 흔한 말과 겹쳐 뺌 · 숫자로 받아쓴 '1, 2, 3'은 됨)
+    "왼발", "오른발", "왼쪽", "오른쪽", "안쪽", "바깥쪽", "인사이드", "아웃사이드", "앞", "뒤", "옆", "위", "아래", "앞으로", "뒤로", "옆으로",
+    "탁", "톡", "툭", "퉁", "쿵", "짝", "착", "팡", "뻥", "스텝", "점프", "터치", "원터치", "투터치",
+    "빠르게", "천천히", "강하게", "세게", "약하게", "빨리", "계속", "더", "멈춰", "스톱", "턴", "돌아", "패스", "슛", "슈팅",
+    "나이스", "나이스샷", "좋아", "좋다", "좋습니다", "굿", "굳", "오케이", "오케", "예스", "골", "고올", "그렇지", "그렇죠", "그거지", "그거죠",
+    "잘했어", "잘한다", "잘하네", "와", "우와", "브라보", "대박", "최고", "화이팅", "파이팅", "가자", "가즈아", "들어갔다", "들어갔어",
+    "됐다", "됐어", "완벽", "완벽해", "멋지다", "멋있다", "퍼펙트", "박수")
+_CHANT = re.compile(r"(?:%s)+요?" % "|".join(sorted(map(re.escape, CHANT_WORDS), key=len, reverse=True)))
 
 
 def _ed():
@@ -102,6 +113,19 @@ def is_slate(text, ed=None):
     return len(left) <= (3 if strong else 2)
 
 
+def is_chant(text, ed=None):
+    """한 줄 전체가 숫자 세기·리듬 말·짧은 구령·환호뿐인지 ('하나, 둘, 셋!' · '왼발, 오른발,' · '나이스!' · '좋아요.' · '골!').
+    받아쓰기가 이런 말을 줄마다 나눠도 말더듬·군더더기로 지우지 않으려고 씀 (앞쪽·사이 추임새는 빼고 봄)."""
+    ed = ed or _ed()
+    words = [w for w in (ed._norm(x) for x in str(text or "").split()) if w and w not in ed.FILLERS]
+    return bool(words) and all(_CHANT.fullmatch(w) or w.isdigit() for w in words)
+
+
+def repeat_ok(a, b, ed=None):
+    """줄마다 나뉜 같은 말 a → b 가 일부러 한 반복인지: 구령·환호이거나, 외친 말('빠르게,' → '빠르게!')."""
+    return is_chant(a, ed) or bool(re.search(r"!\s*$", str(a or "")) or re.search(r"!\s*$", str(b or "")))
+
+
 def _plain(text, ed):
     """추임새를 모두 빼고 끝 머뭇거림도 뗀 정규화 낱말들."""
     words = [w for w in (ed._norm(x) for x in text.split()) if w and w not in ed.FILLERS]
@@ -125,12 +149,37 @@ def _contrast(a, b):
     return False
 
 
-def _retake_ok(segs, cores, slates, i, j):
+def _finished(a, b, ed):
+    """앞 테이크 a 를 다 말했는지: 추임새·끝 머뭇거림 없이 뒤 테이크 b 만큼(UNDONE) 말함 — 끊긴·더듬은 테이크가 아님."""
+    plain = "".join(_plain(a, ed))
+    return plain == ed._norm(a) and len(plain) > UNDONE * len("".join(_plain(b, ed)))
+
+
+def _demo_between(segs, i, j, silences, peaks):
+    """i 끝 ~ j 시작 사이 말 없는 곳에 시범이 있는지: 큰 소리 봉우리(공 차는 소리·환호, 1초 단위 시각)가 있거나
+    조용하지 않은데 말이 없는 곳이 DEMO_MIN 초 넘게 이어짐 (조용한 곳 정보가 없으면 빈 곳 길이 그대로)."""
+    for k in range(i, j):
+        a, b = segs[k]["end"], segs[k + 1]["start"]
+        if b - a <= 0:
+            continue
+        if any(a < p + 0.5 < b for p in peaks):
+            return True
+        quiet = sum(max(0.0, min(b, x["end"]) - max(a, x["start"])) for x in silences)
+        if b - a - quiet > DEMO_MIN:
+            return True
+    return False
+
+
+def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=()):
     """i(앞 테이크) ~ j(다시 찍은 테이크) 사이가 정말 NG 인지: 사이의 말이 다시 한 말·슬레이트·추임새뿐이고, 오래 비지 않음.
-    슬레이트 말이 없으면 더 엄격히: 사이에 다른 말이 하나도 없고 뒤 테이크가 앞 말을 거의 다 다시 함 (같은 말로 감싼 팁·나란한 설명은 그대로)."""
+    슬레이트 말이 없으면 더 엄격히: 사이에 다른 말이 하나도 없고 뒤 테이크가 앞 말을 거의 다 다시 함 (같은 말로 감싼 팁·나란한 설명은 그대로).
+    슬레이트 말 없이 다 말한 앞 테이크 뒤에 시범(큰 소리·말 없는 긴 장면)이 있으면 '같은 설명 → 시범 → 같은 설명' 드릴이라 NG 아님."""
+    ed = _ed()
     slate = any(slates[i + 1:j])
-    if not slate and (_resaid(_trimmed(segs[i]["text"], _ed()), cores[j]) < COVER
+    if not slate and (_resaid(_trimmed(segs[i]["text"], ed), cores[j]) < COVER
                       or _contrast(segs[i]["text"], segs[j]["text"])):
+        return False
+    if not slate and _finished(segs[i]["text"], segs[j]["text"], ed) and _demo_between(segs, i, j, silences, peaks):
         return False
     win, loose = range(j, min(len(segs), j + (j - i) + 2)), 0
     for k in range(i + 1, j):
@@ -143,26 +192,30 @@ def _retake_ok(segs, cores, slates, i, j):
     return quiet <= QUIET_MAX or slate
 
 
-def find_junk(segs, silences=()):
+def find_junk(segs, silences=(), peaks=()):
     """받아쓴 구간 → 지울 구간 [(a, b, 이유)] (a 순서, 다른 구간 안에 다 들어가는 건 뺌).
     · 다시 찍기: 3~60초 앞에 같은 말로 시작한 구간이 있으면 [앞 구간 시작, 지금 구간 시작)
+      (슬레이트 말 없이 다 말한 설명 사이에 시범이 있으면 빼지 않음 · peaks: 큰 소리 봉우리 시각 — analysis.json loud_peaks)
     · 슬레이트 말: 바로 앞 1초 이상 조용한 곳(없으면 그 구간 시작)부터 그 구간 끝까지
-    · 말더듬: 같은 짧은 말(또는 끊긴 첫마디)을 1초 안에 다시 하면 마지막 것만 남김"""
+    · 말더듬: 같은 짧은 말(또는 끊긴 첫마디)을 1초 안에 다시 하면 마지막 것만 남김 (구령·환호·외친 말은 그대로)"""
     ed = _ed()
     segs = sorted((s for s in segs if str(s.get("text") or "").strip()), key=lambda s: (s["start"], s["end"]))
     cores = [_core(s["text"], ed) for s in segs]
     slates = [is_slate(s["text"], ed) for s in segs]
+    chants = [is_chant(s["text"], ed) for s in segs]
+    sil = [x for x in silences or () if isinstance(x, dict) and x.get("end", 0) > x.get("start", 0)]
+    pk = [float(p["time"] if isinstance(p, dict) else p) for p in peaks or ()]
     out, pairs = [], []
 
     for j, later in enumerate(segs):  # 다시 찍은 앞 테이크
-        if len(cores[j]) < MIN_CHARS or slates[j]:  # 슬레이트 말끼리는 테이크 기준으로 안 씀
+        if len(cores[j]) < MIN_CHARS or slates[j] or chants[j]:  # 슬레이트 말끼리·구령끼리는 테이크 기준으로 안 씀
             continue
         for i in range(j - 1, -1, -1):
             d = later["start"] - segs[i]["start"]
             if d > RETAKE_MAX:
                 break
-            if d >= RETAKE_MIN and not slates[i] and _similar(cores[i], cores[j]):
-                if _retake_ok(segs, cores, slates, i, j):
+            if d >= RETAKE_MIN and not slates[i] and not chants[i] and _similar(cores[i], cores[j]):
+                if _retake_ok(segs, cores, slates, i, j, sil, pk):
                     pairs.append((i, j))
                 break
     keep = []  # 앞 테이크 순서로 고르되, 고른 테이크를 가로지르는 짝(여러 줄을 다시 찍었을 때 둘째 줄끼리)은 버림 · 안에 든 짝은 그대로
@@ -185,6 +238,7 @@ def find_junk(segs, silences=()):
         if not a or len(a) > STUTTER_MAX or segs[k + 1]["start"] - segs[k]["end"] > STUTTER_GAP:
             continue
         same = a == b or (len(a) == len(b) and difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() >= 0.8)
+        same = same and not repeat_ok(segs[k]["text"], segs[k + 1]["text"], ed)  # 구령·환호·외친 말을 줄마다 나눈 것은 그대로
         # 끊긴 첫마디('퍼스트' → '퍼스트 터치는 발 안쪽으로 받아요')도 말더듬 · 한 마디씩 늘려 가는 말('받고' → '받고 돌고')은 그대로
         wa, wb = len(_words(segs[k]["text"], ed)), len(_words(segs[k + 1]["text"], ed))
         # 끊긴 첫마디는 짧고(0.6초 미만) 문장부호 없이 끝남 ('포인트!' → '포인트는 …' 같은 강조·감탄은 그대로)

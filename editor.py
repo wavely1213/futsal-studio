@@ -1462,14 +1462,14 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
 
-    # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김)
+    # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김) — 구령·환호('셋!' · '골!' · '나이스! 나이스!')는 그대로
     junk = set()
     for i, s in enumerate(segs):
-        if _norm(s["text"]) in FILLERS or len(_norm(s["text"])) <= 1:
+        if _norm(s["text"]) in FILLERS or (len(_norm(s["text"])) <= 1 and not takes.is_chant(s["text"])):
             junk.add(i)
-        if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]):
+        if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]) and not takes.repeat_ok(s["text"], segs[i + 1]["text"]):
             junk.add(i)
-    junk_iv = takes.find_junk(segs, extra.get("silences", []))  # NG 테이크·슬레이트·말더듬 구간
+    junk_iv = takes.find_junk(segs, extra.get("silences", []), peaks)  # NG 테이크·슬레이트·말더듬 구간 (사이에 시범 소리가 있으면 같은 설명도 그대로)
     junk |= {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in junk_iv)}  # 그 안에 든 말도 군더더기
     # 단어 시각이 있으면: 말 사이에 홀로 떨어진 '음'·'어' 같은 추임새 단어도 뺌 (이미 빠지는 곳에 든 것은 셈하지 않음)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
