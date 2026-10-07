@@ -110,6 +110,8 @@ function getV(k) {
   const l = ls[0];
   if (k.startsWith("c.")) return l.type === "text" ? charGet(l, k.slice(2)) : null;
   if (k === "grad.on") return !!l.fill2;
+  if (k === "dash.on") return !!(l.dash && l.dash.length === 2);  // 전술 도형: 점선·가운데 흰 선 켜기/끄기
+  if (k === "core.on") return !!l.core;
   if (k === "fill2") return l.fill2 || "#000000";
   if (k === "slant" && l.type === "shape") return l.slant || 0.35;
   if (k === "name") return l.name;
@@ -137,6 +139,9 @@ function setV(k, v) {
   else if (k === "rot") l.rot = norm180(v);
   else if (k.startsWith("c.")) { if (l.type !== "text") return; charSet(l, k.slice(2), k === "c.size" ? Math.max(1, v) : /w$/.test(k) ? Math.max(0, v) : v); }
   else if (k === "grad.on") l.fill2 = v ? l.fill2 || (l.type === "text" ? "#FF8A00" : "#000000") : "";
+  else if (k === "dash.on") l.dash = v ? [1.4, 1.5] : null;
+  else if (k === "core.on") l.core = v ? "#FFFFFF" : "";
+  else if (k === "shape" && TAC_DEF[v]) { l.shape = v; normLayer(l); }
   else if ((k === "hs" || k === "vs") && v < 0.05) return;
   else setPath(l, k, v);
   if (l.type === "text" && REFIT.has(k)) refitKeep(l);

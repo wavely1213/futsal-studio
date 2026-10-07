@@ -195,6 +195,7 @@ function drawImageContent(c, l) {
   const T = c.getTransform(), bs = l.blur ? l.blur * Math.hypot(T.a, T.b) : 0;  // 흐림은 캔버스 배율과 무관하게 문서 px 기준
   const f = `brightness(${l.bright}%) contrast(${l.contrast}%) saturate(${l.sat}%)${l.hue ? ` hue-rotate(${l.hue}deg)` : ""}${bs ? ` blur(${bs}px)` : ""}`;
   if (f !== "brightness(100%) contrast(100%) saturate(100%)") c.filter = f;
+  c.imageSmoothingQuality = "high";  // 작게 줄여 그릴 때(카드·목록 미리보기) 계단 없이
   if (bs) { const p = l.blur * 3; c.save(); c.beginPath(); c.rect(0, 0, l.w, l.h); c.clip(); c.drawImage(im, sx, sy, iw, ih, dx - p, dy - p, dw + 2 * p, dh + 2 * p); c.restore(); }
   else c.drawImage(im, sx, sy, iw, ih, dx, dy, dw, dh);
   c.filter = "none";

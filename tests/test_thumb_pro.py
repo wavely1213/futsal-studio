@@ -441,6 +441,33 @@ class ThumbRouteTests(ServerBase):
             code, j = self.call("/api/thumb/ocr", {"data": "data:image/png;base64,AAAA"})
         self.assertEqual(j["lines"][0]["text"], "무조건 봐")
 
+    def test_ab_export_names_and_no_overwrite(self):
+        import base64
+        name = self.add_video()
+        jpg = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0 jpg").decode()
+        code, j = self.call("/api/thumb/ab", {"name": name, "items": [jpg, jpg, jpg], "mobile": jpg})
+        self.assertEqual(code, 200, j)
+        stem = core.adir(name).name
+        self.assertEqual(j["files"], [f"{stem}_썸네일_A.jpg", f"{stem}_썸네일_B.jpg", f"{stem}_썸네일_C.jpg", f"{stem}_모바일 비교.jpg"])
+        code, j = self.call("/api/thumb/ab", {"name": name, "items": [jpg, jpg]})
+        self.assertEqual(j["files"], [f"{stem}_썸네일_A (2).jpg", f"{stem}_썸네일_B (2).jpg"], "예전 묶음을 덮어쓰지 않음")
+        for bad in ({"items": [jpg]}, {"items": [jpg, "http://x"]}, {"items": "x"}, {"items": [jpg] * 7}):
+            self.assertEqual(self.call("/api/thumb/ab", dict(bad, name=name))[0], 400, bad)
+        self.assertEqual(self.call("/api/thumb/ab", {"name": "..\\x.mp4", "items": [jpg, jpg]})[0], 400)
+
+    def test_judge_route_and_parse(self):
+        import thumbcopy
+        with mock.patch.object(self.app, "start_job", return_value=True) as sj:
+            self.assertEqual(self.call("/api/thumb/judge", {"small": "x", "full": "y"})[0], 400)
+            code, j = self.call("/api/thumb/judge", {"small": "data:image/jpeg;base64,AA", "full": "data:image/jpeg;base64,AA"})
+        self.assertEqual((code, j["job"]), (200, True))
+        self.assertEqual(sj.call_args[0][0], "클로드에게 평가받기")
+        r = thumbcopy.parse_judge('평가: {"readability": 8.6, "contrast": 12, "hierarchy": 7, "appeal": "6", "pro_level": 0, "fixes": ["a", "b", "c", "d"], "summary": "좋아요"}')
+        self.assertEqual((r["readability"], r["contrast"], r["appeal"], r["pro_level"]), (9, 10, 6, 1))
+        self.assertEqual(len(r["fixes"]), 3)
+        with self.assertRaises(ValueError):
+            thumbcopy.parse_judge('{"readability": 5}')
+
 
 if __name__ == "__main__":
     unittest.main()

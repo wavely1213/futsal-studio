@@ -644,6 +644,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/thumb/save":
             thumb.save_docs(b["name"], b["docs"])
             return self._send(200, {"ok": True})
+        if path == "/api/thumb/ab":  # A/B 묶음 (썸네일 2~6장 + 모바일 비교 한 장)
+            try:
+                files = thumb.export_ab(b["name"], b.get("items"), b.get("mobile"))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            log(f"A/B 썸네일 저장 · {', '.join(files)}")
+            return self._send(200, {"ok": True, "files": files})
+        if path == "/api/thumb/judge":  # 검수 창: 내 클로드 계정으로 평가 (선택)
+            sm, fu = b.get("small"), b.get("full")
+            if not all(isinstance(x, str) and x.startswith("data:image/") and len(x) < thumb.AB_MAX for x in (sm, fu)):
+                return self._send(400, {"ok": False, "error": "그림 형식이 달라요"})
+            ok = start_job("클로드에게 평가받기", lambda: thumbcopy.judge(sm, fu, editor.CANCEL))
+            return self._send(200 if ok else 409, {"ok": ok, "job": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/thumb/export":
             out = thumb.export_image(b["name"], b["data"], b.get("fmt", "jpg"), b.get("label", "썸네일"))
             log(f"썸네일 저장 · {out.name}")

@@ -207,6 +207,17 @@
   .aiframes .af img { width: 100%; height: 100%; object-fit: cover; }
   .aiframes .af b { position: absolute; left: 2px; top: 1px; font-size: 10px; background: rgba(0,0,0,.72); padding: 0 3px; border-radius: 3px; }
   .aiframes .af span { position: absolute; right: 2px; bottom: 1px; font-size: 10px; background: rgba(0,0,0,.7); padding: 0 3px; border-radius: 3px; }
+  .selbox .pt { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #ffd24d; border: 2px solid #111; pointer-events: auto; cursor: move; box-shadow: 0 0 0 1px #fff; }
+  .film .fr i { position: absolute; left: 3px; bottom: 2px; font-size: 10px; font-style: normal; background: rgba(0,0,0,.72); padding: 0 4px; border-radius: 3px; }
+  .stkgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .stkgrid img { width: 100%; cursor: pointer; border-radius: 6px; background: var(--panel-2); padding: 3px; }
+  .stkgrid img:hover { background: var(--panel-3); outline: 1px solid var(--accent); }
+  .bk { display: grid; grid-template-columns: 1fr 1.3fr; gap: 14px; margin-bottom: 10px; }
+  .bk h4 { margin: 0 0 8px; }
+  .bklogo { height: 80px; background: repeating-conic-gradient(#2a2a2a 0 25%, #222 0 50%) 0 0 / 12px 12px; border-radius: 6px; display: grid; place-items: center; margin-bottom: 8px; }
+  .bklogo img { max-height: 72px; max-width: 100%; }
+  .mobprev { margin-top: 12px; padding: 10px; background: #000; border-radius: 8px; }
+  .mobprev canvas { border-radius: 6px; }
   details.oldc > summary { padding: 8px 12px; cursor: pointer; color: var(--ink-2); border-bottom: 1px solid var(--line); }
 </style>
 </head>
@@ -223,6 +234,7 @@
     <button class="ic" id="safeBtn" title="가려지는 영역 보기 (쇼츠 버튼·제목 / 재생시간 표시)">▦</button>
     <button class="btn" id="pvBtn" title="유튜브 목록 크기로 미리보기">👀 목록 미리보기</button>
     <button class="btn" id="qaBtn" title="작게 봐도 읽히는지·잘린 글자·가림 영역 자동 점검">✅ 검수</button>
+    <button class="btn" id="brandBtn" title="채널 로고·색·글꼴·시리즈 이름 (추천 썸네일에 반영)">🎨 브랜드 키트</button>
     <button class="ic" id="help" title="단축키 (F1)">⌨</button>
     <span class="pill" id="busy"><span id="busyTxt">작업 중</span><span class="bar"><i id="busyBar"></i></span></span>
     <select class="s" id="exFmt" style="width:auto"><option value="jpg">JPG (유튜브용)</option><option value="png">PNG</option></select>
@@ -237,6 +249,8 @@
     <button class="ic" id="tEllipse" title="타원 도구">◯</button>
     <button class="ic" id="tSlant" title="사선 패널">▱</button>
     <button class="ic" id="tBurst" title="집중선 추가">✳</button>
+    <button class="ic" id="ovMenu" title="전술 그래픽 (곡선 화살표·패스 점선·발밑 원·스포트라이트·X·공간 칩·번호·반짝이·손그림)">🎯</button>
+    <button class="ic" id="stkBtn" title="스티커·배지 (이모지)">😀</button>
     <button class="ic" id="tEye" title="스포이드 (I)">💧<kbd>I</kbd></button>
     <hr>
     <button class="ic" id="tImage" title="이미지 파일 불러오기">🖼</button>
@@ -281,7 +295,14 @@
 <div class="modal" id="qaModal"><div class="box" style="width:620px">
   <h3 style="margin:0 0 4px">썸네일 검수 <span class="hint">눌러서 해당 레이어로 가요</span></h3>
   <div id="qaBody" class="qabody"></div>
-  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="qaClose">닫기</button></div>
+  <div id="mobPrev" class="mobprev"></div>
+  <div id="judgeRes" class="hint" style="margin-top:8px"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="judgeBtn" title="내 클로드 계정으로 썸네일 평가 (선택)">🤖 클로드에게 평가받기</button><button class="btn" id="qaClose">닫기</button></div>
+</div></div>
+<div class="modal" id="brandModal"><div class="box" style="width:640px">
+  <h3 style="margin:0 0 4px">🎨 브랜드 키트 <span class="hint">AI 추천 썸네일에 쓰는 채널 로고·색·글꼴</span></h3>
+  <div id="brandBody" style="margin-top:12px"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="brandClose">닫기</button><button class="btn pri" id="brandSave">저장</button></div>
 </div></div>
 <div class="modal" id="helpModal"><div class="box">
   <h3 style="margin:0 0 4px">단축키 <span class="hint">포토샵과 같게 맞췄어요 (Mac은 Ctrl 대신 ⌘)</span></h3>
@@ -306,6 +327,7 @@
     <kbd>Ctrl+G</kbd><span>그룹으로 묶기 (Shift: 풀기)</span><kbd>Ctrl+클릭(레이어 패널)</kbd><span>묶음 안 레이어 하나만</span>
     <kbd>Ctrl+R</kbd><span>눈금자 (끌어서 안내선 만들기)</span><kbd>Ctrl+;</kbd><span>안내선 보이기/숨기기</span>
     <kbd>레이어 두 번 클릭</kbd><span>레이어 스타일 창</span><kbd>숫자칸 이름 끌기</kbd><span>값 미세 조절</span>
+    <kbd>🎯 → 캔버스 누르기</kbd><span>전술 그래픽 넣기 (Esc 취소)</span><kbd>노란 점 끌기</kbd><span>화살표·점선 모양 (Shift 반듯하게)</span>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="helpClose">닫기</button></div>
 </div></div>

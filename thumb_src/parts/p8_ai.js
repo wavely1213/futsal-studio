@@ -538,7 +538,7 @@ async function aiRun(seed = 0) {
     const t0 = performance.now(), prev = new Set(seed ? AI.results.map(x => x.key) : []);
     AI.results = recommend(AUTO_FMT, 6, seed, prev); AI.seed = seed; AI.ab = new Set();
     for (const x of AI.results) for (const l of x.doc.layers) if (l.type === "image" && l.src) img(l.src);
-    renderAICards();
+    renderAI();
     setAIStat(`${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`);
     return AI.results;
   } finally { AI.busy = false; done(); }
@@ -622,4 +622,3 @@ window.__thumbAuto = async (opts = {}) => {
   }
   return { ok: true, items: out, frames: AI.frames.length, copies: AI.copy.length };
 };
-async function abSave() { toast("A/B 저장은 곧 준비돼요"); }

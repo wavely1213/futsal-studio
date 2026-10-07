@@ -407,3 +407,59 @@ def run_ai(name, log=print, cancel=None):
         updater._replace(tmp, p)
     log(f"클로드 문구 · {len(items)}개 저장했어요")
     return {"ok": True, "items": suggest(name)["items"]}
+
+
+# ---------- 클로드에게 평가받기 (선택 · 썸네일 검수 창) ----------
+
+JUDGE_KEYS = ("readability", "contrast", "hierarchy", "appeal", "pro_level")
+JUDGE_PROMPT = """당신은 한국 축구·풋살 유튜브 썸네일을 평가하는 전문가예요. 같은 폴더의 그림 두 장은 같은 썸네일이에요:
+small.jpg = 휴대폰 목록 크기(가로 168px 또는 쇼츠 110px), full.jpg = 원래 크기. Read 도구로 두 그림을 열어 보세요.
+기준(1~10점): readability(작게 봐도 제목이 읽히는지) · contrast(글자와 배경이 또렷이 구분되는지) · hierarchy(무엇을 먼저 읽는지 분명한지)
+· appeal(클릭하고 싶은지) · pro_level(구독자 수만~수십만 축구·풋살 레슨 채널 썸네일 수준인지 — 큰 2줄 제목·굵은 테두리·강조 색·선명한 장면·전술 그래픽 같은 요소).
+고칠 점은 이 썸네일 편집기에서 바로 할 수 있는 구체적인 일 3개 (예: '둘째 줄을 20% 키우기', '배경을 조금 어둡게').
+대답은 JSON 하나만: {"readability": 0, "contrast": 0, "hierarchy": 0, "appeal": 0, "pro_level": 0, "fixes": ["", "", ""], "summary": "한 줄 평"}"""
+
+
+def parse_judge(text):
+    s = str(text or "")
+    a, b = s.find("{"), s.rfind("}")
+    if a < 0 or b <= a:
+        raise ValueError("평가 형식을 찾지 못했어요")
+    try:
+        d = json.loads(s[a:b + 1])
+    except ValueError:
+        raise ValueError("평가 형식이 깨져 있어요") from None
+    out = {}
+    for k in JUDGE_KEYS:
+        try:
+            out[k] = max(1, min(10, int(round(float(d.get(k))))))
+        except (TypeError, ValueError):
+            raise ValueError("점수가 빠졌어요") from None
+    out["fixes"] = [re.sub(r"\s+", " ", str(x)).strip()[:120] for x in (d.get("fixes") or []) if str(x).strip()][:3]
+    out["summary"] = re.sub(r"\s+", " ", str(d.get("summary") or "")).strip()[:160]
+    return out
+
+
+def judge(small_data, full_data, cancel=None):
+    """썸네일 그림(작게·원래 크기 dataURL)을 내 클로드 계정에 보여 주고 점수·고칠 점 → {"ok", ...}. 레퍼런스 그림은 보내지 않음(저작권)."""
+    import base64
+    import tempfile
+    import claude_cli
+    from pathlib import Path
+    with tempfile.TemporaryDirectory(prefix="futsal-judge-", ignore_cleanup_errors=True) as tmp:
+        imgs = []
+        for nm, d in (("small.jpg", small_data), ("full.jpg", full_data)):
+            f = Path(tmp) / nm
+            f.write_bytes(base64.b64decode(str(d).split(",", 1)[1]))
+            imgs.append((f, nm))
+
+        def tick(sec):
+            core.set_progress(label="클로드에게 평가받기", pct=None, detail=f"클로드가 썸네일을 보는 중… (내 클로드 계정 사용 · {sec}초)")
+        try:
+            res = claude_cli.run(JUDGE_PROMPT, images=imgs, cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT)
+        except claude_cli.ClaudeError as e:
+            return {"ok": False, "error": str(e), "kind": e.kind}
+    try:
+        return dict(parse_judge(res.get("text")), ok=True)
+    except ValueError as e:
+        return {"ok": False, "error": f"{e}. 다시 눌러 주세요", "kind": "format"}

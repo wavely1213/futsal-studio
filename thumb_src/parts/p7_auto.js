@@ -40,7 +40,7 @@ function faceBadge(f) {  // 😆 웃음 / 😮 놀람 + 얼굴 크기 (화면 �
 }
 function renderStrip() {
   const list = [...FRAMES].sort(STRIP_SORT === "expr" ? (a, b) => exprOf(b) - exprOf(a) || (b.face || 0) - (a.face || 0) || (b.score || 0) - (a.score || 0) : (a, b) => a.t - b.t);
-  $("strip").innerHTML = list.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span>${faceBadge(f)}</div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
+  $("strip").innerHTML = list.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span>${faceBadge(f)}${f.kind ? `<i>${frameBadges(f)}</i>` : ""}</div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
   document.querySelectorAll(".fr").forEach(el => (el.onclick = e => {
     const src = frameSrc(el.dataset.t);
     if (e.shiftKey) return addImage(src, false, W > H ? {} : { w: W, h: W * 9 / 16, x: 0, y: (H - W * 9 / 16) / 2 });
@@ -320,10 +320,10 @@ function runQA() {
   $("qaBody").innerHTML = `<div class="score">${score}점 · ${bad ? `고칠 것 ${bad}개` : "큰 문제 없어요"}${warn ? ` · 확인할 것 ${warn}개` : ""}</div>`
     + items.sort((a, b) => ["bad", "warn", "ok"].indexOf(a.lv) - ["bad", "warn", "ok"].indexOf(b.lv)).map(i => `<div class="qi ${i.lv}" ${i.id ? `data-ql="${i.id}"` : ""}><span>${{ ok: "✅", warn: "⚠️", bad: "⛔" }[i.lv]}</span><span><b>${esc(i.title)}</b>${esc(i.msg)}</span></div>`).join("");
   $("qaBody").querySelectorAll("[data-ql]").forEach(e => (e.onclick = () => { $("qaModal").classList.remove("show"); select([e.dataset.ql]); }));
-  $("qaModal").classList.add("show");
+  $("qaModal").classList.add("show"); $("judgeRes").innerHTML = ""; qaExtra();
   return { score, bad, warn, items };
 }
-$("qaBtn").onclick = runQA; $("qaClose").onclick = () => $("qaModal").classList.remove("show");
+$("qaBtn").onclick = runQA; $("qaClose").onclick = () => $("qaModal").classList.remove("show"); $("judgeBtn").onclick = judgeAI;
 
 /* ---------- 눈금자 · 안내선 (Ctrl+R / Ctrl+;) ---------- */
 let showRulers = false, showGuidesU = true;

@@ -8,8 +8,10 @@ stage.addEventListener("mousedown", e => {
   const p = toCanvas(e);
   if (tool === "brush" || tool === "eraser") return brushDown(e);
   if (tool === "eye") return eyeDrop(e);
+  if (tool === "tac" && tacPending) return placeTac(p);
   if (tool === "text") { const l = hitAt(p); if (l && l.type === "text") { selIds = [l.id]; startEdit(l, true); } else addText(p); return; }
   if (["rect", "ellipse", "slant"].includes(tool)) return drawShapeDrag(e, p);
+  if (e.target.dataset && e.target.dataset.pt !== undefined) return startPtDrag(e, +e.target.dataset.pt);
   const h = e.target.classList.contains("h") ? [...e.target.classList].find(c => c !== "h") : null;
   if (h) return startTransform(e, h);
   const one = selL();
@@ -32,6 +34,7 @@ stage.addEventListener("mousedown", e => {
 stage.addEventListener("dblclick", e => {
   if (!D || tool !== "move") return; const l = hitAt(toCanvas(e));
   if (l && l.type === "text") { selIds = [l.id]; startEdit(l, true); }
+  else if (l && l.type === "shape" && l.shape === "marker") { select([l.id]); editMarkerLabel(l); }
 });
 function snapCands(ls) {
   const ids = new Set(ls.map(l => l.id)), gd = D.doc.guides || { v: [], h: [] }, xs = [0, W / 2, W, ...(showGuidesU ? gd.v : [])], ys = [0, H / 2, H, ...(showGuidesU ? gd.h : [])];

@@ -836,3 +836,32 @@ def export_image(name, data_url, fmt="jpg", label="썸네일"):
     out = core.OUT / f"{base}_{k}.{fmt}"
     out.write_bytes(raw)
     return out
+
+
+AB_TAGS = "ABCDEF"
+AB_MAX = 2_900_000   # 한 장 dataURL 글자 수 상한 (JPG 2MB 안쪽)
+
+
+def export_ab(name, items, mobile=None):
+    """A/B 묶음 저장: 썸네일 여러 장(dataURL)을 '<영상>_썸네일_A.jpg'·'_B'·… 와 '<영상>_모바일 비교.jpg' 로.
+    같은 이름이 있으면 묶음 전체를 ' (2)'·' (3)'… 로 (예전 묶음을 덮어쓰지 않음) → 저장한 파일 이름들."""
+    if not isinstance(items, list) or not 2 <= len(items) <= len(AB_TAGS):
+        raise ValueError("A/B 로 저장할 썸네일을 2~6개 골라 주세요")
+    datas = list(items) + ([mobile] if mobile else [])
+    for d in datas:
+        if not isinstance(d, str) or not d.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")) or len(d) > AB_MAX:
+            raise ValueError("그림 형식이 다르거나 너무 커요")
+    base = core.adir(name).name
+    k = 1
+    while True:
+        suf = "" if k == 1 else f" ({k})"
+        files = [core.OUT / f"{base}_썸네일_{AB_TAGS[i]}{suf}.jpg" for i in range(len(items))] + ([core.OUT / f"{base}_모바일 비교{suf}.jpg"] if mobile else [])
+        if not any(f.exists() for f in files):
+            break
+        k += 1
+    core.OUT.mkdir(parents=True, exist_ok=True)
+    for f, d in zip(files, datas):
+        tmp = f.with_name(f.name + ".tmp")
+        tmp.write_bytes(base64.b64decode(d.split(",", 1)[1]))
+        updater._replace(tmp, f)
+    return [f.name for f in files]
