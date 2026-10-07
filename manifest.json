@@ -1,14 +1,12 @@
 {
-  "version": "1.9.1",
-  "notes": "영상 출처 구분: 보관함에서 풋살사관학교 · 다른 채널(슛포러브·도블락처럼 채널별) · 내 촬영본으로 나눠 보기, 배지 눌러 직접 바꾸기, 스타일 배우기에서 채널 영상 한 번에 고르기",
-  "zip": "https://github.com/wavely1213/futsal-studio/archive/6e57d0167a300a1a4a35e6d0105082134eeec847.zip",
-  "commit": "6e57d0167a300a1a4a35e6d0105082134eeec847",
+  "version": "1.9.2",
+  "notes": "긴급 수정: 제목이 잘려 한글 자모가 남은 파일(예: '정형ᄃ')에서 스타일 배우기 등이 'cp949' 오류로 멈추던 문제",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "4d9699d90acadfde33c4036d5de3af0867b7970edc1cb327adcf9b0bbf94b994",
     "CLAUDE.md": "66154c9d89192a3411a4b4f25eba4250b0f8cbaea0a9a6ead9ecc7a9eaa26816",
     "README.md": "04b0df561f5cc6179e721d0706f2ce4960aba4676778907089bdadebff41af8c",
-    "app.py": "d48ec584b9e86a8058340ea906c3baf440217860c613c7ba8a288637a8af998e",
+    "app.py": "b7e508173ced837428b6bfe706a6bc2f2a1239d5127eccaaaf8f3024739e51b4",
     "bundle.py": "a1e77e75bca7fe6368da326038f075e6ad830ca591d5db88f71b7c3904f12a09",
     "captions.py": "615738405ac66c5e262e80dd534777cea5c392a45267992cc6541aaa02abc810",
     "config.json": "0391d3d12caafc330e497def79d72f09d40479d15d9d387913a2297c72614f62",
@@ -21,7 +19,7 @@
     "docs/DEVELOPMENT_RULES.md": "ebea477af2a8e0d5fd39744ccd7859195f59fde3820f7e55f0f55234a579ef8e",
     "docs/DOCUMENTATION_POLICY.md": "2bf5192fb5e16b16eba163fc280ab0db004440c9fc902eb09e11e033dfeae58d",
     "docs/DOMAIN_KNOWLEDGE.md": "41bb71a62626817758d65855e33a50ca7de34754ca70a88bc1f668b1fdf12a36",
-    "docs/KNOWN_ISSUES.md": "4214e3dfb70d8a4486c44f38c3bbc826d4e8a365c91ecdcbebc7c22355066c25",
+    "docs/KNOWN_ISSUES.md": "42677bd3aef86c07ab2980fc8e037145611e1499804d413153f4c47ee3b51a60",
     "docs/PROJECT_CONTEXT.md": "8b142077bdc3852261698212068687fb5de428436daeafc25bd1d1c1b8247f30",
     "docs/REFACTORING_GUIDELINES.md": "46505fff67856a34baa6f445e6abd4f3086d1986fc5e39300441a654a377ed81",
     "docs/SECURITY_GUIDELINES.md": "143ae663f2efce5172745a4b451a88cbac33111f935cacc137f009f5bb45b1fd",
@@ -50,7 +48,7 @@
     "ui.html": "d31a560511dd43680b66ca6371605ef5da69b4daabfc99147d06c2a19f7901c8",
     "updater.py": "91cd71f2c5d4c7b2a5b00c1e170e399a9400b39c11d5d017e9843fd57478f8d6",
     "upload.py": "cbc17b82707301c8e61c86f9dbad52495ab848d8431af815e38670f35f69eddd",
-    "version.txt": "0ab4fa190ca1b1d1f630ac87cf34672bfbaf1395d0148c7568d38e58335b8d68",
+    "version.txt": "bb59919018ee76482c23f1ce44219ce4c9c6393c65ef0ddae40d32d79d413bb5",
     "시작하기 (Mac).command": "5c70dc2c35bb2573975376d5b019cf92916e6b4b601314a5dbae5caa2cabc63f",
     "시작하기 (Windows).bat": "97bb90805f430f0d45ded9bc78bb98aab2a1aee9c5e04dfaf011d9d86ebd92fa"
   }
