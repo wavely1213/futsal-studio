@@ -1,6 +1,8 @@
 {
   "version": "2.6.0",
   "notes": "오류를 쉬운 말과 할 일 버튼으로(실패 카드) · 복사 중인 촬영본은 '복사 중'으로 막고 .MTS 등은 MP4로 바꾸기 · 로그인 정보 브라우저 고르기(파이어폭스·엣지·웨일·크롬) · studio.log 오류 위치·갑작스런 종료 기록 · 올리기 제목 틀이 옛 회차·행사 이름을 안 베낌·기술 이름 주제어 · 편집실 노트북 화면 배치",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/9d48995c970892b2e09f67510ca886e44d260dda.zip",
+  "commit": "9d48995c970892b2e09f67510ca886e44d260dda",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f996d08fa0fed5005b72904578e6d574874495d0e3ac5c7128ce4bd43fff9a26",
