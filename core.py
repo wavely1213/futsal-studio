@@ -430,11 +430,46 @@ def _seg_of(s, fixmap):
     return dict(seg, text=" ".join(w["w"] for w in ws), words=ws), n
 
 
+class FileProblem(RuntimeError):
+    """그 영상 파일 하나의 문제 (깨짐·소리 없음) — 여러 개를 찾을 때는 건너뛰고 나머지를 계속 (analyze_many)."""
+
+
+PER_FILE = ("broken", "missing", "locked", "ffmpeg", "copying")  # 그 파일만의 문제로 보는 오류 종류 (trouble.explain)
+
+
+class Analyzed(list):
+    """analyze_many 결과: 끝난 분석 폴더 목록 + failed {이름: 쉬운 안내} (그 파일만의 문제로 건너뛴 영상)."""
+    failed = None
+
+
 def analyze_many(names, log, model="large-v3-turbo"):
+    """여러 영상 편집점 찾기 → 끝난 분석 폴더 목록(Analyzed · .failed).
+    여러 개일 때 그 파일만의 문제(깨짐·소리 없음·파일 없음·잠김)는 건너뛰고 나머지를 계속 · .failed 에 {이름: 쉬운 안내}
+    (모두 실패하면 작업 실패). 메모리·인터넷처럼 다음 영상도 같을 문제는 거기서 멈추고, 오류에 retry(남은 영상 이름)·
+    note(몇 개 끝났는지)를 붙임 → 화면의 [다시 하기]는 남은 영상만. 하나만 찾을 때는 예전처럼 그 오류 그대로."""
+    import trouble
     for n in names:  # 하나라도 아직 복사 중이면 아무것도 시작하지 않음
         _not_copying(n)
+    out, failed = Analyzed(), {}
+    out.failed = failed
     with _analysis_session():
-        return [str(_analyze_kept(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
+        for k, n in enumerate(names, 1):
+            try:
+                out.append(str(_analyze_kept(n, log, model, f"{k}/{len(names)}")))
+            except Exception as e:
+                info = trouble.explain(e)
+                if len(names) == 1 or info["kind"] == "cancelled" or not (isinstance(e, FileProblem) or info["kind"] in PER_FILE):
+                    if len(names) > 1 and info["kind"] != "cancelled":
+                        left = list(names[k - 1:])
+                        e.retry = {"names": left}
+                        e.note = f"{len(names)}개 중 {len(out)}개는 끝났어요 · [다시 하기]는 남은 {len(left)}개만 해요"
+                    raise
+                failed[n] = info
+                log(f"  이 영상은 건너뛰고 다음 영상을 찾을게요 · {info['msg']}")
+    if names and len(failed) == len(names):  # 모두 그 파일만의 문제 → 작업 실패 (다시 해도 같음)
+        first = failed[names[0]]
+        raise trouble.Trouble(first["kind"], f"{len(names)}개 모두 편집점을 찾지 못했어요 · {first['msg']}", ["folder", "log"])
+    return out
 
 
 def analyze(name, log, model="large-v3-turbo", step="1/1"):
@@ -444,9 +479,17 @@ def analyze(name, log, model="large-v3-turbo", step="1/1"):
 
 
 def _analyze_kept(name, log, model, step):
-    """편집점 찾기 + 찾기 시작할 때의 파일 크기 기록 (나중에 파일이 바뀌면(덜 복사된 채 찾았음) 보관함이 알려 줌)."""
+    """편집점 찾기 + 찾기 시작할 때의 파일 크기·수정 시각 기록 (나중에 파일이 바뀌면(덜 복사된 채 찾았음) 보관함이 알려 줌).
+    지난번 기록과 파일이 다르면(복사가 덜 된 채 찾았음) 그때 만든 파형·썸네일·미리보기 파일을 지움 → 편집실이 새 파일로 다시 만듦."""
     import intake
     sig = intake.sig(VIDEOS / name)
+    try:
+        if intake.changed(adir(name), (VIDEOS / name).stat()):
+            n = intake.clear_media_cache(adir(name))
+            if n:
+                log("  파일이 바뀌어서 예전 파형·썸네일·미리보기 파일을 지우고 새로 만들게요")
+    except OSError:
+        pass
     out = _analyze(name, log, model, step)
     intake.remember(out, sig)
     return out
@@ -468,8 +511,8 @@ def _analyze(name, log, model, step):
     log(f"편집점 찾는 중 · {name}")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="소리 추출 중")
     r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
-    if r.returncode or not wav.exists():
-        raise RuntimeError(f"영상에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
+    if r.returncode or not wav.exists():  # 어느 영상인지 이름을 넣음 (여러 개를 찾을 때 카드에서 알 수 있게)
+        raise FileProblem(f"'{name}'에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
@@ -599,8 +642,8 @@ DENO_MIN = (2, 3, 0)
 DENO_ZIP = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
 DENO_ZIP_ALT = "https://dl.deno.land/release/{ver}/deno-x86_64-pc-windows-msvc.zip"
 DENO_AUTO = sys.platform == "win32"  # 자동 설치는 Windows 만
-BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(크롬·엣지·웨일·"
-               "파이어폭스)를 소재 찾기의 '다운로드가 계속 실패하나요?' → '로그인 정보로 받기'에서 고른 뒤 다시 해 보세요.")
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(파이어폭스·엣지·웨일·"
+               "크롬)를 소재 찾기의 '다운로드가 계속 실패하나요?' → '로그인 정보로 받기'에서 고른 뒤 다시 해 보세요.")
 _ENGINE_LOCK = threading.RLock()  # pip 로 엔진을 바꾸는 동안만 목록·다운로드가 기다림 (같은 작업 안의 재시도는 통과)
 _DENO_LOCK = threading.Lock()     # Deno 설치는 한 번에 하나 (엔진 잠금과 따로: 받는 동안 목록 불러오기는 기다리지 않음)
 _DENO_PROG = {}                   # 받는 중인 Deno 진행률 (기다리는 다운로드 작업이 화면에 보여 줌)

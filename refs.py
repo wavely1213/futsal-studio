@@ -33,8 +33,8 @@ TRIES, WAIT = 20, 0.1           # Windows: 백신·탐색기·편집실이 잠�
 SETTLE_SECS = 60                # 막 받은 큰 영상은 백신(Defender)이 오래 검사함 → 받는 폴더에서 옮길 때는 더 오래 기다림
 ORIGINAL_NAMES = ("풋살사관학교", "내 촬영본")  # 보관함에서 확인하고 옮긴 원본(우리 채널·촬영본) 채널 이름
 READ_TRIES = 5
-BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(크롬·엣지·웨일·"
-               "파이어폭스)를 이 화면 '채널 추가' 칸의 '로그인 정보로 받기'에서 고른 뒤 다시 받아 보세요.")
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(파이어폭스·엣지·웨일·"
+               "크롬)를 이 화면 '채널 추가' 칸의 '로그인 정보로 받기'에서 고른 뒤 다시 받아 보세요.")
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 _LOCK = threading.RLock()

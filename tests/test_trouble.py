@@ -80,17 +80,73 @@ class ExplainTests(unittest.TestCase):
         self.assertEqual(info["browser"], "edge")
         k, info = self.kind(LOCKED, browser="chrome")
         self.assertIn("크롬이 켜져 있어서", info["msg"])
-        self.assertIn("크롬을 열지 말고", info["msg"])
+        self.assertIn("숨겨진 아이콘", info["msg"], "창을 닫아도 뒤에서 도는 브라우저")
+        self.assertIn("'백그라운드 앱 계속 실행'", info["msg"])
+        self.assertIn("파이어폭스를 골라", info["msg"])
+        k, info = self.kind(LOCKED, browser="edge")
+        self.assertIn("'시작 부스트'", info["msg"], "엣지는 Windows 로그인 때 미리 켜짐")
+        self.assertIn("nocookies", info["actions"])
         k, info = self.kind(DPAPI, browser="chrome")
-        self.assertEqual((k, info["suggest"]), ("cookie_dpapi", "edge"))
-        self.assertIn("엣지나 파이어폭스", info["msg"])
-        self.assertEqual(self.kind(DPAPI, browser="edge")[1]["suggest"], "firefox", "엣지도 안 되면 파이어폭스")
+        self.assertEqual((k, info["suggest"]), ("cookie_dpapi", "firefox"))
+        self.assertIn("파이어폭스나 엣지", info["msg"])
+        k, info = self.kind(DPAPI, browser="edge")
+        self.assertEqual(info["suggest"], "firefox", "엣지도 안 되면 파이어폭스")
+        self.assertNotIn("엣지나", info["msg"], "실패한 브라우저를 다시 권하지 않음")
+        self.assertIn("파이어폭스에서", info["msg"])
         k, info = self.kind('ERROR: could not find whale cookies database in "C:\\Users\\a\\AppData"', browser="whale")
         self.assertEqual(k, "cookie_missing")
         self.assertIn("웨일에서 로그인 정보를 찾지 못했어요", info["msg"])
         self.assertNotIn("Users", info["msg"], "경로는 화면에 안 보임")
         k, info = self.kind(BOT, browser="firefox")
         self.assertIn("파이어폭스 로그인 정보로도", info["msg"])
+
+    def test_new_rules_for_own_pc_problems(self):
+        """내 PC 쪽 흔한 오류도 '예상하지 못한 문제'가 아니라 할 수 있는 일로 (파일 없음·메모리·모델 처음 받기·ffmpeg 없음·탭 없음)."""
+        cases = [
+            ("[WinError 2] 지정된 파일을 찾을 수 없습니다", "missing", "folder"),
+            ("[Errno 2] No such file or directory: 'C:\\풋살\\videos\\a.mp4'", "missing", "retry"),
+            ("[WinError 1455] 페이징 파일이 너무 작아 이 작업을 완료할 수 없습니다", "memory", "retry"),
+            ("numpy.core._exceptions._ArrayMemoryError: Unable to allocate 1.20 GiB for an array", "memory", "retry"),
+            ("RuntimeError: std::bad_alloc", "memory", "retry"),
+            ("An error happened while trying to locate the files on the Hub and we cannot find the appropriate snapshot folder for the "
+             "specified revision on the local disk. Please check your internet connection", "model_offline", "retry"),
+            ("ERROR: Postprocessing: ffmpeg not found. Please install or provide the path using --ffmpeg-location", "ffmpeg_missing", "update"),
+            ("ERROR: You have requested merging of multiple formats but ffmpeg is not installed. Aborting", "ffmpeg_missing", "update"),
+            ("[Errno 2] No such file or directory: 'ffmpeg'", "ffmpeg_missing", "update"),
+            ("ERROR: [youtube:tab] @fakechan: This channel does not have a shorts tab", "notab", "otherkind"),
+            ("ERROR: [youtube:tab] @fakechan: This channel does not have a videos tab", "notab", "otherkind"),
+        ]
+        for text, want, action in cases:
+            with self.subTest(text=text):
+                k, info = self.kind(text)
+                self.assertEqual(k, want)
+                self.assertIn(action, info["actions"])
+                self.assertNotIn("studio.log", info["msg"])
+        self.assertIn("쇼츠가 없어요", trouble.explain(cases[-2][0])["msg"])
+        self.assertIn("긴 영상이 없어요", trouble.explain(cases[-1][0])["msg"])
+        self.assertIn("'빠르게'", trouble.explain(cases[2][0])["msg"])
+        info = trouble.explain(RuntimeError("영상을 만들지 못했어요 · [Errno 2] No such file or directory: 'bgm.mp3'"))
+        self.assertTrue(info["msg"].startswith("영상을 만들지 못했어요 · 영상 파일을 찾지 못했어요"), info["msg"])
+
+    def test_installed_browsers_in_order(self):
+        env = {"APPDATA": "C:\\A", "LOCALAPPDATA": "C:\\L"}
+        have = lambda *names: (lambda p: any(n in p for n in names))  # noqa: E731
+        self.assertEqual(trouble.installed(env, have("Edge", "Chrome")), ["edge", "chrome"])
+        self.assertEqual(trouble.installed(env, have("Firefox", "Whale", "Chrome", "Edge")), ["firefox", "edge", "whale", "chrome"])
+        self.assertEqual(trouble.installed(env, have()), list(trouble.ORDER), "못 알아내면 전부")
+        self.assertEqual(trouble.ORDER[0], "firefox")
+        self.assertEqual(trouble.ORDER[-1], "chrome", "Windows 크롬 127+ 은 거의 못 읽음 → 맨 뒤")
+        with mock.patch.object(trouble, "installed", return_value=["edge", "chrome"]):
+            info = trouble.explain(DPAPI, browser="chrome")
+        self.assertEqual(info["suggest"], "edge", "파이어폭스가 없으면 엣지")
+        self.assertNotIn("파이어폭스", info["msg"])
+
+    def test_card_wording_when_picker_is_on_card(self):
+        info = trouble.explain(BOT, blocked=refs.BLOCKED_MSG)
+        self.assertIn("아래에서", info["card"])
+        self.assertIn("[이 브라우저로 다시 받기]", info["card"])
+        self.assertNotIn("card", trouble.explain(BOT, browser="edge"), "브라우저를 골랐으면 그 브라우저 안내 그대로")
+        self.assertIn("logfile", trouble.explain(KeyError("x"))["actions"], "예상 못 한 문제: studio.log 위치 열기")
 
     def test_blocked_uses_screen_message(self):
         info = trouble.explain(BOT, blocked=refs.BLOCKED_MSG)
@@ -295,6 +351,35 @@ class RouteTests(Work):
             r = self.state()["result"]
         self.assertEqual((r["ok"], r["blocked"], r["error"]), (False, True, refs.BLOCKED_MSG))
         self.assertEqual((r["fail"]["kind"], r["fail"]["msg"]), ("blocked", refs.BLOCKED_MSG))
+        self.assertIn("아래에서", r["fail"]["card"])
+
+    def test_refs_blocked_with_chosen_browser_names_it(self):
+        """학습용 영상: 엣지 로그인 정보로도 막히면 '이 화면에서 브라우저를 고르라'가 아니라 '엣지 로그인 정보로도'."""
+        with mock.patch.object(core, "list_videos", side_effect=RuntimeError(core.BLOCKED_MSG)) as lv:
+            self.call("/api/refs/add", {"url": "@shootforlovekorea", "count": 3, "cookies": "edge"})
+            r = self.state()["result"]
+        self.assertEqual(lv.call_args[0][1], "edge")
+        self.assertEqual((r["ok"], r["fail"]["kind"], r["fail"]["browser"]), (False, "blocked", "edge"))
+        self.assertIn("엣지 로그인 정보로도", r["fail"]["msg"])
+        self.assertEqual(r["error"], r["fail"]["msg"])
+        self.assertNotIn("card", r["fail"])
+
+    def test_browsers_route(self):
+        code, j = self.call("/api/browsers")
+        self.assertEqual(code, 200)
+        self.assertEqual(j["order"], list(trouble.ORDER))
+        self.assertTrue(set(j["browsers"]) <= set(trouble.BROWSERS) and j["browsers"])
+
+    def test_job_retry_hint_and_note_reach_fail_card(self):
+        """작업이 붙인 다시 하기 범위(retry)와 덧붙임(note)이 /api/state 의 fail 에 들어감 (편집점 찾기: 남은 영상만)."""
+        err = MemoryError()
+        err.retry, err.note = {"names": ["b.mp4"]}, "2개 중 1개는 끝났어요 · [다시 하기]는 남은 1개만 해요"
+        with mock.patch.object(core, "list_videos", side_effect=err):
+            self.call("/api/list", {"url": "@x"})
+            s = self.state()
+        self.assertEqual(s["fail"]["kind"], "memory")
+        self.assertEqual(s["fail"]["retry"], {"names": ["b.mp4"]})
+        self.assertTrue(s["fail"]["msg"].endswith("남은 1개만 해요"), s["fail"]["msg"])
 
 
 if __name__ == "__main__":

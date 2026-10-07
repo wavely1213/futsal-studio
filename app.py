@@ -79,6 +79,7 @@ def start_job(name, fn, ctx=None):
             JOB["result"] = fn()
         except Exception as e:
             info = dict(trouble.explain(e, **(ctx or {})), job=name)  # 영어 원문 → 쉬운 한 줄 + 할 일 (원문·위치는 studio.log 에만)
+            _fail_extra(info, e)
             JOB["error"], JOB["fail"] = info["msg"], info
             log(f"문제가 생겼어요 · {info['msg']}")
             studiolog.write(f"  원문 · {' '.join(str(e).split())[:400]}")
@@ -92,8 +93,18 @@ def start_job(name, fn, ctx=None):
     return True
 
 
-def _refs_job(fn):
-    """학습용 영상 작업: 사용자에게 보여 줄 안내(채널 주소 없음·YouTube 막힘·멈춤)는 결과로 돌려줌 (그 밖의 오류는 작업 기록에)."""
+def _fail_extra(info, e):
+    """작업이 붙여 준 다시 하기 범위(retry: 화면이 보낼 값 · 예: 남은 영상 이름)와 한 줄 덧붙임(note)을 실패 안내에."""
+    if isinstance(getattr(e, "retry", None), dict):
+        info["retry"] = e.retry
+    if getattr(e, "note", None):
+        info["msg"] = f"{info['msg']} · {e.note}"
+    return info
+
+
+def _refs_job(fn, ck=None):
+    """학습용 영상 작업: 사용자에게 보여 줄 안내(채널 주소 없음·YouTube 막힘·멈춤)는 결과로 돌려줌 (그 밖의 오류는 작업 기록에).
+    ck: 고른 로그인 정보 브라우저 — 막혔을 때 '그 브라우저 로그인 정보로도 막힘' 안내 (고르지 않았으면 이 화면 설정 칸을 가리킴)."""
     try:
         return dict(fn(), ok=True)
     except (refs.RefsError, style.StyleCancelled) as e:
@@ -102,9 +113,23 @@ def _refs_job(fn):
     except RuntimeError as e:
         if str(e) != core.BLOCKED_MSG:
             raise
-        log(f"  {refs.BLOCKED_MSG}")
-        return {"ok": False, "error": refs.BLOCKED_MSG, "blocked": True,  # 이 화면의 '로그인 정보로 받기'를 가리킴
-                "fail": trouble.explain(e, blocked=refs.BLOCKED_MSG)}
+        info = trouble.explain(e, browser=ck, blocked=refs.BLOCKED_MSG)
+        log(f"  {info['msg']}")
+        return {"ok": False, "error": info["msg"], "blocked": True,  # 고르지 않았으면 이 화면의 '로그인 정보로 받기'를 가리킴
+                "fail": info}
+
+
+def reveal(path):
+    """파일이 든 폴더를 열고 그 파일을 골라 보여 줌 (Windows 탐색기 · Mac Finder) · 파일이 없으면 폴더만."""
+    path = Path(path)
+    if not path.exists():
+        return open_folder(path.parent)
+    if sys.platform == "win32":
+        subprocess.Popen(f'explorer /select,"{path}"')  # 목록으로 넘기면 따옴표가 '/select,' 까지 감싸 탐색기가 못 알아들음
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        open_folder(path.parent)
 
 
 def open_folder(path):
@@ -345,6 +370,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": f"학습용 영상 목록을 읽지 못했어요 · {e}"})
         if u.path == "/api/refs/recommended":
             return self._send(200, refs.recommended())
+        if u.path == "/api/browsers":  # 로그인 정보를 읽을 브라우저: 이 PC 에 있는 것 (잘 되는 순서)
+            return self._send(200, {"browsers": trouble.installed(), "order": list(trouble.ORDER)})
         # ---- 영상 기획 분석: 클로드 계정 상태 (읽기만 · 60초 기억) · Claude 에게 물어볼 내용 ----
         if u.path == "/api/claude/status":
             return self._send(200, claude_cli.status(refresh=(q.get("refresh") or ["0"])[0] == "1"))
@@ -514,15 +541,23 @@ class Handler(BaseHTTPRequestHandler):
             "/api/update": ("업데이트", lambda: self._update(b)),
             # 학습용 영상: 채널 인기 영상 받기 · 추천 방향 한 번에 · 채널 스타일 다시 배우기 · 지우기 · 배운 파일만 지우기 · 보관함에서 옮기기
             "/api/refs/add": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_channel(b.get("url"), b.get("count") or 5, b.get("kind") or "videos", log, ck,
-                                                                  b.get("learn", True) is not False, bool(b.get("prune")), b.get("style") or None))),
+                                                                  b.get("learn", True) is not False, bool(b.get("prune")), b.get("style") or None), ck)),
             "/api/refs/direction": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_direction(str(b.get("dir") or ""), log, ck, b.get("learn", True) is not False,
-                                                                        bool(b.get("prune"))))),
+                                                                        bool(b.get("prune"))), ck)),
             "/api/refs/learn": ("학습용 스타일 배우기", lambda: _refs_job(lambda: refs.learn_channel(str(b.get("channel") or ""), log, bool(b.get("prune"))))),
             "/api/refs/delete": ("학습용 영상 지우기", lambda: _refs_job(lambda: refs.delete(b.get("names"), b.get("channel"), log, bool(b.get("confirmOriginal"))))),
             "/api/refs/prune": ("배운 영상 파일 지우기", lambda: _refs_job(lambda: refs.prune(b["names"] if b.get("names") is not None else refs.channel_names(b["channel"]), log))),
             "/api/refs/restore": ("보관함으로 되돌리기", lambda: _refs_job(lambda: refs.restore(b["names"], log))),
             "/api/refs/move": ("학습용으로 옮기기", lambda: _refs_job(lambda: refs.move_from_library(b["names"], log, bool(b.get("confirm"))))),
+            "/api/convert": ("MP4로 바꾸기", lambda: self._convert(b)),
         }
+        if path == "/api/convert":  # MP4로 바꾸기: 보관함에 있는 못 쓰는 형식(.MTS 등) 파일 이름만
+            try:
+                n = editor.safe_name(b.get("name"))
+            except (ValueError, TypeError):
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            if n not in {u["name"] for u in intake.unusable(core.VIDEOS)}:
+                return self._send(404, {"ok": False, "error": "바꿀 영상을 보관함에서 찾지 못했어요. 목록을 새로 고친 뒤 다시 눌러 주세요"})
         if path in ("/api/refs/delete", "/api/refs/prune", "/api/refs/move", "/api/refs/restore"):  # 이름은 파일 이름만 · 보관함에서 옮길 때 확인이 필요한 영상
             try:
                 names = b.get("names")
@@ -751,7 +786,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if b["which"] == "refs":
                     refs.root().mkdir(parents=True, exist_ok=True)
-                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root()}[b["which"]])
+                if b["which"] == "log":  # studio.log 위치 (관리자에게 보낼 파일 · 탐색기에서 골라 보여 줌)
+                    reveal(LOGFILE)
+                    return self._send(200, {"ok": True})
+                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root(), "work": core.WORK}[b["which"]])
             except Exception as e:
                 log(f"폴더를 열지 못했어요 · {e}")
                 return self._send(200, {"ok": False})
@@ -974,10 +1012,26 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     @staticmethod
+    def _convert(b):
+        """보관함의 못 쓰는 형식(.MTS 등) 하나를 MP4 로 (원본은 보관함 안 '바꾸기 전 원본' 폴더로)."""
+        n = editor.safe_name(b.get("name"))
+        prog = lambda pct, detail: core.set_progress(label="MP4로 바꾸는 중", item=n, pct=pct, detail=detail)  # noqa: E731
+        prog(None, "준비 중")
+        out = intake.convert(core.VIDEOS, n, core.ffmpeg(), log, prog, editor.CANCEL.is_set)
+        try:
+            source.mark_footage(out, "local")  # 내 촬영본 (캠코더·카메라)
+        except Exception:  # noqa: BLE001 — 출처 표시는 곁가지
+            pass
+        return {"ok": True, "name": out}
+
+    @staticmethod
     def _analyze(b):
         out = core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))
+        failed = getattr(out, "failed", None) or {}  # 여러 개 중 그 파일만의 문제(깨짐 등)로 건너뛴 영상 → 쉬운 안내
         # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
         for n in b["names"]:
+            if n in failed:
+                continue
             core.set_progress(label="가편집 만드는 중", item=n, pct=99, detail="컷 정리·쇼츠 구간 고르는 중")
             had = editor._ppath(n).exists()
             # 이미 편집하던 영상이면 만든 편집본은 그대로 두고, 자막만 새로 + 새 가편집은 옆에 추가 (이전 상태는 백업)
@@ -990,6 +1044,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 names = ", ".join(q["name"] for q in proj["sequences"])
                 log(f"  가편집 완료 · {names}")
+        if failed:  # 일부만 실패: 화면이 '몇 개 중 몇 개' 카드 + 다시 하기는 실패한 영상만
+            return {"done": out, "failed": list(failed), "why": failed}
         return out
 
     @staticmethod
