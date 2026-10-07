@@ -817,7 +817,7 @@ class UploadFlowTests(ServiceBase):
         self.assertEqual(self.fake.snapshot()["quota"], q)
         self.assertEqual(yu.get_settings()["playlistId"], pl["id"])  # 고른 값이 다음 기본값
         self.assertTrue(any(m.startswith("유튜브에 올렸어요 · ") for m in self.logs))
-        # 작업 기록은 휴대폰 /r/status 로도 감 → 영상 번호·주소는 넣지 않음 (일부 공개 영상은 번호가 곧 공유 주소 · D-037)
+        # 작업 기록은 휴대폰 /r/status 로도 감 → 영상 번호·주소는 넣지 않음 (일부 공개 영상은 번호가 곧 공유 주소 · D-047)
         self.assertFalse([m for m in self.logs if r["videoId"] in m or "youtu" in m])
 
     def test_edit_export_with_its_srt_and_shorts_url(self):

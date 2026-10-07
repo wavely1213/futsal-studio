@@ -273,7 +273,7 @@ class NotifyTests(NotifyBase):
         self.assertFalse(any(t.startswith("작업이 끝났어요 · 채널") for t in texts))
 
     def test_youtube_jobs_fixed_text_never_url_or_token(self):
-        """유튜브 바로 올리기와 합침(D-037): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
+        """유튜브 바로 올리기와 합침(D-047): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
         (영상 주소·번호·Google 오류 글·토큰이 결과에 있어도 넣지 않음) · 진행·[멈추기]는 보이고 시작은 휴대폰 허용 목록에 없음."""
         import youtube_upload as yu
         self.assertTrue({yu.JOB_NAME, yu.JOB_FINISH} <= remote.JOB_LABELS)
@@ -307,7 +307,7 @@ class NotifyTests(NotifyBase):
         self.turn_on()
         self.svc.job_hook("학습용 영상 받기", None, {"ok": False, "error": "막힘", "blocked": True}, "휴대폰 · x", 30)
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (False, True))
-        self.assertIn("크롬 로그인 정보로 받기", self.svc.last["error"])
+        self.assertIn("로그인 정보로 받기", self.svc.last["error"])  # E1: 브라우저 고르기 (D-044)
         self.svc.job_hook("보관함에 담기", None, ["AbCdEfGhIjK"], "휴대폰 · x", 30)
         texts = [p[1] for p in self.notes(n=2)]
         self.assertEqual(texts, ["확인이 필요해요 · YouTube가 막았어요", "확인이 필요해요 · 받지 못한 영상이 있어요"])
@@ -318,7 +318,7 @@ class NotifyTests(NotifyBase):
         last = self.svc.last
         self.assertEqual((last["ok"], last["warn"]), (False, True))
         self.assertEqual(last["error"], remote.MISSED_MSG.format(n=1))
-        self.assertIn("크롬 로그인 정보로 받기", last["error"])
+        self.assertIn("로그인 정보로 받기", last["error"])  # E1: 브라우저 고르기 (D-044)
         self.svc.job_hook("보관함에 담기", None, [], "휴대폰 · x", 30)  # 다 받음
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (True, False))
 

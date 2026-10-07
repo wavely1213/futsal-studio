@@ -65,7 +65,7 @@ claude_cli.py       클로드 계정으로 쓰기 (사용자 PC의 Claude Code C
 qa.py               내보낸 영상 자동 검수
 bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
-youtube_upload.py   유튜브에 바로 올리기 (키트 그대로 올리기·이어 올리기·마무리·기록·할당량) → WORK/youtube/ (D-035)
+youtube_upload.py   유튜브에 바로 올리기 (키트 그대로 올리기·이어 올리기·마무리·기록·할당량) → WORK/youtube/ (D-045)
 youtube_api.py      Google OAuth(루프백·PKCE)·비밀 저장(DPAPI)·YouTube Data API(재개 가능한 업로드 등) · 표준 라이브러리만
 hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어)
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
@@ -73,6 +73,9 @@ refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 �
 ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
 strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
 forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
+intake.py           보관함에 들어오는 영상 살피기 (복사 중·못 쓰는 형식·편집점을 찾은 뒤 바뀐 파일)
+trouble.py          작업 오류 → 쉬운 한 줄 + 할 일 (화면의 실패 카드) · 로그인 정보 브라우저 목록
+studiolog.py        studio.log 쓰기 (연도 붙은 시각·크기 제한·오류 위치·갑자기 꺼짐 표시)
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027)
 tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
@@ -96,7 +99,7 @@ icon.ico / icon.png 앱 아이콘
 
 - **저장소 밖에 있는 것 (주의)**: 아래 파일은 저장소가 아니라 리드 개발 환경의 scratchpad(`$SCRATCH`, 경로는 `AGENTS.md` 5번)에 있다. 잃어버릴 위험이 있다 (`KNOWN_ISSUES.md` I-018).
   - 썸네일 화면 원본: 저장소 안 `thumb_src/head.html` + `thumb_src/parts/p1_core.js` … `p7_auto.js`. 이것을 `python3 thumb_src/build.py`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
-  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상), `yt_e2e/yt_ui_test.py`(유튜브에 바로 올리기). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
+  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상), `yt_e2e/yt_ui_test.py`(유튜브에 바로 올리기), `e1a_ui/ui_test.py`(복사 중·실패 카드·브라우저 고르기·studio.log). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
   - 작업 목록: `backlog.json`(순위별 기능·범위·버린 것), `batch1_result.json`(1차 결과).
 - 상세 모듈 구조와 의존 방향은 `ARCHITECTURE.md` 참고.
 
@@ -111,7 +114,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_PORT`: 로컬 서버 포트 (기본 8765)
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
-  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-035·D-036)
+  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-045·D-046)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`, `FUTSAL_OLD_PID`: 내부용. 재시작·실행기 경유·다시 시작 전 앱 프로세스 번호(미룬 구성요소 설치가 그 프로세스가 끝나길 기다림, D-034)를 표시하며 직접 설정하지 않는다.
   - 휴대폰으로 보기(D-027): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의 · 앱 화면 포트 창 8765~8804 안이면 켜지 않음, D-034), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR 이 가리킬 페이지 주소 · 개발 모드만), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
@@ -126,7 +129,7 @@ icon.ico / icon.png 앱 아이콘
 
 | 서비스 | 용도 | 키 관리 위치 |
 |---|---|---|
-| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '크롬 로그인 정보로 받기'를 켤 때만 그 브라우저에서 읽음 (`cookiesfrombrowser`) |
+| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '로그인 정보로 받기'에서 브라우저(크롬·엣지·웨일·파이어폭스)를 고를 때만 그 브라우저에서 읽음 (`cookiesfrombrowser` · D-036) |
 | YouTube 공개 RSS (`www.youtube.com/feeds/videos.xml?channel_id=UC…`) | 채널 전략: 채널마다 최근 15개 영상의 정확한 날짜·조회수·좋아요·원제. 사용자가 [새로 고침]·[지금 점검하기]를 누를 때와 8단계를 열 때 우리 채널 하루 한 번만 (D-024 · BR-016) · 시간 제한 20초 · 응답 2MB 까지 · DOCTYPE/ENTITY 가 든 응답은 거절 · 429·5xx 는 5초 뒤 한 번만 다시 | 키 없음. 쿠키 없음 (User-Agent `futsal-studio/<버전>`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치(켜진 앱이 쓰는 파일 때문에 못 하면 다음 실행 때 실행기가). Python 지원이 끝날 무렵(3.N 은 2016+N 년 7월부터)에만 `pypi.org/pypi/yt-dlp/json` 으로 최신 yt-dlp 가 받는 Python 을 확인 (`core._engine_needs_newer_python`) | 없음 |
 | Microsoft (aka.ms) | `시작하기 (Windows).bat` 이 Visual C++ 구성요소(msvcp140)가 없을 때만 `vc_redist.x64.exe` 를 받아 설치 (D-033) | 없음 |
@@ -143,11 +146,11 @@ icon.ico / icon.png 앱 아이콘
 | Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-027)를 켠 동안만: 휴대폰 → 원격 리스너. 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
 | ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
 | mulgyeol.kr/futsal (저장소 밖: 와벨리 저장소 `public/futsal/`, Vercel) | 휴대폰 화면(정적 PWA). 와벨리 `main`에 병합되면 공개된다 | 없음 |
-| Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-035): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
+| Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-045): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
 | YouTube Data API v3 (`www.googleapis.com/youtube/v3` · `/upload/youtube/v3`) | 7단계 [유튜브에 올리기]를 누를 때만: 재개 가능한 업로드(videos.insert) · thumbnails.set · captions.insert · playlists list/insert · playlistItems.insert · videos.list(상태) · channels.list(연결 확인). 할당량: 업로드 하루 100번 + 그 밖 하루 10,000 단위(2026-06-01 기준) | 위 토큰 (사용자 본인 계정) |
 
 ## 7. 참고 링크
 
 - 기획 문서: 저장소 안에는 없다. 기능 우선순위·범위는 저장소 밖 `$SCRATCH/backlog.json`(리드의 작업 목록)에 있다. 사용자 안내와 관리자 배포 방법은 `README.md`에 있다.
 - 디자인: 별도 디자인 파일 없음. 화면 HTML 자체가 기준이다. 편집실은 Premiere Pro, 썸네일은 Photoshop의 화면 구성과 단축키를 따른다.
-- 운영 대시보드: 없음. 저장소는 https://github.com/wavely1213/futsal-studio 이다. 사용자 PC에서 문제가 생기면 작업 폴더의 `studio.log`를 받아서 본다.
+- 운영 대시보드: 없음. 저장소는 https://github.com/wavely1213/futsal-studio 이다. 사용자 PC에서 문제가 생기면 작업 폴더의 `studio.log`를 받아서 본다(오류 위치 한 줄·지난번 갑자기 꺼짐이 들어 있음 · 2MB 가 넘어 나뉘었으면 `studio.old.log` 도 · D-037). 같은 오류의 traceback 전체·바깥 코드가 죽은 위치는 같은 폴더의 `studio-error.log`(pythonw 일 때 · D-044).

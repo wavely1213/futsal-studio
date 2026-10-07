@@ -40,7 +40,7 @@
 - "더 짧은 코드"가 아니라 "더 읽기 쉬운 코드"가 목표다.
 - 패턴 적용 자체가 목적이 되지 않는다 (디자인 패턴 강박 금지).
 - 이미 세 번을 넘긴 중복 (정리는 지시가 있을 때만):
-  - "임시 파일에 쓰고 Windows 잠금이면 다시 시도하며 `os.replace`" — `updater._replace`/`_write_json`, `editor._replace_retry`/`_write_atomic`, `bundle._replace_retry`, `hooks._write_json`, `upload._write_safe`, `thumb.save_docs`. (`youtube_upload._write_json`·`youtube_api.save_secret` 은 처음부터 `updater.write_atomic` 을 씀 · D-037) 재시도 횟수·간격·실패 때 동작(다른 이름으로 저장 등)이 서로 달라서 하나로 합치면 동작이 바뀔 수 있다. 합친다면 `updater.py` 쪽에 두고 다른 모듈이 가져다 쓰는 방향만 가능하다 (`updater.py` 는 다른 앱 모듈에 기대면 안 됨).
+  - "임시 파일에 쓰고 Windows 잠금이면 다시 시도하며 `os.replace`" — `updater._replace`/`_write_json`, `editor._replace_retry`/`_write_atomic`, `bundle._replace_retry`, `hooks._write_json`, `upload._write_safe`, `thumb.save_docs`. (`youtube_upload._write_json`·`youtube_api.save_secret` 은 처음부터 `updater.write_atomic` 을 씀 · D-047) 재시도 횟수·간격·실패 때 동작(다른 이름으로 저장 등)이 서로 달라서 하나로 합치면 동작이 바뀔 수 있다. 합친다면 `updater.py` 쪽에 두고 다른 모듈이 가져다 쓰는 방향만 가능하다 (`updater.py` 는 다른 앱 모듈에 기대면 안 됨).
   - ffmpeg `Duration:` 읽기 — `editor.probe`, `style._probe_duration`, `qa.check_video`, `bundle.probe`.
 - 짝으로 있는 계산(`editor.html` ↔ `editor.py`: 키프레임·전환 범위·트랙 상태·화면 배치·색보정)은 같은 단계에서 양쪽을 함께 바꾸고, 미리보기와 내보내기 결과가 같은지 e2e 로 확인한다.
 

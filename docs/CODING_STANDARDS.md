@@ -55,22 +55,22 @@
 ## 5. 에러 처리
 
 - 에러를 조용히 삼키지 않는다. 예외: 로그 파일 쓰기·창 앞으로 가져오기·임시 파일 정리처럼 **실패해도 되는 곁가지 작업**만 `except OSError: pass` 식으로 넘기고, 가능하면 좁은 예외 타입을 쓴다.
-- 사용자에게 보이는 에러 메시지와 내부 로그를 구분한다. **이 앱에서는 예외 메시지가 곧 화면 문구다** (`app.start_job` 이 `str(e)` 를 화면에 띄움) → `raise RuntimeError("…하지 못했어요 · <원인>. <다음에 할 일>")` 처럼 사용자가 읽을 문장으로 쓴다. 스택은 화면에 내보내지 않는다.
+- 사용자에게 보이는 에러 메시지와 내부 로그를 구분한다. **이 앱에서는 예외 메시지가 곧 화면 문구다** (`app.start_job` 이 `trouble.explain(e)` 를 거쳐 화면 실패 카드에 띄움 — 우리 한국어 안내('…요'로 끝나는 앞 토막)는 그대로, 영어 원문은 쉬운 한 줄로 바꾸고 원문은 studio.log 에만) → `raise RuntimeError("…하지 못했어요 · <원인>. <다음에 할 일>")` 처럼 사용자가 읽을 문장으로 쓴다. 할 일 버튼까지 정하려면 `trouble.Trouble(kind, msg, actions)`. 자주 나는 새 영어 오류는 `trouble._RULES` 에 한 줄 더한다. 스택은 화면에 내보내지 않는다.
 - 예상 가능한 실패와 버그를 구분한다:
   - 잘못된 입력 → `ValueError`/`FileNotFoundError`/`LookupError` → HTTP 400/404 + `{"ok": false, "error": "…"}`
   - 다른 작업 중 → 409 `"다른 작업이 끝난 뒤에 다시 눌러 주세요"`, 저장 충돌 → `editor.Conflict`(409)
   - 업데이트 실패 → `updater.UpdateError` (앱 폴더는 그대로이거나 되돌려 둔 상태여야 함)
-  - 예상 못 한 오류 → `traceback.print_exc()` + `log(...)` 후 500
+  - 예상 못 한 오류 → `studiolog.trace(e)`(studio.log 에 위치 한 줄 + 오류 출력에 traceback 전체 = pythonw 면 studio-error.log · 비밀은 지움 · 같은 오류는 한 번만) + `log(...)` 후 500. `traceback.print_exc()`·`sys.stderr.write(traceback…)` 는 쓰지 않는다 — 비밀이 그대로 남고, 위치가 studio.log 에 안 남는다 (D-037 · D-044)
 - **부가 기능은 실패해도 앱을 멈추지 않는다**: 얼굴·표정 모델, Deno 설치, 엔진 자동 최신화, 하드웨어 인코더는 실패하면 기록을 남기고 예전 방식으로 계속한다 (`face` → `None`, `HwEncError` → 소프트웨어 인코더).
 - 한 항목 실패가 전체를 막지 않게: 여러 영상을 처리할 때는 실패한 것만 모아 알리고 나머지를 계속한다 (`style.learn` 패턴).
 - 에러 처리 패턴: 예외 + 경계에서 처리 (HTTP 핸들러·`start_job`). Result 타입은 쓰지 않는다.
 
 ## 6. 로깅
 
-- 로깅 도구: `logging` 모듈은 쓰지 않는다. `app.log(msg)` 하나로 화면 기록(`/api/state`) + 표준 출력 + 작업 폴더의 `studio.log`(시각 `%m-%d %H:%M:%S`)에 남긴다. 앱이 켜지기 전·실행기에서는 `updater.studio_log(app_dir, msg)`.
+- 로깅 도구: `logging` 모듈은 쓰지 않는다. `app.log(msg)` 하나로 화면 기록(`/api/state`) + 표준 출력 + 작업 폴더의 `studio.log`(`studiolog.write` · 시각 `%Y-%m-%d %H:%M:%S` · 2MB 넘으면 studio.old.log)에 남긴다. 화면에는 안 보이고 studio.log 에만 남길 것(영어 원문·오류 위치)은 `studiolog.write`·`trace`. 앱이 켜지기 전·실행기에서는 `updater.studio_log(app_dir, msg)`.
 - 모듈은 `app` 을 import 하지 않고 `log` 함수를 인자로 받는다 (기본값 `print`). 진행률은 로그가 아니라 `core.set_progress(label=, item=, step=, pct=, detail=)`.
 - 레벨 구분은 없다 — 모든 줄이 사용자 화면에 보이므로 사용자가 읽을 문장으로 쓴다. 단계 안의 세부 줄은 두 칸 들여쓴다 (`"  완료 · …"`), 실패는 `"…하지 못했어요 · {e}"`.
-- `studio.log` 는 문제가 생기면 사용자가 관리자에게 보내는 파일이다 → 원인을 알 수 있게 파일 이름·원인을 함께 남긴다. 사용자 PC 에서는 `pythonw` 로 실행돼 `print` 출력이 보이지 않는다 — `traceback`·스레드 오류·서버 요청 오류·바깥 코드가 죽은 위치는 `app._error_log` 가 작업 폴더의 `studio-error.log`(줄마다 시각, 1MB 넘으면 `.old`)로 모은다. 실행기에서 켜다 멈춘 오류의 traceback 도 같은 파일 (`updater._error_trace`). 문제를 받을 때 두 파일을 함께 받는다.
+- `studio.log` 는 문제가 생기면 사용자가 관리자에게 보내는 파일이다 → 원인을 알 수 있게 파일 이름·원인을 함께 남긴다. 사용자 PC 에서는 `pythonw` 로 실행돼 `print` 출력이 보이지 않는다 — 오류 기록은 `studiolog` 하나로 (D-044): 오류마다 studio.log 에 '오류 위치' 한 줄(`trace` · 스레드·메인은 `install_hooks` · 서버 요청은 `Handler.handle_one_request`·`_Server.handle_error` · 원격 리스너는 `remote._trace`), 같은 오류의 traceback 전체와 바깥 코드가 죽은 위치(faulthandler)는 `app._error_log` 가 작업 폴더의 `studio-error.log`(줄마다 연도 붙은 시각, 1MB 넘으면 `.old`)로 모은다. 프로그램 오류가 아닌 작업 실패(멈춤·복사 중·YouTube 막힘·볼 수 없는 영상 등 · `app.EXPECTED_KINDS`)는 원문 한 줄만 남기고 오류 위치·traceback 은 남기지 않는다. 휴대폰·터널이 끊은 연결도 오류로 남기지 않는다. 실행기에서 켜다 멈춘 오류의 traceback 도 같은 파일 (`updater._error_trace`). 두 파일 모두 비밀(터널 주소·알림 주제·영상 표·서명·연결 코드)은 `remote.redact` 로 지운다(`studiolog.write`·`app._StampedErr`). 문제를 받을 때 두 파일을 함께 받는다.
 - **개인정보·시크릿·토큰(브라우저 쿠키 등)은 절대 로그에 남기지 않는다** (`SECURITY_GUIDELINES.md`).
 - 커밋 전 임시 디버그 출력(console.log, print)은 제거한다.
 

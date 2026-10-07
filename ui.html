@@ -49,6 +49,7 @@
   .step .count { margin-left: auto; font-size: 12px; color: var(--ink-3); }
   .side .sp { flex: 1; }
   .side .foot { border-top: 1px solid var(--line); padding: 12px 8px 0; display: grid; gap: 8px; font-size: 12px; color: var(--ink-3); }
+  .side .foot #workspace { font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
   .linkbtn { border: 0; background: none; padding: 0; color: var(--ink-2); cursor: pointer; text-align: left; font-size: 13px; }
   .linkbtn:hover { color: var(--ink); text-decoration: underline; }
 
@@ -166,6 +167,12 @@
   .chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; background: var(--cut-soft); color: var(--cut); }
   .chip.ok { background: var(--brand-soft); color: var(--brand); }
   .chip.run { background: var(--brand); color: var(--brand-ink); font-variant-numeric: tabular-nums; }
+  /* 들어오는 중(복사 중) · 편집점을 찾은 뒤 바뀐 파일 · 아직 못 쓰는 형식 (intake.py) */
+  .chip.copy, .chip.warn { background: var(--peak-soft); color: var(--peak); }
+  .chip.bad { background: var(--surface); color: var(--ink-3); border: 1px dashed var(--ink-3); }
+  .rows .row.copying .mini, .rows .row.bad .mini { opacity: .55; }
+  .rows .row.bad .name { color: var(--ink-2); }
+  .rows .sub .next { color: var(--peak); font-weight: 600; }
   input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--brand); }
   /* 영상 출처 배지: 풋살사관학교 · 다른 채널 · 내 촬영본 (보관함에서 눌러 바꿈) */
   .src { display: inline-block; max-width: 100%; vertical-align: 1px; font-size: 11.5px; font-weight: 700; line-height: 1.6; padding: 0 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--cut-soft); color: var(--cut); }
@@ -246,6 +253,21 @@
   .banner[hidden] { display: none; }
   .banner .tx { flex: 1 1 320px; color: var(--ink); line-height: 1.5; }
   .banner .btn { padding: 6px 12px; font-size: 13px; }
+  /* 실패 카드: 작업이 실패하면 쉬운 한 줄 + 할 일 버튼을 그 화면에 남겨 둠 (✕ 나 그 화면에서 새 작업을 시작하면 닫힘) */
+  .failslot:empty { display: none; }
+  .fail { padding: 14px 16px; margin: -4px 0 16px; display: grid; gap: 10px; border-left: 4px solid var(--danger); }
+  .fail .ftop { display: flex; gap: 10px; align-items: flex-start; }
+  .fail .fic { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+  .fail .ftx { flex: 1; min-width: 0; line-height: 1.55; }
+  .fail .ftx b { display: block; color: var(--ink); overflow-wrap: anywhere; }
+  .fail .ftx small { color: var(--ink-3); font-size: 12px; }
+  .fail .fx { flex: none; border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 18px; line-height: 1; padding: 0 2px; }
+  .fail .fx:hover { color: var(--ink); }
+  .fail .fbtns { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding-left: 32px; }
+  .fail .fbtns .btn { padding: 6px 12px; font-size: 13px; }
+  .fail .ckpick { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); }
+  .fail .ckpick select.sel, .note select.sel { padding: 5px 8px; font-size: 13px; }
+  .note .cktip { display: block; font-size: 12px; color: var(--ink-3); margin-top: 4px; }
 
   /* 편집점 */
   .filters { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -352,6 +374,7 @@
     .rows .mini, .rows .row > :last-child { display: none; }
     .ev { grid-template-columns: 52px 1fr; }
     .ev .tag { display: none; }
+    .fail .fbtns { padding-left: 0; }
   }
   /* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */
   .up-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
@@ -741,7 +764,7 @@
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
       <button class="linkbtn" id="btnRemote" title="PC 작업을 휴대폰에서 보고 시키기"><i class="rdot" id="rmDot"></i>휴대폰으로 보기</button>
       <button class="linkbtn" id="btnUpdate">업데이트 확인</button>
-      <div id="workspace" title=""></div>
+      <button class="linkbtn" id="workspace" title="">작업 폴더</button>
     </div>
   </aside>
 
@@ -756,9 +779,11 @@
         <div class="sp"></div>
         <button class="btn primary" id="btnDownload" disabled>보관함에 담기</button>
       </div>
-      <details class="note"><summary>다운로드가 계속 실패하나요?</summary>
-        왼쪽 아래 <b>업데이트 확인</b>을 먼저 눌러 보세요. 그래도 안 되면 크롬에서 YouTube에 로그인한 뒤 아래를 켜고 다시 담아 보세요.<br>
-        <label><input type="checkbox" id="cookies"> 크롬 로그인 정보로 받기 (내 PC 안에서만 쓰여요)</label>
+      <div class="failslot"></div>
+      <details class="note" id="ckNote"><summary>다운로드가 계속 실패하나요?</summary>
+        왼쪽 아래 <b>업데이트 확인</b>을 먼저 눌러 보세요. 그래도 안 되면 YouTube에 로그인해 둔 브라우저를 골라 다시 담아 보세요.<br>
+        <label>로그인 정보로 받기 <select class="sel" id="cookies" title="고른 브라우저의 YouTube 로그인 정보로 받아요 (내 PC 안에서만 쓰여요)"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select> (내 PC 안에서만 쓰여요)</label>
+        <span class="cktip">파이어폭스가 가장 잘 돼요. 엣지·웨일·크롬은 창을 모두 닫고(화면 오른쪽 아래 숨겨진 아이콘까지) 받아 주세요. 최신 크롬은 새 보안 기능 때문에 안 될 수 있어요.</span>
       </details>
       <div class="grid" id="remote"></div>
       <div class="card empty" id="remoteEmpty"><b>아직 불러온 영상이 없어요</b>"채널 불러오기"를 누르면 조회수 순으로 정리해 드려요.</div>
@@ -775,6 +800,7 @@
         <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
       </div>
+      <div class="failslot"></div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
       <div class="card banner" id="refBanner" hidden><span class="tx" id="refBannerTx"></span><button class="btn primary" id="refBannerGo">모두 학습용으로 옮기기</button><button class="btn" id="refBannerNo">다음에</button></div>
       <div class="card rows" id="local"></div>
@@ -816,6 +842,7 @@
       <div class="phead"><div><h1>스타일 배우기</h1><p>따라 하고 싶은 유튜버 채널의 인기 영상을 '학습용 영상'에 담아 고르면, 그 채널의 공식(인트로 구성·장르·형식·자막 처리·재미 요소)을 판단하고 컷 리듬 같은 편집 습관까지 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요. 학습용 영상은 편집할 영상(보관함)과 따로 보관돼요.</p></div></div>
       <details class="card ccard" id="claudeCard"><summary>🤖 클로드 계정으로 쓰기 <span class="st8" id="claudeState">확인 중…</span></summary><div class="cbody" id="claudeBody"></div></details>
       <div class="shbar"><h2 class="sh">학습용 영상</h2><span class="hint" id="refDisk"></span><div class="sp"></div><button class="btn" id="refOpen">폴더 열기</button><button class="btn" id="refAddBtn">채널 추가</button></div>
+      <div class="failslot"></div>
       <div class="card refadd" id="refAdd" hidden>
         <div class="row1"><input class="inp" id="refUrl" placeholder="채널 주소나 @핸들 (예: @shootforlovekorea)" title="예) https://www.youtube.com/@채널이름 · @채널이름">
           <div class="seg" id="refKind"><button class="on" data-v="videos">긴 영상</button><button data-v="shorts">쇼츠</button></div>
@@ -823,7 +850,7 @@
           <button class="btn primary" id="refGo">인기 영상 받기</button></div>
         <div class="opts"><label><input type="checkbox" id="refLearn" checked> 받은 뒤 '채널 이름 스타일'로 배우기</label>
           <label title="영상 파일만 지우고 배운 기록은 남겨요. 스타일은 그대로 쓰고, 다시 배울 때도 그 기록을 써요"><input type="checkbox" id="refPrune"> 배운 뒤 영상 파일 지우기 (디스크 아끼기)</label>
-          <label title="다운로드가 계속 실패할 때만 켜 주세요. 크롬에서 YouTube에 로그인해 두면 돼요 (내 PC 안에서만 쓰여요)"><input type="checkbox" id="refCookies"> 크롬 로그인 정보로 받기</label></div>
+          <label title="받기가 계속 실패할 때만 골라 주세요. 그 브라우저에서 YouTube에 로그인해 두면 돼요 (내 PC 안에서만 쓰여요) · 파이어폭스가 가장 잘 돼요 · 엣지·웨일·크롬은 창을 모두 닫은 뒤 받아 주세요">로그인 정보로 받기 <select class="sel" id="refCookies"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select></label></div>
         <h3>추천 채널</h3>
         <div class="filters" id="recoGroups"></div>
         <div class="reco" id="reco"></div>
@@ -940,7 +967,7 @@
         </div>
       </div>
       <div class="card empty" id="upEmpty"><b>보관함에 영상이 없어요</b>소재 찾기에서 영상을 담거나 촬영 원본을 넣어 주세요.</div>
-      <!-- 7-2. Google 설정 안내 (처음 한 번) — 주소는 서버의 정해진 목록(youtube_upload.GUIDE_URLS)만 엶 · 그림 자리(.yt-shot)는 KNOWN_ISSUES I-050 -->
+      <!-- 7-2. Google 설정 안내 (처음 한 번) — 주소는 서버의 정해진 목록(youtube_upload.GUIDE_URLS)만 엶 · 그림 자리(.yt-shot)는 KNOWN_ISSUES I-056 -->
       <div class="yt-guide" id="ytGuide" hidden>
         <div class="gin">
           <div class="yt-ghead"><h2>Google 설정 안내</h2><span class="yt-muted">처음 한 번 · 약 15분</span><span class="sp"></span><button class="btn" id="ytGuideClose">닫기</button></div>
@@ -1131,7 +1158,8 @@ const srcMatch = (v, f) => { const s = srcOf(v); return f === "all" || (f.starts
 
 let state = { local: [], job: null }, logSince = 0, pending = null, pendingId = null, remote = [], selected = new Set(), lastLocalKey = "";
 // 작업이 끝나면 부를 함수(pending) + 그 작업 번호(pendingId, 시작 응답의 jobId) — 그 번호의 결과만 받음 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
-function waitFor(j, fn) { state.job = "…"; pending = fn || null; pendingId = (j && j.jobId) || null; sync(); showBusy(); }
+// pendPanel: 그 작업을 시킨 화면 (실패하면 그 화면에 실패 카드 · trouble.explain 의 쉬운 한 줄 + 할 일)
+function waitFor(j, fn) { state.job = "…"; pending = fn || null; pendingId = (j && j.jobId) || null; pendPanel = curPanel(); sync(); showBusy(); }
 let srcFilter = "all";
 const libSel = new Set();  // 보관함에서 고른 영상 (고르기 칩으로 숨겨진 영상도 기억)
 const libChecked = () => [...libSel];
@@ -1141,7 +1169,7 @@ let events = [], filter = "all";
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json();
-  if (!r.ok && j.error) toast(j.error);
+  if (!r.ok && j.error && !j.fail) toast(j.error);  // fail 이 있으면 실패 카드로 (job)
   return j;
 }
 async function copyText(t) {
@@ -1151,6 +1179,82 @@ async function copyText(t) {
 }
 // 브라우저식 오른쪽 클릭 메뉴 끄기 (입력칸 제외)
 document.addEventListener("contextmenu", e => { if (!e.target.closest("textarea, input")) e.preventDefault(); });
+/* 실패 카드: 작업이 실패하면 쉬운 한 줄(서버 trouble.explain) + 할 일 버튼을 그 화면에 남겨 둠 (4초 토스트는 금방 사라졌음) */
+const BROWSERS = { firefox: "파이어폭스", edge: "엣지", whale: "웨일", chrome: "크롬" };  // 로그인 정보(쿠키)를 읽을 브라우저 (사용자가 고를 때만 · 잘 되는 순서 trouble.ORDER)
+const BROWSER_NOTE = { chrome: " (최신 크롬은 안 될 수 있어요)" };
+let HAVE = Object.keys(BROWSERS);  // 이 PC 에 있는 브라우저 (GET /api/browsers · 못 알아내면 전부)
+const ckOkGet = () => { try { return localStorage.getItem("ckOk") || ""; } catch (e) { return ""; } };  // 마지막으로 잘 받은 브라우저
+const ckOkSet = b => { try { localStorage.setItem("ckOk", b); } catch (e) {} };
+function browserOpts(sel, keep) {  // 로그인 정보 고르기 칸: 이 PC 에 있는 브라우저만 (지금 고른 값은 남김)
+  const cur = keep !== undefined ? keep : sel.value, list = Object.keys(BROWSERS).filter(b => HAVE.includes(b) || b === cur);
+  sel.innerHTML = (sel.dataset.fck !== undefined ? "" : `<option value="">안 씀</option>`) + list.map(b => `<option value="${b}"${b === cur ? " selected" : ""}>${BROWSERS[b]}${BROWSER_NOTE[b] || ""}</option>`).join("");
+}
+fetch("/api/browsers").then(r => r.json()).then(j => { if (j.browsers && j.browsers.length) HAVE = j.browsers; ["cookies", "refCookies"].forEach(id => browserOpts($(id))); }).catch(() => {});
+const YT_JOBS = ["/api/list", "/api/download", "/api/refs/add", "/api/refs/direction"];  // YouTube 를 쓰는 작업 (로그인 정보·주소 버튼)
+const FOLDER_OF = { "/api/download": "videos", "/api/analyze": "videos", "/api/bundle": "videos", "/api/convert": "videos", "/api/refs/add": "refs", "/api/refs/direction": "refs",
+  "/api/refs/learn": "refs", "/api/refs/move": "videos", "/api/refs/restore": "refs", "/api/style/learn": "videos" };
+let lastJob = null;  // 이 화면에서 시작한 작업 {path, body, done, panel, mine}
+let pendPanel = null;  // job() 밖에서 시작한 작업(waitFor)의 화면
+const curPanel = () => (document.querySelector(".panel.on") || { id: "p-find" }).id;
+function failSlot(panel) {
+  const p = $(panel) || $("p-find");
+  let slot = p.querySelector(".failslot");
+  if (!slot) { slot = document.createElement("div"); slot.className = "failslot"; p.querySelector(".phead").after(slot); }
+  return slot;
+}
+function clearFail(panel) { const s = $(panel) && $(panel).querySelector(".failslot"); if (s) s.innerHTML = ""; }
+function useCookies(b) { $("cookies").value = b || ""; $("refCookies").value = b || ""; if (b) $("ckNote").open = true; }
+function failToast(f, panel) {  // 카드가 다 말해 주니 토스트는 짧게 (카드를 가리지 않게) · 다른 화면에 남겼으면 그 화면 이름
+  const step = document.querySelector(`.step[data-p="${(panel || "").replace(/^p-/, "")}"] b`);
+  toast(`${f.job || "작업"} · 실패했어요 · ${panel && panel !== curPanel() && step ? `'${step.textContent}' 화면에 안내를 남겼어요` : "화면의 안내를 봐 주세요"}`);
+}
+const YT_ACTS = ["resume", "relogin", "verify", "thumb", "finish"];  // 7단계 유튜브 올리기 카드의 할 일 (trouble.YT_CARDS · 그 화면이 jb.on 으로 처리)
+function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · jb {path, body, done, panel, on: {할 일: 함수}}
+  if (!f || f.kind === "cancelled") { if (f) toast(f.msg); return; }
+  jb = jb || {};
+  const panel = jb.panel || curPanel(), yt = YT_JOBS.includes(jb.path), folder = FOLDER_OF[jb.path];
+  const ckCur = (jb.body && jb.body.cookies) || "", kinds = ["/api/list", "/api/refs/add"].includes(jb.path);
+  const acts = (f.actions || []).filter(a => (a !== "cookies" && a !== "url") || yt).filter(a => a !== "folder" || folder).filter(a => a !== "retry" || jb.body)
+    .filter(a => a !== "nocookies" || (yt && ckCur)).filter(a => a !== "otherkind" || kinds).filter(a => !YT_ACTS.includes(a) || (jb.on && jb.on[a]));
+  const now = new Date(), hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const list = Object.keys(BROWSERS).filter(b => HAVE.includes(b) || b === ckCur), okB = ckOkGet();
+  // 미리 고를 브라우저: 서버가 권한 것 → 켜져 있어 못 읽었으면 같은 브라우저(닫고 다시) → 마지막으로 잘 된 것 → 잘 되는 순서의 첫째 (방금 실패한 것은 빼고)
+  const ckPick = f.suggest || (f.kind === "cookie_locked" && ckCur) || (list.includes(okB) && okB !== ckCur && okB) || list.find(b => b !== ckCur) || list[0];
+  const otherKind = jb.body && jb.body.kind === "shorts" ? "videos" : "shorts";
+  const label = { retry: "다시 하기", update: "업데이트 확인", folder: "폴더 열기", url: "주소 다시 넣기", log: "작업 기록 보기", logfile: "studio.log 위치 열기",
+    nocookies: "로그인 정보 없이 다시 하기", otherkind: otherKind === "shorts" ? "쇼츠로 다시 불러오기" : "긴 영상으로 다시 불러오기",
+    resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기" };
+  const btns = acts.map((a, i) => a === "cookies"
+    ? `<span class="ckpick">로그인 정보 <select class="sel" data-fck>${list.map(k => `<option value="${k}"${k === ckPick ? " selected" : ""}>${BROWSERS[k]}${BROWSER_NOTE[k] || ""}</option>`).join("")}</select></span><button class="btn${i ? "" : " primary"}" data-fa="cookies">이 브라우저로 다시 받기</button>`
+    : `<button class="btn${i ? "" : " primary"}" data-fa="${a}">${label[a]}</button>`).join("");
+  const msg = acts.includes("cookies") && f.card ? f.card : f.msg;  // 카드 안에 브라우저 고르기가 있으면 '아래에서 고르고…' (화면 설정 칸을 또 가리키지 않게)
+  const slot = failSlot(panel);
+  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")} · ${hm}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
+  const card = slot.firstElementChild;
+  card.querySelector(".fx").onclick = () => { slot.innerHTML = ""; };
+  if (/^cookie_/.test(f.kind || "") && ckCur && $("cookies").value === ckCur) useCookies(null);  // 그 브라우저 로그인 정보를 못 읽음 → 화면 설정은 '안 씀'으로 (다음 작업까지 같은 오류가 나지 않게 · 카드의 고르기는 그대로)
+  card.querySelectorAll("[data-fa]").forEach(b => b.onclick = () => {
+    const a = b.dataset.fa;
+    if (jb.on && jb.on[a]) { jb.on[a](); return; }  // 그 화면이 정한 할 일 (7단계: 이어 올리기·다시 연결하기·채널 인증·썸네일 다시 올리기·마저 하기)
+    if (a === "log") { $("drawer").classList.add("open"); return; }
+    if (a === "logfile") { api("/api/open", { which: "log" }); return; }
+    if (a === "update") { checkUpdate(true); return; }
+    if (a === "folder") { api("/api/open", { which: folder }); return; }
+    if (a === "url") {
+      slot.innerHTML = "";
+      if (jb.path === "/api/list") { $("chUrl").focus(); $("chUrl").select(); }
+      else { $("refAdd").hidden = false; $("refUrl").focus(); $("refUrl").select(); }
+      return;
+    }
+    const body = { ...jb.body, ...(a === "retry" && f.retry ? f.retry : {}) };  // 작업이 알려 준 다시 할 범위 (예: 남은 영상만)
+    if (a === "cookies") { const ck = card.querySelector("[data-fck]").value; useCookies(ck); body.cookies = ck; }
+    if (a === "nocookies") { useCookies(null); body.cookies = null; }
+    if (a === "otherkind") { body.kind = otherKind; setSeg(jb.path === "/api/list" ? "kindSeg" : "refKind", otherKind); }
+    job(jb.path, body, jb.done);
+  });
+  if (panel === curPanel()) slot.scrollIntoView({ block: "nearest" });
+}
+function setSeg(id, v) { const seg = $(id); if (seg) seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.v === v)); }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 4000); }
 function go(p) {
   document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.p === p));
@@ -1189,42 +1293,65 @@ function loadRemote() {
   job("/api/list", { kind: segVal("kindSeg"), cookies: cookieOpt(), url: $("chUrl").value.trim() }, rows => { remote = rows || []; selected.clear(); renderRemote(); });
 }
 $("chUrl").onkeydown = e => { if (e.key === "Enter") loadRemote(); };
-const cookieOpt = () => $("cookies").checked ? "chrome" : null;
+const cookieOpt = () => $("cookies").value || null;  // 로그인 정보(쿠키)를 읽을 브라우저 (고를 때만)
 $("btnList").onclick = loadRemote;
 $("btnDownload").onclick = () => job("/api/download", { ids: [...selected], cookies: cookieOpt(),  // 출처를 함께 보냄 → 받기 전에도 보관함에 맞게 표시
-  sources: Object.fromEntries(remote.filter(r => selected.has(r.id) && r.source).map(r => [r.id, { ...r.source, channelId: r.channelId, channelUrl: r.channelUrl }])) }, failed => {
-  const ok = selected.size - (failed || []).length;
-  toast(failed && failed.length ? `${ok}개 담음 · ${failed.length}개 실패 (작업 기록 확인)` : `${ok}개를 보관함에 담았어요`);
-  selected.clear(); renderRemote();
-});
+  sources: Object.fromEntries(remote.filter(r => selected.has(r.id) && r.source).map(r => [r.id, { ...r.source, channelId: r.channelId, channelUrl: r.channelUrl }])) }, downloaded);
+function partFail(failed, why, total, verb) {  // 여러 개 중 일부 실패 → 카드 하나 (가장 많은 까닭으로)
+  const infos = failed.map(id => (why || {})[id]).filter(Boolean), count = {};
+  infos.forEach(x => (count[x.kind] = (count[x.kind] || 0) + 1));
+  const top = infos.sort((a, b) => count[b.kind] - count[a.kind])[0] || { kind: "other", msg: "작업 기록에서 까닭을 확인해 주세요", actions: [] };
+  const head = `${total}개 중 ${failed.length}개를 ${verb} 못했어요 · `;
+  return { ...top, msg: head + top.msg, card: top.card ? head + top.card : undefined, actions: [...new Set([...(top.actions || []), "retry"])] };
+}
+function downloaded(res) {
+  const jb = lastJob || {}, body = jb.body || { ids: [] }, total = (body.ids || []).length;
+  const failed = Array.isArray(res) ? res : (res && res.failed) || [];
+  toast(failed.length ? `${total - failed.length}개 담음 · ${failed.length}개 실패` : `${total}개를 보관함에 담았어요`);
+  selected.clear(); failed.forEach(id => selected.add(id));  // 못 담은 영상은 고른 채로 둠 → [다시 하기]
+  renderRemote();
+  if (failed.length) showFail({ ...partFail(failed, res && res.why, total, "담지"), job: "보관함에 담기" }, { path: "/api/download", body: { ...body, ids: failed }, done: downloaded, panel: jb.panel || "p-find" });
+}
 
 /* 2. 보관함 */
 function renderLocal() {
-  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + srcFilter;
+  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter;
   if (key === lastLocalKey) return;
   lastLocalKey = key;
   const have = new Set(state.local.map(v => v.name));
-  [...libSel].forEach(n => { if (!have.has(n)) libSel.delete(n); });  // 지웠거나 이름을 바꾼 영상은 빼기
+  const busyCopy = new Set(state.local.filter(v => v.copying).map(v => v.name));
+  [...libSel].forEach(n => { if (!have.has(n) || busyCopy.has(n)) libSel.delete(n); });  // 지웠거나 이름을 바꾼 영상 · 아직 복사 중인 영상은 빼기
   const checked = libSel;
   $("libCount").textContent = state.local.length || "";
   renderSrcFilters();
   const list = state.local.filter(v => srcMatch(v, srcFilter));
-  $("local").innerHTML = list.length ? list.map(v => {
+  const bad = srcFilter === "all" || srcFilter === "footage" ? state.unusable || [] : [];  // 아직 못 쓰는 형식 (.MTS 등) — 말없이 빠지지 않게 줄로
+  const badRows = bad.map(u => `<div class="row bad" title="MP4·MOV·M4V·MKV·WEBM 영상만 바로 쓸 수 있어요">
+      <span></span><div class="mini"><span class="ph">${esc(u.ext)}</span></div>
+      <div style="min-width:0"><div class="name">${esc(u.name)}</div><div class="sub">이 형식(.${esc(u.ext)})은 바로 못 써요 · <span class="next">[MP4로 바꾸기]를 누르면 편집할 수 있는 MP4로 바꿔 넣어요</span> · <span class="size">${u.size_mb >= 1000 ? (u.size_mb / 1000).toFixed(1) + "GB" : u.size_mb + "MB"}</span></div></div>
+      <span class="chip bad">못 써요</span><button class="btn" data-conv="${esc(u.name)}" title="원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요">MP4로 바꾸기</button></div>`).join("");
+  $("local").innerHTML = list.length || badRows ? list.map(v => {
     const id = ytId(v.name);
     const title = niceName(v.name);
-    return `<div class="row">
-      <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
+    const chip = v.copying ? `<span class="chip copy" title="파일이 아직 복사되고 있어요. 크기가 몇 초 동안 그대로면 쓸 수 있어요">복사 중…</span>`
+      : v.changed ? `<span class="chip warn" data-chip="${esc(v.name)}" data-base="파일이 바뀌었어요" title="편집점을 찾은 뒤 영상 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요)">파일이 바뀌었어요</span>`
+      : v.analyzed ? `<span class="chip ok" data-chip="${esc(v.name)}" data-base="편집점 준비됨">편집점 준비됨</span>` : `<span class="chip" data-chip="${esc(v.name)}" data-base="아직 안 함">아직 안 함</span>`;
+    return `<div class="row${v.copying ? " copying" : ""}">
+      <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
-      ${v.analyzed ? `<span class="chip ok" data-chip="${esc(v.name)}" data-base="편집점 준비됨">편집점 준비됨</span>` : `<span class="chip" data-chip="${esc(v.name)}" data-base="아직 안 함">아직 안 함</span>`}
-      ${v.analyzed ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      ${chip}
+      ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
+        : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
     </div>`;
-  }).join("") : state.local.length ? `<div class="empty"><b>${esc(filterName())} 영상이 없어요</b>위에서 '전체'를 누르면 모든 영상이 보여요. 영상 이름 아래 출처 표시를 눌러 바꿀 수도 있어요.</div>`
+  }).join("") + badRows : state.local.length ? `<div class="empty"><b>${esc(filterName())} 영상이 없어요</b>위에서 '전체'를 누르면 모든 영상이 보여요. 영상 이름 아래 출처 표시를 눌러 바꿀 수도 있어요.</div>`
     : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
   document.querySelectorAll(".lchk").forEach(c => c.onchange = () => { c.checked ? libSel.add(c.value) : libSel.delete(c.value); sync(); });
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   document.querySelectorAll("#local [data-src]").forEach(b => b.onclick = e => { e.stopPropagation(); srcMenu(b); });
   document.querySelectorAll("#local [data-toref]").forEach(b => b.onclick = () => moveToRefs([b.dataset.toref]));
+  document.querySelectorAll("#local [data-reana]").forEach(b => b.onclick = () => analyzeNames([b.dataset.reana], true));
+  document.querySelectorAll("#local [data-conv]").forEach(b => b.onclick = () => convertMp4(b.dataset.conv));
   renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
@@ -1320,13 +1447,28 @@ function fillSelect(id, list) {
   $(id).innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${srcNote(v)}</option>`).join("") : `<option value="">(영상 없음)</option>`;
   if (list.some(v => v.name === cur)) $(id).value = cur;
 }
-$("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요"); };
-$("btnAnalyze").onclick = () => {
-  const names = libChecked();
+$("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요 · 복사가 끝날 때까지 '복사 중'으로 보여요"); };
+$("btnAnalyze").onclick = () => analyzeNames(libChecked());
+function analyzeNames(names, changedFile) {
+  if (state.job || !names.length) return;
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
-  if (again && !confirm(`이미 편집점을 찾은 영상이 ${again}개 있어요.\n다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
-  job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); });
-};
+  if (again && !confirm(`${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
+  job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
+}
+function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남 → '몇 개 중 몇 개' 카드 + 그 영상만 고른 채로 (다시 하기도 그 영상만)
+  const jb = lastJob || {}, body = jb.body || { names: [] }, total = (body.names || []).length;
+  const failed = (res && res.failed) || [];
+  if (!failed.length) { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); return; }
+  toast(`${total - failed.length}개는 편집점을 찾았어요 · ${failed.length}개 실패`);
+  libSel.clear(); failed.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
+  const f = partFail(failed, res.why, total, "편집점을 찾지");
+  showFail({ ...f, msg: f.msg.replace("개를 편집점을 찾지 못했어요", "개는 편집점을 찾지 못했어요"), job: "편집점 찾기" },
+    { path: "/api/analyze", body: { ...body, names: failed }, done: analyzed, panel: jb.panel || "p-library" });
+}
+function convertMp4(name) {  // 못 쓰는 형식(.MTS 등) → MP4 (원본은 보관함 안 '바꾸기 전 원본' 폴더로)
+  if (state.job || !confirm(`'${name}' 파일을 편집할 수 있는 MP4로 바꿔 보관함에 넣을까요?\n원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요. 영상 길이에 따라 몇 분 걸릴 수 있어요.`)) return;
+  job("/api/convert", { name }, r => toast(r && r.name ? `MP4로 바꿨어요 · ${r.name}` : "MP4로 바꿨어요"));
+}
 
 /* 2-1. 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 → 이어서 편집점 찾기 (서버에서 한 작업으로) */
 const BUNDLE_JOB = "한 영상으로 묶기";
@@ -1433,9 +1575,9 @@ try { const v = localStorage.getItem("styleLib"); if (v === "1" || v === "0") st
 try { for (const k of ["refLearn", "refPrune"]) { const v = localStorage.getItem(k); if (v === "1" || v === "0") $(k).checked = v === "1"; } } catch (e) {}
 const showLib = () => styleLib === null ? !refs.videos.length : styleLib;
 const mbText = n => n >= 1000 ? `${(n / 1000).toFixed(1)}GB` : `${Math.round(n)}MB`;
-const refCookie = () => $("refCookies").checked ? "chrome" : null;
-$("refCookies").onchange = () => { $("cookies").checked = $("refCookies").checked; };  // 소재 찾기의 같은 설정과 함께
-$("cookies").addEventListener("change", () => { $("refCookies").checked = $("cookies").checked; });
+const refCookie = () => $("refCookies").value || null;
+$("refCookies").onchange = () => { $("cookies").value = $("refCookies").value; };  // 소재 찾기의 같은 설정과 함께
+$("cookies").addEventListener("change", () => { $("refCookies").value = $("cookies").value; });
 ["refLearn", "refPrune"].forEach(k => $(k).addEventListener("change", () => { try { localStorage.setItem(k, $(k).checked ? "1" : "0"); } catch (e) {} }));
 async function loadRefs() {
   try { const j = await (await fetch("/api/refs")).json(); if (!j.ok) return; refs = { ...j, loaded: true }; } catch (e) { return; }
@@ -1483,9 +1625,13 @@ $("refGo").onclick = () => {
 function refDone(r) {
   loadRefs(); loadStyles();
   if (!r) return;
+  const jb = lastJob || { panel: "p-style" };
   if (r.ok === false) {
-    toast(r.error || "학습용 영상을 받지 못했어요");
-    if (r.blocked) { $("refAdd").hidden = false; $("refCookies").focus(); $("refCookies").parentElement.scrollIntoView({ block: "center" }); }  // 이 화면의 같은 설정을 바로 보여 줌
+    if (r.fail) { failToast({ job: "학습용 영상 받기" }, jb.panel); showFail({ ...r.fail, job: "학습용 영상 받기" }, jb); }  // 카드에 브라우저 고르기가 있음
+    else {
+      toast(r.error || "학습용 영상을 받지 못했어요");
+      if (r.blocked) { $("refAdd").hidden = false; $("refCookies").focus(); }  // 카드가 없으면 이 화면의 같은 설정을 보여 줌
+    }
     return;
   }
   const got = (r.got || []).length, fail = (r.failed || []).length, lib = (r.library || []).length, ls = r.learned || [], lk = (r.locked || []).length;
@@ -1500,6 +1646,7 @@ function refDone(r) {
   if (lk) parts.push(`${lk}개는 백신 등이 아직 검사 중이라 잠시 뒤 목록에 들어와요`);
   if (bad) parts.push(`스타일 ${bad}개 배우기 실패 (작업 기록 확인)`);
   toast(parts.join(" · ") || "끝났어요");
+  if (fail) showFail({ ...partFail(r.failed, r.why, got + fail, "받지"), job: "학습용 영상 받기" }, jb);
 }
 function renderRefChips() {
   const ch = refs.channels || [];
@@ -1583,7 +1730,7 @@ async function refDel(body, done) {  // 학습용 영상 지우기 · 원본(보
     if (!confirm(`이 중 ${j.original.length}개는 보관함에서 옮긴 원본 영상이에요 (풋살사관학교·내 촬영본·출처 모름).\n지우면 다시 받을 수 없어요. 편집에 쓰려면 지우지 말고 '보관함으로'를 눌러 되돌려 주세요.\n그래도 지울까요? [취소]를 누르면 아무것도 지우지 않아요.`)) return;
     return refDel(Object.assign({}, body, { confirmOriginal: true }), done);
   }
-  if (j.ok) waitFor(j, done);
+  if (j.ok) waitFor(j, done || (() => {}));
 }
 $("styleLib").onchange = () => { styleLib = $("styleLib").checked; try { localStorage.setItem("styleLib", styleLib ? "1" : "0"); } catch (e) {} renderStyleSrc(); };
 function syncStyle() { const n = stySel.size; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
@@ -1883,13 +2030,17 @@ function sync() {
   $("btnAnalyze").disabled = busy || !nl;
   $("btnToRefs").disabled = busy || !nl;
   $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
-  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo").forEach(b => (b.disabled = busy));
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana]").forEach(b => (b.disabled = busy));
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
 }
 function job(path, body, done) {
-  api(path, body).then(j => { if (j.ok) waitFor(j, done); });
+  const panel = curPanel();
+  api(path, body).then(j => {
+    if (j.ok) { clearFail(panel); lastJob = { path, body, done: done || null, panel, mine: true }; waitFor(j, done); }
+    else if (j.fail) showFail(j.fail, { path, body, done, panel });  // 바로 거절 (예: 아직 복사 중)
+  });
 }
 function setRing(svg, pct) {
   const ind = pct === null || pct === undefined;
@@ -1929,7 +2080,7 @@ async function poll() {
   try { s = await api(`/api/state?since=${logSince}${want ? "&job=" + want : ""}`); } catch (e) { return; }
   $("ver").textContent = `v${s.version}`;
   $("workspace").textContent = "작업 폴더 " + s.workspace.split(/[\\/]/).slice(-1)[0];
-  $("workspace").title = s.workspace;
+  $("workspace").title = `${s.workspace}\n누르면 작업 폴더를 열어요 (문제가 생기면 보낼 studio.log 도 여기에 있어요)`;
   if (s.log.length) { $("logtxt").textContent += s.log.join("\n") + "\n"; $("logtxt").scrollTop = 1e9; }
   logSince = s.log_total;
   const wasBusy = !!state.job;
@@ -1940,13 +2091,24 @@ async function poll() {
   state.local = s.local;
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
+  state.unusable = s.unusable || [];  // 아직 못 쓰는 형식 (.MTS 등)
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
-  // 내가 시킨 작업(번호)이 끝났을 때만 그 결과로 — 번호가 없으면(예전 흐름) 작업이 비었을 때
-  const fin = pending && (want ? (s.done && s.done.id === want && want === pendingId ? s.done : null) : (wasBusy && !s.job ? s : null));
+  // 내가 시킨 작업(번호)이 끝났을 때만 그 결과·실패로 — 번호가 없으면(예전 흐름) 작업이 비었을 때 (휴대폰이 시킨 작업과 안 섞임)
+  const fin = want ? (s.done && s.done.id === want && want === pendingId ? s.done : null) : (wasBusy && !s.job ? s : null);
   if (fin) {
-    const f = pending; pending = null; pendingId = null;
-    if (fin.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
-    else f(fin.result);
+    const f = pending, fp = pendPanel; pending = null; pendingId = null; pendPanel = null;
+    // job() 밖에서 시작한 작업(학습용으로 옮기기·지우기·점수·채널 추가)도 이 화면이 시작했으면 실패를 알림 (다시 하기 없이)
+    const mine = lastJob && lastJob.mine ? lastJob : (f === bundleDone ? { path: "/api/bundle", panel: "p-library" } : f ? { panel: fp || curPanel() } : null);
+    if (lastJob) lastJob.mine = false;
+    if (fin.error && mine) {  // 실패: 쉬운 한 줄 + 할 일을 그 작업을 시킨 화면에 남김 (다른 화면·창·휴대폰에서 시작한 작업은 그쪽이 알림)
+      const fail = fin.fail || { kind: "other", msg: fin.error, actions: ["retry", "log", "logfile"] };
+      failToast(fail, mine.panel);
+      showFail(fail, mine);
+      if (f === bundleDone) bundleMark(false);
+    } else if (!fin.error && f) {
+      if (mine.body && mine.body.cookies && YT_JOBS.includes(mine.path) && !((fin.result && fin.result.failed) || []).length) ckOkSet(mine.body.cookies);  // 잘 받은 브라우저 (다음 실패 카드에서 먼저 고름)
+      f(fin.result);
+    }
   }
   // 6-1 스타일 일치 점수: 작업이 끝났는데(실패 포함) 아직 '매기는 중'이면 풀어 줌 · 스타일 화면이면 편집점 찾기를 마친 영상을 목록에 바로
   const sKey = s.local.filter(v => v.analyzed).map(v => v.name).join("\n"), onStyle = $("p-style") && $("p-style").classList.contains("on");
@@ -1960,10 +2122,13 @@ async function poll() {
 }
 
 $("btnLog").onclick = () => $("drawer").classList.toggle("open");
+$("workspace").onclick = () => api("/api/open", { which: "work" });
 $("btnLogClose").onclick = () => $("drawer").classList.remove("open");
 async function checkUpdate(manual) {
   const u = await api("/api/update/check");
-  if (u.notice) { toast(u.notice); if (u.notice_warn) $("drawer").classList.add("open"); }  // 방금 업데이트·되돌림 결과 (켜진 뒤 한 번)
+  if (u.notice) {  // 방금 업데이트·되돌림 결과 · 지난번에 갑자기 꺼짐 (켜진 뒤 한 번) · 알릴 일은 카드로 남김
+    if (u.notice_warn) showFail({ kind: "notice", msg: u.notice, actions: ["log", ...(/studio\.log|관리자/.test(u.notice) ? ["logfile"] : [])], job: "알림" }, { panel: curPanel() }); else toast(u.notice);
+  }
   const pill = $("updPill");
   pill.classList.toggle("show", !!u.available);
   pill.textContent = u.available ? `새 버전 v${u.latest} 받기` : "";
@@ -2159,7 +2324,7 @@ checkUpdate();
 })();
 </script>
 <script>
-/* 7-2. 유튜브에 바로 올리기 (서버 youtube_upload.py · /api/youtube/* · D-035) — 연결·Google 설정 안내·올리기·멈추기·이어 올리기·기록
+/* 7-2. 유튜브에 바로 올리기 (서버 youtube_upload.py · /api/youtube/* · D-045) — 연결·Google 설정 안내·올리기·멈추기·이어 올리기·기록
    밖에서 온 글자(채널 이름·제목·오류·파일 이름)는 모두 esc() · 상태는 이 화면이 보일 때, 그리고 우리 작업 중·로그인 기다림에 1.5초마다
    (다른 화면에 가 있어도 우리 작업이 끝나면 알림 · 멈추거나 실패하면 7단계 옆 빨간 점) · 링크는 서버가 시스템 브라우저로 엶(정해진 주소만)
    공개 설정은 늘 '비공개'로 시작 (기억하지 않음) · 비공개가 아니면 매번 확인 · 감사 전에는 모든 업로드가 잠긴다고 늘 보여 줌 */
@@ -2461,6 +2626,7 @@ checkUpdate();
     await ctx().flush();
     const j = await api(path, body);
     if (j.ok) {  // 시작 응답의 jobId(다른 작업과 같음) → 그 번호의 작업이 끝났을 때 결과를 봄
+      clearFail("p-upload");  // 지난 실패 카드는 지움 (새로 시킨 작업의 결과로)
       YT.wasOurs = true; YT.jobId = j.jobId || null; state.jobId = j.jobId || state.jobId;
       state.job = path.endsWith("finish") ? JOBS[1] : JOBS[0]; state.progress = {}; render(); navDot(); return true;
     }
@@ -2494,14 +2660,31 @@ checkUpdate();
     const c = ctx();
     if (await start("/api/youtube/upload", { name: c.name, seq: c.seq || "", opts, again: !!again })) toast("유튜브에 올리기 시작했어요 · 다른 화면에 다녀와도 계속 올리고, 끝나면 알려 드려요");
   }
-  async function finished() {  // 우리 작업이 끝남 (어느 화면에 있든)
+  // 실패 카드 (서버 trouble.YT_CARDS 의 정해진 문장 + 할 일 · 할당량·연결 끊김·권한·썸네일 막힘·인터넷·서버 · D-048) — 7단계 화면 위에 남김
+  function ytCard(f, r) {
+    const pend = pendOf(), key = (r && r.key) || (pend && pend.key), vid = r && r.videoId;
+    const on = { relogin: () => login(), verify: () => { api("/api/youtube/open", { what: "guide", key: "verify" }); toast("브라우저에서 열었어요"); } };
+    if (key) on.resume = () => start("/api/youtube/resume", { key });
+    if (vid) { on.thumb = () => start("/api/youtube/finish", { videoId: vid, steps: ["thumbnail"] }); on.finish = () => start("/api/youtube/finish", { videoId: vid }); }
+    showFail({ ...f, job: f.job || JOBS[0] }, { panel: "p-upload", on });
+  }
+  async function finished(id) {  // 우리 작업이 끝남 (어느 화면에 있든) · id: 그 작업 번호 (작업 밖으로 나온 예외의 실패 안내를 받음)
     await loadStatus();
     if (visible()) await Promise.all([loadPlan(), loadHist()]);
+    const d = id ? ((await getJ(`/api/youtube/status?job=${id}`)) || {}).done : null;
+    const away = visible() ? "" : " · 7단계 '올리기'에서 봐 주세요";
+    if (d && d.error) {  // 예외로 끝남 (YT.st.last 는 지난 작업 것일 수 있음) → start_job 이 만든 카드
+      const f = d.fail || { kind: "yt_other", msg: d.error, actions: ["log", "logfile"] };
+      if (f.kind === "cancelled") toast(f.msg); else { ytCard(f, null); failToast({ job: f.job || JOBS[0] }, "p-upload"); }
+      navDot(); return;
+    }
     const r = YT.st && YT.st.last;
     if (!r) return;
-    const away = visible() ? "" : " · 7단계 '올리기'에서 봐 주세요";
-    if (r.ok) {
-      if (YT.opts) { YT.opts.privacy = "private"; YT.opts.when = ""; }  // 다음 영상은 다시 비공개부터
+    if (r.ok && YT.opts) { YT.opts.privacy = "private"; YT.opts.when = ""; }  // 다음 영상은 다시 비공개부터
+    if (r.fail) ytCard(r.fail, r);
+    if (r.ok && r.fail) toast(`유튜브에 올렸지만 확인할 것이 있어요${away || " · 위의 안내를 봐 주세요"}`);
+    else if (!r.ok && r.fail) failToast({ job: JOBS[0] }, "p-upload");
+    else if (r.ok) {
       toast(r.locked ? `올렸지만 '비공개(잠김)'로 올라갔어요${away || " · 아래 안내를 봐 주세요"}` : `유튜브에 올렸어요 ✓ · ${r.privacyText || PK[r.privacy] || ""}${away}`);
     } else if (r.paused) toast(`멈췄어요 · [이어 올리기]로 이어서 올려요${away}`);
     else if (r.error) toast(`유튜브 · ${r.error}${away}`);
@@ -2621,7 +2804,7 @@ checkUpdate();
     if (run && visible()) renderRun();
     if (run || (waiting && visible()) || YT.wasOurs) await loadStatus();
     const ended = YT.wasOurs && (!run || (YT.jobId && state.jobId && state.jobId !== YT.jobId));  // 내가 시킨 번호가 끝남
-    if (ended) { YT.wasOurs = false; YT.jobId = null; finished(); }
+    if (ended) { const id = YT.jobId; YT.wasOurs = false; YT.jobId = null; finished(id); }
     else if (run) YT.wasOurs = true;
     if (waiting && YT.st && YT.st.connected) { YT.loginUrl = ""; toast(`유튜브 계정을 연결했어요 · ${(YT.st.channel || {}).title || ""}`); loadPlan(); }
     if (visible()) autoCheck();
