@@ -22,7 +22,7 @@ import core
 import editor
 import sfxlib
 
-SIG_VER = 3
+SIG_VER = 5
 MIX_DIR_NAME = "섞기"           # styles/섞기/<이름>.json — 배운 스타일 목록(list_styles)에 섞이지 않게 따로
 DRAFT_NAME = "풋살사관학교 스타일(초안)"
 ASPECTS = ("intro", "rhythm", "captions", "fun", "sound")
@@ -39,7 +39,9 @@ PRAISE = re.compile(r"좋아요|좋습니다|나이스|이거죠|그렇죠|그�
 SUCCESS = re.compile(r"성공|됐다|됐어요|들어갔|골인|나이스|완벽|좋아요")
 FAIL = re.compile(r"아깝|놓쳤|실수|안 ?돼|아이고|아이구|빗나|안 ?들어|아쉽|틀렸|망했")
 SURPRISE = re.compile(r"(?:^|[\s,.!?])(?:와|우와|와우|대박|헐|미쳤|오오+|어\?!|어머)(?:[\s,.!?~]|$)")
-JOKE = re.compile(r"농담|ㅋㅋ|웃기|장난(?:이|입|이에|이고)|제가 원래|저도 (?:잘 )?못|저도 몰라")
+JOKE = re.compile(r"농담|ㅋㅋ|웃기|장난(?:이|입|이에|이고)|제가 원래|저도 .{0,12}못|저도 몰라")
+LAUGH_THR, CHEER_THR = 0.12, 0.1   # YAMNet 웃음·환호 점수: 현장 웃음은 말소리에 섞여 낮게 나옴 (말만 있는 곳은 0.01 안팎)
+EMPH_MORE = ("무조건", "절대", "생명", "핵심", "중요", "차이", "비밀", "비결", "꼭", "달라", "완벽", "정확", "제일", "가장", "포인트")  # 앞의 것부터
 COUNT = re.compile(r"하나[,\s]+둘[,\s]+셋")
 SECTION = re.compile(r"^(?:자[,\s]*)?(?:첫 ?번째|두 ?번째|세 ?번째|네 ?번째|다음은|다음으로|이번엔|이번에는|그 ?다음|마지막으로|자 이제)")
 CLOSING = re.compile(r"오늘은 여기까지|오늘 영상은 여기|감사합니다|구독|다음 시간|다음 영상")
@@ -257,7 +259,8 @@ def signals(name, log=print, use_faces=True):
         raise MsgError("MSG 후보 만들기를 멈췄어요") from None
     rms_db, peak_db = _levels(wave, segs)
     tags = _tags(path, wave, name)
-    noisy = _spans((tags or {}).get("laugh"), 0.48, 0.3) + _spans((tags or {}).get("cheer"), 0.48, 0.3)
+    noisy = _spans((tags or {}).get("laugh"), 0.48, LAUGH_THR) + _spans((tags or {}).get("cheer"), 0.48, CHEER_THR)
+    noisy += _spans((tags or {}).get("speech"), 0.48, 0.6, 0.3)  # 받아쓰기가 놓친 말(짧은 말·작은 소리)의 첫소리도 공 소리가 아님
     onsets = [t for t in _onsets(wave, words) if not any(a - 0.2 <= t <= b + 0.2 for a, b in noisy)]  # 웃음·환호 소리는 공 소리가 아님
     _check()
     rec = editor.recommend(name)
@@ -294,7 +297,7 @@ def demo_windows(sig, words):
             if act and not any(_in_spans((a + b) / 2, [j]) for j in junk):
                 lo, hi = max(a, min(act) - 0.8), min(b, max(act) + 1.2)
                 if hi - lo >= 1.2:
-                    out.append([round(lo, 2), round(hi, 2)])
+                    out.append([round(float(lo), 2), round(float(hi), 2)])
         prev = max(prev, e)
     return out
 
@@ -356,6 +359,26 @@ def _motion_z(sig):
     return [(i * st, (float(v) - med) / mad) for i, v in enumerate(m)]
 
 
+def _emph_clause(txt):
+    """기술 이름은 없지만 강조 말(무조건·핵심·생명…)이 든 말 → 그 말부터 서술어까지 짧은 구절 ('터치가 무조건 길어져요!').
+    서술어(~요·~다)로 끝나지 않거나 14글자 넘으면 None (말 조각을 띄우지 않게)."""
+    toks = re.findall(r"\S+", str(txt or ""))
+    for w in EMPH_MORE:
+        for i, tk in enumerate(toks):
+            if not tk.startswith(w):
+                continue
+            a = i - 1 if i > 0 and not re.search(r"[,.!?]$", toks[i - 1]) and not LEAD.match(toks[i - 1] + " ") else i
+            b = i
+            while b < len(toks) and b - a <= 3 and not re.search(r"(요|다|죠)[.!?~]*$", toks[b]):
+                b += 1
+            if b >= len(toks) or b - a > 3:
+                continue
+            out = re.sub(r"[,.~…]+$", "", " ".join(toks[a:b + 1])).strip()
+            if 4 <= len(out.replace(" ", "")) <= 14:
+                return (out if out.endswith(("!", "?")) else out + "!"), 1
+    return None, 0
+
+
 def _word_at(words, pat, k):
     """구간 k 안에서 pat 이 처음 나오는 낱말의 시각."""
     for s, e, w, j in words:
@@ -381,8 +404,8 @@ def moments(sig, segs=None):
     # 시범(플레이): 말 없는 틈(DEMO_GAP 넘게) 안의 움직임 봉우리·순간 큰 소리
     mz = _motion_z(sig)
     onsets = sig.get("onsets") or []
-    laughs = _spans((sig.get("tags") or {}).get("laugh"), sig.get("tagStep", 0.48), 0.3)
-    cheers = _spans((sig.get("tags") or {}).get("cheer"), sig.get("tagStep", 0.48), 0.3)
+    laughs = _spans((sig.get("tags") or {}).get("laugh"), sig.get("tagStep", 0.48), LAUGH_THR)
+    cheers = _spans((sig.get("tags") or {}).get("cheer"), sig.get("tagStep", 0.48), CHEER_THR)
     gaps = []
     prev = 0.0
     for s, e, _, _ in words + [(dur, dur, "", -1)]:
@@ -397,9 +420,9 @@ def moments(sig, segs=None):
         if not ons and peak[1] < 1.5:
             continue
         t = ons[0] if ons else peak[0]
-        if ons and peak[0] is not None and peak[1] >= 1.5:
-            near = [o for o in ons if abs(o - peak[0]) <= 1.0]
-            t = near[0] if near else ons[0]
+        if ons:  # 공 소리가 여러 번이면 화면이 가장 크게 움직이는 때의 소리
+            zat = lambda o: max([z for tm, z in mot if abs(tm - o) <= 0.75] or [0.0])  # noqa: E731
+            t = max(ons, key=lambda o: (zat(o), -o))
         score = max(0.0, peak[1]) * 0.4 + 1.0 * min(3, len(ons))
         after = [w for s, e, w, _ in words if b <= s <= b + 3.0]
         praise = bool(PRAISE.search(" ".join(after)))
@@ -416,6 +439,8 @@ def moments(sig, segs=None):
         a, b = float(s["start"]), float(s["end"])
         sp = " " + txt + " "
         lab, sc = editor.emphasis_label(txt)
+        if not lab:
+            lab, sc = _emph_clause(txt)
         if lab:
             lab = LEAD.sub("", lab).strip() or lab
             key = lab.rstrip("!").split()[0]
@@ -440,10 +465,10 @@ def moments(sig, segs=None):
             if first_q is None and a < dur * 0.3:
                 first_q = (a, b, txt)
         if JOKE.search(txt):
-            add("punchline", a, b, b, 2.0, txt, "농담 말")
+            add("punchline", a, b, b - 0.1, 2.0, txt, "농담 말")  # (말 끝 바로 앞 · 정리 컷이 말 끝에서 끝나도 남음)
         for la, lb in laughs:  # 말이 끝나고 1.5초 안에 웃음 → 그 말이 펀치라인
             if 0 <= la - b <= 1.5:
-                add("punchline", a, b, b, 3.0, txt, "말 끝에 웃음소리")
+                add("punchline", a, b, b - 0.1, 3.0, txt, "말 끝에 웃음소리")
                 break
     # 훅 문장: 앞 30% 안의 첫 질문, 없으면 강한 낱말이 든 말
     if first_q:
@@ -875,7 +900,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
         elif k == "count" and re.search(r"하나[,\s]+둘", m.get("text") or ""):
             cand("count", m, 1.5, text="하나 둘 셋", dur=0.7)
         elif k == "punchline":
-            cand("inner", m, 1.8 + sc, text=rng.choice(INNER_TEXTS["punchline"]), dur=1.6, t=m["b"] + 0.15)
+            cand("inner", m, 1.8 + sc, text=rng.choice(INNER_TEXTS["punchline"]), dur=1.6, t=m["t"])
             cand("punch", m, 1.7 + sc, dur=2.2, t=max(m["a"], m["b"] - 1.2))
         elif k == "fail":
             cand("fx", m, 1.6 + sc, text=rng.choice(FX_TEXTS["fail"]), dur=1.0, look="fail")

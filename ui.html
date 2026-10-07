@@ -78,6 +78,21 @@
   .styles .st .score .res { flex-basis: 100%; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
   .styles .st .score .res b { color: var(--brand); font-size: 14px; }
   /* 영상 기획 분석 (판단 문장 위주 · 숫자·시각은 접힌 '근거 보기'·'구조 수치' 안에만) */
+  .grid.msgstyles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); align-items: start; }
+  .msgc { padding: 16px; }
+  .msgc h3 { margin: 0 0 6px; font-size: 15px; }
+  .msgc .psum { color: var(--ink); font-size: 13.5px; font-weight: 600; line-height: 1.55; margin: 2px 0 10px; }
+  .msgc .pbtns { margin-top: 10px; }
+  .msgc details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .msgc details > summary { cursor: pointer; font-weight: 600; }
+  .msgc ul { margin: 6px 0 0; padding-left: 18px; }
+  .msgp { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 13px; margin: 6px 0 4px; }
+  .msgp b { white-space: nowrap; }
+  .msgp span { color: var(--ink-2); }
+  .mixrow { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 4px 10px; align-items: center; margin: 8px 0; font-size: 13px; }
+  .mixrow select { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 8px; font: inherit; min-width: 0; max-width: 100%; }
+  .mixrow .d { grid-column: 2; color: var(--ink-2); font-size: 12px; }
+  .mixrow .d.fb { color: #c0392b; }
   .grid.styles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); align-items: start; }
   .styles .st .psum { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.55; margin: 2px 0 12px; }
   .styles .st .psum.old { font-weight: 500; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -500,6 +515,8 @@
       <div class="card rows" id="styleSrc"></div>
       <h2 class="sh">배운 스타일</h2>
       <div class="grid styles" id="styleList"></div>
+      <h2 class="sh">MSG 자동 편집 스타일 <span class="sub" style="font-weight:500;font-size:13px;color:var(--ink-2)">· 편집실 '추천' 탭의 '재미있게 자동 편집'에서 골라요</span></h2>
+      <div class="grid msgstyles" id="msgStyles"></div>
       <div class="card empty" id="styleEmpty"><b>아직 배운 스타일이 없어요</b>1) 위의 '채널 추가'에서 따라 하고 싶은 채널을 넣거나 추천 채널을 고르면 인기 영상을 받아 바로 배워요. 2) 이미 받은 영상은 목록에서 골라 "스타일 배우기"를 누르세요. 2~3개를 함께 배우면 더 정확해요.</div>
     </section>
     <section class="panel" id="p-thumb">
@@ -1135,6 +1152,7 @@ async function loadStyles() {
   document.querySelectorAll("[data-sdel]").forEach(b => (b.onclick = async () => { if (!confirm(`'${b.dataset.sdel}' 스타일을 지울까요?`)) return; await api("/api/style/delete", { name: b.dataset.sdel }); loadStyles(); }));
   bindScores();
   bindPlan();
+  loadMsgStyles();
   document.querySelectorAll("[data-stempo]").forEach(c => (c.onchange = async () => {  // 컷 리듬 맞추기 (#7): 말 빠르기 켜기/끄기
     c.disabled = true;
     const r = await api("/api/style/tempo", { name: c.dataset.stempo, on: c.checked }).catch(() => ({}));
@@ -1142,6 +1160,37 @@ async function loadStyles() {
     else if (!r.error) toast("설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
     loadStyles();
   }));
+}
+/* 6-1. MSG 자동 편집 스타일 (D-023): 기본 스타일 4개 · 스타일 섞기('풋살사관학교 스타일(초안)') — 섞은 스타일은 배운 스타일 목록과 따로 */
+const MIX_ROWS = [["intro", "인트로"], ["rhythm", "컷 리듬"], ["captions", "자막"], ["fun", "재미(MSG)"], ["sound", "음악·소리"]];
+let msgMix = null;
+async function loadMsgStyles(name) {
+  let src, mix;
+  try { src = await (await fetch("/api/style/presets")).json(); mix = await (await fetch("/api/style/mix?name=" + encodeURIComponent(name || (msgMix && msgMix.name) || "풋살사관학교 스타일(초안)"))).json(); }
+  catch (e) { return; }
+  msgMix = mix;
+  const opts = (a, cur) => [["기본 스타일", src.presets || []], ["배운 스타일", src.learned || []]].map(([g, xs]) => xs.length ? `<optgroup label="${g}">${xs.map(x =>
+    `<option value="${esc(x.kind + "|" + x.name)}" ${cur.kind === x.kind && cur.name === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</optgroup>` : "").join("");
+  const hist = (mix.history || []).map(h => `<li>${esc(h.t || "")} · ${esc((MIX_ROWS.find(r => r[0] === h.aspect) || [0, h.aspect])[1])} ← ${esc(h.source)}</li>`).join("");
+  $("msgStyles").innerHTML = `<div class="card msgc"><h3>기본 스타일</h3>
+      <p class="psum">배운 스타일이 없어도 바로 비교할 수 있는 네 가지예요. 같은 원본으로 여러 개를 만들어 나란히 보세요.</p>
+      <div class="msgp">${(src.presets || []).map(x => `<b>${esc(x.name)}</b><span>${esc(x.desc)}</span>`).join("")}</div></div>
+    <div class="card msgc" id="mixCard"><h3>스타일 섞기</h3>
+      <p class="psum">정해진 스타일이 아니에요. 후보를 비교하며 마음에 드는 부분만 골라 계속 바꿔 보세요.</p>
+      <div class="mixrow"><b>이름</b><input class="inp" id="mixName" style="min-width:0" value="${esc(mix.name)}"></div>
+      ${MIX_ROWS.map(([a, l]) => { const r = mix.aspects[a]; return `<div class="mixrow"><b>${l}</b><select data-mixa="${a}">${opts(a, r.source)}</select>
+        <div class="d ${r.fallback ? "fb" : ""}">${esc(r.desc)}${r.fallback ? " (원래 스타일이 지워져 기본값으로)" : ""}</div></div>`; }).join("")}
+      <div class="mixrow"><b>MSG 양</b><div class="seg" id="mixAmt">${["담백", "보통", "듬뿍"].map(v => `<button data-v="${v}" class="${mix.intensity === v ? "on" : ""}">${v}</button>`).join("")}</div></div>
+      <div class="pbtns"><button class="btn primary" id="mixSave">저장</button></div>
+      ${hist ? `<details open><summary>최근 바꾼 것</summary><ul>${hist}</ul></details>` : ""}</div>`;
+  let amt = mix.intensity;
+  document.querySelectorAll("#mixAmt button").forEach(b => (b.onclick = () => { amt = b.dataset.v; document.querySelectorAll("#mixAmt button").forEach(x => x.classList.toggle("on", x === b)); }));
+  $("mixSave").onclick = async () => {
+    const aspects = {}; document.querySelectorAll("[data-mixa]").forEach(sel => { const [kind, ...n] = sel.value.split("|"); aspects[sel.dataset.mixa] = { kind, name: n.join("|") }; });
+    const nm = $("mixName").value.trim() || "풋살사관학교 스타일(초안)";
+    const r = await api("/api/style/mix", { name: nm, aspects, intensity: amt }).catch(() => ({}));
+    if (r.ok) { toast(`'${r.name}'을(를) 저장했어요 · 편집실 '재미있게 자동 편집'의 '섞은 스타일'에서 골라요`); loadMsgStyles(r.name); }
+  };
 }
 function bindPlan() {
   document.querySelectorAll("[data-prelearn]").forEach(b => (b.onclick = async () => {

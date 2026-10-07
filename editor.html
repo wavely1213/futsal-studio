@@ -71,6 +71,21 @@
   .rec b { display: block; margin-bottom: 2px; }
   .rec .m { color: var(--ink-2); font-size: 11.5px; margin-bottom: 6px; }
   .rec.on { border-color: var(--accent); background: var(--accent-soft); }
+  .mgrp { font-size: 11px; color: var(--ink-3, #8a8a8a); margin: 6px 0 4px; }
+  .mchip { display: inline-block; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; padding: 3px 10px; margin: 0 4px 5px 0; cursor: pointer; font-size: 12px; }
+  .mchip.on { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+  .mcand { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+  .mcand.cur { border-color: var(--accent); }
+  .mcand b { display: block; margin-bottom: 3px; }
+  .mstrip { position: relative; height: 12px; background: #1e1e1e; border-radius: 3px; margin: 6px 0; overflow: hidden; }
+  .mstrip i { position: absolute; top: 0; bottom: 0; width: 2px; }
+  .mtaste { font-size: 11.5px; color: var(--ink-2); margin-top: 6px; }
+  .mtaste button { margin: 2px 2px 0 0; }
+  .mrow { display: flex; gap: 6px; align-items: center; padding: 3px 0; font-size: 12px; cursor: pointer; }
+  .mrow:hover { background: var(--panel-2); }
+  .mrow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; width: 40px; flex: none; }
+  .mrow .k { flex: none; }
+  .mrow .x { flex: 1; color: var(--ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .kw { display: inline-block; background: #3a2a14; color: #ffb35c; border-radius: 3px; padding: 0 5px; margin-right: 3px; font-size: 11px; }
   .evrow { display: flex; gap: 8px; padding: 4px 10px; cursor: pointer; }
   .evrow:hover { background: var(--panel-2); }
@@ -509,7 +524,7 @@ const fmtDb = d => d <= -59.9 ? "-∞ dB" : (d >= 0 ? "+" : "") + (+d).toFixed(1
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const EPS = 1e-4, HF = 0.5 / FPS;
 
-let P = null, S = null, EVENTS = [], REC = null, STYLES = null;
+let P = null, S = null, EVENTS = [], REC = null, STYLES = null, MSGSRC = null;
 const MED = {}, WAVES = {}, THUMBS = {};
 let T = 0, playing = false, shuttle = 1, clock = null, tool = "select", zoom = 20, markIn = null, markOut = null, snapOn = true, linkOn = true;
 let selI = new Set(), selX = null, primary = null, clipboard = null, selKf = null;
@@ -2279,7 +2294,8 @@ async function renderRec() {
   const r = REC || { shorts: [], tidy: [] };
   const m = t => mmss(t).slice(0, 5);
   if (STYLES === null) { STYLES = []; try { STYLES = (await (await fetch("/api/style/list")).json()).styles || []; } catch (e) {} }
-  $("lt-rec").innerHTML = `
+  if (MSGSRC === null) { MSGSRC = { presets: [], learned: [], mixes: [] }; try { MSGSRC = await (await fetch("/api/style/presets")).json(); } catch (e) {} }
+  $("lt-rec").innerHTML = msgSection() + `
     <div class="sec"><h4>스타일로 자동 편집 <span class="hint">(배운 유튜버 스타일대로 새 편집본)</span></h4>
       ${STYLES.length ? `${STYLES.map((s, i) => `<div class="rec ${i === 0 ? "on" : ""}" data-sty="${i}" style="cursor:pointer"><b>${esc(s.name)}</b><div class="m" style="margin:0">${esc(s.desc || "")}</div></div>`).join("")}
         <div class="seg" id="styKind" style="margin-bottom:8px"><button data-v="long" class="on">롱폼만</button><button data-v="both">롱폼 + 쇼츠</button></div>
@@ -2351,6 +2367,142 @@ async function renderRec() {
   if ($("recTidy")) $("recTidy").onclick = () => { commit("군더더기 정리"); replaceMain(r.tidy); S.format = "long"; selI.clear(); changed(); seek(0); toast(`군더더기를 정리했어요 · ${mmss(total())}`); };
   $("recFull").onclick = () => { commit("원본 전체로"); replaceMain([{ in: 0, out: P.info.duration }]); selI.clear(); changed(); seek(0); };
   document.querySelectorAll(".evrow").forEach(el => el.onclick = () => { const ts = src2tl(+el.dataset.t); if (ts.length) seek(ts[0]); else toast("지금 잘려나간 구간이에요"); });
+  bindMsg();
+}
+
+/* ---------- 재미있게 자동 편집 (MSG · msg.py) ---------- */
+const MSG_KIND = { teaser: "티저", title: "제목 카드", emphasis: "강조 자막", situ: "상황 자막", inner: "속마음 자막", fx: "효과 글자", count: "숫자 세기", sfx: "효과음",
+  punch: "확대", shake: "흔들기", replay: "다시 보기", freeze: "정지 화면", montage: "몽타주", end: "엔드 화면", bgm: "배경음악", chapters: "챕터" };
+const MSG_COL = { teaser: "#e5484d", title: "#0f7a3d", emphasis: "#ffe14d", situ: "#3fa34d", inner: "#9ad7ff", fx: "#ff9f1c", count: "#ffffff", sfx: "#1f8c86",
+  punch: "#2f6fb0", shake: "#8b4fc6", replay: "#e5484d", freeze: "#bbbbbb", montage: "#e5484d", end: "#777777", bgm: "#555555", chapters: "#555555" };
+const MSG_ASPECTS = [["intro", "인트로"], ["captions", "자막"], ["fun", "재미"], ["sound", "음악"]];
+let MSGPICK = null, MSGAMT = "보통", MSGFMT = "long";
+const msgCands = () => P.sequences.filter(q => q.auto === "msg" && q.msg);
+const josa = (w, a, b) => { const c = String(w).replace(/[^가-힣A-Za-z0-9]+$/, "").slice(-1), n = c.charCodeAt(0) - 44032; return n >= 0 && n < 11172 ? (n % 28 ? a : b) : b; }; // 받침 있으면 a
+function msgSection() {
+  const all = [...(MSGSRC.presets || []), ...(MSGSRC.mixes || []), ...(MSGSRC.learned || [])];
+  if (MSGPICK === null) MSGPICK = (MSGSRC.presets || []).slice(0, 2).map(x => x.kind + "|" + x.name);
+  const chip = x => `<span class="mchip ${MSGPICK.includes(x.kind + "|" + x.name) ? "on" : ""}" data-msty="${esc(x.kind + "|" + x.name)}" title="${esc(x.desc || "")}">${esc(x.name)}</span>`;
+  const grp = (t, xs) => xs && xs.length ? `<div class="mgrp">${t}</div>${xs.map(chip).join("")}` : "";
+  const cands = msgCands(), cur = cands.find(q => q.id === S.id);
+  return `<div class="sec" id="msgSec"><h4>재미있게 자동 편집 (MSG) <span class="hint">(예능 자막·효과음·확대·다시 보기·배경음악)</span></h4>
+    <div class="hint">스타일 고르기 (최대 3개) · 같은 원본으로 나란히 비교해요</div>
+    ${grp("기본 스타일", MSGSRC.presets)}${grp("섞은 스타일 (초안)", MSGSRC.mixes)}${grp("배운 스타일", MSGSRC.learned)}
+    ${all.length ? "" : `<div class="hint">스타일 목록을 불러오지 못했어요</div>`}
+    <div class="f" style="margin-top:6px"><label style="width:auto;margin-right:6px">MSG 양</label><div class="seg" id="msgAmt">${["담백", "보통", "듬뿍"].map(v => `<button data-v="${v}" class="${MSGAMT === v ? "on" : ""}">${v}</button>`).join("")}</div></div>
+    <div class="hint" style="margin:3px 0 6px">담백은 자막·효과를 조금만, 듬뿍은 예능처럼 많이 넣어요</div>
+    <div class="f"><label style="width:auto;margin-right:6px">형식</label><div class="seg" id="msgFmt"><button data-v="long" class="${MSGFMT === "long" ? "on" : ""}">롱폼만</button><button data-v="both" class="${MSGFMT === "both" ? "on" : ""}">롱폼 + 쇼츠</button></div></div>
+    <div style="margin-top:8px"><button class="btn pri" id="msgGo">MSG 후보 만들기</button></div>
+    <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "MSG 후보 A · 스타일 · 양"을 새로 만들어요 (가편집 다시 만들기로 바뀌지 않아요).</div>
+    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(1·2·3 키: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
+    ${cur ? msgList(cur) : ""}
+  </div>`;
+}
+function msgCard(q, i) {
+  const m = q.msg, tot = Math.max(1, seqLen(q)), src = m.style || {};
+  const ticks = (m.events || []).filter(e => !["bgm", "chapters"].includes(e.kind)).map(e => `<i style="left:${(e.t / tot * 100).toFixed(2)}%;background:${MSG_COL[e.kind] || "#888"}" title="${mmss(e.t).slice(0, 5)} ${MSG_KIND[e.kind] || e.kind}"></i>`).join("");
+  return `<div class="mcand ${q.id === S.id ? "cur" : ""}" data-mcand="${q.id}"><b>${i < 9 ? `<span class="kw">${i + 1}</span>` : ""}${esc(q.name)}</b>
+    <div class="m hint">${esc((m.summary || {}).text || "")}</div>
+    <div class="mstrip">${ticks}</div>
+    <button class="btn sm" data-mview="${q.id}">보기</button> <button class="btn sm" data-mswap="${q.id}">같은 장면으로 바꿔 보기</button>
+    <div class="mtaste">이 후보의 … 가 좋아요: ${MSG_ASPECTS.map(([a, l]) => `<button class="btn sm" data-mlike="${q.id}|${a}">${l}</button>`).join("")}</div>
+    ${(m.notes || []).length ? `<div class="hint" style="margin-top:4px">${esc(m.notes.join(" · "))}</div>` : ""}</div>`;
+}
+function msgList(q) {
+  const evs = (q.msg.events || []).filter(e => e.kind !== "chapters");
+  return `<h4 style="margin-top:10px">MSG 목록 <span class="hint">· ${esc(q.name)}</span></h4>
+    ${evs.map(e => `<div class="mrow" data-mseek="${e.t}"><span class="tc">${mmss(e.t).slice(0, 5)}</span><span class="k" style="color:${MSG_COL[e.kind] || "#ccc"}">${MSG_KIND[e.kind] || e.kind}</span>
+      <span class="x">${e.text ? "“" + esc(e.text) + "”" : esc(e.why || "")}</span>${e.kind === "bgm" ? "" : `<button class="btn sm" data-mdel="${e.id}">빼기</button>`}</div>`).join("") || `<div class="hint">넣은 MSG가 없어요</div>`}`;
+}
+function bindMsg() {
+  const root = $("msgSec"); if (!root) return;
+  root.querySelectorAll("[data-msty]").forEach(el => el.onclick = () => {
+    const k = el.dataset.msty, i = MSGPICK.indexOf(k);
+    if (i >= 0) MSGPICK.splice(i, 1); else { if (MSGPICK.length >= 3) return toast("스타일은 3개까지 고를 수 있어요"); MSGPICK.push(k); }
+    el.classList.toggle("on", MSGPICK.includes(k));
+  });
+  root.querySelectorAll("#msgAmt button").forEach(b => b.onclick = () => { MSGAMT = b.dataset.v; root.querySelectorAll("#msgAmt button").forEach(x => x.classList.toggle("on", x === b)); });
+  root.querySelectorAll("#msgFmt button").forEach(b => b.onclick = () => { MSGFMT = b.dataset.v; root.querySelectorAll("#msgFmt button").forEach(x => x.classList.toggle("on", x === b)); });
+  $("msgGo").onclick = runMsg;
+  root.querySelectorAll("[data-mview]").forEach(b => b.onclick = () => { switchSeq(b.dataset.mview); renderRec(); });
+  root.querySelectorAll("[data-mswap]").forEach(b => b.onclick = () => msgSwap(b.dataset.mswap));
+  root.querySelectorAll("[data-mlike]").forEach(b => b.onclick = () => { const [id, a] = b.dataset.mlike.split("|"); msgLike(id, a); });
+  root.querySelectorAll("[data-mseek]").forEach(r => r.onclick = e => { if (e.target.closest("button")) return; seek(+r.dataset.mseek); });
+  root.querySelectorAll("[data-mdel]").forEach(b => b.onclick = () => msgRemove(b.dataset.mdel));
+}
+async function runMsg() {
+  if (!MSGPICK.length) return toast("스타일을 하나 이상 골라 주세요");
+  const styles = MSGPICK.map(k => { const [kind, ...n] = k.split("|"); return { kind, name: n.join("|") }; });
+  const r = await (await post("/api/edit/msg", { name: NAME, styles, intensity: MSGAMT, kinds: MSGFMT === "both" ? ["long", "shorts"] : ["long"] })).json();
+  if (!r.ok) return toast(r.error || "지금은 만들 수 없어요");
+  $("busy").classList.add("show"); JOBNAME = "MSG 후보 만들기";
+  const iv = setInterval(async () => {
+    let s; try { s = await (await fetch("/api/state?since=999999")).json(); } catch (e) { return; }
+    const pr = s.progress || {};
+    $("busyTxt").textContent = (pr.label || "MSG 후보") + " · " + (pr.detail || ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
+    if (s.job) return;
+    clearInterval(iv); $("busy").classList.remove("show");
+    if (s.error) return toast(s.error.includes("멈췄어요") ? "MSG 후보 만들기를 멈췄어요" : "MSG 후보를 만들지 못했어요 · " + s.error.slice(0, 100));
+    const res = s.result || {};
+    if (!res.sequences || !res.sequences.length) return toast("MSG 후보를 만들지 못했어요");
+    msgAdd(res);
+  }, 700);
+}
+function msgAdd(res) {
+  commit("MSG 후보 만들기");
+  for (const md of res.media || []) if (!P.media.some(m => m.id === md.id)) { P.media.push(md); MED[md.id] = md; loadBundle(md); }
+  for (const q of res.sequences) { ensureSeq(q); q.name = uniqSeqName(q.name); P.sequences.push(q); }
+  switchSeq(res.sequences[0].id); renderBin(); renderRec();
+  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요 · 1·2·3 키로 같은 장면에서 바꿔 볼 수 있어요`);
+}
+// 같은 원본 장면으로 다른 후보 보기: 지금 화면의 원본 시각 → 그 후보의 타임라인 시각 (다시 보기·티저 같은 noCaps 클립은 빼고)
+function srcAtT(q, t) { const it = q.items.find(i => i.track === "V1" && i.media === "main" && !i.noCaps && t >= i.start - 1e-6 && t < iEnd(i)); return it ? mt(it, t) : null; }
+function tlOfSrc(q, src) { const it = q.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).sort((a, b) => a.start - b.start)[0]; return it ? tlOf(it, src) : null; }
+function msgSwap(id) {
+  const q = P.sequences.find(x => x.id === id); if (!q) return;
+  let src = srcAtT(S, T);
+  if (src == null) { const nxt = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.noCaps && i.start >= T).sort((a, b) => a.start - b.start)[0]; src = nxt ? nxt.in : null; }
+  switchSeq(id);
+  const t = src == null ? null : tlOfSrc(q, src);
+  if (t != null) seek(t); else toast("이 후보에서는 그 장면이 잘려 나갔어요 · 처음부터 보여 드려요");
+  renderRec();
+}
+async function msgLike(id, aspect) {
+  const q = P.sequences.find(x => x.id === id); if (!q || !q.msg) return;
+  const src = (q.msg.style || {}), nm = (src.sources || {})[aspect] || src.label;
+  const kind = (MSGSRC.presets || []).some(x => x.name === nm) ? "preset" : "style";
+  const draft = MSGSRC.draft || "풋살사관학교 스타일(초안)", lab = Object.fromEntries(MSG_ASPECTS)[aspect];
+  try {
+    const r = await (await post("/api/style/mix_pick", { name: draft, aspect, source: { kind, name: nm } })).json();
+    if (!r.ok) throw new Error(r.error || "");
+    toast(`'${draft}'에 ${lab}${josa(lab, "을", "를")} '${nm}'${josa(nm, "으로", "로")} 담았어요`);
+    MSGSRC = null; renderRec();
+  } catch (e) { toast("담지 못했어요 · " + e.message); }
+}
+// MSG 하나 빼기 (되돌리기 한 번): 그 사건이 만든 글자·도형·클립·전환·마커만 · 끼워 넣은 장면(다시 보기·정지·티저·엔드)은 빈자리도 당김
+function msgRemove(evId) {
+  const q = S, m = q.msg; if (!m) return;
+  const ev = m.events.find(e => e.id === evId); if (!ev) return;
+  commit(`MSG 빼기 · ${MSG_KIND[ev.kind] || ev.kind}`);
+  const r = ev.refs || {}, ids = new Set([...(r.items || []), ...(r.titles || []), ...(r.shapes || []), ...(r.trans || [])]);
+  if (r.fx) { for (const it of q.items) if (ids.has(it.id)) { it.fx = r.fx === "punch" ? Object.fromEntries(Object.entries(it.fx || {}).filter(([k]) => !["scale", "anchor", "pos"].includes(k))) : {}; } }
+  else {
+    q.items = q.items.filter(it => !ids.has(it.id));
+    q.titles = q.titles.filter(t => !ids.has(t.id)); q.shapes = q.shapes.filter(t => !ids.has(t.id));
+    q.trans = q.trans.filter(t => !ids.has(t.id) && !ids.has(t.a) && !ids.has(t.b));
+    if (r.markers) q.markers = q.markers.filter(mk => !r.markers.some(t => Math.abs(t - mk.t) < 1e-3));
+  }
+  if (ev.ins && ev.ins.len > 0) { // 끼워 넣은 장면: 그 뒤를 모두 당김 (다른 MSG 기록도 같이)
+    const a = ev.ins.start, d = ev.ins.len, sh = x => x >= a + d - 1e-3 ? x - d : x;
+    for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
+    for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start));
+    for (const mk of q.markers) mk.t = fr(sh(mk.t));
+    for (const e of m.events) { e.t = sh(e.t); if (e.ins) e.ins.start = sh(e.ins.start); }
+  }
+  m.events = m.events.filter(e => e.id !== evId);
+  const k = {}; for (const e of m.events) k[e.kind] = (k[e.kind] || 0) + 1;
+  if (m.summary) m.summary.text = `MSG ${m.events.filter(e => !["bgm", "chapters"].includes(e.kind)).length}개 · 길이 ${mmss(seqLen(q)).slice(0, 5)} (직접 고침)`;
+  selI.clear(); selX = null; changed(); renderRec(); toast(`${MSG_KIND[ev.kind] || ev.kind}을(를) 뺐어요 (Ctrl+Z로 되돌리기)`);
 }
 
 /* ---------- 효과 · 그래픽 목록 (끌어다 놓기) ---------- */
@@ -3293,6 +3445,7 @@ addEventListener("keydown", e => {
   else if (k === "h") setTool("hand");
   else if (k === "z") setTool("zoom");
   else if (k === "s") toggleSnap();
+  else if ((k === "1" || k === "2" || k === "3") && msgCands()[+k - 1]) { const q = msgCands()[+k - 1]; if (q.id !== S.id) msgSwap(q.id); }
   else if (k === "t") addTitle();
   else if (k === "m" && sh) jumpMarker(1);
   else if (k === "m") addMarker();
