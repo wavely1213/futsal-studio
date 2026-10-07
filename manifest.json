@@ -1,6 +1,8 @@
 {
   "version": "1.9.0",
   "notes": "새 기능: NG 테이크·슬레이트·말더듬 자동 정리, 단어 단위 받아쓰기·풋살 용어 사전·쇼츠 자막 나누기, 배운 스타일과 일치 점수, 배운 컷 리듬·말 빠르기를 가편집에 적용, 썸네일 편집기 속도 개선",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/18cfe252a114490b80ae6fb9a5e2db2f8fb88480.zip",
+  "commit": "18cfe252a114490b80ae6fb9a5e2db2f8fb88480",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "4d9699d90acadfde33c4036d5de3af0867b7970edc1cb327adcf9b0bbf94b994",
