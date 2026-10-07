@@ -106,6 +106,16 @@ class Lines(unittest.TestCase):
         self.assertEqual(msg._emph_clause("디딤발이 너무 가까우면 터치가 무조건 길어져요.")[0], "터치가 무조건 길어져요!")
         self.assertIsNone(msg._emph_clause("포인트는 패스하고 멈추지 않는 거예요.")[0])
 
+    def test_challenge_scoreboard(self):
+        """챌린지: 'N번째 슛' 다음 성공·실패 말마다 점수판 ('2/5 · 1골') · 같은 시도를 두 번 말하면 한 번만 · 시도가 3번 안 되면 없음."""
+        m = lambda k, t, txt="": {"kind": k, "t": t, "a": t, "b": t + 1, "score": 1.0, "text": txt, "why": ""}  # noqa: E731
+        moms = [m("total", 1, "다섯"), m("section", 5, "첫 번째 슛 갑니다"), m("fail", 9, "아깝다"), m("section", 12, "두 번째 슛"), m("success", 16, "들어갔어요"),
+                m("section", 20, "세 번째"), m("success", 24, "나이스"), m("section", 24.5, "세 번째"), m("fail", 26, "빗나갔어요")]
+        sb = msg._scoreboard(moms)
+        self.assertEqual([x["text"] for x in sb], ["1/5 · 0골", "2/5 · 1골", "3/5 · 2골"])
+        self.assertAlmostEqual(sb[1]["t"], 16.9)
+        self.assertEqual(msg._scoreboard(moms[:5]), [])
+
     def test_lexicons(self):
         self.assertTrue(msg.HOOK_Q.search("왜 다들 공을 놓칠까요?"))
         self.assertFalse(msg.HOOK_Q.search("수비가 붙으니까요"))

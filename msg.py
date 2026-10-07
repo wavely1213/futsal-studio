@@ -484,6 +484,9 @@ def moments(sig, segs=None):
             add("count", a, b, a, 1.0, txt, "숫자 세기")
         if SECTION.search(txt):
             add("section", a, b, a, 1.0, txt, "다음 순서로 넘어감")
+        tt = TOTAL.search(txt)
+        if tt and a < dur * 0.3:  # 챌린지 전체 횟수 ('다섯 번 차서')
+            add("total", a, b, a, 1.0, tt[1], "챌린지 횟수")
         if CLOSING.search(txt) and a > dur * 0.6:
             add("closing", a, b, a, 1.0, txt, "마무리 말")
         if DEMO_W.search(txt):
@@ -831,7 +834,9 @@ SFX_PALETTE = {  # 사건 → 효과음 (없으면 소리 없음)
                   "end": "맑은 짧은 음악"},
 }
 CLEAN_ONLY = {"휙", "딩동", "짠", "틱", "딸깍", "팡", "맑은 짧은 음악", "찰칵", "물음표"}   # 담백: 이 소리들만
-TEXT_KINDS = ("emphasis", "situ", "inner", "fx", "count")
+TEXT_KINDS = ("emphasis", "situ", "inner", "fx", "count", "score")
+ORD = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7}
+TOTAL = re.compile(r"(다섯|열|세|네|여섯|일곱|여덟|아홉|[3-9]|10) ?(?:번|개|회) ?(?:차|도전|던지|해 ?보|시도|슛|슈팅)")
 
 
 def _seed(*parts):
@@ -850,6 +855,40 @@ def _situ_text(m):
     if m["kind"] == "play":
         return "실전 시범"
     return "다음 순서"
+
+
+def _scoreboard(moms):
+    """챌린지(첫 번째 슛·두 번째 슛…) → 시도마다 결과(성공·실패 말) 뒤 '2번째 · 1골' 점수판 (시도가 3번 넘을 때만).
+    전체 횟수를 말했으면('다섯 번 차서') '2/5 · 1골'."""
+    tries = []
+    for m in moms:
+        if m["kind"] != "section":
+            continue
+        mm = re.search(r"(첫|두|세|네|다섯|여섯|일곱) ?번째", m.get("text") or "")
+        if mm:
+            tries.append((m["t"], ORD[mm[1]]))
+        elif re.search(r"마지막", m.get("text") or "") and tries:
+            tries.append((m["t"], tries[-1][1] + 1))
+    if len(tries) < 3:
+        return []
+    total = None
+    x = next((m["text"] for m in moms if m["kind"] == "total"), None)
+    if x:
+        total = {"다섯": 5, "열": 10, "세": 3, "네": 4, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9}.get(x) or int(x)
+    res = sorted([m for m in moms if m["kind"] in ("success", "fail")], key=lambda m: m["t"])
+    out, goals, seen = [], 0, set()
+    for k, (t, n) in enumerate(tries):
+        if n in seen:  # 같은 시도를 두 번 말함 (받아쓰기 반복)
+            continue
+        seen.add(n)
+        nxt = tries[k + 1][0] if k + 1 < len(tries) else t + 15.0
+        r = next((m for m in res if t < m["t"] < min(nxt, t + 15.0)), None)
+        if not r:
+            continue
+        goals += r["kind"] == "success"
+        txt = (f"{n}/{total}" if total and n <= total else f"{n}번째") + f" · {goals}골"
+        out.append({"kind": "score", "t": round(r["t"] + 0.9, 2), "a": r["a"], "b": r["b"], "score": 1.0, "text": txt, "why": "챌린지 점수판"})
+    return out
 
 
 def caption_y(st, fmt):
@@ -878,7 +917,12 @@ def text_looks(st, fmt, cap_y):
                  y=0.45 if not low else 0.6, align="center", effect="fade", rot=-4)
     fx = dict(T, font="Black Han Sans", weight="Black", size=150 if sh else 132, fill="#FF9F1C", stroke="#111111", strokeW=10, x=0.5,
               y=(0.5 if not low else 0.6) if not sh else 0.48, align="center", effect="shake", rot=0)
-    return {"emphasis": emph, "situ": situ, "inner": inner, "fx": fx, "count": dict(fx, fill="#FFFFFF", size=140 if sh else 120, effect="stamp")}
+    score = dict(situ, bgOn=True, bg="#111111", bgOpacity=0.75, fill="#FFE14D", x=0.94, y=0.14 if not low else 0.86, align="right", effect="pop",
+                 font="Black Han Sans", weight="Black", size=56 if not sh else 60)
+    if sh:
+        score.update(y=0.27)
+    return {"emphasis": emph, "situ": situ, "inner": inner, "fx": fx, "score": score,
+            "count": dict(fx, fill="#FFFFFF", size=140 if sh else 120, effect="stamp")}
 
 
 def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
@@ -907,7 +951,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
          "replay": budget(BASE_PER_MIN["slowmo_replay"] * fun.get("slowmo_replay", 0) / 1.0, 1 if mild else max(1, int(minutes / 1.5)) if fun.get("slowmo_replay", 0) > 0 else 0),
          "freeze": 0 if mild else budget(BASE_PER_MIN["freeze"] * fun.get("freeze", 0), max(1, int(minutes / 3)) if fun.get("freeze", 0) > 0 else 0),
          "shake": 0 if mild else budget(BASE_PER_MIN["shake"] * fun.get("shake", 0), 1 if intensity == "보통" else None),
-         "sfx": budget(BASE_PER_MIN["sfx"] * fun.get("sfx", 0)), "count": 99}
+         "sfx": budget(BASE_PER_MIN["sfx"] * fun.get("sfx", 0)), "count": 99, "score": 99}
     if fun.get("slowmo_replay", 0) > 0 and B["replay"] == 0 and any(m["kind"] == "play" for m in moms):
         B["replay"] = 1
     cands = []
@@ -958,6 +1002,8 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
             cand("freeze", m, 1.8 + m["score"], at=m["a"], turn=after[0]["kind"], t=m["a"] + 0.05)
         if i < 4 and not any(x["kind"] in ("demo_call", "section") and abs(x["t"] - m["a"]) < 6 for x in moms):
             cand("situ", m, 0.8 + m["score"] * 0.5, text="실전 시범", dur=2.0, t=max(m["a"], m["t"] - 1.0))
+    for c in _scoreboard(moms):  # 챌린지: 'N번째' 시도 뒤 결과마다 점수판
+        cand("score", c, 2.6, text=c["text"], dur=2.4, t=c["t"])
     cands.sort(key=lambda c: (-c["pri"], c["t"]))
     used = {k: 0 for k in B}
     picked = []
@@ -977,8 +1023,8 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
             a, b = t, t + c["dur"]
             if not free_text(a, b, k):
                 continue
-            near = [p for p in picked if p["kind"] in TEXT_KINDS and abs(p["t"] - t) < gap]
-            if near:
+            near = [p for p in picked if p["kind"] in TEXT_KINDS and p["kind"] != "score" and abs(p["t"] - t) < gap]
+            if near and k != "score":  # 점수판은 제 자리(오른쪽 위)에만 · 다른 글자 간격에 안 셈
                 continue
         elif k in ("punch", "shake"):
             if any(p["kind"] in ("punch", "shake") and abs(p["t"] - t) < max(gap, 3.0) for p in picked):
