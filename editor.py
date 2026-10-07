@@ -2002,6 +2002,7 @@ def cancel_export():
             p.kill()
         except OSError:
             pass
+    hwdec.kill_all()  # 그래픽카드 풀기 확인 중인 ffmpeg 도
 
 
 class Cancelled(Exception):
@@ -2489,8 +2490,9 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
     if comp is None:
         comp = base()
     final = lab("v")
-    # 자막·타이틀·도형 (구간 시작 시각만큼 밀어서 같은 ASS 사용)
-    fc.append(f"[{comp}]format=yuv420p,setsar=1,setpts=PTS+{t0:.4f}/TB,subtitles=subs.ass:fontsdir=fonts,setpts=PTS-STARTPTS[{final}]")
+    # 자막·타이틀·도형 (구간 시작 프레임만큼 밀어서 같은 ASS 사용) — 시각 단위를 1/fps 로 맞추고 정수 프레임만큼 밂
+    # (예전 'PTS+시작초/TB' 는 7.3333*30=219.999 를 버림해 자막이 한 프레임 일찍 나오는 구간이 있었음)
+    fc.append(f"[{comp}]format=yuv420p,setsar=1,settb=1/{fps},setpts=PTS+{int(f0)},subtitles=subs.ass:fontsdir=fonts,setpts=PTS-STARTPTS[{final}]")
     (tmp / f"fc{k_seg}.txt").write_text(";\n".join(fc), encoding="utf-8")
     args = []
     for a in inputs:
@@ -2507,6 +2509,27 @@ def _fc_opt():
         h = core.run([core.ffmpeg(), "-hide_banner", "-h", "long"]).stdout
         _FC["o"] = "-filter_complex_script" if "filter_complex_script" in h else "-/filter_complex"
     return _FC["o"]
+
+
+RESERVE_MB = 1500  # 내보내기 동안 앱·브라우저·소리 만들기 몫으로 남겨 둘 메모리
+
+
+def _mem_workers(default, media, W, H, log=None):
+    """구간을 동시에 몇 개 만들지: 남은 메모리 ÷ ffmpeg 하나 예상 메모리 (모자라면 줄임 · 적어도 1).
+    예상: 아이폰 HDR·출력의 2배보다 큰 원본(4K → 1080p 등) 약 1.1GB · 출력이 1080p 보다 크면 0.9GB · 그 밖 0.5GB (측정값 기준)."""
+    if default <= 1:
+        return default
+    import worker
+    free = worker.avail_mb()
+    if free is None:
+        return default
+    vids = [m for m in media.values() if m.get("kind") == "video"]
+    big = any(media_hdr(m) or (m.get("w") or 0) * (m.get("h") or 0) > 2 * W * H for m in vids)
+    est = 1100 if big else (900 if W * H > 1920 * 1080 else 500)
+    n = max(1, min(default, (free - RESERVE_MB) // est))
+    if n < default and log:
+        log(f"  메모리가 넉넉하지 않아 {'한 번에 하나씩' if n == 1 else f'한 번에 {n}개씩'} 만들어요 (남은 메모리 {free}MB)")
+    return n
 
 
 def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None):
@@ -3029,6 +3052,8 @@ def export(name, proj, opts, log):
                 hw = None
 
             # 같은 원본에서 이어지는 짧은 구간들은 ffmpeg 하나로 (exportplan · 그림은 구간마다 만든 것과 같음)
+            if hwdec.will_probe() and any(media_hdr(m) for m in media.values()):
+                prog(2, "준비 중 · 그래픽카드로 영상 풀기 확인 중")
             builds = [_build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k) for k, (f0, f1) in enumerate(segs)]
             units = exportplan.units(builds, tmp, fps)
 
@@ -3050,6 +3075,8 @@ def export(name, proj, opts, log):
                     args = hwdec.strip(args)
                 try:
                     go(args)
+                except HwEncError:  # 그래픽카드 '인코더' 문제는 풀기 탓이 아님 → 원래 처리(하나씩·일반 인코딩)로
+                    raise
                 except RuntimeError:
                     if "-hwaccel" not in args or CANCEL.is_set() or abort.is_set():
                         raise
@@ -3063,6 +3090,7 @@ def export(name, proj, opts, log):
                 done.clear()
                 if workers is None:
                     workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(units) > 1 else 1
+                    workers = _mem_workers(workers, media, W, H, log)
                 abort, procs = threading.Event(), set()
                 ex = ThreadPoolExecutor(workers)
                 try:

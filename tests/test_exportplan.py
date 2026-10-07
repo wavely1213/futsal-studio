@@ -44,8 +44,11 @@ class ExportPlanTest(ExportBase):
     def cut_proj(self, name):
         items, pos = [], 0.0
         # 무음 잘라내기처럼: 원본 2초 쓰고 0.5초 건너뛰기 · 중간에 빠르게 · 거꾸로 · 고정 확대 · 25fps 원본
-        spec = [("main", 1.0, 3.0, {}), ("main", 3.5, 5.0, {}), ("main", 5.5, 7.3, {"speed": 1.5}), ("main", 8.0, 9.0, {"rev": True}),
-                ("main", 9.4, 11.0, {"fx": {"scale": {"v": 130, "k": []}}}), ("main", 11.2, 13.0, {}), ("p25", 2.0, 4.0, {}),
+        # 색보정 구간(rgb24) 이 묶음 안에 있어도 다른 구간 색이 그대로인지 · 9.4~11.0333 (49프레임) 다음 구간은 220프레임째
+        # (=7.3333초 · 예전 'PTS+7.3333/TB' 가 219 로 버림돼 자막이 한 프레임 일찍 나오던 시작)
+        spec = [("main", 1.0, 3.0, {}), ("main", 3.5, 5.0, {"color": {"exp": 0.3, "sat": 120}}), ("main", 5.5, 7.3, {"speed": 1.5}),
+                ("main", 8.0, 9.0, {"rev": True}),
+                ("main", 9.4, 11.0 + 1 / 30, {"fx": {"scale": {"v": 130, "k": []}}}), ("main", 11.2, 13.0, {}), ("p25", 2.0, 4.0, {}),
                 ("p25", 4.3, 6.1, {}), ("main", 30.0, 31.5, {}), ("main", 31.9, 33.4, {})]
         for k, (m, a, b, extra) in enumerate(spec):
             it = item(f"c{k}", m, "V1", pos, a, b)
@@ -70,6 +73,7 @@ class ExportPlanTest(ExportBase):
             (tmp / "subs.ass").write_text(ass, encoding="utf-8")
             shutil.copytree(editor.FONTS, tmp / "fonts")
             segs = editor._segments(proj, 0, editor.seq_total(proj), fps, [], media)
+            self.assertIn(220, [a for a, _ in segs])
             builds = [editor._build_segment(proj, media, W, H, fps, f0, f1, [], tmp, k) for k, (f0, f1) in enumerate(segs)]
             units = exportplan.units(builds, tmp, fps)
             self.assertEqual([k for u in units for k in u], list(range(len(segs))))
@@ -77,6 +81,8 @@ class ExportPlanTest(ExportBase):
             run = next(u for u in units if len(u) > 1)
             txt = exportplan.unit_args(run, builds, tmp, fps)
             self.assertEqual((tmp / txt[3]).read_text(encoding="utf-8").count("subtitles="), 1)  # 자막 필터는 묶음 끝 하나
+            self.assertIn("format=yuv420p,split=", (tmp / txt[3]).read_text(encoding="utf-8"))  # 원본 형식 못박기
+            self.assertTrue(any("lutrgb" in (tmp / f"fc{k}.txt").read_text(encoding="utf-8") for k in run), run)  # 색보정 구간도 같이 묶임
             self.assertGreaterEqual(len(units), 3, units)  # 다른 원본(25fps) · 30초로 건너뛰는 곳은 따로 묶음
             old, new = [], []
             for k, (a, f, n) in enumerate(builds):
@@ -111,6 +117,16 @@ class ExportPlanTest(ExportBase):
         self.assertEqual(exportplan.plan(builds, texts, 30), [[0, 1], [2], [3], [4], [5], [6, 7]])
         texts[1] = "[0:v]sendcmd=f=x.cmd,colorchannelmixer@o1=aa=1[v1]"
         self.assertEqual(exportplan.plan(builds, texts, 30)[:3], [[0], [1], [2]])
+        # 다시 보기(같은 범위를 또 씀)는 안 묶음: split 이 겹친 프레임을 다 쌓아 메모리가 커짐 · 이어 자른 컷(꼬리 0.3초 겹침)은 묶음
+        rep = [b(10.0, 11.5, 300), b(12.0, 10.0, 300), b(21.98, 2.3, 60), b(24.0, 2.3, 60)]
+        self.assertEqual(exportplan.plan(rep, ["[0:v]null[v1]"] * 4, 30), [[0], [1, 2, 3]])
+        # HDR(색 바꾸기)·그래픽카드 풀기·픽셀 형식을 모르는 원본은 안 묶음
+        hdr = [b(0, 2.3, 60), b(2.5, 2.3, 60)]
+        self.assertEqual(exportplan.plan(hdr, ["[0:v]zscale=t=linear,null[v1]"] * 2, 30), [[0], [1]])
+        hw = [(["-hwaccel", "d3d11va"] + b(0, 2.3, 60)[0], "v1", 60), (["-hwaccel", "d3d11va"] + b(2.5, 2.3, 60)[0], "v1", 60)]
+        self.assertEqual(exportplan.plan(hw, ["[0:v]null[v1]"] * 2, 30), [[0], [1]])
+        self.assertEqual(exportplan.plan(hdr, ["[0:v]null[v1]"] * 2, 30, lambda p: None), [[0], [1]])
+        self.assertEqual(exportplan.plan(hdr, ["[0:v]null[v1]"] * 2, 30, lambda p: "yuv420p"), [[0, 1]])
         many = [b(2.5 * k, 2.3, 60) for k in range(40)]
         u = exportplan.plan(many, ["[0:v]null[v1]"] * 40, 30)
         self.assertTrue(all(len(x) <= exportplan.MAX_CUTS and len(x) * 60 <= exportplan.MAX_SEC * 30 for x in u))
