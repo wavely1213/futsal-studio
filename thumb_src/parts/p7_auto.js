@@ -169,7 +169,7 @@ function titleOptions() {
   for (const h of HOOKS) out.push(splitTitle(h));
   const kw = KEYWORDS.find(k => !["팁", "꿀팁", "중요", "잘하", "어떻게", "?"].includes(k));
   if (kw) out.push([kw.includes("국가대표") ? kw : kw + " 비법", kw.includes("국가대표") ? "제대로 알려드림" : "국가대표가 알려줌"]);
-  out.push(splitTitle(niceName(NAME).slice(0, 24)));
+  out.push(splitTitle(cutText(niceName(NAME), 24)));
   return out.filter((x, i, a) => a.findIndex(y => y.join() === x.join()) === i);
 }
 function renderAuto() {
@@ -178,7 +178,7 @@ function renderAuto() {
       <div class="hint">쇼츠 썸네일은 쇼츠 화면(9:16, 1080×1920) 그대로 만들어요.</div></div>
     <div class="pg"><h4>제목 문구</h4>
       <input class="s" id="aL1" placeholder="첫째 줄"><input class="s" id="aL2" placeholder="둘째 줄" style="margin-top:6px">
-      <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(o.join(" ").slice(0, 16))}</button>`).join("")}</div>
+      <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(cutText(o.join(" "), 16))}</button>`).join("")}</div>
       <div class="row2"><button class="btn pri" id="aMake">후보 다시 만들기</button><button class="btn" id="aCutMake">${CUT_AUTO ? "누끼 넣은 후보 ✓" : "인물 누끼 넣어서 만들기"}</button></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라내기)</label>
       <div class="hint">영상에서 선명한 장면을 골라 템플릿으로 만들어요. 누르면 편집 화면으로 불러와요.</div></div>
@@ -263,7 +263,7 @@ async function exportImg() {
   if (fmt === "png") data = c.toDataURL("image/png");
   else { let q = 0.93; do { data = c.toDataURL("image/jpeg", q); q -= 0.07; } while (data.length * 0.75 > 1.95e6 && q > 0.5); }
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
-  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
+  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
 $("exportBtn").onclick = exportImg;
 
@@ -292,7 +292,7 @@ function runQA() {
   for (const l of texts) {
     const m = textLayout(ctx, l), sy = l.h / m.natH, spans = m.lines.flatMap(ln => ln.spans).filter(sp => sp.t.trim());
     const minSize = (spans.length ? Math.min(...spans.map(sp => sp.st.size)) : l.size) * sy;
-    const px = minSize * smallW / W, nm = `'${lname(l).slice(0, 14)}'`;
+    const px = minSize * smallW / W, nm = `'${cutText(lname(l), 14)}'`;
     if (px < 7) add("bad", "작게 보면 안 읽혀요", `${nm} — 작은 목록(${smallW}px)에서 글자 높이가 ${px.toFixed(1)}px예요. 더 키우세요.`, l);
     else if (px < 10) add("warn", "작게 보면 읽기 힘들어요", `${nm} — 작은 목록에서 ${px.toFixed(1)}px. 조금 더 키우면 좋아요.`, l);
     const layerOk = l.box.on || (l.outline.on && l.outline.width >= 4) || (l.glow.on && l.glow.size >= 20);
@@ -385,7 +385,10 @@ function drawSafe() {
   else box(0.86, 0.86, 0.14, 0.14, "재생시간");
 }
 $("safeBtn").onclick = () => { showSafe = !showSafe; $("safeBtn").classList.toggle("on", showSafe); drawSafe(); toast(showSafe ? "빨간 빗금 = 유튜브 화면에서 가려지는 곳이에요. 중요한 글자·얼굴은 피하세요" : "가려지는 영역 숨김"); };
-$("back").onclick = () => { clearTimeout(saveTimer); postRaw("/api/thumb/save", saveBody()).then(() => (location.href = "/")); };
+$("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패하면 물어봄 · 예전: 실패하면 아무 반응 없음)
+  clearTimeout(saveTimer); saveTimer = null;
+  if (await saveNow() || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
+};
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 
 /* ---------- 시작 ---------- */

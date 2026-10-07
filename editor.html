@@ -506,6 +506,8 @@ const linkId = s => { let h1 = 0xdeadbeef, h2 = 0x41c6ce57; for (let i = 0; i < 
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return "k" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36); };
 const niceName = n => String(n).replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "");
+// 글자 수로 자르기: .slice() 는 UTF-16 단위라 이모지를 반으로 잘라 저장이 실패함 (편집본 이름 → 제목 글자)
+const cutText = (s, n) => Array.from(String(s)).slice(0, n).join("");
 const dbLin = d => d <= -59.9 ? 0 : Math.pow(10, d / 20);
 const linDb = v => v > 1e-3 ? 20 * Math.log10(v) : -60;
 const fmtDb = d => d <= -59.9 ? "-∞ dB" : (d >= 0 ? "+" : "") + (+d).toFixed(1) + " dB";
@@ -2240,7 +2242,7 @@ const TEMPLATES = {
   "꽉 채우기": () => { Object.assign(S.layout, { mode: "fill" }); Object.assign(S.captionStyle, { y: 0.72, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false }); tplTitle({ y: 0.15, fill: "#FFE14D", stroke: "#111111", strokeW: 9 }); },
 };
 function tplTitle(st) {
-  if (!S.titles.length) S.titles.push({ id: nid(), text: S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, "").slice(0, 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
+  if (!S.titles.length) S.titles.push({ id: nid(), text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
   S.titles.forEach(t => Object.assign(t.style, st));
 }
 const SHAPES = {
@@ -2272,7 +2274,7 @@ const GFX = {
     return { shapes: [{ name: "구독 버튼", x: sh ? 0.3 : 0.39, y: sh ? 0.56 : 0.66, w: sh ? 0.4 : 0.22, h: sh ? 0.05 : 0.1, color: "#E5484D", opacity: 1, radius: 100, full: false }],
       titles: [{ text: "구독", style: { ...baseTitle(), size: sh ? 64 : 60, fill: "#FFFFFF", strokeW: 0, effect: "pop", x: 0.5, y: sh ? 0.6 : 0.745 } }], dur: 3 }; } },
   "강조 팝 텍스트": { hint: "화면 가운데 큰 글씨가 팡!", make: () => ({ shapes: [], titles: [{ text: "대박!", style: { ...baseTitle(), size: 150, fill: "#FFE14D", stroke: "#111111", strokeW: 10, effect: "pop", y: 0.55 } }], dur: 1.5 }) },
-  "큰 제목": { hint: "위쪽에 영상 제목", make: () => ({ shapes: [], titles: [{ text: S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, "").slice(0, 16) || "제목", style: { ...baseTitle(), size: 100, y: 0.2 } }], dur: Math.max(2, Math.min(total() - T, 6)) }) },
+  "큰 제목": { hint: "위쪽에 영상 제목", make: () => ({ shapes: [], titles: [{ text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", style: { ...baseTitle(), size: 100, y: 0.2 } }], dur: Math.max(2, Math.min(total() - T, 6)) }) },
   "말풍선 박스": { hint: "검은 상자 위 흰 글씨", make: () => ({ shapes: [], titles: [{ text: "여기가 포인트!", style: { ...baseTitle(), size: 64, fill: "#FFFFFF", bgOn: true, bg: "#000000", bgOpacity: 0.75, strokeW: 10, effect: "fade", y: 0.45 } }], dur: 3 }) },
 };
 function addGfx(name, at) {
@@ -2417,10 +2419,10 @@ async function renderRec() {
     const s = r.shorts[+b.dataset.rec];
     const base = P.sequences.find(q => q.format === "shorts") || S;
     commit("쇼츠 편집본 추가");
-    const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${s.title.slice(0, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
+    const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${cutText(s.title, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
       captionStyle: JSON.parse(JSON.stringify(base.captionStyle)), master: { volume: 1, normalize: true, lufs: -14 }, duck: { on: true, amount: -14 },
       layout: JSON.parse(JSON.stringify(base.layout || {})),
-      titles: base.titles.length ? [{ ...JSON.parse(JSON.stringify(base.titles[0])), id: nid(), text: s.keywords[0] ? s.keywords[0] + "!" : s.title.slice(0, 16), start: 0, dur: s.length }] : [],
+      titles: base.titles.length ? [{ ...JSON.parse(JSON.stringify(base.titles[0])), id: nid(), text: s.keywords[0] ? s.keywords[0] + "!" : cutText(s.title, 16), start: 0, dur: s.length }] : [],
       items: itemsFromCuts(s.cuts) };
     ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });

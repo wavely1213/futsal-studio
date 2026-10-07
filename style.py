@@ -21,6 +21,7 @@ import time
 
 import core
 import plan
+import updater
 
 STYLES = core.WORK / "styles"
 FW, FH, FPS = 320, 180, 4
@@ -76,8 +77,7 @@ def _frames(path, limit=None):
     """저해상도 RGB 프레임을 1초에 4장씩 흘려보냄 (메모리에 다 올리지 않음)."""
     import numpy as np
     cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), *(["-t", f"{limit:.3f}"] if limit else []), "-vf", f"fps={FPS},scale={FW}:{FH}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    kw = getattr(core, "NO_WINDOW", {})
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kw)
+    p = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)  # 앱이 꺼지면 같이 꺼짐 (Windows)
     n = FW * FH * 3
     try:
         while True:
@@ -235,7 +235,7 @@ def _audio_events(path, limit=None):
     def once(eb):
         cmd = [core.ffmpeg(), "-hide_banner", "-nostats", "-i", str(path), *(["-t", f"{limit:.3f}"] if limit else []), "-vn", "-af", f"silencedetect=noise=-32dB:d=0.15,{eb}",
                "-f", "s16le", "-ac", "1", "-ar", str(sr), "-"]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+        p = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
         err = []
         th = threading.Thread(target=lambda: err.append(p.stderr.read()), daemon=True)
         th.start()
@@ -627,10 +627,44 @@ def describe(prof):
                if _ok3(prof.get("curve3")) and p["splitShot"] else ""))
 
 
+STYLE_NAME_MAX = 60  # 스타일 이름(=파일 이름) 길이 한도 (글자 기준 · 이모지를 반으로 자르지 않음)
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}  # refs 와 같은 목록
+
+
+def clean_style_name(name, default="내 스타일"):
+    """스타일 이름 → Windows 에서 파일 이름으로 쓸 수 있게 (ui.html 의 이름 정리와 같은 규칙):
+    금지 글자(\\/:*?"<>|)·제어 문자(붙여 넣은 탭 등)·반쪽 이모지를 빼고, 끝 공백·점을 빼고, 60자까지.
+    CON·NUL·COM1 같은 Windows 예약 이름이면 뒤에 ' 스타일' (배우기를 다 끝낸 뒤 저장에서 실패하지 않게 미리)."""
+    n = core.clean_text(str(name or "")).replace("\ufffd", "")
+    n = re.sub(r'[\\/:*?"<>|\x00-\x1f\x7f]', "", n).strip(" .")
+    if len(n) > STYLE_NAME_MAX:
+        n = n[:STYLE_NAME_MAX].rstrip(" .")
+    if n and n.split(".")[0].strip().upper() in _RESERVED:
+        n += " 스타일"
+    return n or default
+
+
+def _repair_name(f):
+    """예전에 반쪽 이모지가 든 이름으로 저장된 스타일 파일(Windows 에서만 생김) → 고친 이름으로 바꿈 (그 이름은 화면에 보낼 수 없음)."""
+    if core.clean_text(f.stem) == f.stem:
+        return f
+    new = f.with_name(clean_style_name(f.stem) + ".json")
+    if new.exists():
+        return None
+    try:
+        os.replace(f, new)
+        return new
+    except OSError:
+        return None
+
+
 def list_styles():
     STYLES.mkdir(parents=True, exist_ok=True)
     out = []
     for f in sorted(STYLES.glob("*.json")):
+        f = _repair_name(f)
+        if f is None:
+            continue
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
             out.append({"name": f.stem, "profile": d, "params": edit_params(d), "desc": describe(d),
@@ -643,7 +677,7 @@ def list_styles():
 def learn(style_name, names, log=print):
     """고른 영상들 → 스타일 파일 (구조 수치 + 영상 기획 분석 plan). 한 영상이 깨져도 나머지로 배우고,
     기획 분석만 실패하면 그 영상은 구조 수치로만 배움. 멈추기(✕)를 누르면 배우기 전체를 그만둠."""
-    style_name = re.sub(r'[\\/:*?"<>|]', "", style_name).strip(" .") or "내 스타일"
+    style_name = clean_style_name(style_name)
     profs, evs = [], []
     fails = []
     for k, n in enumerate(names, 1):
@@ -683,7 +717,8 @@ def learn(style_name, names, log=print):
     except (OSError, ValueError, AttributeError):
         pass
     STYLES.mkdir(parents=True, exist_ok=True)
-    (STYLES / f"{style_name}.json").write_text(json.dumps(prof, ensure_ascii=False, indent=1), encoding="utf-8")
+    # 임시 파일 → 바꿔 끼우기 (다시 배우다 꺼져도 예전 스타일은 그대로 · I-003) · Windows 잠금이면 잠깐 뒤 다시
+    updater.write_atomic(STYLES / f"{style_name}.json", core.clean_text(json.dumps(prof, ensure_ascii=False, indent=1)))
     log(f"스타일 저장 · {style_name} · {describe(prof)}")
     return {"name": style_name, "profile": prof, "params": edit_params(prof), "desc": describe(prof)}
 

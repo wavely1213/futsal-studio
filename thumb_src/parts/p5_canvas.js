@@ -252,7 +252,8 @@ function brushDown(e) {
     removeEventListener("mousemove", stroke); removeEventListener("mouseup", up); delete l._fast; renderAll();
     pushUndo(before, erase ? "누끼 지우기" : "누끼 되살리기");  // 올리기 전에 바로 기록 (올리는 사이 Ctrl+Z 해도 순서가 맞게)
     $("saved").textContent = "브러시 저장 중…";
-    const j = await post("/api/thumb/upload", { data: ec.toDataURL("image/png") });
+    const j = await post("/api/thumb/upload", { data: ec.toDataURL("image/png") }).catch(() => ({}));
+    if (!j.url) { $("saved").textContent = "브러시 저장 실패"; return toast(j.error || "브러시 결과를 저장하지 못했어요. 잠시 뒤 다시 해 주세요"); }
     if (byId(l.id) === l) { l.src = j.url; img(j.url); } scheduleSave();
   };
   addEventListener("mousemove", stroke); addEventListener("mouseup", up);

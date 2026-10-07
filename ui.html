@@ -567,6 +567,8 @@ const mmss = s => { s = Math.max(0, Math.round(s)); return `${String(Math.floor(
 const ytId = name => (name.match(/_([A-Za-z0-9_-]{11})_/) || [])[1];
 const thumb = id => `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
 const niceName = n => ytId(n) ? n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "") : n;
+// 글자 수로 자르기: .slice() 는 UTF-16 단위라 이모지(🔥)를 반으로 잘라 서버에 '반쪽 글자'를 보냄 → 기록·저장·화면 응답이 깨짐
+const cutText = (s, n) => Array.from(String(s)).slice(0, n).join("");
 const segVal = id => $(id).querySelector(".on").dataset.v;
 // 영상 출처 (서버 source.describe): own 풋살사관학교 · other 다른 채널 · footage 내 촬영본 · unknown 모름
 const SRC = { own: "풋살사관학교", other: "다른 채널", footage: "내 촬영본" };
@@ -738,7 +740,7 @@ function srcMenu(btn) {
     const cur = state.local.find(x => x.name === name);
     if (cur) cur.source = j.source;
     lastLocalKey = ""; renderLocal(); poll();  // 고르기 칩 개수는 서버에서 다시
-    toast(`'${niceName(name).slice(0, 24)}' → ${srcLabel(j.source)}${body.kind === "auto" ? " (자동)" : ""}`);
+    toast(`'${cutText(niceName(name), 24)}' → ${srcLabel(j.source)}${body.kind === "auto" ? " (자동)" : ""}`);
   };
   m.querySelectorAll("[data-sk]").forEach(b => b.onclick = () => {
     const k = b.dataset.sk, ck = b.dataset.ck;
@@ -1252,10 +1254,17 @@ function bindScores() {
     } catch (e) { b.disabled = false; res.textContent = "점수를 매기지 못했어요. 잠시 뒤 다시 눌러 주세요"; }
   }));
 }
+// 스타일 이름 → 저장될 파일 이름 (style.clean_style_name 과 같은 규칙: 금지·제어 글자 빼기 · 60자 · Windows 예약 이름이면 ' 스타일')
+const RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+function styleFileName(nm) {
+  let n = cutText(String(nm).replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "").replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, "").replace(/^[ .]+|[ .]+$/g, ""), 60).replace(/[ .]+$/, "");
+  if (n && RESERVED.test(n.split(".")[0].trim())) n += " 스타일";
+  return n || "내 스타일";
+}
 $("btnLearn").onclick = () => {
   const names = [...stySel], first = refs.videos.find(v => v.name === names[0]);
-  const nm = $("styleName").value.trim() || (first && first.channel ? `${first.channel} 스타일` : `${niceName(names[0]).slice(0, 12)} 스타일`);
-  const clean = nm.replace(/[\\/:*?"<>|]/g, "").trim().replace(/^[ .]+|[ .]+$/g, "") || "내 스타일";
+  const nm = $("styleName").value.trim() || (first && first.channel ? `${first.channel} 스타일` : `${cutText(niceName(names[0]), 12)} 스타일`);
+  const clean = styleFileName(nm);
   if ((state.styles || []).some(s => s.toLowerCase() === clean.toLowerCase()) && !confirm(`'${clean}' 스타일이 이미 있어요. 새로 배운 내용으로 바꿀까요?`)) return;
   job("/api/style/learn", { name: nm, names }, () => { toast(`'${clean}'을 배웠어요 · 편집실 '스타일로 자동 편집'에서 고를 수 있어요`); $("styleName").value = ""; loadStyles(); loadRefs(); });
 };

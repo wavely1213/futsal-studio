@@ -9,6 +9,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const r1 = v => Math.round(v * 10) / 10;
 const norm180 = a => ((((a + 180) % 360) + 360) % 360) - 180;
 const niceName = n => n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "");
+// 글자 수로 자르기: .slice() 는 UTF-16 단위라 이모지를 반으로 잘라 디자인 저장이 실패함 (자동 제목 등)
+const cutText = (s, n) => Array.from(String(s)).slice(0, n).join("");
 const mmss = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const FONTS = { "검은고딕": "Black Han Sans", "프리텐다드 블랙": "Pretendard Black", "프리텐다드 볼드": "Pretendard Bold", "도현": "Do Hyeon" };
 const BLENDS = [["source-over", "표준"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["soft-light", "소프트 라이트"], ["hard-light", "하드 라이트"], ["darken", "어둡게"], ["lighten", "밝게"], ["color-dodge", "색상 닷지"], ["color-burn", "색상 번"], ["difference", "차이"], ["hue", "색조"], ["saturation", "채도"], ["color", "색상"], ["luminosity", "광도"]];

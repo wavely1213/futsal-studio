@@ -83,10 +83,23 @@ def normalize_dict(d):
 
 
 def load_dict(path):
-    """사전 파일 읽기 · 없거나 깨졌으면 기본 사전 (사용자가 다 지우고 저장한 빈 사전은 그대로)."""
+    """사전 파일 읽기 · 없거나 깨졌으면 기본 사전 (사용자가 다 지우고 저장한 빈 사전은 그대로).
+    메모장으로 고친 파일(BOM·ANSI)도 읽음. 그래도 못 읽으면 그 내용을 dict.json.bad 로 남겨 둠
+    (기본 사전이 보인 채로 저장하면 사용자가 만든 용어 목록이 사라지므로)."""
+    import updater
     try:
-        return normalize_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
+        raw = path.read_bytes()
+    except OSError:
+        return default_dict()
+    try:
+        return normalize_dict(updater.loads_tolerant(raw))
+    except (ValueError, TypeError, AttributeError):
+        bad = path.with_name(path.name + ".bad")
+        try:
+            if not bad.exists() or bad.read_bytes() != raw:
+                bad.write_bytes(raw)
+        except OSError:
+            pass
         return default_dict()
 
 
