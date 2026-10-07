@@ -230,8 +230,9 @@ class FakeModel:
         FakeModel.made.append((a, k))
         self.hf_tokenizer = None
 
-    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, hotwords=None):
-        FakeModel.calls.append({"word_timestamps": word_timestamps, "initial_prompt": initial_prompt, "hotwords": hotwords})
+    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, hotwords=None, vad_parameters=None):
+        FakeModel.calls.append({"word_timestamps": word_timestamps, "initial_prompt": initial_prompt, "hotwords": hotwords,
+                                "vad_parameters": vad_parameters})
         ws = [Word(0.2, 0.6, " 피버를", 0.81), Word(0.65, 0.9, " 보고", 0.95), Word(0.95, 1.5, " 패스해요.", 0.9)]
         seg = types.SimpleNamespace(start=0.2, end=1.5, text=" 피버를 보고 패스해요.", words=ws if word_timestamps else None)
         return iter([seg]), types.SimpleNamespace(duration=2.0)
@@ -263,8 +264,8 @@ class PositionsModel(FakeModel):
 class OldModel(FakeModel):
     """hotwords 를 모르는 예전 faster-whisper."""
 
-    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None):
-        return FakeModel.transcribe(self, audio, language, vad_filter, word_timestamps, initial_prompt)
+    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, vad_parameters=None):
+        return FakeModel.transcribe(self, audio, language, vad_filter, word_timestamps, initial_prompt, vad_parameters=vad_parameters)
 
 
 class WorkDir(unittest.TestCase):
@@ -322,6 +323,8 @@ class AnalyzeTest(WorkDir):
         self.assertTrue(call["word_timestamps"])
         self.assertIn("풋살사관학교", call["initial_prompt"])
         self.assertIn("최경진 감독", call["hotwords"])  # 설치된 버전이 hotwords 를 받으면
+        self.assertEqual(call["vad_parameters"], core.VAD_PARAMS)
+        self.assertLess(core.VAD_PARAMS["threshold"], 0.5)  # 공·응원 소리 섞인 말도 받아쓰게 (기본 0.5 는 통째로 버림)
         self.assertEqual(FakeModel.made[0][1]["cpu_threads"], min(8, os.cpu_count() or 4))
         self.assertEqual(core._WHISPER, {})  # 끝나면 모델을 내려놓음
 
