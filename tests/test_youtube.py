@@ -448,22 +448,30 @@ class ResumableTests(FakeBase):
         sha = hashlib.sha256(big.read_bytes()).hexdigest()
         size = big.stat().st_size
         uri = self.c.start_upload(META, size, "video/mp4")
-        cancel = threading.Event()
-        threading.Timer(1.5, cancel.set).start()
-        t0 = time.monotonic()
+        cancel, at = threading.Event(), []
+
+        def stop_when_server_read_some():  # 시간이 아니라 서버가 실제로 읽은 양으로 (바쁜 PC 에서도 같게)
+            for _ in range(400):
+                ss = self.fake.snapshot()["sessions"]
+                if ss and ss[0]["inflight"] >= 3 * UNIT:
+                    break
+                time.sleep(0.05)
+            at.append(time.monotonic())
+            cancel.set()
+        threading.Thread(target=stop_when_server_read_some, daemon=True).start()
         with mock.patch.object(yt, "CHUNK", 32 * UNIT):  # 한 조각으로 보내는 중에 멈춤
             with self.assertRaises(yt.Cancelled):
                 self.c.upload_file(uri, big, size, 0, cancel=cancel)
-        self.assertLess(time.monotonic() - t0, 3.5)  # 응답을 기다리지 않고 바로 멈춤
-        self.mode(rate=None)
-        for _ in range(100):  # 서버가 이미 받아 둔(버퍼) 내용까지 다 읽고 끊김을 알아챌 때까지
+        self.assertLess(time.monotonic() - at[0], 2.0)  # 응답을 기다리지 않고 바로 멈춤
+        self.mode(rate=None)  # 가짜는 조각을 읽을 때마다 속도를 다시 봄 → 남은 버퍼를 바로 비움
+        for _ in range(400):  # 서버가 이미 받아 둔(버퍼) 내용까지 다 읽고 끊김을 알아챌 때까지 (바쁜 PC 여유)
             if self.fake.snapshot()["sessions"][0]["received"]:
                 break
             time.sleep(0.05)
         kind, off = self.c.upload_status(uri, size)
         self.assertEqual(kind, "incomplete")
         self.assertEqual(off % UNIT, 0)
-        self.assertGreater(off, 0)
+        self.assertGreater(off, 0, self.fake.snapshot()["sessions"])
         self.assertLess(off, size)
         self.c.upload_file(uri, big, size, off)
         self.assertEqual(self.video()["sha256"], sha)

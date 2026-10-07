@@ -171,7 +171,7 @@ class FakeGoogle:
                              "playlists": [pid for pid, p in self.playlists.items() if vid in p["items"]]})
             return {"videos": vids, "insert_calls": self.insert_calls, "quota": dict(self.quota), "modes": dict(self.modes),
                     "sessions": [{"id": k, "received": len(s["data"]), "total": s["total"], "expired": s["expired"],
-                                  "done": s.get("video")} for k, s in self.sessions.items()],
+                                  "done": s.get("video"), "inflight": s.get("inflight", 0)} for k, s in self.sessions.items()],
                     "playlists": [{"id": k, "title": p["title"], "privacy": p["privacy"], "items": list(p["items"]), "channel": p["channel"]}
                                   for k, p in self.playlists.items()],
                     "last_auth": self.last_auth, "revoked": len(self.revoked), "tokens": {"access": len(self.access), "refresh": len(self.refresh)},
@@ -813,10 +813,12 @@ class _Handler(BaseHTTPRequestHandler):
         if a != len(s["data"]):  # 받은 데와 다른 곳부터 → 지금 받은 데를 알려 줌 (내용은 버림)
             self._drain(n)
             return self._incomplete(s)
-        rate = f.modes.get("rate")
-        got, t0 = bytearray(), time.time()
+        got, t0, base = bytearray(), time.time(), 0
         while len(got) < n:
             drop = f.modes.get("drop_after")  # 보내는 도중에 켜도 듣게 (조각마다 다시 봄)
+            rate = f.modes.get("rate")
+            if not rate:
+                t0, base = time.time(), len(got)
             try:
                 blk = self.rfile.read(min(65536, n - len(got)))
             except (OSError, ValueError):
@@ -826,6 +828,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             got += blk
+            s["inflight"] = len(got)  # 시험이 '서버가 실제로 읽은 양'을 기다릴 수 있게
             if drop is not None and len(s["data"]) + len(got) >= drop:  # 서버 쪽에서 끊김 흉내
                 with f.lock:
                     f.modes["drop_after"] = None
@@ -838,7 +841,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             if rate:
-                ahead = len(got) / float(rate) - (time.time() - t0)
+                ahead = (len(got) - base) / float(rate) - (time.time() - t0)
                 if ahead > 0:
                     time.sleep(ahead)
         with f.lock:
