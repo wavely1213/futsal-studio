@@ -50,7 +50,8 @@ class Synth(unittest.TestCase):
                 shutil.rmtree(tmp, ignore_errors=True)
             self.assertTrue(0.05 <= len(x) / sfxlib.SR <= 2.5, kind)
             pk = 20 * np.log10(np.abs(x).max())
-            self.assertTrue(-3.2 <= pk <= -2.8, f"{kind} {pk:.2f}")
+            want = sfxlib.PEAK_DB + sfxlib.SOFTER.get(kind, 0.0)  # 딸깍 소리는 조금 작게 (SOFTER)
+            self.assertTrue(want - 0.2 <= pk <= want + 0.2, f"{kind} {pk:.2f}")
             self.assertLess(abs(float(x.mean())), 2e-3, kind)
 
 

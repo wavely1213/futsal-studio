@@ -2675,22 +2675,28 @@ LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(d
 
 def _loud_pre(mix, tmp, lufs, vol, abort=None):
     """소리 크기 맞추기 전처리: 섞은 소리를 한 번 재서(ebur128) 목표까지 모자란 만큼 미리 키우고, 그때 넘치는 순간 소리만 리미터로 누름.
-    그다음 loudnorm 은 남은 1dB 안팎만 맞춤 → 목표 LUFS·최대 -1.5 dBTP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
-    try:
-        r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", f"volume={vol:.3f},ebur128=peak=true",
-                     "-f", "null", "-"], tmp, abort=abort, want_err=True)
-    except RuntimeError:
+    리미터가 누른 만큼 다시 한 번 재서 더 키움(2번 재기, 소리만이라 빠름). 그다음 loudnorm 은 남은 1dB 안팎만 맞춤 →
+    목표 LUFS·최대 -1.5 dBTP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
+    def measure(extra):
+        try:
+            r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af",
+                         ",".join([f"volume={vol:.3f}"] + extra + ["ebur128=peak=true"]), "-f", "null", "-"], tmp, abort=abort, want_err=True)
+        except RuntimeError:
+            return None
+        found = re.findall(r"I:\s+(-?[\d.]+) LUFS", r or "")
+        return float(found[-1]) if found else None
+
+    def chain(g):
+        return [f"volume={g:.2f}dB", f"alimiter=limit={10 ** (LOUD_PEAK / 20):.4f}:attack=2:release=80:level=0:asc=1"]
+
+    i_in = measure([])
+    if i_in is None or i_in < -60 or lufs - i_in <= 0.5:  # 조용한 영상 · 이미 충분히 크면 loudnorm 만
         return []
-    I = re.findall(r"I:\s+(-?[\d.]+) LUFS", r or "")
-    P = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", r or "")
-    if not I or not P:
-        return []
-    i_in, tp = float(I[-1]), float(P[-1])
-    gain = lufs - i_in
-    if i_in < -60 or gain <= 0.5 or tp + gain <= -1.5:  # 조용한 영상 · 이미 크거나 그냥 올려도 넘치지 않으면 loudnorm 만
-        return []
-    gain = min(gain, 24.0)
-    return [f"volume={gain:.2f}dB", f"alimiter=limit={10 ** (LOUD_PEAK / 20):.4f}:attack=2:release=80:level=0:asc=1"]
+    gain = min(lufs - i_in, 24.0)
+    i2 = measure(chain(gain))
+    if i2 is not None and lufs - i2 > 0.4:  # 리미터가 눌러 모자란 만큼 한 번 더
+        gain = min(gain + (lufs - i2) * 1.15, 30.0)
+    return chain(gain)
 
 
 PRESETS = {

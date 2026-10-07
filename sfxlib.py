@@ -289,7 +289,7 @@ def _shutter(rng):
     out = np.zeros(int(0.22 * SR))
     for at, f in ((0.0, 3500), (0.06, 2600)):
         tc = _t(0.03)
-        c = _band(_noise(rng, len(tc)), f * 0.5, f * 2.5) * _env(tc, 0.0005, 0.006)
+        c = _band(_noise(rng, len(tc)), f * 0.5, f * 1.6) * _env(tc, 0.002, 0.008)  # 2ms 로 열고 너무 높은 소리는 뺌 (AAC 에서 튀지 않게)
         a = int(at * SR)
         out[a:a + len(tc)] += c
     tm = _t(0.1)
@@ -333,11 +333,14 @@ _GEN = {"whoosh": _whoosh, "boing": _boing, "rimshot": _rimshot, "sad": _sad, "d
         "shutter": _shutter, "riser": _riser, "pang": _pang, "claps": _claps}
 
 
+SOFTER = {"shutter": -5.0}  # 아주 짧은 딸깍 소리는 크게 들려 조금 작게 (소리 크기 맞추기에서 리미터가 세게 누르지 않게)
+
+
 def synth(kind, seed=7):
     """만드는 효과음 하나 → WAV 바이트 (같은 kind·seed 면 늘 같은 바이트)."""
     np = _np()
     rng = np.random.default_rng(seed)
-    return _wav_bytes(_finish(_GEN[kind](rng)))
+    return _wav_bytes(_finish(_GEN[kind](rng), PEAK_DB + SOFTER.get(kind, 0.0)))
 
 
 # ---------- 효과음 준비 ----------
