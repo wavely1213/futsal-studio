@@ -207,6 +207,44 @@
   .srcmenu .new button:hover { background: var(--brand); filter: brightness(1.05); }
   .srcmenu .list { max-height: 220px; overflow: auto; display: grid; gap: 2px; }
   #styleChans { margin: -4px 0 12px; }
+  /* 6-0. 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) */
+  .shbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 6px 0 12px; }
+  .shbar .sh { margin: 0; }
+  .shbar .sp { flex: 1; }
+  .shbar .hint { font-size: 12px; color: var(--ink-3); }
+  .refadd { padding: 16px; margin-bottom: 16px; display: grid; gap: 10px; }
+  .refadd[hidden] { display: none; }
+  .refadd .row1 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .refadd .row1 .inp { flex: 1 1 260px; min-width: 0; }
+  .refadd .opts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+  .refadd .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .refadd h3 { margin: 8px 0 0; font-size: 14px; }
+  .refadd .refnote { margin: 0; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+  .reco { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 8px; max-height: 340px; overflow: auto; }
+  .reco button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 11px; cursor: pointer; display: grid; gap: 2px; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+  .reco button:hover { background: var(--surface-2); }
+  .reco button.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .reco button b { color: var(--ink); font-size: 13px; }
+  .reco button .k { color: var(--ink-3); font-weight: 500; margin-left: 6px; font-size: 12px; }
+  .reco button .have { color: var(--brand); font-weight: 700; margin-left: 6px; font-size: 12px; }
+  .dirs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 8px; }
+  .dirs .d { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; font-size: 12px; color: var(--ink-2); line-height: 1.5; align-content: start; }
+  .dirs .d b { color: var(--ink); font-size: 13px; }
+  .dirs .d .who { color: var(--ink-3); }
+  .dirs .d .btn { padding: 6px 10px; font-size: 12px; justify-self: start; }
+  .refacts { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+  .refacts:empty { display: none; }
+  .refacts .btn { padding: 6px 10px; font-size: 12px; }
+  .rows .row .rdel { font-size: 12px; color: var(--ink-3); }
+  .rows .row.gone .mini { opacity: .5; }
+  .rows .grp { padding: 8px 16px; font-size: 12px; font-weight: 700; color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+  .rows .empty.sm { padding: 24px 16px; }
+  .liblbl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+  .rows .sub .linkbtn { font-size: 12px; color: var(--ink-3); }
+  .banner { padding: 12px 16px; margin: -4px 0 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; background: var(--peak-soft); border-color: transparent; box-shadow: none; }
+  .banner[hidden] { display: none; }
+  .banner .tx { flex: 1 1 320px; color: var(--ink); line-height: 1.5; }
+  .banner .btn { padding: 6px 12px; font-size: 13px; }
 
   /* 편집점 */
   .filters { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -389,11 +427,13 @@
       <div class="bar">
         <button class="btn" id="btnOpenVideos">촬영 원본 넣기</button>
         <div class="sp"></div>
+        <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
         <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
         <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
       </div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
+      <div class="card banner" id="refBanner" hidden><span class="tx" id="refBannerTx"></span><button class="btn primary" id="refBannerGo">모두 학습용으로 옮기기</button><button class="btn" id="refBannerNo">다음에</button></div>
       <div class="card rows" id="local"></div>
       <!-- 2-2. 용어 사전: 받아쓰기가 풋살 용어·이름을 잘 알아듣게 -->
       <h2 class="sh">용어 사전</h2>
@@ -430,18 +470,36 @@
       <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
     </section>
     <section class="panel" id="p-style">
-      <div class="phead"><div><h1>스타일 배우기</h1><p>잘 나가는 유튜버 영상을 보관함에 담고 여기서 고르면, 그 채널의 공식(인트로 구성·장르·형식·자막 처리·재미 요소)을 판단하고 컷 리듬 같은 편집 습관까지 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요.</p></div></div>
+      <div class="phead"><div><h1>스타일 배우기</h1><p>따라 하고 싶은 유튜버 채널의 인기 영상을 '학습용 영상'에 담아 고르면, 그 채널의 공식(인트로 구성·장르·형식·자막 처리·재미 요소)을 판단하고 컷 리듬 같은 편집 습관까지 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요. 학습용 영상은 편집할 영상(보관함)과 따로 보관돼요.</p></div></div>
       <details class="card ccard" id="claudeCard"><summary>🤖 클로드 계정으로 쓰기 <span class="st8" id="claudeState">확인 중…</span></summary><div class="cbody" id="claudeBody"></div></details>
+      <div class="shbar"><h2 class="sh">학습용 영상</h2><span class="hint" id="refDisk"></span><div class="sp"></div><button class="btn" id="refOpen">폴더 열기</button><button class="btn" id="refAddBtn">채널 추가</button></div>
+      <div class="card refadd" id="refAdd" hidden>
+        <div class="row1"><input class="inp" id="refUrl" placeholder="채널 주소나 @핸들 (예: @shootforlovekorea)" title="예) https://www.youtube.com/@채널이름 · @채널이름">
+          <div class="seg" id="refKind"><button class="on" data-v="videos">긴 영상</button><button data-v="shorts">쇼츠</button></div>
+          <select class="sel" id="refCount" title="조회수가 많은 순서로 몇 개를 받을지 (이미 받은 영상은 빼고 다음 순서로)"><option value="3">인기 3개</option><option value="5" selected>인기 5개</option><option value="10">인기 10개</option><option value="15">인기 15개</option><option value="20">인기 20개</option></select>
+          <button class="btn primary" id="refGo">인기 영상 받기</button></div>
+        <div class="opts"><label><input type="checkbox" id="refLearn" checked> 받은 뒤 '채널 이름 스타일'로 배우기</label>
+          <label title="영상 파일만 지우고 배운 기록은 남겨요. 스타일은 그대로 쓰고, 다시 배울 때도 그 기록을 써요"><input type="checkbox" id="refPrune"> 배운 뒤 영상 파일 지우기 (디스크 아끼기)</label>
+          <label title="다운로드가 계속 실패할 때만 켜 주세요. 크롬에서 YouTube에 로그인해 두면 돼요 (내 PC 안에서만 쓰여요)"><input type="checkbox" id="refCookies"> 크롬 로그인 정보로 받기</label></div>
+        <h3>추천 채널</h3>
+        <div class="filters" id="recoGroups"></div>
+        <div class="reco" id="reco"></div>
+        <h3>방향으로 한 번에 담기</h3>
+        <p class="refnote">채널 방향 조사(2026-10-07)에서 고른, 방향마다 먼저 배워 볼 영상이에요. 영상이 많아 받고 배우는 데 시간이 꽤 걸려요.</p>
+        <div class="dirs" id="recoDirs"></div>
+      </div>
+      <div class="filters" id="styleChans" style="display:none"></div>
+      <div class="refacts" id="refActs"></div>
       <div class="bar">
         <input class="inp" id="styleName" placeholder="스타일 이름 (예: 슛포러브 스타일)">
+        <label class="liblbl" title="편집용 보관함의 영상으로도 배울 수 있어요"><input type="checkbox" id="styleLib"> 보관함 영상도 보기</label>
         <div class="sp"></div>
         <button class="btn primary" id="btnLearn" disabled>스타일 배우기</button>
       </div>
-      <div class="filters" id="styleChans" style="display:none"></div>
       <div class="card rows" id="styleSrc"></div>
       <h2 class="sh">배운 스타일</h2>
       <div class="grid styles" id="styleList"></div>
-      <div class="card empty" id="styleEmpty"><b>아직 배운 스타일이 없어요</b>1) 소재 찾기에 다른 유튜버 채널 주소를 넣고 영상을 담은 뒤 2) 여기서 그 영상들을 골라 "스타일 배우기"를 누르세요. 2~3개를 함께 배우면 더 정확해요.</div>
+      <div class="card empty" id="styleEmpty"><b>아직 배운 스타일이 없어요</b>1) 위의 '채널 추가'에서 따라 하고 싶은 채널을 넣거나 추천 채널을 고르면 인기 영상을 받아 바로 배워요. 2) 이미 받은 영상은 목록에서 골라 "스타일 배우기"를 누르세요. 2~3개를 함께 배우면 더 정확해요.</div>
     </section>
     <section class="panel" id="p-thumb">
       <div class="phead"><div><h1>썸네일</h1><p>영상에서 선명한 장면을 골라 후보를 자동으로 만들어요. 고른 후보를 포토샵처럼 고치고(글자·도형·누끼), 유튜브용 이미지로 저장해요.</p></div></div>
@@ -554,7 +612,7 @@ function go(p) {
   document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.p === p));
   document.querySelectorAll(".panel").forEach(s => s.classList.toggle("on", s.id === "p-" + p));
   if (p === "points") loadEvents();
-  if (p === "style") { loadStyles(); if (!claude.state) claudeStatus(false); }
+  if (p === "style") { loadStyles(); loadRefs(); if (!claude.state) claudeStatus(false); }
   if (p === "library") checkSources();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
@@ -610,7 +668,7 @@ function renderLocal() {
     return `<div class="row">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${v.analyzed ? `<span class="chip ok" data-chip="${esc(v.name)}" data-base="편집점 준비됨">편집점 준비됨</span>` : `<span class="chip" data-chip="${esc(v.name)}" data-base="아직 안 함">아직 안 함</span>`}
       ${v.analyzed ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
     </div>`;
@@ -619,6 +677,8 @@ function renderLocal() {
   document.querySelectorAll(".lchk").forEach(c => c.onchange = () => { c.checked ? libSel.add(c.value) : libSel.delete(c.value); sync(); });
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
   document.querySelectorAll("#local [data-src]").forEach(b => b.onclick = e => { e.stopPropagation(); srcMenu(b); });
+  document.querySelectorAll("#local [data-toref]").forEach(b => b.onclick = () => moveToRefs([b.dataset.toref]));
+  renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
   if (remote.length) renderRemote();
@@ -818,31 +878,182 @@ $("dictSave").onclick = async () => {
 };
 loadDict();
 
-/* 6. 스타일 배우기 */
-function renderStyleSrc() {
-  const checked = new Set([...document.querySelectorAll(".schk:checked")].map(c => c.value));
-  $("styleSrc").innerHTML = state.local.length ? state.local.map(v => { const id = ytId(v.name); return `<div class="row">
-      <input type="checkbox" class="schk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
+/* 6. 스타일 배우기 — 6-0. 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로 · 서버 refs.py) */
+let refs = { videos: [], channels: [], disk: {}, loaded: false }, reco = null, recoGroup = "", refFilter = "all";
+const stySel = new Set();  // 스타일 배우기에 고른 영상 (학습용 + 보관함 · 채널 칩으로 숨겨도 기억)
+let styleLib = null;       // '보관함 영상도 보기' (null = 정하지 않음 → 학습용 영상이 없을 때만 켜짐)
+try { const v = localStorage.getItem("styleLib"); if (v === "1" || v === "0") styleLib = v === "1"; } catch (e) {}
+try { for (const k of ["refLearn", "refPrune"]) { const v = localStorage.getItem(k); if (v === "1" || v === "0") $(k).checked = v === "1"; } } catch (e) {}
+const showLib = () => styleLib === null ? !refs.videos.length : styleLib;
+const mbText = n => n >= 1000 ? `${(n / 1000).toFixed(1)}GB` : `${Math.round(n)}MB`;
+const refCookie = () => $("refCookies").checked ? "chrome" : null;
+$("refCookies").onchange = () => { $("cookies").checked = $("refCookies").checked; };  // 소재 찾기의 같은 설정과 함께
+$("cookies").addEventListener("change", () => { $("refCookies").checked = $("cookies").checked; });
+["refLearn", "refPrune"].forEach(k => $(k).addEventListener("change", () => { try { localStorage.setItem(k, $(k).checked ? "1" : "0"); } catch (e) {} }));
+async function loadRefs() {
+  try { const j = await (await fetch("/api/refs")).json(); if (!j.ok) return; refs = { ...j, loaded: true }; } catch (e) { return; }
+  if (!refs.videos.length && $("p-style").classList.contains("on") && !refs.opened) { refs.opened = true; $("refAdd").hidden = false; loadReco(); }
+  renderStyleSrc(); renderBanner();
+}
+async function loadReco() {
+  if (reco) return renderReco();
+  try { reco = await (await fetch("/api/refs/recommended")).json(); } catch (e) { return; }
+  recoGroup = (reco.groups || [])[0] || "";
+  renderReco();
+}
+function renderReco() {
+  if (!reco) return;
+  const url = $("refUrl").value.trim().toLowerCase(), norm = x => String(x || "").replace(/\s/g, "").toLowerCase();
+  const have = new Set((refs.channels || []).flatMap(c => [norm(c.channel), ...(c.handles || []).map(norm)]));  // 이미 받은 채널 (이름·@핸들)
+  $("recoGroups").innerHTML = (reco.groups || []).map(g => `<button class="${g === recoGroup ? "on" : ""}" data-rg="${esc(g)}">${esc(g)} ${(reco.channels || []).filter(c => c.group === g).length}</button>`).join("");
+  $("reco").innerHTML = (reco.channels || []).filter(c => c.group === recoGroup).map(c => `<button class="${url && url === c.url.toLowerCase() ? "on" : ""}" data-rurl="${esc(c.url)}" data-rname="${esc(c.name)}" title="${esc(c.category)} · ${esc(c.format)}">
+      <b>${c.star ? "★ " : ""}${esc(c.name)}<span class="k">구독자 ${esc(c.subsText)}</span>${have.has(norm(c.name)) || have.has(norm(c.handle)) ? `<span class="have">받음</span>` : ""}</b><span>${esc(c.tip)}</span></button>`).join("");
+  $("recoDirs").innerHTML = (reco.directions || []).map(d => { const n = d.channels.reduce((a, c) => a + c.videos.length, 0); return `<div class="d">
+      <b>방향 ${esc(d.key)}. ${esc(d.title)}${d.best ? " (추천)" : ""}</b><span>${esc(d.desc)}</span><span class="who">${d.channels.map(c => esc(c.channel)).join(" · ")}</span>
+      <button class="btn" data-rdir="${esc(d.key)}" data-rn="${n}">방향 ${esc(d.key)}로 한 번에 담기 (${n}개)</button></div>`; }).join("");
+  document.querySelectorAll("[data-rg]").forEach(b => (b.onclick = () => { recoGroup = b.dataset.rg; renderReco(); }));
+  document.querySelectorAll("[data-rurl]").forEach(b => (b.onclick = () => {
+    $("refUrl").value = b.dataset.rurl; renderReco();
+    toast(`'${b.dataset.rname}'을 골랐어요 · [인기 영상 받기]를 누르면 받아요`);
+  }));
+  document.querySelectorAll("[data-rdir]").forEach(b => (b.onclick = () => {
+    const k = b.dataset.rdir;
+    if (!confirm(`방향 ${k}의 추천 영상 ${b.dataset.rn}개를 학습용 영상으로 받을까요?${$("refLearn").checked ? "\n다 받으면 채널마다 '채널 이름 스타일'로 배워요." : ""}\n영상이 많아 시간이 꽤 걸려요 (이미 받은 영상은 건너뛰어요).`)) return;
+    job("/api/refs/direction", { dir: k, learn: $("refLearn").checked, prune: $("refPrune").checked, cookies: refCookie() }, refDone);
+  }));
+  sync();
+}
+$("refAddBtn").onclick = () => { $("refAdd").hidden = !$("refAdd").hidden; if (!$("refAdd").hidden) { loadReco(); $("refUrl").focus(); } };
+$("refOpen").onclick = () => api("/api/open", { which: "refs" });
+$("refUrl").oninput = () => renderReco();
+$("refUrl").onkeydown = e => { if (e.key === "Enter") $("refGo").click(); };
+$("refGo").onclick = () => {
+  const url = $("refUrl").value.trim();
+  if (!url) { toast("채널 주소나 @핸들을 넣거나, 아래 추천 채널을 골라 주세요"); $("refUrl").focus(); return; }
+  job("/api/refs/add", { url, kind: segVal("refKind"), count: +$("refCount").value, learn: $("refLearn").checked, prune: $("refPrune").checked, cookies: refCookie() },
+    r => { refDone(r); if (r && r.ok) { $("refUrl").value = ""; renderReco(); } });
+};
+function refDone(r) {
+  loadRefs(); loadStyles();
+  if (!r) return;
+  if (r.ok === false) { toast(r.error || "학습용 영상을 받지 못했어요"); if (r.blocked) $("drawer").classList.add("open"); return; }
+  const got = (r.got || []).length, fail = (r.failed || []).length, lib = (r.library || []).length, ls = r.learned || [];
+  const ok = ls.filter(x => !x.error).map(x => `'${x.style}'`), bad = ls.filter(x => x.error).length;
+  const pr = ls.reduce((a, x) => a + ((x.prune && x.prune.pruned) || []).length, 0);
+  const parts = [];  // 받기(got 있음) · 다시 배우기(learned 만)
+  if (r.got) parts.push(got ? `학습용 영상 ${got}개를 받았어요` : "새로 받은 영상은 없어요");
+  if (ok.length) parts.push(`${ok.join(", ")}을 배웠어요`);
+  if (pr) parts.push(`영상 파일 ${pr}개는 지웠어요`);
+  if (lib) parts.push(`보관함에 있는 ${lib}개는 건너뜀`);
+  if (fail) parts.push(`${fail}개 받기 실패 (작업 기록 확인)`);
+  if (bad) parts.push(`스타일 ${bad}개 배우기 실패 (작업 기록 확인)`);
+  toast(parts.join(" · ") || "끝났어요");
+}
+function renderRefChips() {
+  const ch = refs.channels || [];
+  if (refFilter !== "all" && !ch.some(c => "ch:" + c.channelKey === refFilter)) refFilter = "all";
+  $("styleChans").style.display = ch.length ? "" : "none";
+  $("styleChans").innerHTML = ch.length ? `<span class="lbl">학습용 영상</span><button class="${refFilter === "all" ? "on" : ""}" data-rf="all">전체 ${refs.videos.length}</button>` + ch.map(c =>
+    `<button class="${refFilter === "ch:" + c.channelKey ? "on" : ""}" data-rf="ch:${esc(c.channelKey)}" title="${esc(chName(c))} 영상만 보기"><i class="dot${colorCls(c.color)}"></i>${esc(chName(c))} ${c.count}</button>`).join("") : "";
+  const c = ch.find(c => "ch:" + c.channelKey === refFilter);
+  $("refActs").innerHTML = c ? `<button class="btn" data-ra="pick">이 채널 영상 모두 고르기</button><button class="btn" data-ra="learn" title="이 채널의 학습용 영상으로 다시 배워요">'${esc(chName(c))} 스타일' 다시 배우기</button>`
+    + (c.learned ? `<button class="btn" data-ra="prune" title="배운 기록은 남겨 둬서 스타일은 그대로예요. 다시 배울 때도 그 기록을 써요">배운 영상 파일 지우기</button>` : "")
+    + `<button class="btn" data-ra="del">채널 지우기</button>` : "";
+  document.querySelectorAll("[data-rf]").forEach(b => (b.onclick = () => { refFilter = b.dataset.rf; renderStyleSrc(); }));
+  document.querySelectorAll("[data-ra]").forEach(b => (b.onclick = () => {
+    const key = c.channelKey, nm = chName(c), a = b.dataset.ra, mine = refs.videos.filter(v => (v.channelKey || "") === key);
+    if (a === "pick") {
+      const use = mine.filter(v => v.usable), all = use.length && use.every(v => stySel.has(v.name));
+      use.forEach(v => (all ? stySel.delete(v.name) : stySel.add(v.name)));
+      if (!all && !$("styleName").value.trim()) $("styleName").value = `${nm} 스타일`;
+      renderStyleSrc(); toast(all ? "그 채널 영상 고르기를 풀었어요" : `${use.length}개 영상을 골랐어요`);
+    } else if (a === "learn") job("/api/refs/learn", { channel: key, prune: $("refPrune").checked }, refDone);
+    else if (a === "prune") {
+      if (!confirm(`'${nm}'의 배운 영상 파일을 지울까요?\n배운 기록은 남겨 둬서 스타일은 그대로 쓰고, 다시 배울 때도 그 기록을 써요.\n(아직 배우지 않은 영상은 남겨요)`)) return;
+      job("/api/refs/prune", { channel: key }, r => { loadRefs(); toast(r && r.ok ? `영상 파일 ${(r.pruned || []).length}개를 지웠어요 · 스타일은 그대로예요` : (r && r.error) || "지우지 못했어요"); });
+    } else if (a === "del") {
+      if (!confirm(`'${nm}' 채널의 학습용 영상 ${mine.length}개를 모두 지울까요?\n영상 파일과 분석 기록이 지워져요. 이미 배운 스타일은 그대로 남아요.`)) return;
+      job("/api/refs/delete", { channel: key }, r => { loadRefs(); refFilter = "all"; toast(r && r.ok ? `'${nm}' 학습용 영상을 지웠어요${(r.failed || []).length ? ` · ${r.failed.length}개는 지우지 못했어요 (다른 프로그램이 쓰는 중)` : ""}` : (r && r.error) || "지우지 못했어요"); });
+    }
+  }));
+}
+function refRow(v) {
+  const id = v.videoId || ytId(v.name), st = v.present ? (v.learned ? "배움" : "아직 안 배움") : v.pruned ? "파일 지움" : "파일 없음";
+  const tip = v.styles.length ? `이 영상으로 배운 스타일: ${v.styles.join(", ")}` : v.learned ? "살펴본 기록이 있어요" : "스타일 배우기에 고르면 살펴봐요";
+  const sub = v.present ? mbText(v.size_mb) : v.pruned ? "영상 파일은 지웠어요 · 배운 기록으로 다시 배울 수 있어요" : "영상 파일을 찾지 못했어요";
+  return `<div class="row${v.present ? "" : " gone"}">
+      <input type="checkbox" class="schk" value="${esc(v.name)}" ${stySel.has(v.name) ? "checked" : ""}${v.usable ? "" : " disabled"}>
+      <div class="mini"><span class="ph">⚽</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div style="min-width:0"><div class="name">${esc(v.title || niceName(v.name))}</div><div class="sub">${srcBadge({ kind: "other", channel: v.channel, color: v.color }, null, true)} · ${esc(sub)}</div></div>
+      <span class="chip${v.learned ? " ok" : ""}" title="${esc(tip)}">${st}</span>
+      <button class="linkbtn rdel" data-rdel="${esc(v.name)}" title="이 학습용 영상과 분석 기록을 지워요 (배운 스타일은 그대로)">지우기</button></div>`;
+}
+function libRow(v) {
+  const id = ytId(v.name);
+  return `<div class="row">
+      <input type="checkbox" class="schk" value="${esc(v.name)}" ${stySel.has(v.name) ? "checked" : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(niceName(v.name))}</div><div class="sub">${srcBadge(srcOf(v))} · ${v.analyzed ? "받아쓰기 있음 (말 빠르기까지 배워요)" : "화면·소리로 배워요"}</div></div><span></span><span></span></div>`; }).join("")
-    : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 따라 하고 싶은 유튜버 영상을 먼저 담아 주세요.</div>`;
-  document.querySelectorAll(".schk").forEach(c => (c.onchange = syncStyle));
-  // 다른 채널 영상을 채널별로 한 번에 고르기 (다시 누르면 그 채널 영상 고르기를 풂)
-  const chans = ((state.sources || {}).channels || []).filter(c => c.channelKey);
-  $("styleChans").style.display = chans.length ? "" : "none";
-  $("styleChans").innerHTML = chans.length ? `<span class="lbl">채널별로 한 번에</span>` + chans.map(c =>
-    `<button data-sc="${esc(c.channelKey)}" title="이 채널 영상 모두 고르기"><i class="dot${colorCls(c.color)}"></i>${esc(chName(c))} 영상 모두 고르기 (${c.count})</button>`).join("") : "";
-  document.querySelectorAll("[data-sc]").forEach(b => b.onclick = () => {
-    const names = new Set(state.local.filter(v => srcMatch(v, "ch:" + b.dataset.sc)).map(v => v.name));
-    const boxes = [...document.querySelectorAll(".schk")].filter(c => names.has(c.value)), all = boxes.length && boxes.every(c => c.checked);
-    boxes.forEach(c => (c.checked = !all));
-    if (!all && !$("styleName").value.trim()) $("styleName").value = `${b.textContent.replace(/ 영상 모두 고르기.*$/, "")} 스타일`;
-    syncStyle();
-    toast(all ? "그 채널 영상 고르기를 풀었어요" : `${boxes.length}개 영상을 골랐어요`);
-  });
+      <div style="min-width:0"><div class="name">${esc(niceName(v.name))}</div><div class="sub">${srcBadge(srcOf(v))} · ${v.analyzed ? "받아쓰기 있음 (말 빠르기까지 배워요)" : "화면·소리로 배워요"}</div></div><span></span><span></span></div>`;
+}
+function renderStyleSrc() {
+  const lib = showLib();
+  $("styleLib").checked = lib;
+  if (refs.loaded) {  // 지웠거나 옮긴 영상은 고르기에서 뺌
+    const ok = new Set([...refs.videos.filter(v => v.usable).map(v => v.name), ...state.local.map(v => v.name)]);
+    [...stySel].forEach(n => { if (!ok.has(n)) stySel.delete(n); });
+  }
+  renderRefChips();
+  const rv = refs.videos.filter(v => refFilter === "all" || "ch:" + (v.channelKey || "") === refFilter);
+  let html = rv.map(refRow).join("");
+  if (!refs.videos.length) html = refs.loaded ? `<div class="empty sm"><b>학습용 영상이 아직 없어요</b>'채널 추가'에서 따라 하고 싶은 채널을 넣거나 추천 채널을 고르면 인기 영상을 받아 스타일까지 배워요.</div>` : "";
+  if (lib) html += `<div class="grp">편집용 보관함</div>` + (state.local.length ? state.local.map(libRow).join("")
+    : `<div class="empty sm"><b>보관함이 비어 있어요</b></div>`);
+  $("styleSrc").innerHTML = html;
+  const d = refs.disk || {};
+  $("refDisk").textContent = refs.videos.length ? `${refs.channels.length}개 채널 · 영상 ${refs.videos.length}개 · ${mbText(d.total_mb || 0)} 사용` : "";
+  document.querySelectorAll(".schk").forEach(c => (c.onchange = () => { c.checked ? stySel.add(c.value) : stySel.delete(c.value); syncStyle(); }));
+  document.querySelectorAll("[data-rdel]").forEach(b => (b.onclick = () => {
+    const v = refs.videos.find(x => x.name === b.dataset.rdel), t = v ? (v.title || niceName(v.name)) : b.dataset.rdel;
+    if (!confirm(`'${t.slice(0, 40)}' 학습용 영상을 지울까요?\n영상 파일과 분석 기록이 지워져요. 이미 배운 스타일은 그대로 남아요.`)) return;
+    job("/api/refs/delete", { names: [b.dataset.rdel] }, r => { loadRefs(); toast(r && r.ok && (r.removed || []).length ? "학습용 영상을 지웠어요" : ((r && r.failed && r.failed[0] && r.failed[0].error) || (r && r.error) || "지우지 못했어요")); });
+  }));
   syncStyle();
 }
-function syncStyle() { const n = document.querySelectorAll(".schk:checked").length; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
+$("styleLib").onchange = () => { styleLib = $("styleLib").checked; try { localStorage.setItem("styleLib", styleLib ? "1" : "0"); } catch (e) {} renderStyleSrc(); };
+function syncStyle() { const n = stySel.size; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
+/* 2-1. 보관함 → 학습용으로 옮기기 (다른 채널 영상 · 그 밖의 영상은 확인 후) · 다른 채널 영상이 많으면 한 번 제안 */
+function renderBanner() {
+  const others = state.local.filter(v => srcOf(v).kind === "other");
+  const show = refs.loaded && !refs.bannerDismissed && others.length >= (refs.suggestMin || 3);
+  $("refBanner").hidden = !show;
+  if (show) $("refBannerTx").textContent = `보관함에 다른 채널 영상이 ${others.length}개 있어요. 스타일 배우기용이면 '학습용 영상'으로 옮겨 두세요 — 보관함에는 편집할 영상만 남고, 스타일 배우기에서 채널별로 모아 보여 줘요.`;
+}
+$("refBannerNo").onclick = async () => {
+  refs.bannerDismissed = true; renderBanner();
+  await api("/api/refs/banner", { dismiss: true }).catch(() => {});
+  toast("이 안내는 다시 보이지 않아요 · 영상 이름 아래 '학습용으로 옮기기'로 언제든 옮길 수 있어요");
+};
+$("refBannerGo").onclick = () => moveToRefs(state.local.filter(v => srcOf(v).kind === "other").map(v => v.name));
+$("btnToRefs").onclick = () => moveToRefs(libChecked());
+async function moveToRefs(names, confirmed) {
+  if (!names.length || state.job) return;
+  if (!confirmed && !confirm(`${names.length}개 영상을 '학습용 영상'으로 옮길까요?\n보관함·편집점·편집실·썸네일·올리기 목록에서 빠지고, 스타일 배우기에서 채널별로 보여요. 분석 기록도 함께 옮겨요.`)) return;
+  const j = await api("/api/refs/move", { names, confirm: confirmed === "all" }).catch(() => ({}));
+  if (j.confirm && j.confirm.length) {
+    const rest = names.filter(n => !j.confirm.includes(n));
+    if (confirm(`고른 영상 중 ${j.confirm.length}개는 다른 채널 영상이 아니에요 (풋살사관학교·내 촬영본·출처 모름).\n학습용으로 옮기면 편집에 쓸 수 없어요. 이 영상들도 함께 옮길까요?\n[취소]를 누르면 다른 채널 영상 ${rest.length}개만 옮겨요.`)) return moveToRefs(names, "all");
+    return rest.length ? moveToRefs(rest, "other") : undefined;
+  }
+  if (!j.ok) return;
+  state.job = "…"; sync(); showBusy();
+  pending = r => {
+    loadRefs();
+    if (!r || r.ok === false) { toast((r && r.error) || "옮기지 못했어요"); return; }
+    (r.moved || []).forEach(n => libSel.delete(n));
+    const f = r.failed || [];
+    toast(`${(r.moved || []).length}개를 학습용 영상으로 옮겼어요${f.length ? ` · ${f.length}개는 못 옮겼어요: ${f[0].error}` : ""}`);
+  };
+}
 /* 6. 배운 스타일 카드: '영상 기획 분석'(판단 문장) 위주 — 시각·컷 수 같은 숫자는 접힌 '근거 보기'·'구조 수치' 안에만 */
 const PLAN_ROWS = [["intro", "인트로"], ["genre", "장르"], ["format", "형식"], ["captions", "자막"], ["fun", "재미 요소"]];
 const confTag = c => c >= 0.75 ? `<span class="tag hi" title="여러 신호가 같은 판단을 가리켜요">확실해요</span>` : c >= 0.5 ? `<span class="tag mid" title="신호 한두 개로 판단했어요">아마도</span>` : `<span class="tag lo" title="단서가 적어 어림으로 판단했어요">어림</span>`;
@@ -870,9 +1081,9 @@ function planBlock(st) {
       <div class="paste" data-pbox="${esc(st.name)}" hidden><textarea placeholder="claude.ai 의 대답을 그대로 붙여 넣어 주세요"></textarea><div><button class="btn primary" data-psave="${esc(st.name)}">저장</button></div></div>
       ${evs || fix ? `<details class="fold" data-fold="ev"><summary>근거 보기</summary><div class="evs">${evs}${fix}</div></details>` : ""}`;
 }
-function relearnable(p) {  // 같은 영상이 보관함에 다 있으면 '다시 배우기'
+function relearnable(p) {  // 같은 영상이 보관함이나 학습용 영상에 다 있으면(파일을 지웠어도 배운 기록이 있으면) '다시 배우기'
   const src = Array.isArray(p.source) ? p.source : [p.source];
-  return src.length && src.every(n => typeof n === "string" && state.local.some(v => v.name === n)) ? src : null;
+  return src.length && src.every(n => typeof n === "string" && (state.local.some(v => v.name === n) || refs.videos.some(v => v.name === n && v.usable))) ? src : null;
 }
 async function loadStyles() {
   const j = await (await fetch("/api/style/list")).json(), list = j.styles || [];
@@ -901,7 +1112,7 @@ async function loadStyles() {
 function bindPlan() {
   document.querySelectorAll("[data-prelearn]").forEach(b => (b.onclick = async () => {
     const name = b.dataset.prelearn, st = (await (await fetch("/api/style/list")).json()).styles.find(x => x.name === name), src = st && relearnable(st.profile);
-    if (!src) { toast("배운 영상이 보관함에 없어요. 영상을 다시 담은 뒤 새로 배워 주세요"); return; }
+    if (!src) { toast("배운 영상이 보관함이나 학습용 영상에 없어요. 영상을 다시 담은 뒤 새로 배워 주세요"); return; }
     job("/api/style/learn", { name, names: src }, () => { toast(`'${name}'을 다시 배웠어요 · 영상 기획 분석이 생겼어요`); loadStyles(); });
   }));
   document.querySelectorAll("[data-pcopy]").forEach(b => (b.onclick = async () => {
@@ -1008,10 +1219,11 @@ function bindScores() {
   }));
 }
 $("btnLearn").onclick = () => {
-  const names = [...document.querySelectorAll(".schk:checked")].map(c => c.value), nm = $("styleName").value.trim() || `${niceName(names[0]).slice(0, 12)} 스타일`;
+  const names = [...stySel], first = refs.videos.find(v => v.name === names[0]);
+  const nm = $("styleName").value.trim() || (first && first.channel ? `${first.channel} 스타일` : `${niceName(names[0]).slice(0, 12)} 스타일`);
   const clean = nm.replace(/[\\/:*?"<>|]/g, "").trim().replace(/^[ .]+|[ .]+$/g, "") || "내 스타일";
   if ((state.styles || []).some(s => s.toLowerCase() === clean.toLowerCase()) && !confirm(`'${clean}' 스타일이 이미 있어요. 새로 배운 내용으로 바꿀까요?`)) return;
-  job("/api/style/learn", { name: nm, names }, () => { toast(`'${clean}'을 배웠어요 · 편집실 '스타일로 자동 편집'에서 고를 수 있어요`); $("styleName").value = ""; loadStyles(); });
+  job("/api/style/learn", { name: nm, names }, () => { toast(`'${clean}'을 배웠어요 · 편집실 '스타일로 자동 편집'에서 고를 수 있어요`); $("styleName").value = ""; loadStyles(); loadRefs(); });
 };
 
 /* 3. 편집점 */
@@ -1083,6 +1295,9 @@ function sync() {
   const shown = new Set([...document.querySelectorAll(".lchk")].map(c => c.value)), hid = [...libSel].filter(n => !shown.has(n)).length;
   $("libHidden").textContent = hid ? `고른 영상 ${nl}개 중 ${hid}개는 지금 숨겨져 있어요 ('전체'를 누르면 보여요)` : "";
   $("btnAnalyze").disabled = busy || !nl;
+  $("btnToRefs").disabled = busy || !nl;
+  $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo").forEach(b => (b.disabled = busy));
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
@@ -1135,6 +1350,7 @@ async function poll() {
   state.progress = s.progress;
   state.local = s.local;
   state.sources = s.sources;
+  if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
   if (wasBusy && !s.job && pending) {
     const f = pending; pending = null;
     if (s.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
@@ -1175,7 +1391,7 @@ $("btnUpdate").onclick = () => $("updPill").classList.contains("show") ? runUpda
 $("updPill").onclick = runUpdate;
 
 setInterval(poll, 1000);
-poll().then(() => { renderEvents(); renderEdList(); });
+poll().then(() => { renderEvents(); renderEdList(); loadRefs(); });
 checkUpdate();
 </script>
 <script>
