@@ -18,6 +18,8 @@ from urllib.parse import quote
 
 import captions
 import core
+import exportplan
+import hwdec
 import takes
 
 PROJECTS = core.WORK / "projects"
@@ -2218,7 +2220,7 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             # 반 프레임 일찍 찾아가야 가장 가까운 원본 프레임이 첫 장면이 됨 (소리와 싱크)
             ss = min(max(0.0, lo - 0.5 / sfps), max(0.0, mdur - 0.05))
             pre_pad = max(0.0, -lo) / sp if not it.get("rev") else max(0.0, hi - mdur) / sp
-            inputs.append(["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
+            inputs.append(hwdec.input_opts(media_hdr(md), p, ss) + ["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
             chain.append("setpts=PTS-STARTPTS")
             hdr = media_hdr(md)
             # HDR → 일반 색: 쓸 크기로 먼저 줄이고, fps 로 버릴 프레임은 바꾸지 않게 fps 뒤에서 (60fps 4K 가 3배쯤 빠름)
@@ -3026,31 +3028,45 @@ def export(name, proj, opts, log):
             if hw and (hw, W, H) in _HW.get("bad", set()):
                 hw = None
 
+            # 같은 원본에서 이어지는 짧은 구간들은 ffmpeg 하나로 (exportplan · 그림은 구간마다 만든 것과 같음)
+            builds = [_build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k) for k, (f0, f1) in enumerate(segs)]
+            units = exportplan.units(builds, tmp, fps)
+
             def render(k, enc, abort, procs):
                 if abort.is_set():
                     return
-                f0, f1 = segs[k]
-                args, final, n = _build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k)
+                args, final, n, fcf = exportplan.unit_args(units[k], builds, tmp, fps)
 
                 def on_frame(fr):
                     with lock:
                         done[k] = min(n, fr)
-                        prog(2 + 85 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(segs)}" + (" · 그래픽카드" if enc else ""))
+                        prog(2 + 85 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(units)}" + (" · 그래픽카드" if enc else ""))
 
-                _run_ff(["-y", "-v", "error"] + args + [_fc_opt(), f"fc{k}.txt", "-map", f"[{final}]", "-an", "-frames:v", str(n)] + _venc(enc, pr, W, H, fps)
-                        + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame,
-                        procs=procs, abort=abort, enc=enc)
+                def go(a):
+                    _run_ff(["-y", "-v", "error"] + a + [_fc_opt(), fcf, "-map", f"[{final}]", "-an", "-frames:v", str(n)] + _venc(enc, pr, W, H, fps)
+                            + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame,
+                            procs=procs, abort=abort, enc=enc)
+                if hwdec.is_bad():  # 앞 구간에서 그래픽카드 풀기가 실패했으면 처음부터 일반 방식
+                    args = hwdec.strip(args)
+                try:
+                    go(args)
+                except RuntimeError:
+                    if "-hwaccel" not in args or CANCEL.is_set() or abort.is_set():
+                        raise
+                    hwdec.mark_bad()  # 그래픽카드로 풀기가 안 됨 → 이번 실행 동안은 일반 방식 (이 구간도 다시)
+                    log("  그래픽카드로 영상 풀기가 안 돼서 일반 방식으로 다시 만들어요")
+                    go(hwdec.strip(args))
                 on_frame(n)
 
             def render_all(enc, workers=None):
                 """구간들을 동시에 만들고, 하나라도 실패하면 나머지를 바로 멈춤 (다 기다리지 않음)."""
                 done.clear()
                 if workers is None:
-                    workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(segs) > 1 else 1
+                    workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(units) > 1 else 1
                 abort, procs = threading.Event(), set()
                 ex = ThreadPoolExecutor(workers)
                 try:
-                    futs = [ex.submit(render, k, enc, abort, procs) for k in range(len(segs))]
+                    futs = [ex.submit(render, k, enc, abort, procs) for k in range(len(units))]
                     wait(futs, return_when=FIRST_EXCEPTION)
                     errs = [f.exception() for f in futs if f.done() and f.exception() is not None]
                     if errs:
@@ -3084,7 +3100,7 @@ def export(name, proj, opts, log):
             except HwEncError as e:
                 if CANCEL.is_set():
                     raise Cancelled()
-                if getattr(e, "session", False) and len(segs) > 1:  # 동시에 여는 개수 제한 → 하나씩 다시
+                if getattr(e, "session", False) and len(units) > 1:  # 동시에 여는 개수 제한 → 하나씩 다시
                     log(f"  그래픽카드({hw})로 한 번에 하나씩 다시 만들어요")
                     try:
                         render_all(hw, 1)
@@ -3097,7 +3113,7 @@ def export(name, proj, opts, log):
                 if not hw or CANCEL.is_set() or _hw_works(hw, pr, W, H, fps):
                     raise
                 to_cpu()
-            (tmp / "list.txt").write_text("".join(f"file 'seg{k:04d}.mp4'\n" for k in range(len(segs))), encoding="utf-8")
+            (tmp / "list.txt").write_text("".join(f"file 'seg{k:04d}.mp4'\n" for k in range(len(units))), encoding="utf-8")
             # 영상 화면이 다 되면 소리 마무리를 기다림 (wait 로 확인 → 파이썬 3.9·3.10 에서도 시간 초과 예외가 안 남)
             while not wait([fut], timeout=0.4).done:
                 prog(87 + 11 * astate["frac"], "소리 마무리 중 · 소리 크기 맞추는 중")
