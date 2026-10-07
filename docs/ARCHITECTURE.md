@@ -29,8 +29,23 @@
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy
    ▼
 [작업 폴더 WORK]   videos/ analysis/ projects/ thumbnails/ styles/ refs/(학습용 영상) edit_media/ out/ studio.log …
-[~/.futsal-studio] bin/deno.exe · models/*.onnx · 엔진 기록(json)
+[~/.futsal-studio] bin/deno.exe · bin/cloudflared.exe · models/*.onnx · 엔진 기록(json) · remote.json(휴대폰 열쇠) · remote/(터널 설정·pid)
 [앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태)
+```
+
+**휴대폰으로 보기 (원격 접속, D-024 · 켜 둔 동안만)**
+
+```
+[휴대폰 브라우저 / 홈 화면 앱]  https://mulgyeol.kr/futsal  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel)
+   │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
+   │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 mulgyeol.kr 만)
+   │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기에 묶인 2시간 표)
+   ▼
+[Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · Job Object] ── Host: remote.futsal.invalid ──┐
+                                                                                                                  ▼
+[app.py 프로세스]  로컬 서버 127.0.0.1:8765 (그대로 · 터널 뒤에 없음)      원격 리스너 127.0.0.1:<임의> (/r/* 만) = remote.RemoteHandler
+                    └ /api/remote* (PC 창: 켜기·연결 QR·끊기·설정)            └ remote.Service → Bridge(log·start_job·작업 모습) → 기능 모듈
+                                                                           └ Publisher 스레드 → ntfy.sh (암호 비콘 · 정해진 알림 문장)
 ```
 
 ## 2. 레이어와 책임
@@ -39,6 +54,7 @@
 |---|---|---|---|
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
+| 원격 경계 | `remote.py` (`RemoteHandler`·`Service`) | 터널로 들어온 요청만: Host 표시·수 제한·CORS·서명/표 확인·허용 동작 목록, 짝짓기·기기 열쇠(`remote.json`)·비콘·알림·자동 끄기·절전 막기. 기능은 app 이 넘긴 `Bridge` 와 기능 모듈 함수를 부르기만 한다 | `app` import. 로컬 `Handler`의 API 를 터널에 내주기. 허용 목록 밖 동작(지우기·설정·업데이트·켜기·임의 경로). 비밀(코드·열쇠·주제·터널 주소·표) 기록 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
 | 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
@@ -59,6 +75,8 @@
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
   - `face` → `core`, `thumb`
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
+  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `style`, `tunnel`, `updater`(`_replace`·`UA`·`NET_ERRORS`). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
+  - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
 - 순환 의존이 생기면 구현을 멈추고 구조를 먼저 보고한다.
@@ -85,7 +103,11 @@
 | takes | `takes.py` (2차 작업 중, 커밋 전) | `find_junk`·`is_slate`: 받아쓰기 구간만 보고 NG 테이크·슬레이트 말·말더듬 구간을 규칙으로 찾음 → `editor.recommend`가 가편집·쇼츠 후보에서 뺌 (`KNOWN_ISSUES.md` I-012). `find_fillers`: 단어 시각이 있으면 홀로 떨어진 추임새 단어 |
 | source | `source.py` | 보관함 영상의 출처(풋살사관학교·다른 채널·내 촬영본·모름) 판단과 기록(`videos/sources.json`, D-020). 받을 때 yt-dlp 채널 정보 기록, 예전 영상은 채널 목록 기억 → 뒤에서 천천히 영상 정보 조회(`start_backfill`), 직접 고르기(`set_manual`), 다른 채널은 채널별 묶음·고정 색(`channels`), 고르기 칩 개수(`summary`) |
 | refs | `refs.py` | 학습용 영상(스타일 배우기 전용) 보관함 (D-022): 기록 `refs/refs.json`(바꿔 끼우기·잠김 재시도·깨지면 `.bad`), 채널별 폴더·색(`source._register` 재사용, 보관함과 같은 색), `add_channel`(인기 영상 N개 → `core.download`를 받는 곳만 바꿔 → 채널 폴더 → '<채널명> 스타일' 배우기), `add_direction`(추천 방향 A/B/C), `prune`(배운 파일만 지우고 지문 `sig` 남김), `delete`(원본은 한 번 더 확인 · 빈 채널 폴더만 지움), `move_from_library`(보관함 → 학습용: 편집실 프로젝트에서 쓰는 영상은 건너뜀 `projects_using` · 분석 폴더 → 영상 → 기록, 실패하면 되돌림 · `archive.txt`에서 id 뺌), `restore`(학습용 → 보관함으로 되돌리기), `listing`(기록 없이 refs 하위 폴더에 있는 파일·받는 폴더에 남은 파일은 다시 기록 `_adopt`), `recommended`(`ref_channels.json`) |
+| remote | `remote.py` | 휴대폰으로 보기 (D-024): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일), `Pairing`(10분 한 번 코드·PBKDF2 만남 주제), `Auth`(FSR1 서명·nonce), `Tickets`(미디어 표), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기·끊기·설정·작업 끝 알림 `job_hook`·자동 끄기·절전 막기), `RemoteHandler`(`/r/*`), 허용 동작 `ACTIONS` |
+| tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·Job Object·남은 pid 정리) · 출력 줄은 기록하지 않음 |
+| qr | `qr.py` | QR 만들기(바이트·M·버전 1~10) → 줄 문자열 (PC 창이 SVG 로 그림) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
+| 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://mulgyeol.kr/futsal` 정적 PWA. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
 | 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 7단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
 
 ## 5. 데이터 모델 요약
@@ -106,7 +128,8 @@
 - 학습용 영상(스타일 배우기 전용, D-022) `refs/<채널 폴더>/<영상>` · 분석 기록 `refs/<채널 폴더>/_analysis/<stem>/`(style_events·plan_events·옮겨 온 받아쓰기) · 받는 중 `refs/_받는 중/`. 기록 `refs/refs.json` = {channels{채널 열쇠: {name, names, handles, url, color, folder}}, files{파일 이름: {channelKey, folder, videoId, title, how(download·move·found), kind, saved, pruned, sig, original·origin(확인하고 옮긴 원본 · 자동으로 지우지 않음)}}, ids{}, ui{bannerDismissed}}. 채널 열쇠·색 규칙은 `sources.json`과 같다. 같은 이름이 보관함에도 있으면 보관함이 먼저다(`core.video_file`·`adir`). 보관함에 파일이 없으면 옛 `analysis/<stem>`이 남아 있어도 학습용 기록이 먼저다. channels 의 `original`: '풋살사관학교'·'내 촬영본' 칸(원본)
 - 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`
-- 사용자별 `~/.futsal-studio/`: `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
+- 휴대폰용 작은 미리보기 `analysis/_remote/<이름>_<sha1 10자>/preview.mp4` (최근 10개 · 완성본 폴더에는 안 넣음)
+- 사용자별 `~/.futsal-studio/`: `remote.json`(휴대폰으로 보기: pc id·기기 열쇠·ntfy 주제·설정·seq, 권한 600), `remote/cloudflared.yml`·`tunnel.pid`, `bin/cloudflared.exe`, `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
 - 앱 폴더의 업데이트 상태: `.update_staging/`, `.rollback/v<이전>/{files/, rollback.json}`, `.update_pending`, `.update_result`, `.req_hash`, `.update_skip` (모두 `.gitignore`에 있음)
 - 규칙·불변식(예: 다시 분석해도 사용자 편집본을 덮어쓰지 않음, `config.json`을 보존함)은 `DOMAIN_KNOWLEDGE.md` 참고
 
@@ -135,6 +158,8 @@
   - 서버는 `127.0.0.1`에만 bind한다.
 - **동시성**:
   - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
+  - 휴대폰에서 시킨 작업도 같은 `start_job`(`by`='휴대폰 · <기기>')이라 PC 작업과 겹치지 않는다. 작업이 끝나면 `app.JOB_HOOKS`(지금은 `remote.Service.job_hook`: 휴대폰 알림·검수 결과 기억)를 부르고, 훅이 실패해도 작업 결과는 그대로다.
+  - 원격 쪽 스레드(보내기 `remote-publisher`·5초 점검 `remote-watch`·Windows 절전 막기 `remote-awake`·`tunnel`)는 작업·HTTP 를 기다리게 하지 않는다(ntfy 가 느려도 큐에만 넣음).
   - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`.
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
   - 멈추기(✕)는 `editor.CANCEL`, `run_killable`, `cancel_export`로 처리한다.
@@ -163,4 +188,5 @@
 5. 저장소에 추적되는 파일은 `tests/`와 `manifest.json`을 빼고 **모두 사용자 PC로 배포된다** (`release.sh`). 저장소의 `config.json`은 새로 설치하는 PC의 기본값이 되므로 개발용 값으로 바꾸지 않는다.
 6. **`thumb.html`은 빌드 산출물이다.** 원본(`thumb_src/head.html` + `thumb_src/parts/p*.js`, 저장소 안 · 배포 목록에서 제외)을 고치고 `python3 thumb_src/build.py`로 다시 만든다(명령은 `AGENTS.md` 5번). 저장소의 `thumb.html`만 고치면 다음 빌드 때 사라진다. 원본을 찾을 수 없으면 작업 전에 소유자에게 알린다. 소유자가 허락해 `thumb.html`을 직접 고쳤다면 "원본 동기화 필요"를 보고하고 `KNOWN_ISSUES.md`에 남긴다.
 7. 새 API는 `Handler`에 추가한다. Host·Origin 검사 뒤에 두고, 파일 이름 인자는 `editor.safe_name()`으로 검사하며, 긴 처리는 `start_job` + `core.set_progress`로 한다. 앱 프로세스 밖의 서버·포트를 새로 열지 않는다.
+   - 예외 하나 (D-024): 원격 접속을 켠 동안만 뜨는 루프백 원격 리스너(`remote.RemoteServer`)와 cloudflared 자식 프로세스. 휴대폰용 경로는 `Handler`가 아니라 `remote.RemoteHandler`에 두고 `SECURITY_GUIDELINES.md` 2절의 원격 경계 순서를 따른다. 로컬 `Handler`의 경로를 터널 쪽에 이어 붙이지 않는다.
 8. 사용자가 만든 데이터(편집본·썸네일 디자인·설정)는 덮어쓰지 않는다. 다시 만드는 결과는 옆에 추가하고, 바꿀 때는 먼저 백업한다. 상세 규칙은 `DOMAIN_KNOWLEDGE.md`에 있다.

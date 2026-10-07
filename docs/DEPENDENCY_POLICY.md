@@ -95,5 +95,9 @@
 | YAMNet (16MB, Apache-2.0 표시, tf2onnx 변환본) | Hugging Face zeropointnine/yamnet-onnx 고정 커밋 → `~/.futsal-studio/models` | 영상 기획 분석: 웃음·환호·음악·효과음 (`avmodels.tags`) |
 | Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021). 앱이 직접 받거나 묶지 않음 |
 | Pretendard 웹폰트 CSS (v1.3.9 고정) | jsDelivr CDN (`ui.html`만) | 메인 화면 글꼴. 편집실·썸네일은 로컬 `fonts/` |
+| cloudflared 2026.10.0 (Apache-2.0, Windows amd64 약 55MB / 386 약 38MB) | GitHub cloudflare/cloudflared 릴리스 고정 주소 · 크기·sha256 고정(`tunnel.CF_ASSETS`, 2026-10-07 공식 릴리스 노트와 맞춤) → `~/.futsal-studio/bin/cloudflared.exe` | 휴대폰으로 보기의 빠른 터널 (D-024). 원격 접속을 처음 켤 때만 받음 · 자동 업데이트 끔 · 6개월쯤마다 고정 판을 올린다(`KNOWN_ISSUES.md` I-035) |
 
-**개발 전용** (`requirements.txt`에 넣지 않음): Playwright(Python·Chromium, e2e 묶음), 시스템 `ffmpeg`·`ffprobe`(`ed2_test.py` 결과 확인), node(`thumb.html` JS 문법 확인), git·bash(`release.sh`), pyflakes/ruff(린트, `CODING_STANDARDS.md` 3번).
+**pip 에는 없지만 코드가 직접 쓰는 것**: `pycryptodomex`(`Cryptodome.Cipher.AES` GCM — 휴대폰으로 보기의 비콘·짝짓기 암호, BSD·퍼블릭 도메인). `yt-dlp[default]`의 의존성으로 모든 PC 에 깔려 있어 `requirements.txt`에 넣지 않았다(넣으면 모든 PC 가 pip 를 다시 돌림 · 넣을지는 소유자 결정, D-024). `remote.py`가 함수 안에서만 불러오고, 없으면 원격 접속만 켜지지 않는다.
+**직접 만든 것**: QR 만들기(`qr.py`, 표준 라이브러리 · ISO 18004 바이트 모드). 라이브러리를 들이면 새 런타임 의존성이 되므로 직접 썼다(암호·파싱이 아님). 개발 PC 의 `segno` 와 칸을 하나하나 비교해 확인한다(`tests.test_qr`).
+
+**개발 전용** (`requirements.txt`에 넣지 않음): Playwright(Python·Chromium, e2e 묶음), 시스템 `ffmpeg`·`ffprobe`(`ed2_test.py` 결과 확인), node(`thumb.html` JS 문법 확인 · ≥ 20 이면 `tests.test_remote_proto` 휴대폰 페이지 맞물림 시험), git·bash(`release.sh`), pyflakes/ruff(린트, `CODING_STANDARDS.md` 3번), segno(BSD, `tests.test_qr` 의 QR 칸 비교 · 없으면 건너뜀).

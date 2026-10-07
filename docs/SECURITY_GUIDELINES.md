@@ -13,6 +13,9 @@
 - 시크릿은 환경변수(또는 시크릿 매니저)로만 주입한다. 현재 앱에는 **시크릿이 없다**.
   - API 키·서버·로그인이 없다. `config.json`에는 공개값(채널 주소·작업 폴더·업데이트 주소)만 있다.
   - 예외 하나: 사용자가 '클로드 계정으로 쓰기'의 고급 칸에 붙여 넣은 로그인 코드(`claude setup-token`, `sk-ant-oat…`)는 `~/.futsal-studio/claude_token`(사용자 폴더, 앱 폴더·`config.json` 밖, 권한 600)에 둔다. 자식 프로세스 환경 변수 `CLAUDE_CODE_OAUTH_TOKEN`으로만 넘기고 기록·응답·화면에 내보내지 않는다. [지우기]로 지운다 (D-021).
+  - 또 하나의 예외: '휴대폰으로 보기'(D-024)의 기기 열쇠(휴대폰마다 서명용·비콘용 32바이트)·ntfy 주제는 `~/.futsal-studio/remote.json`(사용자 폴더, 앱 폴더·`config.json`·작업 폴더 밖, 권한 600, 바꿔 끼우기 저장)에만 둔다. 연결 코드는 10분 동안 메모리에만 있다(PC 화면에 보여 주려고).
+    - **기록·응답·문서에 남기지 않는 것**: 연결 코드, 기기 열쇠, ntfy 주제, 터널 주소(`*.trycloudflare.com`), `Authorization` 머리글, 미디어 표(ticket), cloudflared 출력 줄(주소가 들어 있음). cloudflared 는 `--loglevel info` 만 쓴다(`debug` 는 요청 머리글을 찍음). 원격 리스너는 접속 기록(`log_message`)을 남기지 않는다.
+    - 휴대폰 쪽 열쇠는 가져오기 전용(non-extractable) WebCrypto 키로 IndexedDB 에만 둔다(원래 바이트는 짝짓기 응답을 받은 순간에만 있음).
   - 환경변수는 `FUTSAL_*`뿐이고 시크릿이 아니다(`PROJECT_CONTEXT.md` 5절).
   - 유일한 자격 증명은 개발 PC의 GitHub 푸시 권한(`wavely1213/futsal-studio`)이다. 이 권한은 곧 **모든 사용자 PC에 코드를 설치하는 권한**이다(3번 참고). 토큰을 저장소·문서·로그·`RELEASE_TRAILER`에 넣지 않는다.
 - 저장소는 공개다(업데이트가 인증 없이 raw·archive 주소로 받는다). 추적 파일은 `tests/`·`manifest.json`을 빼고 모두 사용자 PC로 배포된다. 그래서 저장소에 들어간 것은 곧 공개·배포된 것이다.
@@ -37,6 +40,14 @@
   2. Origin 확인(POST, 3번 참고)
   3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. (빈틈: `/api/thumb/cut` 의 `src` 안 `/frame?name=` 은 검사 없이 `thumb.grab` 으로 간다 — `KNOWN_ISSUES.md` I-021)
   4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
+- **원격 경계(`remote.RemoteHandler`, D-024)**: 터널로 들어온 요청은 로컬 `Handler`가 아니라 이것만 받고, 다음 순서로 막는다. 새 `/r/*` 경로도 같은 순서를 따른다.
+  1. Host 가 `remote.futsal.invalid`(cloudflared 가 붙임)인지 — 개발 모드(`FUTSAL_REMOTE_DEV=1`)에서만 `127.0.0.1:<원격 포트>` 도. 브라우저는 `.invalid` Host 를 만들 수 없어 DNS 리바인딩·같은 PC 의 다른 사이트를 막는다.
+  2. 메서드 GET·POST·OPTIONS 만.
+  3. 요청 수 제한(`Cf-Connecting-Ip` 기준, 5절)·잠금.
+  4. CORS: 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`, 개발 모드만 `FUTSAL_REMOTE_ORIGINS`)만 되돌려 줌. `/r/ping`·`/r/m/*` 를 뺀 API 는 허용 Origin 필수, POST 는 `application/json` 필수(단순 요청·폼 거절), 본문 64KB 넘으면 읽기 전에 413.
+  5. 확인: API 는 기기 서명(`FSR1`: HMAC-SHA256(메서드·경로+쿼리·시각 ±300초·nonce 10분 기억·본문 sha256), `hmac.compare_digest`), 미디어는 기기에 묶인 2시간 표(ticket). `/r/ping`·`/r/pair` 만 열려 있고 아주 좁게 제한한다.
+  6. 허용 동작 목록(`remote.ACTIONS`)과 인자 검사: 이름은 `editor.safe_name`+`video_path`, 완성본은 `core.OUT` 안 `.mp4`, 편집본 id·스타일·채널은 목록에 있는 것만, 받기는 YouTube 영상 주소에서 뽑은 11글자 id 만(원래 글은 yt-dlp 에 안 넘김), 학습용 채널은 다시 만든 표준 주소만.
+  7. 내주는 파일은 `resolve()` 후 `core.OUT`·`core.VIDEOS`·`analysis/_remote/`(작은 미리보기)·`analysis/`(그림) 안인지, 확장자 허용 목록(mp4·jpg·png·txt·srt)인지 확인. 응답은 늘 `nosniff`·`Referrer-Policy: no-referrer`·`CSP default-src 'none'`·`Cache-Control: no-store`, 오류는 한국어 JSON(추적 없음).
 - **SQL 인젝션**: DB가 없다(JSON 파일 저장). 같은 자리의 위험은 **명령·필터 인젝션**이다.
   - 외부 프로그램은 항상 인자 목록으로 `core.run()`/`editor.run_killable()`을 통해 실행한다.
   - `shell=True`·`os.system`·`eval`은 쓰지 않는다(현재 0건).
@@ -56,10 +67,17 @@
 ## 3. 인증·인가
 
 - 인증 방식: 로그인이 없다(한 PC·한 사용자 로컬 앱). 대신 다음 규칙으로 "이 PC의 앱 창에서 온 요청"만 받는다.
-  - 서버는 `127.0.0.1`에만 bind한다. `0.0.0.0`이나 다른 포트·서버를 새로 열지 않는다.
+  - 서버는 `127.0.0.1`에만 bind한다. `0.0.0.0`이나 다른 포트·서버를 새로 열지 않는다(유일한 예외는 아래 원격 리스너 · D-024).
   - Host 헤더가 `127.0.0.1:PORT` 또는 `localhost:PORT`여야 한다. DNS 리바인딩으로 다른 사이트가 응답을 읽는 것을 막는다.
   - POST는 Origin이 같은 출처여야 한다. 다른 사이트의 몰래 요청(CSRF)을 막는다.
   - Origin 없는 POST는 허용한다. 같은 PC의 프로그램(`app._focus_running`)이 쓰기 때문이다. 같은 사용자의 로컬 프로세스는 믿는다는 전제다.
+- **예외: 원격 리스너 (D-024 · 원격 접속을 켜 둔 동안만)**. 위 규칙(127.0.0.1 만·다른 서버 금지)의 좁은 예외다. 로컬 서버(8765)의 규칙은 하나도 바뀌지 않았고 터널 뒤에 두지 않는다.
+  - 두 번째 서버를 `127.0.0.1:<임의 포트>`(또는 `FUTSAL_REMOTE_PORT`)에 켜 둔 동안만 띄우고, cloudflared 자식 프로세스가 그것만 바깥(`https://<무작위>.trycloudflare.com`)에 잇는다. 둘 다 [끄기]·자동 끄기·앱 종료·모두 끊기에 꺼진다. Windows 는 Job Object 로 앱이 갑자기 꺼져도 cloudflared 가 같이 꺼진다.
+  - 인증: PC 화면이 만든 10분·한 번 쓰는 코드(Crockford 10글자, 틀리면 5번에 버림, 한 시간 20번 실패면 새 코드까지 막음)로 짝을 지으면 기기마다 열쇠 두 개를 준다(최대 5대, 90일 안 쓰면 끊음). 이후 모든 API 는 서명, 미디어는 표.
+  - 인가: 휴대폰은 허용 동작만 한다. 지우기·설정·업데이트·재시작·Claude·폴더 열기·업로드·쿠키·임의 경로는 없다. 휴대폰에서 원격 접속을 **켤 수는 없다**(끄기·자기 기기 끊기만).
+  - 끊기: PC 의 [끊기]·[모든 휴대폰 끊기]는 열쇠·표·nonce 를 바로 버리고 ntfy 주제 둘을 새로 바꾼다(남은 기기에만 옛 주제로 새 주제를 암호로 알림).
+  - 원격 동작은 모두 `studio.log`에 `원격 · <기기> · <동작> · <대상>`으로 남는다(기기·파일 이름은 줄바꿈·제어 글자 빼고 80자).
+  - 휴대폰 페이지(`mulgyeol.kr/futsal`, 와벨리 저장소)는 엄격한 CSP(`script-src 'self'`, 연결은 `*.trycloudflare.com`·`ntfy.sh` 만), 밖에서 온 글은 `textContent` 로만, 짝짓기 QR 의 `#pair=` 는 읽자마자 주소창에서 지운다. 이미 연결된 PC 와 다른 PC 면 먼저 묻고, 새 주소에 기존 열쇠를 보내지 않는다.
 - **GET은 읽기 전용으로 둔다.** 다른 사이트의 `<img src="http://127.0.0.1:8765/…">`도 Host가 맞아 통과한다. 응답을 읽지는 못하지만 동작은 일어난다.
   - 지우기·저장·작업 시작·폴더 열기처럼 상태를 바꾸는 동작은 반드시 POST로 만든다.
   - 지금 GET이 하는 쓰기는 캐시 생성(`/frame`·`/api/edit/thumbs.jpg` 등)뿐이다.
@@ -93,6 +111,7 @@
     - 실행은 빈 임시 폴더에서 Read 도구만(그 폴더 안), 권한 질문은 모두 거절, 세션·설정 파일·MCP 끄기. 자식 환경에서 `ANTHROPIC_API_KEY`·`ANTHROPIC_AUTH_TOKEN`을 지운다(있으면 계정 로그인보다 먼저 쓰여 요금이 나감).
     - `studio.log`에는 결과 종류(성공·로그인 필요·한도 등)만 남기고 프롬프트·대답·토큰은 남기지 않는다.
   - 이 내용을 자동으로 전송하도록 바꾸지 않는다. 바꾸려면 소유자 결정이 필요하다.
+  - **휴대폰으로 보기**(D-024, 켜 둔 동안만): 휴대폰이 부르는 API·영상·그림·작업 기록(사용자 폴더 경로는 `~` 로 바꿈)이 Cloudflare 터널을 지난다. Cloudflare 가 TLS 를 끝내므로 그 내용을 평문으로 볼 수 있다(열쇠는 아님 · 서명·표는 봄). ntfy.sh 에는 기기마다 암호로 잠근 비콘(지금 터널 주소·작업 이름·진행률)과 정해진 알림 문장(작업 이름·걸린 시간 — 파일 이름·제목·경로·오류 글 없음), 그리고 접속 IP 가 간다. cloudflared 는 처음 한 번 GitHub 릴리스에서 받는다.
 - 개인정보는 **로그·에러 메시지에 남기지 않는다.**
   - `studio.log`는 문제가 생기면 사용자가 관리자에게 보내는 파일이다. 쿠키·계정 정보·대사 전문을 쓰지 않는다.
   - 파일 이름과 원인 정도만 쓴다. 경로에 Windows 사용자 이름이 들어갈 수 있다는 점을 염두에 둔다.
@@ -103,14 +122,15 @@
 
 ## 5. 기타 규칙
 
-- **Rate limiting**: 로그인·가입 엔드포인트가 없어 해당 없다. 대신 다음 두 가지를 지킨다.
+- **Rate limiting**: 로컬 서버는 로그인·가입이 없어 해당 없다. 원격 리스너(D-024)는 제한한다: 열린 길(`/r/ping`·`/r/pair`) IP 마다 10개·6초에 1개, 서명 길 60개·초당 5개, 확인 실패 10분에 10번이면 그 IP 를 15분 잠금, 작업 시작은 기기마다 2초에 1번, 미디어 동시 기기마다 6·전체 10, 처리 동시 24(넘으면 503), 소켓 20초. 기억(nonce·표·버킷)은 LRU 로 상한. ntfy 로 보내기는 하루 200개·비콘은 같은 꼴이면 60초에 1번. 그 밖에 다음 두 가지를 지킨다.
   - 긴 작업은 `start_job`으로 한 번에 하나만 돌린다(겹치면 409).
   - 외부 재시도는 횟수와 간격을 제한한다.
     - YouTube가 막으면 엔진 최신화 후 **1회만** 다시 시도한다.
     - 엔진 최신화나 Deno 설치에 실패하면 하루 동안 다시 하지 않는다(`ENGINE_RETRY`).
     - 얼굴 모델 다운로드에 실패하면 10분 동안 다시 하지 않는다(`face.RETRY`).
   - YouTube를 반복해서 두드리는 루프나 우회 로직을 만들지 않는다.
-- **CORS**: CORS 헤더를 보내지 않는다. 그래서 다른 출처의 스크립트는 응답을 읽지 못한다. `Access-Control-Allow-Origin`을 추가하지 않는다(`*` 금지).
+- **CORS**: 로컬 서버는 CORS 헤더를 보내지 않는다. 그래서 다른 출처의 스크립트는 응답을 읽지 못한다. 로컬 서버에 `Access-Control-Allow-Origin`을 추가하지 않는다(`*` 금지).
+  - 예외는 원격 리스너 하나(D-024): 정확한 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`)만 그대로 되돌려 주고 `Vary: Origin`, `Allow-Credentials` 없음, `*` 금지. 개발 모드에서만 `FUTSAL_REMOTE_ORIGINS` 를 더한다.
 - **에러 응답**: 스택 트레이스·쿼리를 응답에 넣지 않는다.
   - 예외 메시지가 곧 화면 문구다. 사용자 문장으로 쓴다(`CODING_STANDARDS.md` 5번).
   - `traceback.print_exc()`는 표준 출력에만 쓴다(사용자 PC에서는 보이지 않음).
@@ -123,12 +143,13 @@
   | 얼굴·표정 모델 | 고정 커밋 주소, 크기·sha256 고정값 |
   | 기획 분석 모델(OCR 글자 찾기·한국어 읽기·글자 목록, YAMNet) | 고정 태그·커밋 주소, 주소마다 크기·sha256 고정값 (`avmodels.SPECS`) |
   | Claude Code CLI | 앱이 받지 않음. 사용자가 [설치하기]로 Anthropic 공식 설치 명령을 보이는 창에서 직접 실행 |
+  | cloudflared (휴대폰으로 보기) | 고정 판(`tunnel.CF_VERSION`)·GitHub 릴리스 고정 주소, 크기·sha256 고정값(공식 릴리스 노트와 맞춤) → `.part` 확인 뒤 `os.replace` → `--version` 확인. `--no-autoupdate`·설정 파일 `no-autoupdate: true`. 확인 안 된 '최신'으로 대신 받지 않음 |
   | 누끼 모델(rembg 릴리스) | **크기·sha256 확인 없음** (`thumb._model`). `KNOWN_ISSUES.md` I-023 |
   | yt-dlp·pip 패키지·Whisper 모델 | pip와 Hugging Face의 기본 동작에 맡긴다 |
 
 - **의존성 취약점**: `DEPENDENCY_POLICY.md` 참고. audit 경고 발견 시 보고.
 - 밖으로 나가는 통신은 모두 HTTPS다. 업데이트·다운로드 주소를 `http://`로 바꾸지 않는다(`updater.download_and_install`은 형식상 `http`도 받으므로 주소 쪽에서 지킨다).
-- 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다.
+- 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다. 원격 리스너도 루프백 HTTP 이고(바깥 TLS 는 Cloudflare), 쿠키 대신 요청 서명을 쓴다.
 
 ## 6. AI 작업 시 보안 체크리스트
 
@@ -146,5 +167,11 @@
 - [ ] 밖에서 온 글자(YouTube 제목·파일 이름·받아쓰기)를 `innerHTML`에 넣을 때 `esc()`를 거치는가
 - [ ] 새로 받는 실행 파일·모델에 고정 주소 + 크기·sha256 확인이 있는가
 - [ ] `updater.py`·`release.sh`를 고쳤다면 `tests.test_update`와 `python3 updater.py --selftest`가 통과하는가
+- [ ] 원격(`remote.py`·`/r/*`)을 고쳤다면:
+  - 새 경로가 2절의 원격 경계 순서(Host → 메서드 → 수 제한 → CORS·JSON → 서명/표 → 허용 목록 → 이름·폴더) 뒤에 있는가
+  - 휴대폰이 보낼 수 있는 것이 허용 목록·고정 선택지뿐인가 (지우기·설정·업데이트·켜기·임의 경로가 생기지 않았는가)
+  - 코드·열쇠·주제·터널 주소·`Authorization`·표·cloudflared 출력이 기록·응답·알림에 들어가지 않는가 (`tests.test_remote_api` 의 비밀 검사)
+  - 알림 글이 정해진 문장뿐인가 (파일 이름·제목·경로·오류 글 없음)
+  - 로컬 서버(8765)가 여전히 터널 Host 에 403 이고 CORS 헤더가 없는가
 
 보안상 애매한 트레이드오프(예: 편의 vs 보안)는 선택지를 제시하고 소유자가 결정한다.

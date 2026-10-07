@@ -31,7 +31,7 @@
   - 웹 프레임워크·번들러·빌드 도구 도입. 화면은 단일 파일 HTML, 서버는 표준 라이브러리만 쓴다.
   - 사용자 계정 정보로 YouTube 봇 검사를 자동 우회하는 것. 쿠키는 사용자가 브라우저를 직접 고를 때만 쓴다.
   - 유료 AI API 호출. Claude는 사용자가 '복사' 버튼으로 프롬프트를 복사해 claude.ai에 붙여 넣는 방식으로만 쓴다.
-  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다.
+  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다. 예외는 소유자가 켤 때만 여는 '휴대폰으로 보기'(D-024: 빠른 터널 → 루프백 원격 리스너, 짝지은 휴대폰 최대 5대)뿐이다.
   - 영상 업로드 자동화. 앱은 올리기 키트를 만들고 YouTube Studio를 여는 데까지만 한다.
   - 이 항목들의 결정 이유는 `DECISION_LOG.md`에 있다.
 
@@ -69,6 +69,9 @@ hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
 refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) → WORK/refs/<채널>/ · refs/refs.json
 ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
+remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-024)
+tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
+qr.py               연결 QR 만들기 (표준 라이브러리)
 takes.py            NG 테이크·슬레이트·말더듬 찾기 (2차 작업 중, 아직 커밋 전)
 ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기)
 editor.html         편집실 화면 (프리미어식)
@@ -104,6 +107,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`: 내부용. 재시작·실행기 경유를 표시하며 직접 설정하지 않는다.
+  - 휴대폰으로 보기(D-024): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR 이 가리킬 페이지 주소 · 개발 모드만), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)
 - **실행 명령어**: `AGENTS.md` 5번 항목과 동일하게 유지
@@ -128,6 +132,9 @@ icon.ico / icon.png 앱 아이콘
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
 | i.ytimg.com | 소재 찾기 목록의 영상 미리보기 그림 | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
+| Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-024)를 켠 동안만: 휴대폰 → 원격 리스너. 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
+| ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
+| mulgyeol.kr/futsal (저장소 밖: 와벨리 저장소 `public/futsal/`, Vercel) | 휴대폰 화면(정적 PWA). 와벨리 `main`에 병합되면 공개된다 | 없음 |
 
 ## 7. 참고 링크
 
