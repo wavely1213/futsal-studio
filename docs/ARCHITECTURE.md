@@ -161,6 +161,6 @@
 3. 이 문서에 없는 패턴을 새로 도입할 때는 도입 이유를 `DECISION_LOG.md`에 남긴다.
 4. **`updater.py`는 모든 실행이 거치는 문이다.** 표준 라이브러리만 쓰고, 앱 모듈을 import하지 않으며, 최신 Python 전용 문법(예: 3.12의 따옴표 겹친 f-string)을 쓰지 않는다. 고치면 `tests.test_update`와 `python3 updater.py --selftest`로 반드시 확인한다.
 5. 저장소에 추적되는 파일은 `tests/`와 `manifest.json`을 빼고 **모두 사용자 PC로 배포된다** (`release.sh`). 저장소의 `config.json`은 새로 설치하는 PC의 기본값이 되므로 개발용 값으로 바꾸지 않는다.
-6. **`thumb.html`은 빌드 산출물이다.** 원본(`$SCRATCH/thumb_v2_head.html` + `$SCRATCH/tv2/p*.js`, 저장소 밖)을 고치고 `build_thumb.sh`로 다시 만든다(명령은 `AGENTS.md` 5번). 저장소의 `thumb.html`만 고치면 다음 빌드 때 사라진다. 원본을 찾을 수 없으면 작업 전에 소유자에게 알린다. 소유자가 허락해 `thumb.html`을 직접 고쳤다면 "원본 동기화 필요"를 보고하고 `KNOWN_ISSUES.md`에 남긴다.
+6. **`thumb.html`은 빌드 산출물이다.** 원본(`thumb_src/head.html` + `thumb_src/parts/p*.js`, 저장소 안 · 배포 목록에서 제외)을 고치고 `python3 thumb_src/build.py`로 다시 만든다(명령은 `AGENTS.md` 5번). 저장소의 `thumb.html`만 고치면 다음 빌드 때 사라진다. 원본을 찾을 수 없으면 작업 전에 소유자에게 알린다. 소유자가 허락해 `thumb.html`을 직접 고쳤다면 "원본 동기화 필요"를 보고하고 `KNOWN_ISSUES.md`에 남긴다.
 7. 새 API는 `Handler`에 추가한다. Host·Origin 검사 뒤에 두고, 파일 이름 인자는 `editor.safe_name()`으로 검사하며, 긴 처리는 `start_job` + `core.set_progress`로 한다. 앱 프로세스 밖의 서버·포트를 새로 열지 않는다.
 8. 사용자가 만든 데이터(편집본·썸네일 디자인·설정)는 덮어쓰지 않는다. 다시 만드는 결과는 옆에 추가하고, 바꿀 때는 먼저 백업한다. 상세 규칙은 `DOMAIN_KNOWLEDGE.md`에 있다.

@@ -39,7 +39,7 @@ else:  # 커밋 ("모드 종류 sha\t경로")
 files = {}
 for mode, sha, path in recs:
     path = path.decode("utf-8")
-    if mode in (b"120000", b"160000") or path == "manifest.json" or path.startswith("tests/"):
+    if mode in (b"120000", b"160000") or path == "manifest.json" or path.startswith(("tests/", "thumb_src/")):
         continue
     files[path] = hashlib.sha256(git("cat-file", "blob", sha.decode())).hexdigest()
 if "version.txt" not in files or "updater.py" not in files:

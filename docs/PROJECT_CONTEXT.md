@@ -87,7 +87,7 @@ icon.ico / icon.png 앱 아이콘
 ```
 
 - **저장소 밖에 있는 것 (주의)**: 아래 파일은 저장소가 아니라 리드 개발 환경의 scratchpad(`$SCRATCH`, 경로는 `AGENTS.md` 5번)에 있다. 잃어버릴 위험이 있다 (`KNOWN_ISSUES.md` I-018).
-  - 썸네일 화면 원본: `thumb_v2_head.html` + `tv2/p1_core.js` … `p7_auto.js`. 이것을 `build_thumb.sh`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
+  - 썸네일 화면 원본: 저장소 안 `thumb_src/head.html` + `thumb_src/parts/p1_core.js` … `p7_auto.js`. 이것을 `python3 thumb_src/build.py`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
   - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
   - 작업 목록: `backlog.json`(순위별 기능·범위·버린 것), `batch1_result.json`(1차 결과).
 - 상세 모듈 구조와 의존 방향은 `ARCHITECTURE.md` 참고.
