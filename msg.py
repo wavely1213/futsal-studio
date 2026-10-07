@@ -21,8 +21,9 @@ import time
 import core
 import editor
 import sfxlib
+import takes
 
-SIG_VER = 5
+SIG_VER = 6
 MIX_DIR_NAME = "섞기"           # styles/섞기/<이름>.json — 배운 스타일 목록(list_styles)에 섞이지 않게 따로
 DRAFT_NAME = "풋살사관학교 스타일(초안)"
 ASPECTS = ("intro", "rhythm", "captions", "fun", "sound")
@@ -132,6 +133,59 @@ def lines_of(segs):
                             "words": [dict(x) for x in cur]})
                 cur = []
     return [x for x in out if x["text"]]
+
+
+RESTART_GAP = 0.6   # 짧은 말을 끊고 이만큼 안에 같은 말로 다시 시작하면 앞 말은 버림
+
+
+def _plain_ko(text):
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", text or "")
+
+
+def _latin_junk(text):
+    """한국어 받아쓰기에 섞인 영어 찌꺼기 ('functioning.' · 'paced...Pacific...') — 글자의 70% 넘게 로마자이고 한글이 3자 이하."""
+    p = _plain_ko(text)
+    lat = len(re.findall(r"[A-Za-z]", p))
+    return len(p) >= 4 and lat / len(p) > 0.7 and len(p) - lat <= 3
+
+
+def clean_lines(segs):
+    """문장으로 나눈 말 + 편집에서 뺄 말 [(a, b, 이유)].
+    받아쓰기 구간 단위로는 못 잡던 것: 한 구간에 묶인 말 고쳐 다시 하기('이렇게 패스와 동작. 이렇게 패스와 동시에 …')·
+    쉼으로 쪼개진 슬레이트 말('다시' … '해볼게요.')·영어 찌꺼기. 나머지(다시 찍기·추임새·말더듬)는 editor.recommend 가 문장 단위로 봄."""
+    lines = lines_of(segs)
+    drop = {}
+    for k, ln in enumerate(lines):
+        if _latin_junk(ln["text"]):
+            drop[k] = "알아듣지 못한 말"
+    for k in range(len(lines) - 1):
+        a, b = lines[k], lines[k + 1]
+        if b["start"] - a["end"] > RESTART_GAP:
+            continue
+        wa, wb = a["text"].split(), b["text"].split()
+        same = 0
+        while same < min(len(wa), len(wb)) and _plain_ko(wa[same]) == _plain_ko(wb[same]):
+            same += 1
+        # 앞 두 낱말이 같거나, 첫 낱말이 같고 다음 낱말 첫 글자도 같음('동작' → '동시에') · '패스하고 앞으로.' → '패스하고 옆으로 …' 같은 나란한 설명은 그대로
+        slip = same == 1 and len(wa) > 1 and _plain_ko(wa[1])[:1] and _plain_ko(wa[1])[:1] == _plain_ko(wb[1])[:1]
+        if 1 <= len(wa) <= 4 and len(wb) > len(wa) and same < len(wa) and (same >= 2 or slip):
+            drop.setdefault(k, "고쳐 다시 한 말")
+    for k in range(len(lines) - 1):  # 쉼으로 쪼개진 슬레이트 말
+        a, b = lines[k], lines[k + 1]
+        if b["start"] - a["end"] <= 2.5 and len(_plain_ko(a["text"])) <= 4 and not takes.is_slate(a["text"]) \
+                and takes.is_slate(a["text"] + " " + b["text"]):
+            drop.setdefault(k, "슬레이트 말")
+            drop.setdefault(k + 1, "슬레이트 말")
+    junk = [(round(lines[k]["start"], 2), round(lines[k]["end"], 2), why) for k, why in sorted(drop.items())]
+    return [ln for k, ln in enumerate(lines) if k not in drop], junk
+
+
+def _recommend(name, segs, keep_pause=None):
+    """editor.recommend 를 문장 단위·깨진 말 뺀 받아쓰기로 → 정리 컷(tidy)·군더더기(junk_list)."""
+    kept, extra = clean_lines(segs)
+    rec = editor.recommend(name, keep_pause=keep_pause, segs=kept if segs else None)
+    rec["junk_list"] = sorted((rec.get("junk_list") or []) + [{"a": a, "b": b, "why": w} for a, b, w in extra], key=lambda j: (j["a"], -j["b"]))
+    return rec
 
 
 def _onsets(wave, words, sr=16000):
@@ -263,7 +317,7 @@ def signals(name, log=print, use_faces=True):
     noisy += _spans((tags or {}).get("speech"), 0.48, 0.6, 0.3)  # 받아쓰기가 놓친 말(짧은 말·작은 소리)의 첫소리도 공 소리가 아님
     onsets = [t for t in _onsets(wave, words) if not any(a - 0.2 <= t <= b + 0.2 for a, b in noisy)]  # 웃음·환호 소리는 공 소리가 아님
     _check()
-    rec = editor.recommend(name)
+    rec = _recommend(name, segs)
     sig = {"v": SIG_VER, "sig": fsig, "tsig": tsig, "name": name, "duration": float(info["duration"]),
            "w": info["width"], "h": info["height"], "fps": info.get("fps", 30.0),
            "motion": ev.get("motion") or [], "motionStep": 1.0 / float(ev.get("fps") or 2), "cuts": ev.get("cuts") or [],
@@ -845,9 +899,12 @@ def _seed(*parts):
 
 def _situ_text(m):
     txt = m.get("text") or ""
-    mm = re.search(r"(첫|두|세|네|다섯) ?번째", txt)
-    if mm:
-        return f"{mm[1]} 번째 포인트"
+    mm = re.search(r"(첫|두|세|네|다섯) ?번째\s*([가-힣A-Za-z]+)?", txt)
+    if mm:  # 말한 이름을 그대로 ('두 번째 동작' → 동작 · '두 번째 슛' → 슛) · 이름 없이 '첫 번째 갑니다' 면 도전/포인트
+        noun = re.sub(r"(은|는|이|가|을|를|도|부터|에서|으로|로)$", "", mm[2] or "")
+        if not noun or len(noun) > 4 or re.search(r"(다|요|죠|게|고|서|면)$", noun):
+            noun = "도전" if re.search(r"갑니다|가볼게요|갈게요|차|슛|슈팅", txt) else "포인트"
+        return f"{mm[1]} 번째 {noun}"
     if re.search(r"마지막", txt):
         return "마지막 포인트"
     if m["kind"] == "demo_call":
@@ -1029,6 +1086,11 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words):
         elif k in ("punch", "shake"):
             if any(p["kind"] in ("punch", "shake") and abs(p["t"] - t) < max(gap, 3.0) for p in picked):
                 continue
+            # 강조 글자와 확대가 매번 같이 나오면 과함 → 보통은 글자만, 듬뿍도 2번까지만 겹침
+            if c["src"] == "emphasis" and any(p["kind"] == "emphasis" and abs(p["t"] - t) < 1.0 for p in picked):
+                if intensity != "듬뿍" or used.get("_pair", 0) >= 2:
+                    continue
+                used["_pair"] = used.get("_pair", 0) + 1
         elif k in ("replay", "freeze"):
             if any(p["kind"] in ("replay", "freeze") and abs(p["t"] - t) < 20.0 for p in picked):
                 continue
@@ -1256,7 +1318,7 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
     dur = float(info["duration"])
     words = _words(segs)
     rh = st["rhythm"]
-    rec = editor.recommend(name, keep_pause=rh.get("keepPause") or None)
+    rec = _recommend(name, segs, rh.get("keepPause") or None)
     junk = [(j["a"], j["b"], j["why"]) for j in rec.get("junk_list") or []]
     if fmt == "shorts":
         base = _shorts_window(rec, moms, dur, sig.get("demo") or [])
@@ -1357,6 +1419,30 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
                 i = next((k for k, p in enumerate(pieces) if p["in"] >= at), None)
             if i is not None:
                 inserts.setdefault(i, []).append(c)
+    # 몽타주(오늘의 명장면)는 마무리 인사('오늘은 여기까지') 바로 앞에 · 마무리 말이 없으면 본편 뒤
+    mont_done = []
+    closing = [m["t"] for m in moms if m["kind"] == "closing" and m["t"] >= dur * 0.5]
+    mont_at = None
+    if mont and fmt == "long" and closing and any(p["in"] - 0.2 <= closing[0] < p["out"] for p in pieces):
+        mont_at = closing[0]
+        _split(pieces, mont_at, 0.2)
+
+    def _montage():
+        s0 = B.pos
+        made, prev = [], [x for x in B.items if x["track"] == "V1"][-1] if B.items else None
+        for k, m in enumerate(mont[:7]):
+            a = max(0.0, m["t"] - 0.2)
+            v, au = B.clip(a, min(dur, a + MONTAGE_CLIP), nocaps=True, vol_db=-6.0)
+            tr = B.flash(prev, v, "white", 0.14) if prev is not None else None
+            made += [v["id"], au["id"]] + ([tr["id"]] if tr else [])
+            if k % 2 == 0:  # 휙 소리는 한 컷 걸러 (번쩍 전환마다 다 넣으면 시끄러움)
+                B.sfx.append((v["start"], pal.get("montage", "휙"), -6.0, "montage"))
+            prev = v
+        tt = B.title("오늘의 명장면", s0, B.pos - s0, dict(looks["emphasis"], y=0.2 if cap_y > 0.5 else 0.75, size=80, fill="#FFFFFF", effect="pop"))
+        B.event("montage", s0, "오늘의 명장면", f"시범 {len(mont[:7])}개를 빠르게", refs={"items": made, "titles": [tt["id"]]},
+                ins={"start": round(s0, 3), "len": round(B.pos - s0, 3)})
+        mont_done[:] = [s0, B.pos]
+
     # 고친 조각 번호가 바뀌었으므로 다시 찾기: 끼워 넣을 곳은 원본 시각으로
     ins_at = sorted(((c["at"], c) for cs in inserts.values() for c in cs), key=lambda x: x[0])
     main_start = B.pos
@@ -1365,6 +1451,8 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
         while ins_at and ins_at[0][0] <= p["in"] + 0.21:
             _, c = ins_at.pop(0)
             _insert(B, c, name, sig, st, intensity, looks, pal, seed, cap_y)
+        if mont_at is not None and not mont_done and p["in"] >= mont_at - 0.21:
+            _montage()
         fx = None
         if p.get("punch"):
             c = p["punch"]
@@ -1440,22 +1528,10 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
         B.sfx.append((0.0, pal.get("title", "짠"), None, "title"))
         B.event("hook", 0.0, hk["text"], "쇼츠 첫 2.5초 훅 자막", refs={"titles": [hk["id"]], "sfx": [len(B.sfx) - 1]})
 
-    # --- 몽타주 (끝나기 전 · 시범 4개 넘을 때) ---
-    if mont and fmt == "long":
-        s0 = B.pos
-        made, prev = [], [x for x in B.items if x["track"] == "V1"][-1] if B.items else None
-        for k, m in enumerate(mont[:7]):
-            a = max(0.0, m["t"] - 0.2)
-            v, au = B.clip(a, min(dur, a + MONTAGE_CLIP), nocaps=True, vol_db=-6.0)
-            tr = B.flash(prev, v, "white", 0.14) if prev is not None else None
-            made += [v["id"], au["id"]] + ([tr["id"]] if tr else [])
-            if k % 2 == 0:  # 휙 소리는 한 컷 걸러 (번쩍 전환마다 다 넣으면 시끄러움)
-                B.sfx.append((v["start"], pal.get("montage", "휙"), -6.0, "montage"))
-            prev = v
-        tt = B.title("오늘의 명장면", s0, B.pos - s0, dict(looks["emphasis"], y=0.2 if cap_y > 0.5 else 0.75, size=80, fill="#FFFFFF", effect="pop"))
-        B.event("montage", s0, "오늘의 명장면", f"시범 {len(mont[:7])}개를 빠르게", refs={"items": made, "titles": [tt["id"]]},
-                ins={"start": round(s0, 3), "len": round(B.pos - s0, 3)})
-        sections.append((s0, B.pos, snd.get("moods", {}).get("outro", "신남")))
+    # --- 몽타주 (마무리 말이 없으면 끝나기 전) ---
+    if mont and fmt == "long" and not mont_done:
+        _montage()
+        sections.append((mont_done[0], mont_done[1], snd.get("moods", {}).get("outro", "신남")))
 
     # --- 엔드 화면 ---
     if fmt == "long" and B.pos >= 25.0:
@@ -1633,7 +1709,7 @@ def _body_sections(B, picked, moms, a0, a1, moods):
         else:
             demo.append([lo, hi])
     for e in B.events:  # 다시 보기·정지 화면은 시범 분위기 안으로
-        if e["kind"] in ("replay", "freeze") and e.get("ins"):
+        if e["kind"] in ("replay", "freeze", "montage") and e.get("ins"):
             lo, hi = e["ins"]["start"], e["ins"]["start"] + e["ins"]["len"]
             demo.append([max(a0, lo - 3), min(a1, hi + 3)])
     demo.sort()

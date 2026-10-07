@@ -1266,18 +1266,22 @@ def _covered(ivs, a, b):
     return got
 
 
-def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
-    """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초)."""
+def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None):
+    """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초).
+    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일."""
     if keep_pause:
         kp = max(0.08, float(keep_pause))
         pre, post = min(0.15, kp * 0.4), min(0.25, kp * 0.6)
         gap_s = gap_l = max(0.0, kp - pre - post)
     else:
         pre, post, gap_s, gap_l = 0.15, 0.25, 0.6, 0.8
-    segs = []
-    t = core.adir(name) / "transcript.json"
-    if t.exists():
-        segs = [s for s in json.loads(t.read_text(encoding="utf-8")) if s["text"].strip()]
+    if segs is not None:
+        segs = [s for s in segs if str(s.get("text") or "").strip()]
+    else:
+        segs = []
+        t = core.adir(name) / "transcript.json"
+        if t.exists():
+            segs = [s for s in json.loads(t.read_text(encoding="utf-8")) if s["text"].strip()]
     extra_p = core.adir(name) / "analysis.json"
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]

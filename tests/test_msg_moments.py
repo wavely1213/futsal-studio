@@ -116,6 +116,29 @@ class Lines(unittest.TestCase):
         self.assertAlmostEqual(sb[1]["t"], 16.9)
         self.assertEqual(msg._scoreboard(moms[:5]), [])
 
+    def test_clean_lines_drops_restarts_split_slates_and_garbage(self):
+        """편집에서 뺄 말: 한 구간에 묶인 '고쳐 다시 한 말' · 쉼으로 쪼개진 '다시 … 해볼게요' · 영어 찌꺼기 (나란한 설명·짧은 감탄은 그대로)."""
+        def seg(*ws):
+            return {"start": ws[0][1], "end": ws[-1][2], "text": " ".join(w for w, _, _ in ws), "words": [{"w": w, "s": a, "e": b} for w, a, b in ws]}
+        segs = [seg(("이렇게", 0.0, 0.4), ("패스와", 0.4, 0.8), ("동작.", 0.8, 1.2), ("이렇게", 1.3, 1.6), ("패스와", 1.6, 2.0), ("동시에", 2.0, 2.4),
+                    ("몸이", 2.4, 2.7), ("나가야", 2.7, 3.0), ("해요.", 3.0, 3.3)),
+                seg(("다시", 5.0, 5.4)), seg(("해볼게요.", 6.5, 7.1)),
+                seg(("paced...Pacific...", 9.0, 10.5)),
+                seg(("패스하고", 12.0, 12.5), ("앞으로.", 12.5, 13.0), ("패스하고", 13.2, 13.7), ("옆으로", 13.7, 14.2), ("빠지면서", 14.2, 14.6), ("받아요.", 14.6, 15.0)),
+                seg(("나이스!", 16.0, 16.5))]
+        kept, junk = msg.clean_lines(segs)
+        self.assertEqual([(a, b, w) for a, b, w in junk], [(0.0, 1.2, "고쳐 다시 한 말"), (5.0, 5.4, "슬레이트 말"), (6.5, 7.1, "슬레이트 말"),
+                                                            (9.0, 10.5, "알아듣지 못한 말")])
+        self.assertEqual([x["text"] for x in kept], ["이렇게 패스와 동시에 몸이 나가야 해요.", "패스하고 앞으로.", "패스하고 옆으로 빠지면서 받아요.", "나이스!"])
+
+    def test_situ_label_uses_the_spoken_noun(self):
+        """상황 자막: 말한 이름 그대로 ('두 번째 동작' → 동작 · '두 번째 슛' → 슛 · '첫 번째 갑니다' → 도전)."""
+        f = lambda t: msg._situ_text({"kind": "section", "text": t})  # noqa: E731
+        self.assertEqual(f("자, 첫 번째 동작. 패스하고"), "첫 번째 동작")
+        self.assertEqual(f("두 번째 슛."), "두 번째 슛")
+        self.assertEqual(f("자, 첫 번째 갑니다."), "첫 번째 도전")
+        self.assertEqual(f("자, 두번째 포인트는 디딤발이"), "두 번째 포인트")
+
     def test_lexicons(self):
         self.assertTrue(msg.HOOK_Q.search("왜 다들 공을 놓칠까요?"))
         self.assertFalse(msg.HOOK_Q.search("수비가 붙으니까요"))
