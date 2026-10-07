@@ -817,6 +817,55 @@ def _hook(rec_item):
 
 
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
+TXT_LINE = 1.25   # 글 상자 한 줄 높이 = 글자 크기 × 1.25 (editor.html .txt line-height · 내보내기 ASS 도 같은 크기)
+TXT_GAP = 0.012   # 자동으로 놓는 글 상자끼리 띄울 틈 (화면 높이 비율)
+
+
+def frame_size(fmt):
+    """글자 크기·자리의 기준 화면 (내보내기 BW×BH 와 같음)."""
+    return (1080, 1920) if fmt == "shorts" else (1920, 1080)
+
+
+def text_box(text, st, W, H):
+    """글 상자 (왼, 위, 오른, 아래) — 화면 비율 0~1. y 는 글 아래 끝 (editor.html styleText · ASS \\an2·\\pos 와 같음).
+    화면 폭 92% 안에서 띄어쓰기마다 줄을 바꿔 셈 (editor.html .txt max-width 92%) · 글자 폭은 cap_fit 과 같은 어림."""
+    size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
+    black = st.get("weight") == "Black"
+    avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
+    widths = []
+    for para in str(text or "").replace("\r", "").split("\n"):
+        cur = 0.0
+        for w in para.split(" "):
+            ww = sum(_em(ch, black) for ch in w) * size
+            if cur and cur + sp + ww > avail:
+                widths.append(cur)
+                cur = ww
+            else:
+                cur = cur + (sp if cur else 0.0) + ww
+        widths.append(cur)
+    wd = min(avail, max(widths or [0.0])) + 2 * stroke
+    h = len(widths or [0]) * TXT_LINE * size + 2 * stroke
+    x, al = float(st.get("x", 0.5)) * W, st.get("align", "center")
+    left = x if al == "left" else x - wd if al == "right" else x - wd / 2
+    y = float(st.get("y", 0.5)) * H
+    return (left / W, (y - h) / H, (left + wd) / W, y / H)
+
+
+def _cap_band(st, H, lines=1):
+    """자막 글줄이 차지하는 높이 (위, 아래) 0~1 — 한 줄 자막 기준 (넘치면 cap_fit 이 글자를 줄여 한 줄로)."""
+    h = (lines * TXT_LINE * float(st.get("size") or 0) + 2 * float(st.get("strokeW") or 0)) / H
+    return float(st.get("y", 0.85)) - h, float(st.get("y", 0.85))
+
+
+def _stack_below(top_bottom, st, H, lines=1):
+    """st 글 상자를 위 글 상자 아래 끝(top_bottom) 밑으로 — 새 y (글 아래 끝)."""
+    h = (lines * TXT_LINE * float(st.get("size") or 0) + 2 * float(st.get("strokeW") or 0)) / H
+    return math.ceil((top_bottom + TXT_GAP + h) * 1000 - 1e-6) / 1000  # 올림: 반올림으로 틈이 조금이라도 줄지 않게
+
+
+def _overlap(a, b, gap=0.0):
+    """두 (위, 아래) 띠가 gap 안으로 겹치는지."""
+    return a[0] < b[1] + gap and b[0] < a[1] + gap
 
 # ---------- 영상 기획 분석 (plan) 반영: 인트로 티저 · 강조 자막 — 스타일 가편집(롱폼)에만, 원본 장면은 지우지 않음 ----------
 # 강조 낱말: 명사·부사만 (낱말 줄기 '잘하'·'힘들', 흔한 말 '진짜'·'어떻게' 는 뺌) — 낱말 전체가 같을 때만 (부분 일치 금지: '패턴'의 '턴')
@@ -960,9 +1009,10 @@ def _src_to_tl(items, t):
     return None
 
 
-def _emphasis_titles(items, segs, per_min, color, after=0.0):
+def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None):
     """받아쓰기에서 기술 이름·강조 낱말이 든 말을 골라 1.5초 큰 색 글씨(titles)로 — 1분에 per_min 개까지, 서로 EMPH_GAP 초 넘게 떨어뜨림.
-    teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀)."""
+    teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀).
+    place(글, 모양, 시작, 끝) → (x, y): 자리 고르기 (emphasis_placer · 없으면 예전처럼 화면 위 30%)."""
     total = max([i_end(it) for it in items] or [0.0])
     cap = int(per_min * total / 60.0 + 1e-9)
     if cap <= 0 or not segs:
@@ -992,8 +1042,106 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0):
             picked.append((tl, label))
     fill = str(color or "").upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color or "")) else "#FFE14D"
     sty = dict(TITLE_STYLE, fill=fill, size=88, y=0.3)
-    return [{"id": _nid(), "text": label, "start": round(tl, 2), "dur": EMPH_DUR, "style": dict(sty), "plan": "emphasis"}
-            for tl, label in sorted(picked)]
+    out = []
+    for tl, label in sorted(picked):
+        st1 = dict(sty)
+        if place is not None:  # 그 장면 얼굴·자막을 피한 빈자리
+            st1["x"], st1["y"] = place(label, st1, tl, tl + EMPH_DUR)
+        out.append({"id": _nid(), "text": label, "start": round(tl, 2), "dur": EMPH_DUR, "style": st1, "plan": "emphasis"})
+    return out
+
+
+# ---------- 자동 강조 글씨 자리: 얼굴(눈)을 가리지 않게 머리 위·옆·아래 빈자리로 ----------
+EMPH_SAFE = (0.03, 0.04, 0.97, 0.96)   # 글 상자가 들어갈 화면 안쪽 (왼, 위, 오른, 아래)
+FACE_PAD = (0.02, 0.06, 0.02, 0.02)    # 얼굴 상자 둘레 여유 (왼, 위(머리카락), 오른, 아래)
+FACE_GUESS = [[0.35, 0.12, 0.30, 0.26]]  # 얼굴을 못 찾을 때(모델 없음) 말하는 장면의 흔한 얼굴 자리 (화면 높이 15~35%)
+
+
+def emphasis_spot(text, st, W, H, faces, avoid=()):
+    """강조 글씨를 놓을 자리 (x, y) — 얼굴 상자 faces [[x, y, w, h] 0~1] 와 피할 띠 avoid [(위, 아래)] (대사 자막·쇼츠 훅)와
+    겹치지 않는 곳 중 먼저: 원래 자리(스타일 x·y) → 머리 위 → 옆(오른쪽·왼쪽) → 얼굴 아래 → 자막 위 빈 띠 → 화면 위쪽.
+    다 겹치면 얼굴과 가장 적게 겹치는 곳."""
+    fb = [(f[0] - FACE_PAD[0], f[1] - FACE_PAD[1], f[0] + f[2] + FACE_PAD[2], f[1] + f[3] + FACE_PAD[3]) for f in faces or ()]
+    x0, y0 = float(st.get("x", 0.5)), float(st.get("y", 0.3))
+    b0 = text_box(text, dict(st, x=0.5, y=0.5), W, H)
+    bw, bh = b0[2] - b0[0], b0[3] - b0[1]
+    cands = [(x0, y0)]
+    if fb:
+        f = max(fb, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))  # 주인공 얼굴 (가장 큰 얼굴)
+        cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+        cands += [(cx, f[1] - TXT_GAP), (f[2] + TXT_GAP + bw / 2, cy + bh / 2), (f[0] - TXT_GAP - bw / 2, cy + bh / 2),
+                  (cx, f[3] + TXT_GAP + bh)]
+    low = min([a for a, b in avoid if a > 0.5] or [EMPH_SAFE[3]]) - TXT_GAP
+    high = max([b for a, b in avoid if b < 0.5] or [EMPH_SAFE[1]]) + TXT_GAP + bh
+    cands += [(0.5, low), (0.5, high)]
+
+    def fit(x, y):  # 화면 안으로 (가로만 밀어 넣음)
+        return min(max(x, EMPH_SAFE[0] + bw / 2), EMPH_SAFE[2] - bw / 2), y
+
+    def bad(x, y):
+        box = (x - bw / 2, y - bh, x + bw / 2, y)
+        face = sum(max(0.0, min(box[2], r[2]) - max(box[0], r[0])) * max(0.0, min(box[3], r[3]) - max(box[1], r[1])) for r in fb)
+        out = box[1] < EMPH_SAFE[1] - 1e-6 or box[3] > EMPH_SAFE[3] + 1e-6 or box[0] < EMPH_SAFE[0] - 1e-6 or box[2] > EMPH_SAFE[2] + 1e-6
+        band = any(_overlap((box[1], box[3]), b, TXT_GAP / 2) for b in avoid)
+        return out or band, face
+
+    best = None
+    for x, y in cands:
+        x, y = fit(x, y)
+        hard, face = bad(x, y)
+        if not hard and face <= 1e-9:
+            return round(x, 3), round(y, 3)
+        key = (hard, face)
+        if best is None or key < best[0]:
+            best = (key, (round(x, 3), round(y, 3)))
+    return best[1]
+
+
+def _faces_on_screen(name, items, a, b):
+    """타임라인 a~b 초 동안 화면의 얼굴 상자 [[x, y, w, h]] (클립 확대 반영) — 처음·끝 두 장면.
+    얼굴 모델이 없거나(내려받지 않음) 장면을 하나도 못 보면 None."""
+    try:
+        import face
+        import thumb
+        if not face.ready() or not face.ensure(item=name, label="자동 가편집 만드는 중"):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    out, seen = [], 0
+    for t in (a + 0.2, b - 0.2):
+        it = next((it for it in items if it.get("track") == "V1" and float(it["start"]) - 1e-6 <= t < i_end(it)), None)
+        if it is None or it.get("media", "main") != "main":
+            continue
+        src = i_mt(it, t)
+        s = float(kf_at(param(it, "scale"), src)) / 100.0
+        try:
+            p = thumb.grab(name, round(src, 2), 640)
+            fs = face.faces(p) if p.is_file() else None
+        except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
+            fs = None
+        if fs is None:
+            continue
+        seen += 1
+        for f in fs:
+            x, y, w, h = f["box"]
+            out.append([0.5 + (x - 0.5) * s, 0.5 + (y - 0.5) * s, w * s, h * s])
+    return out if seen else None
+
+
+def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=None):
+    """_emphasis_titles 에 넘길 자리 고르기 — 그 장면 얼굴(못 보면 흔한 얼굴 자리)·대사 자막 줄·쇼츠 훅 제목을 피함."""
+    W, H = frame_size(fmt)
+    avoid = []
+    if captions_on and cap_style:
+        avoid.append(_cap_band(cap_style, H))
+    if hook:
+        hb = text_box(hook["text"], hook["style"], W, H)
+        avoid.append((hb[1], hb[3]))
+
+    def place(text, st, a, b):
+        fs = _faces_on_screen(name, items, a, b)
+        return emphasis_spot(text, st, W, H, FACE_GUESS if fs is None else fs, avoid)
+    return place
 
 
 AUTO_LUFS = (-16.0, -13.0)  # 자동 가편집의 소리 크기 목표 범위 — 유튜브는 -14 LUFS 로 맞춰 틀고 작은 소리는 키워 주지 않음
@@ -1046,20 +1194,32 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
             except Exception:  # noqa: BLE001
                 peaks = None
             items, titles = _intro_teaser(items, rec, tidy, min(6.0, max(3.0, float(tz["sec"]))), segs, peaks)
-        if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막
-            titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0)
+        cl = cap(LONG_STYLE)
+        if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막 (그 장면 얼굴·대사 자막을 피한 자리)
+            titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0,
+                                       emphasis_placer(name, items, "long", cl, caps_on))
+        W, H = frame_size("long")
+        for t in titles:  # 위쪽 자막 스타일: 티저 제목이 대사 자막과 같은 자리면 제목을 자막 아래로
+            tb = text_box(t["text"], t["style"], W, H)
+            if t.get("plan") == "teaser" and _overlap(_cap_band(cl, H), (tb[1], tb[3]), TXT_GAP):
+                t["style"]["y"] = math.ceil((_cap_band(cl, H)[1] + TXT_GAP + (tb[3] - tb[1])) * 1000 - 1e-6) / 1000
         if titles:
             extra["titles"] = titles
-        seqs.append(_new_seq("롱폼 가편집", "long", items, captionStyle=cap(LONG_STYLE),
+        seqs.append(_new_seq("롱폼 가편집", "long", items, captionStyle=cl,
                              layout={"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0},
                              master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
         for i, r in enumerate(rec["shorts"], 1):
             items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every, caps), 0.3, zoom=zoom)
             length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
-            seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cap(SHORTS_STYLE),
-                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on,
-                                 titles=[{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}]))
+            hook = {"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}
+            cs = cap(SHORTS_STYLE)
+            W, H = frame_size("shorts")
+            tb = text_box(hook["text"], hook["style"], W, H)
+            if _overlap(_cap_band(cs, H), (tb[1], tb[3]), TXT_GAP):  # 위쪽 자막 스타일: 쇼츠 내내 떠 있는 훅 제목 아래(영상 위 칸)로
+                cs["y"] = _stack_below(tb[3], cs, H)
+            seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs,
+                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on, titles=[hook]))
     for q in seqs:  # 자동으로 만든 가편집 표시 ('가편집 다시 만들기'는 이것만 바꿈 · 스타일 가편집은 app.py 에서 따로 표시)
         q["auto"] = "style" if style else "rough"
     return seqs
