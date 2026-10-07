@@ -6,6 +6,9 @@ AI 없이 규칙으로:
   (회차 번호·행사 이름·괄호 속 영어 풀이는 빼고, 그 영상만의 기술 이름은 통째로 주제 자리로 · D-030)
 - 저장된 목록이 없으면 기본 틀을 씀
 - 주제어는 TERMS + 기술 이름(SKILLS) + 용어 사전(작업 폴더 dict.json · 없으면 기본 사전)에서 긴 이름부터 찾음 (topic_terms)
+  (띄어 쓴 '드래그 백'도 · 사람·팀 이름은 빼고 · '오늘은 X 알려 드릴게요'처럼 소개한 기술은 더 무겁게 · D-033)
+- 우리 채널 틀은 주제 자리 밖에 그 영상만의 이야기('중앙을 파괴?')가 있으면 같은 갈래(드리블·패스·슈팅…)의 주제에만 쓰고,
+  기본 제목(첫 후보)은 늘 기본 틀 (훅이 있으면 훅) · BR-021
 """
 import json
 import os
@@ -32,8 +35,15 @@ SKILLS = [
     "인스텝 킥", "인사이드 킥", "아웃사이드 킥", "힐킥", "힐패스", "로빙", "발리", "롭 패스", "스루패스", "킬패스", "원투 패스",
     "백패스", "골클리어런스", "맨투맨", "지역 방어", "세컨볼",
 ]
-# 용어 사전에 있어도 주제어가 아닌 말 (채널·사람 이름 · 기본 사전의 '풋살사관학교'·'최경진 감독')
-_NOT_TOPIC = re.compile(r"사관학교|최경진|(?:감독|선수|코치|님)$")
+_TERM_SET = {re.sub(r"\s+", "", t) for t in TERMS + SKILLS}  # 풋살 용어·기술 이름 (붙여 쓴 꼴) — 이 밖은 용어 사전에만 있는 말
+_TERM_LOWER = {k.lower() for k in _TERM_SET}
+_SKILL_SET = set(SKILLS)
+# 용어 사전에 있어도 주제어가 아닌 말 (채널·사람·팀·장소 이름 · 기본 사전의 '풋살사관학교'·'최경진 감독')
+_NOT_TOPIC = re.compile(r"사관학교|최경진|(?:감독|선수|코치|님|씨|쌤|선생님)$|(?<![A-Za-z])(?:FC|FS|FK|SC|CF)$"
+                        r"|(?:팀|구단|클럽|학교|중학교|고등학교|대학교|풋살장|경기장|체육관|센터|아카데미|유소년)$", re.I)
+_SURNAME3 = re.compile(r"[김이박최정][가-힣]{2}")  # 세 글자 사람 이름 꼴 (가장 흔한 성 다섯) — 용어 사전에만 있는 말일 때만 봄
+# 대사에서 이름 바로 뒤에 붙는 부름말 → 그 말은 사람 이름 ('박영재 선수')
+_HONORIFIC = r"\s?(?:선수|감독|코치|님|씨|쌤|선생님|형|누나|언니)(?![가-힣])"
 # 낱말 뒤에 붙어도 같은 낱말로 세는 말: 조사 + '하고·하면서·주고·받아' 같은 풀이말 ('패스하고 바로 움직이세요')
 _JOSA_TAIL = (r"(?:이|가|을|를|은|는|도|만|의|에|에서|으로|로|와|과|이랑|랑|이나|나|이란|란|이라고|라고|이라는|라는|이라|라|까지|부터|처럼|보다|이요|요|"
               r"(?:하|해|했|할|한|합|함|되|돼|됐|된|될|주|줘|줬|준|줄|받)[가-힣]{0,4})?")
@@ -165,11 +175,33 @@ def fill(tpl, topics, hook=""):
 
 # ---------- 주제어 ----------
 
+_DETERMINER = set("각한두세네이그저새첫매전현총몇")  # 띄어 쓴 이름의 첫 낱말이 이 한 글자면 '각 드리블 사이에'(각각의)와 헷갈림
+
+
 def _term_re(term):
+    """채널 전략(strategy._TOPIC_RES)이 쓰는 예전 식: 두 글자 이하는 앞뒤가 다른 낱말에 붙어 있으면 안 셈('턴' ≠ '패턴'),
+    띄어 쓴 이름은 붙여 써도 같은 말. 올리기 키트는 _kit_re."""
     body = r"\s?".join(re.escape(p) for p in term.split())
     if len(term.replace(" ", "")) <= 2:
         return re.compile(rf"(?<![가-힣0-9]){body}(?={_JOSA_TAIL}(?![가-힣]))")
     return re.compile(body)
+
+
+def _kit_re(term):
+    """올리기 키트 주제어 찾는 식. 두 글자 이하('턴'·'패스')는 앞뒤가 다른 낱말에 붙어 있으면 안 셈('패턴'),
+    세 글자 이상은 어느 글자 사이든 띄어 써도 같은 말('드래그 백' = '드래그백' · 받아쓰기가 외래어 사이를 자주 띄움),
+    기술 이름·용어 사전 말은 앞에 다른 한글이 붙으면 안 셈('생각 드리블'의 '각 드리블' X) · '각 드리블'처럼 첫 낱말이
+    한 글자 꾸밈말이면 붙여 쓴 것만('각드리블')."""
+    parts = term.split()
+    compact = "".join(parts)
+    if len(compact) <= 2:
+        return _term_re(term)
+    if len(parts) > 1 and parts[0] in _DETERMINER:
+        body = re.escape(compact)
+    else:
+        body = r"\s?".join(re.escape(c) for c in compact)
+    left = "" if compact in _TERM_SET and term not in _SKILL_SET else r"(?<![가-힣])"
+    return re.compile(left + body)
 
 
 def _compact(t):
@@ -190,16 +222,32 @@ def topic_terms():
     for w in words:
         w = re.sub(r"\s+", " ", str(w or "")).strip()
         k = _compact(w)
-        if not k or k in seen or w in STOP or _NOT_TOPIC.search(w):
+        if not k or k in seen or w in STOP or _NOT_TOPIC.search(w) or (_dict_only(w) and _name_like(w)):
             continue
         seen.add(k)
         out.append(w)
     return sorted(out, key=lambda w: -len(_compact(w)))
 
 
+def _dict_only(term):
+    """풋살 용어·기술 이름 목록(TERMS·SKILLS)에 없는, 용어 사전에만 있는 말."""
+    return _compact(term) not in _TERM_LOWER
+
+
+def _futsalish(term):
+    """풋살 낱말(TERMS·SKILLS 의 두 글자 이상 말)이 들어 있는 말 ('리턴 패스'·'발바닥 터치')."""
+    k = _compact(term)
+    return any(len(t) >= 2 and t in k for t in _TERM_LOWER)
+
+
+def _name_like(term):
+    """사람 이름 같은 말 — 흔한 성으로 시작하는 한글 세 글자이고 풋살 낱말이 없으면 ('박영재')."""
+    return bool(_SURNAME3.fullmatch(term)) and not _futsalish(term)
+
+
 @lru_cache(maxsize=8)
 def _term_res(terms):
-    return [(t, _term_re(t)) for t in terms]
+    return [(t, _kit_re(t)) for t in terms]
 
 
 def _find_terms(text, terms):
@@ -220,23 +268,53 @@ def _strip_josa(w):
     return w
 
 
+# 기술을 소개하는 말: '오늘은 팬텀 드리블 …' · '팬텀 드리블 알려 드릴게요' · '팬텀 드리블이란' (영상 첫머리에 한 번 말하고 뒤에선 '드리블')
+_ANNOUNCE_BEFORE = re.compile(r"(?:오늘은|오늘|이번에는|이번엔|이번|지금부터|이제부터)\s*(?:바로\s*|함께\s*|같이\s*)?$")
+_ANNOUNCE_AFTER = re.compile(r"(?:이란|란)(?![가-힣])|(?:이라는|라는|을|를|은|는|에\s?대해서?)?\s*(?:알려|배워|배우|소개|가르쳐|준비했|다뤄|설명해|해\s?볼게)")
+ANNOUNCE_BONUS = 2  # 소개한 말은 이만큼 더 센 것으로 (한 번만)
+
+
+def _named_form(big, small):
+    """big 이 small 의 이름 붙은 꼴인지 — 띄어 쓴 이름의 끝 낱말이 small ('팬텀 드리블' ⊃ '드리블' · '인사이드 킥' ⊃ '킥').
+    붙여 쓴 다른 말('토킥' ⊃ '킥' · '백패스' ⊃ '패스' · '스쿱턴' ⊃ '턴')은 다른 기술이라 합치지 않음."""
+    parts = big.split()
+    return len(parts) > 1 and _compact(parts[-1]) == _compact(small)
+
+
 def topic_keywords(texts, n=6, terms=None):
     """대사에서 주제어 (많이 나온 순). 풋살 용어가 없으면 자주 나온 낱말.
-    terms: 찾을 말 (없으면 topic_terms()). 기술 이름이 그 안의 흔한 말('팬텀 드리블' ⊃ '드리블') 횟수의 1/3 이상 나오면 기술 이름 하나로 셈."""
-    text = " ".join(t for t in texts if t)
-    hits = {}
-    for a, _, term in _find_terms(text, topic_terms() if terms is None else terms):
-        c, first = hits.get(term, (0, a))
-        hits[term] = (c + 1, min(first, a))
+    terms: 찾을 말 (없으면 topic_terms()).
+    - 기술 이름(띄어 쓴 이름의 끝 낱말이 흔한 말: '팬텀 드리블' ⊃ '드리블')이 그 흔한 말 횟수의 절반 이상이면 기술 이름 하나로 셈
+      ('토킥'·'백패스'처럼 붙여 쓴 다른 기술은 합치지 않음 · D-033)
+    - '오늘은 X …'·'X 알려 드릴게요'처럼 소개한 말은 ANNOUNCE_BONUS 만큼 더 세고, 적게 나와도 빠지지 않음
+    - 용어 사전에만 있는 말 중 대사에서 '선수·감독·님' 같은 부름말이 붙은 말(사람 이름)은 빼고, 같은 횟수면 풋살 용어가 앞"""
+    texts = [t for t in texts if t]
+    text = " ".join(texts)
+    terms = topic_terms() if terms is None else terms
+    hits, said = {}, set()
+    pos = 0
+    for t in texts:
+        for a, b, term in _find_terms(t, terms):
+            c, first = hits.get(term, (0, pos + a))
+            hits[term] = (c + 1, min(first, pos + a))
+            if term not in said and (_ANNOUNCE_BEFORE.search(t[max(0, a - 12):a]) or _ANNOUNCE_AFTER.match(t[b:b + 16])):
+                said.add(term)
+        pos += len(t) + 1
+    for term in [t for t in hits if _dict_only(t) and re.search(_kit_re(t).pattern + _HONORIFIC, text)]:
+        del hits[term]  # 대사에서 '박영재 선수'처럼 부른 말 = 사람 이름
+    said &= set(hits)
+    for t in said:
+        hits[t] = (hits[t][0] + ANNOUNCE_BONUS, hits[t][1])
     for big in sorted(hits, key=lambda t: -len(_compact(t))):
-        for small in [t for t in hits if t != big and _compact(t) in _compact(big)]:
+        for small in [t for t in hits if t != big and _named_form(big, t)]:
             if big in hits and hits[big][0] * SKILL_SHARE >= hits[small][0]:
                 hits[big] = (hits[big][0] + hits[small][0], min(hits[big][1], hits[small][1]))
                 del hits[small]
+                said.discard(small)
     if hits:
-        ranked = sorted(hits, key=lambda t: (-hits[t][0], hits[t][1]))
+        ranked = sorted(hits, key=lambda t: (-hits[t][0], _dict_only(t) and not _futsalish(t), hits[t][1]))
         floor = 2 if hits[ranked[0]][0] >= 2 else 1
-        out = [t for t in ranked if hits[t][0] >= floor]
+        out = [t for t in ranked if hits[t][0] >= floor or t in said]
         # 같은 뜻이 겹치면 많이 나온 쪽만 (슛/슈팅)
         if "슛" in out and "슈팅" in out:
             out.remove("슛" if out.index("슈팅") < out.index("슛") else "슈팅")
@@ -254,7 +332,7 @@ def in_order(topics, texts):
     text = " ".join(t for t in texts if t)
     pos = {}
     for t in topics:
-        m = _term_re(t).search(text)
+        m = _kit_re(t).search(text)
         pos[t] = m.start() if m else len(text)
     return sorted(topics, key=lambda t: pos[t])
 
@@ -289,7 +367,7 @@ _ENDING = re.compile(r"(?:처럼|보다|까지|부터|만큼|대로|마다|밖�
                      r"한|된|할|될|운|인|던|린|진|른|쁜|적|들)$")
 _INVARIANT_JOSA = re.compile(r"(?:에서|까지|부터|처럼|보다|의|에|도|만)(?![가-힣])")
 SKELETON_MAX, SKELETON_TRY = 2, 4  # 제목 후보에 쓰는 우리 채널 틀 수 · 주제어가 겹쳐 버릴 때를 위해 더 찾아 둘 수
-SKILL_SHARE = 3  # 기술 이름이 그 안의 흔한 말 횟수의 1/3 이상 나오면 기술 이름으로 셈 ('팬텀 드리블' 1번 · '드리블' 3번 → '팬텀 드리블')
+SKILL_SHARE = 2  # 기술 이름이 그 안의 흔한 말 횟수의 절반 이상 나오면 기술 이름으로 셈 ('팬텀 드리블' 2번 · '드리블' 4번 → '팬텀 드리블')
 
 
 def _clean_title(t):
@@ -331,9 +409,58 @@ def _slot(t, a, b):
     return a, b, j
 
 
-def skeletons(rows, n=3, terms=None):
-    """조회수 높은 제목에서 주제어 자리를 비운 틀 (주제어가 딱 하나 있는 제목만).
-    회차 표시·괄호 속 영어 풀이·초대 손님·조회수 자랑은 빼고, 행사·대회·팀 이름이 든 제목은 안 씀 (D-030)."""
+# 주제어 갈래: 우리 채널 틀의 나머지 말이 그 영상 이야기('중앙을 파괴?')면 같은 갈래 주제에만 씀 (BR-021)
+_CATEGORY = {
+    "dribble": ("드리블", "돌파", "페인트", "개인기", "스텝오버", "턴", "1대1", "헛다리", "시저스", "엘라스티코", "플립플랩", "영재 플랩",
+                "라크로케타", "마르세유 턴", "크루이프 턴", "피보 턴", "룰렛", "드래그백", "스쿱턴", "슬립백", "솔 턴", "솔 롤", "사포",
+                "레인보우 플릭", "넛메그", "알까기", "인앤아웃", "더블 터치", "방향전환", "바디 페인팅", "바디 페인트", "숄더 페인트",
+                "팬텀 드리블", "스네이크 드리블", "각 드리블", "페인팅", "터닝"),
+    "control": ("퍼스트 터치", "볼 컨트롤", "볼 키핑", "볼 터치", "트래핑", "발바닥", "인사이드", "아웃사이드", "발바닥 터치"),
+    "pass": ("패스", "월패스", "스루패스", "킬패스", "백패스", "힐패스", "롭 패스", "원투 패스", "로빙", "크로스", "인사이드 킥", "2대1",
+             "인사이드 패스", "아웃사이드 패스", "2대1 패스", "리턴 패스"),
+    "shoot": ("슈팅", "슛", "칩슛", "킥", "토킥", "인스텝 킥", "아웃사이드 킥", "힐킥", "발리", "마무리", "헤딩"),
+    "setpiece": ("세트피스", "코너킥", "프리킥", "킥인"),
+    "defense": ("수비", "압박", "맨투맨", "지역 방어", "세컨볼", "수비 라인", "프레스"),
+    "tactic": ("로테이션", "포지셔닝", "오프 더 볼", "빌드업", "역습", "침투", "스크린", "피보", "아라", "픽소", "전환", "등지기",
+               "피벗 플레이", "피보 플레이", "시야", "체크백", "피벗", "파라렐라", "디아고날", "오버래핑", "스위칭", "파워플레이"),
+    "keeper": ("골키퍼", "골클리어런스", "고레이로"),
+    "fitness": ("체력", "스피드", "밸런스", "스트레칭", "워밍업"),
+}
+_CAT_OF = {_compact(t): c for c, ts in _CATEGORY.items() for t in ts}
+_CAT_TAIL = (("패스", "pass"), ("슈팅", "shoot"), ("슛", "shoot"), ("킥", "shoot"), ("드리블", "dribble"), ("턴", "dribble"),
+             ("페인트", "dribble"), ("페인팅", "dribble"), ("플랩", "dribble"), ("터치", "control"), ("수비", "defense"), ("방어", "defense"))
+# 주제 자리 밖에 남아도 '그 영상 이야기'가 아닌 말 (어느 주제에나 맞는 틀) — 이 밖의 이름말이 있으면 갈래가 같은 주제에만 씀
+_GENERIC = _KEEP_LEFT | _TITLE_WORDS | STOP | {"법", "하는법", "가지", "개", "번", "것", "거", "이것", "이거", "이것만", "사관학교", "풋살사관학교",
+                                               "shorts", "쇼츠", "아이템", "필수", "시간", "누구나", "모두", "제일", "가장", "최고의"}
+# 주제 자리가 구분 기호 뒤의 꼬리표인 틀 ('… 농락해 버리기?! -{주제}') — 앞말이 그 영상 한 편의 제목이라 버림
+_TAIL_SLOT = re.compile(r"[-|/:·~ㅣ]\s*[\"'“”]?\{주제[^}]*\}[\"'“”]?\s*[?!.~]*$|[?!]\s*[-|/:·~ㅣ]?\s*\{주제")
+
+
+def category(term):
+    """주제어 갈래 (dribble·control·pass·shoot·setpiece·defense·tactic·keeper·fitness) · 모르면 None."""
+    k = _compact(term)
+    if k in _CAT_OF:
+        return _CAT_OF[k]
+    return next((c for tail, c in _CAT_TAIL if k.endswith(tail)), None)
+
+
+def _generic(sk):
+    """틀의 주제 자리 밖 말이 어느 주제에나 맞는지 (꾸밈말·제목 낱말·풀이말뿐 · 머리말 '[…]'·숫자는 상관없음)."""
+    rest = re.sub(r"\{[^}]*\}", " ", re.sub(r"^\s*[\[【][^\]】]*[\]】]", " ", sk))
+    for tok in re.findall(r"[가-힣A-Za-z0-9]+", rest):
+        if re.search(r"\d", tok) or not _bare_noun(tok):
+            continue
+        w = _strip_josa(tok)
+        if w in _GENERIC or tok in _GENERIC or (w.startswith(("풋살", "축구")) and (w[2:] in _GENERIC or not w[2:])):
+            continue
+        return False
+    return True
+
+
+def skeleton_info(rows, n=3, terms=None):
+    """조회수 높은 제목에서 주제어 자리를 비운 틀 [{"sk": 틀, "cat": 비운 말의 갈래, "generic": 어느 주제에나 맞는지}]
+    (주제어가 딱 하나 있는 제목만). 회차 표시·괄호 속 영어 풀이·초대 손님·조회수 자랑은 빼고, 행사·대회·팀 이름이 든 제목과
+    주제 자리가 꼬리표인 제목('… 버리기?! -{주제}')은 안 씀 (D-030 · D-033)."""
     terms = topic_terms() if terms is None else terms
     out = []
     for r in rows:
@@ -356,13 +483,21 @@ def skeletons(rows, n=3, terms=None):
             sk = t[:a] + "{주제:" + _JOSA_OF[j[1]] + "}" + t[b + len(j[1]):]
         else:
             sk = t[:a] + "{주제}" + t[b:]
-        sk = re.sub(r"\s+", " ", re.sub(r"\s*\([^(){}]*\)", " ", sk)).strip(" |ㅣ-/:·")  # 주제 자리 밖 괄호 '(1인칭 시점)'은 그 영상 이야기
+        sk = re.sub(r"\s+", " ", re.sub(r"\s*\([^(){}]*\)", " ", sk)).strip(" |ㅣ/:·")  # 주제 자리 밖 괄호 '(1인칭 시점)'은 그 영상 이야기
+        if _TAIL_SLOT.search(sk):
+            continue
+        sk = sk.strip(" -")
         words = len(re.sub(r"\{[^}]*\}|[^가-힣A-Za-z]", "", sk)) + (2 if "{주제:이란}" in sk else 0)  # 주제어 말고 남은 글자 ('{주제} 꿀팁')
-        if 6 <= len(sk) <= 90 and words >= 2 and sk not in out:
-            out.append(sk)
+        if 6 <= len(sk) <= 90 and words >= 2 and sk not in [x["sk"] for x in out]:
+            out.append({"sk": sk, "cat": category(found[0][2]), "generic": _generic(sk)})
         if len(out) >= n:
             break
     return out
+
+
+def skeletons(rows, n=3, terms=None):
+    """skeleton_info 의 틀 글만."""
+    return [x["sk"] for x in skeleton_info(rows, n, terms)]
 
 
 def _style(rows):
@@ -394,6 +529,14 @@ def tidy_title(t, limit=100):
     return t
 
 
+def _one_minute(t, dur):
+    """1분 넘는(길이를 모르는) 영상에 '1분'이라 하지 않음: '1분 꿀팁' → '꿀팁 하나', 그 밖의 '1분'이 남으면 None (그 제목은 안 씀)."""
+    if one_minute(dur) or "1분" not in t:
+        return t
+    t = t.replace("1분 꿀팁", "꿀팁 하나")
+    return None if "1분" in t else t
+
+
 def one_minute(dur):
     """1분 이하 영상인지 (내보낸 영상은 60.0x초가 되기도 함) · 길이를 모르면 False."""
     try:
@@ -403,7 +546,9 @@ def one_minute(dur):
 
 
 def title_candidates(topics, hook=None, fmt="long", cache=None, n=5, flow=None, dur=None):
-    """제목 후보 3~5개: 편집실 훅 → 우리 채널 인기 제목 틀 → 기본 틀 (조회수 높은 말투 먼저).
+    """제목 후보 3~5개: 편집실 훅 → 기본 틀 하나(조회수 높은 말투) → 우리 채널 인기 제목 틀(2개까지) → 나머지 기본 틀.
+    첫 후보(훅이 없으면 기본 제목)는 늘 기본 틀 — 우리 채널 틀은 옛 영상 한 편의 말이 남아 있을 수 있음 (D-033).
+    우리 채널 틀은 어느 주제에나 맞는 틀이거나, 비운 말과 주제어의 갈래(드리블·패스·슈팅…)가 같을 때만 씀.
     topics: 많이 나온 순 · flow: 영상에 나오는 순서 (여러 주제를 정리하는 제목에 씀) · dur: 영상 길이(초)."""
     topics = [t for t in (topics or []) if t] or ["풋살"]
     flow = [t for t in (flow or []) if t in topics[:3]]
@@ -431,17 +576,17 @@ def title_candidates(topics, hook=None, fmt="long", cache=None, n=5, flow=None, 
     if hook:
         add(hook if fmt == "shorts" or len(hook) > 20 else f"{hook} (최경진 감독)", styled=True)
         used |= {f[0] for f in FAMILIES if re.search(f[1], hook)}
-    picked = 0
-    for sk in skeletons(rows, SKELETON_TRY):
-        t = fill(sk, topics, hook)
-        if picked >= SKELETON_MAX or _compact(t).count(_compact(topics[0])) > 1:  # 주제어 겹침('풋살 풋살'·'풋살기술 "풋살"')은 버림
+    cat0, learned = category(topics[0]), []
+    for x in skeleton_info(rows, SKELETON_TRY):
+        if len(learned) >= SKELETON_MAX or not (x["generic"] or (cat0 and x["cat"] == cat0)):  # 그 영상 이야기가 든 틀은 같은 갈래만
             continue
-        picked += 1
-        add(t)
-        used |= {f[0] for f in FAMILIES if re.search(f[1], sk)}  # 같은 말투의 기본 틀은 건너뜀 (비슷한 제목 두 번 X)
+        t = _one_minute(fill(x["sk"], topics, hook), dur)
+        if not t or _compact(t).count(_compact(topics[0])) > 1:  # 주제어 겹침('풋살 풋살'·'풋살기술 "풋살"')은 버림
+            continue
+        learned.append(t)
+        used |= {f[0] for f in FAMILIES if re.search(f[1], x["sk"])}  # 같은 말투의 기본 틀은 건너뜀 (비슷한 제목 두 번 X)
+    fam = []
     for name, _, long_tpl, short_tpl in _family_order(rows):
-        if len(out) >= n:
-            break
         if name in used:
             continue
         tpl = short_tpl if fmt == "shorts" else long_tpl
@@ -449,9 +594,17 @@ def title_candidates(topics, hook=None, fmt="long", cache=None, n=5, flow=None, 
             continue
         if name == "정리":
             tpl = "{주제1}부터 {주제" + str(len(flow)) + "}까지 한 번에 정리"
-        if "1분" in tpl and not one_minute(dur):  # 쇼츠는 3분까지 · 1분 넘거나 길이를 모르면 '1분'이라 하지 않음
-            tpl = tpl.replace("1분 꿀팁", "꿀팁 하나")
-        add(fill(tpl, flow if name == "정리" else topics, hook), styled=True)
+        t = _one_minute(fill(tpl, flow if name == "정리" else topics, hook), dur)
+        if t:
+            fam.append(t)
+    for t in fam[:1]:  # 기본 틀 하나 다음에 우리 채널 틀
+        add(t, styled=True)
+    for t in learned:
+        add(t)
+    for t in fam[1:]:
+        if len(out) >= n:
+            break
+        add(t, styled=True)
     for name, _, long_tpl, _s in FAMILIES[1:]:  # 그래도 3개가 안 되면 (틀이 겹칠 때) 긴 영상 틀로 채움
         if len(out) >= 3:
             break
