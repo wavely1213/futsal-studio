@@ -301,6 +301,7 @@ class ReviewForecast(unittest.TestCase):
         live = [m for m in out["milestones"] if not m.get("achieved") and not m.get("none")]
         self.assertTrue(live and all(m["confidence"] == "낮음" for m in live))
         self.assertIn("비교 자료가 없어 기본값으로 계산했어요", out["trustWhy"])
+        self.assertNotIn("0곳", out["assumptions"][0])
         self.assertTrue(any("새 채널" in w for w in out["trustWhy"]))
 
     def test_pace_and_plans_share_luck(self):
