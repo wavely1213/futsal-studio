@@ -8,6 +8,8 @@
 <style>
   @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Bold.otf"); font-weight: 700; }
   @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Black.otf"); font-weight: 900; }
+  @font-face { font-family: "BlackHanSansE"; src: url("/fonts/BlackHanSans-Regular.ttf"); font-weight: 400; }
+  @font-face { font-family: "DoHyeonE"; src: url("/fonts/DoHyeon-Regular.ttf"); font-weight: 400; }
   :root {
     --bg: #161616; --panel: #1f1f1f; --panel-2: #262626; --panel-3: #2e2e2e; --line: #0c0c0c; --line-2: #383838;
     --ink: #e8e8e8; --ink-2: #a3a3a3; --ink-3: #6b6b6b;
@@ -93,7 +95,7 @@
   .tgrp { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
   .ov { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
   #shp { z-index: 55; }
-  .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; word-break: keep-all; text-wrap: balance; }
+  .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; font-synthesis: none; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; word-break: keep-all; text-wrap: balance; }
   .mbox { position: absolute; z-index: 70; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); display: none; cursor: move; }
   .mbox i { position: absolute; width: 9px; height: 9px; background: #fff; border: 1px solid #000; }
   .mbox i.a { left: -5px; top: -5px; cursor: nwse-resize; } .mbox i.b { right: -5px; top: -5px; cursor: nesw-resize; }
@@ -616,7 +618,7 @@ function trackState(tid, t) {
 let _caps = { v: -1, list: [] };
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
-  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev), out = [];
+  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps), out = []; // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
   const cs = P.captions.slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
   for (const it of vids) {
     let lo = 0, hi = cs.length; const from = it.in - maxLen;
@@ -629,7 +631,7 @@ function capsTL() {
   out.sort((a, b) => a.s - b.s);
   _caps = { v: ver, list: out }; return out;
 }
-function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
+function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
 /* ---------- 기록(되돌리기) · 저장 ---------- */
 // 되돌리기 기록: 최대 120단계 (모든 기록이 이 함수를 거쳐 오래된 것부터 지움 → 메모리가 끝없이 늘지 않게)
@@ -1373,8 +1375,12 @@ function layoutFrame() {
   frameDirty = true;
 }
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+// 타이틀 글꼴 (editor.py TITLE_FONTS 와 같은 목록) — 굵기가 하나뿐인 글꼴은 굵게 흉내 없이
+const TFONTS = { "Black Han Sans": ["BlackHanSansE", "검은고딕"], "Do Hyeon": ["DoHyeonE", "도현"] };
 function styleText(el, st, scale) {
-  el.style.fontWeight = st.weight === "Black" ? 900 : 700;
+  const tf = TFONTS[st.font];
+  el.style.fontFamily = tf ? tf[0] : "";
+  el.style.fontWeight = tf ? 400 : st.weight === "Black" ? 900 : 700;
   el.style.fontSize = st.size * scale + "px";
   el.style.top = st.y * 100 + "%";
   el.style.left = (st.x ?? 0.5) * 100 + "%";
@@ -1388,15 +1394,18 @@ function styleText(el, st, scale) {
     el.style.webkitTextStroke = `${st.strokeW * 2 * scale}px ${st.stroke}`;
   }
 }
+const lerpT = (pts, e) => { for (let i = 0; i < pts.length - 1; i++) if (e <= pts[i + 1][0]) return pts[i][1] + (pts[i + 1][1] - pts[i][1]) * Math.max(0, (e - pts[i][0]) / (pts[i + 1][0] - pts[i][0])); return pts[pts.length - 1][1]; };
 function effect(el, st, e, r, scale, text) {
-  let op = 1, sc = 1, dy = 0;
+  let op = 1, sc = 1, dy = 0, rot = Math.max(-45, Math.min(45, +st.rot || 0)); // 기울기: 시계 방향 + (editor.py _rot · ASS \frz 는 반대 부호)
   if (st.effect === "fade") op = Math.min(1, e / 0.15, r / 0.12);
+  if (st.effect === "stamp") sc = e < 0.12 ? 1.65 - 0.65 * (e / 0.12) : 1; // 쾅 찍기 (editor.py _effect_tags 와 같은 0.12초 직선)
+  if (st.effect === "shake") { sc = e < 0.08 ? 1.25 - 0.25 * (e / 0.08) : 1; rot += lerpT([[0, 0], [0.06, -6], [0.12, 6], [0.18, -3], [0.24, 0]], e); }
   if (st.effect === "pop") sc = e < 0.11 ? 0.7 + 0.38 * (e / 0.11) : e < 0.19 ? 1.08 - 0.08 * ((e - 0.11) / 0.08) : 1;
   if (st.effect === "slide") { dy = 40 * scale * (1 - Math.min(1, e / 0.18)); op = Math.min(1, e / 0.12); }
   el.style.opacity = op;
   const ax = st.align === "left" ? "0%" : st.align === "right" ? "-100%" : "-50%";
   el.style.transformOrigin = st.align === "left" ? "0 100%" : st.align === "right" ? "100% 100%" : "50% 100%";
-  el.style.transform = `translate(${ax}, -100%) translateY(${dy}px) scale(${sc})`;
+  el.style.transform = `translate(${ax}, -100%) translateY(${dy}px)${rot ? ` rotate(${rot}deg)` : ""} scale(${sc})`;
   if (st.effect === "karaoke") {
     const words = text.split(" "), len = w => w.replace(/\n/g, "").length, tot = words.reduce((a, w) => a + len(w), 0) || 1, dur = e + r; // 줄바꿈은 글자 수에 안 셈 (내보내기와 같은 시간)
     let acc = 0;
@@ -1502,7 +1511,7 @@ function rowList() {
   for (const tr of aTracks()) rows.push({ tk: tr.id, tr });
   return rows;
 }
-const lbl = tr => tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : (tr.role === "dialog" ? "대사 " : "음악 ") + tr.id[1];
+const lbl = tr => tr.name ? `${tr.name} ${tr.id.slice(1)}` : tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : (tr.role === "dialog" ? "대사 " : "음악 ") + tr.id[1];
 function headHTML(tr) {
   const a = tr.k === "a";
   return `<div class="hd"><button class="tb ${tr.target ? "on" : ""}" data-tgt="${tr.id}" title="대상 트랙 켜기/끄기 — Ctrl+K·붙여넣기·Q/W·전환이 이 트랙에 적용돼요">${tr.id}</button>
@@ -2470,7 +2479,9 @@ function styleEditor(prefix, st, title) {
     ${slider(prefix + "bgOpacity", "배경 진하기", st.bgOpacity, 0.1, 1, 0.05, v => Math.round(v * 100) + "%")}
     ${slider(prefix + "y", "세로 위치", st.y, 0.08, 0.95, 0.01, v => Math.round(v * 100) + "%")}
     ${title ? slider(prefix + "x", "가로 위치", st.x ?? 0.5, 0.02, 0.98, 0.01, v => Math.round(v * 100) + "%") + `<div class="f"><label>정렬</label><div class="seg" id="${prefix}align">${[["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]].map(([v, l]) => `<button data-v="${v}" class="${(st.align || "center") === v ? "on" : ""}">${l}</button>`).join("")}</div><span></span></div>` : ""}
-    <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    ${title ? `<div class="f"><label>글꼴</label><select class="s" id="${prefix}font">${[["", "프리텐다드 (기본)"], ...Object.entries(TFONTS).map(([k, v]) => [k, v[1]])].map(([v, l]) => `<option value="${v}" ${(st.font || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    ${slider(prefix + "rot", "기울기", st.rot || 0, -20, 20, 1, v => v + "°")}` : ""}
+    <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"], ["stamp", "쾅 찍기"], ["shake", "흔들기"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
     <div class="f"><label>강조색</label><input type="color" id="${prefix}highlight" value="${st.highlight || "#FFD400"}"><span class="hint">노래방 효과용</span></div>
   </div>`;
 }
@@ -2480,14 +2491,15 @@ function bindStyle(prefix, getSt, root) {
   let before = null;
   const start = () => { if (!before) before = JSON.stringify(P); };
   const end = () => { if (before && before !== JSON.stringify(P)) { pushHist("글자 스타일", before); scheduleSave(); renderTimeline(); } before = null; };
-  for (const k of ["size", "strokeW", "bgOpacity", "y", "x"]) {
+  for (const k of ["size", "strokeW", "bgOpacity", "y", "x", "rot"]) {
     const el = $(prefix + k); if (!el) continue;
-    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : el.value + "px"; live(); };
+    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : k === "rot" ? el.value + "°" : el.value + "px"; live(); };
     el.onchange = end;
   }
   for (const k of ["fill", "stroke", "bg", "highlight"]) { const el = $(prefix + k); el.oninput = () => { start(); getSt()[k] = el.value; live(); }; el.onchange = end; }
   $(prefix + "bgOn").onchange = e => { start(); getSt().bgOn = e.target.checked; live(); end(); };
   $(prefix + "effect").onchange = e => { start(); getSt().effect = e.target.value; live(); end(); };
+  if ($(prefix + "font")) $(prefix + "font").onchange = e => { start(); const st = getSt(); if (e.target.value) st.font = e.target.value; else delete st.font; live(); end(); };
   $(prefix + "weight").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().weight = b.dataset.v; end(); renderPanels(); });
   if ($(prefix + "align")) $(prefix + "align").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().align = b.dataset.v; live(); end(); renderPanels(); });
 }

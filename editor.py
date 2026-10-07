@@ -759,7 +759,7 @@ def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
 def _src_to_tl(items, t):
     """원본 t 초 → 타임라인 시각 (V1 클립 안일 때만, 잘린 곳이면 None)."""
     for it in items:
-        if it.get("track") == "V1" and it.get("media", "main") == "main" and float(it["in"]) <= t < float(it["out"]):
+        if it.get("track") == "V1" and it.get("media", "main") == "main" and not it.get("noCaps") and float(it["in"]) <= t < float(it["out"]):
             return float(it["start"]) + (t - float(it["in"])) / i_sp(it)
     return None
 
@@ -1502,7 +1502,8 @@ def timeline_captions(proj):
     """자막을 타임라인 시간으로 (V1 의 원본 클립을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨)."""
     res = []
     total = seq_total(proj)
-    vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev")],
+    # noCaps: 다시 보기·티저처럼 같은 장면을 한 번 더 쓴 클립은 말 자막을 다시 띄우지 않음 (editor.html capsTL 과 같은 규칙)
+    vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev") and not it.get("noCaps")],
                   key=lambda x: x["start"])
     shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
     for cap0 in proj["captions"]:
@@ -1582,7 +1583,14 @@ def _ass_time(t):
     return f"{int(h)}:{int(m):02d}:{s:05.2f}"
 
 
-def _effect_tags(effect, x, y, dur):
+def _effect_tags(effect, x, y, dur, rz=0.0):
+    """타이틀·자막 효과 → ASS 명령 (editor.html effect() 와 같은 움직임). rz: ASS 기울기(\\frz, 반시계 방향 +)."""
+    if effect == "stamp":  # 쾅 찍기: 크게(165%) 나타나 0.12초 만에 제자리로
+        return r"{\fscx165\fscy165\t(0,120,\fscx100\fscy100)}"
+    if effect == "shake":  # 흔들기: 살짝 크게 시작 + 좌우로 기울며 흔들림 0.24초
+        r = _num(round(rz, 2))
+        return (rf"{{\fscx125\fscy125\t(0,80,\fscx100\fscy100)\t(0,60,\frz{_num(round(rz + 6, 2))})\t(60,120,\frz{_num(round(rz - 6, 2))})"
+                rf"\t(120,180,\frz{_num(round(rz + 3, 2))})\t(180,240,\frz{r})}}")
     if effect == "fade":
         return r"{\fad(150,120)}"
     if effect == "pop":
@@ -1618,6 +1626,17 @@ def _karaoke(text, dur, words=None, t0=0.0):
 
 # ASS 글자 크기는 줄 높이(위+아래 여백) 기준이라 화면(CSS) 글자보다 작게 나옴 → Pretendard 비율만큼 키워 미리보기와 같게
 FONT_K = 1.194
+# 타이틀 글꼴 (style.font): 이름 → (ASS 글꼴 이름, 크기 비율) · 비율은 글꼴의 줄 높이(win 위+아래)/em — libass 로 그려 재어 확인 (Pretendard 1.19 · 검은고딕 1.02 · 도현 1.0)
+TITLE_FONTS = {"Black Han Sans": ("Black Han Sans", 1.02), "Do Hyeon": ("Do Hyeon", 1.0)}
+
+
+def _rot(s):
+    """타이틀 기울기(도, 시계 방향 +) — 숫자가 아니면 0."""
+    try:
+        r = float(s.get("rot") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(-45.0, min(45.0, r)) if math.isfinite(r) else 0.0
 
 
 def build_ass(proj, W, H):
@@ -1626,13 +1645,17 @@ def build_ass(proj, W, H):
     def style_line(name, s):
         font = "Pretendard Black" if s["weight"] == "Black" else "Pretendard"
         bold = 0 if s["weight"] == "Black" else -1
+        k = FONT_K
+        if s.get("font") in TITLE_FONTS:  # 굵기가 하나뿐인 글꼴 → 굵게 흉내 없이 (미리보기도 font-weight 400)
+            font, k = TITLE_FONTS[s["font"]]
+            bold = 0
         if s.get("bgOn"):
             border, outline, ocol = 3, max(6, s["strokeW"]), _ass_color(s["bg"], 1 - s["bgOpacity"])
         else:
             border, outline, ocol = 1, s["strokeW"], _ass_color(s["stroke"])
         prim = _ass_color(s["highlight"] if s["effect"] == "karaoke" else s["fill"])
         sec = _ass_color(s["fill"])
-        return (f"Style: {name},{font},{round(s['size'] * FONT_K)},{prim},{sec},{ocol},{ocol},{bold},0,0,0,100,100,0,0,"
+        return (f"Style: {name},{font},{round(s['size'] * k)},{prim},{sec},{ocol},{ocol},{bold},0,0,0,100,100,0,0,"
                 f"{border},{outline},0,2,40,40,0,1")
 
     lines = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "WrapStyle: 0",
@@ -1667,9 +1690,11 @@ def build_ass(proj, W, H):
         al = s.get("align", "center")
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
-        tags = rf"{{\an{an}\pos({x},{y})}}" if s["effect"] != "slide" else rf"{{\an{an}}}"
+        rz = -_rot(s)  # 화면은 시계 방향 + · ASS \frz 는 반시계 방향 + (기준점은 \pos 자리 = 미리보기 transform-origin)
+        fr = rf"\frz{_num(round(rz, 2))}" if rz else ""
+        tags = rf"{{\an{an}\pos({x},{y}){fr}}}" if s["effect"] != "slide" else rf"{{\an{an}{fr}}}"
         body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
-        eff = _effect_tags(s["effect"], x, y, end - start)
+        eff = _effect_tags(s["effect"], x, y, end - start, rz)
         lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     if proj.get("captionsOn", True):
