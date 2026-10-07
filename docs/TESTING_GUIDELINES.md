@@ -18,7 +18,7 @@
 | `test_update.py` | `updater.py`(설치·되돌리기·실행기·selftest) · `release.sh` 지문 · `core` 다운로드 엔진/Deno |
 | `test_bundle.py` | `bundle.py` 촬영본 묶기 + `/api/bundle` |
 | `test_source.py` | `source.py` 영상 출처: 채널 주소 꼴별 판단 · 받을 때 기록(가짜 yt-dlp) · 예전 영상 찾기(채널 목록 기억·가짜 조회·멈추기) · 직접 고르기 · 채널별 묶기·개수·이름 바뀜·색 · 깨진 기록 파일 · 잠깐 못 읽은 기록 덮어쓰지 않기 · 제목 짐작(조회 뒤) · `/c/`·`/user/` 주소 채널 id 로 바꾸기 · 막히면 쉬기 · 이상한 기록 한 줄 · `/api/source`·`/api/state`·`/api/list` |
-| `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` |
+| `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` · 제목 틀 배우기(BR-019: 우리 채널 실제 목록 `fixtures/channel_cache_own.json`, 회차 표시·행사·초대 손님·영어 풀이·조회수 자랑 빼기, 기술 이름 통째로 주제 자리, 주제어 겹침 버리기, 훅 없는 롱폼 첫 제목) · 주제어(기술 이름·용어 사전·사람 이름 빼기·붙여 쓰기·풀이말·긴 이름 먼저·키트 전체에 들어감) |
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |
 | `test_style_content.py` | 영상 기획 분석 `plan.py`: 자막 6종 분류·색 이름·인트로 유형 5가지·장르·재미 정도·여러 영상 합치기·화자 군집 · 정답 영상(`make_fixture.make_plan_fixture`)으로 티저·타이틀·정지·슬로 리플레이·자막 종류(OCR 모델이 있을 때) · 모델 없을 때 어림 표시·캐시·멈추기 · 가편집 인트로 티저·강조 자막(꺼지면 예전과 같음) · `avmodels` 실패 표시 · `claude_cli`(가짜 claude: 성공·로그인·한도·시간 초과·멈추기·예전 판 옵션·환경 변수·임시 폴더) · `/api/claude/*`·`/api/style/plan_*` · 검토 회귀(`TestReview*`): 긴 장면·처음/끝 같은 자리는 티저 아님, 대사를 따라 크게 띄운 강조 자막, 레슨 대사의 흔한 낱말, 강조 자막 낱말 조각 금지, 인사 뒤 진행 질문, 갈린 판단 요약·가편집 끔, 대결 형식·잔디 구장, 티저 장면 고르기, Claude 프롬프트 본편 표본, `--help` 실패 시 안전 옵션 유지·예전 판 안내·표준 오류 폭주, 소리 없는 영상 기록 재사용·깨진 모델·내려받기 멈춤, 일치 점수에서 기획 값 제외, 작업 중 붙여 넣기 거절 |
