@@ -28,6 +28,13 @@ def _die():
     os._exit(9)
 
 
+def _noisy():
+    import sys
+    sys.stdout.write("라이브러리가 줄바꿈 없이 쓴 글")  # 결과 줄이 이 뒤에 붙어도 잃지 않아야 함
+    sys.stdout.flush()
+    return "결과"
+
+
 def _sleep(s):
     time.sleep(s)
     return "다 잤어요"
@@ -52,6 +59,25 @@ class WorkerTest(unittest.TestCase):
             worker.call("tests.test_worker:_die")
         self.assertEqual(cm.exception.kind, "died")
         self.assertEqual(cm.exception.code, 9)
+
+    def test_result_after_unterminated_print(self):
+        self.assertEqual(worker.call("tests.test_worker:_noisy"), "결과")
+
+    def test_python_for_child(self):
+        exe, env = worker._python()
+        self.assertTrue(os.path.exists(exe))
+        if os.name != "nt":
+            self.assertEqual(env, {})
+
+    def test_out_of_memory_detection(self):
+        oom = [worker.WorkerError("x", -9, "died"), worker.WorkerError("x", 0xC0000017, "died"),
+               worker.WorkerError("std::bad_alloc", 1, "RuntimeException"), worker.WorkerError("", 1, "MemoryError"),
+               worker.WorkerError("[ONNXRuntimeError] : 6 : Failed to allocate memory for requested buffer", 1, "Fail")]
+        other = [worker.WorkerError("DLL load failed while importing onnxruntime_pybind11_state", 1, "ImportError"),
+                 worker.WorkerError("작업 프로세스가 끝까지 못 했어요 (종료 코드 1)", 1, "died"),
+                 worker.WorkerError("x", 0xC0000135, "died")]
+        self.assertTrue(all(worker.out_of_memory(e) for e in oom))
+        self.assertFalse(any(worker.out_of_memory(e) for e in other))
 
     def test_cancel_kills_child(self):
         ev, procs = threading.Event(), set()
@@ -99,6 +125,16 @@ class CutoutWorkerTest(unittest.TestCase):
             out, used, note = cutout_worker.remove_bg("/tmp/a.png", "hq")
         self.assertEqual(calls, ["hq", "fast"])
         self.assertEqual((used, note), ("fast", cutout_worker.LOW_MEM_NOTE))
+
+    def test_hq_other_failure_is_not_memory(self):
+        def fake(target, src, kind, **kw):
+            if kind == "hq":
+                raise worker.WorkerError("DLL load failed", 1, "ImportError")
+            return "/tmp/cut.png"
+
+        with mock.patch.object(worker, "avail_mb", return_value=None), mock.patch.object(worker, "call", fake):
+            out, used, note = cutout_worker.remove_bg("/tmp/a.png", "hq")
+        self.assertEqual((used, note), ("fast", cutout_worker.FAIL_NOTE))
 
     def test_fast_failure_raises(self):
         with mock.patch.object(worker, "call", side_effect=worker.WorkerError("x", 1, "died")):

@@ -34,7 +34,7 @@ def remove_bg(src_path, kind="hq", cancel=None, procs=None, log=None):
         if log:
             log(f"  고품질 누끼 실패 → 빠른 누끼로 · {e}")
         kind = "fast"
-        note = LOW_MEM_NOTE if e.kind == "died" or "memory" in str(e).lower() or "alloc" in str(e).lower() else FAIL_NOTE
+        note = LOW_MEM_NOTE if worker.out_of_memory(e) else FAIL_NOTE  # 그 밖(DLL·백신 차단 등)은 메모리 탓이라 하지 않음
         out = worker.call("cutout_worker:_child_remove_bg", str(src_path), kind, cancel=cancel, procs=procs)
     return Path(out), kind, note
 

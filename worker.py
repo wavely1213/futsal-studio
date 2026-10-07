@@ -37,6 +37,19 @@ class Cancelled(Exception):
     pass
 
 
+# 메모리가 모자라 죽었을 때의 종료 코드: 리눅스 OOM killer(SIGKILL) · Windows STATUS_NO_MEMORY · STATUS_COMMITMENT_LIMIT
+_OOM_CODES = {-9, 137, 0xC0000017, 0xC000012D, 0xC0000017 - (1 << 32), 0xC000012D - (1 << 32)}
+_OOM_WORDS = ("memoryerror", "bad_alloc", "bad allocation", "out of memory", "failed to allocate", "allocate memory",
+              "메모리", "cannot allocate")
+
+
+def out_of_memory(e):
+    """WorkerError 가 메모리 부족 때문인지 (종료 코드·오류 문장으로)."""
+    if getattr(e, "kind", None) == "MemoryError" or getattr(e, "code", None) in _OOM_CODES:
+        return True
+    return any(w in str(e).lower() for w in _OOM_WORDS)
+
+
 # ---------- 남은 메모리 ----------
 
 def avail_mb():
@@ -100,20 +113,36 @@ def _popen(cmd, **kw):
     return subprocess.Popen(cmd, **kw)
 
 
+def _console(exe):
+    """pythonw.exe → 같은 폴더의 python.exe (표준 입출력이 있게 · 검은 창은 CREATE_NO_WINDOW 로 막음)."""
+    exe = Path(exe)
+    if exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").exists():
+        return exe.parent / "python.exe"
+    return exe
+
+
 def _python():
-    """자식 파이썬: Windows 의 pythonw.exe 는 표준 입출력이 없을 수 있어 python.exe 를 씀 (검은 창은 CREATE_NO_WINDOW 로 막음)."""
-    exe = Path(sys.executable)
-    if sys.platform == "win32" and exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").exists():
-        return str(exe.parent / "python.exe")
-    return str(exe)
+    """자식 파이썬 → (실행 파일, 더할 환경 변수).
+    Windows 가상환경(.venv\\Scripts\\python.exe)은 진짜 파이썬을 손자로 띄우는 '런처'라, 그걸 끄면(✕) 런처만 꺼지고
+    손자(누끼 계산, 최대 6.5GB)는 남을 수 있음 → multiprocessing 과 같은 방법으로 진짜 파이썬(sys._base_executable)을 바로
+    띄우고 __PYVENV_LAUNCHER__ 로 가상환경을 알려 줌 (가상환경의 패키지를 그대로 씀)."""
+    exe = _console(sys.executable)
+    if sys.platform == "win32":
+        base = getattr(sys, "_base_executable", None)
+        if base:
+            b = _console(base)
+            if b.exists() and str(b).lower() != str(exe).lower():
+                return str(b), {"__PYVENV_LAUNCHER__": str(exe)}
+    return str(exe), {}
 
 
 def call(target, *args, cancel=None, procs=None, timeout=None, env=None, **kwargs):
     """target = '모듈:함수' 를 따로 프로세스에서 부르고 결과(JSON 으로 바꿀 수 있는 값)를 돌려줌.
     실패하면 WorkerError(자식 오류 문장 · 종료 코드) · cancel 이 켜지면 자식을 끄고 Cancelled."""
-    e = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
+    py, py_env = _python()
+    e = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1", **py_env)
     e.update(env or {})
-    cmd = [_python(), "-X", "utf8", str(HERE / "worker.py")]
+    cmd = [py, "-X", "utf8", str(HERE / "worker.py")]
     p = _popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(HERE), env=e)
     if procs is not None:
         procs.add(p)
@@ -185,7 +214,8 @@ def call(target, *args, cancel=None, procs=None, timeout=None, env=None, **kwarg
 # ---------- 자식 쪽 ----------
 
 def _emit(obj):
-    sys.stdout.write(_TAG + json.dumps(obj, ensure_ascii=True, default=str) + "\n")
+    # 앞에 줄바꿈: 라이브러리가 줄바꿈 없이 print 해 둔 글이 있어도 이 줄이 줄 머리(_TAG)로 시작하게
+    sys.stdout.write("\n" + _TAG + json.dumps(obj, ensure_ascii=True, default=str) + "\n")
     sys.stdout.flush()
 
 
