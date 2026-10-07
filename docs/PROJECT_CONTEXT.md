@@ -43,9 +43,9 @@
 | 프론트엔드 | 단일 파일 HTML 3개: `ui.html`(스튜디오), `editor.html`(편집실), `thumb.html`(썸네일) | 프레임워크·빌드 없음. pywebview 전용 창(Windows는 WebView2)에 띄우고, 창을 못 열면 브라우저로 연다 |
 | 백엔드 | Python 표준 라이브러리 `ThreadingHTTPServer` (`app.py`) | `127.0.0.1:FUTSAL_PORT`(기본 8765)에만 bind. Host 헤더를 검사. 긴 작업은 `start_job` 하나씩 처리 |
 | 데이터베이스 | 없음. 작업 폴더의 JSON·미디어 파일에 저장 | 작업 폴더는 `config.json`의 `workspace`, 비어 있으면 `~/풋살사관학교_작업` |
-| 인증 | 없음 (로컬 1인용) | 대신 Host·Origin 검사와 파일 이름 검사를 함 (`ARCHITECTURE.md` 6절) |
-| 배포/호스팅 | GitHub `main`의 `manifest.json` + 배포 커밋 zip | 사용자 PC의 `updater.py`가 받아서 확인한 뒤 설치. 서버 호스팅은 없음 |
-| 기타 (결제, 알림 등) | 영상: ffmpeg(`imageio-ffmpeg` 번들, ffprobe 없음) · 다운로드: `yt-dlp[default]` + Deno · 받아쓰기: `faster-whisper`(`large-v3-turbo`, CPU int8, 한국어) · 이미지·추론: Pillow, numpy, onnxruntime · 폰트: Pretendard, Black Han Sans, Do Hyeon(OFL, `fonts/`) | 의존성 목록은 `requirements.txt`, 정책은 `DEPENDENCY_POLICY.md` |
+| 인증 | 로컬 화면: 없음 (로컬 1인용 · Host·Origin·파일 이름 검사, `ARCHITECTURE.md` 6절) · 휴대폰으로 보기: 기기 짝짓기(10분 코드 증명) + 요청 서명(`FSR2`) + 미디어 표 | 원격은 켜 둔 동안만 · 규칙은 `SECURITY_GUIDELINES.md` 2·3절, D-024 |
+| 배포/호스팅 | 앱: GitHub `main`의 `manifest.json` + 배포 커밋 zip · 휴대폰 화면: 와벨리 저장소 `public/futsal/` → Vercel `mulgyeol.kr/futsal` (정적) | 사용자 PC의 `updater.py`가 받아서 확인한 뒤 설치. 앱 서버 호스팅은 없음 (원격은 PC → Cloudflare 빠른 터널, D-024) |
+| 기타 (결제, 알림 등) | 영상: ffmpeg(`imageio-ffmpeg` 번들, ffprobe 없음) · 다운로드: `yt-dlp[default]` + Deno · 받아쓰기: `faster-whisper`(`large-v3-turbo`, CPU int8, 한국어) · 이미지·추론: Pillow, numpy, onnxruntime · 폰트: Pretendard, Black Han Sans, Do Hyeon(OFL, `fonts/`) · 휴대폰으로 보기: cloudflared(고정 판, 처음 켤 때 받음) · ntfy.sh(비콘·알림) · pycryptodomex(yt-dlp 와 함께 깔린 것 · AES-GCM) | 의존성 목록은 `requirements.txt`, 정책은 `DEPENDENCY_POLICY.md` · 원격은 D-024 |
 
 > 스택 변경은 반드시 `DECISION_LOG.md`에 이유와 함께 기록한다.
 

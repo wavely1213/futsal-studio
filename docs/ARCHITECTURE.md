@@ -39,7 +39,8 @@
 [휴대폰 브라우저 / 홈 화면 앱]  https://mulgyeol.kr/futsal  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel)
    │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
    │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 mulgyeol.kr 만)
-   │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기에 묶인 2시간 표)
+   │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
+   │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
 [Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · Job Object] ── Host: remote.futsal.invalid ──┐
                                                                                                                   ▼
@@ -103,7 +104,7 @@
 | takes | `takes.py` (2차 작업 중, 커밋 전) | `find_junk`·`is_slate`: 받아쓰기 구간만 보고 NG 테이크·슬레이트 말·말더듬 구간을 규칙으로 찾음 → `editor.recommend`가 가편집·쇼츠 후보에서 뺌 (`KNOWN_ISSUES.md` I-012). `find_fillers`: 단어 시각이 있으면 홀로 떨어진 추임새 단어 |
 | source | `source.py` | 보관함 영상의 출처(풋살사관학교·다른 채널·내 촬영본·모름) 판단과 기록(`videos/sources.json`, D-020). 받을 때 yt-dlp 채널 정보 기록, 예전 영상은 채널 목록 기억 → 뒤에서 천천히 영상 정보 조회(`start_backfill`), 직접 고르기(`set_manual`), 다른 채널은 채널별 묶음·고정 색(`channels`), 고르기 칩 개수(`summary`) |
 | refs | `refs.py` | 학습용 영상(스타일 배우기 전용) 보관함 (D-022): 기록 `refs/refs.json`(바꿔 끼우기·잠김 재시도·깨지면 `.bad`), 채널별 폴더·색(`source._register` 재사용, 보관함과 같은 색), `add_channel`(인기 영상 N개 → `core.download`를 받는 곳만 바꿔 → 채널 폴더 → '<채널명> 스타일' 배우기), `add_direction`(추천 방향 A/B/C), `prune`(배운 파일만 지우고 지문 `sig` 남김), `delete`(원본은 한 번 더 확인 · 빈 채널 폴더만 지움), `move_from_library`(보관함 → 학습용: 편집실 프로젝트에서 쓰는 영상은 건너뜀 `projects_using` · 분석 폴더 → 영상 → 기록, 실패하면 되돌림 · `archive.txt`에서 id 뺌), `restore`(학습용 → 보관함으로 되돌리기), `listing`(기록 없이 refs 하위 폴더에 있는 파일·받는 폴더에 남은 파일은 다시 기록 `_adopt`), `recommended`(`ref_channels.json`) |
-| remote | `remote.py` | 휴대폰으로 보기 (D-024): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일), `Pairing`(10분 한 번 코드·PBKDF2 만남 주제), `Auth`(FSR1 서명·nonce), `Tickets`(미디어 표), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기·끊기·설정·작업 끝 알림 `job_hook`·자동 끄기·절전 막기), `RemoteHandler`(`/r/*`), 허용 동작 `ACTIONS` |
+| remote | `remote.py` | 휴대폰으로 보기 (D-024): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일 · 같은 브라우저는 바꿔 끼움), `Pairing`(10분 한 번 코드 · 증명 확인 · PBKDF2 만남 주제·잠금·증명 열쇠), `Auth`(FSR2 서명: host 포함 · nonce), `Tickets`(미디어 표: 기기·IP 대역·1시간), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기는 시도 번호로 · 터널 추적 · 오류 뒤 다시 켜기 · 끊기·설정·작업 끝 알림 `job_hook`·자동 끄기·절전 막기), `RemoteHandler`(`/r/*`), 허용 동작 `ACTIONS` |
 | tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·Job Object·남은 pid 정리) · 출력 줄은 기록하지 않음 |
 | qr | `qr.py` | QR 만들기(바이트·M·버전 1~10) → 줄 문자열 (PC 창이 SVG 로 그림) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
@@ -159,6 +160,8 @@
 - **동시성**:
   - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
   - 휴대폰에서 시킨 작업도 같은 `start_job`(`by`='휴대폰 · <기기>')이라 PC 작업과 겹치지 않는다. 작업이 끝나면 `app.JOB_HOOKS`(지금은 `remote.Service.job_hook`: 휴대폰 알림·검수 결과 기억)를 부르고, 훅이 실패해도 작업 결과는 그대로다.
+  - `start_job` 은 작업 번호를 돌려주고, 작업 시작 응답에 `jobId` 가 있다. 끝난 작업의 결과는 `app.DONE`(최근 20개)에 남고 `/api/state?job=<번호>` 의 `done` 으로 받는다. PC 화면(`ui.html`·`editor.html`·`thumb.html`)은 '작업이 비었을 때의 결과'가 아니라 **자기가 시킨 번호의 결과**만 쓴다(휴대폰이 바로 다음 작업을 시켜도 안 섞임). `/api/state` 의 `job_id`·`job_by` 로 지금 작업이 휴대폰에서 시킨 것인지 안다.
+  - 휴대폰이 시킨 작업은 `core.no_self_update()` 안에서 돈다(이 스레드에서는 다운로드 엔진 pip·Deno 설치를 안 함).
   - 원격 쪽 스레드(보내기 `remote-publisher`·5초 점검 `remote-watch`·Windows 절전 막기 `remote-awake`·`tunnel`)는 작업·HTTP 를 기다리게 하지 않는다(ntfy 가 느려도 큐에만 넣음).
   - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`.
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
