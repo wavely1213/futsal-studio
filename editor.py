@@ -169,7 +169,8 @@ def _encode_540p(p, tmp, label, item):
     """540p H.264 가벼운 파일 (편집실 미리보기 파일·휴대폰 '작은 미리보기'가 같이 씀) → ffmpeg 종료 코드. 멈추기(✕)로 끌 수 있음."""
     info = probe(p)
     dur = info["duration"] or 1
-    vf = (tonemap_chain(info["hdr"], 1920) if info.get("hdr") else []) + ["scale=-2:540", "fps=30"]
+    # fps 를 먼저 (60fps 의 버릴 프레임은 색 바꾸기를 안 함) · HDR 은 960 으로 줄인 뒤 바꿈 (540p 미리보기라 충분)
+    vf = (["fps=30"] + tonemap_chain(info["hdr"], 960) + ["scale=-2:540"]) if info.get("hdr") else ["scale=-2:540", "fps=30"]
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
@@ -2059,6 +2060,17 @@ def _fit(it, md, seq, W, H):
     return {"chain": f"scale={scw}:{sch}", "bw": scw, "bh": sch, "bx": (W - scw) / 2, "by": (H - sch) / 2, "bg": None}
 
 
+def _hdr_pre_w(it, md, seq, W, H):
+    """HDR 영상을 일반 색으로 바꾸기 전에 줄일 가로 크기: 화면에 놓일 크기(맞춤 확대 포함)까지만, 최대 2W (예전 값).
+    확대·이동 키프레임이 있으면 예전처럼 2W (확대해도 흐려지지 않게)."""
+    ps = param(it, "scale")
+    if ps.get("k") or abs(float(ps.get("v", 100)) - 100) > 1e-6:
+        return 2 * W
+    m = re.search(r"scale=(\d+):", _fit(it, md, seq, W, H)["chain"])
+    need = int(m.group(1)) if m else 2 * W
+    return min(2 * W, max(W, need))
+
+
 def _num(v):
     return f"{v:.5f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v)
 
@@ -2209,13 +2221,16 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             inputs.append(["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
             chain.append("setpts=PTS-STARTPTS")
             hdr = media_hdr(md)
-            if hdr:
-                chain += tonemap_chain(hdr, 2 * W)
+            # HDR → 일반 색: 쓸 크기로 먼저 줄이고, fps 로 버릴 프레임은 바꾸지 않게 fps 뒤에서 (60fps 4K 가 3배쯤 빠름)
+            # 거꾸로 재생은 모든 프레임을 메모리에 쌓으니 예전처럼 앞에서 바꿔 8비트로 쌓음
+            tm = tonemap_chain(hdr, _hdr_pre_w(it, md, seq, W, H)) if hdr else []
             if it.get("rev"):
-                chain += [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
+                chain += tm + [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
+                tm = []
             if abs(sp - 1) > 1e-6:
                 chain.append(f"setpts=PTS/{sp:.5f}")
             chain.append(f"fps={fps}")
+            chain += tm
             if pre_pad > 1e-3:
                 chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
         # fps 뒤에는 setpts 를 두지 않음: 시각은 이미 0부터이고, ffmpeg 7 은 setpts 가 프레임 수(30fps)를 지워서
