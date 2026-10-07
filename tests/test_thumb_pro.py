@@ -177,7 +177,7 @@ class GradeTests(unittest.TestCase):
         for col in ((40, 45, 60), (200, 205, 210), (90, 140, 70)):
             g = thumb.auto_grade(_img(col))
             self.assertTrue(all(0 <= v <= thumb.MAX_SHIFT for v in g["lo"]) and all(255 - thumb.MAX_SHIFT <= v <= 255 for v in g["hi"]), g)
-            self.assertTrue(thumb.GAMMA_RANGE[0] <= g["gamma"] <= thumb.GAMMA_RANGE[1] and -40 <= g["vib"] <= 80 and -20 <= g["temp"] <= 30, g)
+            self.assertTrue(thumb.GAMMA_RANGE[0] <= g["gamma"] <= thumb.GAMMA_RANGE[1] and -60 <= g["vib"] <= 80 and -20 <= g["temp"] <= 30, g)
         self.assertGreater(thumb.auto_grade(_img((40, 45, 60)))["gamma"], 1.0, "어두우면 밝게")
         self.assertLess(thumb.auto_grade(_img((215, 215, 215), noise=20))["gamma"], 1.0, "밝으면 어둡게")
         # 얼굴 클로즈업은 클래리티를 덜 (판정 1회차 뒤 전체를 낮춤: '과하게 보정돼 기계로 만든 느낌' → 25 · 클로즈업 15)

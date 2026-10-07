@@ -75,7 +75,7 @@ const WARP_OPTS = [["none", "없음"], ["arc", "아치"], ["flag", "깃발"], ["
 const warpHtml = () => F("warp.style", "모양", { t: "seg", opts: WARP_OPTS }) + F("warp.bend", "구부림") + `<div class="hint">구부림을 음수로 하면 반대로 휘어요.</div>`;
 function fadeHtml() {
   return `<div class="row2">${[[0, "→ 오른쪽"], [180, "← 왼쪽"], [90, "↓ 아래"], [270, "↑ 위"]].map(([a, t]) => `<button class="btn sm" data-act="fadeDir" data-v="${a}">${t}으로 사라짐</button>`).join("")}</div>`
-    + F("fade.angle", "방향") + F("fade.start", "사라지기 시작") + F("fade.end", "완전히 사라짐");
+    + F("fade.angle", "방향") + F("fade.start", "사라지기 시작") + F("fade.end", "완전히 사라짐") + F("fade.both", "양쪽 끝 모두", { t: "chk" });
 }
 function imageFieldsHtml(l) {
   return `${F("fit", "맞춤", { t: "seg", opts: [["cover", "꽉 채우기"], ["contain", "전체 보이기"]] })}${F("fx", "가로 초점")}${F("fy", "세로 초점")}${F("slant", "사선 자르기")}

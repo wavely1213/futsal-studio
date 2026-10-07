@@ -281,7 +281,10 @@ function layerBitmap(l, sIn) {
       g.setTransform(k, 0, 0, k, mS * k, mS * k);
       const gr = g.createLinearGradient(cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
       const s0 = clamp(Math.min(l.fade.start, l.fade.end), 0, 1), s1 = clamp(Math.max(l.fade.start, l.fade.end), 0, 1);
-      gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(Math.min(s0, 0.999), "rgba(0,0,0,1)"); gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      if (l.fade.both && s0 > 0.5) {  // 양쪽 끝 모두 (가운데 판 장면이 위아래 흐린 배경에 녹아들게): 0~(1-s1) 투명 → (1-s0) 불투명 … s0 → s1 투명
+        gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(1 - s1, "rgba(0,0,0,0)"); gr.addColorStop(Math.min(1 - s0, s0 - 0.001), "rgba(0,0,0,1)"); gr.addColorStop(s0, "rgba(0,0,0,1)");
+        gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      } else { gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(Math.min(s0, 0.999), "rgba(0,0,0,1)"); gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)"); }
       g.globalCompositeOperation = "destination-in"; g.fillStyle = gr; g.fillRect(-mS, -mS, l.w + 2 * mS, l.h + 2 * mS);
       g.globalCompositeOperation = "source-over"; g.setTransform(1, 0, 0, 1, 0, 0);
     }

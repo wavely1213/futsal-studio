@@ -267,7 +267,7 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(bs, [[0.1, 0.1, 0.4, 0.1]])
 
 
-JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "frameQ", "hamming", "sceneGroups", "usableFrame", "aiFrames")
+JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "frameQ", "hamming", "sceneGroups", "usableFrame", "srcHeadCut", "footClose", "headlessBad", "isExpr", "aiFrames")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }

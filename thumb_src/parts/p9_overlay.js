@@ -43,10 +43,17 @@ MACT.tacAuto = async () => {  // 지금 디자인의 배경 장면에서 찾은 
   if (!f || !(f.persons || []).length) return toast("이 장면에서 선수를 찾지 못했어요 · 메뉴에서 하나씩 넣어 주세요");
   const cx = ctxFor(f, AI.copy[0] || { l1: "", l2: "" }, H > W ? "short" : "long", 1);
   const heads = D.doc.layers.filter(l => l.type === "text" && !l.hidden).map(l => bbox([l]));
-  let ls = tactics(cx, bg, heads); if (!ls.length) ls = tactics(cx, bg, heads, { loose: true });  // 자동 추천 기준(선수 2명·발이 보임)을 못 넘어도 직접 부르면 놓을 수 있는 만큼
-  if (!ls.length) return toast("넣을 자리가 없었어요 (제목과 겹쳐서)");
-  commit("전술 그래픽 자동"); D.doc.layers.splice(D.doc.layers.indexOf(bg) + 1, 0, ...ls); selIds = ls.map(l => l.id); changed();
-  toast(`전술 그래픽 ${ls.length}개를 넣었어요 · 한 묶음이라 함께 옮겨져요 (Ctrl+Shift+G 로 풀기)`);
+  // 판정 2회차: 이미 자동 전술 묶음이 있으면 같은 자리에 한 벌 더 겹쳐 들어감 → 그 묶음을 바꿔 넣음
+  const old = D.doc.layers.filter(l => l.type === "shape" && l.gid && /^tac/.test(l.gid));
+  const tries = [() => tactics(cx, bg, heads), () => tactics(cx, bg, heads, { loose: true }), () => tactics(cx, bg, heads, { loose: true, arrow: false }),
+    () => tactics(cx, bg, [], { loose: true, arrow: false, forceRing: true })];  // 제목 때문에 못 놓으면 발밑 원만이라도 · 그것도 안 되면 제목 피하기를 빼고 원만
+  let ls = [];
+  for (const t of tries) { ls = t(); if (ls.length) break; }
+  if (!ls.length) return toast("넣을 자리가 없었어요 (선수 발이 화면 밖이에요) · 메뉴에서 하나씩 넣어 주세요");
+  commit("전술 그래픽 자동");
+  if (old.length) D.doc.layers = D.doc.layers.filter(l => !old.includes(l));
+  D.doc.layers.splice(D.doc.layers.indexOf(bg) + 1, 0, ...ls); selIds = ls.map(l => l.id); changed();
+  toast(`전술 그래픽 ${ls.length}개를 ${old.length ? "바꿔 " : ""}넣었어요 · 한 묶음이라 함께 옮겨져요 (Ctrl+Shift+G 로 풀기)`);
 };
 // 점 핸들: 고른 전술 도형의 점마다 동그라미 (선택 상자 안 = 회전·기울기 그대로 따라감)
 function ptHandles(l) {

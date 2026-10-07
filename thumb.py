@@ -102,9 +102,10 @@ def hamming(a, b):
         return 64
 
 
+GRADE_VER = 5      # 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
-GAMMA_RANGE = (0.8, 2.2)  # 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
+GAMMA_RANGE = (0.8, 2.8)  # 판정 2회차: 아주 어두운 세로 영상(평균 0.15)이 2.2 에 걸려 0.378 → 2.8 · 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
 
 
 def auto_grade(src, close=False):
@@ -148,17 +149,29 @@ def auto_grade(src, close=False):
             temp = -int(round(min(20, d - 14)))      # 너무 누런 조명 → 조금 차갑게
     g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
     # 자연 채도: 레벨만으로도 채도가 오르므로, 보정 뒤 채도가 원본의 약 1.2배가 되는 값을 고름 (화면 applyGrade 와 같은 계산으로 어림)
+    # 판정 2회차: 이미 채도가 높은 원본(낙서 벽 0.48)에 vib 55 → '과한 형광 필터' · 레벨만으로 +46% (vib −40 에 걸림) → 원본 채도가 높으면 목표·상한을 낮추고, 그래도 넘으면 레벨을 덜 늘림
     s0 = float(sat.mean())
-    best = None
-    for v in range(-40, 85, 5):
-        r = _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)
-        if best is None or abs(r - SAT_GAIN) < abs(best[1] - SAT_GAIN):
-            best = (v, r)
+    target, vmax = (SAT_GAIN_HI, VIB_HI) if s0 > SAT_HIGH else (SAT_GAIN, 80)
+    for shrink in (1.0, 0.6, 0.3, 0.0):
+        if shrink < 1:
+            g["lo"] = [int(round(v * shrink)) for v in lo]
+            g["hi"] = [int(round(255 - (255 - v) * shrink)) for v in hi]
+        rs = [(v, _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)) for v in range(-60, vmax + 1, 5)]
+        ok = [x for x in rs if x[1] <= SAT_MAX]
+        best = min(ok or rs, key=lambda x: abs(x[1] - target))
+        if ok:
+            break
     g["vib"] = best[0]
+    if g["gamma"] > 2.0:  # 아주 어두운 장면을 크게 밝히면 노이즈가 커짐 → 선명하게·클래리티를 줄임 (판정: '노이즈가 심하고 흐릿')
+        g["sharpen"], g["clarity"] = 0, 8
     return g
 
 
 SAT_GAIN = 1.24  # 자동 보정 뒤 채도 목표 (원본 대비 · 기준표 +5~35% · 판정 '무보정 캡처 같다' 뒤 1.2 → 1.24, 화면 보정의 선명하게가 조금 더 올림)
+SAT_HIGH = 0.4     # 원본 평균 채도가 이보다 높으면 (이미 쨍한 장면) 자연 채도를 아낌
+SAT_GAIN_HI = 1.06  # 그때의 채도 목표 (판정: 낙서 벽 '과한 형광')
+VIB_HI = 20        # 그때의 자연 채도 상한
+SAT_MAX = 1.28     # 보정 뒤 채도가 이보다 크면 레벨을 덜 늘려 다시 (화면 보정 뒤 +30% 넘지 않게 · 선명하게가 조금 더 올림)
 
 
 def _sat_after(a, g):
@@ -370,7 +383,7 @@ def _cand_sig(name):
     import face
     import detect
     import avmodels  # 지연 import: avmodels → thumb
-    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready(), avmodels.ready("ocr")]
+    return [vs.st_size, int(vs.st_mtime), *mt, face.ready(), detect.ready(), avmodels.ready("ocr"), GRADE_VER]
 
 
 def cached_candidates(name):

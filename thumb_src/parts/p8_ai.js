@@ -42,6 +42,16 @@ function headBox(f) {  // 지켜야 할 머리: 주인공 얼굴(+이마·머리
   if (m && m[1] > 0.012 && m[3] >= 0.12) return [m[0] + m[2] * 0.22, m[1], m[2] * 0.56, Math.min(m[3] * 0.18, m[2] * 1.2)];
   return null;
 }
+// 판정 2회차: 원본에서 이미 머리가 잘린 주인공 18장 (headBox 가 null 이라 머리 게이트를 그냥 통과) → 발·공 클로즈업이 아니면 쓰지 않음
+function srcHeadCut(f) {  // 얼굴 없음 · 주인공 상자 위 끝이 원본 위 끝
+  const m = mainBox(f); return !!m && !mainFace(f) && m[1] <= 0.012;
+}
+function footClose(f) {  // 발·공 클로즈업: 공이 주인공 상자 아래 35% 안 (머리가 없어도 되는 장면)
+  const m = mainBox(f), b = f && f.ball; if (!m || !b) return false;
+  const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  return m[3] >= 0.5 && b[2] >= 0.04 && cx >= m[0] - 0.01 && cx <= m[0] + m[2] + 0.01 && cy >= m[1] + m[3] * 0.65 && cy <= m[1] + m[3] + 0.08;  // 크게 잡은 발·공 (멀리 다리만 나온 장면은 아님)
+}
+const headlessBad = f => srcHeadCut(f) && !footClose(f);
 function visibleText(l, f, ar, W0, H0) {  // 배경에 박힌 큰 글자가 캔버스에 보이는 넓이 (캔버스 대비 0~1)
   if (!f || !f.tboxes || !f.tboxes.length) return 0;
   const view = clipTo({ x: l.x, y: l.y, w: l.w, h: l.h }, { x: 0, y: 0, w: W0, h: H0 });
@@ -53,8 +63,8 @@ function placeFrame(ctx, z, focus, target, o) {
   const f = ctx.frame, W0 = ctx.W, H0 = ctx.H, ar = ctx.ar;
   const l = L("image", Object.assign({ name: "배경", src: frameSrc(f.t), x: 0, y: 0, w: W0 * z, h: H0 * z, fit: "cover" }, o.extra || {}));
   if (f.grade && o.grade !== false) l.grade = Object.assign({}, f.grade, { amt: o.gradeAmt ?? 1 });
-  if (ctx.band === "bottom" && o.crop !== false) l.cropB = clamp(1 - (f.bandY || 0.76) + 0.01, 0.05, 0.3);  // 영상에 박힌 자막·방송 띠는 잘라냄
-  if (ctx.band === "top" && o.crop !== false) l.cropT = clamp((f.bandY || 0.2) + 0.01, 0.05, 0.3);
+  if (ctx.band === "bottom" && o.crop !== false) l.cropB = bandCrop(ctx);  // 영상에 박힌 자막·방송 띠는 잘라냄
+  if (ctx.band === "top" && o.crop !== false) l.cropT = bandCrop(ctx);
   const [u, v] = focus, [tx, ty] = target, r = imgRect(l, ar);
   const px = r.dx + ((l.flipX ? 1 - u : u) - (l.cropL || 0)) / r.cw * r.dw, py = r.dy + (v - (l.cropT || 0)) / r.ch * r.dh;
   l.x = clamp(tx - px, W0 - l.w, 0); l.y = clamp(ty - py, H0 - l.h, 0);
@@ -86,9 +96,18 @@ function frameLayer(ctx, o = {}) {
   }
   return best.l;
 }
-function maxZoom(ctx) {  // 원본 장면(가로 최대 1920)을 1.6배 넘게 키우지 않게 (세로 영상으로 롱폼을 만들 때 뭉개지지 않게)
-  const srcW = Math.min(1920, INFO.width || 1920), dw = ctx.W / ctx.H > ctx.ar ? ctx.W : ctx.H * ctx.ar;
-  return Math.max(1, 1.6 / (dw / srcW));
+// 원본 대비 확대 상한 — 판정 2회차: 84장 중 33장이 원본을 1.5배 넘게 키워 흐림(쇼츠는 720p 를 1.8~1.9배) → 1.35배 (원본이 1080p 넘으면 1.5배)
+const srcW = () => Math.min(1920, INFO.width || 1920);
+function srcCap() { return Math.min(INFO.width || 1920, INFO.height || 1080) >= 1080 ? 1.5 : 1.35; }
+function upOf(l, ar) { const r = imgRect(l, ar); return r.dw / r.cw / srcW(); }  // 이미지 레이어가 원본 화소 1개를 캔버스 몇 화소로 그리는지
+function bandCrop(ctx) {  // 영상에 박힌 자막·방송 띠를 잘라내는 비율 (위 또는 아래) · 없으면 0
+  const f = ctx.frame || {};
+  return ctx.band === "bottom" ? clamp(1 - (f.bandY || 0.76) + 0.01, 0.05, 0.3) : ctx.band === "top" ? clamp((f.bandY || 0.2) + 0.01, 0.05, 0.3) : 0;
+}
+function arEff(ctx) { return ctx.ar / (1 - bandCrop(ctx)); }  // 띠를 잘라낸 뒤 장면의 가로/세로
+function maxZoom(ctx) {  // 원본 장면을 srcCap 배 넘게 키우지 않게 (덮기 자체가 이미 넘으면 1)
+  const a = arEff(ctx), dw = ctx.W / ctx.H > a ? ctx.W : ctx.H * a;
+  return Math.max(1, srcCap() / (dw / srcW()));
 }
 function zoomFor(ctx, target, lo = 1, hi = 2) {  // 주인공(얼굴 또는 사람)이 화면 높이의 target 만큼 보이게 하는 확대 배율
   const f = ctx.frame, m = mainBox(f), fc = mainFace(f);
@@ -105,13 +124,15 @@ function cutLayer(ctx, bg, o = {}) {  // 배경과 똑같이 놓인 누끼 — �
   // 누끼가 꼭 필요한 템플릿(need)이 아니면 글자 박힌 장면에서만 (배경을 흐린 판으로 바꿀 때 주인공을 살림) — 판정: 같은 장면 위 흰 테두리 누끼는 '오려 붙인 티'
   if (!o.need && (ctx.frame.text || 0) < TEXTY) return null;
   const sh = mainBox(ctx.frame) ? subjectH(ctx, bg) : 0.6;
-  if (sh < (o.minH ?? (ctx.short ? 0.28 : 0.42))) return null;
-  const ow = clamp(Math.round(sh * ctx.H * 0.011 * (o.ow || 1)), 3, Math.round(8 * ctx.W / 1280));
+  // 판정 2회차: 흐리거나 크게 키운 사람 누끼(노란 네온 외곽선)가 '오려 붙인 티' — 누끼 있는 장 5.79 < 없는 장 6.07 → 또렷하고 큰 주인공만
+  if (sh < (o.minH ?? (ctx.short ? 0.35 : 0.5)) * (ctx.relax ? 0.8 : 1)) return null;
+  if (!ctx.relax && ((ctx.frame.blur ?? 0) > 0.2 || upOf(bg, ctx.ar) > 1.3)) return null;  // relax: 쓸 만한 장면이 없는 영상의 2개 (그나마 나은 것)
+  const ow = Math.round(5 * ctx.W / 1280 * (o.ow || 1));  // 흰 5px (노랑은 브랜드에서 고를 때만)
   const l = L("image", { name: "누끼", src: ctx.cut.cut, orig: ctx.cut.src, x: bg.x, y: bg.y, w: bg.w, h: bg.h, fit: bg.fit, fx: bg.fx, fy: bg.fy, flipX: bg.flipX,
     cropL: bg.cropL, cropR: bg.cropR, cropT: bg.cropT, cropB: bg.cropB,
     outline: { on: true, color: o.outline || "#FFFFFF", width: ow },
-    glow: { on: !!o.glow && sh >= 0.5, color: o.glow || "#FFFFFF", size: Math.round(22 * ctx.W / 1280), opacity: 0.75 },
-    shadow: { on: true, color: "#000000", blur: 22, dx: 0, dy: 8, opacity: 0.6 } });
+    glow: { on: false, color: "#FFFFFF", size: Math.round(22 * ctx.W / 1280), opacity: 0.75 },
+    shadow: { on: true, color: "#000000", blur: Math.round(28 * ctx.W / 1280), dx: 0, dy: Math.round(6 * ctx.W / 1280), opacity: 0.55 } });
   if (bg.grade) l.grade = Object.assign({}, bg.grade);
   return l;
 }
@@ -130,8 +151,13 @@ function digitRuns(text, font) {
   while ((m = rx.exec(text))) out.push({ s: m.index, e: m.index + m[0].length, font: DIGIT_FONT });
   return out;
 }
+const SMALL_FONT_PX = 19;  // 목록 크기에서 글자 높이가 이보다 작으면 검은고딕 대신 도현 (판정 2회차 OCR: 168px 에서 '드리블'→'드리를', '슛'→'숫')
+function readableFont(ctx, font, size) {
+  return font === "Black Han Sans" && size * (ctx.short ? 110 : 168) / ctx.W < SMALL_FONT_PX ? "Do Hyeon" : font;
+}
 function lineLayer(ctx, text, size, o = {}) {  // 한 줄 글자 + 강조 낱말(runs: 강조 색·조금 크게) + 숫자 글꼴
   const l = L("text", Object.assign({ text, name: o.name || "제목" }, tStyle(ctx, size, o)));
+  l.font = readableFont(ctx, l.font, size);
   const runs = [];
   if (o.emph && o.emph[1] > o.emph[0]) {
     const run = { s: o.emph[0], e: o.emph[1], fill: o.emphFill || ctx.brand.colors.hl };
@@ -222,7 +248,7 @@ function logoLayer(ctx, avoid) {  // 채널 로고 (높이 0.11H) — 제목·�
 const EMOJI = { 놀람: "face-screaming-in-fear.png", 보기: "eyes.png", 오답: "cross-mark.png", 정답: "check-mark-button.png", 불: "fire.png", 질문: "thinking-face.png" };
 function emojiLayer(ctx, near, avoid, o = {}) {
   if (!near) return null;
-  const file = o.file || EMOJI[ctx.copy.tag] || "fire.png", s = Math.round(clamp(near.h * (o.k || 0.95), ctx.H * 0.07, ctx.H * (ctx.short ? 0.09 : 0.2)));
+  const file = o.file || EMOJI[ctx.copy.tag] || "fire.png", s = Math.round(clamp(near.h * (o.k || 0.95), ctx.H * (ctx.short ? 0.075 : 0.16), ctx.H * (ctx.short ? 0.09 : 0.22)));  // 목록 크기에서 14px 넘게
   const spots = [[near.x + near.w - s * 0.12, near.y - s * 0.42], [near.x + near.w + s * 0.02, near.y + near.h * 0.5 - s * 0.5], [near.x - s * 0.88, near.y - s * 0.3]];
   for (const [x, y] of spots) {
     const l = L("image", { name: "스티커", src: `/stickers/${file}`, fit: "contain", w: s, h: s, x, y, rot: o.rot ?? 12, shadow: { on: true, color: "#000000", blur: 10, dx: 0, dy: 5, opacity: 0.5 } });
@@ -259,7 +285,9 @@ function arrowLayer(ctx, s, e, col, gid, o = {}) {  // s → e 로 위로 휘는
   return tacShape("arrow2", { name: o.name || TAC_NAMES.arrow2, x: x0, y: y0, w, h, pts: xs.map((x, i) => [(x - x0) / w, (ys[i] - y0) / h]), fill: col,
     width: Math.round((o.width || 19) * scale), head: Math.round((o.head || 70) * scale), core: "#FFFFFF", gid, glow: { on: true, color: col, size: Math.round(30 * scale), opacity: 1 } });
 }
-function tacOk(ctx) { const f = ctx.frame; return (f.persons || []).length >= 2 && f.main >= 0 && f.kind !== "close" && !(f.flags || []).includes("bench"); }
+// 판정 2회차: 선수 2명 장면의 '공간' 칩·화살표가 붙여 넣은 티(35건) → 선수 3명 이상 · 주인공이 화면 높이 0.25 넘게 보일 때만 자동으로 (사용자가 메뉴로 부르면 느슨하게)
+const TAC_MIN_P = 3, TAC_MIN_H = 0.25;
+function tacOk(ctx) { const f = ctx.frame; return (f.persons || []).length >= TAC_MIN_P && f.main >= 0 && f.kind !== "close" && !(f.flags || []).includes("bench"); }
 function tactics(ctx, bg, avoid, o = {}) {
   const f = ctx.frame, ps = f.persons || [], ar = ctx.ar, out = [], W0 = ctx.W, H0 = ctx.H, gid = "tac" + nid().slice(0, 4), b = ctx.brand.colors, scale = W0 / 1280;
   const loose = !!o.loose;  // 사용자가 메뉴에서 직접 부름: 선수 1명·클로즈업·발이 잘린 장면이어도 놓을 수 있는 만큼 (자동 추천은 엄격하게)
@@ -267,6 +295,7 @@ function tactics(ctx, bg, avoid, o = {}) {
   const P = ps.map(p => { const q = boxC(bg, p, ar); return { x: q.x + q.w / 2, y: q.y + q.h, h: q.h, w: q.w, box: q }; });
   const feetIn = p => !(p.y > H0 * 0.985 || p.y < H0 * 0.3 || p.h < H0 * 0.1 || p.x < 0 || p.x > W0);
   let M = P[f.main];
+  if (!loose && M.h < H0 * TAC_MIN_H) return out;  // 주인공이 작으면 그래픽만 떠 보임
   if (!feetIn(M)) { if (!loose) return out; M = Object.assign({}, M, { x: clamp(M.x, W0 * 0.15, W0 * 0.85), y: clamp(M.y, H0 * 0.45, H0 * 0.85), noRing: true }); }  // 주인공 발이 화면 안에 있어야 (발밑 원·출발점)
   let vis = P.filter(p => p.x > W0 * 0.02 && p.x < W0 * 0.98 && p.y > H0 * 0.25 && p.y < H0 * 1.02);
   if (loose && !vis.length) vis = [M];
@@ -274,14 +303,15 @@ function tactics(ctx, bg, avoid, o = {}) {
   const taken = [], body = vis.map(p => ({ x: p.box.x - p.box.w * 0.1, y: p.box.y, w: p.box.w * 1.2, h: p.box.h }));
   const ok = l => { const bb = bbox([l]); return bb.x > -bb.w * 0.2 && bb.x + bb.w < W0 + bb.w * 0.2 && bb.y + bb.h < H0 && bb.y > 0 && !avoid.some(a => overlap(bb, a, 12)); };
   const put = l => { out.push(l); taken.push(bbox([l])); };
-  if (o.ring !== false && !M.noRing) {
+  if (o.ring !== false && (!M.noRing || o.forceRing)) {
     const rw = clamp(M.w * 1.7, 70 * scale, 360 * scale), rh = rw * 0.3;
     const ring = tacShape("ring", { x: M.x - rw / 2, y: M.y - rh * 0.55, w: rw, h: rh, fill: o.ringColor || b.neon, width: Math.round(10 * scale), gid,
       glow: { on: true, color: o.ringColor || b.neon, size: Math.round(24 * scale), opacity: 1 } });
+    if (loose && ring.y + rh > H0 - 2) ring.y = Math.max(M.y - rh * 1.1, H0 - rh - 2);  // 직접 부름: 발이 화면 아래 끝에 붙어 원이 넘치면 조금 올려서
     if (ok(ring)) put(ring);
   }
   // 빈 자리: 선수들 발 사이 (선수 무리 둘레 안) 중 모든 선수 발에서 가장 먼 곳 — 원근 때문에 세로 거리를 더 크게 셈 · 주인공에서 알맞게 떨어진 곳
-  const xs = vis.map(p => p.x), ys = vis.map(p => p.y), cs = Math.round((ctx.short ? 0.1 : 0.21) * H0);  // 판정: 칩·화살표가 목록 크기에서 안 보임 → 크게
+  const xs = vis.map(p => p.x), ys = vis.map(p => p.y), cs = Math.round((ctx.short ? 0.1 : 0.22) * H0);  // 판정: 칩·화살표가 목록 크기에서 안 보임 → 크게
   const wx = loose ? 0.35 : 0.12, wy = loose ? 0.3 : 0.12;  // 느슨하게: 선수 한 명이면 둘레가 없으니 넓게
   const zone = { x0: Math.max(W0 * 0.07, Math.min(...xs) - W0 * wx), x1: Math.min(W0 * 0.93, Math.max(...xs) + W0 * wx),
     y0: Math.max(H0 * (o.up || loose ? 0.12 : 0.38), Math.min(...ys) - H0 * (o.up ? 0.3 : wy)), y1: Math.min(H0 * 0.9, Math.max(...ys) + H0 * 0.06) };  // up: 제목이 아래에 있으면 위쪽 빈 자리도
@@ -300,7 +330,10 @@ function tactics(ctx, bg, avoid, o = {}) {
   };
   const best = o.arrow === false ? null : freeSpot([M.x, M.y], ctx.short ? 0.2 : 0.14, ctx.short ? 0.55 : 0.38);
   if (best) {
-    const sx0 = M.x + (best.x > M.x ? 1 : -1) * M.w * 0.3, sy = M.y - M.h * 0.04;
+    // 화살표는 공 → 빈 자리 (쪼살 '공간' — 공이 보이면 공에서 출발) · 공이 없으면 주인공 발에서
+    const bl = f.ball ? boxC(bg, f.ball, ar) : null, bx = bl ? bl.x + bl.w / 2 : 0, by = bl ? bl.y + bl.h / 2 : 0;
+    const fromBall = bl && bx > 0 && bx < W0 && by > H0 * 0.2 && by < H0 * 0.95 && Math.hypot(bx - M.x, by - M.y) < M.h * 0.8;
+    const sx0 = fromBall ? bx + (best.x > bx ? 1 : -1) * bl.w * 0.7 : M.x + (best.x > M.x ? 1 : -1) * M.w * 0.3, sy = fromBall ? by : M.y - M.h * 0.04;
     const dd = Math.hypot(best.x - sx0, best.y - sy), cut = o.chip === false ? 0 : (cs * 0.62) / dd;
     const col = o.arrowColor || b.accent;
     const arr = arrowLayer(ctx, [sx0, sy], [best.x - (best.x - sx0) * cut, best.y - (best.y - sy) * cut], col, gid, { bend: 0.24 });
@@ -308,7 +341,7 @@ function tactics(ctx, bg, avoid, o = {}) {
       put(arr);
       if (o.chip !== false) {
         const chip = tacShape("marker", { name: "공간 칩", x: best.x - cs / 2, y: best.y - cs / 2, w: cs, h: cs, fill: col, label: o.chipText || "공간",
-          stroke: { color: "#FFFFFF", width: Math.round(5 * scale) }, gid, glow: { on: true, color: col, size: Math.round(24 * scale), opacity: 1 } });
+          stroke: { color: "#FFFFFF", width: Math.round(6 * scale) }, gid, glow: { on: true, color: col, size: Math.round(46 * scale), opacity: 1 } });  // 빛 번짐 크게 (쪼살 '공간')
         if (ok(chip)) put(chip);
       }
     }
@@ -366,7 +399,7 @@ function headOverlap(ctx, bg, layers) {
 }
 function topLayouts(ctx, ho, fo, left) {
   const c = ctx.copy, m = mainBox(ctx.frame), mx = m ? m[0] + m[2] / 2 : 0.5;
-  const one = c.l2 && (c.l1 + c.l2).replace(/\s/g, "").length <= 12;
+  const one = c.l2 && `${c.l1} ${c.l2}`.length <= LINE_MAX_FMT.long;  // 한 줄로 합쳐도 9자 안일 때만 (판정 B5: 한 줄 11자)
   const tries = [() => headline(ctx, { x: ctx.W * 0.075, y: ctx.H * 0.04, w: ctx.W * 0.85, h: ctx.H * 0.4 }, ho)];  // 왼쪽 위 모서리는 비움
   if (one) tries.push(() => headline(Object.assign({}, ctx, { copy: joinCopy(c) }), { x: ctx.W * 0.075, y: ctx.H * 0.04, w: ctx.W * 0.85, h: ctx.H * 0.22 }, Object.assign({}, ho, { size: Math.round(ctx.H * 0.2) })));
   tries.push(() => headline(ctx, { x: ctx.W * (mx > 0.5 ? 0.075 : 0.5), y: ctx.H * 0.05, w: ctx.W * 0.425, h: ctx.H * 0.5 }, Object.assign({}, ho, { align: mx > 0.5 ? "left" : "right" })));
@@ -380,12 +413,29 @@ function topLayouts(ctx, ho, fo, left) {
 }
 // 쇼츠: 제목 아래 자기 칸에 장면 (위 끝은 검은 바탕으로 부드럽게 사라짐)
 // — 가로 영상으로 만든 쇼츠는 화면 높이가 곧 장면 높이라 확대 없이는 머리를 제목 아래로 내릴 수 없음 (판정: 제목이 선수 머리를 덮음)
-function framesBelow(ctx, hdBox, subject = 0.62) {
-  const py = Math.round(hdBox.y + hdBox.h - ctx.H * 0.02), ph = ctx.H - py, sub = Object.assign({}, ctx, { H: ph });
-  const back = L("shape", { name: "검은 바탕", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#000000" });
-  const f = frameLayer(sub, { zoom: zoomFor(sub, subject, 1, 2), target: [ctx.W * 0.5, ph * 0.5] });
-  f.y += py; f.fade = { on: true, angle: -90, start: 0.86, end: 1 };  // 위 끝이 검은 바탕으로 부드럽게 (딱 잘린 경계 대신)
-  return { back, f };
+// 판정 2회차: 쇼츠 42장이 모두 '검은 띠 + 아래 장면'이고 720p 가로 장면을 1.8~1.9배 키워 흐림 → 장면 칸 높이를 원본 확대 상한(srcCap) 안으로 줄이고,
+// 칸 밖(제목 뒤·아래)은 같은 장면을 크게 흐린 판으로 채움 (검은 띠 대신 · 칸 위아래 끝은 흐린 판으로 녹아듦)
+function blurBack(ctx, o = {}) {
+  const b = frameLayer(ctx, { zoom: 1, keep: false, grade: false });
+  return Object.assign(b, { name: "흐린 배경", blur: Math.round(ctx.W * 0.035), bright: o.bright ?? 48, sat: 85, vignette: 40 });
+}
+function panelH(ctx, room) {  // 가로 장면을 W 폭 칸에 덮을 때 원본 확대 상한을 넘지 않는 칸 높이
+  const a = arEff(ctx);
+  if (a <= ctx.W / room) return room;  // 칸이 장면보다 납작하면 폭으로 맞춰져 높이 제한 없음
+  return Math.min(room, Math.round(srcCap() * srcW() / a));  // 높이로 덮으면 원본 1px = 칸 높이 × (띠를 잘라낸 뒤 가로/세로) / 원본 폭
+}
+function framesBelow(ctx, hdBox, subject = 0.62, o = {}) {
+  const py0 = Math.round(hdBox.y + hdBox.h - ctx.H * (o.overlap ?? 0.02)), room = ctx.H - py0, ph = panelH(ctx, room);
+  // 칸이 짧으면 아래 끝을 0.9H 근처에 (판정: '아래 1/3 이 흐린 빈 공간') — 남는 곳은 제목 뒤 흐린 판이 됨 · 칸 위가 제목에서 너무 멀어지지 않게
+  const py = ph < room ? Math.round(clamp(ctx.H * 0.9 - ph, py0, py0 + ctx.H * 0.08)) : py0;
+  const sub = Object.assign({}, ctx, { H: ph }), m = mainBox(ctx.frame);
+  const back = blurBack(ctx);
+  const fo = o.headY != null && m ? { focus: [m[0] + m[2] / 2, m[1]], target: [ctx.W * 0.5, o.headY - py] } : { target: [ctx.W * 0.5, ph * (o.ty ?? 0.5)] };  // headY: 주인공 머리를 이 높이에 (제목이 칸 위로 들어올 때)
+  const f = frameLayer(sub, Object.assign({ zoom: zoomFor(sub, subject, 1, 2) }, fo));
+  f.y += py;
+  f.fade = o.hardTop ? (ph < room ? { on: true, angle: 90, start: 0.9, end: 1 } : { on: false, angle: 90, start: 0.9, end: 1 })
+    : ph < room ? { on: true, angle: 90, start: 0.9, end: 1, both: true } : { on: true, angle: -90, start: 0.88, end: 1 };  // 위(·아래) 끝이 흐린 판으로 부드럽게
+  return { back, f, py, ph };
 }
 // 코치(얼굴 장면) 누끼 + 같은 영상의 공 다루는 장면 — 판정: 인터뷰 얼굴만 있으면 '무엇을 배우는지 장면이 없음'
 function actionFrame(ctx) {
@@ -424,7 +474,7 @@ const T_NEW = {
       return ls;
     } },
     "아래 제목 + 네온 (쪼살형 2)": { prior: -3, needs: { kinds: ["wide", "mid"], persons: 2, tactics: true }, fn: ctx => {
-      const c = ctx.copy, one = c.l2 && (c.l1 + c.l2).replace(/\s/g, "").length <= 11;
+      const c = ctx.copy, one = c.l2 && `${c.l1} ${c.l2}`.length <= LINE_MAX_FMT.long;
       const cx = one ? Object.assign({}, ctx, { copy: joinCopy(c) }) : ctx;
       const hd = headline(cx, { x: ctx.W * 0.045, y: ctx.H * 0.45, w: ctx.W * 0.91, h: ctx.H * 0.38 }, { style: "word", anchor: "bottom", size: Math.round(ctx.H * (one ? 0.2 : 0.23)), ratio: 0.6, emphScale: 1.15, emphFill: ctx.brand.colors.neon });  // 아래 끝 0.83H (재생시간 자리 위) · 강조는 네온(쪼살 '플랩 레벨업' 하늘색) — 노랑만 반복하면 템플릿 티
       const bg = frameAbove(ctx, hd.box, { subject: 0.5, max: 2 }), ls = [bg];
@@ -434,7 +484,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
-    "옆 제목 (쪼살형 3)": { prior: -1.5, needs: { kinds: ["wide", "mid", "close"] }, fn: ctx => {  // 보조 상자는 롱폼에서 '군더더기'(판정) → 두 줄만 크게
+    "옆 제목 (쪼살형 3)": { prior: -12, minBigW: 0.5, needs: { kinds: ["wide", "mid", "close"] }, fn: ctx => {  // 보조 상자는 롱폼에서 '군더더기'(판정) → 두 줄만 크게
       const m = mainBox(ctx.frame), fc = mainFace(ctx.frame);
       const cxs = fc ? fc[0] + fc[2] / 2 : m ? m[0] + m[2] / 2 : 0.6, right = cxs >= 0.42;  // 사람이 있는 쪽 반대편에 제목
       const hd = headline(ctx, { x: ctx.W * (right ? 0.07 : 0.4), y: ctx.H * 0.08, w: ctx.W * 0.53, h: ctx.H * 0.78 }, { style: "line", align: right ? "left" : "right", anchor: "middle", size: Math.round(ctx.H * 0.28), ratio: 0.58 });
@@ -445,7 +495,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
-    "세로 장면 + 옆 제목": { prior: 0, needs: { vertical: true, noText: true }, fn: ctx => {  // 세로 영상으로 롱폼: 장면을 잘라 키우면 머리·몸이 잘림 → 세로 장면 통째로 한쪽 판에, 뒤는 같은 장면을 흐리게
+    "세로 장면 + 옆 제목": { prior: -4, minBigW: 0.4, needs: { vertical: true, noText: true }, fn: ctx => {  // 세로 영상으로 롱폼: 장면을 잘라 키우면 머리·몸이 잘림 → 세로 장면 통째로 한쪽 판에, 뒤는 같은 장면을 흐리게
       const m = mainBox(ctx.frame), right = !m || m[0] + m[2] / 2 >= 0.35, ph = Math.round(ctx.H * 0.9), pw = Math.round(ph * ctx.ar);
       const back = Object.assign(frameLayer(ctx, { zoom: 1, keep: false }), { name: "흐린 배경", blur: 26, bright: 45, vignette: 55 });
       const x0 = right ? ctx.W * 0.955 - pw : ctx.W * 0.045, y0 = (ctx.H - ph) / 2;
@@ -458,14 +508,14 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box, bbox([panel])]); if (lg) ls.push(lg);
       return ls;
     } },
-    "코치 + 경기 장면": { prior: -2.5, needs: { kinds: ["close"], cut: true, combo: true }, fn: ctx => {
+    "코치 + 경기 장면": { prior: -4, needs: { kinds: ["close"], cut: true, combo: true }, fn: ctx => {
       const act = actionFrame(ctx), m = mainBox(ctx.frame), actx = ctxFor(act, ctx.copy, "long", ctx.seed);
       const bg = Object.assign(frameLayer(actx, { zoom: zoomFor(actx, 0.45, 1, 1.6), target: [ctx.W * 0.42, ctx.H * 0.62] }), { name: "경기 장면 배경", bright: 82 });
       const cut = placeCut(ctx, m, ctx.H * 1.05, ctx.W * 0.77, ctx.H * 0.06);
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.1, w: ctx.W * 0.5, h: ctx.H * 0.78 }, { style: "line", align: "left", anchor: "middle", size: Math.round(ctx.H * 0.28), ratio: 0.58 });
       return [bg, shade("왼쪽 어둡게", 0, 0, ctx.W * 0.66, ctx.H, true, 0.62, true), cut, ...hd.layers];
     } },
-    "상자 제목 (자막형)": { prior: 2.5, needs: { kinds: ["close", "mid"] }, fn: ctx => {
+    "상자 제목 (자막형)": { prior: 4, needs: { kinds: ["close", "mid"] }, fn: ctx => {
       const m = mainBox(ctx.frame), fc = mainFace(ctx.frame);
       const cx = fc ? fc[0] + fc[2] / 2 : m ? m[0] + m[2] / 2 : 0.5, right = cx >= 0.4;  // 사람이 있는 쪽 반대편에 상자
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.95, 1.05, 1.8), target: [ctx.W * (right ? 0.68 : 0.32), ctx.H * 0.48] }), ls = [bg];
@@ -478,12 +528,12 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
-    "강좌 시리즈 (쌈바형)": { prior: 3, needs: { cut: true }, fn: ctx => {
+    "강좌 시리즈 (쌈바형)": { prior: 4.5, needs: { cut: true }, fn: ctx => {
       const main = mainBox(ctx.frame), left = main ? main[0] + main[2] / 2 < 0.5 : false;
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.85, 1, 2), target: [ctx.W * (left ? 0.36 : 0.64), ctx.H * 0.5] }), ls = [bg];
       Object.assign(bg, { bright: 66, blur: 4, vignette: 55 });
       ls.push(shade("아래 어둡게", 0, ctx.H * 0.45, ctx.W, ctx.H * 0.55, false, 0.8));
-      const cut = cutLayer(ctx, bg, { outline: ctx.brand.colors.hl, ow: 1, minH: 0.5, need: true }); if (cut) { cut.blur = 0; cut.bright = 100; ls.push(cut); }
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 1, minH: 0.5, need: true }); if (cut) { cut.blur = 0; cut.bright = 100; ls.push(cut); }
       const al = left ? "right" : "left", bx = { x: ctx.W * 0.045, y: ctx.H * 0.38, w: ctx.W * 0.91, h: ctx.H * 0.45 };  // 재생시간 자리(아래 오른쪽) 위에서 끝
       const hd = headline(ctx, bx, { style: "word", align: al, anchor: "bottom", size: Math.round(ctx.H * 0.29), ratio: 0.42, emphScale: 1.15, grad: false });
       ls.push(...hd.layers);
@@ -491,7 +541,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
-    "리액션 클로즈업": { prior: -2, needs: { kinds: ["close"], sharp: 0.25 }, fn: ctx => {
+    "리액션 클로즈업": { prior: -4, needs: { kinds: ["close"], sharp: 0.25 }, fn: ctx => {
       const fc = mainFace(ctx.frame) || ctx.frame.faces[0].box, z = clamp(0.5 / Math.max(0.12, fc[3]), 1, 1.6);
       const bg = frameLayer(ctx, { zoom: z, focus: [fc[0] + fc[2] / 2, fc[1] + fc[3] / 2], target: [ctx.W * 0.68, ctx.H * 0.46] }), ls = [bg];
       ls.push(shade("왼쪽 어둡게", 0, 0, ctx.W * 0.6, ctx.H, true, 0.7, true));
@@ -501,7 +551,7 @@ const T_NEW = {
       const em = emojiLayer(ctx, hd.big, headAvoid(ctx, bg).concat(hd.layers.filter(l => l !== hd.big).map(l => bbox([l]))), { k: 1.05 }); if (em) ls.push(em);
       return ls;
     } },
-    "질문 훅 (JK형)": { prior: -2.5, needs: { noText: true }, fn: ctx => {
+    "질문 훅 (JK형)": { prior: -6, needs: { noText: true }, fn: ctx => {
       const close = ctx.frame.kind === "close";  // 얼굴이 큰 장면은 얼굴을 오른쪽으로 보내고 제목은 왼쪽에만
       const ho = { style: "word", align: "left", size: Math.round(ctx.H * 0.26), ratio: 0.62, sw: 0.17, emphScale: 1.15 };
       const { hd, bg } = close ? { hd: headline(ctx, { x: ctx.W * 0.075, y: ctx.H * 0.08, w: ctx.W * 0.48, h: ctx.H * 0.6 }, ho), bg: frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.72, ctx.H * 0.5] }) }
@@ -511,7 +561,7 @@ const T_NEW = {
       ls.push(...hd.layers);
       return ls;
     } },
-    "인물 + 오른쪽 제목 (해주호형)": { prior: -5, needs: { kinds: ["mid", "close"] }, fn: ctx => {
+    "인물 + 오른쪽 제목 (해주호형)": { prior: -10, needs: { kinds: ["mid", "close"] }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.9, 1.05, 2), target: [ctx.W * 0.27, ctx.H * 0.5] }), ls = [bg];
       ls.push(shade("오른쪽 어둡게", ctx.W * 0.38, 0, ctx.W * 0.62, ctx.H, false, 0.72, true));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 0.8 }); if (cut) ls.push(cut);
@@ -537,7 +587,16 @@ const T_NEW = {
   },
   short: {
     // 쇼츠 제목: 위쪽 안전 영역 폭을 거의 다 쓰는 3단 (첫 줄 흰 · 큰 줄 노랑 · 어두운 상자 속 보조 문구) — 레퍼런스 'V자 어려우면 / 무조건 봐 / 1분안에 알려줄게'
-    "쇼츠 · 3단 제목": { prior: 2, needs: { sub: true }, fn: ctx => {
+    // 띠 없이 장면 위에 바로 큰 제목 (쪼살 쇼츠 'V자 어려우면 무조건 봐'·'핀타 움직임 중요성') — 판정 2회차: 쇼츠 42장이 모두 띠형
+    "쇼츠 · 장면 위 제목 (쪼살형)": { prior: 1, needs: { noText: true, persons: 1 }, fn: ctx => {
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.1, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "word", size: Math.round(ctx.W * 0.24), ratio: 0.55, emphScale: 1.15, sw: 0.2 });  // 기울이지 않음 (판정: '위로 휘어 읽기 어려움')
+      const { back, f } = framesBelow(ctx, hd.box, 0.55, { overlap: 0.13, headY: hd.box.y + hd.box.h + ctx.H * 0.03 });  // 장면 칸 위쪽이 제목 뒤로 들어감
+      const ls = [back, f, shade("위 어둡게", 0, 0, ctx.W, hd.box.y + hd.box.h + ctx.H * 0.06, true, 0.62)];
+      const b = ctx.brand.colors, tac = tactics(ctx, f, [hd.box, { x: ctx.W * 0.84, y: ctx.H * 0.4, w: ctx.W, h: ctx.H }, { x: 0, y: ctx.H * 0.78, w: ctx.W, h: ctx.H }], { chip: false, arrowColor: b.hl, ringColor: b.neon });
+      ls.push(...tac.filter(l => l.shape === "ring"), ...tac.filter(l => l.shape !== "ring"), ...hd.layers);
+      return ls;
+    } },
+    "쇼츠 · 3단 제목": { prior: 4, needs: { sub: true }, fn: ctx => {
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.075, w: ctx.W * 0.76, h: ctx.H * 0.3 }, { style: "line", size: Math.round(ctx.W * 0.25), ratio: 0.56, sub: true, subRatio: 0.36 });
       const { back, f } = framesBelow(ctx, hd.box), ls = [back, f];
       const cut = cutLayer(ctx, f, { outline: "#FFFFFF", ow: 0.8, minH: 0.32 }); if (cut) ls.push(cut);
@@ -569,26 +628,20 @@ const T_NEW = {
       const cut = placeCut(ctx, m, ctx.H * 0.6, ctx.W * 0.45, ctx.H * 0.44);
       return [back, f, shade("아래 어둡게", 0, ctx.H * 0.55, ctx.W, ctx.H * 0.45, false, 0.5), cut, ...hd.layers];
     } },
-    "쇼츠 · 레터박스 질문": { prior: 3.5, needs: { noText: true }, fn: ctx => {
-      const ls = [L("shape", { name: "검은 바탕", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#000000" })];
+    "쇼츠 · 레터박스 질문": { prior: 3.5, band: true, needs: { noText: true }, fn: ctx => {
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.075, w: ctx.W * 0.76, h: ctx.H * 0.22 }, { style: "word", align: "center", anchor: "bottom", size: Math.round(ctx.W * 0.2), ratio: 0.6, sw: 0.14, emphScale: 1.15 });
-      const py = hd.box.y + hd.box.h + ctx.H * 0.025, ph = ctx.H - py, sub = { ...ctx, W: ctx.W, H: ph };  // 위 검은 띠에 제목, 아래는 끝까지 사진
-      const f = frameLayer(sub, { zoom: zoomFor(sub, 0.7, 1, 1.6), target: [ctx.W * 0.5, ph * 0.45] }); f.y += py; ls.push(f);
-      ls.push(...hd.layers);
-      return ls;
+      const { back, f, py } = framesBelow(ctx, { x: 0, y: 0, w: ctx.W, h: hd.box.y + hd.box.h + ctx.H * 0.045 }, 0.7, { hardTop: true, ty: 0.45 });  // 위 검은 띠에 제목, 아래는 사진 (확대 상한 안 · 남는 아래는 흐린 판)
+      return [back, L("shape", { name: "검은 띠", x: 0, y: 0, w: ctx.W, h: py, fill: "#000000" }), f, ...hd.layers];
     } },
-    "쇼츠 · 흰 띠 제목 (해주호형)": { prior: 4, needs: { noText: true }, fn: ctx => {  // 위 흰 띠 + 검은 굵은 글자 + 큰 줄은 노란 형광펜 (풋살해주호 쇼츠)
-      const ls = [L("shape", { name: "흰 띠", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#FFFFFF" })];
+    "쇼츠 · 흰 띠 제목 (해주호형)": { prior: 4.5, band: true, needs: { noText: true }, fn: ctx => {  // 위 흰 띠 + 검은 굵은 글자 + 큰 줄은 노란 형광펜 (풋살해주호 쇼츠)
       const c = ctx.copy, b = ctx.brand.colors, bigI = c.l2 ? (c.emph ? c.emph[0] : 1) : 0;
       const mk = (t, size, hl, name) => { const l = L("text", Object.assign({ text: t, name }, tStyle(ctx, size, { fill: "#111111", sw: 0, noShadow: true, align: "center" }),
         hl ? { box: { on: true, color: b.hl, pad: Math.round(size * 0.1), radius: Math.round(size * 0.06) } } : {})); l.runs = digitRuns(t, l.font); fitText(l); fitW(l, ctx.W * 0.76); return l; };
       const lines = c.l2 ? [mk(c.l1, Math.round(ctx.W * (bigI === 0 ? 0.155 : 0.095)), bigI === 0, bigI === 0 ? "제목 큰 줄" : "제목 작은 줄"), mk(c.l2, Math.round(ctx.W * (bigI === 1 ? 0.155 : 0.095)), bigI === 1, bigI === 1 ? "제목 큰 줄" : "제목 작은 줄")] : [mk(c.l1, Math.round(ctx.W * 0.15), true, "제목 큰 줄")];
       let y = ctx.H * 0.085;
       for (const l of lines) { l.x = ctx.W * 0.45 - l.w / 2; l.y = y; y += l.h + ctx.H * 0.012; }
-      const py = y + ctx.H * 0.02, ph = ctx.H - py, sub = { ...ctx, H: ph };  // 사진은 아래 끝까지 (빈 흰 바닥이 남지 않게)
-      const f = frameLayer(sub, { zoom: zoomFor(sub, 0.75, 1, 1.6), target: [ctx.W * 0.5, ph * 0.5] }); f.y += py; ls.push(f);
-      ls.push(...lines);
-      return ls;
+      const { back, f, py } = framesBelow(ctx, { x: 0, y: 0, w: ctx.W, h: y + ctx.H * 0.04 }, 0.75, { hardTop: true });  // 사진은 확대 상한 안에서 (남는 아래는 흐린 판)
+      return [back, L("shape", { name: "흰 띠", x: 0, y: 0, w: ctx.W, h: py, fill: "#FFFFFF" }), f, ...lines];
     } },
     "쇼츠 · 얼굴 + 아래 제목": { prior: -4, needs: { kinds: ["close"] }, fn: ctx => {  // 인터뷰처럼 얼굴이 위쪽에 큰 장면: 얼굴은 위에 두고 제목은 아래 안전 영역 끝에
       const bg = frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.47, ctx.H * 0.3] }), ls = [bg];
@@ -598,7 +651,7 @@ const T_NEW = {
       ls.push(...hd.layers);
       return ls;
     } },
-    "쇼츠 · 상자 제목": { prior: 2.5, needs: {}, fn: ctx => {  // 위에 상자 제목 · 사진은 그 아래 자기 칸에 (머리를 가리지 않게)
+    "쇼츠 · 상자 제목": { prior: 4.5, needs: {}, fn: ctx => {  // 위에 상자 제목 · 사진은 그 아래 자기 칸에 (머리를 가리지 않게)
       const hd = boxHead(ctx, ctx.W * 0.07, ctx.H * 0.3, ctx.W * 0.72, { size: ctx.W * 0.18, ratio: 0.6 });
       for (const l of hd.layers) l.y -= Math.min(0, bbox(hd.layers).y - ctx.H * 0.08);
       const { back, f } = framesBelow(ctx, bbox(hd.layers)), ls = [back, f];
@@ -621,6 +674,15 @@ function wholeBody(f) {  // 주인공이 위아래로 잘리지 않고 보이는
   if (f.faces && f.faces.length && f.kind === "close") return true;
   return !!m && m[1] > 0.015 && m[3] >= 0.18 && m[3] <= 0.8;
 }
+// 코치 + 경기 장면: 얼굴이 크게 보이는 사람(코치·인터뷰)만 · 사람 상자가 원본 위·좌·우 끝에 닿지 않음 · 롱폼은 가로 원본만
+// (판정 2회차: 세로 영상의 머리 잘린 분홍 조끼 선수를 16:9 칸에 붙여 네모 모서리로 잘린 누끼)
+function comboOk(ctx) {
+  const f = ctx.frame, m = mainBox(f), fc = mainFace(f);
+  if (!m || !fc || fc[3] < 0.12 || f.kind !== "close" || (f.blur ?? 0) > 0.3) return false;
+  if (m[1] <= 0.01 || m[0] <= 0.01 || m[0] + m[2] >= 0.99) return false;
+  if (!ctx.short && ctx.ar < 1.2) return false;
+  return !!actionFrame(ctx);
+}
 function fits(t, ctx) {
   const n = t.needs || {}, f = ctx.frame;
   if ((n.cut || n.tactics) && !wholeBody(f)) return false;
@@ -632,7 +694,7 @@ function fits(t, ctx) {
   if (n.sub && !ctx.copy.sub) return false;
   if (n.noText && (f.text || 0) >= TEXTY) return false;  // 누끼를 못 넣는 템플릿은 글자 박힌 장면을 안 씀
   if (n.vertical && !(ctx.ar < 0.9)) return false;  // 세로 영상 전용
-  if (n.combo && !(mainBox(f) && mainFace(f) && mainFace(f)[3] >= 0.12 && actionFrame(ctx))) return false;  // 얼굴이 크게 보이는 사람(코치·인터뷰)만 — 뒷모습 선수를 다른 장면에 붙이면 유령처럼 보임
+  if (n.combo && !comboOk(ctx)) return false;  // 얼굴이 크게 보이는 사람(코치·인터뷰)만 — 뒷모습 선수를 다른 장면에 붙이면 유령처럼 보임
   if (n.ox && !(ctx.copy.ox && ctx.copy.ox.length === 2)) return false;
   return true;
 }
@@ -702,6 +764,10 @@ function frameQ(f, maxS) {  // 장면 품질 0~1 (점수를 눌러 펴고 · 벤
   if (fl.includes("lesson")) q = Math.min(1, q * 1.15);
   if ((f.text || 0) >= TEXTY) q *= 0.8;
   if ((f.blur ?? 0) > 0.35) q *= 0.8;
+  if (headlessBad(f)) q *= 0.5;
+  if (f.grade && f.grade.gamma > 2.2) q *= 0.5;  // 아주 어두운 장면: 밝히면 노이즈가 커져 흐릿 (판정: '얼굴을 크게 확대해 화질이 심하게 흐림')  // 원본에서 머리가 잘린 주인공 (발 클로즈업 아님)
+  if (f.kind === "close" && f.emo && (f.emo.happiness || 0) + (f.emo.surprise || 0) < 0.12 && (f.faces || []).length) q *= 0.9;  // 말하는 도중 무표정 얼굴 (판정: '말하다 멈춘 얼굴')
+  if (f.kind === "close" && f.emo && (f.emo.happiness || 0) + (f.emo.surprise || 0) >= 0.4) q = Math.min(1, q * 1.12);  // 살아 있는 표정
   return q;
 }
 function scoreDoc(doc, meta) {
@@ -745,6 +811,16 @@ function scoreDoc(doc, meta) {
   }
   const tac = doc.layers.filter(l => l.type === "shape" && TAC_DEF[l.shape]);
   if (tac.some(t => hb.some(b => overlap(bbox([t]), b, 0)))) gates.push("전술 그래픽이 제목과 겹침");
+  const mb = bg ? mainBox(f) : null;
+  if (mb && geo === bg) {  // 원본·캔버스에서 머리가 잘린 주인공 (발·공 클로즈업이면 공이 보이고 글자에 안 가릴 때만)
+    if (footClose(f) && srcHeadCut(f)) {
+      const bb = boxC(bg, f.ball, ar), cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+      if (cx < 0 || cx > Wd || cy < 0 || cy > Hd || cover.some(c => cx > c.x && cx < c.x + c.w && cy > c.y && cy < c.y + c.h)) gates.push("발 클로즈업인데 공이 안 보임");
+    } else if (srcHeadCut(f)) gates.push("주인공 머리 잘림 (원본)");
+    else if (f.kind !== "close" && !footClose(f)) {
+      const b = boxC(bg, mb, ar); if (b.y < Hd * 0.005 && b.y + b.h > Hd * 0.05) gates.push("주인공 머리 잘림 (화면 위)");
+    }
+  }
   // 가중합
   const fr = frameQ(f, meta.maxFrame);
   const read = clamp((hpx - 9) / (17 - 9), 0, 1) * (weak.length ? 0.6 : 1);
@@ -759,6 +835,7 @@ function scoreDoc(doc, meta) {
   // 감점 (판정 1회차 이유: 주인공 작음 61 · 머리·몸 잘림 58 · 누끼 어색 29 · 박힌 글자 9)
   const sh = geo && mainBox(f) ? clipTo(boxC(geo, mainBox(f), ar), { x: 0, y: 0, w: Wd, h: Hd }).h / Hd : 0.5;
   if (bg && mainBox(f) && f.kind !== "close" && sh < (short ? 0.16 : 0.2) && !tac.length) s -= 8;
+  else if (bg && mainBox(f) && f.kind !== "close" && sh < (short ? 0.22 : 0.3)) s -= 5;  // 판정 2회차 이후: 확대 상한 때문에 작게 나온 주인공 ('선수가 작고 멀어 장면의 힘이 없음')
   const cut = doc.layers.find(l => l.name === "누끼" && !l.hidden);
   if (cut && meta.cutQ != null && meta.cutQ < 0.7) s -= 10;
   const bgx = doc.layers.find(l => l.type === "image" && l.name === "배경");  // 이 장면이 그대로 깔린 배경 (코치+경기 장면 합성은 다른 장면이라 뺌)
@@ -770,6 +847,13 @@ function scoreDoc(doc, meta) {
   if (f.ball && geo) { const bb = boxC(geo.name === "누끼" && bg ? bg : geo, f.ball, ar), cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
     if (cx > 0 && cx < Wd && cy > 0 && cy < Hd && !cover.some(c => cx > c.x && cx < c.x + c.w && cy > c.y && cy < c.y + c.h)) s += 6; }
   if ((f.flags || []).includes("lesson")) s += 3;
+  // 판정 2회차 감점: 원본을 많이 키움(흐림 72/84) · 흐린 사람 누끼 · 제목 큰 줄이 좁음(구석에 작게 · 28)
+  const sharpBg = doc.layers.find(l => l.type === "image" && (l.name === "배경" || l.name === "경기 장면 배경")), bgu = sharpBg ? upOf(sharpBg, ar) : 1;
+  if (bgu > 1.4) s -= 8;
+  if (cut && (f.blur ?? 0) > 0.2) s -= 10;
+  const bigL = heads.find(l => /큰/.test(l.name || "")) || heads[0];
+  if (bigL && bbox([bigL]).w < Wd * 0.45) s -= 6;
+  if (hpx < 15) s -= 8;  // 목록 크기에서 큰 줄이 15px 안 됨 (판정: '제목이 작아 구석에 몰림')
   if (meta.legacy) s -= 15;  // 예전 템플릿은 레퍼런스형보다 한 단계 아래 (새 템플릿이 안 맞을 때만 나오게)
   s += meta.prior || 0;     // 템플릿 가산점: 클로드 블라인드 판정(롱폼·쇼츠 252장) 템플릿 평균으로 맞춤 — 평균 6.3 → +4 … 5.1 → −5
   if (tac.length) s += 2;   // 전술 그래픽 (쪼살형) 가산
@@ -839,36 +923,68 @@ function aiFrames(n = 6) {
     out.push(f);
   };
   for (const k of ["mid", "wide", "close"]) { const f = fs.find(x => x.kind === k); if (f && fq(f) >= 0.5 * top) add(f, 1); }  // 종류마다 하나씩 (너무 나쁜 장면은 빼고)
+  const ex = fs.find(f => isExpr(f) && !headlessBad(f)); if (ex) add(ex, 1);  // 살아 있는 표정 장면 하나는 꼭 (판정 2회차: 표정 장면이 있는데 안 쓴 묶음 7개)
   for (const f of fs) add(f, 1);
   for (const f of fs) add(f, 2);
   for (const f of fs) if (out.length < n && !out.includes(f)) out.push(f);
   return out.slice(0, n).sort((a, b) => fq(b) - fq(a));
 }
-function aiCopies(n = 5, seed = 0) {
+// 한 줄 글자 수 (띄어쓰기 포함) 상한 — 판정 2회차 B5: 쇼츠 9자 줄 6장('퍼스트 터치 어려우면')·롱폼 11자 1장
+const LINE_MAX_FMT = { short: 8, long: 9 };
+function copyFits(c, fmt) { const m = LINE_MAX_FMT[fmt] || 9; return [c.l1, c.l2].every(t => (t || "").length <= m); }
+function rebalance(c, fmt) {  // 두 줄 낱말을 다시 나눠 줄 길이 안으로 (두 줄 길이가 가장 비슷하게 · 강조 낱말은 다시 찾음) → 새 문구 또는 null
+  const words = `${c.l1 || ""} ${c.l2 || ""}`.trim().split(/\s+/), m = LINE_MAX_FMT[fmt] || 9, et = c.emph ? [c.l1, c.l2][c.emph[0]].slice(c.emph[1], c.emph[2]) : "";
+  let best = null;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ");
+    if (a.length > m || b.length > m) continue;
+    const cutsTopic = (AI.topics || []).concat(et ? [et] : []).some(t => t && t.includes(" ") && `${a} ${b}`.includes(t) && !a.includes(t) && !b.includes(t));
+    if (cutsTopic || words[i - 1].length === 1) continue;  // 주제·강조 낱말('퍼스트 터치')을 두 줄로 쪼개지 않음 · 한 글자 낱말('이')이 줄 끝에 홀로 남지 않게
+    const d = Math.abs(a.length - b.length);
+    if (!best || d < best.d) best = { a, b, d };
+  }
+  if (!best) return null;
+  const ln = et && best.b.includes(et) ? 1 : et && best.a.includes(et) ? 0 : -1, t = ln === 1 ? best.b : best.a;
+  return Object.assign({}, c, { l1: best.a, l2: best.b, emph: ln >= 0 ? [ln, t.indexOf(et), t.indexOf(et) + et.length] : null, split: true });
+}
+function aiCopies(n = 5, seed = 0, fmt = "long") {
   if (AI.copySel) return [AI.copySel];
-  const cs = [...AI.copy].sort((a, b) => b.score - a.score);
-  const ai = cs.filter(c => c.src === "ai"), rule = cs.filter(c => c.src !== "ai");
-  const mixd = ai.length ? [...ai.slice(0, 4), ...rule.slice(0, 1), ...ai.slice(4), ...rule.slice(1)] : cs;  // 클로드 문구가 있으면 앞에 (규칙 문구 1개는 섞음 — 판정: 규칙 틀 '무조건 봐'는 흔한 문구)
+  const cs = [...AI.copy].sort((a, b) => b.score - a.score).map(c => (copyFits(c, fmt) ? c : rebalance(c, fmt))).filter(Boolean);
+  // 구체적인 약속(숫자·결과·대상) 먼저 · 막연한 문구('무조건 봐'·'~의 비밀'·'이렇게 하세요')는 2개까지 — 판정 2회차: 문구 이유 44/84 '구체적 약속이 없음'
+  const conc = cs.filter(c => c.concrete), vag = cs.filter(c => c.vague), other = cs.filter(c => !c.concrete && !c.vague);
+  const mixd = conc.length || vag.length ? [...conc.slice(0, 5), ...other.slice(0, 1), ...vag.slice(0, 1), ...conc.slice(5), ...other.slice(1), ...vag.slice(1, 2)] : cs;
   if (!seed) return mixd.slice(0, n);
   const k = (seed * 2) % Math.max(1, mixd.length);  // 다시 추천: 다른 문구가 앞에 오게 돌림
   return [...mixd.slice(k), ...mixd.slice(0, k)].slice(0, n);
 }
+const isExpr = f => !!f && !!f.emo && (f.emo.happiness || 0) + (f.emo.surprise || 0) >= 0.4 && (f.text || 0) < TEXTY && !!mainFace(f) && mainFace(f)[3] >= 0.1 && (f.blur ?? 0) <= 0.3;
+// 쓸 만한 장면이 없는 영상 (판정 2회차 THUMBTEST01: 클로드가 후보 12장 모두 1~4점 · 다른 썸네일·큰 자막이 박힌 화면) → 억지로 6개를 채우지 않음
+function weakScenes() {
+  if (AI.pick != null || !AI.frames.length) return false;
+  const rated = AI.frames.filter(f => f.ai != null), maxS = Math.max(1e-6, ...AI.frames.map(f => f.score || 0));
+  if (rated.length >= 3 && rated.length >= AI.frames.length * 0.6 && Math.max(...rated.map(f => f.ai)) <= 4) return true;
+  return Math.max(...AI.frames.map(f => frameQ(f, maxS))) < 0.35;
+}
 function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set()) {
-  const frames = aiFrames(7), copies = aiCopies(7, seed), cands = [];  // 장면 7 × 문구 7 — 6개가 서로 다른 장면·문구가 되게 (판정: 'A와 같은 장면·문구' 21/84)
+  const weak = weakScenes(); AI.weak = weak;
+  if (weak) n = Math.min(n, 2);
+  const frames = aiFrames(7), copies = aiCopies(7, seed, fmt), cands = [];  // 장면 7 × 문구 7 — 6개가 서로 다른 장면·문구가 되게 (판정: 'A와 같은 장면·문구' 21/84)
   const maxFrame = Math.max(1e-6, ...AI.frames.map(f => f.score || 0)), cScores = AI.copy.map(c => c.score || 0);
   const copyMin = Math.min(...cScores, 0), copyMax = Math.max(...cScores, 1);
   const build = tpls => { for (const f of frames) for (const c of copies) for (const [name, t] of Object.entries(tpls)) {
     if (t.legacy && (f.text || 0) >= TEXTY) continue;  // 예전 템플릿은 박힌 글자를 피하지 못함
-    const cx = ctxFor(f, c, fmt, seed + Math.round(f.t * 10)); if (!fits(t, cx)) continue;
+    const cx = ctxFor(f, c, fmt, seed + Math.round(f.t * 10)); cx.relax = weak; if (!fits(t, cx)) continue;
     let doc; try { doc = buildDoc(NAME, t, cx); } catch (e) { console.warn("템플릿 실패", name, e); continue; }
     if (t.needs && t.needs.tactics && !doc.layers.some(l => l.shape === "arrow2")) continue;  // 전술 템플릿인데 화살표 놓을 자리가 없으면 다른 템플릿에 양보
     if (t.needs && t.needs.cut && !doc.layers.some(l => l.name === "누끼")) continue;  // 누끼 템플릿인데 주인공이 작아 누끼를 안 넣었으면 (흐린 배경만 남음) 양보
+    if (t.minBigW) { const bl = doc.layers.find(l => l.name === "제목 큰 줄"); if (bl && bbox([bl]).w < cx.W * t.minBigW) continue; }  // 옆 제목형: 큰 줄이 좁으면 (구석에 작게 · 판정 5.49) 탈락
     if (doc._texty && !t.legacy) continue;  // 박힌 글자가 보이는데 주인공 누끼가 없음 → 흐리기만 하면 주인공도 흐려짐 (판정 최저 3.4~4.5점)
     delete doc._texty;
     const cq = AI.cuts[String(f.t)] && AI.cuts[String(f.t)].q ? AI.cuts[String(f.t)].q.q : null;
     const meta = { frame: f, copy: c, legacy: !!t.legacy, prior: t.prior || 0, maxFrame, copyMin, copyMax, cutQ: cq }, sc = scoreDoc(doc, meta);
     const key = `${name}|${f.t}|${c.l1}/${c.l2}`;
-    cands.push(Object.assign({ tpl: name, t: f.t, copy: c, doc, key, legacy: !!t.legacy }, sc, { base: sc.raw - (avoidKeys.has(key) ? 25 : 0) }));
+    cands.push(Object.assign({ tpl: name, t: f.t, copy: c, doc, key, legacy: !!t.legacy, ctx: cx, band: !!t.band, close: f.kind === "close", expr: isExpr(f),
+      tac: doc.layers.some(l => l.shape === "arrow2"), vague: !!c.vague, concrete: !!c.concrete }, sc, { base: sc.raw - (avoidKeys.has(key) ? 25 : 0) }));
   } };
   build(T_NEW[fmt]);
   const ok0 = cands.filter(x => !x.gates.length);  // 예전 템플릿은 새 템플릿만으로 모자랄 때만 만듦 (다시 추천 4초 안 — 판정 B8)
@@ -884,35 +1000,113 @@ function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set()) {
   const l2 = x => x.copy.l2 || x.copy.l1;
   const sim = (a, b) => (a.tpl === b.tpl ? 0.5 : 0) + (a.sc === b.sc ? 0.3 : 0) + (a.copy === b.copy ? 0.2 : l2(a) === l2(b) ? 0.1 : 0);
   const out = [];
-  const distinct = k => new Set(pool.map(x => (k === "l2" ? l2(x) : x[k]))).size;
+  const distinct = (k, xs = pool) => new Set(xs.map(x => (k === "l2" ? l2(x) : x[k]))).size;
   // 같은 종류 상한 = 6 ÷ 종류 수 (올림) — 장면이 둘뿐인 영상은 장면당 3개까지, 문구는 7개면 1번씩
   const capOf = k => Math.max(1, Math.ceil(n / Math.max(1, distinct(k))));
-  const tplCap = capOf("tpl"), scCap = capOf("sc"), copyCap = Math.max(capOf("copy"), capOf("l2"));
+  const tplCap = capOf("tpl"), scCap = Math.min(capOf("sc"), distinct("sc") >= 3 ? 2 : 6), copyCap = Math.max(capOf("copy"), capOf("l2"));  // 같은 장면 묶음(같은 얼굴 포함) ≤ 2/6
   // 꼭 채울 장면 종류는 '괜찮은 장면'(가장 좋은 장면 품질의 절반 넘게)만 셈 — 인터뷰 한 사람뿐인 영상에서 나쁜 장면을 억지로 넣지 않게
   const fqT = {}; for (const f of frames) fqT[f.t] = frameQ(f, maxFrame);
   const qTop = Math.max(1e-6, ...Object.values(fqT)), goodSc = new Set(pool.filter(x => (fqT[x.t] ?? 0) >= 0.5 * qTop).map(x => x.sc)).size;
   const need = { tpl: Math.min(4, distinct("tpl")), sc: Math.min(4, Math.max(1, goodSc)), copy: Math.min(5, distinct("copy")) };
+  // 판정 2회차 몫: 롱폼 전술형 ≥ 2 (선수 3명 장면이 있을 때) · 구체적 약속 문구 ≥ 3 · 살아 있는 표정 장면 ≥ 1 · 막연한 문구는 같은 틀 1번·모두 2번까지 ·
+  // 얼굴 클로즈업 ≤ 2 (다른 좋은 장면이 3개 넘으면) · 쇼츠 띠형 ≤ 2
+  const quota = { tac: fmt === "long" ? Math.min(2, distinct("sc", pool.filter(x => x.tac))) : 0, concrete: Math.min(3, distinct("copy", pool.filter(x => x.concrete))), expr: Math.min(1, pool.filter(x => x.expr).length) };
+  const nonClose = distinct("sc", pool.filter(x => !x.close && (fqT[x.t] ?? 0) >= 0.5 * qTop)), closeCap = nonClose >= 3 ? 2 : nonClose >= 1 ? 3 : n;  // 같은 코치 얼굴 반복 (판정 005: 5/6)
+  const n70 = pool.filter(x => x.score >= 70).length;
+  const blocked = x => (x.score < 70 && n70 >= n) || (x.close && out.filter(o => o.close).length >= closeCap) || (x.band && out.filter(o => o.band).length >= 2)
+    || (x.vague && (out.filter(o => o.vague).length >= 2 || out.some(o => o.vague && o.copy.pid === x.copy.pid)));
   while (out.length < n && out.length < pool.length) {
-    const left = n - out.length, have = k => new Set(out.map(x => x[k])).size;
+    const left = n - out.length, have = k => new Set(out.map(x => x[k])).size, owe = k => quota[k] - out.filter(o => o[k]).length;
     let best = null, bv = -1e9;
     for (const x of pool) {
-      if (out.includes(x)) continue;
+      if (out.includes(x) || blocked(x)) continue;
       // 다양성 강제: 남은 자리로 채워야 할 종류가 있으면 새 종류만
       if ((["tpl", "sc", "copy"]).some(k => need[k] - have(k) >= left && out.some(o => o[k] === x[k]))) continue;
+      if (Object.keys(quota).some(k => owe(k) >= left && !x[k])) continue;  // 남은 자리가 몫만큼이면 몫을 채우는 것만
       if (out.filter(o => o.tpl === x.tpl).length >= tplCap || out.filter(o => o.sc === x.sc).length >= scCap) continue;  // 같은 템플릿·같은 장면은 1개 (종류가 모자라면 2개)
       if (out.some(o => o.tpl === x.tpl && o.sc === x.sc)) continue;  // 같은 템플릿 + 같은 장면은 문구만 다른 거의 같은 그림
       if (out.filter(o => l2(o) === l2(x)).length >= copyCap || out.filter(o => o.copy === x.copy).length >= copyCap) continue;  // 같은 둘째 줄('무조건 봐')·같은 문구는 1번 (모자라면 2번)
-      const v = 0.7 * x.base - 0.3 * 100 * Math.max(0, ...out.map(o => sim(o, x)));
+      const bonus = Object.keys(quota).reduce((a, k) => a + (owe(k) > 0 && x[k] ? 6 : 0), 0);
+      const v = 0.7 * (x.base + bonus) - 0.3 * 100 * Math.max(0, ...out.map(o => sim(o, x)));
       if (v > bv) { bv = v; best = x; }
     }
     if (!best) {  // 조건을 다 지킬 수 없으면 덜 겹치는 것 (같은 문구·같은 템플릿+장면을 먼저 피함)
-      const dup = x => (out.some(o => o.tpl === x.tpl && o.sc === x.sc) ? 2 : 0) + (out.some(o => o.copy === x.copy) ? 1 : 0) + (out.some(o => l2(o) === l2(x)) ? 0.5 : 0);
+      const dup = x => (out.some(o => o.tpl === x.tpl && o.sc === x.sc) ? 2 : 0) + (out.some(o => o.copy === x.copy) ? 1 : 0) + (out.some(o => l2(o) === l2(x)) ? 0.5 : 0) + (blocked(x) ? 1.5 : 0) + (out.filter(o => o.sc === x.sc).length >= scCap ? 2.5 : 0);  // 같은 장면 3번째는 가장 뒤로
       for (const x of pool) { if (out.includes(x)) continue; const v = x.base - 40 * dup(x); if (!best || v > bv) { bv = v; best = x; } }
     }
     if (!best) break;
     out.push(best);
   }
+  decorate(out, fmt);
   return out;
+}
+
+/* ----- 소품 (판정 2회차: 레퍼런스의 😱·👀·배지·손그림 화살표가 84장 중 0장) — 고른 6개 중 일부에만, 얼굴·제목·재생시간 자리를 피해서 ----- */
+function propAvoid(x) {
+  const d = x.doc, ctx = x.ctx, bg = d.layers.find(l => l.type === "image" && l.name === "배경");
+  const av = d.layers.filter(l => !l.hidden && (l.type === "text" || l.type === "shape" || /스티커|로고|누끼/.test(l.name || "")) && !/어둡게|덮개|띠|바탕/.test(l.name || "")).map(l => (l.name === "누끼" ? null : extentOf(l))).filter(Boolean);
+  if (bg) for (const p of ctx.frame.persons || []) { const b = boxC(bg, p, ctx.ar); if (b.h >= ctx.H * 0.12) av.push(b); }  // 사람 몸 위에 스티커가 얹히지 않게 (판정)
+  if (bg) { av.push(...headAvoid(ctx, bg)); const mf = mainFace(ctx.frame); if (mf) { const b = boxC(bg, mf, ctx.ar); av.push({ x: b.x - b.w * 0.2, y: b.y - b.h * 0.5, w: b.w * 1.4, h: b.h * 1.9 }); } }
+  const cut = d.layers.find(l => l.name === "누끼"), m = mainBox(ctx.frame);
+  if (cut && m) { const b = boxC(cut, m, ctx.ar); av.push({ x: b.x, y: b.y, w: b.w, h: Math.min(b.h, ctx.H * 0.5) }); }
+  return av;
+}
+function tryProp(x, layers) {  // 넣어 보고 게이트가 생기면 되돌림
+  const before = x.doc.layers.slice();
+  x.doc.layers.push(...layers.map(normLayer));
+  const meta = { frame: x.ctx.frame, copy: x.copy, legacy: x.legacy, prior: 0, maxFrame: 1, copyMin: 0, copyMax: 1 };
+  if (scoreDoc(x.doc, meta).gates.length) { x.doc.layers = before; return false; }
+  return true;
+}
+function badgeLayer(ctx, text) {
+  const b = ctx.brand.colors, sz = Math.round(ctx.W * (ctx.short ? 0.08 : 0.052));  // 목록 크기에서 8px 넘게
+  const l = L("text", { text, name: "배지", font: "Pretendard Black", size: sz, fill: "#111111", strokes: [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }],
+    shadow: { on: true, color: "#000000", blur: 12, dx: 0, dy: 4, opacity: 0.5 }, box: { on: true, color: b.hl, pad: Math.round(sz * 0.3), radius: Math.round(sz * 0.35) }, rot: -3 });
+  fitText(l); return l;
+}
+function scribbleTo(ctx, s, e, seed) {  // s → e 손그림 화살표 (가운데가 살짝 휨)
+  const sc = ctx.W / 1280, [sx, sy] = s, [ex, ey] = e, mx = (sx + ex) / 2 + (ey - sy) * 0.18, my = (sy + ey) / 2 - (ex - sx) * 0.18;
+  const xs = [sx, mx, ex], ys = [sy, my, ey], x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(40, Math.max(...xs) - x0), h = Math.max(40, Math.max(...ys) - y0);
+  return tacShape("scribble", { name: "손그림 화살표", x: x0, y: y0, w, h, pts: xs.map((x, i) => [(x - x0) / w, (ys[i] - y0) / h]), fill: "#FFFFFF", width: Math.round(11 * sc), head: Math.round(44 * sc), seed,
+    stroke: { color: "#000000", width: Math.round(4 * sc) }, shadow: { on: true, color: "#000000", blur: 8, dx: 0, dy: 3, opacity: 0.5 } });
+}
+function decorate(out, fmt) {
+  if (AI.copySel && AI.copySel.src === "user" && !out.length) return;
+  if (fmt === "long") {
+    let em = 0, bd = 0;
+    for (const x of out) {  // 이모지 2장 (점수 높은 것부터 · 빈 곳이 있는 것) — 문구가 놀람·질문·보기·오답일 때만 (판정: 아무 문구에나 붙은 불꽃은 '뜬금없음')
+      if (em >= 2) break;
+      if (!["놀람", "질문", "보기", "오답"].includes(x.copy.tag)) continue;
+      const big = x.doc.layers.find(l => l.name === "제목 큰 줄") || x.doc.layers.find(l => l.type === "text");
+      if (!big || x.doc.layers.some(l => /스티커/.test(l.name || ""))) continue;
+      const bb0 = extentOf(big), e = emojiLayer(x.ctx, big, propAvoid(x).filter(a => !(a.x === bb0.x && a.y === bb0.y && a.w === bb0.w)), { k: 0.9, rot: 10 });
+      if (e && tryProp(x, [e])) em++;
+    }
+    for (const x of out) {  // 작은 배지 1장 (이모지 없는 것 · 왼쪽 위 또는 오른쪽 위 빈 곳)
+      if (bd >= 1) break;
+      if (x.doc.layers.some(l => /스티커|배지|로고|시리즈/.test(l.name || ""))) continue;
+      const l = badgeLayer(x.ctx, (INFO.duration || 999) <= 100 ? "1분 강좌" : x.tac ? "실전 전술" : "실전 꿀팁"), av = propAvoid(x), ctx = x.ctx;
+      for (const [px, py] of [[ctx.W * 0.045, ctx.H * 0.06], [ctx.W * 0.955 - l.w, ctx.H * 0.06]]) {
+        l.x = px; l.y = py; const bb = extentOf(l);
+        if (inSafe(ctx, bb, 0) && !av.some(a => overlap(bb, a, 6)) && tryProp(x, [l])) { bd++; break; }
+      }
+    }
+  } else {
+    let n = 0;
+    for (const x of out) {  // 손그림 화살표 2장: 제목 아래 → 주인공 (머리·공 옆)
+      if (n >= 2) break;
+      const ctx = x.ctx, bg = x.doc.layers.find(l => l.type === "image" && l.name === "배경"), m = mainBox(ctx.frame), heads = x.doc.layers.filter(isHead);
+      if (!bg || !m || !heads.length || x.doc.layers.some(l => l.type === "shape" && TAC_DEF[l.shape])) continue;
+      const hb = bbox(heads), pb = boxC(bg, m, ctx.ar), av = propAvoid(x).filter(a => !heads.some(h => overlap(extentOf(h), a, -2)));
+      const right = pb.x + pb.w / 2 < ctx.W * 0.45;
+      const s = [right ? Math.min(hb.x + hb.w, ctx.W * 0.8) - ctx.W * 0.06 : hb.x + ctx.W * 0.06, hb.y + hb.h + ctx.H * 0.015];
+      const e = [right ? pb.x + pb.w + ctx.W * 0.04 : pb.x - ctx.W * 0.04, clamp(pb.y + Math.min(pb.h * 0.25, ctx.H * 0.08), s[1] + ctx.H * 0.06, ctx.H * 0.72)];
+      if (Math.hypot(e[0] - s[0], e[1] - s[1]) < ctx.W * 0.18) continue;
+      const a = scribbleTo(ctx, s, e, 11 + n), bb = bbox([a]);
+      if (!inSafe(ctx, bb, 0) || av.some(q => overlap(bb, q, 4))) continue;
+      if (tryProp(x, [a])) n++;
+    }
+  }
 }
 
 /* ----- 분석 받기 (다 돼 있으면 바로, 아니면 작업으로: 장면·선수 찾기 → 누끼 → 문구) ----- */
@@ -946,7 +1140,8 @@ async function aiRun(seed = 0) {
     AI.results = recommend(AUTO_FMT, 6, seed, prev); AI.seed = seed; AI.ab = new Set();
     for (const x of AI.results) for (const l of x.doc.layers) if (l.type === "image" && l.src) img(l.src);
     renderAI();
-    setAIStat(`${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`);
+    setAIStat(AI.weak ? `쓸 만한 장면이 없어요 — 아래 '장면 고르기'에서 직접 골라 주세요 (지금은 ${AI.results.length}개만 만들었어요)`
+      : `${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`);
     return AI.results;
   } finally { AI.busy = false; done(); }
 }

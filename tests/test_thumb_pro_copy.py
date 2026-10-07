@@ -62,9 +62,12 @@ class RuleTests(unittest.TestCase):
             self.assertEqual(c["emph"][0], 0, pid)
             self.assertEqual(c["l1"][c["emph"][1]:c["emph"][2]], tp[0], pid)
         # 판정 1회차: '무조건 봐'는 작은 흰 꼬리표가 아니라 가장 큰 노란 줄 (쪼살 'V자 어려우면 / 무조건 봐') · 주제는 첫 줄에 그대로
-        must = next(c for c in C if c["pid"] == "must")
+        # 판정 2회차: 주제가 4자 넘으면('발바닥 드래그 어려우면') 쇼츠 한 줄을 넘어 만들지 않음 → 짧은 주제로 확인
+        self.assertNotIn("must", pids)
+        C2, tp2 = tc.rule_candidates("드리블 기본기", ["드리블 실수하는 분들이 많은데"])
+        must = next(c for c in C2 if c["pid"] == "must")
         self.assertEqual((must["l2"], must["emph"]), ("무조건 봐", [1, 0, 5]))
-        self.assertIn(tp[0], must["l1"])
+        self.assertIn(tp2[0], must["l1"])
         self.assertIn("deceive", pids, "드래그 + 대사에 '속이' → '수비를 속이는 X'")
         self.assertEqual(next(c for c in C if c["pid"] == "deceive")["l2"], tp[0])
 
