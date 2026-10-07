@@ -40,12 +40,13 @@
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `qa` · `bundle` · `upload` · `hooks` · `takes` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
 
 - 의존은 항상 **바깥 → 안** 한 방향: `app` → `upload`·`bundle`·`thumb`·`style`·`qa`·`editor`·`hooks` → `core` → `updater` → (표준 라이브러리만)
+  - `source` → `core`, `hooks`(함수 안). `app`·`bundle`이 쓰고, `core`는 받은 영상 기록(`download`)·목록 채널 정보(`list_videos`)·`add_local` 때 **함수 안에서만** import한다 (순환이지만 import 시점이 달라 안전 · `core` 규칙의 예외는 이것과 `captions`·`updater`뿐).
   - `captions` → (표준 라이브러리만). `core`(받아쓰기)·`editor`(자막)·`app`(`/api/dict`)이 쓴다. `core`는 함수 안에서 import한다.
   - `app`은 `updater`를 함수 안에서 직접 import한다(업데이트 마무리·실행기 경유). `face`는 `thumb`을 거쳐서만 쓴다.
   - `upload` → `editor`, `hooks`, `core`
@@ -76,6 +77,7 @@
 | upload | `upload.py` | `build_kit`·`save_edits`·`load_kit`: 제목 후보·설명(템플릿)·챕터·태그·썸네일 확인 → `out/<…>_올리기.txt/.json`. 유튜브 글자 수·챕터 규칙 적용 |
 | hooks | `hooks.py` | 우리 채널 목록을 `channel_cache.json`에 기억, 제목 틀·풋살 주제어(`TERMS`)·조사 처리로 제목 후보 생성 |
 | takes | `takes.py` (2차 작업 중, 커밋 전) | `find_junk`·`is_slate`: 받아쓰기 구간만 보고 NG 테이크·슬레이트 말·말더듬 구간을 규칙으로 찾음 → `editor.recommend`가 가편집·쇼츠 후보에서 뺌 (`KNOWN_ISSUES.md` I-012). `find_fillers`: 단어 시각이 있으면 홀로 떨어진 추임새 단어 |
+| source | `source.py` | 보관함 영상의 출처(풋살사관학교·다른 채널·내 촬영본·모름) 판단과 기록(`videos/sources.json`, D-020). 받을 때 yt-dlp 채널 정보 기록, 예전 영상은 채널 목록 기억 → 뒤에서 천천히 영상 정보 조회(`start_backfill`), 직접 고르기(`set_manual`), 다른 채널은 채널별 묶음·고정 색(`channels`), 고르기 칩 개수(`summary`) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
 | 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 7단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
 
@@ -93,6 +95,7 @@
 - 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·올린 그림)
 - 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필). 영상별 이벤트(컷·줌 시각) 저장은 2차 작업에서 진행 중
 - 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
+- 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`
 - 사용자별 `~/.futsal-studio/`: `bin/deno.exe`, `models/*.onnx`, `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
 - 앱 폴더의 업데이트 상태: `.update_staging/`, `.rollback/v<이전>/{files/, rollback.json}`, `.update_pending`, `.update_result`, `.req_hash`, `.update_skip` (모두 `.gitignore`에 있음)

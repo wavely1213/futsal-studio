@@ -19,6 +19,7 @@ import core
 import editor
 import hooks
 import qa
+import source
 import style
 import thumb
 import upload
@@ -343,10 +344,11 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 lines = LOG[since:]
                 total = len(LOG)
+            local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
-                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": core.local_videos()})
+                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local)})
         if u.path == "/api/timeline":
             n = q["name"][0]
             return self._send(200, {"text": core.timeline(n), "events": core.timeline_events(n)})
@@ -402,10 +404,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "잘못된 파일 이름이에요"})
         ck = b.get("cookies") or None
         jobs = {
-            "/api/list": ("채널 불러오기", lambda: hooks.remember_listing(  # 우리 채널이면 제목 패턴용으로 저장 (올리기 키트)
-                core.list_videos(b.get("kind", "videos"), ck, b.get("url"), log), b.get("kind", "videos"), b.get("url"))),
+            "/api/list": ("채널 불러오기", lambda: source.annotate_listing(hooks.remember_listing(  # 우리 채널이면 제목 패턴용으로 저장 (올리기 키트)
+                core.list_videos(b.get("kind", "videos"), ck, b.get("url"), log), b.get("kind", "videos"), b.get("url")), b.get("url"))),
             "/api/style/learn": ("스타일 배우기", lambda: style.learn(b.get("name") or "내 스타일", b["names"], log)),
-            "/api/download": ("보관함에 담기", lambda: core.download(b["ids"], log, ck)),
+            "/api/download": ("보관함에 담기", lambda: source.remember_hints(b.get("sources")) or core.download(b["ids"], log, ck)),
             "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
@@ -541,6 +543,25 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"폴더를 열지 못했어요 · {e}")
                 return self._send(200, {"ok": False})
             return self._send(200, {"ok": True})
+        # ---- 영상 출처 (풋살사관학교 · 다른 채널 · 내 촬영본): 보관함에서 직접 고르기 · 모르는 영상 뒤에서 찾기 ----
+        if path == "/api/source":
+            try:
+                n = editor.safe_name(b.get("name"))
+                editor.video_path(n)
+                return self._send(200, {"ok": True, "source": source.set_manual(n, b.get("kind"), b.get("channel"), b.get("channelKey"))})
+            except FileNotFoundError:
+                return self._send(404, {"ok": False, "error": "보관함에서 영상을 찾지 못했어요. 목록을 새로 고친 뒤 다시 골라 주세요"})
+            except (ValueError, TypeError) as e:
+                return self._send(400, {"ok": False, "error": str(e) or "잘못된 파일 이름이에요"})
+            except OSError as e:
+                log(f"영상 출처를 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+        if path == "/api/source/check":  # 작업(start_job)이 아님: 다른 작업을 막지 않고 뒤에서 천천히
+            if b.get("stop"):
+                source.stop_backfill()
+            else:
+                source.start_backfill(log)
+            return self._send(200, {"ok": True, "running": source.backfill_running()})
         # ---- 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 (원본은 그대로) ----
         if path == "/api/bundle":
             try:
@@ -614,6 +635,8 @@ class Handler(BaseHTTPRequestHandler):
             threading.Timer(0.5, restart).start()
             return
         if path in jobs:
+            if path in ("/api/list", "/api/download"):
+                source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
             ok = start_job(name, fn)
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})

@@ -69,7 +69,8 @@ def remember_listing(rows, kind="videos", url=None):
     try:
         if rows and kind in ("videos", "shorts") and _own_channel(url):
             data = load_cache() or {}
-            data[kind] = [{"title": str(r.get("title") or ""), "views": int(r.get("views") or 0), "duration": r.get("duration") or 0}
+            data[kind] = [{"title": str(r.get("title") or ""), "views": int(r.get("views") or 0), "duration": r.get("duration") or 0,
+                           **({"id": str(r["id"])} if r.get("id") else {})}  # id: 예전에 받은 영상이 우리 채널 것인지 (source.from_channel_cache)
                           for r in rows if r.get("title")][:300]
             data["saved"] = time.strftime("%Y-%m-%d %H:%M")
             _write_json(cache_path(), data)

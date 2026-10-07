@@ -17,6 +17,7 @@
 |---|---|
 | `test_update.py` | `updater.py`(설치·되돌리기·실행기·selftest) · `release.sh` 지문 · `core` 다운로드 엔진/Deno |
 | `test_bundle.py` | `bundle.py` 촬영본 묶기 + `/api/bundle` |
+| `test_source.py` | `source.py` 영상 출처: 채널 주소 꼴별 판단 · 받을 때 기록(가짜 yt-dlp) · 예전 영상 찾기(채널 목록 기억·가짜 조회·멈추기) · 직접 고르기 · 채널별 묶기·개수·이름 바뀜·색 · 깨진 기록 파일 · 잠깐 못 읽은 기록 덮어쓰지 않기 · 제목 짐작(조회 뒤) · `/c/`·`/user/` 주소 채널 id 로 바꾸기 · 막히면 쉬기 · 이상한 기록 한 줄 · `/api/source`·`/api/state`·`/api/list` |
 | `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` |
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |

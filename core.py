@@ -127,16 +127,22 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
             flat += [x for x in e["entries"] if x]
         elif e:
             flat.append(e)
-    rows = [{"id": e["id"], "title": e.get("title") or "", "views": e.get("view_count") or 0,
-             "duration": e.get("duration") or 0, "kind": kind} for e in flat if e.get("id") and e.get("_type") != "playlist"]
+    import source
+    top = source.meta_of(info, channel_only=True)  # 채널 목록은 채널 정보가 바깥에만 있음 → 영상마다 붙여 출처(우리 채널·다른 채널)를 가림
+    rows = [dict({"id": e["id"], "title": e.get("title") or "", "views": e.get("view_count") or 0,
+                  "duration": e.get("duration") or 0, "kind": kind}, **dict(top, **source.meta_of(e, channel_only=True)))
+            for e in flat if e.get("id") and e.get("_type") != "playlist"]
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
 def download(ids, log, cookies_browser=None, max_height=1080):
-    cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}}
+    import source
+    cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}, "infos": {}}
 
     def hook(d):
         info = d.get("info_dict") or {}
+        if info.get("id"):  # 채널 정보(출처)는 다 받은 뒤 sources.json 에 기록
+            cur["infos"][info["id"]] = {k: info.get(k) for k in source.INFO_KEYS}
         fmts = info.get("requested_formats") or [info]
         sizes = [f.get("filesize") or f.get("filesize_approx") or 0 for f in fmts]
         fid = info.get("format_id")
@@ -181,6 +187,7 @@ def download(ids, log, cookies_browser=None, max_height=1080):
                     try:
                         ydl.download([vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"])
                         log("  담기 완료")
+                        _remember_source(cur, log)
                     except Exception as e:  # 한 개 실패해도 나머지 계속
                         if attempt == 1 and not retried and _blocked(e):
                             retried = True
@@ -202,6 +209,16 @@ def download(ids, log, cookies_browser=None, max_height=1080):
     return failed
 
 
+def _remember_source(cur, log):
+    """방금 받은 영상의 채널 정보 → sources.json (실패해도 받은 영상은 그대로)."""
+    import source
+    infos, cur["infos"] = list(cur["infos"].values()), {}
+    try:
+        source.record_download(infos)
+    except Exception as e:  # noqa: BLE001
+        log(f"  출처(채널)는 기록하지 못했어요 · {e}")
+
+
 def adir(name):
     """영상별 분석 폴더. Windows 는 폴더 이름 끝의 공백·점을 지워버리므로 미리 제거."""
     return ANALYSIS / (Path(name).stem.rstrip(" .") or "video")
@@ -221,6 +238,8 @@ def add_local(paths, log):
         src = Path(p)
         if src.suffix.lower() in VIDEO_EXTS and src.exists():
             shutil.copy2(src, VIDEOS / src.name)
+            import source
+            source.mark_footage(src.name, "local")
             log(f"추가 · {src.name}")
 
 

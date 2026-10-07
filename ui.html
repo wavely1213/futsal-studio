@@ -126,6 +126,46 @@
   .chip.ok { background: var(--brand-soft); color: var(--brand); }
   .chip.run { background: var(--brand); color: var(--brand-ink); font-variant-numeric: tabular-nums; }
   input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--brand); }
+  /* 영상 출처 배지: 풋살사관학교 · 다른 채널 · 내 촬영본 (보관함에서 눌러 바꿈) */
+  .src { display: inline-block; max-width: 100%; vertical-align: 1px; font-size: 11.5px; font-weight: 700; line-height: 1.6; padding: 0 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--cut-soft); color: var(--cut); }
+  .src.own { background: var(--brand-soft); color: var(--brand); }
+  .src.other { background: var(--peak-soft); color: var(--peak); }
+  .src.unknown { background: var(--surface); border: 1px dashed var(--ink-3); color: var(--ink-3); }
+  button.src { cursor: pointer; font-family: inherit; }
+  button.src::after { content: " ▾"; font-size: 9px; opacity: .7; }
+  button.src:hover { filter: brightness(.96); }
+  .vid .thumb .src { position: absolute; left: 8px; bottom: 8px; z-index: 1; max-width: calc(100% - 70px); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  .rows .sub .src { max-width: 260px; vertical-align: middle; }
+  .srcmenu { position: fixed; z-index: 7; min-width: 210px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 6px; display: grid; gap: 2px; }
+  .srcmenu button { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left; font-size: 13px; }
+  .srcmenu button:hover { background: var(--surface-2); }
+  .srcmenu button .ck { width: 14px; color: var(--brand); font-weight: 800; }
+  .srcmenu small { color: var(--ink-3); font-size: 11.5px; padding: 4px 10px 2px; }
+  .srcbar { margin: -4px 0 12px; display: grid; gap: 6px; }
+  /* 다른 채널: 채널마다 고정 색 (source.PALETTE = 8, 색 번호는 서버가 채널마다 정해 기억) */
+  :root { --c0: #c2410c; --c0s: #fff1e6; --c1: #1d4ed8; --c1s: #e8efff; --c2: #7c3aed; --c2s: #f1eafe; --c3: #be185d; --c3s: #fde8f1;
+          --c4: #0e7490; --c4s: #e2f4f8; --c5: #a16207; --c5s: #fdf4dc; --c6: #b91c1c; --c6s: #fdeaea; --c7: #4338ca; --c7s: #ecebfd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --c0: #ff9a5a; --c0s: #3a2416; --c1: #7aa2ff; --c1s: #1a2540; --c2: #b794ff; --c2s: #2a1f40; --c3: #ff7ab6; --c3s: #3a1a2b;
+            --c4: #5cc8e0; --c4s: #122c33; --c5: #f2c14e; --c5s: #352a12; --c6: #ff7b7b; --c6s: #3a1a1a; --c7: #9b9bff; --c7s: #22224a; }
+  }
+  .src.other.c0 { background: var(--c0s); color: var(--c0); } .src.other.c1 { background: var(--c1s); color: var(--c1); }
+  .src.other.c2 { background: var(--c2s); color: var(--c2); } .src.other.c3 { background: var(--c3s); color: var(--c3); }
+  .src.other.c4 { background: var(--c4s); color: var(--c4); } .src.other.c5 { background: var(--c5s); color: var(--c5); }
+  .src.other.c6 { background: var(--c6s); color: var(--c6); } .src.other.c7 { background: var(--c7s); color: var(--c7); }
+  .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ink-3); }
+  .dot.c0 { background: var(--c0); } .dot.c1 { background: var(--c1); } .dot.c2 { background: var(--c2); } .dot.c3 { background: var(--c3); }
+  .dot.c4 { background: var(--c4); } .dot.c5 { background: var(--c5); } .dot.c6 { background: var(--c6); } .dot.c7 { background: var(--c7); }
+  .filters .lbl { align-self: center; font-size: 12px; color: var(--ink-3); margin-right: 2px; }
+  #libHidden { font-size: 12px; color: var(--ink-3); }
+  #libHidden:empty { display: none; }
+  .filters button.part { border-color: var(--ink); color: var(--ink); }
+  .srcmenu .new { display: flex; gap: 6px; padding: 4px 6px; }
+  .srcmenu .new input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface); font-size: 13px; }
+  .srcmenu .new button { background: var(--brand); color: var(--brand-ink); padding: 6px 10px; font-weight: 700; }
+  .srcmenu .new button:hover { background: var(--brand); filter: brightness(1.05); }
+  .srcmenu .list { max-height: 220px; overflow: auto; display: grid; gap: 2px; }
+  #styleChans { margin: -4px 0 12px; }
 
   /* 편집점 */
   .filters { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -312,6 +352,7 @@
         <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
       </div>
+      <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
       <div class="card rows" id="local"></div>
       <!-- 2-2. 용어 사전: 받아쓰기가 풋살 용어·이름을 잘 알아듣게 -->
       <h2 class="sh">용어 사전</h2>
@@ -354,6 +395,7 @@
         <div class="sp"></div>
         <button class="btn primary" id="btnLearn" disabled>스타일 배우기</button>
       </div>
+      <div class="filters" id="styleChans" style="display:none"></div>
       <div class="card rows" id="styleSrc"></div>
       <h2 class="sh">배운 스타일</h2>
       <div class="grid styles" id="styleList"></div>
@@ -425,8 +467,31 @@ const ytId = name => (name.match(/_([A-Za-z0-9_-]{11})_/) || [])[1];
 const thumb = id => `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
 const niceName = n => ytId(n) ? n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "") : n;
 const segVal = id => $(id).querySelector(".on").dataset.v;
+// 영상 출처 (서버 source.describe): own 풋살사관학교 · other 다른 채널 · footage 내 촬영본 · unknown 모름
+const SRC = { own: "풋살사관학교", other: "다른 채널", footage: "내 촬영본" };
+const srcOf = v => (v && v.source) || { kind: "unknown" };
+// 다른 채널은 채널별로: channelKey(채널 묶음) · channel(이름) · color(0~7 고정 색 → .c0~.c7)
+const srcLabel = (s, short) => s.kind === "other" ? (s.channel ? (short ? s.channel : `다른 채널 · ${s.channel}`) : "다른 채널")
+  : SRC[s.kind] ? SRC[s.kind] + (s.guess && !short ? " (추정)" : "") : (s.checking ? "확인 중" : "알 수 없음");
+const colorCls = c => Number.isInteger(c) ? " c" + c : "";
+const srcBadge = (s, name, short) => {  // name 을 주면 눌러서 바꾸는 단추 (보관함) · short 면 다른 채널은 채널 이름만 (썸네일 위)
+  const tip = s.kind === "unknown" ? (s.checking ? "YouTube에서 이 영상의 채널을 확인하고 있어요" : "어느 채널 영상인지 알아내지 못했어요")
+    : (s.kind === "other" && s.channel ? `다른 채널 · ${s.channel} · ` : "") + (s.manual ? "직접 고른 출처예요" : s.guess ? "제목이 우리 채널 영상과 비슷해서 짐작했어요 · 인터넷이 되면 다시 확인해요" : s.kind === "footage" ? "직접 넣은 파일이에요" : "영상 정보로 알아낸 출처예요");
+  const cls = `src ${s.kind}${s.kind === "other" ? colorCls(s.color) : ""}`;
+  return name ? `<button class="${cls}" data-src="${esc(name)}" title="${esc(tip)} · 눌러서 바꿀 수 있어요">${esc(srcLabel(s, short))}</button>`
+    : `<span class="${cls}" title="${esc(tip)}">${esc(srcLabel(s, short))}</span>`;
+};
+const srcNote = v => { const s = srcOf(v); return s.kind === "unknown" ? "" : ` · ${s.kind === "other" ? s.channel || "다른 채널" : SRC[s.kind]}`; };  // 고르는 칸(select)용 짧은 표시
+const srcKey = v => { const s = srcOf(v); return `${srcLabel(s)}|${s.color ?? ""}`; };
+const chName = c => c.channel || "이름 모르는 채널";
+// 보관함 고르기: all · own · other · footage · unknown · "ch:<channelKey>"(다른 채널 중 한 채널)
+const srcMatch = (v, f) => { const s = srcOf(v); return f === "all" || (f.startsWith("ch:") ? s.kind === "other" && (s.channelKey || "") === f.slice(3) : s.kind === f); };
 
 let state = { local: [], job: null }, logSince = 0, pending = null, remote = [], selected = new Set(), lastLocalKey = "";
+let srcFilter = "all";
+const libSel = new Set();  // 보관함에서 고른 영상 (고르기 칩으로 숨겨진 영상도 기억)
+const libChecked = () => [...libSel];
+try { srcFilter = localStorage.getItem("libSrcFilter") || "all"; } catch (e) {}
 let events = [], filter = "all";
 
 async function api(path, body) {
@@ -448,6 +513,7 @@ function go(p) {
   document.querySelectorAll(".panel").forEach(s => s.classList.toggle("on", s.id === "p-" + p));
   if (p === "points") loadEvents();
   if (p === "style") loadStyles();
+  if (p === "library") checkSources();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
@@ -461,7 +527,7 @@ function renderRemote() {
   $("remoteEmpty").style.display = remote.length ? "none" : "block";
   $("remote").innerHTML = remote.map((r, i) => `
     <div class="vid ${selected.has(r.id) ? "sel" : ""} ${have.has(r.id) ? "have" : ""}" data-id="${r.id}">
-      <div class="thumb"><span class="ph">⚽</span><img src="${thumb(r.id)}" loading="lazy" alt="" onerror="this.remove()"><span class="rank">#${i + 1}</span>${r.duration ? `<span class="dur">${mmss(r.duration)}</span>` : ""}<span class="tick">✓</span></div>
+      <div class="thumb"><span class="ph">⚽</span><img src="${thumb(r.id)}" loading="lazy" alt="" onerror="this.remove()"><span class="rank">#${i + 1}</span>${r.source ? srcBadge(r.source, null, true) : ""}${r.duration ? `<span class="dur">${mmss(r.duration)}</span>` : ""}<span class="tick">✓</span></div>
       <div class="meta"><div class="title">${esc(r.title)}</div><div class="views">조회수 ${views(r.views)}</div></div>
     </div>`).join("");
   document.querySelectorAll(".vid").forEach(el => el.onclick = () => {
@@ -478,7 +544,8 @@ function loadRemote() {
 $("chUrl").onkeydown = e => { if (e.key === "Enter") loadRemote(); };
 const cookieOpt = () => $("cookies").checked ? "chrome" : null;
 $("btnList").onclick = loadRemote;
-$("btnDownload").onclick = () => job("/api/download", { ids: [...selected], cookies: cookieOpt() }, failed => {
+$("btnDownload").onclick = () => job("/api/download", { ids: [...selected], cookies: cookieOpt(),  // 출처를 함께 보냄 → 받기 전에도 보관함에 맞게 표시
+  sources: Object.fromEntries(remote.filter(r => selected.has(r.id) && r.source).map(r => [r.id, { ...r.source, channelId: r.channelId, channelUrl: r.channelUrl }])) }, failed => {
   const ok = selected.size - (failed || []).length;
   toast(failed && failed.length ? `${ok}개 담음 · ${failed.length}개 실패 (작업 기록 확인)` : `${ok}개를 보관함에 담았어요`);
   selected.clear(); renderRemote();
@@ -486,37 +553,127 @@ $("btnDownload").onclick = () => job("/api/download", { ids: [...selected], cook
 
 /* 2. 보관함 */
 function renderLocal() {
-  const key = JSON.stringify(state.local);
+  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + srcFilter;
   if (key === lastLocalKey) return;
   lastLocalKey = key;
-  const checked = new Set([...document.querySelectorAll(".lchk:checked")].map(c => c.value));
+  const have = new Set(state.local.map(v => v.name));
+  [...libSel].forEach(n => { if (!have.has(n)) libSel.delete(n); });  // 지웠거나 이름을 바꾼 영상은 빼기
+  const checked = libSel;
   $("libCount").textContent = state.local.length || "";
-  $("local").innerHTML = state.local.length ? state.local.map(v => {
+  renderSrcFilters();
+  const list = state.local.filter(v => srcMatch(v, srcFilter));
+  $("local").innerHTML = list.length ? list.map(v => {
     const id = ytId(v.name);
     const title = niceName(v.name);
     return `<div class="row">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${id ? "채널 영상" : "촬영 원본"} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span></div></div>
       ${v.analyzed ? `<span class="chip ok" data-chip="${esc(v.name)}" data-base="편집점 준비됨">편집점 준비됨</span>` : `<span class="chip" data-chip="${esc(v.name)}" data-base="아직 안 함">아직 안 함</span>`}
       ${v.analyzed ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
     </div>`;
-  }).join("") : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
-  document.querySelectorAll(".lchk").forEach(c => c.onchange = sync);
+  }).join("") : state.local.length ? `<div class="empty"><b>${esc(filterName())} 영상이 없어요</b>위에서 '전체'를 누르면 모든 영상이 보여요. 영상 이름 아래 출처 표시를 눌러 바꿀 수도 있어요.</div>`
+    : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
+  document.querySelectorAll(".lchk").forEach(c => c.onchange = () => { c.checked ? libSel.add(c.value) : libSel.delete(c.value); sync(); });
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEditor(b.dataset.edit));
+  document.querySelectorAll("#local [data-src]").forEach(b => b.onclick = e => { e.stopPropagation(); srcMenu(b); });
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
   if (remote.length) renderRemote();
   sync();
 }
+/* 2-0. 영상 출처: 고르기 칩(개수) · 출처 바꾸기 메뉴 · 모르는 영상은 뒤에서 확인 */
+function filterName() {
+  if (srcFilter.startsWith("ch:")) { const c = ((state.sources || {}).channels || []).find(c => "ch:" + c.channelKey === srcFilter); return c ? chName(c) : "그 채널"; }
+  return SRC[srcFilter] || (srcFilter === "unknown" ? "출처를 모르는" : "");
+}
+function renderSrcFilters() {
+  const S = state.sources || { all: state.local.length, channels: [] }, chans = S.channels || [];
+  const known = srcFilter === "all" || (srcFilter.startsWith("ch:") ? chans.some(c => "ch:" + c.channelKey === srcFilter) : !!SRC[srcFilter] || (srcFilter === "unknown" && S.unknown > 0));
+  if (state.sources && !known) srcFilter = srcFilter.startsWith("ch:") && S.other ? "other" : "all";  // 고른 채널 영상이 없어졌으면
+  const main = [["all", "전체", S.all], ...Object.entries(SRC).map(([k, l]) => [k, l, S[k] || 0]), ...(S.unknown ? [["unknown", "알 수 없음", S.unknown]] : [])];
+  $("srcFilters").innerHTML = main.map(([k, l, c]) =>
+    `<button class="${srcFilter === k ? "on" : ""}${k === "other" && srcFilter.startsWith("ch:") ? " part" : ""}" data-sf="${k}">${l} ${c}</button>`).join("");
+  $("srcChans").style.display = chans.length ? "" : "none";
+  $("srcChans").innerHTML = chans.length ? `<span class="lbl">다른 채널별</span>` + chans.map(c =>
+    `<button class="${srcFilter === "ch:" + c.channelKey ? "on" : ""}" data-sf="ch:${esc(c.channelKey)}" title="${esc(chName(c))} 영상만 보기"><i class="dot${colorCls(c.color)}"></i>${esc(chName(c))} ${c.count}</button>`).join("") : "";
+  document.querySelectorAll("[data-sf]").forEach(b => b.onclick = () => {
+    srcFilter = b.dataset.sf;
+    try { localStorage.setItem("libSrcFilter", srcFilter); } catch (e) {}
+    lastLocalKey = ""; renderLocal();
+  });
+}
+function closeSrcMenu() { const m = document.querySelector(".srcmenu"); if (m) m.remove(); }
+function srcMenu(btn) {
+  const open = document.querySelector(".srcmenu");
+  closeSrcMenu();
+  if (open && open.dataset.name === btn.dataset.src) return;  // 같은 배지를 다시 누르면 닫기만
+  const name = btn.dataset.src, v = state.local.find(x => x.name === name), s = srcOf(v);
+  const chans = ((state.sources || {}).channels || []).filter(c => c.channelKey);
+  const m = document.createElement("div");
+  m.className = "srcmenu"; m.dataset.name = name; m.dataset.t = Date.now();
+  const opt = (k, l, on, ck) => `<button data-sk="${k}"${ck ? ` data-ck="${esc(ck)}"` : ""}><span class="ck">${on ? "✓" : ""}</span>${l}</button>`;
+  m.innerHTML = `<small>이 영상의 출처</small>${opt("own", "풋살사관학교 (우리 채널)", s.kind === "own")}`
+    + `<small>다른 채널 · 채널을 골라 주세요</small><div class="list">`
+    + (chans.length ? chans.map(c => opt("other", `<i class="dot${colorCls(c.color)}"></i>${esc(chName(c))}`, s.kind === "other" && s.channelKey === c.channelKey, c.channelKey)).join("")
+      : opt("other", "다른 채널", s.kind === "other"))
+    + `</div><button data-new><span class="ck">+</span>새 채널 이름 적기</button>`
+    + opt("footage", "내 촬영본", s.kind === "footage")
+    + (s.manual ? `<button data-sk="auto"><span class="ck"></span>자동으로 (${esc(s.auto === "unknown" ? "알 수 없음" : SRC[s.auto])})</button>` : "");
+  document.body.appendChild(m);
+  const place = () => {
+    const r = btn.getBoundingClientRect(), h = m.offsetHeight, w = m.offsetWidth;
+    m.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+    m.style.top = (r.bottom + 4 + h > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  };
+  place();
+  const save = async (body, same) => {
+    closeSrcMenu();
+    if (same) return;
+    const j = await api("/api/source", { name, ...body }).catch(() => ({}));
+    if (!j.ok) { toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return; }
+    const cur = state.local.find(x => x.name === name);
+    if (cur) cur.source = j.source;
+    lastLocalKey = ""; renderLocal(); poll();  // 고르기 칩 개수는 서버에서 다시
+    toast(`'${niceName(name).slice(0, 24)}' → ${srcLabel(j.source)}${body.kind === "auto" ? " (자동)" : ""}`);
+  };
+  m.querySelectorAll("[data-sk]").forEach(b => b.onclick = () => {
+    const k = b.dataset.sk, ck = b.dataset.ck;
+    save(ck ? { kind: k, channelKey: ck } : { kind: k }, k === s.kind && (k !== "other" || !ck || ck === s.channelKey) && (k !== "auto"));
+  });
+  m.querySelector("[data-new]").onclick = e => {
+    e.stopPropagation();
+    const box = document.createElement("div");
+    box.className = "new";
+    box.innerHTML = `<input maxlength="80" placeholder="채널 이름 (예: 슛포러브)"><button>저장</button>`;
+    e.currentTarget.replaceWith(box);
+    const inp = box.querySelector("input");
+    const go = () => { const c = inp.value.trim(); if (!c) { inp.focus(); return; } save({ kind: "other", channel: c }); };
+    box.querySelector("button").onclick = go;
+    inp.onkeydown = ev => { if (ev.key === "Enter") go(); };
+    place(); inp.focus();
+  };
+}
+document.addEventListener("click", e => { if (!e.target.closest(".srcmenu, [data-src]")) closeSrcMenu(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSrcMenu(); });
+// 목록을 굴리면 메뉴를 닫음 (단, 배지를 누르며 화면이 배지 쪽으로 움직인 직후의 스크롤은 무시)
+const closeOnScroll = () => { const m = document.querySelector(".srcmenu"); if (m && Date.now() - (+m.dataset.t || 0) > 300) closeSrcMenu(); };
+$("local").addEventListener("scroll", closeOnScroll);
+document.querySelector(".main").addEventListener("scroll", closeOnScroll);
+let srcChecked = 0;
+function checkSources() {  // 예전에 받아 출처를 모르는 영상: 서버가 뒤에서 천천히 확인 (화면은 기다리지 않음 · 10분에 한 번까지)
+  if (!state.local.some(v => srcOf(v).kind === "unknown" && !srcOf(v).checking) || Date.now() - srcChecked < 600e3) return;
+  srcChecked = Date.now();
+  api("/api/source/check", {}).catch(() => {});
+}
 function fillSelect(id, list) {
   const cur = $(id).value;
-  $(id).innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}</option>`).join("") : `<option value="">(영상 없음)</option>`;
+  $(id).innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${srcNote(v)}</option>`).join("") : `<option value="">(영상 없음)</option>`;
   if (list.some(v => v.name === cur)) $(id).value = cur;
 }
 $("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요"); };
 $("btnAnalyze").onclick = () => {
-  const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
+  const names = libChecked();
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
   if (again && !confirm(`이미 편집점을 찾은 영상이 ${again}개 있어요.\n다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, () => { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); });
@@ -529,6 +686,7 @@ function bundleMarked() { try { return sessionStorage.getItem("bundleJob") === "
 function bundleDone(res) {
   bundleMark(false);
   if (!res || !res.name) return;
+  libSel.clear();
   document.querySelectorAll(".lchk:checked").forEach(c => (c.checked = false));
   const nm = `'${res.name.replace(/\.[^.]+$/, "")}'`;
   if (res.analyze_error) {
@@ -540,7 +698,7 @@ function bundleDone(res) {
   go("cut");
 }
 function syncBundle(busy) {
-  const n = document.querySelectorAll(".lchk:checked").length;
+  const n = libSel.size;
   $("btnBundle").disabled = busy || n < 2;
   $("btnBundle").textContent = n >= 2 ? `한 영상으로 묶기 (${n})` : "한 영상으로 묶기";
   // 편집실·썸네일에 다녀와 화면이 새로 열려도, 묶는 중이면 끝날 때 알림을 이어서 보여 줌
@@ -553,7 +711,7 @@ if (bundleMarked()) api("/api/state?since=999999999").then(s => {
   if (s.result && s.result.mode && s.result.added) bundleDone(s.result); else bundleMark(false);
 }).catch(() => {});
 $("btnBundle").onclick = () => {
-  const names = [...document.querySelectorAll(".lchk:checked")].map(c => c.value);
+  const names = libChecked();
   if (names.length < 2) return;
   const mb = state.local.filter(v => names.includes(v.name)).reduce((s, v) => s + v.size_mb, 0);
   const size = mb >= 1000 ? (mb / 1000).toFixed(1) + "GB" : Math.max(1, Math.round(mb)) + "MB";
@@ -624,9 +782,22 @@ function renderStyleSrc() {
   $("styleSrc").innerHTML = state.local.length ? state.local.map(v => { const id = ytId(v.name); return `<div class="row">
       <input type="checkbox" class="schk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(niceName(v.name))}</div><div class="sub">${v.analyzed ? "받아쓰기 있음 (말 빠르기까지 배워요)" : "화면·소리로 배워요"}</div></div><span></span><span></span></div>`; }).join("")
+      <div style="min-width:0"><div class="name">${esc(niceName(v.name))}</div><div class="sub">${srcBadge(srcOf(v))} · ${v.analyzed ? "받아쓰기 있음 (말 빠르기까지 배워요)" : "화면·소리로 배워요"}</div></div><span></span><span></span></div>`; }).join("")
     : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 따라 하고 싶은 유튜버 영상을 먼저 담아 주세요.</div>`;
   document.querySelectorAll(".schk").forEach(c => (c.onchange = syncStyle));
+  // 다른 채널 영상을 채널별로 한 번에 고르기 (다시 누르면 그 채널 영상 고르기를 풂)
+  const chans = ((state.sources || {}).channels || []).filter(c => c.channelKey);
+  $("styleChans").style.display = chans.length ? "" : "none";
+  $("styleChans").innerHTML = chans.length ? `<span class="lbl">채널별로 한 번에</span>` + chans.map(c =>
+    `<button data-sc="${esc(c.channelKey)}" title="이 채널 영상 모두 고르기"><i class="dot${colorCls(c.color)}"></i>${esc(chName(c))} 영상 모두 고르기 (${c.count})</button>`).join("") : "";
+  document.querySelectorAll("[data-sc]").forEach(b => b.onclick = () => {
+    const names = new Set(state.local.filter(v => srcMatch(v, "ch:" + b.dataset.sc)).map(v => v.name));
+    const boxes = [...document.querySelectorAll(".schk")].filter(c => names.has(c.value)), all = boxes.length && boxes.every(c => c.checked);
+    boxes.forEach(c => (c.checked = !all));
+    if (!all && !$("styleName").value.trim()) $("styleName").value = `${b.textContent.replace(/ 영상 모두 고르기.*$/, "")} 스타일`;
+    syncStyle();
+    toast(all ? "그 채널 영상 고르기를 풀었어요" : `${boxes.length}개 영상을 골랐어요`);
+  });
   syncStyle();
 }
 function syncStyle() { const n = document.querySelectorAll(".schk:checked").length; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
@@ -735,12 +906,12 @@ $("btnCopy").onclick = async () => {
 function renderThList() {
   const list = state.local;
   $("thEmpty").style.display = list.length ? "none" : "block";
-  const key = JSON.stringify(list.map(v => v.name));
+  const key = JSON.stringify(list.map(v => [v.name, srcKey(v)]));
   if ($("thList").dataset.key === key) return;
   $("thList").dataset.key = key;
   $("thList").innerHTML = list.map(v => { const id = ytId(v.name); return `
     <div class="vid" data-th="${esc(v.name)}">
-      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}${srcBadge(srcOf(v), null, true)}</div>
       <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">썸네일 만들기 →</div></div>
     </div>`; }).join("");
   document.querySelectorAll("[data-th]").forEach(el => el.onclick = () => { location.href = "/thumb?name=" + encodeURIComponent(el.dataset.th); });
@@ -748,12 +919,12 @@ function renderThList() {
 function renderEdList() {
   const list = state.local.filter(v => v.analyzed);
   $("edEmpty").style.display = list.length ? "none" : "block";
-  const key = JSON.stringify(list.map(v => v.name));
+  const key = JSON.stringify(list.map(v => [v.name, srcKey(v)]));
   if ($("edList").dataset.key === key) return;
   $("edList").dataset.key = key;
   $("edList").innerHTML = list.map(v => { const id = ytId(v.name); return `
     <div class="vid" data-ed="${esc(v.name)}">
-      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
+      <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}${srcBadge(srcOf(v), null, true)}</div>
       <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">편집실 열기 →</div></div>
     </div>`; }).join("");
   document.querySelectorAll("[data-ed]").forEach(el => el.onclick = () => openEditor(el.dataset.ed));
@@ -766,7 +937,9 @@ function sync() {
   $("btnList").disabled = busy;
   $("btnDownload").disabled = busy || !selected.size;
   $("btnDownload").textContent = selected.size ? `보관함에 담기 (${selected.size})` : "보관함에 담기";
-  const nl = document.querySelectorAll(".lchk:checked").length;
+  const nl = libSel.size;
+  const shown = new Set([...document.querySelectorAll(".lchk")].map(c => c.value)), hid = [...libSel].filter(n => !shown.has(n)).length;
+  $("libHidden").textContent = hid ? `고른 영상 ${nl}개 중 ${hid}개는 지금 숨겨져 있어요 ('전체'를 누르면 보여요)` : "";
   $("btnAnalyze").disabled = busy || !nl;
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
@@ -819,6 +992,7 @@ async function poll() {
   state.job = s.job;
   state.progress = s.progress;
   state.local = s.local;
+  state.sources = s.sources;
   if (wasBusy && !s.job && pending) {
     const f = pending; pending = null;
     if (s.error) { toast("문제가 생겼어요. 왼쪽 아래 '작업 기록 보기'에서 내용을 확인해 주세요"); $("drawer").classList.add("open"); }
@@ -831,6 +1005,7 @@ async function poll() {
   state.sKey = sKey;
   showBusy();
   renderLocal();
+  if ($("p-library").classList.contains("on")) checkSources();
   sync();
 }
 
@@ -873,11 +1048,11 @@ checkUpdate();
   const edits = () => ({ title: $("upTitle").value, description: $("upDesc").value, tags: $("upTags").value });
 
   function fillVids() {
-    const list = state.local, key = JSON.stringify(list.map(v => [v.name, v.analyzed]));
+    const list = state.local, key = JSON.stringify(list.map(v => [v.name, v.analyzed, srcNote(v)]));
     if (key === up.vkey) return false;
     up.vkey = key;
     const cur = up.name || (up.ret && up.ret.name) || $("upVid").value;
-    $("upVid").innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${v.analyzed ? "" : " (편집점 찾기 전)"}</option>`).join("")
+    $("upVid").innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${srcNote(v)}${v.analyzed ? "" : " (편집점 찾기 전)"}</option>`).join("")
       : `<option value="">(보관함이 비어 있어요)</option>`;
     if (list.some(v => v.name === cur)) $("upVid").value = cur;
     else if (list.length) $("upVid").value = (list.find(v => v.analyzed) || list[0]).name;

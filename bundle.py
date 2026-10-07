@@ -6,6 +6,7 @@
 - 다르면 가장 많은 fps·방향으로 맞춰 H.264 고정 fps 로 다시 만든 뒤 이어 붙임
 - 소리 없는 파일은 무음을 채움
 - 결과: videos/묶음_YYYYMMDD_<제목>.mp4 + analysis/<이름>/bundle.json [{file, start, dur}] · 원본은 그대로 둠
+  묶은 영상의 출처는 '내 촬영본' (source.mark_footage)
 ffprobe 가 없으므로 정보는 ffmpeg -i 의 출력으로 읽는다.
 """
 import json
@@ -20,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import core
+import source
 
 LABEL = "한 영상으로 묶는 중"
 TMP_PREFIX = ".render_bundle_"  # 완성본 폴더 안 임시 폴더 (앱이 갑자기 꺼져 남으면 다음 실행 때 정리됨)
@@ -633,6 +635,7 @@ def make_bundle(names, title, log):
             raise
     finally:
         _rmtree(tmp)
+    source.mark_footage(name, "bundle")
     size = dest.stat().st_size
     total = sum(durs)
     # 다 만든 파일 확인 (길이가 크게 다르면 기록에 남김)
