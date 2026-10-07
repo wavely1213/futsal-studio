@@ -41,7 +41,7 @@ FAIL = re.compile(r"아깝|놓쳤|실수|안 ?돼|아이고|아이구|빗나|안
 SURPRISE = re.compile(r"(?:^|[\s,.!?])(?:와|우와|와우|대박|헐|미쳤|오오+|어\?!|어머)(?:[\s,.!?~]|$)")
 JOKE = re.compile(r"농담|ㅋㅋ|웃기|장난(?:이|입|이에|이고)|제가 원래|저도 .{0,12}못|저도 몰라")
 LAUGH_THR, CHEER_THR = 0.12, 0.1   # YAMNet 웃음·환호 점수: 현장 웃음은 말소리에 섞여 낮게 나옴 (말만 있는 곳은 0.01 안팎)
-EMPH_MORE = ("무조건", "절대", "생명", "핵심", "중요", "차이", "비밀", "비결", "꼭", "달라", "완벽", "정확", "제일", "가장", "포인트")  # 앞의 것부터
+EMPH_MORE = ("무조건", "절대", "생명", "핵심", "중요", "차이", "비밀", "비결", "꼭", "달라", "완벽", "정확", "제일", "가장")  # 앞의 것부터
 COUNT = re.compile(r"하나[,\s]+둘[,\s]+셋")
 SECTION = re.compile(r"^(?:자[,\s]*)?(?:첫 ?번째|두 ?번째|세 ?번째|네 ?번째|다음은|다음으로|이번엔|이번에는|그 ?다음|마지막으로|자 이제)")
 CLOSING = re.compile(r"오늘은 여기까지|오늘 영상은 여기|감사합니다|구독|다음 시간|다음 영상")
@@ -468,8 +468,8 @@ def moments(sig, segs=None):
             lab, sc = _emph_clause(txt)
         if lab:
             lab = _emph_short(LEAD.sub("", lab).strip() or lab, txt)
-        if lab and BOUND.match(lab):  # '번째 슈팅.'처럼 앞말이 잘린 조각은 띄우지 않음
-            lab = None
+        if lab and (BOUND.match(lab) or SECTION.search(txt) or _norm_txt(lab) in ("포인트", "팁")):
+            lab = None  # '번째 슈팅.' 같은 잘린 조각 · 장 나눔 말('첫 번째 포인트')은 상황 자막이 맡음 · '포인트!'만은 뜻이 없음
         if lab:
             key = lab.rstrip("!").split()[0]
             t = next((w0 for w0, _, w, j in words if j == k and w.replace(" ", "").startswith(key[:2])), a)
