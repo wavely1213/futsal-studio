@@ -142,8 +142,8 @@ class FakeYDL:
             for h in self.opts["progress_hooks"]:
                 h({"status": "downloading", "info_dict": info, "downloaded_bytes": 5, "total_bytes": 10})
                 h({"status": "finished", "info_dict": info})
-            Path(self.opts["outtmpl"].replace("%(upload_date)s", "20240101").replace("%(id)s", vid)
-                 .replace("%(title).60B", "패스 잘하는 법").replace("%(ext)s", "mp4")).write_bytes(b"\0")
+            (Path(self.opts.get("paths", {}).get("home", "")) / self.opts["outtmpl"].replace("%(upload_date)s", "20240101")  # 폴더는 paths
+             .replace("%(id)s", vid).replace("%(title).60B", "패스 잘하는 법").replace("%(ext)s", "mp4")).write_bytes(b"\0")
 
     def close(self):
         pass

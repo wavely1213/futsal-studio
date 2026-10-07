@@ -344,7 +344,7 @@ def _adopt(data):
         except OSError:
             continue
         for p in items:
-            if p.is_file() and p.suffix.lower() in core.VIDEO_EXTS and p.name not in data["files"]:
+            if p.is_file() and core.is_video_file(p.name) and p.name not in data["files"]:
                 found.append((p.name, d.name, folders.get(d.name)))
     gone = [n for n, r in data["files"].items()  # 보관함으로 되돌렸는데 기록을 못 지운 것
             if r.get("how") == "move" and not r.get("pruned") and not path_of(n, r).is_file() and (core.VIDEOS / n).is_file()]
@@ -366,7 +366,7 @@ def _adopt(data):
     if not _FETCHING[0] and inc.is_dir():
         for p in sorted(inc.iterdir()):
             vid = source.video_id(p.name)
-            if p.is_file() and p.suffix.lower() in core.VIDEO_EXTS and vid:
+            if p.is_file() and core.is_video_file(p.name) and vid:
                 st, _ = _settle(vid, {}, {}, lambda *a: None)
                 changed = changed or st == "new"
     return changed
@@ -494,7 +494,7 @@ def projects_using(names):
     out = {}
     if not want:
         return out
-    stems = {_stem(n): n for n in want}
+    stems = {core.adir(n).name: n for n in want}  # 프로젝트 파일 이름 = 영상의 분석 폴더 이름 (core.library_dir)
     try:
         files = sorted((core.WORK / "projects").glob("*.json"))
     except OSError:
@@ -613,7 +613,7 @@ def _move_one(n, src, desc, sdata):
             k = _register(data, meta) if meta else _register(data, {}, key="")
         return k, data["channels"][k]["folder"]
     key, folder = _update(chan)
-    adir = core.ANALYSIS / _stem(n)
+    adir = core.library_dir(n)
     dst, adst = root() / folder / n, root() / folder / ANALYSIS_DIR / _stem(n)
     if dst.exists():
         raise RefsError("학습용 폴더에 같은 이름의 파일이 이미 있어요")
@@ -706,7 +706,7 @@ def restore(names, log=print):
         if not src or not src.is_file():
             failed.append({"name": n, "error": "영상 파일이 없어요 (파일을 지운 영상은 되돌릴 수 없어요)"})
             continue
-        dst, adir, adst = core.VIDEOS / n, adir_of(n, rec), core.ANALYSIS / _stem(n)
+        dst, adir, adst = core.VIDEOS / n, adir_of(n, rec), core.library_dir(n)
         if dst.exists():
             failed.append({"name": n, "error": "보관함에 같은 이름의 영상이 이미 있어요"})
             continue
@@ -809,7 +809,7 @@ def prune(names, log=print):
 def _staged(vid):
     inc = root() / INCOMING
     for p in sorted(inc.glob(f"*_{vid}_*")) if inc.is_dir() else []:
-        if p.suffix.lower() in core.VIDEO_EXTS and source.video_id(p.name) == vid:
+        if core.is_video_file(p.name) and source.video_id(p.name) == vid:  # 받다 남은 .f137.mp4(소리 없음)는 빼고
             return p
     return None
 
@@ -960,7 +960,7 @@ def _learn(keys, log, style_name=None, prune_after=False):
         if not names:
             continue
         cname = (data["channels"].get(key) or {}).get("name") or "학습용"
-        sname = re.sub(r'[\\/:*?"<>|]', "", style_name or f"{cname} 스타일").strip(" .") or "내 스타일"
+        sname = style.clean_style_name(style_name or f"{cname} 스타일")
         try:  # 같은 이름의 스타일이 있으면 그때 배운 영상 중 아직 쓸 수 있는 것도 함께
             old = json.loads((style.STYLES / f"{sname}.json").read_text(encoding="utf-8")).get("source")
             old = [x for x in (old if isinstance(old, list) else [old]) if isinstance(x, str)]

@@ -225,6 +225,9 @@ class Base(unittest.TestCase):
         p = mock.patch.object(self.core, "run", side_effect=fake_run)
         p.start()
         self.addCleanup(p.stop)
+        p = mock.patch.object(self.core, "_engine_needs_newer_python", return_value=None)  # PyPI 에 묻지 않게 (인터넷 없이)
+        p.start()
+        self.addCleanup(p.stop)
         p = mock.patch.dict(os.environ, {"FUTSAL_RESTART": "1"})  # 다른 사람이 8765 에 앱을 켜 둬도 확인을 건너뛰지 않게
         p.start()
         self.addCleanup(p.stop)

@@ -192,7 +192,7 @@ class RefreshRobust(Base):
 
             def __exit__(self, *a):
                 return False
-        with mock.patch.object(urllib.request, "urlopen", lambda req, timeout=None: Resp()):
+        with mock.patch.object(urllib.request, "urlopen", lambda req, timeout=None, context=None: Resp()):
             self.assertEqual(strategy.fetch_rss(A), (None, "RSS 를 받지 못했어요"))
         with mock.patch.object(urllib.request, "urlopen", side_effect=OSError("down")):
             self.assertEqual(strategy.fetch_rss(A), (None, strategy.NET_MSG))

@@ -9,6 +9,7 @@
   → 바뀔 파일을 .rollback/v<이전 버전>/ 에 복사 → 하나씩 교체(Windows 잠금 대비 재시도) → 없어진 파일 지우기
   → .update_pending 표시 → (core) 구성요소 목록이 바뀌었을 때만 pip
 """
+import contextlib
 import hashlib
 import http.client
 import json
@@ -21,7 +22,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -29,9 +32,13 @@ from pathlib import Path, PurePosixPath
 APP_DIR = Path(__file__).resolve().parent
 STAGING, ROLLBACK, PENDING, RESULT, REQ_HASH = ".update_staging", ".rollback", ".update_pending", ".update_result", ".req_hash"
 SKIP = ".update_skip"  # 이 PC에서 열리지 않아 되돌린 버전 (더 새 버전이 나올 때까지 다시 권하지 않음)
+REQ_PENDING = ".req_pending"  # 켜져 있는 앱이 쓰는 파일(.pyd·.dll) 때문에 못 한 구성요소 설치 → 다음 실행 때 앱보다 먼저
+LAUNCH_LOCK = ".launch_lock"  # 아이콘을 거의 동시에 여러 번 눌러도 확인·되돌리기·구성요소 설치는 한 번에 하나
+LOCK_FRESH = 30   # 이 시간(초) 안에 고친 잠금 = 다른 실행기가 아직 쓰는 중 (쓰는 쪽이 5초마다 고침)
+PIP_TIMEOUT = 1800
 KEEP = {"config.json"}  # 사용자 설정: 덮어쓰지도 지우지도 않음 (없을 때만 넣음)
 NEVER = {".venv", "venv", ".git", STAGING, ROLLBACK, "__pycache__"}  # 앱 폴더 안이라도 손대지 않는 폴더
-INTERNAL = {PENDING, RESULT, REQ_HASH, SKIP}
+INTERNAL = {PENDING, RESULT, REQ_HASH, SKIP, REQ_PENDING, LAUNCH_LOCK}
 IMPORT_CHECK = "import app, core, editor, thumb, style, qa"
 GRACE = 60       # 업데이트 직후 첫 실행은 (백신 검사·창 준비로) 오래 걸릴 수 있음 → 그사이 아이콘을 또 눌러도 실패로 세지 않음
 MAX_FAILED = 2   # 새 버전이 (GRACE 초가 지나도) 이만큼 안 켜졌으면 다음 실행 때 되돌림
@@ -70,6 +77,168 @@ def _retry(fn, *a, tries=12):
                 raise
             time.sleep(delay)
             delay = min(delay * 2, 1.0)
+
+
+# ---------- 여러 모듈이 같이 쓰는 Windows 대비 도구 (표준 라이브러리만 · core·thumb·editor·style 등이 부름) ----------
+
+REPLACE_SECS = 8.0   # 보통 저장: 백신·OneDrive·탐색기·검색 색인이 막 만든 파일을 잠깐 잡는 동안 기다리는 시간
+SETTLE_SECS = 60.0   # 막 만든 큰 영상(내보내기·묶기): Defender·V3·알약이 오래 검사함 (refs.SETTLE_SECS 와 같은 이유)
+
+
+def replace_retry(src, dst, secs=None):
+    """os.replace + Windows 잠금(PermissionError: WinError 5·32)이면 점점 길게 기다리며 다시 (secs 초까지 · 기본 REPLACE_SECS).
+    읽기 전용 표시가 붙은 대상은 풀고 다시. 다른 오류(없는 파일·다른 드라이브·디스크 가득)는 바로 올려 보냄."""
+    end, delay = time.monotonic() + (REPLACE_SECS if secs is None else secs), 0.05
+    while True:
+        try:
+            return os.replace(src, dst)
+        except PermissionError:
+            _unlock(dst)
+            if time.monotonic() + delay > end:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
+def write_atomic(path, data, encoding="utf-8", fsync=False, secs=None, mode=None):
+    """임시 파일(프로세스·스레드마다 다른 이름)에 다 쓴 뒤 바꿔 끼움 → 쓰다 꺼지거나 디스크가 차도 예전 파일은 그대로.
+    data: 글(str) 또는 바이트. mode: 바꿔 끼우기 전에 임시 파일 권한 (비밀 파일은 0o600 · Windows 는 읽기 전용 표시만 바뀌므로 무시).
+    실패하면 임시 파일을 지우고 오류를 그대로 올려 보냄."""
+    path = Path(path)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}_{threading.get_ident()}.tmp")
+    try:
+        if isinstance(data, bytes):
+            f = open(tmp, "wb")
+        else:
+            f = open(tmp, "w", encoding=encoding)  # Path.write_text 와 같게 (Windows 는 줄바꿈 \r\n)
+        with f:
+            f.write(data)
+            if fsync:
+                f.flush()
+                os.fsync(f.fileno())
+        if mode is not None:
+            try:
+                os.chmod(tmp, mode)
+            except OSError:
+                pass
+        replace_retry(tmp, path, secs)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return path
+
+
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def awake_state(on, prev=None):
+    """Windows: 이 스레드가 PC 를 깨어 있게 쥠(on → 들어올 때 상태) · 놓음(그 상태 prev 로). 다른 운영체제는 아무 일도 안 함 (None).
+    SetThreadExecutionState 를 부르는 곳은 이것 하나 — 앱은 core.keep_awake(core._keep_awake 가 이것), 실행기는 _awake (D-034).
+    Windows 는 이 상태를 스레드마다 셈 (어느 스레드든 쥐고 있으면 깨어 있음)."""
+    import ctypes
+    try:
+        f = ctypes.windll.kernel32.SetThreadExecutionState
+    except AttributeError:
+        return None
+    f.restype, f.argtypes = ctypes.c_uint, [ctypes.c_uint]
+    if on:
+        return f(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) or None
+    f(prev if prev and prev & ES_CONTINUOUS else ES_CONTINUOUS)
+    return None
+
+
+@contextlib.contextmanager
+def _awake():
+    """실행기: 업데이트 마무리(이전 앱 기다리기·미룬 구성요소 설치·새 버전 열리는지 확인) 동안 PC 가 잠들지 않게.
+    이전 앱(작업·휴대폰으로 보기 '켜 둔 동안 항상')이 쥐던 것은 그 프로세스가 끝나면 풀리므로 여기서 이어 쥠 (D-034)."""
+    prev = awake_state(True)
+    try:
+        yield
+    finally:
+        awake_state(False, prev)
+
+
+def py_env(**extra):
+    """파이썬 자식 프로세스(pip·확인 실행)의 환경: 출력을 UTF-8 로 (Windows 3.10~3.14 는 파이프에 cp949 로 써서
+    한국어 오류·한글 경로가 '���' 로 깨짐 · PEP 686 이전)."""
+    return dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", **extra)
+
+
+def _ssl_context():
+    """Python 3.13+ 의 엄격한 인증서 검사(VERIFY_X509_STRICT)만 끔: 백신 'HTTPS 검사'·회사 프록시의 인증서가
+    규격을 조금 벗어나도 3.12 처럼 받게 (인증서 사슬·주소 확인은 그대로)."""
+    import ssl
+    ctx = ssl.create_default_context()
+    strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+    if strict:
+        ctx.verify_flags &= ~strict
+    return ctx
+
+
+def urlopen(req, timeout):
+    """업데이트·Deno·모델 받기에 쓰는 urlopen (위 인증서 설정으로)."""
+    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+
+
+# ---------- config.json (사람이 메모장으로 고치는 파일) ----------
+
+def _decode_text(raw):
+    """메모장 저장 방식: UTF-8(BOM 있든 없든) → 아니면 ANSI(cp949)."""
+    for enc in ("utf-8-sig", "cp949"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def _has_ctrl(d):
+    """글자 값 안에 줄바꿈·탭 같은 제어 문자 → 'D:\\new' 처럼 역슬래시를 하나만 써서 잘못 읽힌 것."""
+    return isinstance(d, dict) and any(isinstance(v, str) and re.search(r"[\x00-\x1f]", v) for v in d.values())
+
+
+def loads_tolerant(raw):
+    """사람이 고친 JSON 읽기: BOM·ANSI(cp949)·이스케이프 안 한 Windows 경로("D:\\풋살작업", 끝 역슬래시 포함)도.
+    읽을 수 없으면 ValueError."""
+    text = _decode_text(raw)
+    single = re.sub(r'\\\\|\\"|\\', lambda m: m.group(0) if len(m.group(0)) == 2 else "\\\\", text)  # 하나뿐인 \ → \\
+    trail = re.sub(r'(?<!\\)\\"(?=\s*[,}\]\r\n])', r'\\\\"', single)  # "D:\풋살\" 처럼 끝이 역슬래시
+    err = None
+    for cand in (text, single, trail):
+        try:
+            d = json.loads(cand)
+        except ValueError as e:
+            err = err or e
+            continue
+        if not _has_ctrl(d):
+            return d
+    raise err or ValueError("설정 파일을 읽지 못했어요")
+
+
+def read_config(app_dir=APP_DIR):
+    """config.json → (설정 dict, 안내 문구 또는 None). 파일이 깨졌으면 빈 설정(기본값으로 켬) + 안내."""
+    p = Path(app_dir) / "config.json"
+    try:
+        raw = p.read_bytes()
+    except FileNotFoundError:
+        return {}, None
+    except OSError as e:
+        return {}, f"설정 파일(config.json)을 읽지 못해 기본 설정으로 열었어요 · {e}"
+    try:
+        d = loads_tolerant(raw)
+    except ValueError as e:
+        return {}, (f"설정 파일(config.json)의 내용이 올바르지 않아 기본 설정으로 열었어요. "
+                    f"메모장으로 고쳤다면 따옴표·쉼표를 확인해 주세요 · {e}")
+    if not isinstance(d, dict):
+        return {}, "설정 파일(config.json)의 내용이 올바르지 않아 기본 설정으로 열었어요"
+    return d, None
+
+
+def default_workspace():
+    return Path.home() / "풋살사관학교_작업"
 
 
 def _unlock(p):
@@ -158,9 +327,27 @@ def _rel(name):
 
 
 def workspace(app_dir=APP_DIR):
-    """core.WORK 와 같은 규칙 (core 를 불러오지 않고 계산 — 새 버전이 망가졌을 때도 기록을 남기려고)."""
-    cfg = _read_json(Path(app_dir) / "config.json") or {}
-    return Path(cfg.get("workspace") or (Path.home() / "풋살사관학교_작업")).expanduser()
+    """core.WORK 와 같은 규칙 (core 를 불러오지 않고 계산 — 새 버전이 망가졌을 때도 기록을 남기려고).
+    설정한 폴더를 쓸 수 없으면(빠진 외장 드라이브 등) core 처럼 기본 작업 폴더."""
+    want = configured_workspace(app_dir)
+    if want == default_workspace() or _usable_dir(want):
+        return want
+    return default_workspace()
+
+
+def configured_workspace(app_dir=APP_DIR):
+    cfg, _ = read_config(app_dir)
+    ws = cfg.get("workspace")
+    return Path(ws).expanduser() if isinstance(ws, str) and ws.strip() else default_workspace()
+
+
+def _usable_dir(p):
+    """폴더가 있거나 만들 수 있는지 (만들어 봄)."""
+    try:
+        Path(p).mkdir(parents=True, exist_ok=True)
+        return Path(p).is_dir()
+    except (OSError, ValueError):
+        return False
 
 
 def _protected(rel, app_dir):
@@ -168,7 +355,7 @@ def _protected(rel, app_dir):
     if rel in KEEP or rel in INTERNAL or parts[0] in NEVER:
         return True
     try:  # 작업 폴더를 앱 폴더 안에 둔 경우 그 안은 사용자 데이터
-        ws = workspace(app_dir).resolve()
+        ws = configured_workspace(app_dir).resolve()
         target = (Path(app_dir) / rel).resolve()
         return ws == target or ws in target.parents
     except OSError:
@@ -176,13 +363,13 @@ def _protected(rel, app_dir):
 
 
 def studio_log(app_dir, msg):
-    """작업 폴더의 studio.log 에 남김 (앱이 안 켜져도 볼 수 있게)."""
+    """작업 폴더의 studio.log 에 남김 (앱이 안 켜져도 볼 수 있게). 못 쓰는 글자(반쪽 이모지 등)는 대신 표시."""
     try:
         ws = workspace(app_dir)
         ws.mkdir(parents=True, exist_ok=True)
-        with open(ws / "studio.log", "a", encoding="utf-8") as f:
-            f.write(time.strftime("%m-%d %H:%M:%S ") + msg + "\n")
-    except OSError:
+        with open(ws / "studio.log", "a", encoding="utf-8", errors="replace") as f:
+            f.write(time.strftime("%m-%d %H:%M:%S ") + str(msg) + "\n")
+    except (OSError, ValueError):
         pass
 
 
@@ -192,7 +379,7 @@ def fetch_manifest(url, timeout=15):
     """업데이트 안내(manifest.json) → (내용, 받은 그대로의 바이트)."""
     try:
         req = urllib.request.Request(url, headers={**UA, "Cache-Control": "no-cache"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urlopen(req, timeout) as r:
             raw = r.read()
     except NET_ERRORS as e:
         raise UpdateError(f"업데이트 정보를 받지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요 · {_why(e)}")
@@ -207,7 +394,7 @@ def fetch_manifest(url, timeout=15):
 
 def download(url, dest, progress=None, timeout=30):
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as r, open(dest, "wb") as f:
+    with urlopen(req, timeout) as r, open(dest, "wb") as f:
         total = int(r.headers.get("Content-Length") or 0)
         got = 0
         while True:
@@ -239,7 +426,10 @@ def _why(e):
     """오류를 짧게 (urlopen 오류는 안쪽 이유만, 받다 끊긴 것은 알아볼 수 있게)."""
     if isinstance(e, http.client.IncompleteRead):
         return "받는 도중 연결이 끊겼어요"
-    return str(getattr(e, "reason", None) or e or type(e).__name__)
+    why = str(getattr(e, "reason", None) or e or type(e).__name__)
+    if "CERTIFICATE_VERIFY_FAILED" in why:  # 백신의 HTTPS 검사·회사 프록시가 연결을 가로챔
+        why += " (백신 프로그램의 'HTTPS 검사'·'웹 보호'를 잠시 끄고 다시 해 보세요)"
+    return why
 
 
 # ---------- 설치 ----------
@@ -308,7 +498,7 @@ def _verify_staged(staging, wanted, log):
     try:
         r = subprocess.run([_console_python(), str(staging / "updater.py"), "--selftest"], cwd=str(staging),
                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-                           env=dict(os.environ, PYTHONIOENCODING="utf-8"), creationflags=NO_WINDOW)
+                           env=py_env(), creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise bad(f"새 실행기 시험 실패 · {e}")
     if r.returncode != 0:
@@ -342,7 +532,7 @@ def install(manifest, zpath, app_dir=APP_DIR, log=print, raw=None):
 
     staging = app_dir / STAGING
     _rmtree(staging)
-    staging.mkdir(parents=True)
+    staging.mkdir(parents=True, exist_ok=True)  # 잠깐 잡힌 파일 때문에 다 못 지웠어도 (남은 파일은 목록에 없으면 쓰지 않음)
     try:
         log("  받은 파일 확인 중")
         staged = _extract(zpath, staging)
@@ -388,7 +578,7 @@ def install(manifest, zpath, app_dir=APP_DIR, log=print, raw=None):
         # 되돌리기용 복사본 + 기록 (바꾸는 도중 꺼져도 다음 실행 때 updater 가 되돌림)
         rb = app_dir / ROLLBACK / f"v{_safe_ver(old_ver)}"
         _rmtree(rb)
-        (rb / "files").mkdir(parents=True)
+        (rb / "files").mkdir(parents=True, exist_ok=True)
         backup, added = [], []
         for rel in plan + removed:
             src = app_dir / rel
@@ -482,7 +672,7 @@ def rollback(app_dir=APP_DIR, log=print):
         try:
             dst = app_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dst.with_name(dst.name + ".rollback-tmp")
+            tmp = dst.with_name(f"{dst.name}.{os.getpid()}.rollback-tmp")  # 실행기 둘이 겹쳐도 서로의 임시 파일을 옮기지 않게
             shutil.copyfile(rb / "files" / rel, tmp)  # 복사본은 남겨 둠 (되돌리다 끊겨도 다시 할 수 있게)
             _replace(tmp, dst)
         except OSError as e:
@@ -524,34 +714,133 @@ def _import_check(app_dir, python=None):
     try:
         r = subprocess.run([python or _console_python(), "-c", IMPORT_CHECK], cwd=str(app_dir), capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=180,
-                           env=dict(os.environ, PYTHONIOENCODING="utf-8"), creationflags=NO_WINDOW)
+                           env=py_env(), creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     lines = [x for x in (r.stderr or "").strip().splitlines() if x.strip()]
     return r.returncode == 0, (lines[-1] if lines else f"종료 코드 {r.returncode}")
 
 
-def _app_running():
-    """이미 켜져 있는 앱이 있으면 (그 창이 앞으로 나옴) 확인을 건너뜀."""
+def _app_ports(app_dir=APP_DIR):
+    """앱이 듣고 있을 포트: FUTSAL_PORT 또는 8765 + (8765 를 못 써서 다른 포트로 켰으면) 작업 폴더 .port 의 번호."""
     try:
-        with socket.create_connection(("127.0.0.1", int(os.environ.get("FUTSAL_PORT", "8765"))), timeout=0.3):
-            return True
-    except (OSError, ValueError):
-        return False
+        base = int(os.environ.get("FUTSAL_PORT") or 8765)
+    except ValueError:
+        base = 8765
+    ports = [base]
+    if not os.environ.get("FUTSAL_PORT"):
+        try:
+            p = int((workspace(app_dir) / ".port").read_text(encoding="utf-8").strip())
+            if base < p < base + 40:
+                ports.append(p)
+        except (OSError, ValueError):
+            pass
+    return ports
+
+
+def _app_running(app_dir=APP_DIR):
+    """이미 켜져 있는 이 앱이 있으면 (그 창이 앞으로 나옴) 확인을 건너뜀. 그 포트를 다른 프로그램이 쓰고 있으면 아님
+    (GET /api/ping 으로 확인 · 예전 버전은 404 {"error": "not found"})."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for port in _app_ports(app_dir):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+                pass
+        except OSError:
+            continue
+        try:
+            with opener.open(f"http://127.0.0.1:{port}/api/ping", timeout=2) as r:
+                if json.loads(r.read() or b"{}").get("app") == "futsal-studio":
+                    return True
+        except urllib.error.HTTPError as e:
+            try:
+                if e.code == 404 and json.loads(e.read() or b"{}") == {"error": "not found"}:
+                    return True
+            except ValueError:
+                pass
+        except (OSError, ValueError, http.client.HTTPException):
+            pass
+    return False
+
+
+@contextlib.contextmanager
+def _launch_lock(app_dir, wait=PIP_TIMEOUT + 60):
+    """실행기끼리 한 번에 하나 (잠금 파일 · 쥔 쪽은 5초마다 고쳐 '아직 씀'을 알림).
+    LOCK_FRESH 초 넘게 안 고친 잠금은 꺼진 실행기가 남긴 것 → 지우고 가져감. 잠금 파일을 못 만들면 잠금 없이."""
+    f = Path(app_dir) / LAUNCH_LOCK
+    end, got = time.monotonic() + wait, False
+    while True:
+        try:
+            fd = os.open(str(f), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            os.close(fd)
+            got = True
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - f.stat().st_mtime
+            except OSError:  # 그 사이 풀림 → 다시 (계속 못 읽으면 기다린 끝에 잠금 없이)
+                if time.monotonic() > end:
+                    break
+                time.sleep(0.05)
+                continue
+            if age > LOCK_FRESH or time.monotonic() > end:
+                try:
+                    f.unlink()
+                except OSError:
+                    break  # 지울 수도 없음 → 잠금 없이
+                continue
+            time.sleep(0.2)
+        except OSError:
+            break
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(5):
+            try:
+                os.utime(f)
+            except OSError:
+                pass
+    if got:
+        threading.Thread(target=beat, daemon=True).start()
+    try:
+        yield got
+    finally:
+        stop.set()
+        if got:
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
 
 def check(app_dir=APP_DIR, python=None, log=None):
     """실행 전 확인. 'none'(업데이트 없었음) · 'ok'(새 버전 확인) · 'starting'(방금 켠 새 버전이 아직 뜨는 중)
-    · 'rolled_back'(이전 버전으로 되돌림) · 'running'(이미 켜져 있음) · 'failed'."""
+    · 'rolled_back'(이전 버전으로 되돌림) · 'running'(이미 켜져 있음) · 'failed'.
+    아이콘을 거의 동시에 여러 번 눌러도 확인·되돌리기는 한 번에 하나 (뒤에 온 실행기는 앞 실행기가 끝난 상태를 다시 읽음)."""
     app_dir = Path(app_dir)
-    p = _read_json(app_dir / PENDING)
+    if not isinstance(_read_json(app_dir / PENDING), dict):
+        return "none"
+    if not os.environ.get("FUTSAL_RESTART") and _app_running(app_dir):
+        return "running"  # 켜져 있는 앱이 업데이트하는 중일 수도 있음 → 손대지 않음 (그 창이 앞으로 나옴)
+    with _launch_lock(app_dir), _awake():
+        return _check_locked(app_dir, python, log)
+
+
+def _check_locked(app_dir, python, log):
+    p = _read_json(app_dir / PENDING)  # 잠금을 기다리는 사이 앞 실행기가 되돌렸거나 마쳤을 수 있음
     if not isinstance(p, dict):
         return "none"
-    if not os.environ.get("FUTSAL_RESTART") and _app_running():
-        return "running"  # 켜져 있는 앱이 업데이트하는 중일 수도 있음 → 손대지 않음 (그 창이 앞으로 나옴)
     say = log or (lambda m: studio_log(app_dir, m))
     if p.get("state") != "installed":
         return _undo(app_dir, p, "업데이트가 끝나기 전에 프로그램이 꺼졌어요", say, broken=False)
+    if (app_dir / REQ_PENDING).exists():  # 앱이 켜진 채로는 못 바꾼 구성요소 → 아무것도 불러오지 않은 지금 설치
+        # 업데이트 다시 시작(app.restart)이면 이전 앱 프로세스가 끝나(.pyd 를 놓아)야 바꿀 수 있음 → 끝날 때까지 기다림.
+        # 이전 앱은 실행기를 띄우기 전에 휴대폰으로 보기(터널·리스너)를 이미 껐음 (D-034)
+        _wait_gone(os.environ.get("FUTSAL_OLD_PID"), OLD_APP_WAIT)
+        why = _deferred_pip(app_dir, python, say)
+        if why:
+            return _undo(app_dir, p, why, say, broken=False)
     now = time.time()
     last = p.get("last_launch")
     if isinstance(last, (int, float)) and 0 <= now - last < GRACE:
@@ -565,6 +854,76 @@ def check(app_dir=APP_DIR, python=None, log=None):
     if ok:
         return "ok"
     return _undo(app_dir, p, f"새 버전이 열리지 않아요 ({err})", say)
+
+
+OLD_APP_WAIT = 20  # 업데이트 다시 시작: 이전 앱 프로세스가 끝나길 기다리는 시간(초) · 넘으면 그냥 설치 (실패하면 예전처럼 되돌림)
+
+
+def _pid_alive(pid):
+    """그 번호의 프로세스가 아직 살아 있는지 (모르면 False). Windows 의 os.kill 은 프로세스를 끝내므로 쓰지 않는다."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if WIN:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.WaitForSingleObject.restype = wintypes.DWORD
+            k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            h = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if not h:
+                return False
+            try:
+                return k32.WaitForSingleObject(h, 0) == 0x00000102  # WAIT_TIMEOUT = 아직 도는 중
+            finally:
+                k32.CloseHandle(h)
+        except (OSError, AttributeError):
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # PermissionError: 있음 (다른 사용자)
+        return True
+    return True
+
+
+def _wait_gone(pid, secs):
+    """pid 프로세스가 끝날 때까지 secs 초까지 기다림 (없거나 이미 끝났으면 바로)."""
+    end = time.monotonic() + secs
+    while _pid_alive(pid) and time.monotonic() < end:
+        time.sleep(0.1)
+
+
+def _deferred_pip(app_dir, python, say):
+    """.req_pending 이 있으면 구성요소(requirements.txt) 설치 → 실패 이유 (성공·할 일 없으면 None).
+    앱 프로세스는 numpy·onnxruntime 같은 .pyd/.dll 을 불러 둔 채라 Windows 에서는 그 파일을 바꾸지 못함 (core.update_app)."""
+    say("업데이트 마무리 · 새 구성요소를 설치하는 중이에요 (몇 분 걸릴 수 있어요 · 끝나면 창이 열려요)")
+    try:
+        r = subprocess.run([python or _console_python(), "-m", "pip", "install", "-q", "--disable-pip-version-check",
+                            "-r", str(Path(app_dir) / "requirements.txt")], cwd=str(app_dir), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=PIP_TIMEOUT, env=py_env(), creationflags=NO_WINDOW)
+        ok = r.returncode == 0
+        lines = [x.strip() for x in (r.stderr or "").splitlines() if x.strip()]
+        err = " / ".join(lines[-2:])[-300:] if lines else f"종료 코드 {r.returncode}"
+    except (OSError, subprocess.TimeoutExpired) as e:
+        ok, err = False, str(e)
+    try:
+        _remove(Path(app_dir) / REQ_PENDING)
+        mark_requirements(app_dir, ok=ok)
+    except OSError:
+        pass
+    if ok:
+        say("  새 구성요소 설치 완료")
+        return None
+    return f"새 구성요소를 설치하지 못했어요 ({err})"
 
 
 def _undo(app_dir, p, reason, say, broken=True):
@@ -651,6 +1010,7 @@ def run_app(app_dir=APP_DIR, args=()):
     except OSError:
         pass
     os.environ["FUTSAL_VIA_UPDATER"] = "1"  # app.py: 실행기를 거쳐 켜졌음 (다시 돌려보내지 않음)
+    os.environ.pop("FUTSAL_OLD_PID", None)  # 기다릴 이전 앱은 확인(check)에서만 · 이 앱이 띄울 프로세스에는 넘기지 않음 (번호 재사용)
     sys.argv = [str(app_dir / "app.py"), *args]
     try:
         runpy.run_path(str(app_dir / "app.py"), run_name="__main__")
@@ -660,9 +1020,21 @@ def run_app(app_dir=APP_DIR, args=()):
     return 0
 
 
+def _error_trace(app_dir):
+    """방금 난 오류의 traceback 을 작업 폴더의 studio-error.log 에 (pythonw 는 화면에 안 보이므로 · 실패해도 그만)."""
+    try:
+        import traceback
+        ws = workspace(app_dir)
+        with open(ws / "studio-error.log", "a", encoding="utf-8", errors="replace") as f:
+            f.write(time.strftime("%m-%d %H:%M:%S ") + "프로그램을 켜다 멈춤\n" + traceback.format_exc())
+    except (OSError, ValueError):
+        pass
+
+
 def _start_failed(app_dir, args, e):
     """app.py 가 창을 열기 전에 오류로 멈춤: 방금 업데이트한 버전이면 바로 되돌리고 이전 버전을 새 프로세스로 켬."""
     err = f"{type(e).__name__}: {e}"
+    _error_trace(app_dir)
 
     def say(m):
         studio_log(app_dir, m)

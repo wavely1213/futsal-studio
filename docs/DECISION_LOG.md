@@ -29,6 +29,66 @@
 
 <!-- 여기서부터 최신 항목을 위에 추가 -->
 
+## D-034 | 2026-10-07 | 휴대폰으로 보기 × Windows 대비 합침: 자식 프로세스·절전 막기·포트·다시 시작 순서·저장·오류 기록을 한 규칙으로
+- **상태**: 채택 (Windows 대비 D-029~D-033 과 휴대폰으로 보기 D-027·D-028 을 합치며 · 합칠 때 Windows 대비 쪽 번호 D-024~D-028·I-034~I-044 를 D-029~D-033·I-038~I-048 로 바꿈)
+- **맥락**: 두 묶음이 따로 만들어져 같은 일을 두 벌로 하거나 서로 모르는 곳이 있었다. 터널은 자기 Job Object(`tunnel._job`)로 cloudflared 를 묶었고 Windows 대비는 모든 자식을 `core.popen`(Job Object `core.track`)으로 묶었다. 절전 막기도 원격(`remote-awake` 스레드가 SetThreadExecutionState 직접)·작업(`core.keep_awake`)이 따로 불렀다. 포트는 8765 를 못 쓰면 8766~8799(`.port`)로 가게 됐는데 원격 리스너는 임의 포트를 쓴다. 업데이트 다시 시작은 원격 끄기(D-027)와 뒤로 미룬 pip(`.req_pending` · D-032)가 순서 약속 없이 붙어 있었다. pythonw 의 오류 출력이 `studio-error.log` 로 모이게 되면서(예전에는 버려짐) 원격 쪽 추적도 파일에 남게 됐다.
+- **결정**:
+  1. 자식 프로세스: cloudflared(`--version` 확인·터널)도 `core.run`(새 `stdin` 인자)·`core.popen` 으로만 띄운다 → 앱의 Job Object 하나에 한 번만 들어감. 터널만의 Job Object(`_job`·`_assign`)는 없앴다(겹쳐 넣지 않음). 남은 pid 정리(`kill_stale`)는 Job Object 를 못 만든 PC 를 위해 그대로.
+  2. 절전 막기: SetThreadExecutionState 는 `core.keep_awake()`(·같은 스레드 안의 `_analysis_session`)만 부른다. 원격은 자기 스레드에서 `with core.keep_awake()` 를 쥐고 있다가 놓는다(`remote._awake_loop`). Windows 가 이 상태를 스레드마다 세므로(어느 스레드든 쥐면 깨어 있음) 그 셈이 곧 참조 수다 — 원격을 꺼도 도는 작업은 깨어 있고, 작업이 끝나도 '켜 둔 동안 항상'은 그대로다. 같은 스레드에서 겹치면 들어올 때 상태로 되돌린다.
+  3. 포트: 원격 리스너는 앱 화면 포트 창(`remote.app_ports` = 8765~8804, `FUTSAL_PORT` 면 그 포트 하나 — `app._bind`·`updater._app_ports` 와 같은 규칙)을 쓰지 않는다(`FUTSAL_REMOTE_PORT` 가 창 안이면 켜지 않고, 임의 포트가 걸리면 닫고 다시). 원격 리스너는 `/api/ping` 에 403 이라 두 번째 실행·실행기가 '이 앱'으로 착각하지 않는다. '휴대폰으로 보기' 창·연결 QR 은 같은 출처 `/api/remote*` 라 `.port` 로 켠 앱에서도 그대로다.
+  4. 업데이트 다시 시작 순서: `app.restart` = 원격 끄기(터널·리스너·마지막 비콘, 켜 둠 표시는 그대로) → 실행기 띄우기(`FUTSAL_RESTART`·`FUTSAL_OLD_PID`=이 프로세스) → 끝내기. 실행기는 `.launch_lock` 안에서 `.req_pending` pip 전에 그 프로세스가 끝나길 기다린다(`updater._wait_gone` · 최대 `OLD_APP_WAIT` 20초 · Windows 는 OpenProcess/WaitForSingleObject, `os.kill(pid, 0)` 은 Windows 에서 프로세스를 끝내므로 쓰지 않음). 앱을 실행하기 전에 그 번호는 환경에서 지운다(번호 재사용).
+  5. 저장: `remote.json` 은 `updater.write_atomic(…, mode=0o600)`(새 `mode` 인자 · 실패하면 열쇠가 든 임시 파일을 지움), 터널 `cloudflared.yml`·`tunnel.pid` 도 `write_atomic`, 휴대폰 '작은 미리보기'(`editor.out_preview`)는 편집실 미리보기 파일처럼 `replace_retry(…, SETTLE_SECS)`. `strategy._write`(fsync·잠금 재시도·캐시 비우기)는 이미 같은 일을 하므로 그대로 둔다.
+  6. 오류 기록·글자: 원격 쪽 추적은 `remote._trace()`(→ `redact`: 터널 주소·주제·표·서명·연결 코드를 '…')로만 쓰고, 리스너 `handle_error` 도 보낸 곳 주소 없이 이것만. 휴대폰에 보내는 `scrub` 도 같은 지우기. 휴대폰 POST 본문도 `core.clean_json`, 응답은 못 쓰는 글자면 `\uXXXX`(로컬 서버 `_body`·`_send` 와 같게). 8단계 근거 영상 제목 자르기는 `cutText`.
+- **이유**: 같은 일을 하는 도구를 하나로 모아야(D-029) 한쪽만 고쳐지는 일이 없다. Job Object 를 두 개 쓰면 같은 프로세스를 두 번 넣게 되고 실패 처리도 두 벌이다. 절전 막기는 Windows 가 이미 스레드별로 센다 — 그 위에 따로 참조 수를 두고 0→1·1→0 을 만든 스레드에서 부르면 쥔 스레드와 놓는 스레드가 달라(원격 스레드가 쥐고 작업 스레드가 놓음) PC 가 끝없이 깨어 있게 되고, 이를 피하려면 주인 스레드를 하나 더 둬야 한다. 각자 자기 스레드에서 `keep_awake` 를 쥐는 것이 가장 단순한 참조 수다. 미룬 pip 는 이전 앱이 .pyd 를 놓아야 성공하므로 기다림이 순서 약속이 된다.
+- **버린 대안**: core 에 한 주인 스레드 + 참조 수 — 쥐고 놓는 호출이 그 스레드를 기다려야 하고 시험 사이에 남은 작업이 수를 어지럽힘, 스레드별 셈으로 이미 같은 효과 / 원격 리스너도 8766~ 에서 고르기 — 앱이 다음에 켤 때 그 포트를 써야 할 수 있음 / 실행기가 포트가 닫히길 기다리기 — 다른 사용자의 앱·`FUTSAL_PORT` 와 헷갈리고 프로세스가 끝났는지는 모름 / `strategy._write` 도 `write_atomic` 으로 — 지금 것이 fsync·캐시까지 하므로 바꿀 이유가 없음.
+- **영향/제약**: Windows 실기 미검증(`KNOWN_ISSUES.md` I-036·I-048 확인 목록에 더함). 이전 앱이 20초 안에 안 끝나면 예전처럼 pip 가 실패해 되돌릴 수 있다. 시험 `tests/test_remote_windows.py`.
+- **합침 검토 후 보강 (같은 날)**:
+  1. 창 닫기 확인: pywebview 의 `evaluate_js` 는 값이 Promise 일 때만 `callback` 을 부른다(6.2.1 `window.py`). `confirm(…)` 은 바로 참·거짓이라 대답이 안 와 600초를 기다렸고, 그사이 두 번째 ✕ 는 묻지도·저장(`flushBeforeClose`)하지도 않고 닫았다(Windows 대비 쪽부터 있던 것). 옆의 저장처럼 `Promise.resolve(confirm(…))` 로 감싼다. 시험의 가짜 창도 pywebview 처럼 Promise 일 때만 부르고, 진짜 `Window.evaluate_js` 가 만든 글을 node 로 돌리는 시험을 더했다.
+  2. 업데이트 다시 시작은 도는 작업이 없을 때만: 업데이트가 끝나고 PC 화면이 `/api/restart` 를 부르기 전에 휴대폰이 작업을 시키면 다시 시작이 그 작업(과 ffmpeg)을 말없이 끊었다. `/api/restart` 는 작업이 있으면 409 busy('지금 하는 작업이 끝나면 다시 시작해요' · 화면이 3초마다 다시 부름), 없으면 같은 잠금 안에서 `app.RESTARTING` 을 세우고, 그 뒤로 `start_job` 은 PC·휴대폰 작업을 받지 않는다(휴대폰은 기존 BUSY 409). 실행기를 못 띄우면 표시를 지우고 앱을 그대로 둔다.
+  3. 절전 막기 한 곳: SetThreadExecutionState 를 부르는 함수를 표준 라이브러리만 쓰는 `updater.awake_state` 로 옮기고 `core._keep_awake` 가 그것을 가리킨다(결정 2번의 '부르는 곳 하나'는 이제 이 함수 · 앱 안에서 쥐는 길은 그대로 `core.keep_awake`). 실행기는 업데이트 마무리(이전 앱 기다리기·미룬 pip·새 버전 확인) 동안 `updater._awake` 로 쥔다 — 이전 앱이 쥐던 것(작업·원격 '켜 둔 동안 항상')은 그 프로세스가 끝나면 풀려, 몇 분 걸리는 pip 중에 PC 가 잠들면 업데이트가 끊길 수 있었다.
+  4. 원격 리스너도 `allow_reuse_address = sys.platform != "win32"`(D-030 과 같음 · 정해 둔 `FUTSAL_REMOTE_PORT` 를 다른 프로세스와 같이 잡지 않고 '열지 못했어요'). `redact` 는 짝짓기 만남 주제(`fsp` + 24자)도 지운다.
+  5. 휴대폰 알림·비콘(ntfy)·마지막 비콘·터널 자기 확인·채널 RSS 도 `updater.urlopen`(D-029 인증서 설정) — Python 3.13+ 에서 백신 'HTTPS 검사'가 있는 PC 는 비콘이 모두 실패해 다시 시작한 뒤 휴대폰이 새 터널 주소를 몰랐다. 인증서 오류면 기록에 백신 안내(정해진 문장만 · 주소·주제는 남기지 않음).
+
+## D-033 | 2026-10-07 | 설치(bat): Python 3.10~3.14 · 64비트(x64)만, 맞지 않는 .venv 는 옮겨 두고 새로, Visual C++ 구성요소 자동 설치
+- **상태**: 채택 (지원 범위는 소유자 확인 필요 — `KNOWN_ISSUES.md` I-022)
+- **맥락**: `py -3` 은 가장 새 Python 을 고름 → 휠이 없는 3.15·ARM64·32비트에서 '설치 실패'만 나오고, `.venv\Scripts\python.exe` 파일이 있기만 하면 그 바탕 Python 을 지웠거나 범위 밖이어도 그대로 써서 bat 을 다시 실행해도 영원히 실패했다. ctranslate2·onnxruntime 은 Python 에 없는 msvcp140(_1).dll 이 필요해 pip 는 성공하고 첫 받아쓰기·누끼에서 DLL 오류가 났다.
+- **결정**: bat 은 `setup_check.py`(표준 라이브러리)로 확인한다. (1) `py -3.13 → 3.12 → 3.11 → 3.14 → 3.10`(없으면 `python`) 중 3.10~3.14·`win-amd64` 인 첫 Python. (2) 있는 `.venv` 가 실행되지 않거나·범위 밖·다른 아키텍처이거나, 3.10 인데 3.11 이상이 깔려 있으면 `.venv.old`(있으면 `.venv.old-<난수>`)로 **옮기고**(지우지 않음) 새로 만든다. (3) 새로 만들 때 앱 폴더 경로가 260자 한도에 걸리면(긴 경로 설정이 꺼져 있을 때) 짧은 곳으로 옮기라고 안내하고 멈춘다. (4) pip 를 23.3 이상으로 올린다. (5) System32 의 msvcp140·msvcp140_1·vcruntime140_1 이 없거나 14.40 보다 예전이면 `curl` 로 Microsoft 공식 `vc_redist.x64.exe` 를 받아 `/install /passive /norestart` (관리자 확인 창), 안 되면 받는 페이지를 연다. 앱 안에서는 DLL 오류를 한국어 안내로 바꾸고(`core.dll_missing`·`vc_runtime_msg`), 소리·OCR 모델을 지웠다 다시 받기를 되풀이하지 않는다.
+- **이유**: 비개발자가 스스로 빠져나올 수 없는 '설치 실패' 반복을 없앰. 3.10 은 2026-10 지원이 끝나 yt-dlp 가 곧 뺄 예정이라, 사용자가 새 Python 을 깔고 bat 을 다시 실행하면 그대로 옮겨 가게 했다.
+- **버린 대안**: `py -3.13-64` — 3.13 만 강제 · `-64` 는 'x86 이 아님'만 뜻해 ARM64 를 고를 수 있음 / `.venv` 지우기 — 사용자 폴더 삭제는 승인 사항이고 잠긴 파일이 있으면 실패 / requirements 에 `msvc-runtime` 추가 — venv 의 python.exe 는 바탕 Python 폴더에서 DLL 을 찾아서 효과 없음 + requirements 변경은 모든 PC 의 pip.
+- **영향/제약**: 새 파일 `setup_check.py`(배포됨). bat 은 Windows 실기 미검증. 3.10 사용자가 더 새 Python 을 깔고 bat 을 실행하면 구성요소를 처음부터 다시 받는다(몇 분).
+
+## D-032 | 2026-10-07 | 구성요소(pip) 설치를 앱이 켜진 채로 못 하면 다음 실행 때 실행기가 먼저
+- **상태**: 채택
+- **맥락**: 업데이트의 `pip install -r requirements.txt` 는 앱 프로세스가 numpy·onnxruntime·ctranslate2 의 .pyd/.dll 을 불러 둔 채로 돈다. Windows 는 불러 둔 DLL 을 지울 수 없어, pip 23.3 미만(Python 3.10 기본 23.0)은 'Access is denied' 로 실패 → 업데이트가 '인터넷 연결 확인'이라는 틀린 안내와 함께 되돌려졌다.
+- **결정**: (1) Windows 에서 pip 가 23.3 미만이면 먼저 올린다(`core._pip_self_upgrade`). (2) 그래도 잠금 때문에 실패하면(WinError 5·32·Access is denied…) 되돌리지 않고 `.req_pending` 을 남긴 뒤 다시 시작 → 실행기가 앱을 불러오기 전에 pip(`updater._deferred_pip`, UTF-8 출력) → 실패하면 그때 되돌림. (3) 실행기끼리는 `.launch_lock`(5초마다 고치는 잠금, 30초 넘게 안 고치면 꺼진 것)으로 한 번에 하나: 아이콘을 거의 동시에 두 번 눌러도 확인·되돌리기·pip 가 겹치지 않고, 뒤에 온 쪽은 앞쪽이 끝낸 상태를 다시 읽는다. (4) 실패 안내는 원인별로(`core._pip_advice`: Python 이 오래됨·저장 공간·인터넷) 마지막 두 줄을 보여 준다.
+- **이유**: 앱을 끄고 다시 켜는 순간이 DLL 이 하나도 없는 유일한 때다. 대부분의 업데이트는 requirements 가 그대로라 영향이 없다.
+- **버린 대안**: 언제나 다음 실행 때 pip — 진행률 화면이 없는 실행기에서 몇 분 기다리게 됨(지금은 잠금일 때만) / 앱 안에서 DLL 을 내려놓기 — 파이썬은 확장 모듈을 내려놓지 못함.
+- **영향/제약**: 미룬 설치 동안은 창이 1~2분 늦게 열린다(작업 기록에 미리 알림). 실행기 변경이라 `--selftest`·`tests.test_update` 로 확인.
+
+## D-031 | 2026-10-07 | 이름(대소문자 무시)이 같은 보관함 영상은 분석 폴더를 따로 (나중 쪽은 '<이름>_<지문>')
+- **상태**: 채택
+- **맥락**: 분석 폴더·편집 프로젝트·썸네일 문서·캐시가 모두 `analysis/<확장자 뺀 이름>` 을 열쇠로 써서, `IMG_1234.MOV` 와 `IMG_1234.mp4`(또는 OBS `.mkv` 와 바꾼 `.mp4`, Windows 에서 대소문자만 다른 이름)가 받아쓰기·편집본을 섞어 썼다.
+- **결정**: `core.library_dir` — 같은 열쇠의 다른 영상이 보관함에 없으면 예전 그대로. 있으면 그 폴더의 주인(타임라인 첫 줄 `# 타임라인: <이름>` → 없으면 프로젝트의 `source`, 둘 다 없으면 이름 순서)만 `analysis/<이름>` 을 쓰고 다른 쪽은 `analysis/<이름 60자>_<sha1(소문자 전체 이름) 8자>`. 한 번 생긴 지문 폴더는 계속 그 영상 것. 편집 프로젝트·썸네일 문서·올리기 키트·캐시 이름은 모두 이 폴더 이름을 따른다(`core.adir(name).name`). 학습용으로 옮기기·되돌리기도 같은 규칙.
+- **이유**: 겹치지 않는 대부분의 사용자에게는 저장 위치가 그대로라 변환이 필요 없고, 겹치는 경우에도 먼저 쓰던 쪽의 기록은 제자리에 남는다.
+- **버린 대안**: 모든 영상을 '전체 이름 + 지문'으로 — 모든 사용자의 분석·프로젝트를 옮기는 변환이 필요(저장 형식 변경 · 승인 사항).
+- **영향/제약**: 겹치는 영상의 내보낸 썸네일·키트 파일 이름 앞부분에 지문이 붙는다. 보관함 목록은 폴더 시각이 바뀔 때(+FAT 외장 드라이브는 2초마다) 다시 읽는다.
+
+## D-030 | 2026-10-07 | 서버 포트: Windows 에서 SO_REUSEADDR 끔, 8765 를 못 쓰면 8766~8799 · '이 앱인지' 확인 후에만 창 띄우기
+- **상태**: 채택
+- **맥락**: `ThreadingHTTPServer` 는 SO_REUSEADDR 를 켜는데 Windows 에서는 '이미 듣는 포트도 같이 잡기'라 두 번째 실행이 실패하지 않고 앱이 둘 떴다(작업·저장·임시 폴더 정리가 섞임). 반대로 Hyper-V·WSL·Docker 가 8765 를 예약했거나(WinError 10013) 다른 프로그램(AnkiConnect 등)이 쓰면 10초 뒤 빈/남의 페이지만 열리고 기록도 없었다. PC 에 프록시가 설정돼 있으면 '켜진 창 앞으로' 요청(urllib)이 프록시로 가 실패했다.
+- **결정**: Windows 는 `allow_reuse_address=False`(`app._Server`). `GET /api/ping` 으로 그 포트의 주인이 이 앱인지 확인(예전 버전은 404 `{"error": "not found"}`)한 뒤에만 `/api/focus` 를 보낸다(프록시 없이 `ProxyHandler({})`). 주인이 남이거나 예약된 포트면 8766~8799 중 빈 포트로 켜고 번호를 작업 폴더 `.port` 에 남긴다(두 번째 실행·실행기 `_app_running` 이 함께 확인). `FUTSAL_PORT` 를 준 시험 앱은 그 포트만. 모두 안 되면 기록 + 알림 창. 브라우저로 쓰는 중에 또 켜면 화면을 한 번 더 연다.
+- **이유**: 한 앱만 뜨게 하는 확인이 포트 묶기 실패에 기대고 있어서, 그 전제를 Windows 에서도 맞게 하고 막힌 경우의 출구를 만듦.
+- **버린 대안**: SO_EXCLUSIVEADDRUSE — 업데이트 재시작 직후 남은 연결 때문에 다시 묶기가 늦어질 수 있음 / 이름 있는 뮤텍스로 한 번만 실행 — 실행기·runpy·재시작 흐름과 따로 놀아 관리할 것이 늘어남.
+- **영향/제약**: 다른 포트로 켜지면 브라우저 저장소(창의 설정)는 포트마다 따로다. Windows 실기 미검증.
+
+## D-029 | 2026-10-07 | Windows 대비 공통 도구: 저장(write_atomic·replace_retry) · 자식 프로세스(core.run·popen + Job Object) · 반쪽 이모지 정리 · 설정 JSON 읽기
+- **상태**: 채택
+- **맥락**: 저장·교체 재시도가 모듈마다 따로 있어(0.25초~10초) 막 만든 완성본은 0.25초 만에 포기하고 지워졌고, 몇몇 저장은 재시도가 아예 없었다. 앱이 꺼져도 ffmpeg·pip·claude 가 남았다. JS 가 자른 반쪽 이모지 하나로 studio.log·응답이 멈췄다(v1.9.2 의 cp949 와 같은 종류). config.json 하나 잘못 고치면 앱이 아예 안 켜졌다.
+- **결정**: 표준 라이브러리만 쓰는 `updater` 에 `write_atomic`·`replace_retry`(초 단위, `REPLACE_SECS` 8초·`SETTLE_SECS` 60초)·`py_env`·`read_config`/`loads_tolerant`·`urlopen`(3.13 의 엄격한 인증서 검사만 끔)을 두고, `core` 에 `run`/`popen`(Job Object `KILL_ON_JOB_CLOSE` 에 넣음)·`clean_text`/`clean_json`·`keep_awake`(모든 작업)를 둔다. 새 저장·외부 프로그램은 이것만 쓴다(`CODING_STANDARDS.md` 7번). 이미 잘 도는 예전 저장 코드는 이번에 고친 곳만 바꿨다.
+- **이유**: 모든 실행이 거치는 `updater` 는 표준 라이브러리만 쓰므로 core·thumb·style·captions 가 다 불러 쓸 수 있다. 한 곳에서 고치면 같은 종류의 버그가 다시 생기지 않는다.
+- **버린 대안**: 새 모듈(winfs.py) — `updater` 는 다른 앱 모듈을 불러올 수 없어 결국 같은 코드를 두 벌 둬야 함 / 앱 프로세스 자체를 Job Object 에 넣기 — 앱이 연 브라우저·탐색기·메모장까지 같이 꺼짐.
+- **영향/제약**: yt-dlp 가 안에서 띄우는 ffmpeg(영상·소리 합치기)는 묶음에 없다. Job Object·잠금 시간은 Windows 실기 미검증 (I-013).
+
 ## D-028 | 2026-10-07 | 채널 전략 작업은 휴대폰에서 시작하지 않음 (진행·알림·멈추기만) · 전략 작업 시작 응답도 jobId
 - **상태**: 채택 (채널 전략 D-024~D-026 과 휴대폰으로 보기 D-027 을 합치며)
 - **맥락**: 두 기능을 따로 만들고 합쳤다. 채널 전략에는 새 작업 4개(`strategy.JOB_REFRESH` '채널 전략 새로 고침' · `JOB_OWN` '우리 채널 숫자 기록' · `JOB_CHECK` '채널 점검' · `JOB_AI` '클로드로 전략 보기')가 있다. 휴대폰으로 보기는 PC 화면이 자기가 시킨 작업 번호(`jobId`)의 결과만 받게 바꿨고(D-027 보강 8), 휴대폰은 허용 목록(`remote.ACTIONS`)에 있는 일만 시킨다.

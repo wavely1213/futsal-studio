@@ -42,10 +42,14 @@
     - YouTube가 막으면 그 자리에서 1회 올린다(`core.update_engine`, `pip install -U`).
   - 다른 패키지는 새 설치 PC·pip를 다시 돌린 PC가 그때의 최신 메이저를 그대로 받는다. 그래서 PC마다 버전이 다를 수 있다.
   - 특정 버전에서 깨지는 것이 확인되면 그 패키지에만 상한을 다는 방안을 제시하고, 소유자가 결정한다. 결정은 `DECISION_LOG.md`에 남긴다.
-- Python: 사용자가 python.org에서 받은 버전을 쓴다(`시작하기 (Windows).bat`은 `py -3`, 고정 안 됨). 다른 문서는 Python 버전 규칙을 여기서 참조한다.
+- Python: 사용자가 python.org에서 받은 버전을 쓴다. 다른 문서는 Python 버전 규칙을 여기서 참조한다.
+  - **설치가 받는 범위 (2026-10-07 기본값, D-033)**: 3.10~3.14 · 64비트(x64, `sysconfig.get_platform() == "win-amd64"`). `시작하기 (Windows).bat` 은 `py -3.13 → 3.12 → 3.11 → 3.14 → 3.10` 중 범위 안의 첫 것을 쓰고(`setup_check.py`), 3.15(휠 없음)·ARM64·32비트(ctranslate2·onnxruntime 휠 없음)는 거절하고 'Windows installer (64-bit)' 3.13 을 안내한다. 범위를 바꾸면 `setup_check.PY_MIN`·`PY_MAX`·README 를 함께.
   - 코드는 3.10 이상 기능을 쓴다(`tempfile.TemporaryDirectory(ignore_cleanup_errors=…)` — `updater.py` 업데이트 설치·`--selftest`, `core.py` Deno 설치).
-  - 최소 지원 버전은 아직 확정되지 않았다 (`KNOWN_ISSUES.md` I-022). <!-- TODO: 최소 지원 Python 버전 확정 (소유자) — 정하면 README 설치 안내와 .bat 확인도 맞춘다 -->
-  - 막 나온 Python에는 onnxruntime·ctranslate2(faster-whisper) 휠이 늦게 나올 수 있다.
+  - 3.10 은 2026-10 지원이 끝나 yt-dlp 가 곧 뺄 예정이다. 그 뒤 3.10 PC 는 pip 가 예전 yt-dlp 에서 멈추므로 앱이 알아채 '새 Python 설치 → bat 다시 실행'을 안내하고(`core._engine_needs_newer_python`), bat 은 더 새 Python 이 있으면 `.venv` 를 옮겨 두고 새로 만든다.
+  - 최소 지원 버전의 최종 확정은 소유자 몫이다 (`KNOWN_ISSUES.md` I-022).
+  - 막 나온 Python에는 onnxruntime·ctranslate2(faster-whisper) 휠이 늦게 나올 수 있다 → 휠이 나온 뒤에 `PY_MAX` 를 올린다.
+  - ctranslate2·onnxruntime 은 Microsoft Visual C++ 재배포 패키지(msvcp140·msvcp140_1)가 필요하다 (Python·휠에 없음). bat 이 없으면 설치한다(D-033). `msvc-runtime` 같은 pip 패키지로 대신하지 않는다 (venv 에서는 DLL 을 찾지 못함).
+  - pip 는 23.3 이상으로 올려 둔다(bat·업데이트 · Windows 에서 켜진 앱이 쓰는 .pyd 를 못 지워도 설치를 실패로 끝내지 않음, D-032).
 - **메이저 업그레이드는 승인 필요** + 변경사항(breaking changes) 요약 보고 후 진행.
   - 버전을 고정하지 않으므로 주요 패키지(faster-whisper·onnxruntime·numpy·pywebview·pillow)의 새 메이저 소식을 알게 되면 먼저 보고한다.
   - 개발 PC에서 단위 + 영향받는 e2e로 확인한 결과를 함께 보고한다.

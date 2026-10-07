@@ -300,6 +300,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const r1 = v => Math.round(v * 10) / 10;
 const norm180 = a => ((((a + 180) % 360) + 360) % 360) - 180;
 const niceName = n => n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]+$/, "");
+// 글자 수로 자르기: .slice() 는 UTF-16 단위라 이모지를 반으로 잘라 디자인 저장이 실패함 (자동 제목 등)
+const cutText = (s, n) => Array.from(String(s)).slice(0, n).join("");
 const mmss = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const FONTS = { "검은고딕": "Black Han Sans", "프리텐다드 블랙": "Pretendard Black", "프리텐다드 볼드": "Pretendard Bold", "도현": "Do Hyeon" };
 const BLENDS = [["source-over", "표준"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["soft-light", "소프트 라이트"], ["hard-light", "하드 라이트"], ["darken", "어둡게"], ["lighten", "밝게"], ["color-dodge", "색상 닷지"], ["color-burn", "색상 번"], ["difference", "차이"], ["hue", "색조"], ["saturation", "채도"], ["color", "색상"], ["luminosity", "광도"]];
@@ -666,10 +668,16 @@ const saveBody = () => JSON.stringify({ name: NAME, docs: DOCS }, dropPriv);  //
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
 function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
 async function saveNow() {
-  clearTimeout(saveTimer); saveTimer = null; if (!D) return; const g = saveGen;
-  await postRaw("/api/thumb/save", saveBody());
+  clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
+  let r = null;
+  try { r = await postRaw("/api/thumb/save", saveBody()); } catch (e) {}
+  if (!r || r.ok === false) {  // 저장 실패(Windows: 백신·OneDrive 가 잠깐 잡음 등) → 알리고 잠시 뒤 다시 (예전: '저장 중…'에 멈춤)
+    if (g === saveGen) { $("saved").textContent = "저장 실패 · 잠시 뒤 다시 저장할게요"; saveTimer = setTimeout(saveNow, 3000); }
+    return false;
+  }
   if (g === saveGen) $("saved").textContent = "저장됨";  // 저장하는 사이 또 바뀌었으면 '저장 중' 유지
   renderDesigns();
+  return true;
 }
 // 창을 닫거나 숨길 때 남은 변경을 바로 보냄 (keepalive)
 function flushSave() { if (!D || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: saveBody() }); } catch (e) {} }
@@ -1604,7 +1612,8 @@ function brushDown(e) {
     removeEventListener("mousemove", stroke); removeEventListener("mouseup", up); delete l._fast; renderAll();
     pushUndo(before, erase ? "누끼 지우기" : "누끼 되살리기");  // 올리기 전에 바로 기록 (올리는 사이 Ctrl+Z 해도 순서가 맞게)
     $("saved").textContent = "브러시 저장 중…";
-    const j = await post("/api/thumb/upload", { data: ec.toDataURL("image/png") });
+    const j = await post("/api/thumb/upload", { data: ec.toDataURL("image/png") }).catch(() => ({}));
+    if (!j.url) { $("saved").textContent = "브러시 저장 실패"; return toast(j.error || "브러시 결과를 저장하지 못했어요. 잠시 뒤 다시 해 주세요"); }
     if (byId(l.id) === l) { l.src = j.url; img(j.url); } scheduleSave();
   };
   addEventListener("mousemove", stroke); addEventListener("mouseup", up);
@@ -1772,7 +1781,8 @@ function pasteLayers(inPlace) {
 async function addImageFile(f) {
   if (!f || !f.type.startsWith("image/")) return;
   const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
-  const j = await post("/api/thumb/upload", { data });
+  const j = await post("/api/thumb/upload", { data }).catch(() => ({}));
+  if (!j.url) return toast(j.error || "그림을 넣지 못했어요. 잠시 뒤 다시 해 주세요");
   const im = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = j.url; });
   const ar = im ? im.naturalWidth / im.naturalHeight : 16 / 9; let w = Math.min(W * 0.7, im ? im.naturalWidth : 640), h = w / ar;
   if (h > H * 0.85) { h = H * 0.85; w = h * ar; }
@@ -2103,7 +2113,7 @@ function titleOptions() {
   for (const h of HOOKS) out.push(splitTitle(h));
   const kw = KEYWORDS.find(k => !["팁", "꿀팁", "중요", "잘하", "어떻게", "?"].includes(k));
   if (kw) out.push([kw.includes("국가대표") ? kw : kw + " 비법", kw.includes("국가대표") ? "제대로 알려드림" : "국가대표가 알려줌"]);
-  out.push(splitTitle(niceName(NAME).slice(0, 24)));
+  out.push(splitTitle(cutText(niceName(NAME), 24)));
   return out.filter((x, i, a) => a.findIndex(y => y.join() === x.join()) === i);
 }
 function renderAuto() {
@@ -2112,7 +2122,7 @@ function renderAuto() {
       <div class="hint">쇼츠 썸네일은 쇼츠 화면(9:16, 1080×1920) 그대로 만들어요.</div></div>
     <div class="pg"><h4>제목 문구</h4>
       <input class="s" id="aL1" placeholder="첫째 줄"><input class="s" id="aL2" placeholder="둘째 줄" style="margin-top:6px">
-      <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(o.join(" ").slice(0, 16))}</button>`).join("")}</div>
+      <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(cutText(o.join(" "), 16))}</button>`).join("")}</div>
       <div class="row2"><button class="btn pri" id="aMake">후보 다시 만들기</button><button class="btn" id="aCutMake">${CUT_AUTO ? "누끼 넣은 후보 ✓" : "인물 누끼 넣어서 만들기"}</button></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라내기)</label>
       <div class="hint">영상에서 선명한 장면을 골라 템플릿으로 만들어요. 누르면 편집 화면으로 불러와요.</div></div>
@@ -2197,7 +2207,7 @@ async function exportImg() {
   if (fmt === "png") data = c.toDataURL("image/png");
   else { let q = 0.93; do { data = c.toDataURL("image/jpeg", q); q -= 0.07; } while (data.length * 0.75 > 1.95e6 && q > 0.5); }
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
-  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
+  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
 $("exportBtn").onclick = exportImg;
 
@@ -2226,7 +2236,7 @@ function runQA() {
   for (const l of texts) {
     const m = textLayout(ctx, l), sy = l.h / m.natH, spans = m.lines.flatMap(ln => ln.spans).filter(sp => sp.t.trim());
     const minSize = (spans.length ? Math.min(...spans.map(sp => sp.st.size)) : l.size) * sy;
-    const px = minSize * smallW / W, nm = `'${lname(l).slice(0, 14)}'`;
+    const px = minSize * smallW / W, nm = `'${cutText(lname(l), 14)}'`;
     if (px < 7) add("bad", "작게 보면 안 읽혀요", `${nm} — 작은 목록(${smallW}px)에서 글자 높이가 ${px.toFixed(1)}px예요. 더 키우세요.`, l);
     else if (px < 10) add("warn", "작게 보면 읽기 힘들어요", `${nm} — 작은 목록에서 ${px.toFixed(1)}px. 조금 더 키우면 좋아요.`, l);
     const layerOk = l.box.on || (l.outline.on && l.outline.width >= 4) || (l.glow.on && l.glow.size >= 20);
@@ -2319,7 +2329,10 @@ function drawSafe() {
   else box(0.86, 0.86, 0.14, 0.14, "재생시간");
 }
 $("safeBtn").onclick = () => { showSafe = !showSafe; $("safeBtn").classList.toggle("on", showSafe); drawSafe(); toast(showSafe ? "빨간 빗금 = 유튜브 화면에서 가려지는 곳이에요. 중요한 글자·얼굴은 피하세요" : "가려지는 영역 숨김"); };
-$("back").onclick = () => { clearTimeout(saveTimer); postRaw("/api/thumb/save", saveBody()).then(() => (location.href = "/")); };
+$("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패하면 물어봄 · 예전: 실패하면 아무 반응 없음)
+  clearTimeout(saveTimer); saveTimer = null;
+  if (await saveNow() || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
+};
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 
 /* ---------- 시작 ---------- */

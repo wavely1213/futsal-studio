@@ -1,7 +1,8 @@
 """원격 접속 '휴대폰으로 보기' — 원격 경계 (D-027).
 
 PC 에서 하는 작업을 휴대폰(https://mulgyeol.kr/futsal)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
-  - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(/r/* 만). 화면용 로컬 서버(8765)는 터널 뒤에 두지 않는다.
+  - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(/r/* 만 · 앱 화면 포트 창 app_ports 밖). 화면용 로컬 서버(8765)는
+    터널 뒤에 두지 않는다.
   - 확인 순서: Host(remote.futsal.invalid) → 메서드 → 요청 수 제한 → CORS·Origin → 서명/표(ticket) → JSON → 허용 동작 목록 → 파일 이름·허용 폴더.
   - 짝짓기: PC 가 만든 10분짜리 한 번 쓰는 코드 → 휴대폰은 코드 대신 코드로 만든 증명(HMAC)만 보냄 → 기기 열쇠 2개(서명용·비콘용)를
     코드로 만든 열쇠로 잠가 돌려줌 (터널·Cloudflare 는 코드도 열쇠도 못 봄) → ~/.futsal-studio/remote.json.
@@ -162,13 +163,41 @@ def clean(s, n=80):
     return _CTRL.sub("", str(s or "").replace("\r", " ").replace("\n", " ")).strip()[:n]
 
 
-def scrub(s):
-    """휴대폰에 보내는 기록·오류 글: 사용자 폴더 경로(Windows 사용자 이름이 들어감)를 '~' 로, 제어 글자는 뺌."""
+# 기록에 남으면 안 되는 것: 터널 주소 · 비콘/알림 주제 · 영상·그림 표(ticket) · 서명 머리글 · 연결 코드와 터널 힌트
+_SECRETS = (
+    (re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I), "https://….trycloudflare.com"),
+    (re.compile(r"\bfs[bnp][0-9a-f]{24}\b"), "fs…"),  # 비콘(fsb)·알림(fsn)·짝짓기 만남(fsp, derive_pair) 주제
+    (re.compile(r"/r/m/[A-Za-z0-9_-]+"), "/r/m/…"),
+    (re.compile(r"FSR2 [^\s'\"]+"), "FSR2 …"),
+    (re.compile(r"([#&?]pair=)[^&\s'\"]+"), r"\1…"),
+    (re.compile(r"([#&?]u=)[^&\s'\"]+"), r"\1…"),
+)
+
+
+def redact(s):
+    """오류·추적 글에서 비밀(터널 주소·주제·표·서명·연결 코드)을 '…'로 (studio.log·studio-error.log·휴대폰 기록 모두)."""
     s = str(s if s is not None else "")
+    for rx, to in _SECRETS:
+        s = rx.sub(to, s)
+    return s
+
+
+def scrub(s):
+    """휴대폰에 보내는 기록·오류 글: 사용자 폴더 경로(Windows 사용자 이름이 들어감)를 '~' 로, 제어 글자는 뺌, 비밀은 '…'로."""
+    s = redact(s)
     home = str(Path.home())
     if len(home) > 3:
         s = s.replace(home, "~").replace(home.replace("\\", "/"), "~")
     return _CTRL.sub("", s.replace("\r", ""))
+
+
+def _trace():
+    """방금 난 오류의 추적을 오류 출력으로 — 비밀은 지우고. pythonw 에서는 app._error_log 가 이것을 studio-error.log 에 남긴다
+    (예전에는 버려졌던 출력이라 원격 쪽 추적에 표·주소가 섞여도 몰랐음 · D-034)."""
+    try:
+        sys.stderr.write(redact(traceback.format_exc()))
+    except Exception:  # noqa: BLE001 — 기록 실패가 요청·끄기를 막지 않게
+        pass
 
 
 def _lru_put(d, k, v, cap=LRU_MAX):
@@ -377,16 +406,11 @@ class Store:
         return d
 
     def save(self):
+        """공통 저장 도구(updater.write_atomic): 임시 파일을 나만 읽게(0600 · Windows 는 무시) 해 둔 뒤 바꿔 끼움 ·
+        백신·OneDrive 가 잠깐 잡으면 기다렸다 다시 · 실패하면 열쇠가 든 임시 파일을 지우고 오류를 올려 보냄."""
         with self.lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.data, ensure_ascii=False, indent=1))
-            try:
-                os.chmod(tmp, 0o600)  # Windows 는 읽기 전용 표시만 바뀜 → 무시
-            except OSError:
-                pass
-            updater._replace(tmp, self.path)
+            updater.write_atomic(self.path, json.dumps(self.data, ensure_ascii=False, indent=1), mode=0o600)
 
     def device(self, did):
         return next((x for x in self.data["devices"] if x["id"] == did), None)
@@ -754,7 +778,7 @@ class Publisher:
                     if self._budget(True):
                         self._post(f"{self.svc.ntfy()}/{item[1]}", item[2].encode("utf-8"), {"Content-Type": "text/plain"})
             except Exception:  # noqa: BLE001 — 보내기 실패가 앱을 멈추지 않게
-                traceback.print_exc()
+                _trace()
 
     def _send_beacon(self, important, moved, topic):
         if not self._budget(important or bool(moved)):
@@ -771,29 +795,31 @@ class Publisher:
         self._post(self.svc.ntfy() + "/", json.dumps(msg, ensure_ascii=False).encode("utf-8"), {"Content-Type": "application/json"})
 
     def _post(self, url, data, headers):
+        cert = False
         for k in range(len(RETRY_DELAYS) + 1):
             try:
                 req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with updater.urlopen(req, 10) as r:  # 업데이트와 같은 인증서 설정 (Python 3.13+ · 백신 'HTTPS 검사' · D-029)
                     r.read(256)
                 return True
             except urllib.error.HTTPError as e:
                 if e.code < 500 and e.code != 429:
                     break
-            except updater.NET_ERRORS:
-                pass
+            except updater.NET_ERRORS as e:
+                cert = cert or "CERTIFICATE_VERIFY_FAILED" in updater._why(e)
             if k < len(RETRY_DELAYS):
                 time.sleep(RETRY_DELAYS[k])
         if self.svc.clock() - self.warned > 3600:
-            self.warned = self.svc.clock()
-            self.svc.log("  휴대폰 알림을 보내지 못했어요 · 인터넷 연결을 확인해 주세요")
+            self.warned = self.svc.clock()  # 정해진 문장만 (주소·주제가 든 오류 글은 기록하지 않음)
+            self.svc.log("  휴대폰 알림을 보내지 못했어요 · " + ("백신 프로그램의 'HTTPS 검사'·'웹 보호'를 잠시 끄고 다시 해 보세요" if cert
+                                                         else "인터넷 연결을 확인해 주세요"))
         return False
 
     def post_now(self, url, data, headers, timeout=2.0):
         """앱을 끌 때 마지막 비콘: 기다리지 않고 한 번만."""
         try:
             req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with updater.urlopen(req, timeout) as r:
                 r.read(256)
             return True
         except Exception:  # noqa: BLE001
@@ -801,6 +827,16 @@ class Publisher:
 
     def stop(self):
         self.q.put(("stop",))
+
+
+def app_ports():
+    """앱 화면(로컬 서버)이 쓸 수 있는 포트 창 — app._bind(8765 → 8766~8799 · .port)·updater._app_ports(.port 는 8766~8804)와 같은 규칙.
+    FUTSAL_PORT 로 정해 켜면 그 포트 하나뿐 (다른 포트로 가지 않음)."""
+    try:
+        fixed = int(os.environ.get("FUTSAL_PORT") or 0)
+    except ValueError:
+        fixed = 0
+    return {fixed} if fixed else range(8765, 8765 + 40)
 
 
 # ---------- 원격 서비스 ----------
@@ -976,7 +1012,7 @@ class Service:
                 self._schedule_retry()
             self._stop_resources(tuns, lst2)
             if not isinstance(e, (RuntimeError, OSError)):
-                traceback.print_exc()
+                _trace()
             self.log(f"원격 접속을 켜지 못했어요 · {scrub(e)}")
         finally:
             if lst is not None:  # 띄웠지만 넘겨주지 못한 리스너 (그만둔 시도·오류) → 닫음
@@ -1038,7 +1074,7 @@ class Service:
             try:
                 t.stop(timeout=timeout)
             except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
-                traceback.print_exc()
+                _trace()
         if lst is not None:
             _close_server(lst)
 
@@ -1149,7 +1185,7 @@ class Service:
                     t.start()
                     t.join(timeout)
         except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
-            traceback.print_exc()
+            _trace()
 
     # ----- 비콘 -----
     def beacon_body(self, state=None, reason=None, moved=None):
@@ -1236,7 +1272,7 @@ class Service:
                 if self.clock() - last_hb >= HEARTBEAT:
                     last_hb = self.clock()
             except Exception:  # noqa: BLE001
-                traceback.print_exc()
+                _trace()
 
     def tick(self, last_hb=None):
         """5초마다 (시험은 직접 부름): 작업이 바뀌면 비콘 · 20분 하트비트 · 오래 안 쓰면 끄기 · 90일 안 쓴 기기 끊기 ·
@@ -1264,39 +1300,52 @@ class Service:
         if old:  # 오래 안 쓴 기기: 비콘 주제만 바꿈 (알림 주제까지 바꾸면 쓰고 있는 휴대폰의 ntfy 알림이 조용히 끊김)
             self.revoke(old, why="90일 동안 안 씀", rotate_notify=False)
 
+    def _awake_wanted(self):
+        return self.state in ("on", "restarting") and (bool((self.bridge.job() or {}).get("name"))
+                                                       or self.store.data["settings"].get("keepAwake") == "always")
+
     def _keep_awake(self):
-        """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기. SetThreadExecutionState 는 스레드마다라 한 스레드에서만."""
-        import ctypes
-        try:
-            f = ctypes.windll.kernel32.SetThreadExecutionState
-        except AttributeError:
-            return
-        f.restype, f.argtypes = ctypes.c_uint, [ctypes.c_uint]
-        on = False
-        while True:
+        """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기 (remote-awake 스레드)."""
+        self._awake_loop()
+
+    def _awake_loop(self, stop=None, every=5):
+        """이 스레드에서 core.keep_awake() 를 쥐고 있다가 원하지 않게 되면 놓음 (SetThreadExecutionState 는 core·updater 에서만).
+        Windows 는 그 상태를 스레드마다 세므로, 여기서 놓아도 작업 스레드(app.start_job 의 keep_awake · 편집점 찾기)가 쥔 것은
+        그대로이고 반대로 작업이 끝나도 여기서 쥔 '켜 둔 동안 항상'은 그대로 — 서로를 일찍 풀지 않는다 (D-034)."""
+        stop = stop or threading.Event()
+        while not stop.is_set():
             try:
-                want = self.state in ("on", "restarting") and (bool((self.bridge.job() or {}).get("name"))
-                                                               or self.store.data["settings"].get("keepAwake") == "always")
-                if want != on:
-                    f(core.ES_CONTINUOUS | core.ES_SYSTEM_REQUIRED if want else core.ES_CONTINUOUS)
-                    on = want
+                if self._awake_wanted():
+                    with core.keep_awake():
+                        while not stop.wait(every) and self._awake_wanted():
+                            pass
+                    continue
             except Exception:  # noqa: BLE001
                 pass
-            time.sleep(5)
+            stop.wait(every)
 
     # ----- 리스너 -----
     def _new_listener(self):
-        """새 원격 리스너 (띄우기만 · self.listener 에 넣는 것은 부르는 쪽이 잠금 안에서)."""
+        """새 원격 리스너 (띄우기만 · self.listener 에 넣는 것은 부르는 쪽이 잠금 안에서).
+        앱 화면 포트 창(app_ports: 8765 와 넘칠 때 쓰는 8766~ · .port)은 쓰지 않는다 — 두 번째 실행·실행기가 그 창을 '이 앱'인지 묻고,
+        다음에 켤 때 앱이 그 포트를 써야 할 수 있으므로 (D-034)."""
         port = int(os.environ.get("FUTSAL_REMOTE_PORT") or 0)
+        if port and port in app_ports():
+            raise RuntimeError("원격 접속용 포트가 앱 화면 포트와 겹쳐요 · FUTSAL_REMOTE_PORT 를 바꿔 주세요")
         srv = None
         for _ in range(20):
             try:
                 srv = RemoteServer(("127.0.0.1", port), self)
-                break
             except OSError:
                 if not port:
                     raise
                 time.sleep(0.25)
+                continue
+            if not port and srv.server_address[1] in app_ports():  # 임의 포트가 (드물게) 앱 포트 창에 걸림 → 닫고 다시
+                srv.server_close()
+                srv = None
+                continue
+            break
         if srv is None:
             raise RuntimeError("원격 접속용 포트를 열지 못했어요 · 잠시 뒤 다시 켜 주세요")
         threading.Thread(target=srv.serve_forever, daemon=True, name="remote-listener").start()
@@ -1643,10 +1692,17 @@ ACTIONS = {"download": _a_download, "analyze": _a_analyze, "add_refs": _a_add_re
 class RemoteServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
+    # app._Server 와 같은 규칙 (D-030): Windows 의 SO_REUSEADDR 는 다른 프로세스가 듣고 있는 포트도 같이 잡음 →
+    # FUTSAL_REMOTE_PORT 가 쓰이는 중이면 조용히 같이 듣지 않고 _new_listener 가 기다렸다 '열지 못했어요'로
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(self, addr, svc):
         self.svc = svc
         super().__init__(addr, RemoteHandler)
+
+    def handle_error(self, request, client_address):
+        """처리 밖으로 나온 오류: socketserver 기본은 보낸 곳 주소와 추적을 그대로 오류 출력(→ studio-error.log)에 → 비밀을 지우고 추적만."""
+        _trace()
 
 
 class RemoteHandler(BaseHTTPRequestHandler):
@@ -1690,7 +1746,10 @@ class RemoteHandler(BaseHTTPRequestHandler):
         self.send_header("Vary", "Origin")
 
     def _json(self, code, obj, extra=None):
-        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        try:
+            data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        except UnicodeEncodeError:  # 짝 없는 대리 문자(반쪽 이모지)가 든 파일 이름 등 → \uXXXX 로 (app.Handler._send 와 같게)
+            data = json.dumps(obj, ensure_ascii=True).encode("ascii")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -1706,10 +1765,10 @@ class RemoteHandler(BaseHTTPRequestHandler):
             return self._json(503, {"error": "지금은 바빠요 · 잠시 뒤 다시 해 주세요"}, {"Retry-After": "2"})
         try:
             self._handle(method, svc)
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        except (ConnectionError, TimeoutError):  # 휴대폰이 먼저 끊음 (영상 앞뒤로 옮기기 · Windows 는 ConnectionAbortedError 10053 도)
             pass
         except Exception:  # noqa: BLE001 — 오류 글·추적은 응답에 넣지 않음
-            traceback.print_exc()
+            _trace()
             try:
                 self._json(500, {"error": "문제가 생겼어요 · 잠시 뒤 다시 해 주세요"})
             except OSError:
@@ -1887,12 +1946,18 @@ def _int(v):
 
 
 def _json_body(body):
-    """POST 본문 → dict · 아니면 None (깊이 폭탄의 RecursionError 도 400 으로)."""
+    """POST 본문 → dict · 아니면 None (깊이 폭탄의 RecursionError 도 400 으로). 반쪽 이모지('\\ud83d')는 '�'로
+    (app.Handler._body 와 같은 core.clean_json · 기기 이름이 remote.json·기록에 못 쓰여 짝짓기가 멈추지 않게)."""
     try:
         b = json.loads(body or b"{}")
     except (ValueError, RecursionError):
         return None
-    return b if isinstance(b, dict) else None
+    if not isinstance(b, dict):
+        return None
+    try:
+        return core.clean_json(b)
+    except RecursionError:
+        return None
 
 
 # ---------- app 이 부르는 곳 ----------

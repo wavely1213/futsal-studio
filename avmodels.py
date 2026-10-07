@@ -130,9 +130,10 @@ def ensure(kind, item=None, label="스타일 배우는 중", threads=2, cancel=N
                     raise ValueError("글자 목록과 모델이 맞지 않아요")
         except thumb.DownloadCancelled:
             raise
-        except Exception:
+        except Exception as e:
             _FAIL[kind] = time.time()
-            if ready(kind):  # 다 받았는데 불러오지 못함 → 깨진 파일을 지우고 10분 뒤 새로 받음
+            if ready(kind) and not core.dll_missing(e):  # 다 받았는데 불러오지 못함 → 깨진 파일을 지우고 10분 뒤 새로 받음
+                # (Visual C++ 구성요소가 없어 onnxruntime 을 못 불러온 것이면 파일은 멀쩡함 → 지우고 다시 받기를 되풀이하지 않음)
                 _drop_files(kind)
                 try:
                     _mark(kind).write_text(str(int(time.time())), encoding="utf-8")

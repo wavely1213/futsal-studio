@@ -22,6 +22,7 @@ from pathlib import Path
 
 import core
 import source
+import updater
 
 LABEL = "한 영상으로 묶는 중"
 TMP_PREFIX = ".render_bundle_"  # 완성본 폴더 안 임시 폴더 (앱이 갑자기 꺼져 남으면 다음 실행 때 정리됨)
@@ -530,21 +531,30 @@ class _HwFail(Exception):
     pass
 
 
-def _replace_retry(src, dst, tries=40):
-    """Windows: 백신·탐색기가 막 만든 파일을 잠깐 잡고 있으면 옮기기가 실패 → 잠시 뒤 다시."""
-    for i in range(tries):
-        try:
-            os.replace(src, dst)
+def _replace_retry(src, dst, secs=None):
+    """Windows: 백신·탐색기가 막 만든 큰 파일을 한동안 잡고 검사하면 옮기기가 실패 → 점점 길게 기다리며 다시 (최대 1분)."""
+    try:
+        updater.replace_retry(src, dst, updater.SETTLE_SECS if secs is None else secs)
+    except PermissionError:
+        raise
+    except OSError as e:
+        if getattr(e, "errno", None) == 18 or getattr(e, "winerror", None) == 17:  # 다른 드라이브
+            shutil.move(str(src), str(dst))
             return
-        except PermissionError:
-            if i == tries - 1:
-                raise
-            time.sleep(0.25)
-        except OSError as e:
-            if getattr(e, "errno", None) == 18 or getattr(e, "winerror", None) == 17:  # 다른 드라이브
-                shutil.move(str(src), str(dst))
-                return
-            raise
+        raise
+
+
+KEEP_PREFIX = "묶은 영상_옮기지 못함_"  # 다 묶었는데 보관함으로 못 옮기면 임시 폴더를 이 이름으로 (정리 대상 아님 · 지우지 않음)
+
+
+def _keep_tmp(tmp):
+    """옮기지 못한 묶음 파일이 든 임시 폴더를 보이는 이름으로 바꿈 → 바뀐 폴더 (못 바꾸면 None)."""
+    keep = tmp.with_name(KEEP_PREFIX + time.strftime("%Y%m%d_%H%M%S"))
+    try:
+        os.replace(tmp, keep)
+        return keep
+    except OSError:
+        return None
 
 
 def _rmtree(d):
@@ -630,11 +640,18 @@ def make_bundle(names, title, log):
         (adir / "bundle.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         try:
             _replace_retry(part, dest)
-        except OSError:
+        except OSError as e:
             _rmtree(adir)
-            raise
+            kept = _keep_tmp(tmp)  # 몇 분 걸려 만든 묶음을 지우지 않음 (예전: 10초 뒤 포기하고 임시 폴더째 지움)
+            if kept is None:
+                raise
+            tmp = kept
+            log(f"  묶은 영상을 보관함으로 옮기지 못했어요 · {e}")
+            raise RuntimeError(f"묶은 영상은 만들었지만 보관함으로 옮기지 못했어요 (백신이 검사 중일 수 있어요). "
+                               f"'{kept / part.name}' 에 그대로 있어요") from None
     finally:
-        _rmtree(tmp)
+        if not tmp.name.startswith(KEEP_PREFIX):
+            _rmtree(tmp)
     source.mark_footage(name, "bundle")
     size = dest.stat().st_size
     total = sum(durs)

@@ -31,13 +31,27 @@ def _frames_dir(name):
 
 
 def grab(name, t, w=1920):
-    """영상의 t초 장면을 이미지로 (원본 화질, 가로 최대 1920 — 쇼츠 9:16 확대에도 덜 뭉개지게)."""
+    """영상의 t초 장면을 이미지로 (원본 화질, 가로 최대 1920 — 쇼츠 9:16 확대에도 덜 뭉개지게).
+    임시 파일에 다 만든 뒤에만 제자리로 (디스크가 차거나 꺼져 반쪽이 된 그림이 '있는 파일'로 남아 계속 쓰이지 않게 ·
+    같은 장면을 두 요청이 함께 만들어도 반쯤 쓴 파일을 내주지 않게)."""
     out = _frames_dir(name) / f"h_{t:09.3f}.jpg"
     src, vf = str(core.VIDEOS / name), f"scale='min({w},iw)':-2"
-    if not out.exists():
-        core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-frames:v", "1", "-vf", vf, "-q:v", "1", str(out)])
-    if not out.exists():  # 영상 끝(또는 소리가 영상보다 긴 꼬리)이면 마지막 장면으로
-        core.run([core.ffmpeg(), "-y", "-v", "error", "-sseof", "-3", "-i", src, "-vf", vf, "-update", "1", "-q:v", "1", str(out)])
+    if out.exists():
+        return out
+    tmp = out.with_name(f"{out.stem}.{os.getpid()}_{threading.get_ident()}.tmp.jpg")
+    for cmd in (["-ss", f"{t:.3f}", "-i", src, "-frames:v", "1"],
+                ["-sseof", "-3", "-i", src, "-update", "1"]):  # 영상 끝(또는 소리가 영상보다 긴 꼬리)이면 마지막 장면으로
+        r = core.run([core.ffmpeg(), "-y", "-v", "error", *cmd, "-vf", vf, "-q:v", "1", str(tmp)])
+        if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+            try:
+                updater.replace_retry(tmp, out)
+            except OSError:
+                pass
+            break
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
     return out
 
 
@@ -271,7 +285,12 @@ _SESS = {}
 def remove_bg(src_path, kind="hq"):
     """배경을 지운 PNG 경로 반환 (원본과 같은 크기 — 브러시로 복원할 때 위치가 맞도록)."""
     import numpy as np
-    import onnxruntime as ort
+    try:
+        import onnxruntime as ort
+    except (ImportError, OSError) as e:
+        if core.dll_missing(e):
+            raise RuntimeError(core.vc_runtime_msg("누끼 따기")) from e
+        raise
     from PIL import Image, ImageFilter
     from PIL import ImageOps
     path, size, mean, std, logits = _model(kind)
@@ -314,7 +333,7 @@ def save_upload(data_url, ext="png"):
     except Exception:
         pass
     dst = ASSETS / f"img_{int(time.time() * 1000)}.{ext}"
-    dst.write_bytes(raw)
+    updater.write_atomic(dst, raw)
     return dst
 
 
@@ -348,29 +367,30 @@ _SAVE_LOCK = threading.Lock()
 
 
 def save_docs(name, docs):
-    """안전하게 저장: 빈 목록은 거절, 임시 파일에 쓴 뒤 바꿔치기, 바로 전 저장본은 .bak으로."""
+    """안전하게 저장: 빈 목록은 거절, 임시 파일에 쓴 뒤 바꿔치기, 바로 전 저장본은 .bak 으로 복사.
+    지금 파일은 끝까지 제자리에 둠 (예전에는 .bak 으로 먼저 옮긴 뒤 바꿔치기가 Windows 잠금으로 실패하면 지금 파일이 없어져
+    다시 열 때 예전 디자인이 보였음) · 잠겨 있으면 잠깐 뒤 다시."""
     if not isinstance(docs, dict) or not docs.get("designs"):
         return False
     p = _doc_path(name)
+    data = core.clean_text(json.dumps(docs, ensure_ascii=False))
     with _SAVE_LOCK:
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(docs, ensure_ascii=False), encoding="utf-8")
         if p.exists():
             try:
-                os.replace(p, p.with_suffix(".json.bak"))
+                updater.write_atomic(p.with_suffix(".json.bak"), p.read_bytes())
             except OSError:
-                pass
-        os.replace(tmp, p)
+                pass  # 백업은 곁가지
+        updater.write_atomic(p, data)
     return True
 
 
 def export_image(name, data_url, fmt="jpg", label="썸네일"):
     raw = base64.b64decode(data_url.split(",", 1)[1])
-    label = re.sub(r'[\\/:*?"<>|]', "", label).strip(" .") or "썸네일"
+    label = re.sub(r'[\\/:*?"<>|\x00-\x1f\ufffd]', "", core.clean_text(str(label or ""))).strip(" .") or "썸네일"
     base = f"{core.adir(name).name}_{label}"
     k = 1
     while (core.OUT / f"{base}_{k}.{fmt}").exists():
         k += 1
     out = core.OUT / f"{base}_{k}.{fmt}"
-    out.write_bytes(raw)
+    updater.write_atomic(out, raw)  # 다 쓴 뒤에만 완성본 폴더에 (반쪽 그림이 올리기 키트에 잡히지 않게)
     return out
