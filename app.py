@@ -1,5 +1,6 @@
 """풋살사관학교 스튜디오 — 데스크톱 앱 (화면은 전용 창, 내부 통신은 127.0.0.1 전용)."""
 import base64
+import collections
 import json
 import mimetypes
 import os
@@ -21,7 +22,9 @@ import editor
 import hooks
 import plan
 import qa
+import qr
 import refs
+import remote
 import source
 import strategy
 import style
@@ -42,8 +45,11 @@ def _utf8_console():
 _utf8_console()
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
-LOG, JOB = [], {"name": None, "result": None, "error": None}
+LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0}
+DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
 LOCK = threading.Lock()
+BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
+JOB_HOOKS = []  # 작업이 끝나면 부름 (이름, 오류, 결과, 시킨 곳, 걸린 초) — 휴대폰 알림·결과 (remote.Service.job_hook)
 
 
 LOGFILE = core.WORK / "studio.log"
@@ -64,11 +70,13 @@ def log(msg):
         pass
 
 
-def start_job(name, fn):
+def start_job(name, fn, by=None):
+    """긴 작업 하나 시작 → 작업 번호(1부터 · 참) · 이미 돌고 있으면 False. by: 휴대폰에서 시켰으면 '휴대폰 · <기기 이름>'."""
     with LOCK:
         if JOB["name"]:
             return False
-        JOB.update(name=name, result=None, error=None)
+        jid = JOB["id"] + 1
+        JOB.update(name=name, result=None, error=None, by=by, t0=time.time(), id=jid)
 
     def runner():
         core.set_progress()
@@ -81,10 +89,42 @@ def start_job(name, fn):
             traceback.print_exc()
         finally:
             core.set_progress()
-            JOB["name"] = None
+            err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
+            with LOCK:
+                DONE[jid] = {"name": name, "by": by, "result": res, "error": err}
+                while len(DONE) > 20:
+                    DONE.popitem(last=False)
+                JOB["name"] = None
+            for h in list(JOB_HOOKS):
+                try:  # 알림 같은 곁가지가 작업을 깨뜨리지 않게
+                    h(name, err, res, by, secs)
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
 
     threading.Thread(target=runner, daemon=True).start()
-    return True
+    return jid
+
+
+def _started(ok):
+    """작업 시작 응답: jobId 로 화면이 '내가 시킨 작업'의 끝을 기다림 (/api/state?job=<번호> 의 done)."""
+    return {"ok": bool(ok), "jobId": ok or None, "error": None if ok else BUSY_MSG}
+
+
+def _job_snapshot():
+    """휴대폰 화면용 지금 작업 모습 (remote.Bridge.job)."""
+    with LOCK:
+        return {"name": JOB["name"], "by": JOB["by"], "t0": JOB["t0"], "progress": dict(core.PROGRESS),
+                "result": JOB["result"], "error": JOB["error"]}
+
+
+def _log_lines(since):
+    with LOCK:
+        return LOG[since:], len(LOG)
+
+
+def _remote_bridge():
+    return remote.Bridge(log=log, start_job=start_job, job=_job_snapshot, logs=_log_lines, analyze=Handler._analyze,
+                         refs_job=_refs_job, version=core.VERSION)
 
 
 def _refs_job(fn):
@@ -111,8 +151,10 @@ def open_folder(path):
 
 
 def restart():
-    """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후)."""
+    """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후).
+    휴대폰으로 보기는 새 프로세스를 띄우기 전에 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로)."""
     log("다시 시작하는 중…")
+    remote.SVC.shutdown()
     kw = {"cwd": str(core.APP_DIR)}
     if sys.platform == "win32":
         kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
@@ -125,7 +167,8 @@ def restart():
 
 
 def _quit():
-    """앱 끝내기: 저장 중인 프로젝트는 끝까지 쓰고, 남은 ffmpeg 는 끔 (Windows 는 자식 프로세스가 같이 안 꺼짐)."""
+    """앱 끝내기: 휴대폰에 '앱을 껐어요'를 알리고 터널을 끔 → 저장 중인 프로젝트는 끝까지 쓰고, 남은 ffmpeg 는 끔 (Windows 는 자식 프로세스가 같이 안 꺼짐)."""
+    remote.SVC.shutdown()
     editor.wait_saves(3)
     editor.cancel_export()
     os._exit(0)
@@ -398,14 +441,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
         if u.path == "/api/state":
             since = int(q.get("since", ["0"])[0])
+            try:
+                want = int(q.get("job", ["0"])[0])
+            except ValueError:
+                want = 0
             with LOCK:
                 lines = LOG[since:]
                 total = len(LOG)
+                running = bool(JOB["name"])
+                jinfo = {"job_id": JOB["id"] if running else None, "job_by": JOB["by"] if running else None,
+                         "done": dict(DONE[want], id=want) if want in DONE else None}  # ?job=<번호>: 그 작업이 끝났으면 결과
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
-            return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
+            return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
-                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local)})
+                                    "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
+                                    "remote": remote.SVC.brief()})
+        if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
+            if not remote.SVC.store:
+                return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})
+            st = remote.SVC.pc_status()
+            if st["pair"]:
+                st["pair"]["qr"] = qr.encode(st["pair"]["link"])
+            return self._send(200, st)
         if u.path == "/api/timeline":
             n = q["name"][0]
             return self._send(200, {"text": core.timeline(n), "events": core.timeline_events(n)})
@@ -556,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, dict(style.score_video(sname, vname), ok=True))
             except style.NeedsAnalysis:
                 ok = start_job("스타일 일치 점수", do_score)
-                return self._send(200 if ok else 409, {"ok": ok, "job": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+                return self._send(200 if ok else 409, dict(_started(ok), job=bool(ok)))
             except style.StyleMissing as e:
                 return self._send(404, {"ok": False, "error": str(e)})
             except style.StyleError as e:
@@ -570,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
             if c is not None:
                 return self._send(200, {"ok": True, "frames": c})
             ok = start_job("장면 고르기", lambda: thumb.frame_candidates(b["name"]))
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         if path == "/api/thumb/cut":
             def do_cut():
                 src = b["src"]
@@ -583,7 +641,7 @@ class Handler(BaseHTTPRequestHandler):
                 log("  누끼 완료")
                 return {"cut": thumb.asset_url(out), "src": src}
             ok = start_job("누끼 따기", do_cut)
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         if path == "/api/thumb/upload":
             ext = "png" if b["data"].startswith("data:image/png") else "jpg"
             return self._send(200, {"url": thumb.asset_url(thumb.save_upload(b["data"], ext))})
@@ -614,7 +672,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"captions": out, "split": n})
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         if path in ("/api/edit/restore", "/api/edit/freeze"):
             try:
                 if path == "/api/edit/restore":
@@ -629,10 +687,10 @@ class Handler(BaseHTTPRequestHandler):
             meta = editor.EXPORT_META.get(f.name) or {}  # 내보낼 때 기록한 설정이 먼저 (편집실을 새로 열면 화면 쪽 기록이 없음)
             ok = start_job("영상 검수", lambda: qa.check_video(f, meta.get("format") or b.get("format"), meta.get("master") or b.get("master"),
                                                              editor.run_killable))
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         if path == "/api/edit/proxy":
             ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         # ---- 영상 기획 분석: 클로드 계정으로 쓰기 (사용자 PC 의 Claude Code CLI) · Claude 대답 붙여 넣기 ----
         if path in ("/api/claude/install", "/api/claude/login", "/api/claude/token"):
             try:
@@ -680,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
                 except (style.StyleError, OSError, ValueError) as e:
                     return {"ok": False, "error": str(e) or "클로드 판단을 저장하지 못했어요"}
             ok = start_job("클로드로 더 깊게 보기", do_ai)
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         if path == "/api/edit/cancel":
             editor.cancel_export()
             return self._send(200, {"ok": True})
@@ -756,7 +814,7 @@ class Handler(BaseHTTPRequestHandler):
                     r["analyze_error"] = str(e)
                 return r
             ok = start_job("한 영상으로 묶기", run_bundle)
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         # ---- 올리기 키트 (제목 후보·설명·챕터·태그) ----
         if path == "/api/upload/kit":  # 만들기 · edits 가 있으면 화면에서 고친 내용 저장
             try:
@@ -803,6 +861,45 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, dict(d, ok=True))
         if path.startswith("/api/strategy/"):  # 채널 전략 (8단계)
             return self._strategy_post(path, b)
+        if path.startswith("/api/remote/"):  # 휴대폰으로 보기: 켜기·끄기·연결·끊기·설정 (PC 화면에서만 · 켜는 길은 여기뿐)
+            svc = remote.SVC
+            if not svc.store:
+                return self._send(503, {"ok": False, "error": "원격 접속을 준비하는 중이에요"})
+            try:
+                if path == "/api/remote/on":
+                    ok = svc.turn_on()
+                    return self._send(200 if ok else 400, {"ok": ok, "error": None if ok else svc.error, "state": svc.state})
+                if path == "/api/remote/off":
+                    svc.turn_off("user")
+                    return self._send(200, {"ok": True})
+                if path == "/api/remote/pair":
+                    pair = svc.pair_start()
+                    pair["qr"] = qr.encode(pair["link"])
+                    return self._send(200, {"ok": True, "pair": pair})
+                if path == "/api/remote/pair/cancel":
+                    svc.pairing.cancel()
+                    return self._send(200, {"ok": True})
+                if path == "/api/remote/revoke":
+                    if b.get("all") is True:
+                        n = svc.revoke(everyone=True)
+                    elif isinstance(b.get("id"), str):
+                        n = svc.revoke([b["id"]])
+                    else:
+                        return self._send(400, {"ok": False, "error": "끊을 휴대폰을 골라 주세요"})
+                    return self._send(200, {"ok": True, "removed": n})
+                if path == "/api/remote/settings":
+                    return self._send(200, {"ok": True, "settings": svc.set_settings(b)})
+                if path == "/api/remote/test":
+                    if not svc.store.data["devices"]:
+                        return self._send(400, {"ok": False, "error": "먼저 휴대폰을 연결해 주세요"})
+                    svc.test_notify()
+                    return self._send(200, {"ok": True})
+            except (remote.PairError, ValueError) as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"원격 접속 설정을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(404, {"error": "not found"})
         if path == "/api/restart":
             self._send(200, {"ok": True})
             threading.Timer(0.5, restart).start()
@@ -812,7 +909,7 @@ class Handler(BaseHTTPRequestHandler):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
             ok = start_job(name, fn)
-            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+            return self._send(200 if ok else 409, _started(ok))
         self._send(404, {"error": "not found"})
 
     def _strategy_get(self, path, q):
@@ -843,8 +940,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def _strategy_post(self, path, b):
-        """채널 전략 바꾸기·작업 시작 (YouTube 를 쓰는 작업은 뒤에서 하던 출처 찾기를 멈추고 시작)."""
-        busy = {"ok": False, "error": "다른 작업이 끝난 뒤에 다시 눌러 주세요"}
+        """채널 전략 바꾸기·작업 시작 (YouTube 를 쓰는 작업은 뒤에서 하던 출처 찾기를 멈추고 시작).
+        작업 시작 응답은 다른 작업과 같은 _started (jobId → 화면이 자기가 시킨 작업의 끝만 받음). 휴대폰에서는 시작할 수 없다 (D-028)."""
         try:
             if path == "/api/strategy/save":
                 if b.get("revivedAt") is not None:
@@ -862,7 +959,7 @@ class Handler(BaseHTTPRequestHandler):
                     if a.get("refresh"):
                         source.stop_backfill()
                         job = start_job(strategy.JOB_REFRESH, lambda: strategy.refresh([entry["key"]], "normal", log, editor.CANCEL))
-                    return self._send(200, {"ok": True, "entry": entry, "job": job})
+                    return self._send(200, {"ok": True, "entry": entry, "job": job, "jobId": job or None})
                 if isinstance(b.get("remove"), dict):
                     strategy.remove_channel(str(b["remove"].get("key") or ""))
                     return self._send(200, {"ok": True})
@@ -881,7 +978,7 @@ class Handler(BaseHTTPRequestHandler):
                     name, fn = strategy.JOB_REFRESH, lambda: strategy.refresh(keys, mode, log, editor.CANCEL)
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게)
                 ok = start_job(name, fn)
-                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+                return self._send(200 if ok else 409, _started(ok))
             if path == "/api/strategy/pause":  # [지금 다시 시도]: 연달아 실패해서 쉬는 것만 풂
                 strategy.clear_pause()
                 return self._send(200, {"ok": True})
@@ -889,7 +986,7 @@ class Handler(BaseHTTPRequestHandler):
                 studio = strategy._clean_studio(b.get("studio"))
                 source.stop_backfill()
                 ok = start_job(strategy.JOB_CHECK, lambda: strategy.checkup(log, editor.CANCEL, studio))
-                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+                return self._send(200 if ok else 409, _started(ok))
             if path == "/api/strategy/todo":
                 if isinstance(b.get("add"), dict):
                     a = b["add"]
@@ -912,7 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
                     b.get("remind") if isinstance(b.get("remind"), bool) else None, b.get("ownAuto") if isinstance(b.get("ownAuto"), bool) else None)})
             if path == "/api/strategy/ai":
                 ok = start_job(strategy.JOB_AI, lambda: strategy.run_ai(log, editor.CANCEL))
-                return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+                return self._send(200 if ok else 409, _started(ok))
             if path == "/api/strategy/ai_paste":
                 ai = strategy.parse_ai(b.get("text"), by="paste")
                 dh = strategy.data_hash(strategy.overview())
@@ -1026,6 +1123,12 @@ def main():
     _after_start()
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
+        remote.init(_remote_bridge())
+        JOB_HOOKS.append(remote.SVC.job_hook)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        log(f"휴대폰으로 보기를 준비하지 못했어요 · {e}")
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=ensure_shortcut, daemon=True).start()
     if "--browser" not in sys.argv:

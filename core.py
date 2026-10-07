@@ -110,6 +110,9 @@ def _extract_flat(target, opts, log):
         except Exception as e:
             if not _blocked(e):
                 raise
+            if not self_update_allowed():
+                log(REMOTE_NO_UPDATE_MSG)
+                raise RuntimeError(BLOCKED_MSG) from e
             log("YouTube가 막아서 다운로드 엔진을 최신으로 바꾼 뒤 한 번 더 불러올게요")
             update_engine(log)
             try:
@@ -211,7 +214,7 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
                         log("  담기 완료")
                         _remember_source(cur, log, remember)
                     except Exception as e:  # 한 개 실패해도 나머지 계속
-                        if attempt == 1 and not retried and _blocked(e):
+                        if attempt == 1 and not retried and _blocked(e) and self_update_allowed():
                             retried = True
                             log("  YouTube가 막았어요 · 다운로드 엔진을 최신으로 바꾼 뒤 한 번 더 받아 볼게요")
                             ydl.close()
@@ -222,7 +225,7 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
                             continue
                         msg = str(e)
                         if _blocked_text(msg):
-                            msg = BLOCKED_MSG
+                            msg = BLOCKED_MSG if self_update_allowed() else REMOTE_BLOCKED_MSG
                         log(f"  담지 못했어요 · {msg}")
                         failed.append(vid)
                     break
@@ -572,6 +575,26 @@ DENO_AUTO = sys.platform == "win32"  # 자동 설치는 Windows 만
 BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
                "소재 찾기의 '다운로드가 계속 실패하나요?' → '크롬 로그인 정보로 받기'를 켜고 다시 해 보세요.")
 _ENGINE_LOCK = threading.RLock()  # pip 로 엔진을 바꾸는 동안만 목록·다운로드가 기다림 (같은 작업 안의 재시도는 통과)
+_SELF_UPDATE = threading.local()
+REMOTE_NO_UPDATE_MSG = ("  휴대폰에서 시킨 작업이라 다운로드 엔진은 바꾸지 않았어요 · "
+                        "PC에서 '업데이트 확인' → 다운로드 엔진을 최신으로 바꾼 뒤 다시 받아 주세요")
+REMOTE_BLOCKED_MSG = ("YouTube가 막았어요 · 휴대폰에서 시킨 받기라 다운로드 엔진은 바꾸지 않았어요. PC에서 '업데이트 확인'으로 "
+                      "엔진을 최신으로 바꾸거나 '크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요")
+
+
+@contextlib.contextmanager
+def no_self_update():
+    """휴대폰에서 시킨 작업(remote, D-027): 이 스레드에서는 다운로드 엔진(pip)·Deno 를 설치·업데이트하지 않는다 (PC 에서만)."""
+    prev = getattr(_SELF_UPDATE, "off", False)
+    _SELF_UPDATE.off = True
+    try:
+        yield
+    finally:
+        _SELF_UPDATE.off = prev
+
+
+def self_update_allowed():
+    return not getattr(_SELF_UPDATE, "off", False)
 _DENO_LOCK = threading.Lock()     # Deno 설치는 한 번에 하나 (엔진 잠금과 따로: 받는 동안 목록 불러오기는 기다리지 않음)
 _DENO_PROG = {}                   # 받는 중인 Deno 진행률 (기다리는 다운로드 작업이 화면에 보여 줌)
 _DENO = None
@@ -670,7 +693,10 @@ def engine_age():
 
 def update_engine(log, deno=True):
     """다운로드 엔진(yt-dlp + YouTube 해석 부품)을 최신으로 바꾸고 새 버전을 다시 읽음. 성공하면 True.
-    잠금은 pip 동안만 (Deno 는 그 밖에서 확인·설치)."""
+    잠금은 pip 동안만 (Deno 는 그 밖에서 확인·설치). 휴대폰에서 시킨 작업 안에서는 하지 않고 False."""
+    if not self_update_allowed():
+        log(REMOTE_NO_UPDATE_MSG)
+        return False
     with _ENGINE_LOCK:
         before = _ytdlp_version()
         log("다운로드 엔진을 최신으로 바꾸는 중")
@@ -787,7 +813,8 @@ def _deno_progress(show):
 def ensure_deno(log, install=True, show=True):
     """YouTube 해석에 쓰는 자바스크립트 실행기(Deno)를 찾고, 없으면 (Windows) 이 사용자 폴더에 설치.
     실패해도 멈추지 않고 None (영상 일부가 안 받아질 수 있음). 다른 쪽이 설치하는 중이면 끝날 때까지 기다렸다 그 결과를 씀.
-    show: 받는 진행률을 화면에 (작업 안에서 부를 때만)."""
+    show: 받는 진행률을 화면에 (작업 안에서 부를 때만). 휴대폰에서 시킨 작업 안에서는 찾기만 (설치 안 함)."""
+    install = install and self_update_allowed()
     found = _find_deno()
     if found or not (install and DENO_AUTO):
         return found

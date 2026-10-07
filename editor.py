@@ -165,14 +165,10 @@ def proxy_path(f, src="videos"):
     return _cache_dir(f, src) / "proxy.mp4"
 
 
-def make_proxy(f, src="videos", log=print):
-    """4K·HEVC(아이폰) 영상도 편집실에서 부드럽게: 540p H.264, 짧은 키프레임 간격. 내보내기는 항상 원본으로."""
-    p, out = media_path(f, src), proxy_path(f, src)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    CANCEL.clear()
+def _encode_540p(p, tmp, label, item):
+    """540p H.264 가벼운 파일 (편집실 미리보기 파일·휴대폰 '작은 미리보기'가 같이 씀) → ffmpeg 종료 코드. 멈추기(✕)로 끌 수 있음."""
     info = probe(p)
     dur = info["duration"] or 1
-    tmp = out.with_suffix(".part.mp4")
     vf = (tonemap_chain(info["hdr"], 1920) if info.get("hdr") else []) + ["scale=-2:540", "fps=30"]
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
@@ -184,22 +180,110 @@ def make_proxy(f, src="videos", log=print):
             if line.startswith(b"out_time_us="):
                 try:
                     t = int(line[12:].strip() or 0) / 1e6
-                    core.set_progress(label="미리보기 파일 만드는 중", item=f, pct=min(99, int(t * 100 / dur)), detail=f"{int(t)}초 / {int(dur)}초")
+                    core.set_progress(label=label, item=item, pct=min(99, int(t * 100 / dur)), detail=f"{int(t)}초 / {int(dur)}초")
                 except ValueError:
                     pass
         proc.wait()
     finally:
         _PROCS.discard(proc)
         proc.stdout.close()
+    return proc.returncode
+
+
+def make_proxy(f, src="videos", log=print):
+    """4K·HEVC(아이폰) 영상도 편집실에서 부드럽게: 540p H.264, 짧은 키프레임 간격. 내보내기는 항상 원본으로."""
+    p, out = media_path(f, src), proxy_path(f, src)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    CANCEL.clear()
+    tmp = out.with_suffix(".part.mp4")
+    rc = _encode_540p(p, tmp, "미리보기 파일 만드는 중", f)
     if CANCEL.is_set():
         tmp.unlink(missing_ok=True)
         raise RuntimeError("미리보기 파일 만들기를 멈췄어요")
-    if proc.returncode or not tmp.exists():
+    if rc or not tmp.exists():
         tmp.unlink(missing_ok=True)
         raise RuntimeError("미리보기 파일을 만들지 못했어요")
     os.replace(tmp, out)
     log(f"  미리보기 파일 완료 · {Path(f).name}")
     return {"src": src, "file": Path(f).name}
+
+
+# ---------- 휴대폰으로 보기 (remote.py) 가 쓰는 것 ----------
+
+PREVIEW_KEEP = 10  # 휴대폰용 작은 미리보기는 최근 10개만 (오래된 것부터 지움)
+
+
+def remote_previews():
+    """휴대폰용 작은 미리보기 폴더 (완성본 폴더 out/ 에는 넣지 않음)."""
+    return core.ANALYSIS / "_remote"
+
+
+def out_preview_path(name):
+    n = safe_name(name)
+    tag = hashlib.sha1(n.encode("utf-8")).hexdigest()[:10]
+    base = Path(n).stem.strip(" .")[:40].rstrip(" .") or "video"
+    return remote_previews() / f"{base}_{tag}" / "preview.mp4"
+
+
+def out_preview(name, log=print):
+    """완성본(out/*.mp4) → 휴대폰에서 데이터 적게 볼 540p 미리보기 (analysis/_remote/…/preview.mp4)."""
+    src = (core.OUT / safe_name(name)).resolve()
+    if src.parent != core.OUT.resolve() or not src.is_file() or src.suffix.lower() != ".mp4":
+        raise RuntimeError("완성본을 찾지 못했어요")
+    out = out_preview_path(name)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    CANCEL.clear()
+    tmp = out.with_suffix(".part.mp4")
+    rc = _encode_540p(src, tmp, "작은 미리보기 만드는 중", name)
+    if CANCEL.is_set():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("작은 미리보기 만들기를 멈췄어요")
+    if rc or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("작은 미리보기를 만들지 못했어요")
+    os.replace(tmp, out)
+    try:
+        dirs = sorted((d for d in remote_previews().iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True)
+        for d in dirs[PREVIEW_KEEP:]:
+            shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
+    log(f"  작은 미리보기 완료 · {name}")
+    return {"file": name}
+
+
+def export_saved(name, seq_id, preset="youtube", log=print):
+    """저장된 편집본 하나 내보내기 (휴대폰에서) — 편집실 화면 exportProject() 와 같은 묶음 {편집본, 자막, 정보, 원본, 미디어}."""
+    if preset not in ("youtube", "small"):
+        raise RuntimeError("내보내기 설정을 다시 골라 주세요")
+    proj = load_project(name)
+    seq = next((q for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("id") == seq_id), None)
+    if not seq:
+        raise RuntimeError("편집본을 찾지 못했어요 · 편집실에서 지웠는지 확인해 주세요")
+    merged = {**seq, "captions": proj.get("captions"), "info": proj.get("info"), "source": proj.get("source"), "media": proj.get("media")}
+    return export(name, merged, {"preset": preset, "fps": 30, "video": True, "srt": True, "xml": False, "hw": True, "range": None}, log)
+
+
+def add_style_sequences(name, style_name, params, kinds=("long", "shorts"), log=print, client="remote"):
+    """배운 스타일로 자동 가편집을 만들어 프로젝트 편집본에 바로 더함 (휴대폰에서 · 이름 규칙은 /api/edit/autoseq 와 같음).
+    편집실이 그 사이 저장했으면 한 번 다시 읽어 더함 · 열려 있는 편집실은 다음 저장 때 기존 '다른 창에서 저장됨' 안내를 받는다."""
+    core.set_progress(label="자동 가편집 만드는 중", item=name, pct=None, detail=f"{style_name} 스타일")
+    for attempt in (1, 2):
+        proj = load_project(name)
+        seqs = auto_sequences(name, proj.get("info") or media_info(name), params, tuple(kinds))
+        names = {q.get("name") for q in proj.get("sequences") or []}
+        for q in seqs:
+            q["name"] = _uniq_name(f"{style_name} 스타일 가편집" + ("" if q["format"] == "long" else " · " + q["name"]), names)
+            names.add(q["name"])
+        proj["sequences"] = list(proj.get("sequences") or []) + seqs
+        try:
+            save_project(name, proj, proj.get("rev"), client=client)
+            break
+        except Conflict:
+            if attempt == 2:
+                raise RuntimeError("편집실에서 저장하는 중이라 더하지 못했어요 · 잠시 뒤 다시 해 주세요") from None
+    log(f"  가편집 {len(seqs)}개를 편집본에 더했어요 · " + ", ".join(q["name"] for q in seqs))
+    return {"added": [q["name"] for q in seqs]}
 
 
 def library():

@@ -4,7 +4,7 @@ async function doCut(l0, kind) {
   const doc = D, id = l0.id, src = l0.orig || l0.src;
   const j = await post("/api/thumb/cut", { src, kind });
   if (!j.ok) return toast(j.error || "지금은 할 수 없어요");
-  const res = await watchJob(); if (!res) return;
+  const res = await watchJob(j.jobId); if (!res) return;
   if (doc !== D) { const i = DOCS.designs.indexOf(doc); if (i >= 0) openDesign(i); }  // 기다리는 사이 다른 디자인을 열었으면 원래 디자인으로
   const l = D.doc.layers.find(x => x.id === id);  // 되돌리기로 객체가 바뀌었어도 id로 다시 찾기
   if (!l) return toast("누끼 딸 레이어가 없어졌어요 (되돌리기·삭제)");
@@ -15,13 +15,14 @@ async function doCut(l0, kind) {
   Object.assign(l, { bright: Math.min(l.bright, 72), blur: Math.max(l.blur, 3) });
   selIds = [cutL.id]; changed(); toast("누끼를 땄어요 · 배경은 살짝 어둡고 흐리게 했어요 (Ctrl+Z로 되돌리기)");
 }
-function watchJob() {
+function watchJob(id) {  // id: 시작 응답의 jobId — 그 작업의 결과만 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
   $("busy").classList.add("show");
   return new Promise(resolve => {
     const iv = setInterval(async () => {
-      const s = await (await fetch("/api/state?since=999999")).json(), pr = s.progress || {};
-      $("busyTxt").textContent = pr.detail || s.job || "작업 중"; $("busyBar").style.width = (pr.pct || 5) + "%";
-      if (!s.job) { clearInterval(iv); $("busy").classList.remove("show"); if (s.error) { toast("실패 · " + s.error.slice(0, 80)); resolve(null); } else resolve(s.result); }
+      let s; try { s = await (await fetch("/api/state?since=999999" + (id ? "&job=" + id : ""))).json(); } catch (e) { return; }
+      const pr = s.progress || {}, d = id ? s.done : (s.job ? null : s);
+      if (!d) { $("busyTxt").textContent = pr.detail || s.job || "작업 중"; $("busyBar").style.width = (pr.pct || 5) + "%"; return; }
+      clearInterval(iv); $("busy").classList.remove("show"); if (d.error) { toast("실패 · " + d.error.slice(0, 80)); resolve(null); } else resolve(d.result);
     }, 700);
   });
 }
@@ -190,7 +191,7 @@ function renderAuto() {
     if (!FRAMES.length) return toast("장면을 고르는 중이에요");
     const j = await post("/api/thumb/cut", { src: frameSrc(FRAMES[0].t), kind: "hq" });
     if (!j.ok) return toast(j.error || "지금은 할 수 없어요");
-    const r = await watchJob(); if (r) { CUT_AUTO = r; renderAuto(); }
+    const r = await watchJob(j.jobId); if (r) { CUT_AUTO = r; renderAuto(); }
   };
   renderDesigns(); makeCands();
 }
@@ -413,7 +414,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   for (let tries = 0; tries < 200; tries++) {
     const r = tries === 0 ? await framesP : await post("/api/thumb/frames", { name: NAME });
     if (r.frames) { FRAMES = r.frames; break; }
-    if (r.ok) { const res = await watchJob(); FRAMES = res || []; break; }
+    if (r.ok) { const res = await watchJob(r.jobId); FRAMES = res || []; break; }
     if (tries === 0) toast("다른 작업이 끝나면 장면을 골라요");
     $("strip").innerHTML = `<span class="hint" style="padding:10px">다른 작업이 끝나기를 기다리는 중…</span>`;
     await new Promise(r2 => setTimeout(r2, 3000));

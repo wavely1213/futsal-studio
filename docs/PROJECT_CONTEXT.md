@@ -31,7 +31,7 @@
   - 웹 프레임워크·번들러·빌드 도구 도입. 화면은 단일 파일 HTML, 서버는 표준 라이브러리만 쓴다.
   - 사용자 계정 정보로 YouTube 봇 검사를 자동 우회하는 것. 쿠키는 사용자가 브라우저를 직접 고를 때만 쓴다.
   - 유료 AI API 호출. Claude는 사용자가 '복사' 버튼으로 프롬프트를 복사해 claude.ai에 붙여 넣는 방식으로만 쓴다.
-  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다.
+  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다. 예외는 소유자가 켤 때만 여는 '휴대폰으로 보기'(D-027: 빠른 터널 → 루프백 원격 리스너, 짝지은 휴대폰 최대 5대)뿐이다.
   - 영상 업로드 자동화. 앱은 올리기 키트를 만들고 YouTube Studio를 여는 데까지만 한다.
   - 이 항목들의 결정 이유는 `DECISION_LOG.md`에 있다.
 
@@ -43,9 +43,9 @@
 | 프론트엔드 | 단일 파일 HTML 3개: `ui.html`(스튜디오), `editor.html`(편집실), `thumb.html`(썸네일) | 프레임워크·빌드 없음. pywebview 전용 창(Windows는 WebView2)에 띄우고, 창을 못 열면 브라우저로 연다 |
 | 백엔드 | Python 표준 라이브러리 `ThreadingHTTPServer` (`app.py`) | `127.0.0.1:FUTSAL_PORT`(기본 8765)에만 bind. Host 헤더를 검사. 긴 작업은 `start_job` 하나씩 처리 |
 | 데이터베이스 | 없음. 작업 폴더의 JSON·미디어 파일에 저장 | 작업 폴더는 `config.json`의 `workspace`, 비어 있으면 `~/풋살사관학교_작업` |
-| 인증 | 없음 (로컬 1인용) | 대신 Host·Origin 검사와 파일 이름 검사를 함 (`ARCHITECTURE.md` 6절) |
-| 배포/호스팅 | GitHub `main`의 `manifest.json` + 배포 커밋 zip | 사용자 PC의 `updater.py`가 받아서 확인한 뒤 설치. 서버 호스팅은 없음 |
-| 기타 (결제, 알림 등) | 영상: ffmpeg(`imageio-ffmpeg` 번들, ffprobe 없음) · 다운로드: `yt-dlp[default]` + Deno · 받아쓰기: `faster-whisper`(`large-v3-turbo`, CPU int8, 한국어) · 이미지·추론: Pillow, numpy, onnxruntime · 폰트: Pretendard, Black Han Sans, Do Hyeon(OFL, `fonts/`) | 의존성 목록은 `requirements.txt`, 정책은 `DEPENDENCY_POLICY.md` |
+| 인증 | 로컬 화면: 없음 (로컬 1인용 · Host·Origin·파일 이름 검사, `ARCHITECTURE.md` 6절) · 휴대폰으로 보기: 기기 짝짓기(10분 코드 증명) + 요청 서명(`FSR2`) + 미디어 표 | 원격은 켜 둔 동안만 · 규칙은 `SECURITY_GUIDELINES.md` 2·3절, D-027 |
+| 배포/호스팅 | 앱: GitHub `main`의 `manifest.json` + 배포 커밋 zip · 휴대폰 화면: 와벨리 저장소 `public/futsal/` → Vercel `mulgyeol.kr/futsal` (정적) | 사용자 PC의 `updater.py`가 받아서 확인한 뒤 설치. 앱 서버 호스팅은 없음 (원격은 PC → Cloudflare 빠른 터널, D-027) |
+| 기타 (결제, 알림 등) | 영상: ffmpeg(`imageio-ffmpeg` 번들, ffprobe 없음) · 다운로드: `yt-dlp[default]` + Deno · 받아쓰기: `faster-whisper`(`large-v3-turbo`, CPU int8, 한국어) · 이미지·추론: Pillow, numpy, onnxruntime · 폰트: Pretendard, Black Han Sans, Do Hyeon(OFL, `fonts/`) · 휴대폰으로 보기: cloudflared(고정 판, 처음 켤 때 받음) · ntfy.sh(비콘·알림) · pycryptodomex(yt-dlp 와 함께 깔린 것 · AES-GCM) | 의존성 목록은 `requirements.txt`, 정책은 `DEPENDENCY_POLICY.md` · 원격은 D-027 |
 
 > 스택 변경은 반드시 `DECISION_LOG.md`에 이유와 함께 기록한다.
 
@@ -72,6 +72,9 @@ ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 
 strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
 forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
+remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027)
+tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
+qr.py               연결 QR 만들기 (표준 라이브러리)
 takes.py            NG 테이크·슬레이트·말더듬 찾기 (2차 작업 중, 아직 커밋 전)
 ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기 · 8 채널 전략)
 editor.html         편집실 화면 (프리미어식)
@@ -107,6 +110,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`: 내부용. 재시작·실행기 경유를 표시하며 직접 설정하지 않는다.
+  - 휴대폰으로 보기(D-027): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR 이 가리킬 페이지 주소 · 개발 모드만), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)
 - **실행 명령어**: `AGENTS.md` 5번 항목과 동일하게 유지
@@ -132,6 +136,9 @@ icon.ico / icon.png 앱 아이콘
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
 | i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
+| Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-027)를 켠 동안만: 휴대폰 → 원격 리스너. 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
+| ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
+| mulgyeol.kr/futsal (저장소 밖: 와벨리 저장소 `public/futsal/`, Vercel) | 휴대폰 화면(정적 PWA). 와벨리 `main`에 병합되면 공개된다 | 없음 |
 
 ## 7. 참고 링크
 

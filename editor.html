@@ -1166,13 +1166,14 @@ async function makeProxy(md) {
   if (!r.ok) return toast(r.error || "지금은 만들 수 없어요");
   toast("미리보기 파일을 만드는 중이에요 · 그동안 계속 편집해도 돼요");
   $("busy").classList.add("show"); JOBNAME = "미리보기 파일 만들기";
+  const id = r.jobId;  // 이 작업 번호의 결과만 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
   const iv = setInterval(async () => {
-    let s; try { s = await (await fetch("/api/state?since=999999")).json(); } catch (e) { return; }
-    const pr = s.progress || {};
-    $("busyTxt").textContent = "미리보기 파일 · " + (pr.detail || ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
-    if (!s.job) {
+    let s; try { s = await (await fetch("/api/state?since=999999" + (id ? "&job=" + id : ""))).json(); } catch (e) { return; }
+    const pr = s.progress || {}, d = id ? s.done : (s.job ? null : s);
+    if (!d) { $("busyTxt").textContent = "미리보기 파일 · " + (pr.detail || ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : ""; }
+    if (d) {
       clearInterval(iv); $("busy").classList.remove("show");
-      if (s.error) return toast(s.error.includes("멈췄어요") ? "미리보기 파일 만들기를 멈췄어요" : "미리보기 파일 실패 · " + s.error.slice(0, 80));
+      if (d.error) return toast(d.error.includes("멈췄어요") ? "미리보기 파일 만들기를 멈췄어요" : "미리보기 파일 실패 · " + d.error.slice(0, 80));
       md.proxy = true; for (const e of [...POOL.values()]) if (e.mid === md.id) killEntry(e);
       scheduleSave(); frameDirty = true; renderMediaBin(); toast("미리보기 파일 완성 · 이제 부드럽게 재생돼요 (내보내기는 원본 화질)");
     }
@@ -3260,23 +3261,23 @@ $("exGo").onclick = async () => {
   await saveNow();
   const r = await (await post("/api/edit/export", { name: NAME, project: proj, opts })).json();
   if (!r.ok) return toast(r.error || "지금은 내보낼 수 없어요");
-  toast("내보내기 시작 · 그동안 계속 편집해도 돼요"); watchJob("내보내기");
+  toast("내보내기 시작 · 그동안 계속 편집해도 돼요"); watchJob("내보내기", r.jobId);
 };
 let EXP_JOB = { t0: 0, fmt: null, seq: null, master: null }, JOBNAME = "";
 const etaTxt = s => s == null ? "" : s >= 60 ? `약 ${Math.floor(s / 60)}분 ${s % 60}초 남음` : `약 ${s}초 남음`;
-function watchJob(name) {
+function watchJob(name, id) {  // id: 이 화면이 시킨 작업 번호 — 그 작업의 결과만 씀 (휴대폰이 시킨 작업 결과로 폴더를 열거나 검수하지 않게)
   JOBNAME = name || "내보내기";
   $("busy").classList.add("show"); $("exportBtn").disabled = true;
   const iv = setInterval(async () => {
-    let s; try { s = await (await fetch("/api/state?since=999999")).json(); } catch (e) { return; }
-    const pr = s.progress || {};
-    $("busyTxt").textContent = (pr.detail || (qaRunning ? "검수 중" : "내보내는 중")) + (pr.eta != null ? " · " + etaTxt(pr.eta) : ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
-    if (!s.job) {
+    let s; try { s = await (await fetch("/api/state?since=999999" + (id ? "&job=" + id : ""))).json(); } catch (e) { return; }
+    const pr = s.progress || {}, d = id ? s.done : (s.job ? null : s);
+    if (!d) { $("busyTxt").textContent = (pr.detail || (qaRunning ? "검수 중" : "내보내는 중")) + (pr.eta != null ? " · " + etaTxt(pr.eta) : ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : ""; }
+    if (d) {
       clearInterval(iv); $("busy").classList.remove("show"); $("exportBtn").disabled = false;
-      if (s.error && qaRunning) { qaRunning = null; toast(s.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수 실패 · " + s.error.slice(0, 80)); post("/api/open", { which: "out" }); }
-      else if (s.error) { toast(s.error.includes("멈췄어요") ? "내보내기를 멈췄어요" : "실패 · " + s.error.slice(0, 100)); }
-      else if (qaRunning) { if (s.result && s.result.items) showVideoQA(s.result); else qaRunning = null; }
-      else if (Array.isArray(s.result) && /\.mp4$/i.test(s.result[0] || "") && $("exQa").checked) runVideoQA(s.result[0]);
+      if (d.error && qaRunning) { qaRunning = null; toast(d.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수 실패 · " + d.error.slice(0, 80)); post("/api/open", { which: "out" }); }
+      else if (d.error) { toast(d.error.includes("멈췄어요") ? "내보내기를 멈췄어요" : "실패 · " + d.error.slice(0, 100)); }
+      else if (qaRunning) { if (d.result && d.result.items) showVideoQA(d.result); else qaRunning = null; }
+      else if (Array.isArray(d.result) && /\.mp4$/i.test(d.result[0] || "") && $("exQa").checked) runVideoQA(d.result[0]);
       else { toast("내보냈어요! 완성본 폴더를 열게요"); post("/api/open", { which: "out" }); }
     }
   }, 700);
@@ -3286,7 +3287,7 @@ async function runVideoQA(file) {
   qaRunning = file; toast("내보냈어요! 올리기 전에 자동 검수 중이에요");
   const r = await (await post("/api/edit/qa", { name: NAME, file, format: EXP_JOB.fmt || S.format, master: EXP_JOB.master })).json();
   if (!r.ok) { qaRunning = null; toast(r.error || "검수를 시작하지 못했어요"); post("/api/open", { which: "out" }); return; }
-  watchJob("검수");
+  watchJob("검수", r.jobId);
 }
 function showVideoQA(rep) {
   const file = qaRunning; qaRunning = null;
@@ -3492,7 +3493,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   layoutFrame(); zoomFit(); renderCaps(); renderPanels(); renderBin(); showCapBan(j.capLong);
   $("saved").textContent = "자동 저장 켜짐";
   requestAnimationFrame(loop);
-  const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기") watchJob("내보내기");
+  const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기" && !s.job_by) watchJob("내보내기", s.job_id);  // 휴대폰이 시킨 내보내기는 이 화면이 이어받지 않음
 })();
 </script>
 </body>

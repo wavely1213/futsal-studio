@@ -740,6 +740,32 @@ class RouteTests(Base):
         self.assertEqual(rf.call_args[0][1], "own")
         self.assertEqual(self.call("/api/strategy/refresh", {"keys": [1, 2]})[0], 400)
 
+    def test_job_start_replies_have_job_id(self):
+        """원격 접속과 합침(D-028): 전략 작업 시작 응답에도 jobId → 8단계는 /api/state?job=<번호> 의 done 으로 자기 작업 결과만."""
+        with mock.patch.object(strategy, "refresh", return_value={"ok": True, "done": 1}), \
+                mock.patch.object(strategy, "checkup", return_value={"ok": True, "checkup": {}}), \
+                mock.patch.object(strategy, "run_ai", return_value={"ok": False, "error": "x", "kind": "login"}):
+            ids = []
+            for path, body, want in (("/api/strategy/refresh", {}, {"ok": True, "done": 1}),
+                                     ("/api/strategy/refresh", {"own": True}, {"ok": True, "done": 1}),
+                                     ("/api/strategy/checkup", {}, {"ok": True, "checkup": {}}),
+                                     ("/api/strategy/ai", {}, {"ok": False, "error": "x", "kind": "login"})):
+                code, j = self.call(path, body)
+                self.assertEqual((code, j["ok"], j["error"]), (200, True, None), path)
+                self.assertIsInstance(j["jobId"], int)
+                ids.append(j["jobId"])
+                self.wait_job()
+                self.assertEqual(self.call(f"/api/state?since=0&job={j['jobId']}")[1]["done"]["result"], want, path)
+            self.assertEqual(ids, sorted(set(ids)))
+            code, j = self.call("/api/strategy/channels", {"add": {"url": "@새로운채널", "refresh": True}})
+            self.assertEqual(code, 200)
+            self.assertIsInstance(j["jobId"], int)
+            self.assertEqual(j["job"], j["jobId"])
+            self.wait_job()
+        self.app.JOB.update(name=strategy.JOB_REFRESH)
+        code, j = self.call("/api/strategy/ai", {})
+        self.assertEqual((code, j["ok"], j["jobId"]), (409, False, None))
+
     def test_host_and_origin_checked(self):
         self.assertEqual(self.call("/api/strategy", headers={"Host": "evil.example.com"})[0], 403)
         self.assertEqual(self.call("/api/strategy/settings", {"remind": False}, headers={"Origin": "http://evil.example.com"})[0], 403)
