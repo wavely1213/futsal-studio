@@ -224,9 +224,10 @@ def _remember_source(cur, log, remember=None):
 
 def adir(name):
     """영상별 분석 폴더. Windows 는 폴더 이름 끝의 공백·점을 지워버리므로 미리 제거.
-    편집용 보관함 영상(또는 이미 분석 폴더가 있는 이름)은 analysis/<이름> · 그 밖에 학습용 영상(refs)이면 그 채널 폴더의 _analysis/<이름>."""
+    편집용 보관함에 파일이 있으면 analysis/<이름> · 아니고 학습용 영상(refs) 기록이 있으면 그 채널 폴더의 _analysis/<이름>
+    (보관함에서 지운 같은 이름 영상의 옛 분석 폴더가 남아 있어도 학습용이 이김) · 둘 다 아니면 analysis/<이름>."""
     d = ANALYSIS / (Path(name).stem.rstrip(" .") or "video")
-    if d.exists() or (VIDEOS / Path(name).name).exists():
+    if (VIDEOS / Path(name).name).exists():
         return d
     return _ref("adir_of", name) or d
 

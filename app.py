@@ -96,8 +96,8 @@ def _refs_job(fn):
     except RuntimeError as e:
         if str(e) != core.BLOCKED_MSG:
             raise
-        log(f"  {e}")
-        return {"ok": False, "error": str(e), "blocked": True}
+        log(f"  {refs.BLOCKED_MSG}")
+        return {"ok": False, "error": refs.BLOCKED_MSG, "blocked": True}  # 이 화면의 '크롬 로그인 정보로 받기'를 가리킴
 
 
 def open_folder(path):
@@ -472,20 +472,21 @@ class Handler(BaseHTTPRequestHandler):
             "/api/refs/direction": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_direction(str(b.get("dir") or ""), log, ck, b.get("learn", True) is not False,
                                                                         bool(b.get("prune"))))),
             "/api/refs/learn": ("학습용 스타일 배우기", lambda: _refs_job(lambda: refs.learn_channel(str(b.get("channel") or ""), log, bool(b.get("prune"))))),
-            "/api/refs/delete": ("학습용 영상 지우기", lambda: _refs_job(lambda: refs.delete(b.get("names"), b.get("channel"), log))),
-            "/api/refs/prune": ("배운 영상 파일 지우기", lambda: _refs_job(lambda: refs.prune(b.get("names") or refs.channel_names(str(b.get("channel") or "")), log))),
+            "/api/refs/delete": ("학습용 영상 지우기", lambda: _refs_job(lambda: refs.delete(b.get("names"), b.get("channel"), log, bool(b.get("confirmOriginal"))))),
+            "/api/refs/prune": ("배운 영상 파일 지우기", lambda: _refs_job(lambda: refs.prune(b["names"] if b.get("names") is not None else refs.channel_names(b["channel"]), log))),
+            "/api/refs/restore": ("보관함으로 되돌리기", lambda: _refs_job(lambda: refs.restore(b["names"], log))),
             "/api/refs/move": ("학습용으로 옮기기", lambda: _refs_job(lambda: refs.move_from_library(b["names"], log, bool(b.get("confirm"))))),
         }
-        if path in ("/api/refs/delete", "/api/refs/prune", "/api/refs/move"):  # 이름은 파일 이름만 · 보관함에서 옮길 때 확인이 필요한 영상
+        if path in ("/api/refs/delete", "/api/refs/prune", "/api/refs/move", "/api/refs/restore"):  # 이름은 파일 이름만 · 보관함에서 옮길 때 확인이 필요한 영상
             try:
                 names = b.get("names")
                 if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)):
                     raise ValueError
                 for n in names or []:
                     editor.safe_name(n)
+                if path in ("/api/refs/move", "/api/refs/restore") and not names:
+                    raise ValueError
                 if path == "/api/refs/move":
-                    if not names:
-                        raise ValueError
                     for n in names:
                         editor.video_path(n)
             except (ValueError, TypeError):
@@ -497,6 +498,17 @@ class Handler(BaseHTTPRequestHandler):
                 need = [n for n in names if source.describe(n, data, False)["kind"] != "other"]
                 if need:
                     return self._send(200, {"ok": False, "confirm": need, "error": None})
+            if path == "/api/refs/move":  # 편집실 프로젝트에서 쓰는 영상은 옮기지 않음 → 먼저 알려 줌
+                busy = refs.projects_using(names)
+                if busy and not b.get("skipInUse"):
+                    return self._send(200, {"ok": False, "inUse": busy, "error": None})
+            if path == "/api/refs/prune" and not names and not isinstance(b.get("channel"), str):
+                return self._send(400, {"ok": False, "error": "파일을 지울 영상이나 채널을 골라 주세요"})
+            if path == "/api/refs/delete" and not b.get("confirmOriginal"):  # 원본(다시 받을 수 없음)은 한 번 더 확인
+                ch = b.get("channel") if isinstance(b.get("channel"), str) else None
+                orig = refs.originals(names if ch is None else None, ch)
+                if orig:
+                    return self._send(200, {"ok": False, "original": orig, "error": None})
             if path == "/api/refs/delete" and names is None and not isinstance(b.get("channel"), str):
                 return self._send(400, {"ok": False, "error": "지울 영상이나 채널을 골라 주세요"})
         if path == "/api/refs/add" and not str(b.get("url") or "").strip():

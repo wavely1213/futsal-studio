@@ -30,7 +30,11 @@ UNKNOWN = "채널 모름"           # 채널 정보가 없는 영상의 폴더 �
 COUNT_MAX = 30                  # 채널 하나에서 한 번에 받는 최대 영상 수
 SUGGEST_MIN = 3                 # 보관함에 다른 채널 영상이 이만큼 있으면 옮기기를 제안
 TRIES, WAIT = 20, 0.1           # Windows: 백신·탐색기·편집실이 잠깐 잡고 있으면 조금 뒤 다시
+SETTLE_SECS = 60                # 막 받은 큰 영상은 백신(Defender)이 오래 검사함 → 받는 폴더에서 옮길 때는 더 오래 기다림
+ORIGINAL_NAMES = ("풋살사관학교", "내 촬영본")  # 보관함에서 확인하고 옮긴 원본(우리 채널·촬영본) 채널 이름
 READ_TRIES = 5
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
+               "이 화면 '채널 추가' 칸의 '크롬 로그인 정보로 받기'를 켜고 다시 받아 보세요.")
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 _LOCK = threading.RLock()
@@ -156,15 +160,27 @@ def _update(fn):
         return out
 
 
-def _retry(fn, tries=TRIES):
-    """Windows: 다른 프로그램이 파일을 잠깐 잡고 있으면(PermissionError) 조금 뒤 다시."""
-    for k in range(tries):
+def _retry(fn, tries=TRIES, secs=None):
+    """Windows: 다른 프로그램이 파일을 잠깐 잡고 있으면(PermissionError) 조금 뒤 다시.
+    secs 를 주면 그 시간(초)까지 점점 길게 기다리며 다시 (막 받은 영상을 백신이 검사하는 동안)."""
+    if secs is None:
+        for k in range(tries):
+            try:
+                return fn()
+            except PermissionError:
+                if k == tries - 1:
+                    raise
+                time.sleep(WAIT)
+        return None
+    end, wait = time.monotonic() + secs, WAIT
+    while True:
         try:
             return fn()
         except PermissionError:
-            if k == tries - 1:
+            if time.monotonic() + wait > end:
                 raise
-            time.sleep(WAIT)
+            time.sleep(wait)
+            wait = min(wait * 2, 5.0)
 
 
 # ---------- 이름 → 파일·분석 폴더 (core.video_file · core.adir 가 부름) ----------
@@ -196,19 +212,49 @@ def kept_sig(name):
     return sig if isinstance(sig, list) and len(sig) == 2 and all(isinstance(x, int) for x in sig) else None
 
 
-def _events_ok(name, rec=None):
-    """배운 기록(style_events.json)이 있는지."""
+def _events_ok(name, rec=None, kept=False):
+    """배운 기록(style_events.json)이 있는지. kept: 파일을 지운 영상 — 그 기록을 지금 앱이 그대로 쓸 수 있는지까지
+    (기록 형식 EV_VER·지울 때 남긴 지문이 맞아야 style._load_events 가 씀 · 앱이 바뀌어 형식이 달라지면 다시 받아야 함)."""
     d = adir_of(name, rec)
-    return bool(d) and (d / "style_events.json").is_file()
+    if not d:
+        return False
+    f = d / "style_events.json"
+    if not kept:
+        return f.is_file()
+    try:
+        import style
+        ev = json.loads(f.read_text(encoding="utf-8"))
+        rec = rec or find(name) or {}
+        return isinstance(ev, dict) and ev.get("v") == style.EV_VER and ev.get("sig") == rec.get("sig")
+    except (OSError, ValueError):
+        return False
 
 
 def usable(name):
-    """스타일 배우기에 쓸 수 있는지: 파일이 있거나, 파일을 지웠어도 배운 기록이 남아 있음."""
+    """스타일 배우기에 쓸 수 있는지: 파일이 있거나, 파일을 지웠어도 지금 쓸 수 있는 배운 기록이 남아 있음."""
     rec = find(name)
     if not rec:
         return False
     p = path_of(name, rec)
-    return p.is_file() or (rec.get("pruned") and _events_ok(name, rec))
+    return p.is_file() or bool(rec.get("pruned") and _events_ok(name, rec, kept=True))
+
+
+def is_original(rec, data=None):
+    """보관함에서 확인하고 옮긴 원본(풋살사관학교·내 촬영본·출처 모름) — 다시 받을 수 없으니 자동으로 지우지 않음."""
+    if not rec:
+        return False
+    if rec.get("original"):
+        return True
+    c = ((data or load())["channels"].get(rec.get("channelKey") or "") or {})
+    return bool(c.get("original"))
+
+
+def originals(names=None, channel=None):
+    """지우려는 것 중 원본인 영상 이름 (지우기 전에 한 번 더 확인할 것)."""
+    data = load()
+    if channel is not None:
+        names = [n for n, r in data["files"].items() if (r.get("channelKey") or "") == channel]
+    return [n for n in names or [] if is_original(data["files"].get(n), data)]
 
 
 # ---------- 채널 ----------
@@ -282,26 +328,60 @@ def _tree_size(d):
 
 
 def _adopt(data):
-    """채널 폴더에 기록 없이 있는 영상(옮기다 끊긴 것 등)을 그 채널 영상으로 기록 → 고친 게 있으면 True."""
+    """refs 폴더에 기록 없이 있는 영상(옮기다 끊김·기록 파일이 깨짐 등)을 그 폴더의 채널 영상으로 기록하고,
+    받는 폴더에 남은 영상(백신이 오래 잡고 있었음·앱이 꺼짐)도 채널 폴더로 옮김 → 고친 게 있으면 True."""
     found = []
     folders = {c["folder"]: k for k, c in data["channels"].items() if c.get("folder")}
-    for folder, key in folders.items():
+    try:
+        subs = [p for p in root().iterdir() if p.is_dir()]
+    except OSError:
+        subs = []
+    for d in subs:
+        if d.name in (INCOMING, ANALYSIS_DIR) or not _safe_folder(d.name):
+            continue
         try:
-            items = list((root() / folder).iterdir())
+            items = list(d.iterdir())
         except OSError:
             continue
         for p in items:
             if p.is_file() and p.suffix.lower() in core.VIDEO_EXTS and p.name not in data["files"]:
-                found.append((p.name, key, folder))
-    if not found:
-        return False
+                found.append((p.name, d.name, folders.get(d.name)))
+    gone = [n for n, r in data["files"].items()  # 보관함으로 되돌렸는데 기록을 못 지운 것
+            if r.get("how") == "move" and not r.get("pruned") and not path_of(n, r).is_file() and (core.VIDEOS / n).is_file()]
+    changed = False
+    if found or gone:
+        def fn(d):
+            for n in gone:
+                d["files"].pop(n, None)
+            for n, folder, key in found:
+                if n in d["files"]:
+                    continue
+                if key is None:
+                    key = _register_folder(d, folder)
+                d["files"][n] = {"channelKey": key, "folder": folder, "videoId": source.video_id(n), "how": "found",
+                                 "saved": time.strftime("%Y-%m-%d %H:%M")}
+        _update(fn)
+        changed = True
+    inc = root() / INCOMING
+    if not _FETCHING[0] and inc.is_dir():
+        for p in sorted(inc.iterdir()):
+            vid = source.video_id(p.name)
+            if p.is_file() and p.suffix.lower() in core.VIDEO_EXTS and vid:
+                st, _ = _settle(vid, {}, {}, lambda *a: None)
+                changed = changed or st == "new"
+    return changed
 
-    def fn(d):
-        for n, key, folder in found:
-            d["files"].setdefault(n, {"channelKey": key, "folder": folder, "videoId": source.video_id(n), "how": "found",
-                                      "saved": time.strftime("%Y-%m-%d %H:%M")})
-    _update(fn)
-    return True
+
+def _register_folder(d, folder):
+    """기록에 없는 채널 폴더 → 그 폴더 이름의 채널로 등록 (폴더는 그대로 씀)."""
+    key = source._register(d, {"channel": folder}) or ""
+    c = d["channels"].setdefault(key, {})
+    c.setdefault("folder", folder)
+    c.setdefault("name", folder)
+    if folder in ORIGINAL_NAMES:
+        c["original"] = True
+    _register(d, {}, key=key)
+    return key
 
 
 def _style_uses():
@@ -337,10 +417,12 @@ def listing():
         key = rec.get("channelKey") or ""
         v = dict(_view(key, data), name=n, title=rec.get("title") or source._title_of(n), videoId=rec.get("videoId") or source.video_id(n),
                  present=present, pruned=bool(rec.get("pruned")) and not present, learned=learned, size_mb=round(size / 1e6, 1),
-                 styles=uses.get(n, []), kind=rec.get("kind") or "", how=rec.get("how") or "")
-        v["usable"] = present or (v["pruned"] and learned)
+                 styles=uses.get(n, []), kind=rec.get("kind") or "", how=rec.get("how") or "", original=is_original(rec, data))
+        v["stale"] = v["pruned"] and not _events_ok(n, rec, kept=True)  # 앱이 바뀌어 남긴 기록을 못 씀 → 다시 받아야 함
+        v["usable"] = present or (v["pruned"] and not v["stale"])
         vids.append(v)
-        g = groups.setdefault(key, dict(_view(key, data), count=0, size_mb=0.0, learned=0))
+        g = groups.setdefault(key, dict(_view(key, data), count=0, size_mb=0.0, learned=0, original=False))
+        g["original"] = g["original"] or v["original"]
         g["count"] += 1
         g["size_mb"] = round(g["size_mb"] + v["size_mb"], 1)
         g["learned"] += int(learned)
@@ -368,8 +450,8 @@ def dismiss_banner(on=True):
 
 # ---------- 파일 옮기기·지우기 (Windows 잠김은 조금 뒤 다시) ----------
 
-def _move(src, dst):
-    """같은 드라이브면 바로 이름 바꾸기 · 다른 드라이브면 복사 후 지우기. 잠겨 있으면 몇 번 다시."""
+def _move(src, dst, secs=None):
+    """같은 드라이브면 바로 이름 바꾸기 · 다른 드라이브면 복사 후 지우기. 잠겨 있으면 몇 번 다시 (secs: _retry)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         raise RefsError(f"같은 이름이 이미 있어요 · {dst.name}")
@@ -381,7 +463,7 @@ def _move(src, dst):
             if isinstance(e, PermissionError) or getattr(e, "errno", None) != 18:  # 18 = 다른 드라이브(EXDEV)
                 raise
             shutil.move(str(src), str(dst))
-    _retry(go)
+    _retry(go, secs=secs)
 
 
 def _unlink(p):
@@ -405,11 +487,72 @@ def _locked_msg(name):
             "그 창을 닫은 뒤 다시 해 주세요")
 
 
+def projects_using(names):
+    """편집실 프로젝트(projects/*.json)에서 원본·가져온 영상으로 쓰는 보관함 영상 → {이름: [프로젝트 이름]}.
+    옮기면 그 프로젝트가 영상을 못 찾으니 옮기지 않음."""
+    want = {os.path.basename(str(n)) for n in names or []}
+    out = {}
+    if not want:
+        return out
+    stems = {_stem(n): n for n in want}
+    try:
+        files = sorted((core.WORK / "projects").glob("*.json"))
+    except OSError:
+        return out
+
+    def walk(x, used):
+        if isinstance(x, dict):
+            if x.get("src", "videos") == "videos" and isinstance(x.get("file"), str):
+                used.add(os.path.basename(x["file"]))
+            for v in x.values():
+                walk(v, used)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, used)
+    for f in files:
+        used = set()
+        if f.stem in stems:  # 그 영상의 편집실 프로젝트 (파일 이름 = 영상 이름)
+            used.add(stems[f.stem])
+        try:
+            pj = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pj = None
+        if isinstance(pj, dict):
+            if isinstance(pj.get("source"), str):
+                used.add(os.path.basename(pj["source"]))
+            walk(pj.get("media"), used)
+            walk(pj.get("sequences"), used)
+        for n in used & want:
+            out.setdefault(n, []).append(f.stem)
+    return out
+
+
+def _archive(vid, add):
+    """보관함 받기 기록(videos/archive.txt)에서 영상 id 빼기·넣기 — 학습용으로 옮긴 영상을 소재 찾기로 다시 받을 수 있게.
+    실패해도 괜찮음 (임시 파일에 다 쓴 뒤 바꿔 끼움)."""
+    if not vid:
+        return
+    p, line = core.VIDEOS / "archive.txt", f"youtube {vid}"
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+        has = any(x.strip() == line for x in lines)
+        if has == add:
+            return
+        new = (lines + [line]) if add else [x for x in lines if x.strip() != line]
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+        tmp.write_text("".join(x + "\n" for x in new), encoding="utf-8")
+        _retry(lambda: os.replace(tmp, p))
+    except OSError:
+        pass
+
+
 def move_from_library(names, log=print, allow_own=False):
     """편집용 보관함의 영상 → 학습용 영상 (파일 + 분석 폴더). 다른 채널 영상만 옮기고,
-    풋살사관학교·내 촬영본·출처 모르는 영상은 allow_own(사용자가 확인함)일 때만. → {moved, skipped, failed}"""
+    풋살사관학교·내 촬영본·출처 모르는 영상은 allow_own(사용자가 확인함)일 때만.
+    편집실 프로젝트에서 쓰는 영상은 옮기지 않음(프로젝트가 깨짐). → {moved, skipped, failed, inUse}"""
     sdata = source.load()
     moved, skipped, failed = [], [], []
+    busy = projects_using(names)
     for k, n in enumerate(names, 1):
         core.set_progress(label="학습용으로 옮기는 중", item=n, step=f"{k}/{len(names)}", pct=None, detail="영상과 분석 기록을 옮기는 중")
         src = core.VIDEOS / os.path.basename(n)
@@ -419,6 +562,10 @@ def move_from_library(names, log=print, allow_own=False):
         desc = source.describe(n, sdata, False)
         if desc["kind"] != "other" and not allow_own:
             skipped.append(n)
+            continue
+        if n in busy:
+            skipped.append(n)
+            log(f"  편집실 프로젝트({', '.join(busy[n][:3])})에서 쓰는 영상이라 보관함에 두었어요 · {n}")
             continue
         try:
             _move_one(n, src, desc, sdata)
@@ -435,8 +582,9 @@ def move_from_library(names, log=print, allow_own=False):
             log(f"  옮기지 못했어요 · {n} · {e}")
             continue
         moved.append(n)
+        _archive(source.video_id(n), add=False)
         log(f"학습용으로 옮김 · {n}")
-    return {"moved": moved, "skipped": skipped, "failed": failed}
+    return {"moved": moved, "skipped": skipped, "failed": failed, "inUse": {n: v for n, v in busy.items() if n in skipped}}
 
 
 def _move_one(n, src, desc, sdata):
@@ -458,10 +606,9 @@ def _move_one(n, src, desc, sdata):
                 if f in schan and f not in c:
                     c[f] = json.loads(json.dumps(schan[f]))
             return _register(data, meta, key=key), data["channels"][key]["folder"]
-        if desc["kind"] == "own":  # 사용자가 확인하고 옮긴 우리 채널·내 촬영본 영상은 그 이름의 폴더로
-            k = _register(data, {"channel": "풋살사관학교"})
-        elif desc["kind"] == "footage":
-            k = _register(data, {"channel": "내 촬영본"})
+        if desc["kind"] in ("own", "footage"):  # 사용자가 확인하고 옮긴 우리 채널·내 촬영본 영상은 그 이름의 폴더로 (원본 → 자동으로 지우지 않음)
+            k = _register(data, {"channel": ORIGINAL_NAMES[0 if desc["kind"] == "own" else 1]})
+            data["channels"][k]["original"] = True
         else:
             k = _register(data, meta) if meta else _register(data, {}, key="")
         return k, data["channels"][k]["folder"]
@@ -489,14 +636,17 @@ def _move_one(n, src, desc, sdata):
     def put(data):
         data["files"][n] = {"channelKey": key, "folder": folder, "videoId": source.video_id(n), "title": source._title_of(n),
                             "how": "move", "saved": time.strftime("%Y-%m-%d %H:%M")}
+        if desc["kind"] != "other":
+            data["files"][n].update(original=True, origin=desc["kind"])
     try:
         _update(put)
     except OSError:
         pass  # 다음 목록에서 _adopt 가 채널 폴더의 파일을 다시 기록함
 
 
-def delete(names=None, channel=None, log=print):
-    """학습용 영상 지우기 (파일 + 분석 기록 + 기록) · channel 을 주면 그 채널 폴더째. → {removed, failed}"""
+def delete(names=None, channel=None, log=print, allow_original=False):
+    """학습용 영상 지우기 (파일 + 분석 기록 + 기록) · channel 을 주면 그 채널 영상 모두(빈 채널 폴더도).
+    원본(보관함에서 옮긴 우리 채널·촬영본)은 allow_original(사용자가 한 번 더 확인함)일 때만. → {removed, failed}"""
     data = load()
     removed, failed = [], []
     if channel is not None:
@@ -507,6 +657,9 @@ def delete(names=None, channel=None, log=print):
         rec = data["files"].get(n)
         if not rec:
             failed.append({"name": n, "error": "학습용 영상에서 찾지 못했어요"})
+            continue
+        if is_original(rec, data) and not allow_original:
+            failed.append({"name": n, "error": "보관함에서 옮긴 원본 영상이에요 (다시 받을 수 없어요). 지우려면 한 번 더 확인해 주세요"})
             continue
         try:
             _unlink(path_of(n, rec))
@@ -526,12 +679,78 @@ def delete(names=None, channel=None, log=print):
         if channel is not None and not any((r.get("channelKey") or "") == channel for r in d["files"].values()):
             c = d["channels"].pop(channel, None)
             if c and c.get("folder"):
-                _rmtree(root() / c["folder"])
+                _rmdir_empty(root() / c["folder"])  # 기록에 없는 파일이 있으면 폴더는 남김 (다음 목록에서 다시 보임)
     if gone or channel is not None:
         _update(fn)
     if removed:
         log(f"학습용 영상 {len(removed)}개를 지웠어요")
     return {"removed": removed, "failed": failed}
+
+
+def _rmdir_empty(d):
+    for x in (d / ANALYSIS_DIR, d):
+        try:
+            x.rmdir()
+        except OSError:
+            pass
+
+
+def restore(names, log=print):
+    """학습용 영상 → 편집용 보관함으로 되돌리기 (파일 + 분석 폴더). → {restored, failed}"""
+    data = load()
+    restored, failed = [], []
+    for k, n in enumerate(names or [], 1):
+        core.set_progress(label="보관함으로 되돌리는 중", item=n, step=f"{k}/{len(names)}", pct=None, detail="영상과 분석 기록을 옮기는 중")
+        rec = data["files"].get(n)
+        src = path_of(n, rec) if rec else None
+        if not src or not src.is_file():
+            failed.append({"name": n, "error": "영상 파일이 없어요 (파일을 지운 영상은 되돌릴 수 없어요)"})
+            continue
+        dst, adir, adst = core.VIDEOS / n, adir_of(n, rec), core.ANALYSIS / _stem(n)
+        if dst.exists():
+            failed.append({"name": n, "error": "보관함에 같은 이름의 영상이 이미 있어요"})
+            continue
+        moved_dir = False
+        try:
+            if adir.is_dir() and not adst.exists():
+                _move(adir, adst)
+                moved_dir = True
+            try:
+                _move(src, dst)
+            except BaseException:
+                if moved_dir:
+                    try:
+                        _move(adst, adir)
+                    except OSError:
+                        pass
+                raise
+        except PermissionError:
+            failed.append({"name": n, "error": _locked_msg(n)})
+            continue
+        except (OSError, RefsError) as e:
+            failed.append({"name": n, "error": f"옮기지 못했어요 · {e}"})
+            continue
+        if not moved_dir:
+            _rmtree(adir)  # 보관함 쪽에 예전 분석 폴더가 있으면 그쪽을 씀
+        restored.append(n)
+        vid = rec.get("videoId") or source.video_id(n)
+        _archive(vid, add=True)
+        c = data["channels"].get(rec.get("channelKey") or "") or {}
+        if vid and not is_original(rec, data) and c.get("name"):  # 보관함 목록에서도 그 채널로 보이게 (이미 기록이 있으면 그대로)
+            key = rec.get("channelKey") or ""
+            try:
+                source.remember_hints({vid: {k2: v for k2, v in {"kind": "other", "channel": c["name"], "channelUrl": c.get("url"),
+                                                                 "channelId": key if key.startswith("UC") else None,
+                                                                 "uploaderId": (c.get("handles") or [None])[0]}.items() if isinstance(v, str) and v}})
+            except Exception:  # noqa: BLE001 — 출처는 곁가지
+                pass
+        log(f"보관함으로 되돌림 · {n}")
+    if restored:
+        try:
+            _update(lambda d: [d["files"].pop(n, None) for n in restored])
+        except OSError:
+            pass  # 다음 목록에서 _adopt 가 정리 (보관함에 파일이 있으면 기록을 뺌)
+    return {"restored": restored, "failed": failed}
 
 
 def prune(names, log=print):
@@ -543,6 +762,9 @@ def prune(names, log=print):
         rec = find(n)
         p = path_of(n, rec) if rec else None
         if not p or not p.is_file():
+            continue
+        if is_original(rec):  # 보관함에서 옮긴 원본은 다시 받을 수 없으니 자동으로 지우지 않음
+            kept.append(n)
             continue
         try:
             sig = style._sig(p)
@@ -592,31 +814,59 @@ def _staged(vid):
     return None
 
 
-def _settle(vid, meta, extra, log):
-    """받는 폴더의 영상 하나 → 채널 폴더로 옮기고 기록 → 파일 이름 (못 찾으면 None)."""
+def _settle(vid, meta, extra, log, secs=None):
+    """받는 폴더의 영상 하나 → 채널 폴더로 옮기고 기록 → (상태, 파일 이름).
+    상태: "new"(새로 받음) · "dup"(이미 있어 받은 것은 버림) · "none"(받는 폴더에 없음) · "locked"(다른 프로그램이 잡고 있어 못 옮김) · "error"."""
     p = _staged(vid)
     if p is None:
-        return None
+        return "none", None
     n = p.name
 
-    def fn(data):
-        if n in data["files"]:
-            old = data["files"][n]
-            if path_of(n, old).is_file():  # 이미 있음 → 받은 것은 버림
-                _unlink(p)
-                return
+    def chan(data):  # 채널(폴더)을 먼저 정해 기록 · 이미 있으면 "dup"
+        if n in data["files"] and path_of(n, data["files"][n]).is_file():
+            return None
         key = _register(data, meta) if (meta.get("channel") or meta.get("channelId") or meta.get("uploaderId")) else _register(data, {}, key="")
-        folder = data["channels"][key]["folder"]
-        _move(p, root() / folder / n)
+        return key, data["channels"][key]["folder"]
+
+    def put(data):
         data["files"][n] = dict({"channelKey": key, "folder": folder, "videoId": vid, "title": extra.get("title") or source._title_of(n),
                                  "how": "download", "saved": time.strftime("%Y-%m-%d %H:%M")},
                                 **{k: v for k, v in extra.items() if k in ("url", "kind", "views") and v})
     try:
-        _update(fn)
+        kf = _update(chan)
+        if kf is None:  # 이미 있음 → 받은 것은 버림
+            _unlink(p)
+            return "dup", n
+        key, folder = kf
+        if (root() / folder / n).is_file():  # 기록만 없고 파일은 이미 있음 → 받은 것은 버림 (다음 목록에서 기록됨)
+            _unlink(p)
+            return "dup", n
+        _move(p, root() / folder / n, secs=secs)  # 기록 잠금 밖에서 (오래 기다려도 목록·다른 작업이 멈추지 않게)
+    except PermissionError as e:
+        log(f"  학습용 폴더로 옮기지 못했어요 (다른 프로그램이 파일을 쓰는 중) · {n} · {e}")
+        return "locked", n
     except (OSError, RefsError) as e:
         log(f"  학습용 폴더로 옮기지 못했어요 · {n} · {e}")
-        return None
-    return n
+        return "error", n
+    try:
+        _update(put)
+    except OSError as e:  # 파일은 채널 폴더에 있음 → 다음 목록에서 _adopt 가 다시 기록
+        log(f"  기록은 다음에 남길게요 · {n} · {e}")
+    _take_orphan_analysis(n)
+    return "new", n
+
+
+def _take_orphan_analysis(n):
+    """보관함에서 지운 같은 이름 영상의 옛 분석 폴더(analysis/<이름>)가 남아 있으면 학습용 쪽으로 옮김 (받아쓰기 등을 이어 씀 ·
+    남겨 두면 헷갈림). 보관함에 그 파일이 다시 있거나 학습용 쪽에 이미 분석 폴더가 있으면 그대로 둠. 실패해도 괜찮음."""
+    old = core.ANALYSIS / _stem(n)
+    new = adir_of(n)
+    if new is None or not old.is_dir() or (core.VIDEOS / n).exists() or new.exists():
+        return
+    try:
+        _move(old, new)
+    except (OSError, RefsError):
+        pass
 
 
 def _have_ids(data=None):
@@ -624,9 +874,12 @@ def _have_ids(data=None):
     return {r.get("videoId") or source.video_id(n) for n, r in data["files"].items()} - {None}
 
 
+_FETCHING = [0]  # 받는 중인 작업 수 (그동안은 받는 폴더의 파일을 '남은 파일'로 보지 않음)
+
+
 def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
     """items [{id, channel…(힌트), title, kind, url}] → 학습용으로 받기. 이미 학습용에 있거나 편집용 보관함에 있는 영상은 건너뜀.
-    → {"got": [파일 이름], "failed": [영상 id], "skipped": [영상 id], "library": [보관함에 있는 영상 id]}"""
+    → {"got": [파일 이름], "failed": [영상 id], "skipped": [영상 id], "library": [보관함에 있는 영상 id], "locked": [영상 id]}"""
     have = _have_ids()
     todo, skipped, lib = [], [], []
     for it in items:
@@ -641,30 +894,54 @@ def fetch(items, log=print, cookies=None, label="학습용 영상 받는 중"):
             todo.append(it)
     if lib:
         log(f"  편집용 보관함에 이미 있는 영상 {len(lib)}개는 건너뛰어요 (보관함에서 '학습용으로 옮기기'로 옮길 수 있어요)")
-    got, failed = [], []
+    got, failed, locked = [], [], []
     if not todo:
-        return {"got": got, "failed": failed, "skipped": skipped, "library": lib}
+        return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked}
     hints = {it["id"]: it for it in todo}
-    (root() / INCOMING).mkdir(parents=True, exist_ok=True)
+    done = {}  # 영상 id → 상태 (new·dup·locked·error)
+
+    def take(vid, meta, extra, secs=None):
+        st, n = _settle(vid, meta, extra, log, secs)
+        if st != "none":
+            done[vid] = st
+        if st == "new":
+            got.append(n)
+
+    def meta_of(h):
+        return {k: h[k] for k in ("channel", "channelId", "channelUrl", "uploaderId", "uploaderUrl") if isinstance(h.get(k), str) and h[k]}
 
     def remember(infos):
         for info in infos:
             vid = info.get("id")
             h = hints.get(vid) or {}
-            meta = {k: h[k] for k in ("channel", "channelId", "channelUrl", "uploaderId", "uploaderUrl") if isinstance(h.get(k), str) and h[k]}
+            meta = meta_of(h)
             meta.update(source.meta_of(info, channel_only=True))
-            n = _settle(vid, meta, dict(h, title=info.get("title") or h.get("title"), url=info.get("webpage_url") or h.get("url")), log)
-            if n:
-                got.append(n)
-    failed = core.download([it["id"] for it in todo], log, cookies, dest=root() / INCOMING, archive=False, label=label, remember=remember)
-    for it in todo:  # 정보 없이 끝난 영상(훅이 안 불림)도 힌트로 정리
+            take(vid, meta, dict(h, title=info.get("title") or h.get("title"), url=info.get("webpage_url") or h.get("url")))
+    (root() / INCOMING).mkdir(parents=True, exist_ok=True)
+    with _LOCK:
+        _FETCHING[0] += 1
+    try:
+        failed = core.download([it["id"] for it in todo], log, cookies, dest=root() / INCOMING, archive=False, label=label, remember=remember)
+        for it in todo:  # 정보 없이 끝났거나(훅이 안 불림) 잠겨서 못 옮긴 영상 → 더 오래 기다리며 다시
+            vid = it["id"]
+            if vid not in failed and done.get(vid) in (None, "locked", "error"):
+                take(vid, meta_of(it), it, SETTLE_SECS)
+    finally:
+        with _LOCK:
+            _FETCHING[0] -= 1
+    failed = list(failed)
+    for it in todo:
         vid = it["id"]
-        if vid not in failed and not any(source.video_id(n) == vid for n in got):
-            meta = {k: it[k] for k in ("channel", "channelId", "channelUrl", "uploaderId", "uploaderUrl") if isinstance(it.get(k), str) and it[k]}
-            n = _settle(vid, meta, it, log)
-            if n:
-                got.append(n)
-    return {"got": got, "failed": failed, "skipped": skipped, "library": lib}
+        st = done.get(vid)
+        if st == "dup":
+            skipped.append(vid)
+        elif st == "locked":
+            locked.append(vid)
+            log(f"  받은 영상을 다른 프로그램(백신 등)이 잡고 있어 아직 학습용 폴더로 옮기지 못했어요 · {vid} · 잠시 뒤 목록을 새로 고치면 들어와요")
+        elif st != "new" and vid not in failed:
+            failed.append(vid)
+            log(f"  받은 영상 파일을 찾지 못했어요 · {vid}")
+    return {"got": got, "failed": failed, "skipped": skipped, "library": lib, "locked": locked}
 
 
 def channel_names(key):
@@ -760,8 +1037,13 @@ def add_direction(key, log=print, cookies=None, learn=True, prune_after=False):
     items = []
     for ch in d.get("channels") or []:
         for v in ch.get("videos") or []:
-            items.append({"id": v.get("id"), "title": v.get("title"), "kind": "shorts" if v.get("shorts") else "videos",
-                          "url": v.get("url"), "channel": ch.get("channel"), "uploaderUrl": ch.get("url")})
+            it = {"id": v.get("id"), "title": v.get("title"), "kind": "shorts" if v.get("shorts") else "videos",
+                  "url": v.get("url"), "channel": ch.get("channel"), "uploaderUrl": ch.get("url")}
+            if ch.get("channelId"):  # 추천 채널 목록과 같은 열쇠 (정보 훅이 안 불려도 칸이 둘로 갈리지 않게)
+                it["channelId"] = ch["channelId"]
+            if ch.get("handle"):
+                it["uploaderId"] = ch["handle"]
+            items.append(it)
     log(f"방향 {key} · {d.get('title')} 추천 영상 {len(items)}개를 학습용으로 받아요")
     res = fetch(items, log, cookies)
     res["direction"] = key

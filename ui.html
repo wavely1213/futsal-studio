@@ -236,6 +236,7 @@
   .refacts:empty { display: none; }
   .refacts .btn { padding: 6px 10px; font-size: 12px; }
   .rows .row .rdel { font-size: 12px; color: var(--ink-3); }
+  .rows .row .racts { display: flex; gap: 10px; white-space: nowrap; }
   .rows .row.gone .mini { opacity: .5; }
   .rows .grp { padding: 8px 16px; font-size: 12px; font-weight: 700; color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); }
   .rows .empty.sm { padding: 24px 16px; }
@@ -936,8 +937,12 @@ $("refGo").onclick = () => {
 function refDone(r) {
   loadRefs(); loadStyles();
   if (!r) return;
-  if (r.ok === false) { toast(r.error || "학습용 영상을 받지 못했어요"); if (r.blocked) $("drawer").classList.add("open"); return; }
-  const got = (r.got || []).length, fail = (r.failed || []).length, lib = (r.library || []).length, ls = r.learned || [];
+  if (r.ok === false) {
+    toast(r.error || "학습용 영상을 받지 못했어요");
+    if (r.blocked) { $("refAdd").hidden = false; $("refCookies").focus(); $("refCookies").parentElement.scrollIntoView({ block: "center" }); }  // 이 화면의 같은 설정을 바로 보여 줌
+    return;
+  }
+  const got = (r.got || []).length, fail = (r.failed || []).length, lib = (r.library || []).length, ls = r.learned || [], lk = (r.locked || []).length;
   const ok = ls.filter(x => !x.error).map(x => `'${x.style}'`), bad = ls.filter(x => x.error).length;
   const pr = ls.reduce((a, x) => a + ((x.prune && x.prune.pruned) || []).length, 0);
   const parts = [];  // 받기(got 있음) · 다시 배우기(learned 만)
@@ -946,6 +951,7 @@ function refDone(r) {
   if (pr) parts.push(`영상 파일 ${pr}개는 지웠어요`);
   if (lib) parts.push(`보관함에 있는 ${lib}개는 건너뜀`);
   if (fail) parts.push(`${fail}개 받기 실패 (작업 기록 확인)`);
+  if (lk) parts.push(`${lk}개는 백신 등이 아직 검사 중이라 잠시 뒤 목록에 들어와요`);
   if (bad) parts.push(`스타일 ${bad}개 배우기 실패 (작업 기록 확인)`);
   toast(parts.join(" · ") || "끝났어요");
 }
@@ -957,7 +963,7 @@ function renderRefChips() {
     `<button class="${refFilter === "ch:" + c.channelKey ? "on" : ""}" data-rf="ch:${esc(c.channelKey)}" title="${esc(chName(c))} 영상만 보기"><i class="dot${colorCls(c.color)}"></i>${esc(chName(c))} ${c.count}</button>`).join("") : "";
   const c = ch.find(c => "ch:" + c.channelKey === refFilter);
   $("refActs").innerHTML = c ? `<button class="btn" data-ra="pick">이 채널 영상 모두 고르기</button><button class="btn" data-ra="learn" title="이 채널의 학습용 영상으로 다시 배워요">'${esc(chName(c))} 스타일' 다시 배우기</button>`
-    + (c.learned ? `<button class="btn" data-ra="prune" title="배운 기록은 남겨 둬서 스타일은 그대로예요. 다시 배울 때도 그 기록을 써요">배운 영상 파일 지우기</button>` : "")
+    + (c.learned && !c.original ? `<button class="btn" data-ra="prune" title="배운 기록은 남겨 둬서 스타일은 그대로예요. 다시 배울 때도 그 기록을 써요">배운 영상 파일 지우기</button>` : "")
     + `<button class="btn" data-ra="del">채널 지우기</button>` : "";
   document.querySelectorAll("[data-rf]").forEach(b => (b.onclick = () => { refFilter = b.dataset.rf; renderStyleSrc(); }));
   document.querySelectorAll("[data-ra]").forEach(b => (b.onclick = () => {
@@ -973,20 +979,20 @@ function renderRefChips() {
       job("/api/refs/prune", { channel: key }, r => { loadRefs(); toast(r && r.ok ? `영상 파일 ${(r.pruned || []).length}개를 지웠어요 · 스타일은 그대로예요` : (r && r.error) || "지우지 못했어요"); });
     } else if (a === "del") {
       if (!confirm(`'${nm}' 채널의 학습용 영상 ${mine.length}개를 모두 지울까요?\n영상 파일과 분석 기록이 지워져요. 이미 배운 스타일은 그대로 남아요.`)) return;
-      job("/api/refs/delete", { channel: key }, r => { loadRefs(); refFilter = "all"; toast(r && r.ok ? `'${nm}' 학습용 영상을 지웠어요${(r.failed || []).length ? ` · ${r.failed.length}개는 지우지 못했어요 (다른 프로그램이 쓰는 중)` : ""}` : (r && r.error) || "지우지 못했어요"); });
+      refDel({ channel: key }, r => { loadRefs(); refFilter = "all"; toast(r && r.ok ? `'${nm}' 학습용 영상을 지웠어요${(r.failed || []).length ? ` · ${r.failed.length}개는 지우지 못했어요 (다른 프로그램이 쓰는 중)` : ""}` : (r && r.error) || "지우지 못했어요"); });
     }
   }));
 }
 function refRow(v) {
-  const id = v.videoId || ytId(v.name), st = v.present ? (v.learned ? "배움" : "아직 안 배움") : v.pruned ? "파일 지움" : "파일 없음";
+  const id = v.videoId || ytId(v.name), st = v.present ? (v.learned ? "배움" : "아직 안 배움") : v.pruned ? (v.stale ? "다시 받아야 해요" : "파일 지움") : "파일 없음";
   const tip = v.styles.length ? `이 영상으로 배운 스타일: ${v.styles.join(", ")}` : v.learned ? "살펴본 기록이 있어요" : "스타일 배우기에 고르면 살펴봐요";
-  const sub = v.present ? mbText(v.size_mb) : v.pruned ? "영상 파일은 지웠어요 · 배운 기록으로 다시 배울 수 있어요" : "영상 파일을 찾지 못했어요";
+  const sub = (v.original ? "보관함에서 옮긴 원본 · " : "") + (v.present ? mbText(v.size_mb) : v.pruned ? (v.stale ? "파일 지움 · 앱이 바뀌어 남긴 기록을 못 써요. 다시 받아야 배울 수 있어요" : "영상 파일은 지웠어요 · 배운 기록으로 다시 배울 수 있어요") : "영상 파일을 찾지 못했어요");
   return `<div class="row${v.present ? "" : " gone"}">
       <input type="checkbox" class="schk" value="${esc(v.name)}" ${stySel.has(v.name) ? "checked" : ""}${v.usable ? "" : " disabled"}>
       <div class="mini"><span class="ph">⚽</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
       <div style="min-width:0"><div class="name">${esc(v.title || niceName(v.name))}</div><div class="sub">${srcBadge({ kind: "other", channel: v.channel, color: v.color }, null, true)} · ${esc(sub)}</div></div>
       <span class="chip${v.learned ? " ok" : ""}" title="${esc(tip)}">${st}</span>
-      <button class="linkbtn rdel" data-rdel="${esc(v.name)}" title="이 학습용 영상과 분석 기록을 지워요 (배운 스타일은 그대로)">지우기</button></div>`;
+      <span class="racts">${v.present ? `<button class="linkbtn rdel" data-rback="${esc(v.name)}" title="편집에 쓰도록 편집용 보관함으로 되돌려요 (분석 기록도 함께)">보관함으로</button>` : ""}<button class="linkbtn rdel" data-rdel="${esc(v.name)}" title="이 학습용 영상과 분석 기록을 지워요 (배운 스타일은 그대로)">지우기</button></span></div>`;
 }
 function libRow(v) {
   const id = ytId(v.name);
@@ -1015,9 +1021,23 @@ function renderStyleSrc() {
   document.querySelectorAll("[data-rdel]").forEach(b => (b.onclick = () => {
     const v = refs.videos.find(x => x.name === b.dataset.rdel), t = v ? (v.title || niceName(v.name)) : b.dataset.rdel;
     if (!confirm(`'${t.slice(0, 40)}' 학습용 영상을 지울까요?\n영상 파일과 분석 기록이 지워져요. 이미 배운 스타일은 그대로 남아요.`)) return;
-    job("/api/refs/delete", { names: [b.dataset.rdel] }, r => { loadRefs(); toast(r && r.ok && (r.removed || []).length ? "학습용 영상을 지웠어요" : ((r && r.failed && r.failed[0] && r.failed[0].error) || (r && r.error) || "지우지 못했어요")); });
+    refDel({ names: [b.dataset.rdel] }, r => { loadRefs(); toast(r && r.ok && (r.removed || []).length ? "학습용 영상을 지웠어요" : ((r && r.failed && r.failed[0] && r.failed[0].error) || (r && r.error) || "지우지 못했어요")); });
+  }));
+  document.querySelectorAll("[data-rback]").forEach(b => (b.onclick = () => {
+    const n = b.dataset.rback, v = refs.videos.find(x => x.name === n), t = v ? (v.title || niceName(v.name)) : n;
+    if (state.job || !confirm(`'${t.slice(0, 40)}'을 편집용 보관함으로 되돌릴까요?\n학습용 영상에서 빠지고 보관함·편집점·편집실에 다시 보여요. 분석 기록도 함께 옮겨요.`)) return;
+    job("/api/refs/restore", { names: [n] }, r => { loadRefs(); toast(r && r.ok && (r.restored || []).length ? "보관함으로 되돌렸어요" : ((r && r.failed && r.failed[0] && r.failed[0].error) || (r && r.error) || "되돌리지 못했어요")); });
   }));
   syncStyle();
+}
+async function refDel(body, done) {  // 학습용 영상 지우기 · 원본(보관함에서 옮긴 우리 영상·촬영본)은 한 번 더 확인
+  if (state.job) return;
+  const j = await api("/api/refs/delete", body).catch(() => ({}));
+  if (j.original && j.original.length) {
+    if (!confirm(`이 중 ${j.original.length}개는 보관함에서 옮긴 원본 영상이에요 (풋살사관학교·내 촬영본·출처 모름).\n지우면 다시 받을 수 없어요. 편집에 쓰려면 지우지 말고 '보관함으로'를 눌러 되돌려 주세요.\n그래도 지울까요? [취소]를 누르면 아무것도 지우지 않아요.`)) return;
+    return refDel(Object.assign({}, body, { confirmOriginal: true }), done);
+  }
+  if (j.ok) { state.job = "…"; pending = done || null; sync(); showBusy(); }
 }
 $("styleLib").onchange = () => { styleLib = $("styleLib").checked; try { localStorage.setItem("styleLib", styleLib ? "1" : "0"); } catch (e) {} renderStyleSrc(); };
 function syncStyle() { const n = stySel.size; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
@@ -1035,14 +1055,27 @@ $("refBannerNo").onclick = async () => {
 };
 $("refBannerGo").onclick = () => moveToRefs(state.local.filter(v => srcOf(v).kind === "other").map(v => v.name));
 $("btnToRefs").onclick = () => moveToRefs(libChecked());
-async function moveToRefs(names, confirmed) {
+async function moveToRefs(names, o) {  // o: {asked(처음 확인함), all(우리 영상·촬영본도), skip(편집 중인 영상은 빼고)} · [취소]는 언제나 아무것도 옮기지 않음
+  o = o || {};
   if (!names.length || state.job) return;
-  if (!confirmed && !confirm(`${names.length}개 영상을 '학습용 영상'으로 옮길까요?\n보관함·편집점·편집실·썸네일·올리기 목록에서 빠지고, 스타일 배우기에서 채널별로 보여요. 분석 기록도 함께 옮겨요.`)) return;
-  const j = await api("/api/refs/move", { names, confirm: confirmed === "all" }).catch(() => ({}));
+  if (!o.asked && !confirm(`${names.length}개 영상을 '학습용 영상'으로 옮길까요?\n보관함·편집점·편집실·썸네일·올리기 목록에서 빠지고, 스타일 배우기에서 채널별로 보여요. 분석 기록도 함께 옮겨요.\n편집실 프로젝트에서 쓰는 영상은 옮기지 않아요. 나중에 '보관함으로'를 눌러 되돌릴 수 있어요.`)) return;
+  o.asked = true;
+  const j = await api("/api/refs/move", { names, confirm: !!o.all, skipInUse: !!o.skip }).catch(() => ({}));
   if (j.confirm && j.confirm.length) {
     const rest = names.filter(n => !j.confirm.includes(n));
-    if (confirm(`고른 영상 중 ${j.confirm.length}개는 다른 채널 영상이 아니에요 (풋살사관학교·내 촬영본·출처 모름).\n학습용으로 옮기면 편집에 쓸 수 없어요. 이 영상들도 함께 옮길까요?\n[취소]를 누르면 다른 채널 영상 ${rest.length}개만 옮겨요.`)) return moveToRefs(names, "all");
-    return rest.length ? moveToRefs(rest, "other") : undefined;
+    if (rest.length) {
+      if (!confirm(`고른 영상 중 ${j.confirm.length}개는 다른 채널 영상이 아니에요 (풋살사관학교·내 촬영본·출처 모름).\n그 영상은 보관함에 두고, 다른 채널 영상 ${rest.length}개만 옮길까요?\n[취소]를 누르면 아무것도 옮기지 않아요. (우리 영상까지 옮기려면 그 영상만 따로 골라 옮겨 주세요)`)) return;
+      return moveToRefs(rest, o);
+    }
+    if (!confirm(`고른 ${names.length}개는 다른 채널 영상이 아니에요 (풋살사관학교·내 촬영본·출처 모름).\n학습용으로 옮기면 편집에 쓸 수 없어요 ('보관함으로'로 되돌릴 수는 있어요). 그래도 옮길까요?\n[취소]를 누르면 옮기지 않아요.`)) return;
+    return moveToRefs(names, Object.assign(o, { all: true }));
+  }
+  if (j.inUse && Object.keys(j.inUse).length) {
+    const busy = Object.keys(j.inUse), rest = names.filter(n => !busy.includes(n)), projs = [...new Set(busy.flatMap(n => j.inUse[n]))];
+    const msg = `${busy.length}개 영상은 편집실 프로젝트 ${projs.length}개(${projs.slice(0, 3).map(niceName).join(", ")}${projs.length > 3 ? " 등" : ""})에서 쓰고 있어요.\n옮기면 그 프로젝트에서 영상이 사라지니 보관함에 둘게요.`;
+    if (!rest.length) { toast(msg.replace("\n", " ")); return; }
+    if (!confirm(`${msg}\n나머지 ${rest.length}개만 옮길까요? [취소]를 누르면 아무것도 옮기지 않아요.`)) return;
+    return moveToRefs(rest, Object.assign(o, { skip: true, held: busy.length }));
   }
   if (!j.ok) return;
   state.job = "…"; sync(); showBusy();
@@ -1051,7 +1084,8 @@ async function moveToRefs(names, confirmed) {
     if (!r || r.ok === false) { toast((r && r.error) || "옮기지 못했어요"); return; }
     (r.moved || []).forEach(n => libSel.delete(n));
     const f = r.failed || [];
-    toast(`${(r.moved || []).length}개를 학습용 영상으로 옮겼어요${f.length ? ` · ${f.length}개는 못 옮겼어요: ${f[0].error}` : ""}`);
+    const iu = Object.keys(r.inUse || {}).length + (o.held || 0);
+    toast(`${(r.moved || []).length}개를 학습용 영상으로 옮겼어요${iu ? ` · 편집 중인 ${iu}개는 보관함에 뒀어요` : ""}${f.length ? ` · ${f.length}개는 못 옮겼어요: ${f[0].error}` : ""}`);
   };
 }
 /* 6. 배운 스타일 카드: '영상 기획 분석'(판단 문장) 위주 — 시각·컷 수 같은 숫자는 접힌 '근거 보기'·'구조 수치' 안에만 */

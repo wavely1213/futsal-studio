@@ -205,7 +205,8 @@ class IsolationTests(Base):
 
 # ---------- 학습용 영상으로 배우기 · 배운 뒤 파일 지우기 ----------
 
-class LearnTests(Base):
+class AVBase(Base):
+    """스타일 배우기용: 무거운 모델(OCR·얼굴)은 끔."""
     def setUp(self):
         super().setUp()
         self.p2 = [mock.patch.object(avmodels, "ensure", return_value=False), mock.patch.object(face, "ready", return_value=False)]
@@ -217,6 +218,8 @@ class LearnTests(Base):
             p.stop()
         super().tearDown()
 
+
+class LearnTests(AVBase):
     def test_style_events_and_plan_for_refs_live_in_refs_folder(self):
         ref = self.ref_video(yt_name("refvid00010", "도블락 [대결] 영상"), real=True)
         r = style.learn("슛포러브 스타일", [ref], quiet)
@@ -533,7 +536,7 @@ class DownloadTests(Base):
 
 # ---------- /api/refs/* ----------
 
-class RouteTests(Base):
+class RouteBase(Base):
     def setUp(self):
         super().setUp()
         import app
@@ -573,6 +576,8 @@ class RouteTests(Base):
         self.wait_job()
         return self.call("/api/state?since=0")[1]["result"]
 
+
+class RouteTests(RouteBase):
     def test_list_and_recommended(self):
         self.ref_video(yt_name("rtevid00001"))
         code, j = self.call("/api/refs")
@@ -607,7 +612,7 @@ class RouteTests(Base):
         with mock.patch.object(core, "list_videos", side_effect=RuntimeError(core.BLOCKED_MSG)):
             self.assertEqual(self.call("/api/refs/add", {"url": "@shootforlovekorea", "count": 5})[0], 200)
             r = self.result()
-        self.assertEqual((r["ok"], r["blocked"], r["error"]), (False, True, core.BLOCKED_MSG))
+        self.assertEqual((r["ok"], r["blocked"], r["error"]), (False, True, refs.BLOCKED_MSG))
         with mock.patch.object(refs, "add_channel", return_value={"got": []}) as add:
             self.call("/api/refs/add", {"url": "@x", "count": 3, "kind": "shorts", "learn": False, "prune": True, "cookies": "chrome"})
             self.assertEqual(self.result()["ok"], True)
@@ -621,6 +626,247 @@ class RouteTests(Base):
         self.assertFalse(self.call("/api/refs")[1]["bannerDismissed"])
         self.assertEqual(self.call("/api/refs/banner", {"dismiss": True})[1]["ok"], True)
         self.assertTrue(self.call("/api/refs")[1]["bannerDismissed"])
+
+
+# ---------- 검토에서 나온 고침 (회귀 방지) ----------
+
+class ReviewFixTests(AVBase):
+    """옛 분석 폴더 · 편집 중인 프로젝트 · 원본 보호 · 되돌리기 · 받는 폴더 잠김 · 기록 형식 바뀜 · 깨진 기록 뒤 채널 지우기."""
+
+    def stage(self, vid, title="인기 영상 제목"):
+        inc = refs.root() / refs.INCOMING
+        inc.mkdir(parents=True, exist_ok=True)
+        n = yt_name(vid, title)
+        shutil.copy2(M["video"], inc / n)
+        return n
+
+    def test_old_library_analysis_does_not_take_over_ref(self):
+        """보관함에서 지운 같은 이름 영상의 옛 analysis/<이름> 이 있어도 학습용 영상은 학습용 폴더의 기록을 씀 (배움·파일 지우기가 동작)."""
+        n = yt_name("stalevid001", "인기 영상 제목")
+        old = core.ANALYSIS / Path(n).stem
+        old.mkdir(parents=True)
+        (old / "transcript.json").write_text("[]", encoding="utf-8")
+        self.stage("stalevid001")
+        st, got = refs._settle("stalevid001", source.meta_of(OTHER_INFO, channel_only=True), {}, quiet)
+        self.assertEqual((st, got), ("new", n))
+        self.assertEqual(core.adir(n), refs.adir_of(n))
+        self.assertTrue((refs.adir_of(n) / "transcript.json").is_file(), "옛 받아쓰기는 학습용 쪽으로 따라옴")
+        self.assertFalse(old.exists())
+        style.learn("슛포러브 스타일", [n], quiet)
+        self.assertTrue((refs.adir_of(n) / "style_events.json").is_file())
+        self.assertFalse((core.ANALYSIS / Path(n).stem).exists(), "analysis/ 에는 안 씀")
+        self.assertTrue(refs.listing()["videos"][0]["learned"])
+        self.assertEqual(refs.prune([n], quiet)["pruned"], [n])
+
+    def test_old_analysis_dir_left_behind_still_loses_to_ref_record(self):
+        n = self.ref_video(yt_name("stalevid002"), real=True)
+        (core.ANALYSIS / Path(n).stem).mkdir(parents=True)  # 옮기지 못하고 남은 옛 폴더
+        self.assertEqual(core.adir(n), refs.adir_of(n))
+        style.extract_events(n, quiet)
+        self.assertTrue(refs.listing()["videos"][0]["learned"])
+        self.assertEqual(refs.prune([n], quiet)["pruned"], [n])
+
+    def test_duplicate_settle_is_not_counted_as_received(self):
+        n = self.ref_video(yt_name("dupvid00001", "인기 영상 제목"))
+        self.stage("dupvid00001")
+        self.assertEqual(refs._settle("dupvid00001", {}, {}, quiet), ("dup", n))
+        self.assertFalse(any((refs.root() / refs.INCOMING).iterdir()), "받은 것은 버림")
+
+    # --- 편집 중인 프로젝트 ---
+    def project(self, stem, data):
+        d = core.WORK / "projects"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{stem}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def other(self, name, info=OTHER_INFO):
+        self.lib_video(name)
+        source.record_download([dict(info, id=source.video_id(name))])
+        return name
+
+    def test_move_skips_videos_used_by_editor_projects(self):
+        main = self.other(yt_name("prjvid00001", "하이라이트 원본"))
+        broll = self.other(yt_name("prjvid00002", "가져온 영상"))
+        free = self.other(yt_name("prjvid00003", "안 쓰는 영상"))
+        self.project(Path(main).stem, {"source": main, "sequences": []})
+        self.project("내 리액션 편집", {"source": "내 촬영본.mp4", "media": [{"id": "m1", "src": "videos", "file": broll},
+                                                                      {"id": "m2", "src": "assets", "file": free}]})
+        busy = refs.projects_using([main, broll, free])
+        self.assertEqual(set(busy), {main, broll}, "가져온 파일(assets)은 보관함 영상이 아님")
+        res = refs.move_from_library([main, broll, free], quiet)
+        self.assertEqual(res["moved"], [free])
+        self.assertEqual(sorted(res["skipped"]), sorted([main, broll]))
+        self.assertEqual(set(res["inUse"]), {main, broll})
+        self.assertTrue((self.videos / main).is_file() and (self.videos / broll).is_file())
+
+    # --- 원본(우리 채널·촬영본) 보호 ---
+    def test_moved_footage_is_never_pruned_and_delete_needs_confirmation(self):
+        foot = self.lib_video("촬영 원본 2.mp4", real=True)
+        self.assertEqual(refs.move_from_library([foot], quiet, allow_own=True)["moved"], [foot])
+        self.assertTrue(refs.find(foot)["original"])
+        style.extract_events(foot, quiet)
+        res = refs.prune([foot], quiet)
+        self.assertEqual((res["pruned"], res["kept"]), ([], [foot]))
+        key = refs.find(foot)["channelKey"]
+        with mock.patch.object(style, "learn", return_value={}):  # 배운 뒤 자동 파일 지우기도 원본은 그대로
+            refs.learn_channel(key, quiet, prune_after=True)
+        self.assertTrue(refs.path_of(foot).is_file())
+        self.assertEqual(refs.originals(channel=key), [foot])
+        res = refs.delete(channel=key, log=quiet)
+        self.assertEqual(res["removed"], [])
+        self.assertIn("원본", res["failed"][0]["error"])
+        self.assertTrue(refs.path_of(foot).is_file())
+        self.assertEqual(refs.delete([foot], log=quiet, allow_original=True)["removed"], [foot])
+        self.assertTrue(refs.listing()["channels"] == [])
+
+    def test_original_flag_survives_lost_record(self):
+        """기록 파일이 깨져도 '내 촬영본' 폴더의 영상은 원본으로 다시 기록됨."""
+        foot = self.lib_video("촬영 원본 3.mp4")
+        refs.move_from_library([foot], quiet, allow_own=True)
+        refs.store_path().write_text("{깨짐", encoding="utf-8")
+        refs._CACHE.update(key=None, data=None)
+        v = refs.listing()["videos"]
+        self.assertEqual([(x["name"], x["original"]) for x in v], [(foot, True)])
+
+    # --- 되돌리기 · archive.txt ---
+    def test_move_frees_archive_and_restore_brings_back(self):
+        n = self.other(yt_name("arcvid00001", "되돌릴 영상"))
+        d = core.adir(n)
+        d.mkdir(parents=True)
+        (d / "transcript.json").write_text("[]", encoding="utf-8")
+        (self.videos / "archive.txt").write_text("youtube aaaaaaaaaaa\nyoutube arcvid00001\n", encoding="utf-8")
+        refs.move_from_library([n], quiet)
+        self.assertEqual((self.videos / "archive.txt").read_text(encoding="utf-8"), "youtube aaaaaaaaaaa\n",
+                         "소재 찾기로 다시 받을 수 있게 받기 기록에서 뺌")
+        res = refs.restore([n], quiet)
+        self.assertEqual(res, {"restored": [n], "failed": []})
+        self.assertEqual([v["name"] for v in core.local_videos()], [n])
+        self.assertTrue((core.ANALYSIS / Path(n).stem / "transcript.json").is_file(), "분석 기록도 함께 돌아옴")
+        self.assertNotIn(n, refs.load()["files"])
+        self.assertIn("youtube arcvid00001", (self.videos / "archive.txt").read_text(encoding="utf-8"))
+        self.assertEqual(refs.restore([n], quiet)["failed"][0]["name"], n)
+
+    def test_restore_downloaded_ref_keeps_channel_in_library(self):
+        n = self.ref_video(yt_name("arcvid00002"))
+        refs.restore([n], quiet)
+        self.assertEqual(source.describe(n, source.load(), False)["kind"], "other")
+        self.assertEqual(source.describe(n, source.load(), False)["channelKey"], OTHER_ID)
+
+    # --- 받는 폴더에서 못 옮김 (백신이 오래 잡고 있음) ---
+    def test_locked_staged_file_reported_and_picked_up_later(self):
+        FakeYDL.seen, FakeYDL.fail, FakeYDL.infos = [], {}, {"lckvid00001": OTHER_INFO}
+        fake = types.SimpleNamespace(YoutubeDL=FakeYDL)
+        real = refs._move
+
+        def locked(src, dst, secs=None):
+            if Path(src).parent.name == refs.INCOMING:
+                raise PermissionError("백신 검사 중")
+            return real(src, dst, secs)
+        with mock.patch.object(core, "_yt", return_value=fake), mock.patch.object(core, "ensure_deno"), \
+                mock.patch.object(refs, "_move", side_effect=locked), mock.patch.object(refs, "SETTLE_SECS", 0.01):
+            res = refs.fetch([{"id": "lckvid00001", **source.meta_of(OTHER_INFO, channel_only=True)}], quiet)
+        self.assertEqual((res["got"], res["locked"], res["failed"]), ([], ["lckvid00001"], []))
+        v = refs.listing()["videos"]  # 잠김이 풀린 뒤 목록을 열면 채널 폴더로 옮겨 기록
+        self.assertEqual([source.video_id(x["name"]) for x in v], ["lckvid00001"])
+        self.assertFalse(any((refs.root() / refs.INCOMING).iterdir()))
+
+    def test_settle_waits_longer_with_backoff(self):
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] < 4:
+                raise PermissionError("잠김")
+            return "ok"
+        self.assertEqual(refs._retry(flaky, secs=5), "ok")
+        with self.assertRaises(PermissionError):
+            refs._retry(lambda: (_ for _ in ()).throw(PermissionError("x")), secs=0.01)
+
+    # --- 기록 형식이 바뀌면 파일을 지운 영상은 '다시 받아야 함' ---
+    def test_pruned_ref_with_old_events_version_is_not_usable(self):
+        n = self.ref_video(yt_name("vervid00001"), real=True)
+        style.extract_events(n, quiet)
+        refs.prune([n], quiet)
+        self.assertTrue(refs.usable(n))
+        with mock.patch.object(style, "EV_VER", style.EV_VER + 1):
+            v = refs.listing()["videos"][0]
+            self.assertEqual((v["pruned"], v["stale"], v["usable"]), (True, True, False))
+            self.assertFalse(refs.usable(n))
+            self.assertEqual(refs.channel_names(OTHER_ID), [])
+
+    # --- 깨진 기록 뒤 채널 지우기가 기록에 없는 파일을 지우지 않음 ---
+    def test_channel_delete_keeps_unrecorded_files(self):
+        a = self.ref_video(yt_name("orpvid00001"))
+        refs.store_path().write_text("{깨짐", encoding="utf-8")
+        refs._CACHE.update(key=None, data=None)
+        b = self.ref_video(yt_name("orpvid00002"))  # 같은 폴더(슛포러브)를 다시 씀
+        refs.delete(channel=refs.find(b)["channelKey"], log=quiet)
+        self.assertTrue((refs.root() / "슛포러브" / a).is_file(), "기록에 없던 파일은 지우지 않음")
+        self.assertEqual([v["name"] for v in refs.listing()["videos"]], [a], "다음 목록에서 다시 보임")
+
+    def test_unknown_folder_adopted_as_channel(self):
+        d = refs.root() / "어떤 채널"
+        d.mkdir(parents=True)
+        (d / yt_name("orpvid00003")).write_bytes(b"\0" * 10)
+        v = refs.listing()["videos"]
+        self.assertEqual([(x["channel"], x["name"]) for x in v], [("어떤 채널", yt_name("orpvid00003"))])
+        self.assertEqual(refs.find(yt_name("orpvid00003"))["folder"], "어떤 채널")
+
+    def test_direction_entries_carry_channel_id(self):
+        d = refs.recommended()
+        by = {c["url"].lower(): c.get("channelId") for c in d["channels"]}
+        for x in d["directions"]:
+            for c in x["channels"]:
+                self.assertEqual(c.get("channelId"), by.get(c["url"].lower()))
+        seen = []
+        with mock.patch.object(refs, "fetch", side_effect=lambda items, *a, **k: seen.extend(items) or
+                               {"got": [], "failed": [], "skipped": [], "library": [], "locked": []}):
+            refs.add_direction("A", quiet, learn=False)
+        jk = [i for i in seen if i["channel"] == "JK 아트사커"]
+        self.assertTrue(jk and all(i["channelId"] == "UCT8DsZlac7D1_dx6d8Kh_Qw" and i["uploaderId"] == "@JKartsoccer" for i in jk))
+        meta = {k: jk[0][k] for k in ("channel", "channelId", "uploaderId", "uploaderUrl")}
+        self.assertEqual(source.channel_key(meta), "UCT8DsZlac7D1_dx6d8Kh_Qw", "정보 훅이 없어도 같은 채널 열쇠")
+
+
+class ReviewRouteTests(RouteBase):
+    def other(self, name):
+        self.lib_video(name)
+        source.record_download([dict(OTHER_INFO, id=source.video_id(name))])
+        return name
+
+    def test_move_route_reports_projects_before_job(self):
+        a, b = self.other(yt_name("rtpvid00001")), self.other(yt_name("rtpvid00002"))
+        (core.WORK / "projects").mkdir(parents=True, exist_ok=True)
+        (core.WORK / "projects" / f"{Path(a).stem}.json").write_text(json.dumps({"source": a}), encoding="utf-8")
+        code, j = self.call("/api/refs/move", {"names": [a, b]})
+        self.assertEqual((code, j["ok"], list(j["inUse"])), (200, False, [a]))
+        self.assertIsNone(self.app.JOB["name"], "알리기 전에는 작업을 시작하지 않음")
+        self.assertEqual(self.call("/api/refs/move", {"names": [b], "skipInUse": True})[1]["ok"], True)
+        self.assertEqual(self.result()["moved"], [b])
+        self.assertTrue((self.videos / a).is_file())
+
+    def test_delete_route_asks_again_for_originals(self):
+        foot = self.lib_video("촬영 원본 4.mp4")
+        refs.move_from_library([foot], quiet, allow_own=True)
+        code, j = self.call("/api/refs/delete", {"names": [foot]})
+        self.assertEqual((code, j["ok"], j["original"]), (200, False, [foot]))
+        self.assertIsNone(self.app.JOB["name"])
+        key = refs.find(foot)["channelKey"]
+        self.assertEqual(self.call("/api/refs/delete", {"channel": key})[1]["original"], [foot])
+        self.assertEqual(self.call("/api/refs/delete", {"names": [foot], "confirmOriginal": True})[1]["ok"], True)
+        self.assertEqual(self.result()["removed"], [foot])
+
+    def test_prune_route_rejects_empty_selection(self):
+        self.ref_video(yt_name("rtpvid00003"))
+        self.assertEqual(self.call("/api/refs/prune", {"names": []})[0], 400)
+        self.assertEqual(self.call("/api/refs/prune", {})[0], 400)
+
+    def test_restore_route(self):
+        n = self.ref_video(yt_name("rtpvid00004"))
+        self.assertEqual(self.call("/api/refs/restore", {"names": []})[0], 400)
+        self.assertEqual(self.call("/api/refs/restore", {"names": ["../x.mp4"]})[0], 400)
+        self.assertEqual(self.call("/api/refs/restore", {"names": [n]})[1]["ok"], True)
+        self.assertEqual(self.result()["restored"], [n])
+        self.assertEqual([v["name"] for v in self.call("/api/state?since=0")[1]["local"]], [n])
 
 
 if __name__ == "__main__":
