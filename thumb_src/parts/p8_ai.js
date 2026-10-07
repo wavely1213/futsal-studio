@@ -242,7 +242,7 @@ function ctxFor(frame, copy, fmt, seed) {
 }
 const T_NEW = {
   long: {
-    "전술 해설 (쪼살형)": { needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
+    "전술 해설 (쪼살형)": { prior: 3, needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.42, 1.05, 1.6), target: [ctx.W * 0.5, ctx.H * 0.6] }), ls = [bg];  // 주인공이 화면 높이 42% 쯤
       ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.58, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.74 }));
       const hd = headline(ctx, { x: ctx.W * 0.05, y: ctx.H * 0.035, w: ctx.W * 0.9, h: ctx.H * 0.46 }, { style: "line", size: Math.round(ctx.H * 0.27), ratio: 0.52 });
@@ -254,7 +254,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
-    "큰 제목 + 네온 화살표 (쪼살형 2)": { needs: { kinds: ["wide", "mid"], persons: 2, tactics: true }, fn: ctx => {
+    "큰 제목 + 네온 화살표 (쪼살형 2)": { prior: 1.5, needs: { kinds: ["wide", "mid"], persons: 2, tactics: true }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.48, 1.1, 1.6), target: [ctx.W * 0.5, ctx.H * 0.62] }), ls = [bg];
       ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.72 }));
       const hd = headline(ctx, { x: ctx.W * 0.06, y: ctx.H * 0.03, w: ctx.W * 0.88, h: ctx.H * 0.42 }, { style: "line", size: Math.round(ctx.H * 0.28), ratio: 0.5 });
@@ -265,7 +265,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
-    "상자 제목 (자막형)": { needs: { kinds: ["close", "mid"] }, fn: ctx => {
+    "상자 제목 (자막형)": { prior: 1, needs: { kinds: ["close", "mid"] }, fn: ctx => {
       const m = ctx.frame.main >= 0 ? ctx.persons[ctx.frame.main] : null, fc = ctx.frame.faces && ctx.frame.faces[0] ? ctx.frame.faces[0].box : null;
       const cx = fc ? fc[0] + fc[2] / 2 : m ? m[0] + m[2] / 2 : 0.5, right = cx >= 0.4;  // 사람이 있는 쪽 반대편에 상자
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.95, 1.05, 1.8), target: [ctx.W * (right ? 0.68 : 0.32), ctx.H * 0.48] }), ls = [bg];
@@ -278,7 +278,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
-    "강좌 시리즈 (쌈바형)": { needs: { cut: true }, fn: ctx => {
+    "강좌 시리즈 (쌈바형)": { prior: 3, needs: { cut: true }, fn: ctx => {
       const main = ctx.frame.main >= 0 ? ctx.persons[ctx.frame.main] : null, left = main ? main[0] + main[2] / 2 < 0.5 : false;
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.85, 1, 2), target: [ctx.W * (left ? 0.36 : 0.64), ctx.H * 0.5] }), ls = [bg];
       Object.assign(bg, { bright: 68, blur: 3, vignette: 55 });
@@ -291,17 +291,17 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
-    "인물 + 오른쪽 제목 (해주호형)": { needs: { kinds: ["mid", "close"] }, fn: ctx => {
+    "인물 + 오른쪽 제목 (해주호형)": { prior: -1.5, needs: { kinds: ["mid", "close"] }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.9, 1.05, 2), target: [ctx.W * 0.27, ctx.H * 0.5] }), ls = [bg];
       ls.push(L("shape", { name: "오른쪽 어둡게", x: ctx.W * 0.38, y: 0, w: ctx.W * 0.62, h: ctx.H, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 0, opacity: 0.72 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
-      const hd = headline(ctx, { x: ctx.W * 0.46, y: ctx.H * 0.1, w: ctx.W * 0.5, h: ctx.H * 0.7 }, { style: "word", align: "center", anchor: "middle", size: Math.round(ctx.H * 0.3), ratio: 0.6, rot: -2, emphFill: ctx.brand.colors.accent, emphScale: 1.12 });
+      const hd = headline(ctx, { x: ctx.W * 0.46, y: ctx.H * 0.1, w: ctx.W * 0.5, h: ctx.H * 0.7 }, { style: "word", align: "center", anchor: "middle", size: Math.round(ctx.H * 0.3), ratio: 0.6, rot: -2, emphScale: 1.12 });
       for (const l of hd.layers) for (const r of l.runs || []) if (r.fill === ctx.brand.colors.accent) { r.s2c = "#FFFFFF"; r.s2w = Math.round((r.size || l.size) * 0.07); }
       ls.push(...hd.layers);
       const lg = logoLayer(ctx, [hd.box]); if (lg) ls.push(lg);
       return ls;
     } },
-    "질문 훅 (JK형)": { needs: {}, fn: ctx => {
+    "질문 훅 (JK형)": { prior: -1.5, needs: {}, fn: ctx => {
       const close = ctx.frame.kind === "close";  // 얼굴이 큰 장면은 얼굴을 오른쪽으로 보내고 제목은 왼쪽에만
       const bg = frameLayer(ctx, { zoom: 1.05, target: close ? [ctx.W * 0.72, ctx.H * 0.5] : [ctx.W * 0.55, ctx.H * 0.6] }), ls = [bg];
       ls.push(close ? L("shape", { name: "왼쪽 어둡게", x: 0, y: 0, w: ctx.W * 0.6, h: ctx.H, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 0, opacity: 0.6 })
@@ -324,7 +324,7 @@ const T_NEW = {
       ls.push(noL, xm, yesL, scr, ...hd.layers);
       return ls;
     } },
-    "리액션 클로즈업": { needs: { kinds: ["close"] }, fn: ctx => {
+    "리액션 클로즈업": { prior: -1.5, needs: { kinds: ["close"], sharp: 0.25 }, fn: ctx => {
       const fc = ctx.frame.faces[0].box, z = clamp(0.5 / Math.max(0.12, fc[3]), 1, 1.6);
       const bg = frameLayer(ctx, { zoom: z, focus: [fc[0] + fc[2] / 2, fc[1] + fc[3] / 2], target: [ctx.W * 0.66, ctx.H * 0.4] }), ls = [bg];
       ls.push(L("shape", { name: "왼쪽 어둡게", x: 0, y: 0, w: ctx.W * 0.6, h: ctx.H, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 0, opacity: 0.7 }));
@@ -334,7 +334,7 @@ const T_NEW = {
     } },
   },
   short: {
-    "쇼츠 · 전술": { needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
+    "쇼츠 · 전술": { prior: 1, needs: { kinds: ["wide", "mid"], persons: 1, tactics: true }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: 1, target: [ctx.W * 0.48, ctx.H * 0.6] }), ls = [bg];
       ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.46, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.9 }));
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.085, w: ctx.W * 0.76, h: ctx.H * 0.28 }, { style: "line", size: Math.round(ctx.W * 0.23), ratio: 0.66 });
@@ -343,7 +343,7 @@ const T_NEW = {
       ls.push(...tac.filter(l => l.shape === "ring")); if (cut) ls.push(cut); ls.push(...tac.filter(l => l.shape !== "ring"), ...hd.layers);
       return ls;
     } },
-    "쇼츠 · 레터박스 질문": { needs: {}, fn: ctx => {
+    "쇼츠 · 레터박스 질문": { prior: -2, needs: {}, fn: ctx => {
       const ls = [L("shape", { name: "검은 바탕", x: 0, y: 0, w: ctx.W, h: ctx.H, fill: "#000000" })];
       const py = ctx.H * 0.3, ph = ctx.H - py, sub = { ...ctx, W: ctx.W, H: ph };  // 위 검은 띠에 제목, 아래는 끝까지 사진 (아래가 비면 미완성처럼 보인다는 평)
       const f = frameLayer(sub, { zoom: zoomFor(sub, 0.75, 1, 1.6), target: [ctx.W * 0.5, ph * 0.5] }); f.y += py; ls.push(f);
@@ -351,7 +351,7 @@ const T_NEW = {
       ls.push(...hd.layers);
       return ls;
     } },
-    "쇼츠 · 누끼 크게": { needs: { cut: true }, fn: ctx => {
+    "쇼츠 · 누끼 크게": { prior: 2, needs: { cut: true }, fn: ctx => {
       const z = zoomFor(ctx, 0.5, 1, 1.8), bg = frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] });
       const ls = [Object.assign(frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] }), { name: "흐린 배경", blur: 20, bright: 55, vignette: 60 })];
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 12, glow: ctx.brand.colors.hl }); if (cut) ls.push(cut);
@@ -361,25 +361,36 @@ const T_NEW = {
     } },
     "쇼츠 · 위 제목 + 아래 누끼": { needs: { cut: true }, fn: ctx => {
       const z = zoomFor(ctx, 0.58, 1, 1.8), bg = frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] }), ls = [bg];
-      Object.assign(bg, { bright: 70, blur: 4 });
+      Object.assign(bg, { bright: 72 });  // 흐리면 누끼 둘레에 잔상이 보인다는 평
       ls.push(L("shape", { name: "위 판", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: ctx.brand.colors.box, fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.96 }));
-      const cut = cutLayer(ctx, bg, { outline: ctx.brand.colors.hl, ow: 12 }); if (cut) { cut.blur = 0; cut.bright = 100; ls.push(cut); }
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 9 }); if (cut) { cut.bright = 100; ls.push(cut); }
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.08, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "word", size: Math.round(ctx.W * 0.2), ratio: 0.66, emphScale: 1.1, grad: false });
       ls.push(...hd.layers);
       return ls;
     } },
-    "쇼츠 · 질문 훅 (JK)": { needs: {}, fn: ctx => {
+    "쇼츠 · 질문 훅 (JK)": { prior: -3, needs: { kinds: ["mid", "close"] }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.45, 1.05, 1.6), target: [ctx.W * 0.5, ctx.H * 0.56] }), ls = [bg];
-      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.45, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.8 }));
+      ls.push(L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.92 }));
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.08, w: ctx.W * 0.76, h: ctx.H * 0.3 }, { style: "word", align: "left", size: Math.round(ctx.W * 0.22), ratio: 0.8, sw: 0.17, emphScale: 1.0 });
       ls.push(...hd.layers);
       return ls;
     } },
+    "쇼츠 · 얼굴 + 아래 제목": { prior: 0, needs: { kinds: ["close"] }, fn: ctx => {  // 인터뷰처럼 얼굴이 위쪽에 큰 장면: 얼굴은 위에 두고 제목은 아래 안전 영역 끝에
+      const bg = frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.47, ctx.H * 0.3] }), ls = [bg];
+      ls.push(L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.38, w: ctx.W, h: ctx.H * 0.62, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.92 }));
+      const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.5, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "line", anchor: "bottom", size: Math.round(ctx.W * 0.21), ratio: 0.62 });
+      ls.push(...hd.layers);
+      return ls;
+    } },
     "쇼츠 · 상자 제목": { needs: {}, fn: ctx => {
-      const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.55, 1.05, 1.7), target: [ctx.W * 0.46, ctx.H * 0.4] }), ls = [bg];
-      ls.push(L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.42, w: ctx.W, h: ctx.H * 0.58, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.75 }));
+      // 제목은 위, 사람은 그 아래 (가운데 제목이 시선을 나눈다는 평) · 얼굴이 크면 얼굴을 가리지 않게 제목을 아래 안전 영역 끝에
+      const face = ctx.frame.kind === "close", bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.5, 1.05, 1.7), target: [ctx.W * 0.46, ctx.H * (face ? 0.36 : 0.56)] }), ls = [bg];
+      ls.push(face ? L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.42, w: ctx.W, h: ctx.H * 0.58, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.75 })
+        : L("shape", { name: "위 어둡게", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.42, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.7 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 8 }); if (cut) ls.push(cut);
-      const hd = boxHead(ctx, ctx.W * 0.07, ctx.H * 0.745, ctx.W * 0.76, { size: ctx.W * 0.17, ratio: 0.7 });
+      const hd = boxHead(ctx, ctx.W * 0.07, ctx.H * (face ? 0.745 : 0.33), ctx.W * 0.72, { size: ctx.W * 0.18, ratio: 0.7 });
       ls.push(...hd.layers);
       return ls;
     } },
@@ -402,6 +413,7 @@ function fits(t, ctx) {
   const n = t.needs || {}, f = ctx.frame;
   if ((n.cut || n.tactics) && !wholeBody(f)) return false;
   if (n.kinds && !n.kinds.includes(f.kind)) return false;
+  if (n.sharp != null && (f.blur ?? 1) > n.sharp) return false;
   if (n.cut && !ctx.cut) return false;
   if (n.persons && (f.persons || []).length < n.persons) return false;
   if (n.ox && !(ctx.copy.ox && ctx.copy.ox.length === 2)) return false;
@@ -409,8 +421,8 @@ function fits(t, ctx) {
 }
 function buildDoc(name, t, ctx) {
   const layers = t.fn(ctx).filter(Boolean).map(normLayer);
-  if ((ctx.frame.text || 0) >= TEXTY && !layers.some(l => l.name === "누끼"))  // 글자 박힌 장면인데 누끼가 없으면 주인공까지 흐려지지 않게 덜 흐림
-    for (const l of layers) if (l.type === "image" && l.name === "배경" && l.blur) l.blur = Math.round(ctx.W * 0.004);
+  if ((ctx.frame.text || 0) >= TEXTY && !layers.some(l => l.name === "누끼"))  // 글자 박힌 장면인데 누끼가 없으면 주인공까지 흐려지지 않게 어둡게만
+    for (const l of layers) if (l.type === "image" && l.name === "배경" && l.blur) l.blur = 0;
   return { w: ctx.W, h: ctx.H, bg: "#000000", layers };
 }
 
@@ -458,10 +470,13 @@ function scoreDoc(doc, meta) {
   // 3) 대비 (획이 약하면 정밀 단계에서 배경 밝기로 다시 봄)
   const weak = heads.filter(l => !strongStroke(l));
   // 4) 얼굴 가림 · 전술 그래픽과 제목 겹침
-  const bg = doc.layers.find(l => l.type === "image" && l.name === "배경"), f = meta.frame, hb = heads.map(extentOf);
+  const bg = doc.layers.find(l => l.type === "image" && /배경/.test(l.name || "")), f = meta.frame, hb = heads.map(extentOf);
   let faceHit = 0;
   if (bg && f.faces && f.faces[0]) {
-    const fb = boxC(bg, f.faces[0].box, frameAspect()), fa = fb.w * fb.h;
+    const fb = boxC(bg, f.faces[0].box, frameAspect()); fb.y -= fb.h * 0.35; fb.h *= 1.35;  // 얼굴 상자 + 이마·머리 (제목이 이마에 얹힌다는 평)
+    const y0 = Math.max(fb.y, bg.y, 0), y1 = Math.min(fb.y + fb.h, bg.y + bg.h, Hd), x0 = Math.max(fb.x, bg.x, 0), x1 = Math.min(fb.x + fb.w, bg.x + bg.w, Wd);
+    Object.assign(fb, { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) });  // 보이는 곳만 (레터박스 위 검은 띠로 올라간 머리는 없음)
+    const fa = fb.w * fb.h;
     for (const b of hb) { const ix = Math.max(0, Math.min(b.x + b.w, fb.x + fb.w) - Math.max(b.x, fb.x)), iy = Math.max(0, Math.min(b.y + b.h, fb.y + fb.h) - Math.max(b.y, fb.y)); faceHit += fa ? ix * iy / fa : 0; }
     if (faceHit > 0.06) gates.push(`얼굴을 가림 (${Math.round(faceHit * 100)}%)`);
   }
@@ -479,6 +494,7 @@ function scoreDoc(doc, meta) {
   const area = hb.reduce((a, b) => a + b.w * b.h, 0) / (Wd * Hd), comp = area >= 0.12 && area <= 0.42 ? 1 : area < 0.12 ? area / 0.12 : clamp(1 - (area - 0.42) * 3, 0, 1);
   let s = 100 * (0.22 * fr + 0.22 * read + 0.14 * hier + 0.14 * occl + 0.12 * cp + 0.08 * safeM + 0.08 * comp);
   if (meta.legacy) s -= 15;  // 예전 템플릿은 레퍼런스형보다 한 단계 아래 (새 템플릿이 안 맞을 때만 나오게)
+  s += meta.prior || 0;     // 템플릿 가산점: 개발 중 클로드 블라인드 판정 평균으로 맞춤 (7점대 +3 … 5점대 −3)
   if (tac.length) s += 3;   // 전술 그래픽 (쪼살형) 가산
   s = Math.min(100, s);
   if (gates.length) s = Math.min(s, 40);
@@ -537,7 +553,7 @@ function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set()) {
     const cx = ctxFor(f, c, fmt, seed + Math.round(f.t * 10)); if (!fits(t, cx)) continue;
     let doc; try { doc = buildDoc(NAME, t, cx); } catch (e) { console.warn("템플릿 실패", name, e); continue; }
     if (t.needs && t.needs.tactics && !doc.layers.some(l => l.shape === "arrow2")) continue;  // 전술 템플릿인데 화살표 놓을 자리가 없으면 다른 템플릿에 양보
-    const meta = { frame: f, copy: c, legacy: !!t.legacy, maxFrame, copyMin, copyMax }, sc = scoreDoc(doc, meta);
+    const meta = { frame: f, copy: c, legacy: !!t.legacy, prior: t.prior || 0, maxFrame, copyMin, copyMax }, sc = scoreDoc(doc, meta);
     const key = `${name}|${f.t}|${c.l1}/${c.l2}`;
     cands.push(Object.assign({ tpl: name, t: f.t, copy: c, doc, key, legacy: !!t.legacy }, sc, { base: sc.score - (avoidKeys.has(key) ? 25 : 0) }));
   }
