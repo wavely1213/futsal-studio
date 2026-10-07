@@ -65,6 +65,8 @@ claude_cli.py       클로드 계정으로 쓰기 (사용자 PC의 Claude Code C
 qa.py               내보낸 영상 자동 검수
 bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
+youtube_upload.py   유튜브에 바로 올리기 (키트 그대로 올리기·이어 올리기·마무리·기록·할당량) → WORK/youtube/ (D-027)
+youtube_api.py      Google OAuth(루프백·PKCE)·비밀 저장(DPAPI)·YouTube Data API(재개 가능한 업로드 등) · 표준 라이브러리만
 hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어)
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
 refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) → WORK/refs/<채널>/ · refs/refs.json
@@ -77,7 +79,7 @@ ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기 · 8 채�
 editor.html         편집실 화면 (프리미어식)
 thumb.html          썸네일 편집기 화면 (포토샵식). 빌드 산출물이며 원본은 저장소 밖에 있음 (아래 주의)
 fonts/              자막·썸네일 폰트 + OFL 라이선스
-tests/              단위 테스트 (unittest). 배포 목록에서 빠짐
+tests/              단위 테스트 (unittest) + 가짜 Google(tests/fake_google.py). 배포 목록에서 빠짐
 docs/               개발 지침·기록 문서 (이 문서 포함)
 config.json         기본 설정 (channel_url·workspace·update_manifest_url). 사용자 PC에서는 업데이트가 덮어쓰지 않음
 version.txt         현재 버전 (release.sh가 씀)
@@ -91,7 +93,7 @@ icon.ico / icon.png 앱 아이콘
 
 - **저장소 밖에 있는 것 (주의)**: 아래 파일은 저장소가 아니라 리드 개발 환경의 scratchpad(`$SCRATCH`, 경로는 `AGENTS.md` 5번)에 있다. 잃어버릴 위험이 있다 (`KNOWN_ISSUES.md` I-018).
   - 썸네일 화면 원본: 저장소 안 `thumb_src/head.html` + `thumb_src/parts/p1_core.js` … `p7_auto.js`. 이것을 `python3 thumb_src/build.py`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
-  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
+  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상), `yt_e2e/yt_ui_test.py`(유튜브에 바로 올리기). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
   - 작업 목록: `backlog.json`(순위별 기능·범위·버린 것), `batch1_result.json`(1차 결과).
 - 상세 모듈 구조와 의존 방향은 `ARCHITECTURE.md` 참고.
 
@@ -106,6 +108,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_PORT`: 로컬 서버 포트 (기본 8765)
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
+  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. `http://127.0.0.1:<포트>`·`http://localhost:<포트>`만 받고 다른 값은 무시 (시험 전용 · D-027)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`: 내부용. 재시작·실행기 경유를 표시하며 직접 설정하지 않는다.
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)
@@ -132,6 +135,8 @@ icon.ico / icon.png 앱 아이콘
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
 | i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
+| Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-027): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
+| YouTube Data API v3 (`www.googleapis.com/youtube/v3` · `/upload/youtube/v3`) | 7단계 [유튜브에 올리기]를 누를 때만: 재개 가능한 업로드(videos.insert) · thumbnails.set · captions.insert · playlists list/insert · playlistItems.insert · videos.list(상태) · channels.list(연결 확인). 할당량: 업로드 하루 100번 + 그 밖 하루 10,000 단위(2026-06-01 기준) | 위 토큰 (사용자 본인 계정) |
 
 ## 7. 참고 링크
 
