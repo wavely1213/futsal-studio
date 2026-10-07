@@ -1144,17 +1144,20 @@ def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=Non
     return place
 
 
-AUTO_LUFS = (-16.0, -13.0)  # 자동 가편집의 소리 크기 목표 범위 — 유튜브는 -14 LUFS 로 맞춰 틀고 작은 소리는 키워 주지 않음
+# 자동 가편집의 소리 크기 목표 범위 — 유튜브는 -14 LUFS 로 맞춰 틀고 작은 소리는 키워 주지 않음 (검수는 -16 밑이면 경고).
+# 아래 끝을 -16 이 아니라 -15 로 둔 것은 한 번 맞추기(loudnorm)가 0.5~0.7dB 모자라게 나와도 -16 밑으로 안 가게 (MSG 와 같은 범위)
+AUTO_LUFS = (-15.0, -13.0)
 
 
-def auto_lufs(v):
-    """배운 스타일의 소리 크기(레퍼런스 원본을 잰 값, 예: -27) → 가편집 목표 (-16~-13 · 모르면 -14).
-    레퍼런스가 작게 올라가 있어도 우리 영상까지 유튜브에서 8~10dB 작게 들리면 안 되므로 범위 안으로만."""
+def auto_lufs(v, nd=1):
+    """배운 스타일의 소리 크기(레퍼런스 원본을 잰 값, 예: -27) → 가편집 목표 (-15~-13 · 모르면 -14).
+    레퍼런스가 작게 올라가 있어도 우리 영상까지 유튜브에서 8~10dB 작게 들리면 안 되므로 범위 안으로만. nd: 반올림 자리 (None 이면 그대로)."""
     try:
         x = float(v) if v is not None else -14.0
     except (TypeError, ValueError):
         x = -14.0
-    return round(min(AUTO_LUFS[1], max(AUTO_LUFS[0], x if math.isfinite(x) else -14.0)), 1)
+    x = min(AUTO_LUFS[1], max(AUTO_LUFS[0], x if math.isfinite(x) else -14.0))
+    return x if nd is None else round(x, nd)
 
 
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):

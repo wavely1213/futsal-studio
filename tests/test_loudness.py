@@ -1,7 +1,8 @@
 """가편집 소리 크기 목표·검수 (E6) — 저장소 폴더에서 python3 -m unittest tests.test_loudness
 
 배운 스타일의 소리 크기(레퍼런스 원본을 잰 값, 예: -27 LUFS)를 그대로 목표로 쓰면 완성본이 유튜브에서 8~10dB 작게 나오는데
-검수는 '목표대로 맞췄어요' 100점을 주던 문제: 가편집 목표는 -16~-13 으로 묶고, 검수는 목표와 상관없이 -16 보다 작으면 경고.
+검수는 '목표대로 맞췄어요' 100점을 주던 문제: 가편집 목표는 -16~-13 안(-15~-13, 한 번 맞추기가 조금 모자라도 -16 밑으로 안 가게)으로 묶고,
+검수는 목표와 상관없이 -16 보다 작으면 경고.
 검수는 ffmpeg 출력 글을 흉내 내서 보고(영상 없음), 내보내기 실측은 진짜 ffmpeg 로 짧은 시험 영상을 만들어 잼."""
 import json
 import re
@@ -44,7 +45,7 @@ def sound(r):
 
 class TargetTest(unittest.TestCase):
     def test_auto_lufs_band(self):
-        for v, want in ((-27.1, -16.0), (-21.9, -16.0), (-14.45, -14.4), (-14.0, -14.0), (-9.0, -13.0), (None, -14.0),
+        for v, want in ((-27.1, -15.0), (-21.9, -15.0), (-14.45, -14.4), (-14.0, -14.0), (-9.0, -13.0), (None, -14.0),
                         ("x", -14.0), (float("nan"), -14.0), (float("-inf"), -14.0)):
             with self.subTest(v=v):
                 self.assertEqual(editor.auto_lufs(v), want)
@@ -52,8 +53,8 @@ class TargetTest(unittest.TestCase):
     def test_learned_quiet_style_targets_youtube_band(self):
         # 재현: MSGRAW01·03 으로 배운 스타일(lufs=-27.1) → 예전에는 edit_params 가 그대로 넘기고 가편집 master.lufs=-24.0
         p = style.edit_params(LEARNED)
-        self.assertEqual(p["lufs"], -16.0)
-        self.assertEqual(style.edit_params(dict(LEARNED, lufs=-14.45))["lufs"], -14.4)
+        self.assertEqual(p["lufs"], -15.0)
+        self.assertEqual(style.edit_params(dict(LEARNED, lufs=-14.45))["lufs"], -14.45)  # 범위 안이면 배운 값 그대로
         self.assertEqual(style.edit_params(dict(LEARNED, lufs=None))["lufs"], -14.0)
 
 
@@ -82,13 +83,13 @@ class AutoSeqTest(unittest.TestCase):
 
     def test_style_rough_cut_master(self):
         info = {"duration": 50.0, "width": 1920, "height": 1080, "fps": 30.0}
-        for prof_lufs, want in ((-27.1, -16.0), (-21.9, -16.0), (-14.45, -14.4), (-7.0, -13.0)):
+        for prof_lufs, want in ((-27.1, -15.0), (-21.9, -15.0), (-14.45, -14.4), (-7.0, -13.0)):
             p = style.edit_params(dict(LEARNED, lufs=prof_lufs))
             for q in editor.auto_sequences(self.name, info, p):
                 self.assertEqual(q["master"]["lufs"], want, (prof_lufs, q["name"]))
         # 스타일 값을 직접 넘겨도(예전 저장본·MSG 아닌 다른 길) 가편집은 범위 안
         for q in editor.auto_sequences(self.name, info, {"lufs": -24.0}):
-            self.assertEqual(q["master"]["lufs"], -16.0)
+            self.assertEqual(q["master"]["lufs"], -15.0)
         for q in editor.auto_sequences(self.name, info):
             self.assertEqual(q["master"], {"volume": 1.0, "normalize": True, "lufs": -14.0})
 
@@ -134,7 +135,7 @@ class QaLoudnessTest(unittest.TestCase):
 
 
 class ExportLoudnessTest(unittest.TestCase):
-    """진짜 ffmpeg: 작게 녹음된(-30 LUFS 안팎) 시험 영상을 배운 스타일(-27) 가편집 목표로 내보내면 -16 LUFS 근처 · 최대 피크 -1 dBTP 이하."""
+    """진짜 ffmpeg: 작게 녹음된(-30 LUFS 안팎) 시험 영상을 배운 스타일(-27) 가편집 목표로 내보내면 -15 LUFS 근처 · 최대 피크 -1 dBTP 이하."""
 
     def test_quiet_source_export_lands_in_band(self):
         tmp = Path(tempfile.mkdtemp(prefix="소리 내보내기 "))
@@ -151,7 +152,7 @@ class ExportLoudnessTest(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
                 info = editor.media_info(name)
                 seq = editor.auto_sequences(name, info, style.edit_params(LEARNED), ("long",))[0]
-                self.assertEqual(seq["master"]["lufs"], -16.0)
+                self.assertEqual(seq["master"]["lufs"], -15.0)
                 proj = dict(seq, captions=[], info=info, source=name,
                             media=[{"id": "main", "kind": "video", "src": "videos", "file": name, "dur": info["duration"], "w": info["width"],
                                     "h": info["height"], "fps": 30.0, "audio": True}])
@@ -160,7 +161,8 @@ class ExportLoudnessTest(unittest.TestCase):
                 err = core.run([core.ffmpeg(), "-hide_banner", "-nostats", "-i", str(f), "-af", "ebur128=peak=true", "-f", "null", "-"]).stderr
                 lufs = float(re.findall(r"I:\s+(-?[\d.]+) LUFS", err)[-1])
                 peak = float(re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)[-1])
-                self.assertAlmostEqual(lufs, -16.0, delta=1.0)
+                self.assertAlmostEqual(lufs, -15.0, delta=1.0)
+                self.assertGreater(lufs, qa.QUIET, "검수 기준(-16)보다 큼")
                 self.assertLessEqual(peak, -1.0)
                 with mock.patch.object(core, "set_progress"):
                     res = qa.check_video(f, "long", editor.EXPORT_META[out[0]]["master"])
