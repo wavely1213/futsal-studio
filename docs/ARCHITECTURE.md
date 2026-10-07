@@ -24,13 +24,13 @@
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · thumb · face · style · plan · refs · source · qa · bundle · upload · hooks · takes(2차 작업 중)
+[기능 모듈]  core · editor · thumb · face · style · plan · msg · sfxlib · refs · source · qa · bundle · upload · hooks · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy
    ▼
 [작업 폴더 WORK]   videos/ analysis/ projects/ thumbnails/ styles/ refs/(학습용 영상) edit_media/ out/ studio.log …
 [~/.futsal-studio] bin/deno.exe · models/*.onnx · 엔진 기록(json)
-[앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태)
+[앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태) · fonts/ · sfx/(Kenney CC0 효과음, D-024)
 ```
 
 ## 2. 레이어와 책임
@@ -40,7 +40,7 @@
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `msg` · `sfxlib` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -56,6 +56,8 @@
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
+  - `msg` → `core`, `editor`, `sfxlib`. `style`·`plan`·`avmodels`·`face`·`thumb`·`hooks`·`upload`는 함수 안에서 지연 import한다(`style` → `plan` 순환·무거운 모델 import를 피함). `app`이 쓴다.
+  - `sfxlib` → `core` (+ numpy 함수 안). `msg`가 쓴다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
   - `face` → `core`, `thumb`
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
@@ -76,6 +78,8 @@
 | face | `face.py` | UltraFace 얼굴 + FER+ 표정 점수. `ensure()`가 처음에 모델을 받고, 실패하면 10분 동안 다시 시도하지 않고 조용히 False를 돌려줌 |
 | style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
 | plan | `plan.py` | 영상 기획 분석 (D-021). `extract_plan`(1초 한 장 640px 지문·복잡도·잔디·화면 글자 OCR(상한 400장)·소리 종류·화자 수 → `plan_events.json`), `detect`(티저·타이틀·정지·리플레이·삽입·흔들기·몽타주·웃음·효과음·펀치라인 줌·자막 사건 6종), `judge`(인트로·장르·형식·자막·재미 판단 문장 + 확신 + 근거 1~2개 · 채널 공식 한 문장 `headline`), `merge_plans`(길이×확신 투표 · 갈리면 `mixed` 표시), `plan_params`(절반 넘게 같은 판단일 때만 가편집 값), `claude_prompt`·`parse_ai`·`run_ai`(Claude 판단 저장) |
+| msg | `msg.py` | MSG 자동 편집 (D-023): `signals`(받아쓰기 문장·공 소리·움직임·YAMNet 웃음/환호·얼굴 → `msg_signals.json`) · `moments`(재미 순간) · `demo_windows`·`keep_cuts`(말 없는 시범 살리기) · 기본 스타일 4개·배운 스타일 부분 값(`learned_aspects`, 범위로 묶음)·섞은 스타일(`styles/섞기/`, `save_mix`·`load_mix`·`mix_view`·`sources_listing`) · `plan_events`(예산·간격·글자 2개·말 자막 자리 피하기·시드) · `compile_seq`(티저·제목 카드·확대·흔들기·다시 보기·정지·몽타주·엔드 화면·효과음·배경음악·챕터 마커·썸네일 추천 → `seq.msg`) · `build_variants` |
+| sfxlib | `sfxlib.py` · `sfx/` | 효과음·배경음악 (D-024): 실은 Kenney CC0 효과음 27개(`sfx/LICENSE.txt`) · numpy 로 만드는 효과음 10개 · 분위기 5가지 배경음악(16마디, 이어 붙여도 이음새 없음) → `edit_media/효과음_*.wav`·`배경음악_*.wav` |
 | avmodels | `avmodels.py` | 기획 분석 모델: PP-OCRv5 글자 찾기·한국어 읽기, YAMNet 소리 종류. `ensure`(처음에 받기 · ✕ 로 멈춤, 실패하면 10분 쉬고 조용히 False · 불러오지 못한 파일은 지워 다시 받게), `usable`(기획 기록 재사용 판단), `ocr`, `tags` |
 | claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
@@ -100,6 +104,7 @@
   - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
   - 백업: `projects/backup/<stem>__YYYYMMDD_HHMMSS[_태그].json`. 자동 백업은 5분마다 최근 10개, 태그 백업(재분석전·덮어쓰기전·변환전)은 따로 10개
 - 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·올린 그림)
+- MSG (D-023): 영상마다 `analysis/<stem>/msg_signals.json`(판 `v`·파일 지문 `sig`·받아쓰기 지문 `tsig`·움직임·공 소리·소리 종류·정리할 곳·시범 구간·얼굴) · 섞은 스타일 `styles/섞기/<이름>.json` = {v, name, aspects{intro·rhythm·captions·fun·sound: {kind: preset|style, name}}, intensity, history[]} · MSG 편집본은 `auto: "msg"` + `msg` = {v, style{label, kind, sources}, intensity, seed, events[{id, kind, t, src, text, why, refs{titles, shapes, items, trans, markers, fx}, ins{start, len}}], thumb[{t_src, why, text}], summary, hook, topic, bgm[], notes} · 타이틀 `style.font`(Black Han Sans·Do Hyeon)·`style.rot` · 클립 `noCaps` · 트랙 `name`. 값이 없는 예전 프로젝트는 그대로 열린다
 - 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필) + `plan`(영상 기획 분석: intro·genre·format·captions·fun·summary·apply·agree, Claude 판단 `ai`) · `refs[i].plan`(영상마다). `plan`이 없는 예전 파일도 그대로 읽는다
   - 영상마다 `analysis/<stem>/style_events.json`(구조, D-015)과 `plan_events.json`(기획 신호: 판 `v`·파일 `sig`·그때의 모델 상태·지문·OCR 줄·소리 점수·화자 수)을 따로 둔다
 - 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
