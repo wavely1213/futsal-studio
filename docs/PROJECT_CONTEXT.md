@@ -67,6 +67,8 @@ bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
 hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어)
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
+refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) → WORK/refs/<채널>/ · refs/refs.json
+ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
 takes.py            NG 테이크·슬레이트·말더듬 찾기 (2차 작업 중, 아직 커밋 전)
 ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기)
 editor.html         편집실 화면 (프리미어식)
@@ -86,7 +88,7 @@ icon.ico / icon.png 앱 아이콘
 
 - **저장소 밖에 있는 것 (주의)**: 아래 파일은 저장소가 아니라 리드 개발 환경의 scratchpad(`$SCRATCH`, 경로는 `AGENTS.md` 5번)에 있다. 잃어버릴 위험이 있다 (`KNOWN_ISSUES.md` I-018).
   - 썸네일 화면 원본: `thumb_v2_head.html` + `tv2/p1_core.js` … `p7_auto.js`. 이것을 `build_thumb.sh`로 이어 붙여 저장소의 `thumb.html`을 만든다 (`ARCHITECTURE.md` 7절 6번).
-  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
+  - E2E(Playwright) 테스트: `ed2_test.py`(편집실), `th2_test.py`(썸네일), `style_test.py`(스타일 배우기), `refs_e2e/refs_ui_test.py`(학습용 영상). 실행 방법은 `TESTING_GUIDELINES.md` 1번에 있다.
   - 작업 목록: `backlog.json`(순위별 기능·범위·버린 것), `batch1_result.json`(1차 결과).
 - 상세 모듈 구조와 의존 방향은 `ARCHITECTURE.md` 참고.
 
@@ -114,7 +116,7 @@ icon.ico / icon.png 앱 아이콘
 
 | 서비스 | 용도 | 키 관리 위치 |
 |---|---|---|
-| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기, 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '크롬 로그인 정보로 받기'를 켤 때만 그 브라우저에서 읽음 (`cookiesfrombrowser`) |
+| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '크롬 로그인 정보로 받기'를 켤 때만 그 브라우저에서 읽음 (`cookiesfrombrowser`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치 | 없음 |
 | GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |

@@ -36,7 +36,7 @@
   1. Host 확인(GET·POST)
   2. Origin 확인(POST, 3번 참고)
   3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. (빈틈: `/api/thumb/cut` 의 `src` 안 `/frame?name=` 은 검사 없이 `thumb.grab` 으로 간다 — `KNOWN_ISSUES.md` I-021)
-  4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`다.
+  4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
 - **SQL 인젝션**: DB가 없다(JSON 파일 저장). 같은 자리의 위험은 **명령·필터 인젝션**이다.
   - 외부 프로그램은 항상 인자 목록으로 `core.run()`/`editor.run_killable()`을 통해 실행한다.
   - `shell=True`·`os.system`·`eval`은 쓰지 않는다(현재 0건).
