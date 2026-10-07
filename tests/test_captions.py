@@ -250,6 +250,16 @@ class EchoModel(FakeModel):
         return iter(segs), types.SimpleNamespace(duration=2.0)
 
 
+class CreditModel(FakeModel):
+    """소음 구간에서 지어낸 '한글자막 by …' 줄 + 진짜 말 (끝인사는 실제로 말할 수 있어 남김)."""
+
+    def transcribe(self, audio, **k):
+        FakeModel.calls.append(k)
+        rows = [(0.0, 0.8, "한글자막 by 한효정"), (1.0, 1.9, "다음 영상에서 만나요")]
+        segs = [types.SimpleNamespace(start=a, end=b, text=" " + t, words=[Word(a, b, " " + t, 0.5)]) for a, b, t in rows]
+        return iter(segs), types.SimpleNamespace(duration=2.0)
+
+
 class PositionsModel(FakeModel):
     """코치가 포지션을 늘어놓는 진짜 문장 (외래어라 확신이 낮음)."""
 
@@ -349,6 +359,15 @@ class AnalyzeTest(WorkDir):
         self.assertEqual([s["text"] for s in segs], ["피벗이 받아요"])
         self.assertIn("용어 목록만 잘못 받아쓴 1곳은 뺐어요", logs[-1])
         self.assertTrue(all(type(w["s"]) is float for w in segs[0]["words"]))
+
+    def test_subtitle_credit_dropped(self):
+        name = self.video("공 차는 소리만.mp4")
+        logs = []
+        with self.whisper(CreditModel):
+            core.analyze(name, logs.append)
+        segs = json.loads((core.adir(name) / "transcript.json").read_text(encoding="utf-8"))
+        self.assertEqual([s["text"] for s in segs], ["다음 영상에서 만나요"])
+        self.assertIn("자막 표시 1곳은 뺐어요", logs[-1])
 
     def test_positions_sentence_kept(self):
         name = self.video("포지션 설명.mp4")
