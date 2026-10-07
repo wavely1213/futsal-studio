@@ -1515,14 +1515,23 @@ def timeline_captions(proj):
     shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
     for cap0 in proj["captions"]:
         for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
+            toks = str(cap.get("text") or "").split()
             for it in vids:
                 a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
                 if b - a > 0.05:
                     s, e = i_tl(it, a), min(i_tl(it, b), total)
                     if e - s > 0.04:
-                        c = {"start": s, "end": e, "text": cap["text"]}
+                        # 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말·고쳐 다시 한 말이 자막에 남지 않게 · editor.html capsTL 과 같은 규칙)
+                        keep = [k for k, w in enumerate(ws) if it["in"] <= (float(w["s"]) + float(w["e"])) / 2 < it["out"]] if ws else None
+                        if keep is not None and not keep:
+                            continue
+                        c = {"start": s, "end": e, "text": cap["text"] if keep is None or len(keep) == len(ws) else " ".join(toks[k] for k in keep)}
                         if ws:  # 노래방 자막용 단어 시각도 타임라인으로
-                            c["words"] = [{"w": w.get("w", ""), "s": i_tl(it, float(w["s"])), "e": i_tl(it, float(w["e"]))} for w in ws]
+                            c["words"] = [{"w": ws[k].get("w", ""), "s": i_tl(it, float(ws[k]["s"])), "e": i_tl(it, float(ws[k]["e"]))} for k in keep]
+                            c["_keep"] = keep
+                            c["_n"] = len(ws)
+                            c["_toks"] = toks
+                            c["_full"] = cap["text"]
                         c["_k"] = id(cap)
                         res.append(c)
     # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
@@ -1536,10 +1545,14 @@ def timeline_captions(proj):
                 p["words"] = p["words"] + c["words"]
             else:
                 p.pop("words", None)
+            if "_keep" in p and "_keep" in c:
+                p["_keep"] = sorted(set(p["_keep"]) | set(c["_keep"]))
+                p["text"] = " ".join(p["_toks"][k] for k in p["_keep"]) if len(p["_keep"]) < p["_n"] else p["_full"]
             continue
         out.append(c)
     for c in out:
-        c.pop("_k", None)
+        for k in ("_k", "_keep", "_n", "_toks", "_full"):
+            c.pop(k, None)
     return out
 
 

@@ -933,15 +933,39 @@ def _scoreboard(moms):
     if x:
         total = {"다섯": 5, "열": 10, "세": 3, "네": 4, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9}.get(x) or int(x)
     res = sorted([m for m in moms if m["kind"] in ("success", "fail")], key=lambda m: m["t"])
-    out, goals, seen = [], 0, set()
-    for k, (t, n) in enumerate(tries):
-        if n in seen:  # 같은 시도를 두 번 말함 (받아쓰기 반복)
+    first = {}
+    for t, n in tries:  # 같은 시도를 두 번 말함 (받아쓰기 반복) → 처음 것만
+        first.setdefault(n, t)
+    ann = sorted((t, n) for n, t in first.items())
+    got, last = {}, None
+    for r in res:
+        before = [(t, n) for t, n in ann if t < r["t"]]
+        if not before:
             continue
-        seen.add(n)
-        nxt = tries[k + 1][0] if k + 1 < len(tries) else t + 15.0
-        r = next((m for m in res if t < m["t"] < min(nxt, t + 15.0)), None)
-        if not r:
-            continue
+        t0, n0 = before[-1]
+        said = re.search(r"(첫|두|세|네|다섯|여섯|일곱) ?번째", r.get("text") or "")
+        if said:  # 결과 말에 번호가 있으면 그 시도 ('네 번째 빗나갔어요' 를 두 번 말해도 한 번만)
+            if ORD[said[1]] in got:
+                continue
+            n0, t0 = ORD[said[1]], r["t"]
+        if n0 not in got and r["t"] - t0 < 15.0:
+            n = n0
+        else:
+            # 말로 안 알린 시도 ('세 번째'를 받아쓰기가 놓침 · 마지막 시도를 '하나 둘 셋'으로만): 앞 결과와 4초 넘게 떨어진 새 결과만,
+            # 뒤에 알린 번호 사이 빈자리이거나 전체 횟수 안에서
+            if last is None or r["t"] - last["t"] < 4.0:
+                continue
+            n = max(got) + 1
+            later = [m for t, m in ann if t > r["t"]]
+            if not ((later and n < min(later)) or (not later and total and n <= total)):
+                continue
+        got[n] = r
+        last = r
+    out, goals = [], 0
+    for n in sorted(got):
+        if n != len(out) + 1:  # 결과를 모르는 시도가 끼면 골 수가 틀릴 수 있어 거기서 멈춤 (틀린 점수보다 없는 게 나음)
+            break
+        r = got[n]
         goals += r["kind"] == "success"
         txt = (f"{n}/{total}" if total and n <= total else f"{n}번째") + f" · {goals}골"
         out.append({"kind": "score", "t": round(r["t"] + 0.9, 2), "a": r["a"], "b": r["b"], "score": 1.0, "text": txt, "why": "챌린지 점수판"})

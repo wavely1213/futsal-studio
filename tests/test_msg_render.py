@@ -75,6 +75,21 @@ class CaptionJoin(unittest.TestCase):
         self.assertEqual(len(editor.timeline_captions(dict(two, captions=seq["captions"][:1]))), 2)
 
 
+    def test_cut_words_leave_the_caption(self):
+        """단어 시각이 있으면 클립에 든 낱말만 자막에 (고쳐 다시 한 말을 잘라 냈는데 자막에 남던 것) · 다시 이어 붙으면 원래 글 그대로."""
+        it = lambda i, s, a, b: {"id": i, "track": "V1", "media": "main", "start": s, "in": a, "out": b, "speed": 1.0}  # noqa: E731
+        cap = {"id": "c1", "start": 0.0, "end": 3.0, "text": "이렇게 패스와 동작. 이렇게 패스와 동시에",
+               "words": [{"w": w, "s": a, "e": a + 0.4} for w, a in (("이렇게", 0.0), ("패스와", 0.5), ("동작.", 1.0), ("이렇게", 1.6), ("패스와", 2.1), ("동시에", 2.5))]}
+        seq = {"items": [it("a", 0, 1.55, 3.0)], "titles": [], "shapes": [], "format": "long", "captions": [cap]}
+        caps = editor.timeline_captions(seq)
+        self.assertEqual([c["text"] for c in caps], ["이렇게 패스와 동시에"])
+        self.assertEqual(len(caps[0]["words"]), 3)
+        whole = editor.timeline_captions(dict(seq, items=[it("a", 0, 0.0, 1.5), it("b", 1.5, 1.5, 3.0)]))
+        self.assertEqual([c["text"] for c in whole], [cap["text"]])
+        none = editor.timeline_captions(dict(seq, items=[it("a", 0, 2.8, 3.0)]))  # 말끝 뒤 쉼만 남은 클립
+        self.assertEqual(none, [])
+
+
 def bbox(gray, thr=200):
     import numpy as np
     m = gray > thr

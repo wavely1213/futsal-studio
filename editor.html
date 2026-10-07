@@ -633,21 +633,46 @@ function trackState(tid, t) {
 let _caps = { v: -1, list: [] };
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
-  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps), out = []; // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
+  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps), out = [], tot = total(); // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
   const cs = P.captions.slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
   for (const it of vids) {
     let lo = 0, hi = cs.length; const from = it.in - maxLen;
     while (lo < hi) { const m = (lo + hi) >> 1; if (cs[m].start < from) lo = m + 1; else hi = m; }
     for (let i = lo; i < cs.length && cs[i].start < it.out; i++) {
       const cap = cs[i], a = Math.max(cap.start, it.in), b = Math.min(cap.end, it.out);
-      if (b - a > 0.05) out.push({ cap, s: tlOf(it, a), e: tlOf(it, b) });
+      if (b - a <= 0.05) continue;
+      const s = tlOf(it, a), e = Math.min(tlOf(it, b), tot);
+      if (e - s <= 0.04) continue;
+      // 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말이 자막에 남지 않게 · editor.py timeline_captions 와 같은 규칙)
+      const ws = capWT(cap), keep = ws ? ws.map((w, k) => (it.in <= (w.s + w.e) / 2 && (w.s + w.e) / 2 < it.out) ? k : -1).filter(k => k >= 0) : null;
+      if (keep && !keep.length) continue;
+      out.push({ cap, s, e, keep, n: ws ? ws.length : 0 });
     }
   }
   out.sort((a, b) => a.s - b.s);
   // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · editor.py timeline_captions 와 같은 규칙)
   const joined = [];
-  for (const c of out) { const p = joined[joined.length - 1]; if (p && p.cap === c.cap && Math.abs(c.s - p.e) <= 0.06) p.e = Math.max(p.e, c.e); else joined.push({ ...c }); }
+  for (const c of out) {
+    const p = joined[joined.length - 1];
+    if (p && p.cap === c.cap && Math.abs(c.s - p.e) <= 0.06) { p.e = Math.max(p.e, c.e); if (p.keep && c.keep) p.keep = [...new Set([...p.keep, ...c.keep])].sort((x, y) => x - y); }
+    else joined.push({ ...c });
+  }
+  for (const c of joined) { const toks = String(c.cap.text || "").split(/\s+/).filter(Boolean); c.text = c.keep && c.keep.length < c.n ? c.keep.map(k => toks[k]).join(" ") : c.cap.text; }
   _caps = { v: ver, list: joined }; return joined;
+}
+// 자막의 단어 시각 [{s, e}] — 낱말 수가 글과 같을 때만 (editor.py _cap_words 와 같은 규칙) · wt(1/100초, 차이) 또는 words
+function capWT(cap) {
+  const toks = String(cap.text || "").split(/\s+/).filter(Boolean);
+  let ws = null;
+  try {
+    if (cap.wt != null) {
+      let acc = 0; const t = cap.wt.map(x => (acc += parseInt(x, 10)));
+      if (t.length !== 2 * toks.length || t.some(x => !isFinite(x))) return null;
+      ws = toks.map((w, k) => ({ s: t[2 * k] / 100, e: t[2 * k + 1] / 100 }));
+    } else ws = (cap.words || []).map(w => ({ s: +w.s, e: +w.e }));
+  } catch (err) { return null; }
+  ws = ws.filter(w => cap.start - 0.05 <= (w.s + w.e) / 2 && (w.s + w.e) / 2 <= cap.end + 0.05);
+  return ws.length && ws.length === toks.length ? ws : null;
 }
 function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
@@ -1444,7 +1469,7 @@ function drawOverlays(t) {
     }).join("");
   }
   const want = {};
-  if (S.captionsOn) for (const c of capsTL()) if (t >= c.s && t < c.e) want["c" + c.cap.id] = { st: S.captionStyle, s: c.s, e: c.e, text: c.cap.text };
+  if (S.captionsOn) for (const c of capsTL()) if (t >= c.s && t < c.e) want["c" + c.cap.id] = { st: S.captionStyle, s: c.s, e: c.e, text: c.text };
   for (const g of S.titles) if (t >= g.start && t < g.start + g.dur && t < tot + 0.01) want["t" + g.id] = { st: g.style, s: g.start, e: g.start + g.dur, text: g.text };
   for (const k of Object.keys(ovEls)) if (!want[k]) { ovEls[k].remove(); delete ovEls[k]; }
   for (const [k, w] of Object.entries(want)) {

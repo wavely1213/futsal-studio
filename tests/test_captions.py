@@ -578,7 +578,7 @@ class ReviewFixTest(WorkDir):
         caps = proj["captions"]
         self.assertTrue(any(c.get("sh") for c in caps))
         self.assertTrue(any("\n" in c["text"] for c in caps))  # 프로젝트 자막은 롱폼형 그대로 (롱폼 편집본·미리보기)
-        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": 15.0, "speed": 1.0}
+        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": max(c["end"] for c in caps) + 0.2, "speed": 1.0}
         base = {"items": [v], "captions": caps, "titles": [], "shapes": [], "captionsOn": True}
         longs = editor.timeline_captions(dict(base, format="long"))
         self.assertEqual([c["text"] for c in longs], [c["text"] for c in caps])

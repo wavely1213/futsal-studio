@@ -115,6 +115,12 @@ class Lines(unittest.TestCase):
         self.assertEqual([x["text"] for x in sb], ["1/5 · 0골", "2/5 · 1골", "3/5 · 2골"])
         self.assertAlmostEqual(sb[1]["t"], 16.9)
         self.assertEqual(msg._scoreboard(moms[:5]), [])
+        # 받아쓰기가 '네 번째'만 듣고 세 번째를 놓침 → 골 수를 모르니 거기서 멈춤 · '네 번째 빗나갔어요' 를 두 번 말해도 한 번
+        gap = moms[:5] + [m("section", 22, "세 번째"), m("success", 25, "들어갔어요"), m("section", 40, "네 번째"), m("fail", 44, "빗나갔어요"),
+                          m("fail", 48.5, "네번째 빗나갔어요"), m("success", 60, "들어갔다")]
+        self.assertEqual([x["text"] for x in msg._scoreboard(gap)], ["1/5 · 0골", "2/5 · 1골", "3/5 · 2골", "4/5 · 2골", "5/5 · 3골"])
+        lost = [x for x in gap if not (x["kind"] == "section" and x["text"] == "세 번째") and x["t"] != 25]
+        self.assertEqual([x["text"] for x in msg._scoreboard(lost)], ["1/5 · 0골", "2/5 · 1골"])
 
     def test_clean_lines_drops_restarts_split_slates_and_garbage(self):
         """편집에서 뺄 말: 한 구간에 묶인 '고쳐 다시 한 말' · 쉼으로 쪼개진 '다시 … 해볼게요' · 영어 찌꺼기 (나란한 설명·짧은 감탄은 그대로)."""
