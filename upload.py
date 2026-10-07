@@ -747,7 +747,9 @@ def build_kit(name, seq=None, save=True):
     topics = hooks.topic_keywords(texts)
     flow = hooks.in_order(topics[:3], texts)
     hook = None
-    if sq and fmt == "shorts":  # 쇼츠 편집본의 큰 제목 글자가 곧 훅
+    if sq and (sq.get("msg") or {}).get("hook"):  # MSG 편집본: 맨 앞 훅 자막이 곧 제목 후보
+        hook = _oneline(sq["msg"]["hook"], 40) or None
+    if sq and fmt == "shorts" and not hook:  # 쇼츠 편집본의 큰 제목 글자가 곧 훅
         hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text"))), None)
     if not hook and segs:
         try:

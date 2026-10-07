@@ -70,12 +70,33 @@ REACTIONS = {"대박": 3, "우와": 3, "미쳤": 3, "깜짝": 3, "헐": 2, "ㅋ�
 
 
 def _cand_sig(name):
-    """장면 후보를 다시 골라야 하는지 판단하는 지문: 영상 크기·수정 시각, 편집점 분석·받아쓰기 시각, 얼굴 모델 유무."""
+    """장면 후보를 다시 골라야 하는지 판단하는 지문: 영상 크기·수정 시각, 편집점 분석·받아쓰기 시각, 얼굴 모델 유무, MSG 추천 장면."""
     vs = (core.VIDEOS / name).stat()
     d = core.adir(name)
     mt = [int(f.stat().st_mtime) if f.exists() else 0 for f in (d / "analysis.json", d / "transcript.json")]
     import face
-    return [vs.st_size, int(vs.st_mtime), *mt, face.ready()]
+    sig = [vs.st_size, int(vs.st_mtime), *mt, face.ready()]
+    msg_ts = _msg_thumb_times(name)
+    return sig + [msg_ts] if msg_ts else sig  # MSG 추천이 없으면 예전 지문 그대로 (예전 캐시를 다시 쓰게)
+
+
+MSG_PICKS = 3  # MSG 후보가 추천한 장면은 이만큼까지 먼저 넣음
+
+
+def _msg_thumb_times(name):
+    """편집실 MSG 후보(seq.msg.thumb)가 추천한 썸네일 장면 — 원본 시각 (최고 시범·웃는 얼굴·강조하는 말) · 없으면 []."""
+    from editor import _ppath  # 순환 import 피함
+    try:
+        d = json.loads(_ppath(name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for q in d.get("sequences") or [] if isinstance(d, dict) else []:
+        for x in ((q.get("msg") or {}).get("thumb") or []) if isinstance(q, dict) else []:
+            t = x.get("t_src") if isinstance(x, dict) else None
+            if isinstance(t, (int, float)) and t > 0 and round(float(t), 1) not in out:
+                out.append(round(float(t), 1))
+    return out[:8]
 
 
 def cached_candidates(name):
@@ -164,6 +185,8 @@ def frame_candidates(name, n=8):
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
     ts += _keyword_times(name)
+    msg_ts = [t for t in _msg_thumb_times(name) if 0 < t < dur]
+    ts += msg_ts
     uniq = sorted(set(round(x, 1) for x in ts if 0 < x < dur))
     span = 80 if use_faces else 100  # 진행률: 장면 고르기 80% · 표정 다듬기 20%
 
@@ -172,7 +195,12 @@ def frame_candidates(name, n=8):
 
     scored = _score_frames(name, uniq, use_faces, prog(0, span, "장면 살펴보는 중"))
     picked = []
+    for t in sorted([t for t in msg_ts if t in scored], key=lambda x: -scored[x][0])[:MSG_PICKS]:  # MSG 추천 장면 먼저
+        if all(abs(t - q) > dur * 0.05 for q in picked):
+            picked.append(t)
     for t in sorted(scored, key=lambda x: -scored[x][0]):
+        if t in picked:
+            continue
         if all(abs(t - q) > dur * 0.05 for q in picked):
             picked.append(t)
         if len(picked) >= n:
@@ -192,6 +220,8 @@ def frame_candidates(name, n=8):
     for t in sorted(picked, key=lambda x: -scored[x][0]):
         sc, fs = scored[t]
         it = {"t": t, "url": f"/frame?name={name}&t={t}", "score": round(sc, 3)}
+        if any(abs(t - m) <= 0.45 for m in msg_ts):  # 표정 다듬기로 0.4초까지 옮겨질 수 있음
+            it["why"] = "MSG 추천 장면"
         if fs:
             m = face.main(fs)
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)

@@ -2937,6 +2937,8 @@ def export(name, proj, opts, log):
             m = proj.get("master") or {}  # 검수용: 이 파일을 만들 때의 형식·소리 크기 (편집실을 새로 고쳐도 남음)
             EXPORT_META[out.name] = {"format": fmt, "master": {"normalize": astate.get("norm", False),
                                                                "lufs": min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))}}
+            if isinstance(proj.get("msg"), dict):  # MSG 편집본: 무엇을 넣었는지 (검수·평가가 씀)
+                EXPORT_META[out.name]["msg"] = (proj["msg"].get("summary") or {}).get("text")
             log(f"  영상 길이 {span:.1f}초 · {W}×{H} · {fps}fps · {time.time() - t_start:.0f}초 걸림" + (f" · 그래픽카드({hw})" if hw and (hw, W, H) not in _HW.get("bad", set()) else ""))
         except Cancelled as e:
             traceback.clear_frames(e.__traceback__)
