@@ -1,6 +1,8 @@
 {
   "version": "2.1.1",
   "notes": "스타일 배우기 속도 개선: 1시간짜리 영상도 약 3배 빠르게 (긴 영상은 앞부분 위주로 살펴봄)",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/e302d4919294d97c71ff07f847730165eac8d680.zip",
+  "commit": "e302d4919294d97c71ff07f847730165eac8d680",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "57a7fc83aac79782eedcd0111c6b4e58ab25af6fa0efbe317032cfe36da71d9a",
