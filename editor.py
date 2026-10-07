@@ -19,6 +19,7 @@ from urllib.parse import quote
 import captions
 import core
 import takes
+import updater
 
 PROJECTS = core.WORK / "projects"
 ASSETS = core.WORK / "edit_media"  # 편집실에서 가져온 음악·이미지·영상
@@ -173,7 +174,7 @@ def _encode_540p(p, tmp, label, item):
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+    proc = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     _PROCS.add(proc)
     try:
         for line in proc.stdout:
@@ -203,7 +204,11 @@ def make_proxy(f, src="videos", log=print):
     if rc or not tmp.exists():
         tmp.unlink(missing_ok=True)
         raise RuntimeError("미리보기 파일을 만들지 못했어요")
-    os.replace(tmp, out)
+    try:  # 막 만든 큰 파일: 백신이 검사하는 동안 잠깐 잠김
+        updater.replace_retry(tmp, out, updater.SETTLE_SECS)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"미리보기 파일을 만들었지만 제자리에 두지 못했어요 (백신이 검사 중일 수 있어요). 잠시 뒤 다시 눌러 주세요 · {e}")
     log(f"  미리보기 파일 완료 · {Path(f).name}")
     return {"src": src, "file": Path(f).name}
 
@@ -241,7 +246,11 @@ def out_preview(name, log=print):
     if rc or not tmp.exists():
         tmp.unlink(missing_ok=True)
         raise RuntimeError("작은 미리보기를 만들지 못했어요")
-    os.replace(tmp, out)
+    try:  # 막 만든 큰 파일: 백신이 검사하는 동안 잠깐 잠김 (make_proxy 와 같게)
+        updater.replace_retry(tmp, out, updater.SETTLE_SECS)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"작은 미리보기를 만들었지만 제자리에 두지 못했어요 (백신이 검사 중일 수 있어요). 잠시 뒤 다시 해 주세요 · {e}")
     try:
         dirs = sorted((d for d in remote_previews().iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True)
         for d in dirs[PREVIEW_KEEP:]:
@@ -309,14 +318,15 @@ def _upright_image(dest):
             up.convert("RGB").save(tmp, "JPEG", quality=95)
         else:
             up.save(tmp, fmt or None)
-        os.replace(tmp, dest)
+        updater.replace_retry(tmp, dest)
     except Exception:
         pass
 
 
 def save_upload(name, stream, length):
-    """가져오기: 음악·이미지·영상 파일을 그대로 받아 저장."""
-    name = re.sub(r'[\\/:*?"<>|]', "_", Path(name).name).strip(" .") or "media"
+    """가져오기: 음악·이미지·영상 파일을 그대로 받아 저장. 끝까지 받은 뒤에만 제 이름으로 (끊기거나 디스크가 차면
+    반쪽 파일이 미디어 목록에 남아 내보내기가 깨졌음 · Windows 는 끊김이 ConnectionAbortedError)."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", core.clean_text(Path(name).name)).strip(" .") or "media"
     if Path(name).suffix.lower() not in MEDIA_EXTS:
         raise ValueError("영상·음악·이미지 파일만 가져올 수 있어요")
     dest = ASSETS / name
@@ -324,14 +334,22 @@ def save_upload(name, stream, length):
     while dest.exists():
         dest = ASSETS / f"{Path(name).stem}_{k}{Path(name).suffix}"
         k += 1
+    part = ASSETS / f".{dest.name}.{os.getpid()}_{threading.get_ident()}.part"  # 미디어 목록(MEDIA_EXTS)에 안 잡히는 이름
     left = length
-    with open(dest, "wb") as f:
-        while left > 0:
-            chunk = stream.read(min(1 << 20, left))
-            if not chunk:
-                break
-            f.write(chunk)
-            left -= len(chunk)
+    try:
+        with open(part, "wb") as f:
+            while left > 0:
+                chunk = stream.read(min(1 << 20, left))
+                if not chunk:
+                    break
+                f.write(chunk)
+                left -= len(chunk)
+        if left > 0:
+            raise ValueError("파일을 끝까지 받지 못했어요. 다시 가져와 주세요")
+        updater.replace_retry(part, dest)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     if dest.suffix.lower() in IMAGE_EXTS:
         _upright_image(dest)
     return media_entry(dest.name, "assets")
@@ -348,9 +366,7 @@ def _gen_lock(key):
 
 
 def _write_atomic(path, text):
-    tmp = path.with_name(path.name + f".{threading.get_ident()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    updater.write_atomic(path, text)
 
 
 def waveform(name, per_sec=50, src="videos"):
@@ -364,8 +380,10 @@ def waveform(name, per_sec=50, src="videos"):
         import numpy as np
         sr = 8000
         with _GEN_SEM:
-            p = subprocess.run([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-ac", "1", "-ar", str(sr),
-                                "-f", "s16le", "-"], capture_output=True, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+            with core.popen([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-ac", "1", "-ar", str(sr),
+                             "-f", "s16le", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL) as proc:
+                out, _ = proc.communicate()
+            p = subprocess.CompletedProcess(proc.args, proc.returncode, out, b"")
         a = np.abs(np.frombuffer(p.stdout, np.int16).astype(np.float32)) / 32768.0
         hop = sr // per_sec
         n = len(a) // hop
@@ -410,7 +428,7 @@ def thumbs(name, src="videos"):
             else:
                 core.run([core.ffmpeg(), "-y", "-v", "error", "-i", str(path), "-vf", f"scale={w}:{h}", "-frames:v", "1", "-q:v", "5", str(tmp)])
         if tmp.exists():
-            os.replace(tmp, jpg)
+            updater.replace_retry(tmp, jpg)
         data = {"interval": interval, "w": w, "h": h, "count": count if info["kind"] == "video" else 1}
         _write_atomic(meta, json.dumps(data))
         return data
@@ -440,7 +458,7 @@ def poster(name, src="videos"):
         with _GEN_SEM:
             core.run([core.ffmpeg(), "-y", "-v", "error", *ss, "-i", str(path), "-frames:v", "1", "-an", "-vf", f"{tm}scale=-2:72", "-q:v", "5", str(tmp)])
         if tmp.exists():
-            os.replace(tmp, out)
+            updater.replace_retry(tmp, out)
         return out
 
 
@@ -470,8 +488,11 @@ def rev_audio(src, f, a, b, sp):
             return out
         d.mkdir(parents=True, exist_ok=True)
         old = sorted(d.glob("rev_*.wav"), key=lambda x: x.stat().st_mtime)
-        for o in old[:-40]:  # 오래된 것 정리
-            o.unlink(missing_ok=True)
+        for o in old[:-40]:  # 오래된 것 정리 (미리보기가 들고 있으면 Windows 는 못 지움 → 다음에)
+            try:
+                o.unlink(missing_ok=True)
+            except OSError:
+                pass
         tmp = d / f"rev.{threading.get_ident()}.tmp.wav"
         af = ",".join(["areverse"] + _atempo(sp))
         with _GEN_SEM:
@@ -480,14 +501,14 @@ def rev_audio(src, f, a, b, sp):
         if r.returncode or not tmp.exists():
             tmp.unlink(missing_ok=True)
             raise RuntimeError("거꾸로 재생 소리를 만들지 못했어요")
-        os.replace(tmp, out)
+        updater.replace_retry(tmp, out)
         return out
 
 
 def run_killable(cmd):
     """멈추기(✕)로 끌 수 있는 ffmpeg 실행 (검수 등). 멈추면 RuntimeError."""
-    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
-                         encoding="utf-8", errors="replace", **core.NO_WINDOW)
+    p = core.popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
+                   encoding="utf-8", errors="replace")
     _PROCS.add(p)
     try:
         _, err = p.communicate()
@@ -1021,15 +1042,9 @@ def _read_json(p):
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def _replace_retry(src, dst, tries=20):
-    for i in range(tries):  # Windows: 백신·OneDrive·탐색기가 잠깐 잡고 있으면 실패 → 잠깐 뒤 다시
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if i == tries - 1:
-                raise
-            time.sleep(0.05)
+def _replace_retry(src, dst, secs=None):
+    """Windows: 백신·OneDrive·탐색기가 잠깐 잡고 있으면 실패 → 점점 길게 기다리며 다시 (updater.replace_retry)."""
+    updater.replace_retry(src, dst, secs)
 
 
 def _disk_rev(p):
@@ -1280,11 +1295,14 @@ def save_project(name, proj, base_rev=None, force=False, client=None, seq=None):
             _WRITER[str(p)] = (client, w[1] if mine else proj["rev"] - 1, proj["rev"], seq)
         else:
             _WRITER.pop(str(p), None)
-        # 자동 백업: 5분마다 한 벌씩, 최근 10개까지
-        regs = [x for x in _backup_files(p.stem) if not x[1]]
-        if not regs or time.time() - _bk_epoch(regs[-1][0]) > 300:
-            _backup_copy(p)
-        _prune_backups(p.stem)
+        # 자동 백업: 5분마다 한 벌씩, 최근 10개까지 · 이미 저장은 끝났으므로 백업이 실패해도(디스크 가득·잠긴 옛 백업) 저장 실패가 아님
+        try:
+            regs = [x for x in _backup_files(p.stem) if not x[1]]
+            if not regs or time.time() - _bk_epoch(regs[-1][0]) > 300:
+                _backup_copy(p)
+            _prune_backups(p.stem)
+        except OSError:
+            pass
         return proj["rev"]
 
 
@@ -1369,12 +1387,17 @@ def freeze_frame(src, f, t):
     p = media_path(f, src)
     tag = hashlib.sha1(f"{src}|{p.name}".encode("utf-8")).hexdigest()[:6]
     out = ASSETS / f"정지_{Path(f).stem[:30].strip(' .')}_{tag}_{t:.2f}.png"
-    if not out.exists():
+    if not out.exists():  # 임시 파일에 다 만든 뒤에만 제 이름으로 (디스크가 차서 반쪽이 된 그림이 '있는 파일'로 남지 않게)
         info = probe(p)
         vf = ["-vf", ",".join(tonemap_chain(info["hdr"]))] if info.get("hdr") else []
-        r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", str(p), "-frames:v", "1", *vf, str(out)])
-        if r.returncode or not out.exists():
-            raise RuntimeError("정지 화면을 만들지 못했어요")
+        tmp = ASSETS / f".{out.stem}.{os.getpid()}_{threading.get_ident()}.tmp.png"
+        try:
+            r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", str(p), "-frames:v", "1", *vf, str(tmp)])
+            if r.returncode or not tmp.is_file() or not tmp.stat().st_size:
+                raise RuntimeError("정지 화면을 만들지 못했어요")
+            updater.replace_retry(tmp, out)
+        finally:
+            tmp.unlink(missing_ok=True)
     return {**media_entry(out.name, "assets"), "freeze": True}
 
 
@@ -1931,7 +1954,7 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None):
             return f'<file id="{fid[k]}"/>'
         seen.add(k)
         p = media_path(m["file"], m["src"])
-        url = "file://localhost/" + quote(str(p).replace("\\", "/").lstrip("/"))
+        url = _pathurl(p)
         dur_f = int((m.get("dur") or 10) * fps)
         med = ""
         if m["kind"] in ("video", "image"):
@@ -1979,6 +2002,16 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None):
             f'<duration>{total_f}</duration>{rate}<media><video><format><samplecharacteristics>{rate}<width>{W}</width><height>{H}</height>'
             f'<pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format>{"".join(vt)}</video>'
             f'<audio>{"".join(at)}</audio></media></sequence></xmeml>\n')
+
+
+def _pathurl(p):
+    """프리미어 XML 의 파일 주소: 드라이브 경로는 file://localhost/C%3A/… (프리미어가 쓰는 꼴), 네트워크 폴더(NAS)는
+    file://서버/공유/… (예전에는 서버 이름이 빠져 모든 클립이 '미디어 오프라인')."""
+    s = str(p)
+    if s.startswith("\\\\") and not s.startswith("\\\\?\\"):
+        host, _, rest = s[2:].replace("\\", "/").partition("/")
+        return f"file://{quote(host)}/" + quote(rest)
+    return "file://localhost/" + quote(s.replace("\\", "/").lstrip("/"))
 
 
 def _xml_esc(s):
@@ -2497,8 +2530,8 @@ def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=
     if CANCEL.is_set() or (abort is not None and abort.is_set()):
         raise Cancelled()
     with tempfile.TemporaryFile(dir=cwd) as errf:
-        p = subprocess.Popen([core.ffmpeg(), "-hide_banner", "-nostats", "-progress", "pipe:1"] + args, cwd=str(cwd),
-                             stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+        p = core.popen([core.ffmpeg(), "-hide_banner", "-nostats", "-progress", "pipe:1"] + args, cwd=str(cwd),
+                       stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL)
         _PROCS.add(p)
         if procs is not None:
             procs.add(p)
@@ -2683,7 +2716,7 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
             fi, fo = float(it.get("fadeIn") or 0), float(it.get("fadeOut") or 0)
             got = 0
             with tempfile.TemporaryFile(dir=tmp) as errf:
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+                p = core.popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL)
                 _PROCS.add(p)
                 my.add(p)
                 try:
@@ -2830,7 +2863,7 @@ PRESETS = {
 
 def _is_render_tmp(d):
     """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음)."""
-    if not d.is_dir():
+    if not d.is_dir() or (d / KEEP_MARK).exists():
         return False
     if d.name.startswith(".render_"):
         return True
@@ -2841,6 +2874,50 @@ def _is_render_tmp(d):
     except OSError:
         return False
     return any(x in ("list.txt", "subs.ass", "dialog.f32", "mix.f32", "music.f32") or re.fullmatch(r"(seg\d{4}|p\d{3})\.mp4", x) for x in names)
+
+
+KEEP_PREFIX = "내보낸 영상_옮기지 못함_"  # 완성본을 제자리로 못 옮기면 임시 폴더를 이 이름으로 (정리 대상 아님 · 사용자에게 보임)
+KEEP_MARK = "옮기지 못한 완성본.txt"  # 폴더 이름도 못 바꿨으면 이 표시를 넣음 → 정리(sweep_temp)에서 빼고 지우지 않음
+
+
+class KeptFinal(RuntimeError):
+    """완성본을 만들었지만 제자리로 못 옮김 (임시 폴더에 그대로 남겨 두고 위치를 알려 줌)."""
+
+
+def _place_final(src, out, log):
+    """완성본(src)을 out 으로 → 실제로 둔 경로.
+    막 만든 큰 mp4 는 백신(Defender·V3·알약)이 한동안 잡고 검사함 → 최대 1분 기다리며 다시 (예전에는 0.25초 뒤 포기하고 임시 폴더째
+    지워서 렌더링 전체를 잃었음). 같은 이름 파일이 다른 프로그램에 열려 있을 때(대상 쪽 문제)만 ' (2)' 같은 다른 이름으로.
+    그래도 못 옮기면 완성본을 지우지 않고 그 폴더를 보이는 이름으로 바꿔 KeptFinal 로 위치를 알려 줌."""
+    try:
+        updater.replace_retry(src, out, updater.SETTLE_SECS)
+        return out
+    except OSError as e:
+        err = e
+    if out.exists():  # 대상 쪽: 같은 이름 파일이 열려 있음 → 다른 이름으로라도 꼭 남김
+        for i in range(2, 100):
+            alt = out.with_name(f"{out.stem} ({i}){out.suffix}")
+            if alt.exists():
+                continue
+            try:
+                updater.replace_retry(src, alt)
+            except OSError as e:
+                err = e
+                break
+            log(f"  같은 이름 파일이 다른 프로그램에 열려 있어서 '{alt.name}'(으)로 저장했어요")
+            return alt
+    log(f"  완성본을 옮기지 못했어요 · {err}")
+    d = src.parent
+    keep = d.with_name(KEEP_PREFIX + time.strftime("%Y%m%d_%H%M%S"))
+    try:
+        os.replace(d, keep)
+        d = keep
+    except OSError:
+        try:
+            (d / KEEP_MARK).write_text("완성본을 옮기지 못했어요. 이 폴더의 final.mp4 가 완성본이에요.", encoding="utf-8")
+        except OSError:
+            pass
+    raise KeptFinal(f"완성본은 만들었지만 제자리로 옮기지 못했어요 (백신이 검사 중일 수 있어요). '{d / src.name}' 에 그대로 있어요")
 
 
 def sweep_temp(min_age=600):
@@ -2947,8 +3024,8 @@ def export(name, proj, opts, log):
         side.append((f"{stem}_premiere.xml", _xmeml(proj, BW, BH, fps, stem, t_lo, t_hi)))
 
     def write_side():
-        for fn, txt in side:
-            (core.OUT / fn).write_text(txt, encoding="utf-8")
+        for fn, txt in side:  # 자막(.srt)은 BOM 을 붙임 (프리미어·자막 프로그램이 한글을 안 깨지게 읽음 · core.SRT_ENCODING)
+            updater.write_atomic(core.OUT / fn, txt, encoding=core.SRT_ENCODING if fn.endswith(".srt") else "utf-8")
             outputs.append(fn)
 
     if not opts.get("video", True):
@@ -3091,23 +3168,11 @@ def export(name, proj, opts, log):
             # 영상·소리를 그대로 합치기만 (다시 인코딩 없음)
             _run_ff(["-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio.name, "-map", "0:v", "-map", "1:a", "-c", "copy",
                      "-movflags", "+faststart", "final.mp4"], tmp)
-            out = core.OUT / f"{stem}.mp4"
             try:  # 다 만들어진 뒤에만 완성본 폴더로 (멈추면 반쪽 파일이 안 남음)
-                _replace_retry(tmp / "final.mp4", out, 5)
-            except OSError:  # 같은 이름 파일이 다른 프로그램에 열려 있음 → 다른 이름으로라도 꼭 남김
-                for i in range(2, 100):
-                    alt = core.OUT / f"{stem} ({i}).mp4"
-                    if alt.exists():
-                        continue
-                    try:
-                        os.replace(tmp / "final.mp4", alt)
-                    except OSError:
-                        continue
-                    log(f"  같은 이름 파일이 다른 프로그램에 열려 있어서 '{alt.name}'(으)로 저장했어요")
-                    out = alt
-                    break
-                else:
-                    raise RuntimeError("완성본을 저장하지 못했어요 (같은 이름 파일이 다른 프로그램에 열려 있어요)")
+                out = _place_final(tmp / "final.mp4", core.OUT / f"{stem}.mp4", log)
+            except KeptFinal:
+                tmp = None  # 옮기지 못한 완성본이 든 폴더는 지우지 않음
+                raise
             outputs.insert(0, out.name)
             m = proj.get("master") or {}  # 검수용: 이 파일을 만들 때의 형식·소리 크기 (편집실을 새로 고쳐도 남음)
             EXPORT_META[out.name] = {"format": fmt, "master": {"normalize": astate.get("norm", False),
@@ -3121,7 +3186,7 @@ def export(name, proj, opts, log):
             if not isinstance(e, RuntimeError):
                 traceback.print_exc()
             traceback.clear_frames(e.__traceback__)
-            err = f"영상을 만들지 못했어요 · {str(e)[-300:]}"
+            err = str(e) if isinstance(e, KeptFinal) else f"영상을 만들지 못했어요 · {str(e)[-300:]}"
         finally:
             if fut is not None:
                 if not fut.done():  # 실패·멈춤이면 소리 쪽도 바로 멈춤
@@ -3136,7 +3201,7 @@ def export(name, proj, opts, log):
                 except BaseException as e:  # noqa: BLE001
                     traceback.clear_frames(e.__traceback__)
                 ex_a.shutdown(wait=True)
-            for _ in range(5):  # Windows: 잠깐 잡혀 있으면 조금 뒤 다시
+            for _ in range(5 if tmp else 0):  # Windows: 잠깐 잡혀 있으면 조금 뒤 다시
                 shutil.rmtree(tmp, ignore_errors=True)
                 if not tmp.exists():
                     break

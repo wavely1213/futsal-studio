@@ -39,7 +39,9 @@
 - 검증 도구/패턴: 라이브러리 없이 `app.Handler`가 경계에서 다음 순서로 막는다. 새 API도 같은 순서를 따른다(`ARCHITECTURE.md` 7절 7번).
   1. Host 확인(GET·POST)
   2. Origin 확인(POST, 3번 참고)
-  3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. (빈틈: `/api/thumb/cut` 의 `src` 안 `/frame?name=` 은 검사 없이 `thumb.grab` 으로 간다 — `KNOWN_ISSUES.md` I-021)
+  3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. 주소 안에 든 이름(`/api/thumb/cut` 의 `src` 안 `/frame?name=`)도 `video_path` 를 거친다 (I-021 해결).
+  4. 요청 본문 JSON 의 글자는 `core.clean_json` 이 짝 없는 대리 문자를 '�'로 바꾼 뒤 쓴다 (`KNOWN_ISSUES.md` I-038).
+  - `GET /api/ping` 은 이 앱인지(`{"app": "futsal-studio", "version"}`)만 알려 준다 — 두 번째 실행·실행기가 그 포트의 주인을 확인할 때만 쓰고(D-030), 개인 정보는 없다. 같은 Host 검사를 거친다.
   4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
 - **원격 경계(`remote.RemoteHandler`, D-027)**: 터널로 들어온 요청은 로컬 `Handler`가 아니라 이것만 받고, 다음 순서로 막는다. 새 `/r/*` 경로도 같은 순서를 따른다.
   1. Host 가 `remote.futsal.invalid`(cloudflared 가 붙임)인지 — 개발 모드(`FUTSAL_REMOTE_DEV=1`)에서만 `127.0.0.1:<원격 포트>` 도. 브라우저는 `.invalid` Host 를 만들 수 없어 DNS 리바인딩·같은 PC 의 다른 사이트를 막는다. 본문은 `Content-Length` 로만 받는다(`Transfer-Encoding` 이 있으면 읽지 않고 411 · 잠금 횟수에 안 셈).
@@ -73,11 +75,13 @@
   - POST는 Origin이 같은 출처여야 한다. 다른 사이트의 몰래 요청(CSRF)을 막는다.
   - Origin 없는 POST는 허용한다. 같은 PC의 프로그램(`app._focus_running`)이 쓰기 때문이다. 같은 사용자의 로컬 프로세스는 믿는다는 전제다.
 - **예외: 원격 리스너 (D-027 · 원격 접속을 켜 둔 동안만)**. 위 규칙(127.0.0.1 만·다른 서버 금지)의 좁은 예외다. 로컬 서버(8765)의 규칙은 하나도 바뀌지 않았고 터널 뒤에 두지 않는다.
-  - 두 번째 서버를 `127.0.0.1:<임의 포트>`(또는 `FUTSAL_REMOTE_PORT`)에 켜 둔 동안만 띄우고(터널이 오류로 멈추면 닫았다가 다시 켤 때 새로), cloudflared 자식 프로세스가 그것만 바깥(`https://<무작위>.trycloudflare.com`)에 잇는다. 둘 다 [끄기]·자동 끄기·앱 종료(상태와 상관없이)·모두 끊기에 꺼진다. 켜기·끄기는 시도 번호로 묶여 빨리 눌러도 cloudflared 는 많아야 하나이고, 끄면 0이며, 끈 뒤 `enabled` 가 다시 켜지지 않는다. Windows 는 Job Object 로 앱이 갑자기 꺼져도 cloudflared 가 같이 꺼진다.
+  - 두 번째 서버를 `127.0.0.1:<임의 포트>`(또는 `FUTSAL_REMOTE_PORT`)에 켜 둔 동안만 띄우고(터널이 오류로 멈추면 닫았다가 다시 켤 때 새로), cloudflared 자식 프로세스가 그것만 바깥(`https://<무작위>.trycloudflare.com`)에 잇는다. 둘 다 [끄기]·자동 끄기·앱 종료(상태와 상관없이)·모두 끊기에 꺼진다. 켜기·끄기는 시도 번호로 묶여 빨리 눌러도 cloudflared 는 많아야 하나이고, 끄면 0이며, 끈 뒤 `enabled` 가 다시 켜지지 않는다. Windows 는 cloudflared 를 `core.popen`(앱의 Job Object 하나 · D-034)으로 띄워 앱이 갑자기 꺼져도 같이 꺼진다. 원격 리스너는 앱 화면 포트 창(`remote.app_ports`)을 쓰지 않는다.
   - 인증: PC 화면이 만든 10분·한 번 쓰는 코드(Crockford 10글자, 틀리면 5번에 버림, 한 시간 20번 실패면 새 코드까지 막음 — 버리거나 막으면 PC 화면이 까닭을 보여 줌)로 짝을 짓는다. 휴대폰은 코드 증명만 보내고, 기기마다 열쇠 두 개를 코드 열쇠로 잠가 받는다(최대 5대, 90일 안 쓰면 끊음, 같은 브라우저가 다시 연결하면 옛 항목을 바꿔 끼움). 이후 모든 API 는 서명, 미디어는 표. 휴대폰 페이지는 이미 연결된 상태에서 새 연결(QR·코드)이 오면 **PC 가 같든 다르든 먼저 묻는다**(가짜 QR 링크로 연결 빼앗기 방지).
   - 인가: 휴대폰은 허용 동작만 한다(동작 이름은 글자여야 하고 목록에 있어야 함 · 아니면 400). 지우기·설정·업데이트·재시작·Claude·폴더 열기·업로드·쿠키·임의 경로·채널 전략 작업(새로 고침·점검 · D-028)은 없다. 휴대폰에서 원격 접속을 **켤 수는 없다**(끄기·자기 기기 끊기·알림 시험만). 휴대폰이 시킨 받기·학습용 받기는 다운로드 엔진 pip 업데이트·Deno 설치를 하지 않는다(`core.no_self_update` · PC 에서만).
   - 끊기: PC 의 [끊기]·[모든 휴대폰 끊기]·휴대폰의 '이 휴대폰 끊기'는 열쇠·표·nonce 를 바로 버리고 ntfy 주제 둘을 새로 바꾼다(남은 기기에만 옛 비콘 주제로 새 주제를 암호로 알림 · 옛 알림 주제에는 '주제가 바뀌었어요' 정해진 안내만 한 번 — 새 주제는 쓰지 않음). 90일 정리는 비콘 주제만 바꾼다.
   - 원격 동작은 모두 `studio.log`에 `원격 · <기기> · <동작> · <대상>`으로 남는다(기기·파일 이름은 줄바꿈·제어 글자 빼고 80자).
+  - 원격 쪽 오류 추적은 `remote._trace()` 로만 오류 출력에 쓴다 — `remote.redact` 가 터널 주소·비콘/알림 주제·표(`/r/m/…`)·서명(`FSR2 …`)·연결 코드(`#pair=`·`&u=`)를 '…'로 지운다. 리스너의 `handle_error` 도 보낸 곳 주소 없이 이것만 쓴다. pythonw 에서는 이 출력이 `studio-error.log` 로 모이므로(D-034 · 예전에는 버려짐) 이 규칙을 지킨다. 휴대폰에 보내는 기록·오류 글(`scrub`)도 같은 지우기를 거친다.
+  - 휴대폰에서 온 POST 본문도 로컬 서버처럼 `core.clean_json`(반쪽 이모지 → '�')을 거치고, 응답은 쓸 수 없는 글자가 있으면 `\uXXXX` 로 보낸다.
   - 휴대폰 페이지(`mulgyeol.kr/futsal`, 와벨리 저장소)는 엄격한 CSP(`script-src 'self'`, 연결은 `*.trycloudflare.com`·`ntfy.sh` 만), 밖에서 온 글은 `textContent` 로만, 짝짓기 QR 의 `#pair=` 는 읽자마자 주소창에서 지운다. 이미 연결된 PC 와 다른 PC 면 먼저 묻고, 새 주소에 기존 열쇠를 보내지 않는다.
 - **GET은 읽기 전용으로 둔다.** 다른 사이트의 `<img src="http://127.0.0.1:8765/…">`도 Host가 맞아 통과한다. 응답을 읽지는 못하지만 동작은 일어난다.
   - 지우기·저장·작업 시작·폴더 열기처럼 상태를 바꾸는 동작은 반드시 POST로 만든다.
@@ -140,7 +144,7 @@
   - 예외는 원격 리스너 하나(D-027): 정확한 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`)만 그대로 되돌려 주고 `Vary: Origin`, `Allow-Credentials` 없음, `*` 금지. 개발 모드에서만 `FUTSAL_REMOTE_ORIGINS` 를 더한다.
 - **에러 응답**: 스택 트레이스·쿼리를 응답에 넣지 않는다.
   - 예외 메시지가 곧 화면 문구다. 사용자 문장으로 쓴다(`CODING_STANDARDS.md` 5번).
-  - `traceback.print_exc()`는 표준 출력에만 쓴다(사용자 PC에서는 보이지 않음).
+  - `traceback.print_exc()`는 표준 오류에만 쓴다. 사용자 PC(pythonw)에서는 작업 폴더의 `studio-error.log` 로 모인다(`app._error_log`) — 화면·응답에는 나가지 않지만 경로에 Windows 사용자 이름이 들어갈 수 있다.
 - **받은 실행 코드·모델의 무결성**: 새로 받는 실행 파일·모델에는 고정 주소와 크기·sha256 확인을 붙인다. 확인한 뒤에만 임시 파일을 제자리로 옮긴다(`os.replace`). 현재 상태는 다음과 같다.
 
   | 대상 | 확인 방식 |
@@ -151,11 +155,14 @@
   | 기획 분석 모델(OCR 글자 찾기·한국어 읽기·글자 목록, YAMNet) | 고정 태그·커밋 주소, 주소마다 크기·sha256 고정값 (`avmodels.SPECS`) |
   | Claude Code CLI | 앱이 받지 않음. 사용자가 [설치하기]로 Anthropic 공식 설치 명령을 보이는 창에서 직접 실행 |
   | cloudflared (휴대폰으로 보기) | 고정 판(`tunnel.CF_VERSION`)·GitHub 릴리스 고정 주소, 크기·sha256 고정값(공식 릴리스 노트와 맞춤) → `.part` 확인 뒤 `os.replace` → `--version` 확인. `--no-autoupdate`·설정 파일 `no-autoupdate: true`. 확인 안 된 '최신'으로 대신 받지 않음 |
+  | Microsoft Visual C++ 재배포 패키지 | 앱은 받지 않음. `시작하기 (Windows).bat` 이 msvcp140 이 없거나 예전일 때만 Microsoft 공식 주소(`aka.ms/vs/17/release/vc_redist.x64.exe`)에서 받아 실행 — 관리자 확인 창(서명된 Microsoft 설치 파일). 안 되면 받는 페이지를 연다 (D-033) |
   | 누끼 모델(rembg 릴리스) | **크기·sha256 확인 없음** (`thumb._model`). `KNOWN_ISSUES.md` I-023 |
   | yt-dlp·pip 패키지·Whisper 모델 | pip와 Hugging Face의 기본 동작에 맡긴다 |
 
 - **의존성 취약점**: `DEPENDENCY_POLICY.md` 참고. audit 경고 발견 시 보고.
 - 밖으로 나가는 통신은 모두 HTTPS다. 업데이트·다운로드 주소를 `http://`로 바꾸지 않는다(`updater.download_and_install`은 형식상 `http`도 받으므로 주소 쪽에서 지킨다).
+  - 업데이트·Deno·모델 받기는 `updater.urlopen` 을 쓴다: 인증서 사슬·주소 확인은 그대로 하고 Python 3.13+ 의 `VERIFY_X509_STRICT` 만 끈다 (백신 'HTTPS 검사'·회사 프록시 인증서가 규격을 조금 벗어나도 3.12 처럼 받게 · I-047). `CERT_NONE`·`check_hostname=False` 로 바꾸지 않는다.
+- 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다.
 - 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다. 원격 리스너도 루프백 HTTP 이고(바깥 TLS 는 Cloudflare), 쿠키 대신 요청 서명을 쓴다.
 
 ## 6. AI 작업 시 보안 체크리스트
@@ -168,7 +175,7 @@
   - 상태를 바꾸는 동작이 POST인가
 - [ ] 새 조회/수정 경로가 `resolve()` 후 허용 폴더 안인지 확인하는가
 - [ ] 쿠키·계정·개인정보(대사 전문 포함)가 코드·로그·`studio.log`에 남지 않는가
-- [ ] 외부 프로그램을 인자 목록으로 실행하는가
+- [ ] 외부 프로그램을 인자 목록으로, `core.run`·`core.popen` 으로 실행하는가 (앱이 꺼지면 같이 꺼지게 · `CODING_STANDARDS.md` 7번)
   - shell을 쓰지 않는가
   - ffmpeg 필터 문자열에 사용자 글자·경로를 그대로 넣지 않는가
 - [ ] 밖에서 온 글자(YouTube 제목·파일 이름·받아쓰기)를 `innerHTML`에 넣을 때 `esc()`를 거치는가

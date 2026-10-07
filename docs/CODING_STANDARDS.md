@@ -70,7 +70,7 @@
 - 로깅 도구: `logging` 모듈은 쓰지 않는다. `app.log(msg)` 하나로 화면 기록(`/api/state`) + 표준 출력 + 작업 폴더의 `studio.log`(시각 `%m-%d %H:%M:%S`)에 남긴다. 앱이 켜지기 전·실행기에서는 `updater.studio_log(app_dir, msg)`.
 - 모듈은 `app` 을 import 하지 않고 `log` 함수를 인자로 받는다 (기본값 `print`). 진행률은 로그가 아니라 `core.set_progress(label=, item=, step=, pct=, detail=)`.
 - 레벨 구분은 없다 — 모든 줄이 사용자 화면에 보이므로 사용자가 읽을 문장으로 쓴다. 단계 안의 세부 줄은 두 칸 들여쓴다 (`"  완료 · …"`), 실패는 `"…하지 못했어요 · {e}"`.
-- `studio.log` 는 문제가 생기면 사용자가 관리자에게 보내는 파일이다 → 원인을 알 수 있게 파일 이름·원인을 함께 남긴다. 사용자 PC 에서는 `pythonw` 로 실행돼 `print`·`traceback` 출력이 보이지 않는다.
+- `studio.log` 는 문제가 생기면 사용자가 관리자에게 보내는 파일이다 → 원인을 알 수 있게 파일 이름·원인을 함께 남긴다. 사용자 PC 에서는 `pythonw` 로 실행돼 `print` 출력이 보이지 않는다 — `traceback`·스레드 오류·서버 요청 오류·바깥 코드가 죽은 위치는 `app._error_log` 가 작업 폴더의 `studio-error.log`(줄마다 시각, 1MB 넘으면 `.old`)로 모은다. 실행기에서 켜다 멈춘 오류의 traceback 도 같은 파일 (`updater._error_trace`). 문제를 받을 때 두 파일을 함께 받는다.
 - **개인정보·시크릿·토큰(브라우저 쿠키 등)은 절대 로그에 남기지 않는다** (`SECURITY_GUIDELINES.md`).
 - 커밋 전 임시 디버그 출력(console.log, print)은 제거한다.
 
@@ -81,8 +81,19 @@
 - 타입 힌트는 쓰지 않는다 (기존 관례).
 - 파일 읽기·쓰기는 항상 `encoding="utf-8"` (Windows 기본값 cp949 로 깨짐), JSON 은 `ensure_ascii=False`. 경로는 `pathlib.Path`, 한글·띄어쓰기 경로를 전제로 한다. Windows 는 폴더 이름 끝의 공백·점을 지우므로 `core.adir` 처럼 미리 정리한다.
 - 저장은 임시 파일에 다 쓴 뒤 `os.replace` 로 바꿔 끼우고, Windows 잠금(`PermissionError`)이면 잠깐 뒤 다시 시도한다. 편집본처럼 잃으면 안 되는 것은 `fsync` + 백업까지 (`editor.save_project`).
-- 요청으로 받은 파일 이름은 `editor.safe_name` 을 거치고, 내보내는 파일은 `resolve()` 후 허용 폴더 안인지 확인한다 (`SECURITY_GUIDELINES.md`).
-- 외부 프로그램은 `core.run(cmd)`(인자 목록, utf-8, Windows 검은 창 안 띄움 `core.NO_WINDOW`)으로, 멈추기(✕)가 필요하면 `editor.run_killable`. ffmpeg 는 `core.ffmpeg()`(imageio-ffmpeg) — ffprobe 는 없으므로 `ffmpeg -i` 출력을 읽는다.
+  - **새 코드는 공통 도구를 쓴다** (직접 `write_text`·`os.replace` 를 짜지 않음):
+    - `updater.write_atomic(path, 글|바이트, encoding=…, fsync=…, mode=…)` — 프로세스·스레드마다 다른 임시 이름 → 다 쓴 뒤 바꿔 끼움, 실패하면 임시 파일을 지움. 비밀 파일은 `mode=0o600`(바꿔 끼우기 전에 임시 파일 권한 · `remote.Store.save`).
+    - `updater.replace_retry(src, dst, secs)` — 잠금이면 점점 길게 기다리며 다시 (보통 `REPLACE_SECS`=8초). **막 만든 큰 영상**(내보내기·묶기·미리보기 파일)은 백신이 오래 검사하므로 `updater.SETTLE_SECS`(60초).
+  - 사용자가 몇 분을 기다려 만든 결과물(완성본·묶음)은 옮기기가 끝내 실패해도 **지우지 않는다** — 보이는 이름의 폴더로 남기고 위치를 알려 준다 (`editor._place_final`·`bundle._keep_tmp`).
+  - ffmpeg 가 만드는 그림(장면·정지 화면)·가져온 파일도 임시 이름에 만든 뒤 성공(`returncode`·크기·받은 바이트 수)을 확인하고서만 제 이름으로 (`thumb.grab`·`editor.freeze_frame`·`editor.save_upload`). 임시 이름은 목록에 안 잡히게 (`.part`·`.tmp`).
+  - 결과가 여러 파일이면 '완료' 표시가 되는 파일을 맨 마지막에 쓴다 (`core._analyze` 의 `transcript_timeline.md`). 저장 뒤의 곁가지(백업·정리·임시 소리 파일 지우기) 실패가 저장 실패가 되지 않게 따로 감싼다.
+- 요청으로 받은 파일 이름은 `editor.safe_name` 을 거치고, 내보내는 파일은 `resolve()` 후 허용 폴더 안인지 확인한다 (`SECURITY_GUIDELINES.md`). 주소 안에 든 이름(`/frame?name=…`)도 같다.
+- **반쪽 이모지(짝 없는 UTF-16 대리 문자)**: 화면 JS 의 `.slice()` 가 이모지를 반으로 자르면 서버에 `"\ud83d"` 로 온다. 그 글자는 UTF-8 로 쓸 수 없어 기록·저장·응답이 오류로 멈춘다. 요청 본문은 `Handler._body` 가 `core.clean_json` 으로 고치고, `app.log` 는 `core.clean_text` 를 거친다. 사용자가 이름을 정하는 파일은 정리 함수를 하나 두고 화면과 같은 규칙으로 (`style.clean_style_name` ↔ `ui.html` `styleFileName`: 금지·제어 문자, 60자, `CON`·`NUL`·`COM1` 같은 Windows 예약 이름).
+- 사람이 메모장으로 고칠 수 있는 설정 JSON(`config.json`·`dict.json`)은 `updater.read_config`·`updater.loads_tolerant` 로 읽는다 (BOM·ANSI(cp949)·`"D:\풋살작업"` 처럼 역슬래시 하나). 못 읽어도 앱은 켜지고(기본값) 이유를 알리며, 못 읽은 사용자 파일을 기본값으로 덮어쓰지 않는다 (`dict.json.bad`).
+- HTTP 핸들러에서 저장·삭제처럼 Windows 잠금으로 실패할 수 있는 일은 `try` 로 감싸 `{"ok": false, "error": "…"}`(500)로 답한다 — 예외가 핸들러 밖으로 나가면 연결이 응답 없이 끊겨 화면이 '저장 중…'에 멈춘다.
+- 외부 프로그램은 `core.run(cmd, timeout=None)`(인자 목록, utf-8, Windows 검은 창 안 띄움)으로, 출력을 흘려 읽어야 하면 `core.popen(cmd, …)`(= `subprocess.Popen` 과 같은 인자), 멈추기(✕)가 필요하면 `editor.run_killable`. `subprocess.Popen`·`run` 을 직접 쓰지 않는다 — 두 도우미가 자식을 **'앱이 꺼지면 같이 꺼짐' 묶음**(Windows Job Object, `core.track`)에 넣는다 (Windows 는 부모가 꺼져도 ffmpeg·pip·claude 를 끄지 않음). 앱보다 오래 살아야 하는 것(다시 시작·보이는 설치/로그인 창·탐색기·메모장)만 예외. ffmpeg 는 `core.ffmpeg()`(imageio-ffmpeg) — ffprobe 는 없으므로 `ffmpeg -i` 출력을 읽는다.
+  - 절전 막기는 `with core.keep_awake():` 로만 쥔다 (`SetThreadExecutionState` 를 직접 부르지 않음). Windows 가 스레드마다 세므로, 오래 쥐는 쪽(휴대폰으로 보기 `remote._awake_loop`)은 자기 스레드에서 쥐고 놓는다 — 다른 스레드가 쥔 것을 대신 풀 수 없고 풀려고 하지도 않는다(D-034).
+  - 파이썬 자식(pip·확인 실행)은 출력을 UTF-8 로 쓰게 `updater.py_env()` 환경으로 (Windows 3.10~3.14 는 파이프에 cp949 로 써서 한국어 오류·한글 경로가 깨짐). `core.run` 은 `sys.executable` 을 부를 때 저절로 붙인다.
 - 무거운·선택적 서드파티(numpy, PIL, faster_whisper, onnxruntime, webview, yt_dlp)는 **함수 안에서** import 한다 (앱 시작·업데이트 import 확인을 가볍게, 없으면 예전 방식으로).
 - `updater.py` 는 표준 라이브러리만 쓰고 다른 앱 모듈을 import 하지 않는다 (모든 실행이 거치는 문).
 - 오래 걸리는 일은 `app.start_job(이름, fn)` 으로 한 번에 하나만 돌린다. 여러 스레드가 만지는 상태는 모듈 잠금(`_SAVE_LOCK`, `_LOCK`)으로 보호한다.
@@ -92,6 +103,8 @@
 - 화면 하나 = HTML 한 파일 (CSS·JS 인라인). 빌드 도구·프레임워크·외부 스크립트를 넣지 않는다 (예외: `ui.html` 의 Pretendard 글꼴 CSS). 글꼴은 `/fonts/` 에서 받는다.
 - `thumb.html` 은 직접 고치지 않고 소스 조각을 고쳐 다시 빌드한다 (`ARCHITECTURE.md` 7절 6번).
 - 서버 호출은 같은 출처 `fetch('/api/…')` JSON (`api()`·`post()` 도우미). 서버가 Host·Origin 을 확인하므로 다른 주소로 부르지 않는다.
+- 사용자 글(영상 제목·편집본 이름)을 길이로 자를 때는 `.slice()` 대신 `cutText(s, n)`(글자 단위 `Array.from`)을 쓴다 — `.slice()` 는 이모지를 반으로 잘라 저장이 깨진다. 세 화면에 같은 한 줄 도우미가 있다.
+- 저장 요청이 실패하면(연결 실패·`ok: false`) 화면에 알리고 잠시 뒤 다시 저장한다 (편집실 `doSave`·썸네일 `saveNow`). '저장 중…'에 멈춰 두지 않는다.
 - 영상 제목·파일 이름처럼 밖에서 온 글자를 `innerHTML` 에 넣을 때는 `esc()` 로 감싼다.
 - 색은 `:root` CSS 변수로. 단축키는 프리미어(편집실)·포토샵(썸네일)과 같게 맞춘다.
 - 편집실 계산(키프레임·전환 범위·트랙 상태·화면 배치·색보정)은 `editor.py` 와 짝이다 — 함께 고친다.

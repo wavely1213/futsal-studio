@@ -439,8 +439,8 @@ class FakeYDL:
             for h in self.opts["progress_hooks"]:
                 h({"status": "downloading", "info_dict": info, "downloaded_bytes": 5, "total_bytes": 10})
                 h({"status": "finished", "info_dict": info})
-            Path(self.opts["outtmpl"].replace("%(upload_date)s", "20240101").replace("%(id)s", vid)
-                 .replace("%(title).60B", "인기 영상 제목").replace("%(ext)s", "mp4")).write_bytes(b"\0" * 500)
+            (Path(self.opts.get("paths", {}).get("home", "")) / self.opts["outtmpl"].replace("%(upload_date)s", "20240101")  # 폴더는 paths
+             .replace("%(id)s", vid).replace("%(title).60B", "인기 영상 제목").replace("%(ext)s", "mp4")).write_bytes(b"\0" * 500)
 
     def close(self):
         pass
@@ -477,7 +477,7 @@ class DownloadTests(Base):
         for n in res["got"]:
             self.assertTrue((refs.root() / "슛포러브" / n).is_file())
             self.assertEqual(refs.find(n)["kind"], "shorts")
-        self.assertEqual(FakeYDL.seen[0]["outtmpl"].split(os.sep)[-2], refs.INCOMING)
+        self.assertEqual(Path(FakeYDL.seen[0]["paths"]["home"]).name, refs.INCOMING)
         self.assertNotIn("download_archive", FakeYDL.seen[0], "편집용 보관함의 archive.txt 를 쓰지 않음")
         self.assertFalse(any((refs.root() / refs.INCOMING).iterdir()))
         self.assertEqual([v["name"] for v in core.local_videos()], [yt_name("popvid00002")], "보관함에는 안 들어감")

@@ -42,7 +42,7 @@
    │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
    │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
-[Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · Job Object] ── Host: remote.futsal.invalid ──┐
+[Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · core.popen(Job Object)] ── Host: remote.futsal.invalid ──┐
                                                                                                                   ▼
 [app.py 프로세스]  로컬 서버 127.0.0.1:8765 (그대로 · 터널 뒤에 없음)      원격 리스너 127.0.0.1:<임의> (/r/* 만) = remote.RemoteHandler
                     └ /api/remote* (PC 창: 켜기·연결 QR·끊기·설정)            └ remote.Service → Bridge(log·start_job·작업 모습) → 기능 모듈
@@ -65,8 +65,10 @@
 - 의존은 항상 **바깥 → 안** 한 방향: `app` → `upload`·`bundle`·`thumb`·`style`·`qa`·`editor`·`hooks` → `core` → `updater` → (표준 라이브러리만)
   - `source` → `core`, `hooks`(함수 안). `app`·`bundle`이 쓰고, `core`는 받은 영상 기록(`download`)·목록 채널 정보(`list_videos`)·`add_local` 때 **함수 안에서만** import한다 (순환이지만 import 시점이 달라 안전 · `core` 규칙의 예외는 이것과 `refs`·`captions`·`updater`뿐).
   - `refs` → `core`, `source`. `style`은 함수 안에서 지연 import한다(배우기·스타일 목록 · `style` → `plan` → `core` 순환을 피함). `app`이 쓰고, `core`는 이름 → 파일·분석 폴더 찾기(`video_file`·`adir`·`kept_sig`의 `_ref`)에서 **함수 안에서만** import한다 (D-022).
-  - `captions` → (표준 라이브러리만). `core`(받아쓰기)·`editor`(자막)·`app`(`/api/dict`)이 쓴다. `core`는 함수 안에서 import한다.
-  - `app`은 `updater`를 함수 안에서 직접 import한다(업데이트 마무리·실행기 경유). `face`는 `thumb`을 거쳐서만 쓴다.
+  - `captions` → (표준 라이브러리만 + `updater` 의 설정 JSON 읽기 `loads_tolerant`, 함수 안). `core`(받아쓰기)·`editor`(자막)·`app`(`/api/dict`)이 쓴다. `core`는 함수 안에서 import한다.
+  - `app`은 `updater`(업데이트 마무리·실행기 경유·공통 저장 도구)와 `winlink`(Windows 바로가기·작업 표시줄 아이디)를 직접 import한다. `face`는 `thumb`을 거쳐서만 쓴다.
+  - `winlink` → (표준 라이브러리만: ctypes COM). `setup_check.py` 는 앱이 import 하지 않는 설치 확인 스크립트다 (`시작하기 (Windows).bat` 이 실행 · 오래된 Python 문법도 됨).
+  - `editor`·`style`·`bundle`·`thumb` → `updater` (공통 저장 도구 `write_atomic`·`replace_retry`, D-029). `claude_cli` 는 자식 묶음(`core.track`)만 함수 안에서 지연 import한다.
   - `upload` → `editor`, `hooks`, `core`
   - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`
   - `style` → `core`, `plan` · `qa`·`hooks` → `core`
@@ -89,7 +91,9 @@
 
 | 모듈 | 위치 | 역할 |
 |---|---|---|
-| app | `app.py` | HTTP 서버·라우팅, `start_job`(작업 하나씩, 겹치면 409), `log()`, pywebview 창·닫기 전 저장, 이미 켜져 있으면 그 창을 앞으로(`/api/focus`), 바로가기 만들기, 재시작 |
+| app | `app.py` | HTTP 서버·라우팅, `start_job`(작업 하나씩, 겹치면 409), `log()`, pywebview 창·닫기 전 저장, 이미 켜져 있으면 그 창을 앞으로(`/api/ping` 으로 이 앱인지 확인 → `/api/focus`), 포트 고르기(8765 → 8766~8799, `.port`), 작업 중 창 닫기 확인, pywebview 저장소(비공개 모드 끔), pythonw 오류 기록(`studio-error.log`), 재시작 |
+| winlink | `winlink.py` | Windows 바탕화면·시작 메뉴 바로가기(COM `IShellLinkW`, 안 되면 PowerShell)와 작업 표시줄 아이디(AppUserModelID `FutsalAcademy.Studio`, 바로가기·프로세스 짝). 같은 실행 경로면 다시 만들지 않음(`~/.futsal-studio/shortcut.json`) |
+| setup_check | `setup_check.py` | `시작하기 (Windows).bat` 의 설치 확인: 쓸 Python(3.10~3.14·x64)·`.venv` 다시 만들기·긴 경로·Visual C++ 구성요소 (D-033) |
 | updater | `updater.py` | `--launch`(업데이트 확인 → `run_app`), `install`(zip 검사 → staging → 버전·sha256 → 문법·selftest → 백업 → 교체 → 지울 파일 정리), `rollback`, `check`/`finish`(새 버전 import 확인·알림), `.update_skip` |
 | core | `core.py` | `list_videos`(조회수 순), `download`(받는 폴더·archive·진행 이름·출처 기록 함수를 바꿀 수 있음 · 학습용 영상이 씀), 이름 → 파일·분석 폴더(`video_file`·`adir`: 보관함 먼저, 없으면 학습용 영상 · `kept_sig`), `analyze`(whisper 한국어 → transcript.json·analysis.json·subtitles.srt·timeline.md), 엔진 관리(`update_engine`·`engine_autoupdate` 3일·`ensure_deno`), `check_update`·`update_app`(pip는 요구사항이 바뀔 때만). `render`(컷 목록 → mp4 + EDL)와 `/api/render`는 현재 화면에서 부르지 않는 예전 기능이다 |
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소) |
@@ -109,7 +113,7 @@
 | strategy | `strategy.py` | 채널 전략 (D-024): 기록 `WORK/strategy/`(state·channels·history·checkups·forecast, 바꿔 끼우기·.bad·잠기면 안 덮어씀), 경쟁 채널 넣기·빼기(열쇠·중복 막기), `refresh`(yt-dlp 목록 `core.channel_listing` + RSS `fetch_rss`·`parse_rss` · 예절 BR-016 · 막히면 6시간 쉼·RSS 계속 · 채널마다 저장 · 다시 시작한 날), `channel_stats`·`cadence`, 제목 패턴(`formula_stats`·`topic_stats`·`series_stats`·`fixed_hashtags`), `group_summary`·`strengths`·배운 스타일 연결, `takeaways`(규칙 R-* · 8분류 · 맞춤 점수), 할 일(`todo_*`·`todos_for`), 방향 초안 `PRESETS`·`validate_strategy`, `forecast_result`(입력 해시 캐시 · 자료 받은 시각 기준 입력 · 한 번에 하나)·`forecast_preview`(저장 없는 미리 보기)·`own_pace`(지금 속도), `solution`(30/60/90 · 먼저 할 것 · 계획을 바꾸면)·`solution_view`(캐시 `solution.json`), `checkup`·`evaluate`·`band_at`·`forward_check`·`remind`, `claude_prompt`·`parse_ai`·`run_ai`, 화면 묶음 `overview`·`week_view`(이번 주 할 것). 채널 원본은 새로 고침·점검만 읽고(`load_channel`), 분석은 줄인 자료(`_read_slim`)를 기억한다 (D-026). 비교 데이터 `strategy_seed.json`(함께 배포) |
 | forecast | `forecast.py` | 가능성(%) (D-025): `calibrate`(반응 회귀·분류 줄이기·σ·Theil–Sen 전환·탄력성·bootstrap·DEFAULTS), `own_posterior`, `simulate`(주 단위 · 공통 난수 · 지수 누적 · 되먹임), 목표·궤적·KPI, 민감도 `variants`, 표시 `show`(BR-015), `assumptions`, 검증(`loo_coverage`·`video_reliability`·`backtest`·`brier`), `inputs_hash` |
 | remote | `remote.py` | 휴대폰으로 보기 (D-027): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일 · 같은 브라우저는 바꿔 끼움), `Pairing`(10분 한 번 코드 · 증명 확인 · PBKDF2 만남 주제·잠금·증명 열쇠), `Auth`(FSR2 서명: host 포함 · nonce), `Tickets`(미디어 표: 기기·IP 대역·1시간), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기는 시도 번호로 · 터널 추적 · 오류 뒤 다시 켜기 · 끊기·설정·작업 끝 알림 `job_hook`·자동 끄기·절전 막기), `RemoteHandler`(`/r/*`), 허용 동작 `ACTIONS` |
-| tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·Job Object·남은 pid 정리) · 출력 줄은 기록하지 않음 |
+| tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·`core.popen`/`core.run` 으로 띄워 앱의 Job Object 하나에(따로 두지 않음 · D-034)·남은 pid 정리) · 출력 줄은 기록하지 않음 |
 | qr | `qr.py` | QR 만들기(바이트·M·버전 1~10) → 줄 문자열 (PC 창이 SVG 로 그림) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
 | 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://mulgyeol.kr/futsal` 정적 PWA. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
@@ -149,10 +153,11 @@
 - **로깅**:
   - `app.log()`는 메모리 `LOG`(화면 '작업 기록', `/api/state?since=`), 작업 폴더 `studio.log`(`MM-DD HH:MM:SS` 접두어), stdout에 한꺼번에 남긴다.
   - `updater.studio_log()`는 앱이 안 켜져도 같은 `studio.log`에 남긴다.
+  - pythonw(사용자 PC)에서는 traceback·스레드 오류·서버 요청 오류·바깥 코드가 죽은 위치(faulthandler)가 작업 폴더의 `studio-error.log` 로 간다(`app._error_log`, 켜다 멈춘 오류는 `updater._error_trace`).
   - 진행률은 `core.set_progress(label, item, step, pct, detail)`로 알리고 `/api/state`의 `progress`로 전달된다.
   - 사용자 PC에서 문제가 생기면 `studio.log`를 받는다.
 - **설정/환경변수 접근**:
-  - `config.json`은 `core.CONFIG`(import 때 한 번 읽음)와 `updater.workspace()`(core 없이 같은 규칙)만 읽는다.
+  - `config.json`은 `core.CONFIG`(import 때 한 번 읽음)와 `updater.workspace()`(core 없이 같은 규칙)만 읽고, 둘 다 `updater.read_config`(BOM·ANSI·역슬래시 하나도 읽음, 못 읽으면 기본값 + `core.CONFIG_NOTES` 안내)를 거친다. 설정한 작업 폴더를 쓸 수 없으면 기본 작업 폴더로 연다(D-029).
   - 경로는 모듈 상수로 쓴다: `core.WORK/VIDEOS/ANALYSIS/OUT`, `editor.PROJECTS/ASSETS`, `thumb.THUMBS/ASSETS/MODELS`, `style.STYLES`.
   - 환경변수는 `FUTSAL_*` 몇 개뿐이다(`PROJECT_CONTEXT.md` 5절).
   - 업데이트는 `config.json`을 덮어쓰지도 지우지도 않는다(`updater.KEEP`). 파일이 없을 때만 넣는다.
@@ -161,26 +166,30 @@
   - POST는 Origin이 같은 출처인지 확인한다.
   - 영상·파일 이름 인자는 `editor.safe_name()`/`video_path()`로 경로·드라이브·`..`를 거절한다.
   - 파일을 내줄 때는 `resolve()` 후 허용 폴더 안인지 확인한다.
-  - 서버는 `127.0.0.1`에만 bind한다.
+  - 서버는 `127.0.0.1`에만 bind한다. Windows 에서는 SO_REUSEADDR 를 끈다(`app._Server` · 켜 두면 두 번째 실행이 같은 포트를 같이 잡음). 8765 를 못 쓰면(다른 프로그램·예약 포트) 8766~8799 중 하나로 켜고 작업 폴더 `.port` 에 남긴다. 두 번째 실행·실행기는 `GET /api/ping` 으로 그 포트가 이 앱인지 확인한 뒤에만 `/api/focus` 를 보낸다(D-030). 원격 리스너는 이 포트 창(`remote.app_ports`: 8765~8804 · `FUTSAL_PORT` 면 그 포트 하나)을 쓰지 않고, `/api/ping` 에는 403 이라 '이 앱'으로 잡히지 않는다(D-034).
 - **동시성**:
   - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
   - 휴대폰에서 시킨 작업도 같은 `start_job`(`by`='휴대폰 · <기기>')이라 PC 작업과 겹치지 않는다. 작업이 끝나면 `app.JOB_HOOKS`(지금은 `remote.Service.job_hook`: 휴대폰 알림·검수 결과 기억)를 부르고, 훅이 실패해도 작업 결과는 그대로다.
   - `start_job` 은 작업 번호를 돌려주고, 작업 시작 응답에 `jobId` 가 있다. 끝난 작업의 결과는 `app.DONE`(최근 20개)에 남고 `/api/state?job=<번호>` 의 `done` 으로 받는다. PC 화면(`ui.html`·`editor.html`·`thumb.html`)은 '작업이 비었을 때의 결과'가 아니라 **자기가 시킨 번호의 결과**만 쓴다(휴대폰이 바로 다음 작업을 시켜도 안 섞임). `/api/state` 의 `job_id`·`job_by` 로 지금 작업이 휴대폰에서 시킨 것인지 안다.
   - 휴대폰이 시킨 작업은 `core.no_self_update()` 안에서 돈다(이 스레드에서는 다운로드 엔진 pip·Deno 설치를 안 함).
   - 원격 쪽 스레드(보내기 `remote-publisher`·5초 점검 `remote-watch`·Windows 절전 막기 `remote-awake`·`tunnel`)는 작업·HTTP 를 기다리게 하지 않는다(ntfy 가 느려도 큐에만 넣음).
+  - 절전 막기는 `core.keep_awake()` 하나로만 쥔다(SetThreadExecutionState 를 부르는 곳은 core 뿐). Windows 는 그 상태를 스레드마다 세므로 작업 스레드(`start_job`)·같은 스레드 안의 편집점 찾기(`_analysis_session`, 들어올 때 상태로 되돌림)·`remote-awake`('켜 둔 동안 항상'·'작업할 때만')가 겹쳐도 한쪽이 놓을 때 다른 쪽 것이 풀리지 않는다(D-034).
   - 저장은 모듈별 잠금으로 보호한다: `editor._SAVE_LOCK`, `thumb._SAVE_LOCK`, `upload._LOCK`, `strategy._LOCK`(state·채널·기록 파일).
   - 다운로드 엔진은 `core._ENGINE_LOCK`(pip 중에만)과 `_DENO_LOCK`으로 보호한다.
   - 멈추기(✕)는 `editor.CANCEL`, `run_killable`, `cancel_export`로 처리한다.
 - **파일 저장 안전**:
-  - 저장 순서: 임시 파일에 다 쓴다 → `os.replace`로 바꾼다. Windows 잠금에 대비해 재시도한다(`updater._replace`·`editor._replace_retry`).
+  - 저장 순서: 임시 파일에 다 쓴다 → `os.replace`로 바꾼다. Windows 잠금에 대비해 재시도한다 — 새 코드는 공통 도구 `updater.write_atomic`·`replace_retry`(보통 8초, 막 만든 큰 영상은 `SETTLE_SECS` 60초)를 쓴다(D-029). 끝내 못 옮긴 완성본·묶음은 지우지 않고 보이는 폴더로 남긴다.
   - 편집 프로젝트는 `rev` 판 번호로 다른 창의 덮어쓰기를 막고(409 conflict), 백업한다.
   - 깨진 파일은 지우지 않고 옆에 `.bad`로 남긴 뒤 최근 백업으로 복구한다.
   - 썸네일 문서는 `.bak`을 남긴다.
 - **외부 프로세스·미디어 정보**:
-  - 외부 프로세스는 `core.run()`으로 실행한다(Windows `CREATE_NO_WINDOW`).
+  - 외부 프로세스는 `core.run()`·`core.popen()`으로 실행한다(Windows `CREATE_NO_WINDOW` + 앱이 꺼지면 같이 꺼지는 Job Object `core.track` · 파이썬 자식은 UTF-8 출력 `updater.py_env`). 휴대폰으로 보기의 cloudflared(`--version` 확인·터널)도 같다 — 터널만의 Job Object 는 두지 않는다(D-034). 모든 작업(`start_job`)은 `core.keep_awake()` 안에서 돌아 PC 가 절전으로 들어가지 않는다.
   - ffprobe가 없으므로 미디어 정보는 `ffmpeg -i`의 stderr를 파싱해 얻는다(`editor.probe`, `bundle.probe`, `style._probe_duration`).
   - ffmpeg는 `core.ffmpeg()` 하나로만 찾는다.
-- **업데이트 흐름**: 받기 → `testzip` → `.update_staging`에 풀기 → 버전·sha256 확인 → 모든 `.py` 문법 확인과 새 `updater.py --selftest` → 바뀔 파일을 `.rollback/v<이전>`에 복사 → `os.replace`로 교체(재시도) → manifest에서 빠진 파일 삭제(`config.json`·`.venv`·작업 폴더는 제외) → `.update_pending` 기록 → (core) 요구사항이 바뀌었으면 pip(`.req_hash`) → 재시작. 다음 실행 때 실행기는 다음과 같이 처리한다.
+- **업데이트 흐름**: 받기 → `testzip` → `.update_staging`에 풀기 → 버전·sha256 확인 → 모든 `.py` 문법 확인과 새 `updater.py --selftest` → 바뀔 파일을 `.rollback/v<이전>`에 복사 → `os.replace`로 교체(재시도) → manifest에서 빠진 파일 삭제(`config.json`·`.venv`·작업 폴더는 제외) → `.update_pending` 기록 → (core) 요구사항이 바뀌었으면 pip(`.req_hash` · Windows 는 먼저 pip 23.3 이상으로) → 재시작. 켜진 앱이 쓰는 .pyd/.dll 때문에 pip 가 실패하면 되돌리지 않고 `.req_pending` 을 남긴다(D-032). 다음 실행 때 실행기는 다음과 같이 처리한다.
+  - 실행기끼리는 `.launch_lock` 으로 한 번에 하나다(겹친 실행은 앞 실행기가 끝낸 상태를 다시 읽음).
+  - `.req_pending` 이 있으면 앱을 불러오기 전에 pip 를 하고, 실패하면 되돌린다.
+  - 업데이트 다시 시작(`app.restart`)의 순서: 휴대폰으로 보기 끄기(터널·리스너·마지막 비콘 · 켜 둠 표시는 그대로) → 실행기 띄우기(`FUTSAL_RESTART`·이 프로세스 번호 `FUTSAL_OLD_PID`) → 끝내기. 실행기는 `.launch_lock` 안에서 `.req_pending` 설치 전에 그 번호의 프로세스가 끝나길 기다린다(최대 `OLD_APP_WAIT` 20초 · .pyd 를 놓은 뒤에 pip) → 새 앱이 포트를 잡은 뒤 원격을 이어서 켠다(D-034).
   - `import app, core, editor, thumb, style, qa`로 확인하고, 실패하면 되돌린 뒤 `.update_skip`에 기록한다.
   - 켜다가 멈추면 그 자리에서 되돌린다.
   - 창이 안 뜬 채로 1분이 지나서 두 번 더 켜면 되돌린다.

@@ -1,6 +1,7 @@
 """풋살사관학교 스튜디오 — 데스크톱 앱 (화면은 전용 창, 내부 통신은 127.0.0.1 전용)."""
-import base64
 import collections
+import errno
+import faulthandler
 import json
 import mimetypes
 import os
@@ -9,6 +10,8 @@ import subprocess
 import sys
 import threading
 import traceback
+import urllib.error
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,7 +32,9 @@ import source
 import strategy
 import style
 import thumb
+import updater
 import upload
+import winlink
 
 
 def _utf8_console():
@@ -45,6 +50,8 @@ def _utf8_console():
 _utf8_console()
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
+PORT_FALLBACK = range(PORT + 1, PORT + 35)  # 8765 를 다른 프로그램이 쓰거나 Windows(Hyper-V·WSL·Docker)가 예약해 두었으면
+APP_ID = "futsal-studio"  # /api/ping: 이 포트에서 듣는 게 이 앱인지 (다른 프로그램이면 창을 띄우라고 보내지 않음)
 LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0}
 DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
 LOCK = threading.Lock()
@@ -57,16 +64,17 @@ STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기", "학습�
 
 
 def log(msg):
+    msg = core.clean_text(str(msg))  # 반쪽 이모지가 섞이면 화면 응답(/api/state)·파일 기록이 오류로 멈춤 → '�'로
     with LOCK:
         LOG.append(msg)
     try:
         print(msg, flush=True)
     except Exception:  # 화면 출력이 안 돼도 작업·파일 기록은 계속
         pass
-    try:  # 콘솔 없이 실행되므로 파일에도 남김
-        with open(LOGFILE, "a", encoding="utf-8") as f:
+    try:  # 콘솔 없이 실행되므로 파일에도 남김 (기록이 실패해도 작업은 계속: 곁가지)
+        with open(LOGFILE, "a", encoding="utf-8", errors="replace") as f:
             f.write(time.strftime("%m-%d %H:%M:%S ") + msg + "\n")
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
@@ -82,7 +90,8 @@ def start_job(name, fn, by=None):
         core.set_progress()
         editor.CANCEL.clear()  # 예전 작업에서 누른 멈추기(✕)가 다음 작업에 남지 않게
         try:
-            JOB["result"] = fn()
+            with core.keep_awake():  # 켜 두고 자리를 비워도 Windows 가 절전으로 들어가 작업이 멈추지 않게 (모든 작업)
+                JOB["result"] = fn()
         except Exception as e:
             JOB["error"] = str(e)
             log(f"문제가 생겼어요 · {e}")
@@ -151,8 +160,10 @@ def open_folder(path):
 
 
 def restart():
-    """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후).
-    휴대폰으로 보기는 새 프로세스를 띄우기 전에 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로)."""
+    """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후). 순서 (D-034):
+    1. 휴대폰으로 보기를 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로 → 새 앱이 이어서 켬)
+    2. 실행기(updater --launch)를 띄움 — 이 프로세스 번호(FUTSAL_OLD_PID)를 넘겨, 뒤로 미룬 구성요소 설치(.req_pending)는
+       이 프로세스가 끝나 .pyd 를 놓은 뒤에 하게 (.launch_lock 안에서) → 3. 끝내기 (남은 자식은 Job Object 로 같이 꺼짐)."""
     log("다시 시작하는 중…")
     remote.SVC.shutdown()
     kw = {"cwd": str(core.APP_DIR)}
@@ -160,7 +171,7 @@ def restart():
         kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
     else:
         kw["start_new_session"] = True
-    kw["env"] = dict(os.environ, FUTSAL_RESTART="1")  # 새 프로세스는 '이미 실행 중' 확인을 건너뜀
+    kw["env"] = dict(os.environ, FUTSAL_RESTART="1", FUTSAL_OLD_PID=str(os.getpid()))  # 새 프로세스는 '이미 실행 중' 확인을 건너뜀
     args = ["--browser"] if "--browser" in sys.argv else []
     subprocess.Popen([_gui_python(), str(core.APP_DIR / "updater.py"), "--launch", *args], **kw)  # 새 버전이 열리는지 확인 후 실행
     _quit()
@@ -185,13 +196,15 @@ def _gui_python():
 # ---------- 안전한 업데이트 · 다운로드 엔진 자동 관리 ----------
 
 def _after_start():
-    """앱이 잘 켜진 뒤(포트 확보): 업데이트 표시 정리·결과 알림, 다운로드 엔진은 뒤에서 확인 (3일마다 최신으로)."""
+    """앱이 잘 켜진 뒤(포트 확보): 업데이트 표시 정리·결과 알림, 설정 파일 안내, 다운로드 엔진은 뒤에서 확인 (3일마다 최신으로)."""
     try:
-        import updater
         for msg in updater.finish(core.APP_DIR):
             log(msg)
     except Exception as e:
         log(f"업데이트 마무리 중 문제가 생겼어요 · {e}")
+    for note in core.CONFIG_NOTES:  # config.json 을 못 읽었거나 작업 폴더를 못 써서 기본값으로 켰음 → 기록 + 화면 알림 한 번
+        log(note)
+        updater._NOTICES.append({"text": note, "warn": True})
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=core.engine_autoupdate, args=(log,), daemon=True).start()
 
@@ -202,7 +215,6 @@ def _redirect_to_updater():
     if os.environ.pop("FUTSAL_VIA_UPDATER", None):
         return False
     try:
-        import updater
         p = updater._read_json(core.APP_DIR / updater.PENDING)
         if not isinstance(p, dict) or p.get("state") == "installed":
             return False
@@ -216,29 +228,9 @@ APP_NAME = "풋살사관학교 스튜디오"
 
 
 def ensure_shortcut():
-    """바탕화면·시작 메뉴(Windows) 또는 응용 프로그램(Mac)에 아이콘을 만든다. 이미 있으면 건너뜀."""
+    """Mac: 응용 프로그램에 앱을 만든다 (Windows 바로가기·작업 표시줄은 winlink.prepare)."""
     try:
-        if sys.platform == "win32":
-            def q(v):  # PowerShell '…' 안의 작은따옴표
-                return str(v).replace("'", "''")
-            ps = f"""
-$w = New-Object -ComObject WScript.Shell
-$dirs = @([Environment]::GetFolderPath('Desktop'), (Join-Path ([Environment]::GetFolderPath('Programs')) ''))
-$pin = Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'
-if (Test-Path -LiteralPath (Join-Path $pin '{APP_NAME}.lnk')) {{ $dirs += $pin }}  # 예전에 고정한 작업 표시줄 아이콘도 실행기를 거치게
-foreach ($dir in $dirs) {{
-  $p = Join-Path $dir '{APP_NAME}.lnk'
-  $s = $w.CreateShortcut($p)
-  $s.TargetPath = '{q(_gui_python())}'
-  $s.Arguments = '"{q(core.APP_DIR / "updater.py")}" --launch'
-  $s.WorkingDirectory = '{q(core.APP_DIR)}'
-  $s.IconLocation = '{q(core.APP_DIR / "icon.ico")}'
-  $s.Save()
-}}"""
-            enc = base64.b64encode(ps.encode("utf-16-le")).decode()
-            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
-                           capture_output=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             app = Path.home() / "Applications" / f"{APP_NAME}.app"
             macos = app / "Contents" / "MacOS"
             res = app / "Contents" / "Resources"
@@ -272,20 +264,31 @@ foreach ($dir in $dirs) {{
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 120  # 멈춘(일시 정지한) 영상 미리보기가 연결을 끝없이 붙잡아 그 파일이 잠긴 채로 남지 않게 (Windows: 열린 파일은 못 지움)
+
     def log_message(self, *a):
         pass
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
-        data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        if isinstance(body, bytes):
+            data = body
+        else:
+            try:
+                data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            except UnicodeEncodeError:  # 짝 없는 대리 문자가 든 파일 이름 등 → \uXXXX 로 (응답이 끊겨 화면이 멈추지 않게)
+                data = json.dumps(body, ensure_ascii=True).encode("ascii")
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except ConnectionError:  # 화면이 먼저 끊음 (Windows: ConnectionAbortedError 10053 도)
+            pass
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(n) or b"{}")
+        return core.clean_json(json.loads(self.rfile.read(n) or b"{}"))  # 반쪽 이모지('\ud83d')는 여기서 '�'로 (모든 POST)
 
     def _file(self, path, ctype):
         """영상은 구간 요청(Range)을 지원해야 미리보기에서 앞뒤로 이동 가능."""
@@ -315,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
                     left -= len(chunk)
-            except (BrokenPipeError, ConnectionResetError):
+            except (ConnectionError, TimeoutError):  # 앞뒤로 옮기면 화면이 연결을 끊음 (Windows 는 ConnectionAbortedError)
                 pass
 
     def _host_ok(self):
@@ -336,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
                     editor.video_path(n)
             except (KeyError, ValueError, FileNotFoundError):
                 return self._send(404, {"error": "not found"})
+        if u.path == "/api/ping":  # 두 번째로 켠 앱이 이 포트의 주인이 이 앱인지 확인 (app._ours · updater._app_running)
+            return self._send(200, {"app": APP_ID, "version": core.VERSION})
         if u.path == "/":
             return self._send(200, (core.APP_DIR / "ui.html").read_bytes(), "text/html; charset=utf-8")
         if u.path == "/thumb":
@@ -583,8 +588,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         if path == "/api/style/delete":
             f = (style.STYLES / f"{b['name']}.json").resolve()
-            if style.STYLES.resolve() in f.parents and f.exists():
-                f.unlink()
+            try:
+                if style.STYLES.resolve() in f.parents and f.exists():
+                    f.unlink()
+            except OSError as e:  # Windows: 백신·탐색기가 잡고 있음
+                log(f"스타일을 지우지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "스타일을 지우지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(200, {"ok": True})
         # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
         if path == "/api/style/tempo":
@@ -634,7 +643,8 @@ class Handler(BaseHTTPRequestHandler):
                 src = b["src"]
                 if src.startswith("/frame"):
                     qq = parse_qs(urlparse(src).query)
-                    sp = thumb.grab(qq["name"][0], float(qq["t"][0]))
+                    n = editor.video_path(qq["name"][0]).name  # GET /frame 과 같게: 보관함 안의 파일 이름만 (I-021)
+                    sp = thumb.grab(n, float(qq["t"][0]))
                 else:
                     sp = (thumb.ASSETS / Path(urlparse(src).path).name).resolve()
                 out = thumb.remove_bg(sp, b.get("kind", "hq"))
@@ -642,22 +652,30 @@ class Handler(BaseHTTPRequestHandler):
                 return {"cut": thumb.asset_url(out), "src": src}
             ok = start_job("누끼 따기", do_cut)
             return self._send(200 if ok else 409, _started(ok))
-        if path == "/api/thumb/upload":
-            ext = "png" if b["data"].startswith("data:image/png") else "jpg"
-            return self._send(200, {"url": thumb.asset_url(thumb.save_upload(b["data"], ext))})
-        if path == "/api/thumb/save":
-            thumb.save_docs(b["name"], b["docs"])
-            return self._send(200, {"ok": True})
-        if path == "/api/thumb/export":
-            out = thumb.export_image(b["name"], b["data"], b.get("fmt", "jpg"), b.get("label", "썸네일"))
+        if path in ("/api/thumb/upload", "/api/thumb/export"):  # Windows 잠금·디스크 가득이면 연결이 끊기지 않고 안내
+            try:
+                if path == "/api/thumb/upload":
+                    ext = "png" if b["data"].startswith("data:image/png") else "jpg"
+                    return self._send(200, {"ok": True, "url": thumb.asset_url(thumb.save_upload(b["data"], ext))})
+                out = thumb.export_image(b["name"], b["data"], b.get("fmt", "jpg"), b.get("label", "썸네일"))
+            except (OSError, ValueError) as e:
+                log(f"썸네일 그림을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": f"저장하지 못했어요. 잠시 뒤 다시 눌러 주세요 · {e}"})
             log(f"썸네일 저장 · {out.name}")
             return self._send(200, {"ok": True, "file": out.name})
+        if path == "/api/thumb/save":
+            try:
+                thumb.save_docs(b["name"], b["docs"])
+            except (OSError, ValueError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐
+                log(f"썸네일 디자인을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요 · 잠시 뒤 다시 저장할게요"})
+            return self._send(200, {"ok": True})
         if path == "/api/edit/save":
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
                 rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
             except editor.Conflict as e:
                 return self._send(409, {"ok": False, "conflict": True, "rev": e.rev, "error": str(e)})
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 return self._send(500, {"ok": False, "error": f"저장하지 못했어요 · {e}"})
             return self._send(200, {"ok": True, "rev": rev})
         if path == "/api/edit/oneline":  # 편집실 '자막 한 줄씩 나누기' (지금 글 그대로 나눔 · 저장은 편집실이 함)
@@ -753,6 +771,9 @@ class Handler(BaseHTTPRequestHandler):
                 q["name"] = f"{sname} 스타일 가편집" + ("" if q["format"] == "long" else " · " + q["name"]) if sname else q["name"]
             return self._send(200, {"sequences": seqs, "params": st["params"] if st else None})
         if path == "/api/focus":  # 이미 켜진 앱을 다시 실행하면 그 창을 앞으로
+            if _BROWSER:  # 전용 창 없이 브라우저로 쓰는 중 → 화면을 한 번 더 열어 줌 (새 프로세스는 그대로 끝남)
+                webbrowser.open(f"http://127.0.0.1:{PORT}/")
+                return self._send(200, {"ok": True})
             try:
                 import webview
                 for w in webview.windows:
@@ -1054,33 +1075,135 @@ class Handler(BaseHTTPRequestHandler):
         return {"restart": changed}
 
 
-def _bind():
-    # 업데이트 재시작 직후엔 이전 프로세스가 포트를 놓을 때까지 잠깐 기다림
-    for _ in range(40):
-        try:
-            return ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-        except OSError:
-            time.sleep(0.25)
+class _Server(ThreadingHTTPServer):
+    # Windows 의 SO_REUSEADDR 는 '다른 프로세스가 이미 듣고 있는 포트도 같이 잡기' → 앱이 두 개 떠서 작업·저장이 섞임
+    # (asyncio 도 Windows 에서는 끔). 업데이트 재시작은 이전 프로세스가 포트를 놓을 때까지 _bind 가 기다림.
+    allow_reuse_address = sys.platform != "win32"
+
+
+def _port_file():
+    return core.WORK / ".port"  # 8765 를 못 써서 다른 포트로 켰으면 그 번호 (두 번째 실행·실행기가 찾아옴)
+
+
+def _saved_port():
+    try:
+        p = int(_port_file().read_text(encoding="utf-8").strip())
+        return p if p in PORT_FALLBACK else None
+    except (OSError, ValueError):
+        return None
+
+
+def _save_port(p):
+    try:
+        if p == int(os.environ.get("FUTSAL_PORT") or 8765):
+            _port_file().unlink(missing_ok=True)
+        else:
+            updater.write_atomic(_port_file(), str(p))
+    except OSError:
+        pass
+
+
+def _reserved(e):
+    """Windows 가 막아 둔 포트 (Hyper-V·WSL·Docker 의 excludedportrange → WinError 10013) — 기다려도 안 풀림."""
+    return getattr(e, "winerror", None) == 10013 or e.errno == errno.EACCES
+
+
+def _bind(restart=False):
+    """서버 포트 잡기. 기본은 8765 (FUTSAL_PORT 로 바꾸면 그 포트만).
+    - 이 앱이 이미 듣고 있으면 None (부르는 쪽이 그 창을 앞으로) · 업데이트 재시작이면 이전 프로세스가 놓을 때까지 기다림
+    - 다른 프로그램이 쓰거나 Windows 가 예약한 포트면 8766~8799 중 빈 곳 (번호는 작업 폴더 .port 에 남김)"""
+    global PORT
+    fixed = bool(os.environ.get("FUTSAL_PORT"))
+    ports = [PORT] if fixed else list(dict.fromkeys([_saved_port() or PORT, PORT, *PORT_FALLBACK]))
+    end = time.monotonic() + (10 if restart or fixed else 0)
+    for p in ports:
+        while True:
+            try:
+                srv = _Server(("127.0.0.1", p), Handler)
+            except OSError as e:
+                if _reserved(e):
+                    break
+                if not restart and _ours(p):
+                    return None
+                if time.monotonic() < end:
+                    time.sleep(0.25)
+                    continue
+                break
+            PORT = p
+            _save_port(p)
+            return srv
     return None
 
 
 _WINDOW = []
+_BROWSER = []  # 전용 창 없이 브라우저로 쓰는 중 (--browser 또는 창을 못 열었을 때)
+_NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # PC 에 프록시를 설정해 둬도 127.0.0.1 은 바로
+
+
+def _ours(port, timeout=2):
+    """그 포트에서 듣는 게 이 앱인지 (GET /api/ping). 예전 버전(ping 없음)은 404 {"error": "not found"} 로 답함."""
+    try:
+        with _NOPROXY.open(f"http://127.0.0.1:{port}/api/ping", timeout=timeout) as r:
+            return json.loads(r.read() or b"{}").get("app") == APP_ID
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code == 404 and json.loads(e.read() or b"{}") == {"error": "not found"}
+        except ValueError:
+            return False
+    except (OSError, ValueError):
+        return False
+
+
+def _candidate_ports():
+    return list(dict.fromkeys([PORT] + ([] if os.environ.get("FUTSAL_PORT") else [_saved_port() or PORT])))
 
 
 def _focus_running():
     """이미 켜진 이 앱이 있으면 그 창을 앞으로 (새 창·브라우저를 또 열지 않음 → 같은 편집본을 두 곳에서 고치지 않게)."""
-    import urllib.request
+    for p in _candidate_ports():
+        if not _ours(p):
+            continue
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{p}/api/focus", data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with _NOPROXY.open(req, timeout=2) as r:
+                if json.loads(r.read() or b"{}").get("ok") is True:
+                    return True
+        except (OSError, ValueError):
+            pass
+    return False
+
+
+def _running_url():
+    """이미 켜진 이 앱의 주소 (못 찾으면 기본 주소)."""
+    for p in _candidate_ports():
+        if _ours(p, 1):
+            return f"http://127.0.0.1:{p}/"
+    return f"http://127.0.0.1:{PORT}/"
+
+
+def _confirm_close(win):
+    """작업 중에 창을 닫으려 하면 한 번 묻기 (닫으면 그 작업은 멈춤). 닫아도 되면 True."""
+    name = JOB["name"]
+    if not name:
+        return True
+    msg = f"지금 '{name}' 중이에요. 창을 닫으면 이 작업이 멈춰요.\n그래도 닫을까요?"
+    done, ans = threading.Event(), {}
+
+    def got(r):
+        ans["r"] = r
+        done.set()
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/focus", data=b"{}", method="POST",
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=2) as r:
-            return json.loads(r.read() or b"{}").get("ok") is True
-    except Exception:
-        return False
+        win.evaluate_js(f"confirm({json.dumps(msg, ensure_ascii=False)})", callback=got)
+    except Exception:  # noqa: BLE001 — 물어볼 수 없으면 예전처럼 닫음
+        return True
+    if not done.wait(600):
+        return False  # 대답이 없으면 닫지 않음 (다시 닫기를 누르면 또 물음)
+    return ans.get("r") is not False
 
 
 def _on_closing(win):
-    """창을 닫을 때: 편집실에 저장 안 된 것이 있으면 먼저 저장하고 닫음."""
+    """창을 닫을 때: 작업 중이면 한 번 묻고, 편집실에 저장 안 된 것이 있으면 먼저 저장하고 닫음."""
     state = {"go": False}
 
     def handler():
@@ -1089,6 +1212,9 @@ def _on_closing(win):
         state["go"] = True
 
         def flush():
+            if not _confirm_close(win):
+                state["go"] = False
+                return
             done = threading.Event()
             try:
                 win.evaluate_js("Promise.resolve(window.flushBeforeClose ? window.flushBeforeClose() : true)", callback=lambda r: done.set())
@@ -1107,20 +1233,95 @@ def _on_closing(win):
     return handler
 
 
+class _StampedErr:
+    """pythonw 의 오류 출력: 줄마다 시각을 붙여 studio-error.log 에 (traceback·스레드 오류·서버 요청 오류)."""
+
+    def __init__(self, f):
+        self.f, self.bol = f, True
+
+    def write(self, s):
+        s = str(s)
+        out = []
+        for line in s.splitlines(True):
+            if self.bol:
+                out.append(time.strftime("%m-%d %H:%M:%S "))
+            out.append(line)
+            self.bol = line.endswith("\n")
+        try:
+            self.f.write("".join(out))
+            self.f.flush()
+        except (OSError, ValueError):
+            pass
+        return len(s)
+
+    def flush(self):
+        try:
+            self.f.flush()
+        except (OSError, ValueError):
+            pass
+
+    def fileno(self):
+        return self.f.fileno()
+
+
+ERROR_LOG_MAX = 1_000_000  # 이보다 커지면 .old 로 하나만 남기고 새로
+
+
+def _error_log():
+    """pythonw(콘솔 없음)로 켜지면 traceback·스레드 오류·서버 요청 오류가 모두 사라짐 (sys.stderr 가 None, 실행기가 다시 띄우면 NUL)
+    → 작업 폴더의 studio-error.log 로. studio.log 에는 화면 문구만 남아 Windows 에서만 생기는 오류의 위치를 알 수 없었음."""
+    if sys.stderr is not None and Path(sys.executable).name.lower() != "pythonw.exe":
+        return None
+    p = core.WORK / "studio-error.log"
+    try:
+        if p.exists() and p.stat().st_size > ERROR_LOG_MAX:
+            os.replace(p, p.with_name("studio-error.old.log"))
+        f = open(p, "a", encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    sys.stderr = _StampedErr(f)
+    try:
+        faulthandler.enable(file=f)  # WebView2·onnxruntime 같은 바깥 코드가 죽을 때도 위치를 남김
+    except (RuntimeError, ValueError, OSError):
+        pass
+    return p
+
+
+def _start_webview(webview):
+    """창 띄우기: 설정(localStorage: 보관함 필터·최근 색·타임라인 높이 등)이 다음에도 남게 비공개 모드를 끔 (pywebview 5+ 기본은
+    비공개 → 켤 때마다 지워짐). 저장 위치는 앱 전용 폴더. 예전 pywebview 는 그 인자를 몰라 그대로."""
+    try:
+        webview.start(private_mode=False, storage_path=str(core.ENGINE_HOME / "webview"))
+    except TypeError:
+        webview.start()
+
+
 def main():
-    url = f"http://127.0.0.1:{PORT}/"
+    _error_log()
     if _redirect_to_updater():  # 끊긴 업데이트는 실행기가 먼저 되돌림
         return
-    if not os.environ.pop("FUTSAL_RESTART", None) and _focus_running():
+    restart = bool(os.environ.pop("FUTSAL_RESTART", None))
+    if not restart and _focus_running():
         return
-    srv = _bind()
-    if srv is None:  # 이미 실행 중 → 그 창을 앞으로 (안 되면 그 화면만 띄워줌)
-        if not _focus_running():
-            webbrowser.open(url)
+    srv = _bind(restart)
+    if srv is None:  # 이미 실행 중 → 그 창을 앞으로 (막 켜지는 중이면 잠깐 기다림 · 안 되면 그 화면만 띄워줌)
+        for _ in range(16):
+            if _focus_running():
+                return
+            time.sleep(0.5)
+        if any(_ours(p, 1) for p in _candidate_ports()):
+            webbrowser.open(_running_url())
+        else:
+            _no_port()
         return
+    url = f"http://127.0.0.1:{PORT}/"
     log(f"{APP_NAME} v{core.VERSION} 시작")
     log(f"작업 폴더 · {core.WORK}")
+    if PORT != int(os.environ.get("FUTSAL_PORT") or 8765):
+        log(f"  8765 포트를 다른 프로그램이 쓰고 있어서 {PORT} 포트로 켰어요")
     _after_start()
+    if "--browser" in sys.argv:
+        _BROWSER.append(True)  # 서버가 답하기 전에 정해 둠 (그사이 또 켠 실행이 /api/focus 를 물어도 화면을 다시 열게)
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
@@ -1129,7 +1330,9 @@ def main():
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         log(f"휴대폰으로 보기를 준비하지 못했어요 · {e}")
-    if sys.platform in ("win32", "darwin"):
+    if sys.platform == "win32":
+        winlink.prepare(core.APP_DIR, _gui_python(), core.ENGINE_HOME, log)  # 아이콘·작업 표시줄 묶음 (창을 만들기 전에)
+    elif sys.platform == "darwin":
         threading.Thread(target=ensure_shortcut, daemon=True).start()
     if "--browser" not in sys.argv:
         try:
@@ -1140,13 +1343,23 @@ def main():
                 win.events.closing += _on_closing(win)
             except Exception:
                 pass
-            webview.start()
+            _start_webview(webview)
             _quit()  # 창을 닫으면 종료
         except Exception as e:
+            _WINDOW.clear()
             log(f"앱 창을 열지 못해 브라우저로 엽니다 · {e}")
+        _BROWSER.append(True)
     webbrowser.open(url)
     while True:
         time.sleep(3600)
+
+
+def _no_port():
+    """쓸 수 있는 포트가 하나도 없음: 예전에는 아무 말 없이 빈 브라우저 창만 떴음 → 기록 + 알림 창."""
+    msg = (f"프로그램을 켜지 못했어요. 이 PC의 다른 프로그램이 {PORT}~{PORT_FALLBACK[-1]} 포트를 모두 쓰고 있어요. "
+           "PC를 다시 시작한 뒤 켜 보세요. 계속되면 작업 폴더의 studio.log 를 관리자에게 보내 주세요.")
+    log(msg)
+    updater._alert(msg)
 
 
 if __name__ == "__main__":

@@ -497,7 +497,7 @@ def remember_hints(hints):
 
 def _find_file(vid):
     for p in sorted(core.VIDEOS.glob(f"*_{vid}_*")):
-        if p.suffix.lower() in core.VIDEO_EXTS and video_id(p.name) == vid:
+        if core.is_video_file(p.name) and video_id(p.name) == vid:  # 받다 남은 .f137.mp4 가 진짜 영상보다 앞에 정렬됨
             return p.name
     return None
 
@@ -617,7 +617,7 @@ def _lookup(vid):
 
 def _library():
     try:
-        return [p.name for p in sorted(core.VIDEOS.iterdir()) if p.suffix.lower() in core.VIDEO_EXTS]
+        return [p.name for p in sorted(core.VIDEOS.iterdir()) if core.is_video_file(p.name)]
     except OSError:
         return []
 

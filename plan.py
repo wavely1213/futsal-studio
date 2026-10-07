@@ -434,7 +434,7 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
 
     def frames():
         for cmd in parts:
-            state["p"] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+            state["p"] = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
             try:
                 while True:
                     b = state["p"].stdout.read(n)
@@ -541,7 +541,7 @@ def _audio16(path):
     """16kHz 흑백 소리(int16 numpy) — 없으면 빈 배열."""
     np = _np()
     cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+    p = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     chunks = []
     try:
         while True:

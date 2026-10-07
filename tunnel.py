@@ -5,7 +5,8 @@
   - 실행: 계정 없는 빠른 터널(https://<네 낱말>.trycloudflare.com) → 원격 리스너(127.0.0.1:<포트>)만 가리킴.
     Host 는 remote.futsal.invalid 로 바꿔 보냄 · 자동 업데이트·진단 끔 · 기록 단계 info (debug 는 요청 헤더까지 찍으므로 쓰지 않음).
   - 지킴이: 'Registered tunnel connection' 이 나와야 켜짐 · 40초 안에 안 되면 http2 로 다시 · 갑자기 꺼지면 5초·15초·1분·5분 뒤 다시
-    (한 시간에 6번까지) · Windows 는 Job Object 로 앱이 꺼지면 같이 꺼지게.
+    (한 시간에 6번까지) · 실행은 core.popen·core.run 으로만 → 앱의 Job Object 하나(core.track)에 들어가 앱이 꺼지면 같이 꺼짐
+    (터널만의 Job Object 는 따로 두지 않음 · D-034).
   - cloudflared 출력 줄에는 터널 주소가 들어 있으므로 기록(studio.log)에 남기지 않는다.
 """
 import collections
@@ -67,8 +68,7 @@ def bin_path():
 def _version(exe):
     """→ "ok" · "other"(돌았지만 고정 판이 아님) · 실행하지 못한 까닭(OSError·시간 초과) — 백신이 막으면 여기서 OSError."""
     try:
-        r = subprocess.run([str(exe), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=20, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
+        r = core.run([str(exe), "--version"], timeout=20, stdin=subprocess.DEVNULL)  # 검은 창 없음 · 앱이 꺼지면 같이 꺼짐
     except (OSError, subprocess.SubprocessError) as e:
         return e
     return "ok" if CF_VERSION in (r.stdout or "") + (r.stderr or "") else "other"
@@ -161,7 +161,7 @@ def config_file():
             return f
     except OSError:
         pass
-    f.write_text(want, encoding="utf-8")
+    updater.write_atomic(f, want)  # 쓰다 꺼져도 빈 설정 파일이 남지 않게
     return f
 
 
@@ -172,60 +172,6 @@ def command(exe, port, http2=False):
     if http2:
         cmd += ["--protocol", "http2"]
     return cmd
-
-
-# ---------- Windows: 앱이 꺼지면 cloudflared 도 꺼지게 (Job Object) ----------
-
-_JOB = None
-
-
-def _job():
-    """JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 인 Job Object 하나 (앱이 갑자기 꺼져도 핸들이 닫히며 자식이 같이 꺼짐)."""
-    global _JOB
-    if _JOB is not None or not WIN:
-        return _JOB
-    from ctypes import wintypes
-
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(n, ctypes.c_ulonglong) for n in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-                                                      "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
-
-    class BASIC(ctypes.Structure):
-        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64), ("LimitFlags", ctypes.c_uint32),
-                    ("MinimumWorkingSetSize", ctypes.c_size_t), ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
-                    ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32), ("SchedulingClass", ctypes.c_uint32)]
-
-    class EXTENDED(ctypes.Structure):
-        _fields_ = [("BasicLimitInformation", BASIC), ("IoInfo", IO_COUNTERS), ("ProcessMemoryLimit", ctypes.c_size_t),
-                    ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
-    try:
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateJobObjectW.restype = wintypes.HANDLE
-        k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
-        k32.SetInformationJobObject.restype = wintypes.BOOL
-        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-        k32.AssignProcessToJobObject.restype = wintypes.BOOL
-        h = k32.CreateJobObjectW(None, None)
-        if not h:
-            return None
-        info = EXTENDED()
-        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        if not k32.SetInformationJobObject(h, 9, ctypes.byref(info), ctypes.sizeof(info)):  # JobObjectExtendedLimitInformation
-            return None
-        _JOB = (k32, h)
-    except (OSError, AttributeError):
-        _JOB = None
-    return _JOB
-
-
-def _assign(proc):
-    j = _job()
-    if j:
-        try:
-            j[0].AssignProcessToJobObject(j[1], int(proc._handle))
-        except (OSError, AttributeError):
-            pass
 
 
 # ---------- 남은 프로세스 정리 (pid 파일 · 우리 실행 파일일 때만) ----------
@@ -341,12 +287,12 @@ class Tunnel:
 
     def _launch(self, http2):
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith("TUNNEL_")}  # 환경 변수로 debug·토큰이 끼어들지 않게
-        p = subprocess.Popen(command(self.exe, self.port, http2), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL, env=env, **core.NO_WINDOW)
-        _assign(p)
+        # core.popen: 검은 창 없음 + 앱의 Job Object(core.track · KILL_ON_JOB_CLOSE) → 앱이 갑자기 꺼져도 같이 꺼짐 (Windows)
+        p = core.popen(command(self.exe, self.port, http2), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       stdin=subprocess.DEVNULL, env=env)
         self.launches += 1
-        try:
-            _pidfile().write_text(json.dumps({"pid": p.pid, "exe": str(self.exe)}), encoding="utf-8")
+        try:  # Job Object 를 못 만든 PC 에서 남은 것을 다음에 정리하려고 (kill_stale)
+            updater.write_atomic(_pidfile(), json.dumps({"pid": p.pid, "exe": str(self.exe)}))
         except OSError:
             pass
         st = {"url": None, "registered": threading.Event(), "url_ev": threading.Event()}

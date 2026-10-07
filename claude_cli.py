@@ -63,8 +63,13 @@ def find_exe():
     if env:
         return env if Path(env).is_file() else None
     w = shutil.which("claude")
-    if w:
-        return w
+    if w and (not WIN or Path(w).suffix.upper() in _pathext()):
+        return w  # Python 3.12.0 의 which 는 npm 폴더의 확장자 없는 'claude'(sh 스크립트, 실행 불가)를 먼저 돌려줌 → 건너뜀
+    if WIN:
+        for ext in (".exe", ".cmd"):
+            w = shutil.which("claude" + ext)
+            if w:
+                return w
     home = Path.home()
     cands = [home / ".local" / "bin" / ("claude.exe" if WIN else "claude")]
     if WIN and os.environ.get("APPDATA"):
@@ -75,6 +80,10 @@ def find_exe():
     return None
 
 
+def _pathext():
+    return {e.strip().upper() for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e.strip()}
+
+
 def _is_cmd(exe):
     return str(exe).lower().endswith((".cmd", ".bat"))
 
@@ -82,6 +91,15 @@ def _is_cmd(exe):
 def _base(exe):
     """npm 의 claude.cmd 는 cmd.exe 를 거쳐 실행."""
     return [os.environ.get("COMSPEC") or "cmd.exe", "/c", str(exe)] if _is_cmd(exe) else [str(exe)]
+
+
+def _track(p):
+    """앱이 꺼지면(창 닫기·재시작) 클로드도 같이 꺼지게 (core.track · Windows Job Object). core 가 없으면 그대로."""
+    try:
+        import core
+        core.track(p)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _flags(hidden=True):
@@ -344,6 +362,7 @@ def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None):
                                  env=child_env(), **_flags())
         except OSError:
             raise ClaudeError("missing", MSG["missing"]) from None
+        _track(p)
         res = {}
 
         def feed():

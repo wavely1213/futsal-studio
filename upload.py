@@ -483,7 +483,7 @@ def _images_of(name):
     """썸네일 편집기가 이 영상 이름으로 저장한 이미지들 (이름이 더 긴 다른 영상의 것은 빼고 · 최근 것부터)."""
     pre = core.adir(name).name + "_"
     try:
-        longer = {core.adir(v.name).name + "_" for v in core.VIDEOS.iterdir() if v.suffix.lower() in core.VIDEO_EXTS}
+        longer = {core.adir(v.name).name + "_" for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)}
         files = [p for p in core.OUT.iterdir() if p.is_file() and p.suffix.lower() in IMG_EXTS and p.name.startswith(pre)]
     except OSError:
         return []

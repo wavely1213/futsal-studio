@@ -38,10 +38,16 @@ const saveBody = () => JSON.stringify({ name: NAME, docs: DOCS }, dropPriv);  //
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
 function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
 async function saveNow() {
-  clearTimeout(saveTimer); saveTimer = null; if (!D) return; const g = saveGen;
-  await postRaw("/api/thumb/save", saveBody());
+  clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
+  let r = null;
+  try { r = await postRaw("/api/thumb/save", saveBody()); } catch (e) {}
+  if (!r || r.ok === false) {  // 저장 실패(Windows: 백신·OneDrive 가 잠깐 잡음 등) → 알리고 잠시 뒤 다시 (예전: '저장 중…'에 멈춤)
+    if (g === saveGen) { $("saved").textContent = "저장 실패 · 잠시 뒤 다시 저장할게요"; saveTimer = setTimeout(saveNow, 3000); }
+    return false;
+  }
   if (g === saveGen) $("saved").textContent = "저장됨";  // 저장하는 사이 또 바뀌었으면 '저장 중' 유지
   renderDesigns();
+  return true;
 }
 // 창을 닫거나 숨길 때 남은 변경을 바로 보냄 (keepalive)
 function flushSave() { if (!D || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: saveBody() }); } catch (e) {} }

@@ -129,7 +129,8 @@ function pasteLayers(inPlace) {
 async function addImageFile(f) {
   if (!f || !f.type.startsWith("image/")) return;
   const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
-  const j = await post("/api/thumb/upload", { data });
+  const j = await post("/api/thumb/upload", { data }).catch(() => ({}));
+  if (!j.url) return toast(j.error || "그림을 넣지 못했어요. 잠시 뒤 다시 해 주세요");
   const im = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = j.url; });
   const ar = im ? im.naturalWidth / im.naturalHeight : 16 / 9; let w = Math.min(W * 0.7, im ? im.naturalWidth : 640), h = w / ar;
   if (h > H * 0.85) { h = H * 0.85; w = h * ar; }
