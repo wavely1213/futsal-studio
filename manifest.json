@@ -1,17 +1,17 @@
 {
-  "version": "1.8.0",
-  "notes": "편집실 검수 87건 반영, 안전한 업데이트(실패하면 자동 되돌림), 촬영본 여러 개 한 영상으로 묶기, 7 올리기(제목·설명·챕터·태그), 썸네일 장면 고르기에 표정 점수, 다운로드 엔진 자동 관리",
-  "zip": "https://github.com/wavely1213/futsal-studio/archive/3d56a1a32f4c8aa076a272bdccac94ab2ef6afc2.zip",
-  "commit": "3d56a1a32f4c8aa076a272bdccac94ab2ef6afc2",
+  "version": "1.8.2",
+  "notes": "편집실 검수 재확인 20건: B롤 영상·소리 싱크(속도·Q/W·정지 화면·트랙 이동), 거꾸로 재생 소리 미리보기, 고른 키프레임 지우기, 잠긴 트랙, 창 닫을 때 마지막 편집 보존, 그래픽카드 오류 구분, 사진 흐린 배경·켄 번스 속도와 부드러움, 내보내기 검수 기준 유지",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/50eb0823b5828edbc602d8cab808122127dc3bee.zip",
+  "commit": "50eb0823b5828edbc602d8cab808122127dc3bee",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "README.md": "122beeb1c933a5a2b0098821803148e56662ebac61bb84f39647f5f1a0e87186",
-    "app.py": "d3f2a94ca4a63de3c186b06cc3d000444dec8ba97a889e0680f8977073d0851e",
+    "app.py": "d380cb335d61eb99185a3ca73fb3246fd0fc961fd6a02e9330e603ba2b2146f4",
     "bundle.py": "9c3413bc29bea1a59fa03e376c5bb9943f110d14f5aac60341f6d5ce49380561",
     "config.json": "0391d3d12caafc330e497def79d72f09d40479d15d9d387913a2297c72614f62",
     "core.py": "800ebbbe70e0f51288a485c0cfca975c9956c3ad189f84021771a04eb5a46211",
-    "editor.html": "e69e95b27f58257b362d3e5fc832ef6848287621821e8362f7a970c5eae81529",
-    "editor.py": "81744f10ca5410e170a77ccd6b667df9fed342f2e1301aec868d2beb13665f83",
+    "editor.html": "5726e1a2f2efd55f5655de3a8f82e977ac8b2a4678a24074ce2e49f1adde2d47",
+    "editor.py": "9037a5a37aa23639e1d49fcd472ad601dc69deb698a3a8be17e2e132485586d0",
     "face.py": "be0c8acb3ad30dfe611c6fdae662376ccbe4e042bd791d063a47b187dc5c3213",
     "fonts/BlackHanSans-Regular.ttf": "31960809284026681774a8e52dc19ebcad26cf69b0ad9d560f288296fbb52739",
     "fonts/DoHyeon-Regular.ttf": "35644be7f28e0a68a447b1f7af351dcde5674b870f24f7b5f43e26d00b4ab653",
@@ -32,7 +32,7 @@
     "ui.html": "3a2dcfb690640bf3fa4eb3000091eb90595316c17454548e55554ec077b2078b",
     "updater.py": "91cd71f2c5d4c7b2a5b00c1e170e399a9400b39c11d5d017e9843fd57478f8d6",
     "upload.py": "b529d1df4c390191b67946963d77418398a8a044a6d5b724da89f422ba9b4aff",
-    "version.txt": "3eb1ef94b5890ca727158b106142685c8733b0ace5bcb4cf3f0ac14f9f0643f4",
+    "version.txt": "e7066ea517cbc9e563967997e5cf2e3a899250403dac6fbaa25bb6b1815d16ca",
     "시작하기 (Mac).command": "5c70dc2c35bb2573975376d5b019cf92916e6b4b601314a5dbae5caa2cabc63f",
     "시작하기 (Windows).bat": "97bb90805f430f0d45ded9bc78bb98aab2a1aee9c5e04dfaf011d9d86ebd92fa"
   }
