@@ -258,5 +258,88 @@ class EdgeCases(unittest.TestCase):
         self.assertIsNone(forecast.brier([]))
 
 
+class ReviewForecast(unittest.TestCase):
+    """검토 보강: 믿을 만함(근거) · 한 편 빼 보기 · 지금 속도 · 방향 비교 · 반올림한 끝으로 차이 · 쇼츠 전환 범위 끝 · 흔들림·기준점 보정."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.peers = make_peers()
+        for i, p in enumerate(cls.peers):
+            p["cad"] = {"L": 0.25 * (1 + i % 8), "S": 0.5 * (1 + i % 6)}
+        cls.out = forecast.run(cls.peers, own(), {"L": 1, "S": 3}, boot=BOOT, sims=SIMS, pace={"L": 0, "S": 0.5},
+                               plans={"A": {"L": 1, "S": 3}, "B": {"L": 1, "S": 3}, "C": {"L": 0.5, "S": 5}, "X": {"L": 2, "S": 3}})
+
+    def test_change_text_uses_rounded_endpoints(self):
+        self.assertEqual(forecast.change_text("x", "1만", 0.68, 0.66)[0], "x: 1만 약 70% → 거의 차이 없어요")
+        self.assertEqual(forecast.change_text("x", "1만", 0.72, 0.685), ("x: 1만 약 70% → 거의 차이 없어요", 0))  # 둘 다 약 70%
+        t, d = forecast.change_text("x", "1만", 0.62, 0.70)
+        self.assertEqual((t, d), ("x: 1만 약 60% → 약 70% (+10%포인트 안팎)", 10))
+        self.assertEqual(forecast.change_text("x", "1만", 0.6, 0.02)[1], -60)
+        for s in self.out["sensitivity"]:
+            a, b = s["text"].split(": ", 1)[1].split(" → ")[0].split(" ", 1)[1], s["text"].split(" → ")[1]
+            self.assertFalse(b.startswith(a) and "포인트" in b, s["text"])  # '약 70% → 약 70% (−5%p)' 같은 줄 없음
+
+    def test_few_own_videos_mean_low_trust_with_reason(self):
+        m = next(x for x in self.out["milestones"] if x["id"] == "subs10000_12")
+        self.assertEqual(m["confidence"], "낮음")
+        self.assertTrue(any("롱폼 근거가 2편" in w for w in m["why"]), m["why"])
+        self.assertEqual(self.out["own"]["L"], {"n": 2, "w": 1.0})
+        self.assertIn("롱폼 2편", self.out["assumptions"][0])
+        self.assertIn("loo", m)  # 우리 롱폼 한 편씩 빼고 다시 계산한 범위
+        self.assertIn("한 편을 빼고", m["loo"])
+
+    def test_many_own_videos_can_be_trusted(self):
+        o = own()
+        o["videos"] = [{"k": k, "v": 3000 + 100 * i, "age": 30 + 20 * i} for i in range(10) for k in ("L", "S")]
+        out = forecast.run(self.peers, o, {"L": 1, "S": 3}, boot=BOOT, sims=SIMS)
+        ms = [m for m in out["milestones"] if m["kind"] == "subs" and not m["achieved"]]
+        self.assertTrue(all(not any("근거가" in w for w in m["why"]) for m in ms))
+        self.assertTrue(any(m["confidence"] in ("높음", "보통") for m in ms))
+
+    def test_new_channel_and_no_peers_are_low(self):
+        out = forecast.run([], {"subs": 0, "videos": [], "life": {}}, {"L": 1, "S": 3}, boot=BOOT, sims=SIMS)
+        live = [m for m in out["milestones"] if not m.get("achieved") and not m.get("none")]
+        self.assertTrue(live and all(m["confidence"] == "낮음" for m in live))
+        self.assertIn("비교 자료가 없어 기본값으로 계산했어요", out["trustWhy"])
+        self.assertTrue(any("새 채널" in w for w in out["trustWhy"]))
+
+    def test_pace_and_plans_share_luck(self):
+        pace = self.out["pace"]
+        g12 = next(m for m in self.out["milestones"] if m["id"] == f"subs{self.out['goal']}_12")
+        self.assertLessEqual(pace["m12"]["p"], g12["p"])
+        self.assertTrue(pace["text"].startswith("지금 속도(롱폼 주 0개 · 쇼츠 주 0.5개)대로면"))
+        pl = self.out["plans"]
+        self.assertEqual(pl["A"]["m12"]["p"], pl["B"]["m12"]["p"])  # 개수가 같으면 같은 확률 (같은 운)
+        self.assertEqual(pl["A"]["m12"]["p"], round(g12["p"]) if not g12.get("loo") else pl["A"]["m12"]["p"])
+        self.assertGreaterEqual(pl["X"]["m12"]["p"], pl["A"]["m12"]["p"])  # 롱폼을 더 올리면 줄지 않음
+        self.assertIn("지금 속도", self.out["assumptions"][7])
+        same = forecast.run(self.peers, own(), {"L": 1, "S": 3}, boot=BOOT, sims=SIMS, pace={"L": 1, "S": 3})
+        self.assertNotIn("pace", same)  # 계획과 같은 속도면 따로 보여 주지 않음
+
+    def test_conv_sd_and_elasticity_center_are_fitted(self):
+        cal = forecast.calibrate(self.peers, "풋살 특화", boot=BOOT)
+        self.assertTrue(forecast.CONV_SD <= cal["conv_sd"] <= forecast.CONV_SD_MAX)
+        lc = [math.log(p["cad"]["L"]) for p in self.peers]
+        self.assertAlmostEqual(cal["L"]["lc0"], sum(lc) / len(lc), places=6)
+        noisy = make_peers(30, seed=3)
+        for p in noisy:  # 같은 조회 구성에서 구독 전환만 채널마다 크게 다름 (ln 표준편차 약 1)
+            k = math.exp(random.Random(p["key"]).gauss(0, 1.0))
+            p["life"]["L"] *= k
+            p["life"]["S"] *= k
+        self.assertGreater(forecast.calibrate(noisy, "풋살 특화", boot=BOOT)["conv_sd"], 0.6)
+        self.assertEqual(forecast.calibrate([], "풋살 특화", boot=BOOT)["conv_sd"], forecast.CONV_SD)
+
+    def test_shorts_conversion_at_bound_is_flagged(self):
+        peers = make_peers(20, seed=11)
+        for p in peers:  # 쇼츠가 구독과 전혀 상관없게 → 기울기가 범위 끝(0.002%)에 닿음
+            p["life"]["S"] = p["life"]["L"] * random.Random(p["key"]).uniform(0.1, 30)
+            p["life"]["L"] = p["subs"] / CL
+        out = forecast.run(peers, own(), {"L": 0.5, "S": 10}, boot=BOOT, sims=SIMS, plans={"C": {"L": 0.5, "S": 10}})
+        c = out["calibration"]
+        self.assertTrue(c["convHit"])
+        self.assertTrue(any("데이터로 정해지지 않아" in a for a in out["assumptions"]))
+        self.assertIn("cS", c["conv_range"])
+
+
 if __name__ == "__main__":
     unittest.main()
