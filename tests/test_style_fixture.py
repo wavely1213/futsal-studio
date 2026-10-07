@@ -517,7 +517,7 @@ class TestScoreFixes(StyleFixtureBase):
         code, j = call("/api/style/score", {"style": "오류 스타일", "name": bad})
         self.assertEqual((code, j["error"]), (400, "받아쓰기 파일을 읽지 못했어요. 편집점 찾기를 다시 해 주세요"))
         with mock.patch.object(style, "score_video", side_effect=RuntimeError("Expecting value: line 1 column 1 (char 0)")), \
-                mock.patch.object(app.traceback, "print_exc"), mock.patch.object(app, "log") as lg:
+                mock.patch.object(app.studiolog, "trace"), mock.patch.object(app, "log") as lg:
             code, j = call("/api/style/score", {"style": "오류 스타일", "name": MAIN})
         self.assertIn("Expecting value", lg.call_args[0][0], "자세한 내용은 작업 기록에")
         self.assertEqual(code, 500)

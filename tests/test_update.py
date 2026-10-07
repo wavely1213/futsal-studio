@@ -886,7 +886,7 @@ class EngineTests(Base):
         self.assertEqual(failed, ["abcdefghijk"])
         self.assertEqual(len(self.engine_pips()), 1)
         self.assertEqual(len(yt.calls), 2)
-        self.assertTrue(any("크롬 로그인 정보로 받기" in m for m in self.logs), self.logs)
+        self.assertTrue(any("로그인해 둔 브라우저를 골라" in m for m in self.logs), self.logs)  # 브라우저 고르기 (크롬만이 아님 · 쉬운 안내)
 
     def test_many_videos_upgrade_only_once(self):
         yt = fake_ytdlp(["HTTP Error 403: Forbidden", None, "HTTP Error 403: Forbidden"])
@@ -917,7 +917,7 @@ class EngineTests(Base):
         with mock.patch.object(self.core, "_yt", return_value=yt):
             with self.assertRaises(RuntimeError) as cm:
                 self.core.list_videos("videos", None, "@채널", self.logs.append)
-        self.assertIn("크롬 로그인 정보로 받기", str(cm.exception))
+        self.assertIn("'로그인 정보로 받기'에서 고른 뒤", str(cm.exception))
         self.assertEqual(len(self.engine_pips()), 1)
 
     def test_startup_upgrade_every_3_days(self):

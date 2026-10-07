@@ -516,7 +516,7 @@ class DownloadTests(Base):
         up.assert_called_once()  # 엔진을 한 번 최신으로 바꿔 다시 해 봄
         self.assertEqual(res["failed"], ["blkvid00001"])
         self.assertEqual([source.video_id(n) for n in res["got"]], ["blkvid00002"])
-        self.assertTrue(any(core.BLOCKED_MSG in m for m in msgs), "쉬운 안내 문구")
+        self.assertTrue(any(refs.BLOCKED_MSG in m for m in msgs), "쉬운 안내 문구 · 이 화면(채널 추가)의 설정을 가리킴")
         self.assertNotIn("cookiesfrombrowser", FakeYDL.seen[0], "쿠키는 사용자가 고를 때만")
 
     def test_cookies_only_when_picked(self):

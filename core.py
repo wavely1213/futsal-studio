@@ -282,9 +282,11 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
-def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None):
+def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None,
+             why=None, blocked_msg=None):
     """영상 받기 → 받지 못한 영상 id 목록. 기본은 편집용 보관함(VIDEOS · archive.txt · 출처는 sources.json).
-    학습용 영상(refs)은 dest(받는 폴더)·archive(False 면 쓰지 않음)·label(진행 표시)·remember(받은 영상 정보 [dict] 를 받는 함수)를 바꿔 씀."""
+    학습용 영상(refs)은 dest(받는 폴더)·archive(False 면 쓰지 않음)·label(진행 표시)·remember(받은 영상 정보 [dict] 를 받는 함수)를 바꿔 씀.
+    why(dict 를 주면): 받지 못한 영상 id → 쉬운 안내 {kind, msg, actions} (trouble.explain) · blocked_msg: 이 화면용 막힘 안내."""
     import source
     cur = {"i": 0, "n": len(ids), "vid": None, "streams": {}, "infos": {}}
 
@@ -351,16 +353,27 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
                             opts.update(_js_opts())
                             ydl = _yt(log).YoutubeDL(opts)
                             continue
-                        msg = str(e)
-                        if _blocked_text(msg):
-                            msg = BLOCKED_MSG if self_update_allowed() else REMOTE_BLOCKED_MSG
-                            _old_python_hint(log)
-                        log(f"  담지 못했어요 · {msg}")
+                        _failed_one(vid, e, log, cookies_browser, blocked_msg, why)
                         failed.append(vid)
                     break
         finally:
             ydl.close()
     return failed
+
+
+def _failed_one(vid, e, log, browser, blocked_msg, why):
+    """영상 하나를 받지 못함: 화면 기록에는 쉬운 한 줄, studio.log 에만 원문 (영어 원문이 화면에 보이지 않게)."""
+    import studiolog
+    import trouble
+    if not self_update_allowed():  # 휴대폰에서 시킨 받기(학습용 포함): 엔진을 바꾸지 않았으니 PC 에서 할 일 (PC 화면용 안내 대신)
+        blocked_msg = REMOTE_BLOCKED_MSG
+    info = trouble.explain(e, browser=browser, blocked=blocked_msg)  # 막힘: 이 화면용 안내 (없으면 '브라우저를 골라 다시 받아 보세요')
+    if info["kind"] == "blocked":
+        _old_python_hint(log)
+    if why is not None:
+        why[vid] = info
+    log(f"  담지 못했어요 · {info['msg']}")
+    studiolog.write(f"    원문 · {vid} · {' '.join(str(e).split())[:400]}")
 
 
 def _remember_source(cur, log, remember=None):
@@ -670,14 +683,77 @@ def _seg_of(s, fixmap):
     return dict(seg, text=" ".join(w["w"] for w in ws), words=ws), n
 
 
+class FileProblem(RuntimeError):
+    """그 영상 파일 하나의 문제 (깨짐·소리 없음) — 여러 개를 찾을 때는 건너뛰고 나머지를 계속 (analyze_many)."""
+
+
+PER_FILE = ("broken", "missing", "locked", "ffmpeg", "copying")  # 그 파일만의 문제로 보는 오류 종류 (trouble.explain)
+
+
+class Analyzed(list):
+    """analyze_many 결과: 끝난 분석 폴더 목록 + failed {이름: 쉬운 안내} (그 파일만의 문제로 건너뛴 영상)."""
+    failed = None
+
+
 def analyze_many(names, log, model="large-v3-turbo"):
+    """여러 영상 편집점 찾기 → 끝난 분석 폴더 목록(Analyzed · .failed).
+    여러 개일 때 그 파일만의 문제(깨짐·소리 없음·파일 없음·잠김)는 건너뛰고 나머지를 계속 · .failed 에 {이름: 쉬운 안내}
+    (모두 실패하면 작업 실패). 메모리·인터넷처럼 다음 영상도 같을 문제는 거기서 멈추고, 오류에 retry(남은 영상 이름)·
+    note(몇 개 끝났는지)를 붙임 → 화면의 [다시 하기]는 남은 영상만. 하나만 찾을 때는 예전처럼 그 오류 그대로."""
+    import trouble
+    for n in names:  # 하나라도 아직 복사 중이면 아무것도 시작하지 않음
+        _not_copying(n)
+    out, failed = Analyzed(), {}
+    out.failed = failed
     with _analysis_session():
-        return [str(analyze(n, log, model, f"{k}/{len(names)}")) for k, n in enumerate(names, 1)]
+        for k, n in enumerate(names, 1):
+            try:
+                out.append(str(_analyze_kept(n, log, model, f"{k}/{len(names)}")))
+            except Exception as e:
+                info = trouble.explain(e)
+                if len(names) == 1 or info["kind"] == "cancelled" or not (isinstance(e, FileProblem) or info["kind"] in PER_FILE):
+                    if len(names) > 1 and info["kind"] != "cancelled":
+                        left = list(names[k - 1:])
+                        e.retry = {"names": left}
+                        e.note = f"{len(names)}개 중 {len(out)}개는 끝났어요 · [다시 하기]는 남은 {len(left)}개만 해요"
+                    raise
+                failed[n] = info
+                log(f"  이 영상은 건너뛰고 다음 영상을 찾을게요 · {info['msg']}")
+    if names and len(failed) == len(names):  # 모두 그 파일만의 문제 → 작업 실패 (다시 해도 같음)
+        first = failed[names[0]]
+        raise trouble.Trouble(first["kind"], f"{len(names)}개 모두 편집점을 찾지 못했어요 · {first['msg']}", ["folder", "log"])
+    return out
 
 
 def analyze(name, log, model="large-v3-turbo", step="1/1"):
+    _not_copying(name)
     with _analysis_session():
-        return _analyze(name, log, model, step)
+        return _analyze_kept(name, log, model, step)
+
+
+def _analyze_kept(name, log, model, step):
+    """편집점 찾기 + 찾기 시작할 때의 파일 크기·수정 시각 기록 (나중에 파일이 바뀌면(덜 복사된 채 찾았음) 보관함이 알려 줌).
+    지난번 기록과 파일이 다르면(복사가 덜 된 채 찾았음) 그때 만든 파형·썸네일·미리보기 파일을 지움 → 편집실이 새 파일로 다시 만듦."""
+    import intake
+    sig = intake.sig(VIDEOS / name)
+    try:
+        if intake.changed(adir(name), (VIDEOS / name).stat()):
+            n = intake.clear_media_cache(adir(name))
+            if n:
+                log("  파일이 바뀌어서 예전 파형·썸네일·미리보기 파일을 지우고 새로 만들게요")
+    except OSError:
+        pass
+    out = _analyze(name, log, model, step)
+    intake.remember(out, sig)
+    return out
+
+
+def _not_copying(name):
+    """아직 다른 프로그램이 쓰는 중(복사 중)인 영상이면 편집점 찾기를 멈춤 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)."""
+    import intake
+    import trouble
+    if intake.busy(VIDEOS / name):
+        raise trouble.Trouble("copying", intake.copying_msg(name), ["retry"])
 
 
 def _analyze(name, log, model, step):
@@ -688,8 +764,8 @@ def _analyze(name, log, model, step):
     log(f"편집점 찾는 중 · {name}")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="소리 추출 중")
     r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
-    if r.returncode or not wav.exists():
-        raise RuntimeError(f"영상에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
+    if r.returncode or not wav.exists():  # 어느 영상인지 이름을 넣음 (여러 개를 찾을 때 카드에서 알 수 있게)
+        raise FileProblem(f"'{name}'에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
 
     log("  대사를 받아쓰는 중이에요 (처음 한 번은 준비에 몇 분 걸려요)")
     set_progress(label="편집점 찾는 중", item=name, step=step, pct=None, detail="받아쓰기 준비 중")
@@ -819,14 +895,14 @@ DENO_MIN = (2, 3, 0)
 DENO_ZIP = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
 DENO_ZIP_ALT = "https://dl.deno.land/release/{ver}/deno-x86_64-pc-windows-msvc.zip"
 DENO_AUTO = sys.platform == "win32"  # 자동 설치는 Windows 만
-BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. 크롬에서 YouTube에 로그인한 뒤 "
-               "소재 찾기의 '다운로드가 계속 실패하나요?' → '크롬 로그인 정보로 받기'를 켜고 다시 해 보세요.")
+BLOCKED_MSG = ("다운로드 엔진을 최신으로 바꿔 다시 해 봤지만 YouTube가 계속 막고 있어요. YouTube에 로그인해 둔 브라우저(파이어폭스·엣지·웨일·"
+               "크롬)를 소재 찾기의 '다운로드가 계속 실패하나요?' → '로그인 정보로 받기'에서 고른 뒤 다시 해 보세요.")
 _ENGINE_LOCK = threading.RLock()  # pip 로 엔진을 바꾸는 동안만 목록·다운로드가 기다림 (같은 작업 안의 재시도는 통과)
 _SELF_UPDATE = threading.local()
 REMOTE_NO_UPDATE_MSG = ("  휴대폰에서 시킨 작업이라 다운로드 엔진은 바꾸지 않았어요 · "
                         "PC에서 '업데이트 확인' → 다운로드 엔진을 최신으로 바꾼 뒤 다시 받아 주세요")
 REMOTE_BLOCKED_MSG = ("YouTube가 막았어요 · 휴대폰에서 시킨 받기라 다운로드 엔진은 바꾸지 않았어요. PC에서 '업데이트 확인'으로 "
-                      "엔진을 최신으로 바꾸거나 '크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요")
+                      "엔진을 최신으로 바꾸거나 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 브라우저를 골라 다시 받아 주세요")
 
 
 @contextlib.contextmanager

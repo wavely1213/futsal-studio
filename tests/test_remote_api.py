@@ -414,7 +414,7 @@ class ActionTests(Base):
             self.assertEqual(st, 400, u)
         self.assertEqual(self.fb.started, [])
         got = []
-        with mock.patch.object(core, "download", lambda ids, log, ck: got.append((ids, ck)) or []):
+        with mock.patch.object(core, "download", lambda ids, log, ck, **k: got.append((ids, ck)) or []):
             for u, vid in (("https://www.youtube.com/watch?v=AbCdEfGhIjK&list=PLx&t=3", "AbCdEfGhIjK"), ("youtu.be/AbCdEfGhIj_", "AbCdEfGhIj_"),
                            ("https://m.youtube.com/shorts/Ab-dEfGhIjK?feature=x", "Ab-dEfGhIjK")):
                 st, _, b = self.act("download", {"url": u})
@@ -669,7 +669,7 @@ class ActionTests(Base):
     def test_phone_jobs_never_self_update(self):
         """검토: 휴대폰이 시킨 받기·학습용 받기가 pip install -U yt-dlp · Deno 설치를 부름 → 휴대폰 작업 안에서는 하지 않음 (PC 에서만)."""
         seen = []
-        with mock.patch.object(core, "download", lambda ids, log, ck: seen.append(core.self_update_allowed()) or []):
+        with mock.patch.object(core, "download", lambda ids, log, ck, **k: seen.append(core.self_update_allowed()) or []):
             self.act("download", {"url": "https://youtu.be/AbCdEfGhIjK"})
             self.fb.wait_idle()
         self.assertEqual(seen, [False])

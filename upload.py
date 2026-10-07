@@ -353,6 +353,19 @@ def _sent_score(t):
     return sum(w for k, w in editor.KEYWORDS.items() if k in t) + min(len(t), 60) / 30
 
 
+def _topic_hook(hook, topics):
+    """편집실 쇼츠 훅('국가대표 꿀팁' · editor._hook 은 editor.KEYWORDS 로 주제를 고름)을 키트의 주제어로 다시 씀
+    → 제목·해시태그·태그·설명이 같은 주제 ('팬텀 드리블 꿀팁'). 주제어가 풋살 용어가 아니면(자주 나온 낱말) 훅의 말이 풋살 용어일 때만 그대로."""
+    if not hook:
+        return hook
+    tail = "꿀팁" if hook.endswith("꿀팁") else "!"
+    word = hook[: -len(tail)].strip()
+    terms = {re.sub(r"\s+", "", t) for t in hooks.topic_terms()}
+    if topics and re.sub(r"\s+", "", topics[0]) in terms:
+        return f"{topics[0]} {tail}" if tail == "꿀팁" else f"{topics[0]}!"
+    return hook if re.sub(r"\s+", "", word) in terms else None
+
+
 def hook_lines(segs, topics, fmt="long", flow=None, dur=None):
     """설명 첫 두 줄: 감독님이 한 말 중 가장 힘 있는 한 문장 + 무엇을 알려 주는지 (flow: 나오는 순서의 주제어).
     쇼츠는 3분까지라 '1분 안에'는 1분 이하일 때만."""
@@ -754,6 +767,7 @@ def build_kit(name, seq=None, save=True):
             rec = editor.recommend(name)
             h = editor._hook(rec["shorts"][0]) if rec["shorts"] else ""
             hook = h if h.endswith(("꿀팁", "!") if fmt == "shorts" else "꿀팁") else None  # 첫 문장을 자른 것이면 제목으로 안 씀
+            hook = _topic_hook(hook, topics)
         except Exception:
             hook = None
     if fmt == "shorts":
