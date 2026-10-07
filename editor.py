@@ -1036,14 +1036,22 @@ def _make_cap(part, fmt, terms, base=None):
     if ws:
         cap["wt"] = _wt(ws)
     if fmt == "long":
-        sub = captions.split_text(part["text"], part["start"], part["end"], "shorts", terms, words=ws)
-        if len(sub) > 1:
-            cap["sh"], k = [], 0
-            for q in sub[:-1]:
-                k += len(q["text"].split())
-                cap["sh"].append(k)
-            cap["shn"] = len(part["text"].split())
+        sh = _shorts_cuts(part["text"], part["start"], part["end"], terms, ws)
+        if sh:
+            cap["sh"], cap["shn"] = sh, len(part["text"].split())
     return cap
+
+
+def _shorts_cuts(text, start, end, terms, ws=None):
+    """가로 영상 자막을 쇼츠형 한 줄로 나눌 곳 sh (몇 번째 낱말부터 새 자막인지) — 안 나눠도 되면 [].
+    단어 시각이 없으면 _shorts_parts·capParts 가 보여 줄 때와 같은 시각(captions.weight 비율 · 조용한 곳 없이)으로 골라서
+    고를 때 확인한 길이(2.2초까지·0.6초 넘게)가 화면에서도 그대로."""
+    sub = captions.split_text(text, start, end, "shorts", terms, words=ws)
+    sh, k = [], 0
+    for q in sub[:-1]:
+        k += len(q["text"].split())
+        sh.append(k)
+    return sh
 
 
 def _terms():
@@ -1076,14 +1084,21 @@ def oneline_captions(caps, info, silences=(), terms=None):
     for c in sorted((c for c in caps or () if isinstance(c, dict)), key=lambda c: float(c.get("start") or 0)):
         text = str(c.get("text") or "")
         if not captions.needs_split(text, fmt):
-            if fmt == "long" and not c.get("sh") and text.strip():  # 예전 자막: 쇼츠 편집본에서 나눌 곳만 새로
-                ws = _cap_words(c)
-                c = _make_cap({"start": c["start"], "end": c["end"], "text": " ".join(text.split()), **({"words": ws} if ws else {})}, fmt, terms, c)
+            if fmt == "long" and not c.get("sh") and text.strip():  # 예전 자막: 쇼츠 편집본에서 나눌 곳만 새로 (글·단어 시각·줄바꿈은 그대로)
+                try:
+                    sh = _shorts_cuts(text, float(c["start"]), float(c["end"]), terms, _cap_words(c))
+                except (TypeError, ValueError, KeyError):
+                    sh = []
+                if sh:
+                    c = dict(c, sh=sh, shn=len(text.split()))
             out.append(c)
             continue
         ws = _cap_words(c)
-        parts = captions.split_text(text, c["start"], c["end"], fmt, terms, words=ws, silences=() if ws else silences)
-        if not parts:
+        try:
+            parts = captions.split_text(text, c["start"], c["end"], fmt, terms, words=ws, silences=() if ws else silences)
+        except (TypeError, ValueError, KeyError):
+            parts = []
+        if len(parts) < 2:  # 나눌 수 없음 (길이가 없거나 거꾸로 된 자막 · 낱말 하나) → 그대로
             out.append(c)
             continue
         n += 1
@@ -1614,10 +1629,10 @@ def _shorts_parts(cap):
     if not tm:
         if cap.get("shn") is None:
             return [(cap, ws)]
-        tot, acc, tm = sum(len(t) for t in toks) or 1, 0, []
-        for t in toks:  # 글자 수대로 (editor.html 과 같은 식)
+        tot, acc, tm = sum(captions.weight(t) for t in toks), 0, []
+        for t in toks:  # 나눌 곳을 고를 때(captions.even_words)와 같은 비율 (editor.html capWeight 와 같은 식)
             tm.append({"w": t, "s": cap["start"] + (cap["end"] - cap["start"]) * acc / tot})
-            acc += len(t)
+            acc += captions.weight(t)
     try:
         cuts = [0] + [int(k) for k in sh] + [len(tm)]
     except (TypeError, ValueError):
@@ -1639,12 +1654,12 @@ def _shorts_parts(cap):
 FIT_MIN = 0.7
 
 
-def _em(ch):
+def _em(ch, black=False):
     o = ord(ch)
     if ch == " ":
         return 0.24
     if o >= 0x1100:
-        return 0.9
+        return 0.95 if black else 0.9  # Pretendard Black 은 한글이 조금 더 넓음
     if "0" <= ch <= "9" or "a" <= ch <= "z":
         return 0.6
     if "A" <= ch <= "Z":
@@ -1653,11 +1668,12 @@ def _em(ch):
 
 
 def cap_fit(text, st, W):
-    """자막 글자 크기 배율 (1 = 그대로) — 가장 긴 줄이 화면 폭의 90%(왼쪽/오른쪽 정렬이면 남은 쪽) 안에 들게."""
+    """자막 글자 크기 배율 (1 = 그대로) — 가장 긴 줄이 화면 폭의 90%(왼쪽/오른쪽 정렬이면 남은 쪽, 그래도 90%까지) 안에 들게."""
     x, al = float(st.get("x", 0.5)), st.get("align", "center")
     room = (1 - x) if al == "left" else x if al == "right" else 2 * min(x, 1 - x)
-    avail = W * (min(0.9, room - 0.05) if al == "center" else room - 0.05)
-    em = max([sum(_em(ch) for ch in ln) for ln in str(text).replace("\r", "").split("\n")] or [0])
+    avail = W * min(0.9, room - 0.05)  # 화면 90%까지 (미리보기 글 상자 92%·내보내기 양옆 여백 안쪽)
+    black = st.get("weight") == "Black"
+    em = max([sum(_em(ch, black) for ch in ln) for ln in str(text).replace("\r", "").split("\n")] or [0])
     need = em * float(st["size"]) + 2 * float(st.get("strokeW") or 0)
     if need <= avail or avail <= 0:
         return 1.0

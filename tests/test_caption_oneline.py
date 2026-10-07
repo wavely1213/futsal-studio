@@ -136,7 +136,8 @@ class RulesTest(unittest.TestCase):
                 self.assertGreaterEqual(p["end"] - p["start"], captions.MIN_DUR - 1e-6, p)
 
     def test_needs_split(self):
-        self.assertTrue(captions.needs_split("공을 받고\n돌아요"))
+        self.assertFalse(captions.needs_split("공을 받고\n돌아요"))  # 짧은 자막에 직접 넣은 줄바꿈은 그대로 둠
+        self.assertTrue(captions.needs_split("공을 받고 바로\n돌아서 패스해요", "long"))  # 예전 두 줄 자막 (12글자 넘음)
         self.assertTrue(captions.needs_split(OWNER[0], "long"))
         self.assertFalse(captions.needs_split("공을 받고 돌아요", "long"))
         self.assertFalse(captions.needs_split("가나다라마바사아자차카타파하가나다라마", "long"))  # 낱말 하나는 못 나눔
@@ -274,20 +275,26 @@ class ExportTest(unittest.TestCase):
         big = dict(st, size=96)
         k = editor.cap_fit("어쨌든 이제 여러분들 제가", big, 1080)
         self.assertTrue(0.7 <= k < 1.0, k)
-        need = sum(editor._em(ch) for ch in "어쨌든 이제 여러분들 제가") * 96 * k + 2 * big["strokeW"]
+        need = sum(editor._em(ch, True) for ch in "어쨌든 이제 여러분들 제가") * 96 * k + 2 * big["strokeW"]  # 쇼츠 글씨는 Black
         self.assertLessEqual(need, 0.9 * 1080)  # 줄인 뒤엔 1080 화면 90% 안
         line = self.dialogues(self.seq([{"id": "a", "start": 0, "end": 2, "text": "어쨌든 이제 여러분들 제가"}], "shorts", big), 1080, 1920)[0][9]
         self.assertIn(rf"\fs{round(96 * k * editor.FONT_K)}", line)
         self.assertEqual(editor.cap_fit(OWNER[0], st, 1080), 1.0)  # 너무 긴 예전 자막은 줄이지 않고 줄바꿈 (예전과 같게)
         self.assertEqual(editor.cap_fit("가나다", dict(st, size=600), 1080), 1.0)  # 0.7배보다 더 줄여야 하면 그대로
-        self.assertLess(editor.cap_fit("가나다라마바사아", dict(st, size=72, x=0.8), 1080), 1.0)  # 오른쪽에 치우치면 남은 폭 기준
+        self.assertLess(editor.cap_fit("가나다라마바사", dict(st, size=72, x=0.8), 1080), 1.0)  # 오른쪽에 치우치면 남은 폭 기준
+        # 왼쪽 정렬로 화면 끝에 붙여도 90%까지만 (미리보기 글 상자 92%·내보내기 양옆 여백보다 넓게 잡지 않음)
+        k = editor.cap_fit("가" * 13, dict(st, size=80, align="left", x=0.0), 1080)
+        self.assertLess(k, 1.0)
+        self.assertLessEqual(13 * 0.95 * 80 * k + 16, 0.9 * 1080)
+        # Black 은 보통 굵기보다 조금 넓게 어림
+        self.assertLess(editor.cap_fit("가" * 13, dict(st, size=78), 1080), editor.cap_fit("가" * 13, dict(st, size=78, weight="Bold"), 1080))
 
 
 def _js_funcs():
     """editor.html 에서 미리보기 함수(capWords·capParts·emOf·capFit)만 꺼냄."""
     src = (ROOT / "editor.html").read_text(encoding="utf-8")
     out = []
-    for name in ("function capWords(", "function capParts(", "const emOf =", "function capFit("):
+    for name in ("function capWeight(", "function capWords(", "function capParts(", "const emOf =", "function capFit("):
         i = src.index(name)
         j = src.index("\n}", i) + 2 if name.startswith("function") else src.index("\n", i)
         out.append(src[i:j])
@@ -335,6 +342,178 @@ class PreviewParityTest(unittest.TestCase):
                         self.assertAlmostEqual(a, b, places=6)
         self.assertEqual(js["fits"], [editor.cap_fit(t, st, W) for t, st, W in fits])
         self.assertTrue(any(k < 1 for k in js["fits"]))
+
+
+# 문장부호 없는 코칭 말 (Whisper 한국어 받아쓰기는 마침표가 없을 때가 많음 — 소유자 화면과 같음)
+PARA = ("오늘은 퍼스트 터치에 대해서 알려 드릴게요 공이 오기 전에 고개를 들어야 돼요 공이 오고 나서 고개를 들거든요 "
+        "그러면 이미 늦어요 그래서 받기 전에 보고 내가 갈 방향으로 첫 터치를 하는 겁니다 이게 되면 상대가 압박을 해도 "
+        "여유가 생기는데 안 되면 공을 받고 나서 등지게 되기 때문에 여러분이 할 수 있는 게 백패스밖에 없는 거예요")
+BOUND = {"것", "거", "게", "수", "때문에", "줄", "데", "뿐", "때", "때는", "거예요"}
+MODS = {"첫", "한", "두", "그", "이", "저", "안", "못", "갈", "할"}
+FINAL = re.compile(r"(?:요|니다|죠)$")
+
+
+class NaturalBreakTest(unittest.TestCase):
+    """문장부호 없는 말도 자연스러운 곳에서 끊는지 (검토 지적: '집중을 / 해야'·'드릴게요 공이'·'때문에 여러분이' 등)."""
+
+    def lines(self):
+        for fmt in ("shorts", "long"):
+            for text in OWNER + [PARA]:
+                n = len(text.split())
+                yield fmt, "말한 시각", [p["text"] for p in captions.chunk(spoken(text), fmt, terms=captions.DEFAULT_TERMS)]
+                for per in (0.45, 0.55):  # 단어 시각 없는 예전 받아쓰기 (보통 빠르기)
+                    yield fmt, per, [p["text"] for p in captions.split_text(text, 0, per * n, fmt, captions.DEFAULT_TERMS)]
+            yield fmt, "6초", [p["text"] for p in captions.split_text(OWNER[0], 0, 6, fmt, captions.DEFAULT_TERMS)]
+
+    def test_owner_sentence(self):
+        for fmt, how, ls in self.lines():
+            joined = " / ".join(ls)
+            with self.subTest(fmt=fmt, how=how, got=joined):
+                if "집중을" in joined:
+                    self.assertNotIn("집중을 / 해야", joined)  # 목적어와 풀이말 사이
+                    self.assertNotIn("해야 / 되고", joined)    # '해야 되다'
+                    self.assertIn("집중을 해야 되고", joined)
+
+    def test_no_awkward_lines(self):
+        for fmt, how, ls in self.lines():
+            with self.subTest(fmt=fmt, how=how, got=" / ".join(ls)):
+                for ln in ls:
+                    ws = ln.split()
+                    self.assertNotIn(ws[0], BOUND, ln)            # 기대는 말로 시작하지 않음 ('게 백패스밖에')
+                    if len(ls) > 1:
+                        self.assertNotIn(ws[-1], MODS - {"할"}, ln)  # 꾸미는 말로 끝나지 않음 ('방향으로 첫')
+                    for w in ws[:-1]:                               # 한 자막 안에 두 문장 없음 ('드릴게요 공이')
+                        self.assertIsNone(FINAL.search(w), ln)
+                joined = " / ".join(ls)
+                for bad in ("고개를 / 들거든요", "받고 / 나서", "오기 / 전에", "등지게 / 되기", "할 / 수"):
+                    self.assertNotIn(bad, joined)
+
+
+class EdgeCaseTest(unittest.TestCase):
+    """길이 없는 자막 · 아주 짧게 스치는 자막 · 고칠 필요 없는 자막은 그대로 (검토 지적)."""
+
+    def test_zero_or_reversed_caption_not_split(self):
+        for s, e in ((5, 5), (6, 5.5), (5, 5.3)):
+            cap = {"id": "z", "start": s, "end": e, "text": OWNER[0], "pos": 3}
+            out, n = editor.oneline_captions([dict(cap)], {"width": 1920, "height": 1080}, terms=[])
+            self.assertEqual(n, 0)
+            self.assertEqual(out, [cap])
+            for p in captions.split_text(OWNER[0], s, e, "shorts"):
+                self.assertLessEqual(p["start"], p["end"])
+
+    def test_parts_never_reversed_and_inside(self):
+        import random
+        rnd = random.Random(7)
+        words = (OWNER[0] + " " + PARA).split()
+        for _ in range(400):
+            k = rnd.randint(2, 30)
+            text = " ".join(rnd.choice(words) for _ in range(k))
+            s = round(rnd.uniform(0, 100), 2)
+            e = round(s + rnd.uniform(0, 8), 2)
+            for fmt in ("shorts", "long"):
+                parts = captions.split_text(text, s, e, fmt)
+                self.assertEqual(" ".join(p["text"] for p in parts).split(), text.split())
+                for p in parts:
+                    self.assertTrue(s - 1e-9 <= p["start"] <= p["end"] <= max(s, e) + 1e-9, (text, s, e, parts))
+                for a, b in zip(parts, parts[1:]):
+                    self.assertLessEqual(a["end"], b["start"] + 1e-9)
+
+    def test_no_flash_next_to_long_word_or_url(self):
+        cases = [("오늘 배울 것은 세계에서 가장 유명한 아이솔레이션플레이스타일오버래핑언더래핑 입니다", 4.5, "shorts"),
+                 ("자세한 내용은 https://www.futsal-academy.co.kr/lessons/first-touch-basics 에서 보세요.", 9.6, "long"),
+                 ("가나다라마바사아자차카 타파하가나다라마바사아 자차카타파하가나다라마", 1.2, "long")]
+        for text, dur, fmt in cases:
+            with self.subTest(text=text[:12]):
+                parts = captions.split_text(text, 0, dur, fmt)
+                self.assertEqual(" ".join(p["text"] for p in parts).split(), text.split())
+                for p in parts:
+                    self.assertGreaterEqual(p["end"] - p["start"], 0.5 - 1e-9, parts)
+        url = captions.split_text(cases[1][0], 0, 9.6, "long")
+        self.assertLess(max(p["end"] - p["start"] for p in url if "https" in p["text"]), 0.6 * 9.6)  # 주소가 시간을 다 가져가지 않음
+        # 단어 시각이 있어도 0.5초도 안 되는 자투리는 합침
+        ws = [W("가나다라마바사아자차카타파", 0, 0.5), W("하가나다라마바사아자차카", 0.5, 0.9), W("타파하", 0.9, 1.2)]
+        for p in captions.chunk(ws, "shorts"):
+            nxt = 1.2
+            self.assertGreaterEqual(min(p["end"], nxt) - p["start"], 0.5 - 1e-9)
+
+    def test_weight(self):
+        self.assertEqual(captions.weight("가나다"), 3)
+        self.assertEqual(captions.weight("abc123"), 3)
+        self.assertEqual(captions.weight("요."), 1)
+        self.assertEqual(captions.weight("가" * 40), 12)
+
+    def test_button_keeps_short_captions_exactly(self):
+        info = {"width": 1920, "height": 1080}
+        stale = {"id": "a", "start": 0, "end": 1, "text": "좋아요", "wt": [0, 30, 5, 30, 5, 30], "x": 0.3}  # 글을 고쳐 안 맞게 된 wt
+        mine = {"id": "b", "start": 2, "end": 3.5, "text": "안녕\n하세요", "wt": [200, 50, 10, 80]}  # 직접 넣은 줄바꿈
+        out, n = editor.oneline_captions([dict(stale), dict(mine)], info, terms=[])
+        self.assertEqual(n, 0)
+        self.assertEqual(out, [stale, mine])
+        # 쇼츠에서 나눠야 하는 예전 자막은 sh·shn 만 더하고 글·단어 시각·줄바꿈은 그대로
+        old = {"id": "c", "start": 4, "end": 9, "text": "공을 받기 전에\n고개를 들어요", "wt": [400] + [60, 10] * 4 + [60], "y": 0.7}
+        out, _ = editor.oneline_captions([dict(old)], dict(info), terms=[])
+        self.assertEqual({k: v for k, v in out[0].items() if k not in ("sh", "shn")}, old)
+        self.assertTrue(out[0]["sh"])
+        self.assertEqual(out[0]["shn"], 5)
+
+    def test_rendered_shorts_parts_match_chosen_ones(self):
+        """단어 시각 없는 가로 자막: 쇼츠 편집본에서 보여 주는 시각(_shorts_parts)이 나눌 곳을 고를 때 확인한 시각과 같음."""
+        texts = [OWNER[0], OWNER[1], "자세한 건 2024년 FIFA 풋살 규정 3.2조를 보세요, 아셨죠?", PARA[:60]]
+        for text in texts:
+            for dur in (4.0, 6.0, 9.0):
+                with self.subTest(text=text[:10], dur=dur):
+                    cap = editor._make_cap({"start": 10.0, "end": 10.0 + dur, "text": text}, "long", [])
+                    sub = captions.split_text(text, 10.0, 10.0 + dur, "shorts", [])
+                    parts = editor._shorts_parts(cap)
+                    self.assertEqual([p["text"] for p, _ in parts], [q["text"] for q in sub])
+                    for (p, _), q in zip(parts, sub):
+                        self.assertAlmostEqual(p["start"], q["start"], delta=0.03)
+                        self.assertLessEqual(p["end"] - p["start"], captions.LIMITS["shorts"][1] + 0.05)
+
+
+def _js_effect():
+    src = (ROOT / "editor.html").read_text(encoding="utf-8")
+    i = src.index("const esc =")
+    out = [src[i:src.index("\n", i)]]
+    i = src.index("function effect(")
+    out.append(src[i:src.index("\n}", i) + 2])
+    return "\n".join(out)
+
+
+@unittest.skipUnless(NODE, "node 가 없어요")
+class KaraokeParityTest(unittest.TestCase):
+    """노래방 미리보기(editor.html effect)가 내보내기 \\kf(editor._karaoke)와 같은 때에 같은 낱말을 채우는지
+    — 두 줄 자막·띄어쓰기 두 번·끝 띄어쓰기도 (검토 지적)."""
+
+    def test_rows_and_fill_times(self):
+        cases = [("공을 받고\n바로 돌아요", [0.0, 0.4, 1.1, 1.5]), ("공을  받고 바로 ", [0.0, 0.5, 1.2]),
+                 ("공을 받고 바로", None), ("공을 받고\n바로 돌아서\n패스", None), ("공을 받고 바로", [0.0, 0.3])]
+        dur = 2.0
+        samples = [round(0.05 + 0.1 * k, 2) for k in range(20)]
+        prog = _js_effect() + "\nconst inp = JSON.parse(require('fs').readFileSync(0, 'utf8'));\nconst st = {effect: 'karaoke', highlight: 'H', fill: 'F'};\n" \
+            "process.stdout.write(JSON.stringify(inp.map(([text, kw]) => inp.samples.map(e => { const el = {style: {}}; effect(el, st, e, 2.0 - e, 1, text, kw); return el.innerHTML; }))));"
+        payload = [[t, kw] for t, kw in cases]
+        prog = prog.replace("inp.samples", json.dumps(samples))
+        r = subprocess.run([NODE, "-e", prog], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        for (text, kw), htmls in zip(cases, got):
+            words = [{"s": s} for s in kw] if kw else None
+            ass = editor._karaoke(text, dur, words, 0.0)
+            rows = ass.split(r"\N")
+            starts, acc = [], 0
+            for row in rows:
+                for m in re.finditer(r"\{\\kf(\d+)\}", row):
+                    starts.append(acc / 100)
+                    acc += int(m.group(1))
+            for e, html in zip(samples, htmls):
+                with self.subTest(text=text, e=e):
+                    self.assertEqual(html.count("<br>"), len(rows) - 1)
+                    on = [m == "H" for m in re.findall(r"color:(H|F)", html)]
+                    self.assertEqual(len(on), len(starts))
+                    for k, (o, st0) in enumerate(zip(on, starts)):
+                        if abs(st0 - e) > 0.03:
+                            self.assertEqual(o, k == 0 or st0 <= e, (k, st0, e, html, ass))
 
 
 class RouteTest(unittest.TestCase):

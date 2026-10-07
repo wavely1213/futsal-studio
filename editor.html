@@ -631,6 +631,15 @@ function capWords(cap) {
   ws = ws.filter(w => { const m = (Number(w.s) + Number(w.e)) / 2; return cap.start - 0.05 <= m && m <= cap.end + 0.05; });
   return ws.length && ws.length === toks.length ? ws : null;
 }
+/* 단어 시각이 없을 때 낱말에 줄 시간 몫 — captions.weight 와 같은 규칙 (한글 등 1 · 영어·숫자 0.5 · 문장부호 0 · 1~12) */
+function capWeight(t) {
+  let k = 0;
+  for (const ch of String(t)) {
+    if (/\s/.test(ch) || ",.?!…~\"'()[]:;-_/·".includes(ch)) continue;
+    k += /^[0-9A-Za-z]$/.test(ch) ? 0.5 : 1;
+  }
+  return Math.min(12, Math.max(1, k));
+}
 /* 쇼츠 편집본에서 가로 영상 자막을 쇼츠형 한 줄로 (만들 때 정해 둔 나눌 곳 sh) — editor.py _shorts_parts 와 같은 규칙 */
 function capParts(cap) {
   const ws = capWords(cap), sh = cap.sh, toks = String(cap.text || "").split(/\s+/).filter(Boolean);
@@ -639,8 +648,8 @@ function capParts(cap) {
   let tm = ws;
   if (!tm) {
     if (cap.shn == null) return whole;
-    const len = t => Array.from(t).length, tot = toks.reduce((a, t) => a + len(t), 0) || 1; let acc = 0; tm = [];
-    for (const t of toks) { tm.push({ w: t, s: cap.start + (cap.end - cap.start) * acc / tot }); acc += len(t); }
+    const tot = toks.reduce((a, t) => a + capWeight(t), 0); let acc = 0; tm = [];
+    for (const t of toks) { tm.push({ w: t, s: cap.start + (cap.end - cap.start) * acc / tot }); acc += capWeight(t); }
   }
   const cuts = [0, ...sh.map(k => Math.trunc(Number(k))), tm.length];
   if (cuts.some((k, i) => !Number.isFinite(k) || (i && k <= cuts[i - 1]))) return whole;
@@ -678,12 +687,12 @@ function capsTL() {
   _caps = { v: ver, list: out }; return out;
 }
 // 한 줄 자막이 화면 밖으로 넘치지 않게 글자 크기 배율 — editor.py cap_fit 과 같은 규칙 (한글 0.9em 어림 · 0.7배보다 더 줄여야 하면 그대로 두고 줄바꿈)
-const emOf = ch => ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? 0.9 : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
+const emOf = (ch, black) => ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? (black ? 0.95 : 0.9) : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
 function capFit(text, st, W) {
-  const x = st.x ?? 0.5, al = st.align || "center";
+  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black";
   const room = al === "left" ? 1 - x : al === "right" ? x : 2 * Math.min(x, 1 - x);
-  const avail = W * (al === "center" ? Math.min(0.9, room - 0.05) : room - 0.05);
-  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch), 0)));
+  const avail = W * Math.min(0.9, room - 0.05);
+  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, black), 0)));
   const need = em * st.size + 2 * (st.strokeW || 0);
   if (need <= avail || avail <= 0) return 1;
   const k = Math.floor(avail / need * 100) / 100;
@@ -1457,11 +1466,12 @@ function effect(el, st, e, r, scale, text, kw) {
   const ax = st.align === "left" ? "0%" : st.align === "right" ? "-100%" : "-50%";
   el.style.transformOrigin = st.align === "left" ? "0 100%" : st.align === "right" ? "100% 100%" : "50% 100%";
   el.style.transform = `translate(${ax}, -100%) translateY(${dy}px) scale(${sc})`;
-  if (st.effect === "karaoke") {
-    const words = text.split(" "), len = w => w.replace(/\n/g, "").length, tot = words.reduce((a, w) => a + len(w), 0) || 1, dur = e + r; // 줄바꿈은 글자 수에 안 셈 (내보내기와 같은 시간)
-    const byWord = kw && !text.includes("\n") && words.every(Boolean) && kw.length === words.length; // 단어 시각이 맞으면 말한 때에 채움 (내보내기 \kf 와 같게)
-    let acc = 0;
-    el.innerHTML = words.map((w, k) => { const on = byWord ? k === 0 || kw[k] <= e : (acc / tot) * dur <= e; acc += len(w); return `<span style="color:${on ? st.highlight : st.fill}">${esc(w)}</span>`; }).join(" ");
+  if (st.effect === "karaoke") { // editor.py _karaoke 와 같은 규칙: 줄은 그대로, 낱말은 띄어쓰기 몇 개든 나눔 · 단어 시각이 낱말 수와 맞으면 말한 때에 채움
+    const rows = String(text).replace(/\r\n/g, "\n").split("\n").map(ln => ln.split(/\s+/).filter(Boolean));
+    const len = w => Array.from(w).length, all = rows.flat(), tot = all.reduce((a, w) => a + len(w), 0) || 1, dur = e + r;
+    const byWord = !!kw && kw.length === all.length;
+    let acc = 0, k = 0;
+    el.innerHTML = rows.map(row => row.map(w => { const on = byWord ? k === 0 || kw[k] <= e : (acc / tot) * dur <= e; acc += len(w); k++; return `<span style="color:${on ? st.highlight : st.fill}">${esc(w)}</span>`; }).join(" ")).join("<br>");
   } else if (el._t !== text) { el.textContent = text; }
   el._t = st.effect === "karaoke" ? null : text;
 }
