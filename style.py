@@ -20,6 +20,7 @@ import threading
 import time
 
 import core
+import plan
 
 STYLES = core.WORK / "styles"
 FW, FH, FPS = 320, 180, 4
@@ -593,6 +594,8 @@ def edit_params(prof):
         "lufs": prof["lufs"] if prof.get("lufs") is not None else -14.0,
         "splitShot": split, "curve3": c3 if split else [0, 0, 0],
         "tempo": round(cps, 2) if cps > 0 and prof.get("tempoOn", True) is not False else 0,
+        # 영상 기획 분석 (plan) — 인트로 티저·강조 자막. plan 이 없는 예전 스타일은 값 자체가 없음 (가편집·값이 예전과 똑같음)
+        **(plan.plan_params(prof["plan"]) if isinstance(prof.get("plan"), dict) else {}),
     }
 
 
@@ -615,31 +618,49 @@ def list_styles():
     for f in sorted(STYLES.glob("*.json")):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
-            out.append({"name": f.stem, "profile": d, "params": edit_params(d), "desc": describe(d)})
+            out.append({"name": f.stem, "profile": d, "params": edit_params(d), "desc": describe(d),
+                        "plan": d.get("plan") if isinstance(d.get("plan"), dict) else None, "plan_desc": plan.describe_plan(d.get("plan"))})
         except Exception:
             pass
     return out
 
 
 def learn(style_name, names, log=print):
+    """고른 영상들 → 스타일 파일 (구조 수치 + 영상 기획 분석 plan). 한 영상이 깨져도 나머지로 배우고,
+    기획 분석만 실패하면 그 영상은 구조 수치로만 배움. 멈추기(✕)를 누르면 배우기 전체를 그만둠."""
     style_name = re.sub(r'[\\/:*?"<>|]', "", style_name).strip(" .") or "내 스타일"
     profs, evs = [], []
     fails = []
     for k, n in enumerate(names, 1):
-        core.set_progress(label="스타일 배우는 중", item=n, step=f"{k}/{len(names)}", pct=0, detail="준비 중")
+        step = f"{k}/{len(names)}"
+        core.set_progress(label="스타일 배우는 중", item=n, step=step, pct=0, detail="준비 중")
         try:
             ev = extract_events(n, log)
             p = summarize(ev)
+        except StyleCancelled:
+            raise
         except Exception as e:  # 한 영상이 깨져도 나머지로 배움
             fails.append(n)
             log(f"  배우지 못했어요 · {n} · {e}")
             continue
         _log_prof(p, log)
+        try:
+            pl = plan.judge(plan.extract_plan(n, ev, log, step=step), ev)
+            p["plan"] = pl
+            log(f"  기획 분석 · {pl['genre']['label']} · 인트로 {pl['intro']['label']}")
+        except plan.PlanCancelled:
+            raise StyleCancelled("영상 살펴보기를 멈췄어요") from None
+        except Exception as e:  # noqa: BLE001 — 기획 분석이 안 돼도 구조 수치로는 배움
+            log(f"  기획 분석을 하지 못했어요 · {n} · {e}")
         profs.append(p)
         evs.append(ev)
     if not profs:
         raise RuntimeError("고른 영상에서 배울 수 있는 게 없었어요 (파일이 깨졌거나 화면이 없어요)")
     prof = merge(profs, evs)
+    prof.pop("plan", None)
+    merged = plan.merge_plans([p["plan"] for p in profs if p.get("plan")])  # 기획 분석을 못 한 영상은 빼고 합침
+    if merged:
+        prof["plan"] = merged
     prof["refs"] = profs
     try:  # 같은 이름으로 다시 배워도 '말 빠르기 맞추기'를 꺼 둔 것은 그대로
         if json.loads((STYLES / f"{style_name}.json").read_text(encoding="utf-8")).get("tempoOn") is False:
@@ -650,6 +671,33 @@ def learn(style_name, names, log=print):
     (STYLES / f"{style_name}.json").write_text(json.dumps(prof, ensure_ascii=False, indent=1), encoding="utf-8")
     log(f"스타일 저장 · {style_name} · {describe(prof)}")
     return {"name": style_name, "profile": prof, "params": edit_params(prof), "desc": describe(prof)}
+
+
+def style_file(style_name):
+    """스타일 이름 → 스타일 파일 (STYLES 안 · 있는 파일만). 아니면 StyleMissing."""
+    f = (STYLES / f"{os.path.basename(str(style_name or ''))}.json").resolve()
+    if STYLES.resolve() not in f.parents or not f.is_file():
+        raise StyleMissing("스타일을 찾지 못했어요")
+    return f
+
+
+def update_style(style_name, fn):
+    """스타일 파일을 읽어 fn(d) 로 고친 뒤 임시 파일 → 교체 (다른 값은 그대로). 고친 내용을 돌려줌."""
+    f = style_file(style_name)
+    d = json.loads(f.read_text(encoding="utf-8"))
+    fn(d)
+    tmp = f.with_name(f.name + f".{os.getpid()}_{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    for k in range(10):  # 윈도우: 다른 프로그램(백신 등)이 잠깐 잡고 있으면 조금 뒤 다시
+        try:
+            os.replace(tmp, f)
+            break
+        except PermissionError:
+            if k == 9:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.1)
+    return d
 
 
 def set_tempo(style_name, on):
@@ -1085,6 +1133,9 @@ def _mark_failed(name):
         pass
 
 
+PLAN_PARAM_KEYS = ("introTeaser", "emphasisTitles")
+
+
 def score_video(style_name, name, log=None, analyze=False):
     """배운 스타일로 만든 자동 가편집(롱폼)이 그 스타일과 얼마나 닮았는지 — 내보내지 않고 편집본 JSON 으로 바로.
     원본을 아직 안 살펴봤으면(점프 컷이 화면에 티가 나는지 알 수 없음) NeedsAnalysis — analyze=True(작업)면 먼저 살펴봄.
@@ -1103,7 +1154,9 @@ def score_video(style_name, name, log=None, analyze=False):
             if not isinstance(e, OSError):  # 파일이 잠겼거나 권한 문제(OSError)는 잠깐일 수 있어 다음에 다시 살펴봄
                 _mark_failed(name)  # 같은 파일이면 한동안(FAIL_TTL) 다시 살펴보지 않음
     info = ed.media_info(name)
-    params = st["params"]
+    # 기획 분석 값(인트로 티저·강조 자막)은 빼고 매김: 점수는 '구조 수치'(컷·확대·공백·자막 위치·소리) 비교라서
+    # 티저 경계(컷 하나)·강조 글자(자막 시간)가 v1.9.2 와 다른 점수를 만들지 않게 (기획 판단은 점수에 넣지 않음)
+    params = {k: v for k, v in st["params"].items() if k not in PLAN_PARAM_KEYS}
     seq = ed.auto_sequences(name, info, params, ("long",))[0]
     proj = {"source": name, "info": info, "captions": [x for x in segs if x["text"].strip()],
             "media": [{"id": "main", "kind": "video", "src": "videos", "file": name, "dur": info["duration"], "w": info["width"],

@@ -21,6 +21,7 @@
 | `test_upload.py` | `upload.py`·`hooks.py` 올리기 키트 (챕터·글자 수 규칙·제목 틀) + `/api/upload/*` |
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |
+| `test_style_content.py` | 영상 기획 분석 `plan.py`: 자막 6종 분류·색 이름·인트로 유형 5가지·장르·재미 정도·여러 영상 합치기·화자 군집 · 정답 영상(`make_fixture.make_plan_fixture`)으로 티저·타이틀·정지·슬로 리플레이·자막 종류(OCR 모델이 있을 때) · 모델 없을 때 어림 표시·캐시·멈추기 · 가편집 인트로 티저·강조 자막(꺼지면 예전과 같음) · `avmodels` 실패 표시 · `claude_cli`(가짜 claude: 성공·로그인·한도·시간 초과·멈추기·예전 판 옵션·환경 변수·임시 폴더) · `/api/claude/*`·`/api/style/plan_*` · 검토 회귀(`TestReview*`): 긴 장면·처음/끝 같은 자리는 티저 아님, 대사를 따라 크게 띄운 강조 자막, 레슨 대사의 흔한 낱말, 강조 자막 낱말 조각 금지, 인사 뒤 진행 질문, 갈린 판단 요약·가편집 끔, 대결 형식·잔디 구장, 티저 장면 고르기, Claude 프롬프트 본편 표본, `--help` 실패 시 안전 옵션 유지·예전 판 안내·표준 오류 폭주, 소리 없는 영상 기록 재사용·깨진 모델·내려받기 멈춤, 일치 점수에서 기획 값 제외, 작업 중 붙여 넣기 거절 |
 | `test_captions.py` (2차 작업 중, 커밋 전) | `captions` 자막 나누기·용어 사전·낱말 경계 고치기 · `core.analyze`(단어 시각·힌트·모델 한 번만·절전 막기, 가짜 faster_whisper) · 노래방 `\kf` · 단어 추임새 컷 · `/api/dict` |
 
 - **e2e 묶음은 저장소 밖** 관리자 작업 공간 `$SCRATCH`(경로는 `AGENTS.md` 5번)에 있다. 각 묶음은 저장소를 복사한 시험 앱(`config.json` 제외)과 자기 작업 폴더를 쓴다. 시험 앱의 `config.json` 은 `update_manifest_url` 이 닿지 않는 주소(`http://127.0.0.1:1/…`)라 실제 업데이트를 시도하지 않는다.
@@ -30,7 +31,7 @@
 |---|---|---|
 | `ed2_test.py` | 편집실 (`editor.html`·`editor.py`·내보내기, 193개 확인) | `python3 $SCRATCH/ed2_test.py [--no-export] [--backend-only]` — 스스로 `$SCRATCH/edtest2/srv.sh` 를 불러 저장소를 `edtest2/app` 으로 복사(`config.json`·`tests` 제외)하고 8766 포트에 띄운다. 다른 포트로 따로 돌리려면 `bash $SCRATCH/ed2_clone.sh <이름> <포트>` 로 폴더를 만든 뒤 `ED_DIR=<그 폴더> ED_PORT=<포트> python3 $SCRATCH/ed2_test.py` (`ED_REPO` 로 저장소 위치 지정) |
 | `th2_test.py` | 썸네일 편집기 (`thumb.html`·`thumb.py`) | `bash $SCRATCH/th_run.sh` (저장소를 `thtest/app` 에 복사하고 8765 포트에 띄움, 작업 폴더 `thtest/work`) → `python3 $SCRATCH/th2_test.py <스크린샷 폴더> [--cut]` (`--cut` 은 누끼까지). 다른 시험 앱이면 `TH_PORT=<포트> TH_OUTDIR=<그 앱의 out 폴더>` |
-| `style_test.py` | 스타일 배우기 화면 (`ui.html`·`style.py`) | `th_run.sh` 로 띄운 같은 시험 앱(8765 고정, 보관함에 `STYLETEST01·02` 영상이 있음) → `python3 $SCRATCH/style_test.py <스크린샷 폴더>` |
+| `style_test.py` | 스타일 배우기 화면 (`ui.html`·`style.py`·`plan.py`·`claude_cli.py`) | `th_run.sh` 로 띄운 같은 시험 앱(8765, 보관함에 `STYLETEST01·02` 영상이 있음) → `python3 $SCRATCH/style_test.py <스크린샷 폴더>`. 기획 분석·클로드 카드까지: `bash $SCRATCH/plan_run.sh`(8911, `plantest/app`, 기획 정답 영상·예전 스타일·가짜 claude) → `STYLE_PORT=8911 PLAN_DIR=$SCRATCH/plantest python3 $SCRATCH/style_test.py <폴더>` |
 
 - `th_run.sh`·`style_test.py` 는 8765 를 쓰므로, 개발용으로 띄운 앱(기본 8765)과 동시에 돌리지 않는다.
 

@@ -214,26 +214,35 @@ def _timed_out(e):
     return isinstance(e, (socket.timeout, TimeoutError)) or isinstance(getattr(e, "reason", None), (socket.timeout, TimeoutError))
 
 
-def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, timeout=30):
+class DownloadCancelled(Exception):
+    """내려받는 중에 멈추기(✕)를 누름."""
+
+
+def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, timeout=30, cancel=None):
     """모델 파일을 MODELS 에 (없으면) 내려받아 경로 반환. 주소를 차례로 시도하고, 받은 파일은 크기·지문(sha256)을
     확인한 뒤에만 제자리로 (중간에 끊겨도 반쪽 파일이 남지 않게). 모두 실패하면 마지막 오류를 냄.
-    대답 없이 시간이 다 되면 다른 주소도 마찬가지라서 더 기다리지 않음."""
+    대답 없이 시간이 다 되면 다른 주소도 마찬가지라서 더 기다리지 않음.
+    urls 의 한 항목은 주소 하나이거나 (주소, 크기, sha256) — 서버마다 변환본이 달라 지문이 다를 때 그 주소만의 값으로 확인."""
     MODELS.mkdir(parents=True, exist_ok=True)
     path = MODELS / fname
     with _DL_LOCK:
         if path.is_file():
             return path
         tmp, err = path.with_suffix(".part"), None
-        for url in urls:
-            def hook(got, total):
-                total = total or size or 0
+        for entry in urls:
+            url, want_size, want_sha = (entry if isinstance(entry, (tuple, list)) else (entry, size, sha256))
+
+            def hook(got, total, want_size=want_size):
+                if cancel is not None and cancel():
+                    raise DownloadCancelled()
+                total = total or want_size or 0
                 if total > 0:
                     core.set_progress(label=label, item=item, pct=min(99, int(got * 100 / total)), detail=detail)
             try:
                 updater.download(url, tmp, hook, timeout=timeout)
-                if size and tmp.stat().st_size != size:
+                if want_size and tmp.stat().st_size != want_size:
                     raise OSError("받은 파일 크기가 달라요")
-                if sha256 and updater.sha256(tmp) != sha256:
+                if want_sha and updater.sha256(tmp) != want_sha:
                     raise OSError("받은 파일 확인(sha256)에 실패했어요")
                 updater._replace(tmp, path)
                 return path
@@ -243,6 +252,8 @@ def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, t
                     tmp.unlink()
                 except OSError:
                     pass
+                if isinstance(e, DownloadCancelled):
+                    raise
                 if _timed_out(e):
                     break
         raise err or OSError("내려받을 주소가 없어요")

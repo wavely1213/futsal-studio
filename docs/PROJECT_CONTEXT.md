@@ -59,6 +59,9 @@ editor.py           편집실 백엔드: 프로젝트 저장/백업·자동 가�
 thumb.py            썸네일 백엔드: 장면 후보·캡처·누끼·디자인 저장·이미지 내보내기
 face.py             얼굴·표정 점수 (ONNX 모델은 처음 쓸 때 내려받음)
 style.py            스타일 배우기 → WORK/styles/<이름>.json
+plan.py             영상 기획 분석 (인트로·장르·형식·자막·재미 판단) → 스타일의 plan
+avmodels.py         기획 분석 모델 (화면 글자 OCR · 소리 종류 YAMNet, 처음 쓸 때 받음)
+claude_cli.py       클로드 계정으로 쓰기 (사용자 PC의 Claude Code CLI 호출)
 qa.py               내보낸 영상 자동 검수
 bundle.py           촬영본 여러 파일 → 한 영상
 upload.py           올리기 키트 (제목·설명·챕터·태그·썸네일 확인)
@@ -97,6 +100,7 @@ icon.ico / icon.png 앱 아이콘
 - **필요한 환경변수**: 시크릿은 없다. 모두 선택 사항이다.
   - `FUTSAL_PORT`: 로컬 서버 포트 (기본 8765)
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
+  - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`: 내부용. 재시작·실행기 경유를 표시하며 직접 설정하지 않는다.
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)
@@ -115,6 +119,8 @@ icon.ico / icon.png 앱 아이콘
 | GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
 | GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` | 없음 |
+| ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
+| Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |
 | Hugging Face Hub | faster-whisper가 받아쓰기 모델을 처음 한 번 받음 (라이브러리 기본 동작) | 없음 |
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |

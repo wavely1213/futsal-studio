@@ -15,9 +15,11 @@ from urllib.parse import parse_qs, urlparse
 
 import bundle
 import captions
+import claude_cli
 import core
 import editor
 import hooks
+import plan
 import qa
 import source
 import style
@@ -43,6 +45,7 @@ LOCK = threading.Lock()
 
 
 LOGFILE = core.WORK / "studio.log"
+STYLE_JOBS = ("스타일 배우기", "클로드로 더 깊게 보기")   # 스타일 파일(plan)을 끝에 다시 쓰는 작업
 
 
 def log(msg):
@@ -287,6 +290,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
             return self._send(200, {"styles": style.list_styles()})
+        # ---- 영상 기획 분석: 클로드 계정 상태 (읽기만 · 60초 기억) · Claude 에게 물어볼 내용 ----
+        if u.path == "/api/claude/status":
+            return self._send(200, claude_cli.status(refresh=(q.get("refresh") or ["0"])[0] == "1"))
+        if u.path == "/api/style/plan_prompt":
+            try:
+                d = json.loads(style.style_file((q.get("name") or [""])[0]).read_text(encoding="utf-8"))
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except (OSError, ValueError):
+                return self._send(500, {"ok": False, "error": "스타일 파일을 읽지 못했어요"})
+            if not isinstance(d.get("plan"), dict):
+                return self._send(400, {"ok": False, "error": "이 스타일은 아직 기획 분석이 없어요. 먼저 '다시 배우기'를 눌러 주세요"})
+            return self._send(200, {"ok": True, "prompt": plan.claude_prompt(d)})
         if u.path == "/api/thumb/open":
             n = q["name"][0]
             rec = editor.recommend(n)
@@ -527,6 +543,54 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/edit/proxy":
             ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        # ---- 영상 기획 분석: 클로드 계정으로 쓰기 (사용자 PC 의 Claude Code CLI) · Claude 대답 붙여 넣기 ----
+        if path in ("/api/claude/install", "/api/claude/login", "/api/claude/token"):
+            try:
+                if path == "/api/claude/install":
+                    claude_cli.install()
+                elif path == "/api/claude/login":
+                    claude_cli.login()
+                elif b.get("clear"):
+                    claude_cli.clear_token()
+                else:
+                    claude_cli.save_token(b.get("token"))
+            except claude_cli.ClaudeError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "창을 띄우지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            log({"/api/claude/install": "클로드 설치 창을 띄웠어요", "/api/claude/login": "클로드 로그인 창을 띄웠어요",
+                 "/api/claude/token": "클로드 로그인 코드를 " + ("지웠어요" if b.get("clear") else "저장했어요")}[path])
+            return self._send(200, {"ok": True})
+        if path in ("/api/style/plan_ai", "/api/style/plan_paste"):
+            sname = str(b.get("name") or "")
+            try:
+                style.style_file(sname)
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            if path == "/api/style/plan_paste":
+                try:
+                    ai = plan.parse_ai(b.get("text"), by="paste")
+                    # 스타일 파일을 쓰는 작업(배우기·클로드 판단)이 도는 중이면 그 작업이 끝에 덮어써서 붙여 넣은 대답이 사라짐 → 거절.
+                    # 확인과 저장을 작업 잠금 안에서 해서, 저장하는 동안 새 작업이 끼어들지 않게 (저장은 금방 끝남)
+                    with LOCK:
+                        if JOB["name"] in STYLE_JOBS:
+                            return self._send(409, {"ok": False, "busy": True,
+                                                    "error": f"지금 '{JOB['name']}' 중이에요. 끝난 뒤에 [저장]을 다시 눌러 주세요 (붙여 넣은 글은 그대로 있어요)"})
+                        plan.save_ai(sname, ai)
+                except (ValueError, style.StyleError) as e:
+                    return self._send(400, {"ok": False, "error": str(e)})
+                except OSError:
+                    return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+                log(f"Claude 대답을 붙여 넣었어요 · {sname}")
+                return self._send(200, {"ok": True, "ai": ai})
+
+            def do_ai():
+                try:
+                    return plan.run_ai(sname, log, editor.CANCEL)
+                except (style.StyleError, OSError, ValueError) as e:
+                    return {"ok": False, "error": str(e) or "클로드 판단을 저장하지 못했어요"}
+            ok = start_job("클로드로 더 깊게 보기", do_ai)
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path == "/api/edit/cancel":
             editor.cancel_export()

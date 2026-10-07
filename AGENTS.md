@@ -86,6 +86,6 @@
 - **실행기 자가 시험**: `python3 updater.py --selftest` → `selftest ok`
 - **린트**: 설정 파일은 없다. `python3 -m pyflakes *.py` — 새 경고가 없어야 한다(지금 남은 경고는 `docs/KNOWN_ISSUES.md` I-019). 고친 HTML의 JS는 문법만 확인한다(`docs/CODING_STANDARDS.md` 3번). pyflakes가 없으면 최소 `python3 -m py_compile *.py`.
 - **저장소 밖 작업 공간 `$SCRATCH`**: 썸네일 원본·빌드 스크립트·e2e 묶음은 저장소가 아니라 리드 개발 환경의 scratchpad에 있다(`docs/KNOWN_ISSUES.md` I-018). 작성 시점 경로는 `/tmp/claude-0/-home-user-wavely/0fb55fd4-356e-5366-99c4-2fddb0b4f464/scratchpad`이고 세션·환경마다 바뀔 수 있다. 다른 문서는 이 경로를 `$SCRATCH`로만 적는다.
-- **E2E (Playwright)**: 편집실 `$SCRATCH/ed2_test.py`(193개 확인), 썸네일 `$SCRATCH/th2_test.py`, 스타일 배우기 `$SCRATCH/style_test.py`. 영향받는 화면을 고쳤으면 해당 묶음을 돌린다. 시험 앱 띄우기·실행 명령은 `docs/TESTING_GUIDELINES.md` 1번.
+- **E2E (Playwright)**: 편집실 `$SCRATCH/ed2_test.py`(193개 확인), 썸네일 `$SCRATCH/th2_test.py`, 스타일 배우기 `$SCRATCH/style_test.py`(기획 분석·클로드 카드는 `bash $SCRATCH/plan_run.sh` 시험 앱 8911 + `STYLE_PORT=8911 PLAN_DIR=$SCRATCH/plantest`). 영향받는 화면을 고쳤으면 해당 묶음을 돌린다. 시험 앱 띄우기·실행 명령은 `docs/TESTING_GUIDELINES.md` 1번.
 - **빌드**: 앱 자체는 빌드가 없다(파이썬·HTML을 그대로 배포). 예외는 `thumb.html` 하나다. `bash $SCRATCH/build_thumb.sh`가 `$SCRATCH/thumb_v2_head.html` + `$SCRATCH/tv2/p1_core.js`…`p7_auto.js`를 이어 붙여 `thumb.html`을 쓰고 node로 JS 문법을 확인한다(`syntax ok`). 출력 위치는 `$SCRATCH/futsal-studio-repo/thumb.html`로 고정돼 있으니 다른 클론에서 일하면 결과를 복사한다. 규칙은 `docs/ARCHITECTURE.md` 7절 6번.
 - **배포**: `./release.sh X.Y.Z "변경 내용 한 줄"` — 절대 규칙 2에 따라 소유자 승인 후에만 한다. `git add -A`를 하므로 커밋 안 한 다른 작업이 있으면 깨끗한 클론에서 한다. 절차·주의는 `docs/DEVELOPMENT_RULES.md` 8번.

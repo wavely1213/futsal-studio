@@ -163,6 +163,96 @@ def reencode(src, out, size="960x540", crf=30):
     return Path(out)
 
 
+# ---- 영상 기획 분석 정답 영상 (plan.py) ----
+# 70초: 티저(0~4초 = 50~54초 장면) → 타이틀(검정 바탕 가운데 큰 글씨) → 본편(말 자막·노랑 강조·이름표·속마음·의성어)
+#       → 40초 정지 화면 2초 → 56~64초 50~54초 장면을 2배 느리게 다시 (슬로 리플레이). 소리: 핑크 잡음(배경) + 33초 짧은 비프.
+PLAN_NAME = "20990103_PLANTEST001_슈팅 챌린지 1대1 대결.mp4"
+PLAN_DUR = 70.0
+PLAN_TRANSCRIPT = [
+    {"start": 7.2, "end": 10.0, "text": "오늘은 슈팅 연습을 해볼게요"},
+    {"start": 10.3, "end": 13.8, "text": "공을 끝까지 보고 차세요"},
+    {"start": 14.2, "end": 18.8, "text": "디딤발은 공 옆에 두세요"},
+    {"start": 20.2, "end": 22.8, "text": "와 대박 진짜 미쳤다"},
+    {"start": 24.2, "end": 28.8, "text": "다시 한번 해볼게요"},
+    {"start": 42.4, "end": 48.6, "text": "이번에는 왼발로 차 볼게요"},
+    {"start": 64.5, "end": 68.5, "text": "구독 좋아요 부탁해요"},
+]
+PLAN_CAPS = [  # (시작, 끝, 스타일, 글자)
+    (4.0, 7.0, "Title", "슈팅 챌린지"),
+    (7.2, 10.0, "Speech", "오늘은 슈팅 연습을 해볼게요"), (10.3, 13.8, "Speech", "공을 끝까지 보고 차세요"),
+    (14.2, 18.8, "Speech", "디딤발은 공 옆에 두세요"),
+    (20.0, 23.0, "Emph", "이게 들어간다고?"), (21.0, 26.5, "Name", "최경진 감독"),
+    (24.2, 28.8, "Speech", "다시 한번 해볼게요"),
+    (30.0, 32.5, "Inner", "(당황)"), (33.0, 34.6, "Sfx", "쾅!"),
+    (42.4, 48.6, "Speech", "이번에는 왼발로 차 볼게요"), (64.5, 68.5, "Speech", "구독 좋아요 부탁해요"),
+]
+
+
+def _plan_ass():
+    head = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "WrapStyle: 2", "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+            "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            "Style: Title,Black Han Sans,60,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,5,10,10,0,1",
+            "Style: Speech,Pretendard,26,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,2,10,10,18,1",
+            "Style: Emph,Black Han Sans,52,&H004DE1FF,&H004DE1FF,&H00111111,&H00000000,0,0,0,0,100,100,0,0,1,4,0,5,10,10,0,1",
+            "Style: Name,Pretendard,18,&H00FFFFFF,&H00FFFFFF,&H004D4DFF,&H004D4DFF,1,0,0,0,100,100,0,0,3,4,0,7,24,10,18,1",
+            "Style: Inner,Pretendard,30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,8,10,10,40,1",
+            "Style: Sfx,Black Han Sans,64,&H001C9FFF,&H001C9FFF,&H00111111,&H00000000,0,0,0,0,100,100,0,0,1,4,0,5,10,10,0,1",
+            "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    return "\n".join(head + [f"Dialogue: 0,{_ts(a)},{_ts(b)},{st},,0,0,0,,{t}" for a, b, st, t in PLAN_CAPS]) + "\n"
+
+
+def make_plan_fixture(out, work=None):
+    """기획 분석 정답 영상을 out 에 만들고 정답(dict)을 돌려줌 (받아쓰기 흉내 PLAN_TRANSCRIPT 포함)."""
+    out = Path(out)
+    tmp = Path(work or tempfile.mkdtemp(prefix="기획 정답 "))
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        (tmp / "fonts").mkdir(exist_ok=True)
+        for f in ("Pretendard-Bold.otf", "BlackHanSans-Regular.ttf"):
+            shutil.copy2(core.APP_DIR / "fonts" / f, tmp / "fonts" / f)
+        (tmp / "plan.ass").write_text(_plan_ass(), encoding="utf-8")
+        for k, (r, g, b) in PATTERNS.items():  # 크게 그린 무늬를 천천히 훑음 (장면 C)
+            _ff(["-f", "lavfi", "-i", f"color=c=black:s=1280x720:d=1,format=rgb24,geq=r='{r}':g='{g}':b='{b}'", "-frames:v", "1", f"{k}.png"], tmp)
+        # 장면 X: 무늬 위에 바둑판(경계가 또렷한 실제 촬영처럼 · 밋밋한 화면은 티저·리플레이로 안 봄)
+        ck = "90*mod(floor(X/40)+floor(Y/40),2)"
+        xr, xg, xb = (f"0.55*({c})+{ck}" for c in PATTERNS["pat1"])
+        _ff(["-f", "lavfi", "-i", f"color=c=black:s=1280x720:d=1,format=rgb24,geq=r='{xr}':g='{xg}':b='{xb}'", "-frames:v", "1", "x.png"], tmp)
+        R = RATE
+        pan = lambda img, d: ["-loop", "1", "-framerate", R, "-t", d, "-i", img]  # noqa: E731
+        ins = (pan("x.png", 4)                                                       # 0: X (티저·원본·리플레이에 같이 씀)
+               + ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={R}:d=3"]           # 1: 타이틀 바탕
+               + ["-f", "lavfi", "-i", f"mandelbrot=s={W}x{H}:r={R}:end_scale=0.05:end_pts=400"]   # 2: A
+               + ["-f", "lavfi", "-i", f"life=s=160x90:r={R}:mold=10:ratio=0.5:life_color=#FFCC33:death_color=#203060,scale={W}:{H}:flags=neighbor"]  # 3: B
+               + pan("pat2.png", 12)                                                    # 4: C (+ 끝 2초 멈춤)
+               + pan("pat1.png", 8)                                                     # 5: D
+               + ["-f", "lavfi", "-i", f"cellauto=s={W}x{H}:r={R}:rule=110:scroll=1"]  # 6: E
+               + ["-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r={R}"]                      # 7: F
+               + ["-f", "lavfi", "-i", f"anoisesrc=color=pink:amplitude=0.12:sample_rate=48000:d={PLAN_DUR}"]   # 8: 배경 소리
+               + ["-f", "lavfi", "-i", "sine=f=1400:sample_rate=48000:d=0.25"])          # 9: 효과음 비프
+        mv = lambda i, d: f"[{i}:v]crop={W}:{H}:x='t*24':y='60+t*8',fps={R},trim=duration={d},setpts=PTS-STARTPTS,format=yuv420p,setsar=1"  # noqa: E731
+        plain = lambda i, d: f"[{i}:v]fps={R},trim=duration={d},setpts=PTS-STARTPTS,scale={W}:{H},format=yuv420p,setsar=1"  # noqa: E731
+        fc = [mv(0, 4) + ",split=3[x0][x1][x2]",
+              plain(1, 3) + "[t]", plain(2, 13) + "[a]", plain(3, 10) + "[b]",
+              # C 는 10초 동안 훑다가 마지막 장면에서 2초 멈춤 (40~42초 정지 화면, 소리는 계속)
+              f"[4:v]crop={W}:{H}:x='40+min(t\\,10)*30':y='100',fps={R},trim=duration=12,setpts=PTS-STARTPTS,format=yuv420p,setsar=1[c]",
+              f"[5:v]crop={W}:{H}:x='300':y='t*30',fps={R},trim=duration=8,setpts=PTS-STARTPTS,format=yuv420p,setsar=1[d]", plain(6, 2) + "[e]", "[x2]setpts=2*PTS,fps=" + str(R) + "[xs]", plain(7, 6) + "[f]",
+              "[x0][t][a][b][c][d][x1][e][xs][f]concat=n=10:v=1:a=0[cat]",
+              "[cat]subtitles=plan.ass:fontsdir=fonts[v]",
+              "[9:a]adelay=33000|33000,volume=6[bp]", "[8:a][bp]amix=inputs=2:duration=first:normalize=0[au]"]
+        # 순서: X 0~4 · 타이틀 4~7 · A 7~20 · B 20~30 · C 30~40 + 정지 40~42 · D 42~50 · X 50~54 · E 54~56 · X 2배 느리게 56~64 · F 64~70
+        _ff(ins + ["-filter_complex", ";".join(fc), "-map", "[v]", "-map", "[au]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                   "-pix_fmt", "yuv420p", "-r", R, "-c:a", "aac", "-b:a", "128k", "-t", PLAN_DUR, "plan.mp4"], tmp)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(tmp / "plan.mp4"), str(out))
+    finally:
+        if work is None:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return {"duration": PLAN_DUR, "teaser": [0, 4, 50], "title": [4, 7], "freeze": [40, 42], "slow_replay": [56, 64, 50, 54],
+            "transcript": PLAN_TRANSCRIPT}
+
+
 if __name__ == "__main__":
     dst = Path(sys.argv[1] if len(sys.argv) > 1 else "style_fixture.mp4")
     t = make_fixture(dst)

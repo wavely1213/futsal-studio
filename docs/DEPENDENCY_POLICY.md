@@ -91,6 +91,9 @@
 | Whisper 모델 `large-v3-turbo` | Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo` (faster-whisper 기본 동작) | 받아쓰기 |
 | 누끼 모델 BiRefNet(약 220MB)·u2net_human_seg(약 170MB) | GitHub danielgatis/rembg 릴리스 → `~/.futsal-studio/models` | 썸네일 배경 지우기 |
 | 얼굴 UltraFace RFB-320·표정 FER+ (약 36MB) | ONNX model zoo 고정 커밋 → `~/.futsal-studio/models` | 썸네일 장면 고르기 표정 점수 |
+| PP-OCRv5 mobile 글자 찾기(4.8MB)·한국어 읽기(13.5MB)·글자 목록 (Apache-2.0, RapidOCR ONNX 변환본) | ModelScope RapidAI/RapidOCR `v3.9.2` 태그 (예비: Hugging Face monkt/paddleocr-onnx 고정 커밋, 주소별 크기·sha256) → `~/.futsal-studio/models` | 영상 기획 분석: 레퍼런스 화면 자막 읽기 (`avmodels.ocr`) |
+| YAMNet (16MB, Apache-2.0 표시, tf2onnx 변환본) | Hugging Face zeropointnine/yamnet-onnx 고정 커밋 → `~/.futsal-studio/models` | 영상 기획 분석: 웃음·환호·음악·효과음 (`avmodels.tags`) |
+| Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021). 앱이 직접 받거나 묶지 않음 |
 | Pretendard 웹폰트 CSS (v1.3.9 고정) | jsDelivr CDN (`ui.html`만) | 메인 화면 글꼴. 편집실·썸네일은 로컬 `fonts/` |
 
 **개발 전용** (`requirements.txt`에 넣지 않음): Playwright(Python·Chromium, e2e 묶음), 시스템 `ffmpeg`·`ffprobe`(`ed2_test.py` 결과 확인), node(`thumb.html` JS 문법 확인), git·bash(`release.sh`), pyflakes/ruff(린트, `CODING_STANDARDS.md` 3번).

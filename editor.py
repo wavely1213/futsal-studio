@@ -622,6 +622,183 @@ def _hook(rec_item):
 
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
 
+# ---------- 영상 기획 분석 (plan) 반영: 인트로 티저 · 강조 자막 — 스타일 가편집(롱폼)에만, 원본 장면은 지우지 않음 ----------
+# 강조 낱말: 명사·부사만 (낱말 줄기 '잘하'·'힘들', 흔한 말 '진짜'·'어떻게' 는 뺌) — 낱말 전체가 같을 때만 (부분 일치 금지: '패턴'의 '턴')
+EMPH_WORDS = ("무조건", "절대", "대박", "100%", "이것만", "핵심", "꿀팁", "비결", "중요", "실수", "포인트", "비밀", "원리", "차이")
+EMPH_GAP = 15.0       # 강조 자막끼리 최소 간격(초)
+EMPH_DUR = 1.5
+EMPH_SHORT = 12       # 말 전체를 그대로 띄울 수 있는 길이 (띄어쓰기 뺀 글자 수)
+_EMPH_TAIL = re.compile(r"^(이에요|예요|입니다|이죠|이고|해요|합니다|하는|하면|하고|해서|할|한|해|하죠|하게|이|가|을|를|은|는|도|만|의|에|에서|으로|로|와|과)?[!~.?]*$")
+
+
+def _emph_terms():
+    """강조로 띄울 기술 이름 (hooks.TERMS 중 두 글자 넘는 것 — '턴'·'슛'·'킥' 같은 한 글자는 다른 낱말 속에 흔해서 뺌)."""
+    import hooks
+    return [t for t in hooks.TERMS if len(t.replace(" ", "")) >= 2]
+
+
+def _tokens(txt):
+    return re.findall(r"[가-힣A-Za-z0-9%]+", str(txt or ""))
+
+
+def _find_terms(toks, terms):
+    """낱말 목록에서 기술 이름 찾기 (조사만 떼고 낱말 전체가 같아야 함 · 여러 낱말 이름은 이어진 낱말로) → [(시작 번호, 끝 번호, 이름)]."""
+    out, i = [], 0
+    multi = sorted((t.split() for t in terms), key=len, reverse=True)
+    while i < len(toks):
+        hit = None
+        for parts in multi:
+            k = len(parts)
+            if i + k > len(toks):
+                continue
+            seg = toks[i:i + k - 1] + [toks[i + k - 1]]
+            last = seg[-1]
+            if seg[:-1] == parts[:-1] and (last == parts[-1] or (last.startswith(parts[-1]) and _EMPH_TAIL.match(last[len(parts[-1]):]))):
+                hit = (i, i + k, " ".join(parts))
+                break
+        if hit:
+            out.append(hit)
+            i = hit[1]
+        else:
+            i += 1
+    # 이어진 기술 이름은 하나로 ('인사이드' '패스' → '인사이드 패스')
+    merged = []
+    for a, b, t in out:
+        if merged and merged[-1][1] == a:
+            merged[-1] = (merged[-1][0], b, merged[-1][2] + " " + t)
+        else:
+            merged.append((a, b, t))
+    return merged
+
+
+def _find_emph(toks):
+    for tk in toks:
+        for w in EMPH_WORDS:
+            if tk == w or (tk.startswith(w) and _EMPH_TAIL.match(tk[len(w):])):
+                return w
+    return None
+
+
+def emphasis_label(txt, terms=None):
+    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+    기술 이름도 강조 낱말도 낱말 전체가 맞을 때만 — 낱말 조각('잘하!'·'턴!')은 만들지 않음."""
+    terms = terms if terms is not None else _emph_terms()
+    toks = _tokens(txt)
+    found = _find_terms(toks, terms)
+    emph = _find_emph(toks)
+    if not found and not emph:
+        return None, 0
+    flat = re.sub(r"\s+", " ", str(txt or "")).strip()
+    score = len(found) + (2 if emph else 0)
+    if len(flat.replace(" ", "")) <= EMPH_SHORT:
+        return flat, score
+    if found and emph:
+        return f"{found[0][2]} {emph}!", score
+    if found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
+        return f"{found[0][2]}!", score
+    return None, 0
+
+
+def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
+    """롱폼 맨 앞에 미리 보기 sec 초 + 제목 → (items, titles). 원래 컷은 그만큼 뒤로 밂 (지우지 않음).
+    고르는 곳: 정리 컷 안의 sec 초 창 중에서 말이 적고(감독님 시범) 현장 소리가 큰(공 차는 소리·환호) 곳 — 첫 쇼츠 추천 구간이면 조금 더 점수.
+    말이 많은 곳밖에 없으면 그 소리는 줄여서 (제목과 겹쳐 말이 끊겨 들리지 않게)."""
+    r = (rec.get("shorts") or [None])[0]
+    pool = list(tidy or []) or list((r or {}).get("cuts") or [])
+    if not pool or sec <= 0:
+        return items, []
+    talk = [(float(s["start"]), float(s["end"])) for s in segs or [] if float(s.get("end", 0)) > float(s.get("start", 0))]
+    rr = (float(r["start"]), float(r["end"])) if r and "start" in r and "end" in r else None
+    pk, per = None, 50
+    if peaks and peaks.get("peaks"):
+        pk, per = peaks["peaks"], int(peaks.get("per_sec") or 50)
+
+    def speech(a, b):
+        return sum(max(0.0, min(b, e) - max(a, s)) for s, e in talk) / max(1e-6, b - a)
+
+    def loud(a, b):
+        if not pk:
+            return 0.0
+        seg = pk[int(a * per):int(b * per)]
+        if not seg:
+            return 0.0
+        top = sorted(seg)[-max(1, len(seg) // 10):]  # 창 안에서 가장 큰 10% (공 차는 소리·환호)
+        return sum(top) / len(top)
+    def pick(full):
+        """full: sec 초를 다 채우는 창만 (없을 때만 더 짧은 컷도)."""
+        best = None
+        for c in pool:
+            a0, b0 = float(c["in"]), float(c["out"])
+            if b0 - a0 < 1.0 or (full and b0 - a0 < sec - 1e-6):
+                continue
+            t = a0
+            while True:
+                a, b = t, min(b0, t + sec)
+                if b - a >= min(sec, b0 - a0) - 1e-6:
+                    sc = -2.0 * speech(a, b) + loud(a, b) + (0.3 if rr and rr[0] <= a and b <= rr[1] else 0.0)
+                    if best is None or sc > best[0] + 1e-9:
+                        best = (sc, a, b)
+                if b >= b0 - 1e-6:
+                    break
+                t = min(t + 1.0, b0 - sec) if b0 - sec > t + 1e-6 else b0
+        return best
+    best = pick(True) or pick(False)
+    if best is None:
+        return items, []
+    _, a, b = best
+    if b - a < 1.0:
+        return items, []
+    ln = round(b - a, 3)
+    moved = [dict(it, start=round(float(it["start"]) + ln, 4)) for it in items]
+    vol = 0.3 if speech(a, b) > 0.3 else 1.0
+    text = _hook(r) if r else "오늘의 하이라이트"
+    return _pair(a, b, start=0.0, vol=vol) + moved, [{"id": _nid(), "text": text, "start": 0.0, "dur": round(ln, 2), "style": dict(TITLE_STYLE),
+                                                    "plan": "teaser"}]
+
+
+def _src_to_tl(items, t):
+    """원본 t 초 → 타임라인 시각 (V1 클립 안일 때만, 잘린 곳이면 None)."""
+    for it in items:
+        if it.get("track") == "V1" and it.get("media", "main") == "main" and float(it["in"]) <= t < float(it["out"]):
+            return float(it["start"]) + (t - float(it["in"])) / i_sp(it)
+    return None
+
+
+def _emphasis_titles(items, segs, per_min, color, after=0.0):
+    """받아쓰기에서 기술 이름·강조 낱말이 든 말을 골라 1.5초 큰 색 글씨(titles)로 — 1분에 per_min 개까지, 서로 EMPH_GAP 초 넘게 떨어뜨림.
+    teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀)."""
+    total = max([i_end(it) for it in items] or [0.0])
+    cap = int(per_min * total / 60.0 + 1e-9)
+    if cap <= 0 or not segs:
+        return []
+    terms = _emph_terms()
+    cands = []
+    for s in segs:
+        txt = str(s.get("text") or "").strip()
+        label, score = emphasis_label(txt, terms)
+        if not label:
+            continue
+        t = float(s["start"])
+        key = label.rstrip("!").split()[0]
+        for w in s.get("words") or ():  # 낱말 시각이 있으면 그 낱말이 나오는 때에
+            if str(w.get("w") or "").replace(" ", "").startswith(key):
+                t = float(w.get("s", t))
+                break
+        tl = _src_to_tl(items, t)
+        if tl is None or tl < after + 1.0 or tl + EMPH_DUR > total:
+            continue
+        cands.append((-score, tl, label))
+    picked = []
+    for _, tl, label in sorted(cands):
+        if len(picked) >= cap:
+            break
+        if all(abs(tl - p) >= EMPH_GAP for p, _ in picked):
+            picked.append((tl, label))
+    fill = str(color or "").upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color or "")) else "#FFE14D"
+    sty = dict(TITLE_STYLE, fill=fill, size=88, y=0.3)
+    return [{"id": _nid(), "text": label, "start": round(tl, 2), "dur": EMPH_DUR, "style": dict(sty), "plan": "emphasis"}
+            for tl, label in sorted(picked)]
+
 
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
@@ -646,9 +823,22 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     seqs = []
     if "long" in kinds:
         tidy = rec["tidy"] or [{"in": 0.0, "out": info["duration"]}]
-        seqs.append(_new_seq("롱폼 가편집", "long", _items_from_cuts(_rhythm(tidy, segs, st, every), zoom=zoom), captionStyle=cap(LONG_STYLE),
+        items, extra = _items_from_cuts(_rhythm(tidy, segs, st, every), zoom=zoom), {}
+        tz, em = st.get("introTeaser") or {}, st.get("emphasisTitles") or {}
+        titles = []
+        if tz.get("on") and float(tz.get("sec") or 0) > 0:  # 기획 분석: 티저형 인트로 스타일
+            try:  # 소리 크기(편집실 파형, 없으면 만듦 · 몇 초) — 못 읽으면 말이 적은 곳만 보고 고름
+                peaks = waveform(name)
+            except Exception:  # noqa: BLE001
+                peaks = None
+            items, titles = _intro_teaser(items, rec, tidy, min(6.0, max(3.0, float(tz["sec"]))), segs, peaks)
+        if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막
+            titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0)
+        if titles:
+            extra["titles"] = titles
+        seqs.append(_new_seq("롱폼 가편집", "long", items, captionStyle=cap(LONG_STYLE),
                              layout={"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0},
-                             master=dict(master), captionsOn=caps_on))
+                             master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
         for i, r in enumerate(rec["shorts"], 1):
             items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every), 0.3, zoom=zoom)

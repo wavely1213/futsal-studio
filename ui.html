@@ -77,6 +77,47 @@
   .styles .st .score .btn { padding: 6px 10px; font-size: 12px; }
   .styles .st .score .res { flex-basis: 100%; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
   .styles .st .score .res b { color: var(--brand); font-size: 14px; }
+  /* 영상 기획 분석 (판단 문장 위주 · 숫자·시각은 접힌 '근거 보기'·'구조 수치' 안에만) */
+  .grid.styles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); align-items: start; }
+  .styles .st .psum { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.55; margin: 2px 0 12px; }
+  .styles .st .psum.old { font-weight: 500; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .styles .st .ptitle { font-size: 12px; font-weight: 700; color: var(--ink-3); letter-spacing: .2px; margin: 14px 0 6px; display: flex; gap: 6px; align-items: center; }
+  .styles .st .plan { display: grid; grid-template-columns: 64px 1fr; gap: 8px 12px; font-size: 13px; line-height: 1.55; }
+  .styles .st .plan .pk { color: var(--ink-2); font-weight: 700; }
+  .styles .st .plan .pv { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+  .styles .st .plan .mine { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .styles .st .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 4px; white-space: nowrap; vertical-align: 1px; }
+  .styles .st .tag.hi { background: var(--brand-soft); color: var(--brand); }
+  .styles .st .tag.mid { background: var(--cut-soft); color: var(--cut); }
+  .styles .st .tag.lo { background: var(--peak-soft); color: var(--peak); }
+  .styles .st .tag.ai { background: #efe9ff; color: #5b3fc4; }
+  .styles .st .agree { color: var(--ink-3); font-size: 11px; margin-left: 4px; white-space: nowrap; }
+  .styles .st .apply { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; line-height: 1.5; }
+  .styles .st .apply li { display: flex; gap: 8px; align-items: baseline; }
+  .styles .st .apply li::before { content: "→"; color: var(--brand); font-weight: 700; }
+  .styles .st .apply .tx { flex: 1; min-width: 0; }
+  .styles .st .pbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .styles .st .pbtns .btn { padding: 6px 10px; font-size: 12px; }
+  .styles .st .paste { display: grid; gap: 6px; margin-top: 8px; }
+  .styles .st .paste[hidden] { display: none; }
+  .styles .st .paste textarea { width: 100%; min-height: 90px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--surface); font-size: 12px; }
+  .styles .st details.fold { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .styles .st details.fold > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
+  .styles .st details.fold .evs { display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; margin-top: 8px; line-height: 1.5; }
+  .styles .st details.fold .kv { margin-top: 8px; }
+  .styles .st details.fold p { margin: 8px 0; font-size: 12px; }
+  @media (prefers-color-scheme: dark) { .styles .st .tag.ai { background: #2a2147; color: #c4b5ff; } }
+  /* 클로드 계정으로 쓰기 */
+  .ccard { padding: 14px 16px; margin-bottom: 16px; }
+  .ccard > summary { cursor: pointer; font-weight: 700; display: flex; gap: 8px; align-items: center; list-style: none; }
+  .ccard > summary::-webkit-details-marker { display: none; }
+  .ccard > summary .st8 { font-weight: 500; color: var(--ink-2); font-size: 13px; }
+  .ccard .cbody { margin-top: 10px; display: grid; gap: 10px; font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+  .ccard .cbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ccard .cbtns .btn { padding: 6px 12px; font-size: 13px; }
+  .ccard details.adv summary { cursor: pointer; font-size: 12px; color: var(--ink-3); }
+  .ccard details.adv .row2 { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .ccard details.adv input { flex: 1 1 220px; min-width: 0; }
 
   .btn { border: 1px solid var(--line); background: var(--surface); padding: 9px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; white-space: nowrap; }
   .btn:hover { background: var(--surface-2); }
@@ -389,7 +430,8 @@
       <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
     </section>
     <section class="panel" id="p-style">
-      <div class="phead"><div><h1>스타일 배우기</h1><p>잘 나가는 유튜버 영상을 보관함에 담고 여기서 고르면, 컷 리듬·확대 컷·말 사이 공백·자막 위치와 색·소리 크기를 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요.</p></div></div>
+      <div class="phead"><div><h1>스타일 배우기</h1><p>잘 나가는 유튜버 영상을 보관함에 담고 여기서 고르면, 그 채널의 공식(인트로 구성·장르·형식·자막 처리·재미 요소)을 판단하고 컷 리듬 같은 편집 습관까지 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요.</p></div></div>
+      <details class="card ccard" id="claudeCard"><summary>🤖 클로드 계정으로 쓰기 <span class="st8" id="claudeState">확인 중…</span></summary><div class="cbody" id="claudeBody"></div></details>
       <div class="bar">
         <input class="inp" id="styleName" placeholder="스타일 이름 (예: 슛포러브 스타일)">
         <div class="sp"></div>
@@ -512,7 +554,7 @@ function go(p) {
   document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.p === p));
   document.querySelectorAll(".panel").forEach(s => s.classList.toggle("on", s.id === "p-" + p));
   if (p === "points") loadEvents();
-  if (p === "style") loadStyles();
+  if (p === "style") { loadStyles(); if (!claude.state) claudeStatus(false); }
   if (p === "library") checkSources();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
@@ -801,18 +843,53 @@ function renderStyleSrc() {
   syncStyle();
 }
 function syncStyle() { const n = document.querySelectorAll(".schk:checked").length; $("btnLearn").disabled = !!state.job || !n; $("btnLearn").textContent = n ? `스타일 배우기 (${n}개 영상)` : "스타일 배우기"; }
+/* 6. 배운 스타일 카드: '영상 기획 분석'(판단 문장) 위주 — 시각·컷 수 같은 숫자는 접힌 '근거 보기'·'구조 수치' 안에만 */
+const PLAN_ROWS = [["intro", "인트로"], ["genre", "장르"], ["format", "형식"], ["captions", "자막"], ["fun", "재미 요소"]];
+const confTag = c => c >= 0.75 ? `<span class="tag hi" title="여러 신호가 같은 판단을 가리켜요">확실해요</span>` : c >= 0.5 ? `<span class="tag mid" title="신호 한두 개로 판단했어요">아마도</span>` : `<span class="tag lo" title="단서가 적어 어림으로 판단했어요">어림</span>`;
+const planText = (k, x) => k === "format" ? (x.labels || []).join(" · ") : (x.label || "");
+function planBlock(st) {
+  const pl = st.plan, ai = pl.ai || null, n = pl.refs || 1;
+  const sum = ai && ai.summary ? ai.summary : (pl.summary || "");  // 머리글: 채널 공식 한 문장 (아래 다섯 줄을 되풀이하지 않게)
+  const head = ai && ai.summary ? sum.split(/(?<=요\.)\s+/).slice(0, 2).join(" ") : (pl.headline || sum.split(/(?<=요\.)\s+/)[0] || "");
+  const rows = PLAN_ROWS.map(([k, nm]) => {
+    const x = pl[k] || {}, mine = esc(planText(k, x)), ag = n > 1 && pl.agree && pl.agree[k] ? `<span class="agree" title="레퍼런스 영상마다 같은 판단이 나온 수">${esc(pl.agree[k])} 영상</span>` : "";
+    return ai && ai[k] ? `<span class="pk">${nm}</span><div class="pv">${esc(ai[k])} <span class="tag ai">Claude 판단</span><div class="mine">내 PC 판단: ${mine} ${confTag(x.conf || 0)}</div></div>`
+      : `<span class="pk">${nm}</span><div class="pv">${mine} ${confTag(x.conf || 0)}${ag}</div>`;
+  }).join("");
+  const ap = (pl.apply || []).filter(a => a.auto || !(ai && (ai.apply || []).length)).map(a => `<li><span class="tx">${esc(a.tip)}</span><span class="chip" style="${a.auto ? "background:var(--brand-soft);color:var(--brand)" : ""}">${a.auto ? "가편집에 반영돼요" : "직접 해 보세요"}</span></li>`)
+    .concat(((ai && ai.apply) || []).slice(0, 3).map(t => `<li><span class="tx">${esc(t)} <span class="tag ai">Claude 판단</span></span><span class="chip">직접 해 보세요</span></li>`)).join("");
+  const evs = PLAN_ROWS.map(([k, nm]) => { const e = ((pl[k] || {}).ev || []).slice(0, 2).map(x => esc(x.why)).join(" · "); return e ? `<span class="pk">${nm}</span><span>${e}</span>` : ""; }).join("");
+  const fix = ai && ai.fix ? `<span class="pk">Claude</span><span>내 PC 판단에서 고친 점: ${esc(ai.fix)}</span>` : "";
+  return `<p class="psum">${esc(head)}</p>
+      <div class="ptitle">영상 기획 분석${ai ? ` <span class="tag ai" title="${esc(ai.by === "paste" ? "붙여 넣은 Claude 대답" : "내 클로드 계정으로 받은 판단")} · ${esc(ai.at || "")}">Claude 판단 포함</span>` : ""}</div>
+      <div class="plan">${rows}</div>
+      ${ap ? `<div class="ptitle">우리 영상에 적용하면</div><ul class="apply">${ap}</ul>` : ""}
+      <div class="pbtns"><button class="btn" data-pai="${esc(st.name)}" title="내 PC에 설치된 클로드 프로그램으로 장면 그림·대사까지 보고 더 깊게 판단해요 (내 클로드 계정 사용량)">클로드로 더 깊게 보기</button>
+        <button class="btn" data-pcopy="${esc(st.name)}" title="claude.ai 대화창에 붙여 넣을 질문을 복사해요 (무료)">Claude에게 물어볼 내용 복사</button>
+        <button class="btn" data-ppaste="${esc(st.name)}" title="claude.ai 에서 받은 대답을 붙여 넣으면 '(Claude 판단)'으로 저장해요">Claude 대답 붙여 넣기</button></div>
+      <div class="paste" data-pbox="${esc(st.name)}" hidden><textarea placeholder="claude.ai 의 대답을 그대로 붙여 넣어 주세요"></textarea><div><button class="btn primary" data-psave="${esc(st.name)}">저장</button></div></div>
+      ${evs || fix ? `<details class="fold" data-fold="ev"><summary>근거 보기</summary><div class="evs">${evs}${fix}</div></details>` : ""}`;
+}
+function relearnable(p) {  // 같은 영상이 보관함에 다 있으면 '다시 배우기'
+  const src = Array.isArray(p.source) ? p.source : [p.source];
+  return src.length && src.every(n => typeof n === "string" && state.local.some(v => v.name === n)) ? src : null;
+}
 async function loadStyles() {
   const j = await (await fetch("/api/style/list")).json(), list = j.styles || [];
   $("styleEmpty").style.display = list.length ? "none" : "block"; state.styles = list.map(s => s.name);
-  const pos = { bottom: "아래", middle: "가운데", top: "위" };
-  $("styleList").innerHTML = list.map(st => { const p = st.profile, q = st.params; return `<div class="card st">
+  const pos = { bottom: "아래", middle: "가운데", top: "위" }, open = {};
+  document.querySelectorAll(".styles .st details.fold[open]").forEach(d => (open[d.closest(".st").dataset.sname + "|" + d.dataset.fold] = 1));  // 다시 그려도 펼친 칸은 그대로
+  $("styleList").innerHTML = list.map(st => { const p = st.profile, q = st.params, re = relearnable(p); return `<div class="card st" data-sname="${esc(st.name)}">
       <h3>🎬 ${esc(st.name)}<span class="sp" style="flex:1"></span><button class="linkbtn" data-sdel="${esc(st.name)}">삭제</button></h3>
-      <p>${esc(st.desc)}</p>
+      ${st.plan ? planBlock(st) : `<p class="psum old">다시 배우면 기획 분석이 생겨요 (인트로 구성·장르·형식·자막·재미 요소)${re ? ` <button class="btn" data-prelearn="${esc(st.name)}">다시 배우기</button>` : ""}</p>`}
+      <details class="fold" data-fold="kv"><summary>구조 수치 (편집 엔진용)</summary><p>${esc(st.desc)}</p>
       <div class="kv"><b>컷 길이</b><span>평균 ${p.avgShot}초 · 1분에 ${p.cutsPerMin}번</span><b>확대 컷</b><span>${q.zoomEvery ? `${q.zoomEvery}초마다 · ${q.zoomScale}배` : "거의 없음"}</span>
-      <b>말 사이 공백</b><span>${q.keepPause}초 넘으면 자름</span><b>자막</b><span>${q.captions ? `${pos[p.captionPos]}쪽 · <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.captionColor};border:1px solid #888"></span> ${p.captionColor}` : "적게 씀"}</span>
-      <b>소리 크기</b><span>${p.lufs ?? "—"} LUFS</span>${q.splitShot ? `<b>컷 리듬</b><span>도입 ${q.curve3[0]}초 · 본론 ${q.curve3[1]}초 · 마무리 ${q.curve3[2]}초마다 컷</span>` : ""}${p.charsPerSec ? `<b>말 빠르기</b><span>1초에 ${p.charsPerSec}글자 <label class="tempo" title="코치님 말이 이 스타일보다 느리면, 말하는 부분만 최대 12% 빠르게 (시범 부분은 그대로)"><input type="checkbox" data-stempo="${esc(st.name)}"${p.tempoOn === false ? "" : " checked"}> 가편집에서 맞추기</label></span>` : ""}<b>배운 영상</b><span>${Array.isArray(p.source) ? p.source.length + "개" : "1개"}</span></div>${scoreBlock(st.name, JSON.stringify([p.analyzed, p.duration, p.source, p.tempoOn !== false]))}</div>`; }).join("");
+      <b>말 사이 공백</b><span>${q.keepPause}초 넘으면 자름</span><b>자막</b><span>${q.captions ? `${pos[p.captionPos]}쪽 · <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(p.captionColor)};border:1px solid #888"></span> ${esc(p.captionColor)}` : "적게 씀"}</span>
+      <b>소리 크기</b><span>${p.lufs ?? "—"} LUFS</span>${q.splitShot ? `<b>컷 리듬</b><span>도입 ${q.curve3[0]}초 · 본론 ${q.curve3[1]}초 · 마무리 ${q.curve3[2]}초마다 컷</span>` : ""}${p.charsPerSec ? `<b>말 빠르기</b><span>1초에 ${p.charsPerSec}글자 <label class="tempo" title="코치님 말이 이 스타일보다 느리면, 말하는 부분만 최대 12% 빠르게 (시범 부분은 그대로)"><input type="checkbox" data-stempo="${esc(st.name)}"${p.tempoOn === false ? "" : " checked"}> 가편집에서 맞추기</label></span>` : ""}${q.introTeaser && q.introTeaser.on ? `<b>인트로 티저</b><span>맨 앞 ${q.introTeaser.sec}초 미리 보기 + 제목</span>` : ""}${q.emphasisTitles && q.emphasisTitles.perMin ? `<b>강조 자막</b><span>1분에 ${q.emphasisTitles.perMin}번까지</span>` : ""}<b>배운 영상</b><span>${Array.isArray(p.source) ? p.source.length + "개" : "1개"}</span></div></details>${scoreBlock(st.name, JSON.stringify([p.analyzed, p.duration, p.source, p.tempoOn !== false]))}</div>`; }).join("");
+  document.querySelectorAll(".styles .st details.fold").forEach(d => { if (open[d.closest(".st").dataset.sname + "|" + d.dataset.fold]) d.open = true; });
   document.querySelectorAll("[data-sdel]").forEach(b => (b.onclick = async () => { if (!confirm(`'${b.dataset.sdel}' 스타일을 지울까요?`)) return; await api("/api/style/delete", { name: b.dataset.sdel }); loadStyles(); }));
   bindScores();
+  bindPlan();
   document.querySelectorAll("[data-stempo]").forEach(c => (c.onchange = async () => {  // 컷 리듬 맞추기 (#7): 말 빠르기 켜기/끄기
     c.disabled = true;
     const r = await api("/api/style/tempo", { name: c.dataset.stempo, on: c.checked }).catch(() => ({}));
@@ -820,6 +897,71 @@ async function loadStyles() {
     else if (!r.error) toast("설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
     loadStyles();
   }));
+}
+function bindPlan() {
+  document.querySelectorAll("[data-prelearn]").forEach(b => (b.onclick = async () => {
+    const name = b.dataset.prelearn, st = (await (await fetch("/api/style/list")).json()).styles.find(x => x.name === name), src = st && relearnable(st.profile);
+    if (!src) { toast("배운 영상이 보관함에 없어요. 영상을 다시 담은 뒤 새로 배워 주세요"); return; }
+    job("/api/style/learn", { name, names: src }, () => { toast(`'${name}'을 다시 배웠어요 · 영상 기획 분석이 생겼어요`); loadStyles(); });
+  }));
+  document.querySelectorAll("[data-pcopy]").forEach(b => (b.onclick = async () => {
+    const r = await api(`/api/style/plan_prompt?name=${encodeURIComponent(b.dataset.pcopy)}`);
+    if (!r.ok) return;
+    await copyText(r.prompt);
+    toast("복사했어요 · claude.ai 대화창에 붙여 넣고, 대답을 [Claude 대답 붙여 넣기]로 넣어 주세요 (무료)");
+  }));
+  document.querySelectorAll("[data-ppaste]").forEach(b => (b.onclick = () => {
+    const box = [...document.querySelectorAll("[data-pbox]")].find(x => x.dataset.pbox === b.dataset.ppaste);
+    box.hidden = !box.hidden; if (!box.hidden) box.querySelector("textarea").focus();
+  }));
+  document.querySelectorAll("[data-psave]").forEach(b => (b.onclick = async () => {
+    const box = b.closest("[data-pbox]"), t = box.querySelector("textarea").value.trim();
+    if (!t) { toast("대답을 붙여 넣어 주세요"); return; }
+    b.disabled = true;
+    const r = await api("/api/style/plan_paste", { name: b.dataset.psave, text: t }).catch(() => ({}));
+    b.disabled = false;
+    if (r.ok) { toast("Claude 판단을 저장했어요"); loadStyles(); }
+  }));
+  document.querySelectorAll("[data-pai]").forEach(b => (b.onclick = async () => {
+    if (claude.state && claude.state.state !== "ready") {
+      $("claudeCard").open = true; $("claudeCard").scrollIntoView({ behavior: "smooth", block: "start" });
+      toast(claude.state.state === "missing" ? "먼저 클로드 프로그램을 설치해 주세요 (위 카드)" : "먼저 클로드 계정으로 로그인해 주세요 (위 카드)");
+      if (claude.state.state !== "unknown") return;
+    }
+    const name = b.dataset.pai;
+    job("/api/style/plan_ai", { name }, r => { if (r && r.ok) toast("클로드 판단을 받았어요 · '(Claude 판단)'으로 보여 줘요"); else toast((r && r.error) || "클로드 판단을 받지 못했어요"); if (r && r.kind === "login") claudeStatus(true); loadStyles(); });
+  }));
+}
+/* 6-0. 클로드 계정으로 쓰기 — 이 PC 의 Claude Code(공식 프로그램)로 내 클로드(Pro/Max) 계정을 씀 */
+const claude = { state: null };
+const CLAUDE_TXT = {
+  missing: ["설치 안 됨", "이 PC에 클로드 프로그램이 없어요. 설치하면 내 클로드(Pro/Max) 계정으로 영상 기획을 더 깊게 분석해요 (추가 비용 없음, 사용 한도 안에서)."],
+  login: ["로그인 필요", "클로드 계정으로 로그인해 주세요. [로그인]을 누르면 열리는 창의 안내대로 브라우저에서 로그인하면 돼요. 끝나면 [다시 확인]을 눌러 주세요."],
+  ready: ["연결됐어요 ✓", "클로드 계정으로 연결됐어요 ✓ 배운 스타일 카드의 [클로드로 더 깊게 보기]를 누르면 장면 그림과 대사까지 보고 판단해요 (내 클로드 사용량 사용)."],
+  unknown: ["확인 필요", "클로드 프로그램은 있는데 로그인 상태를 알 수 없어요 (예전 판일 수 있어요). [로그인]으로 로그인한 뒤 [클로드로 더 깊게 보기]를 눌러 보세요."],
+};
+function renderClaude() {
+  const v = claude.state || {}, t = CLAUDE_TXT[v.state] || ["확인 중…", "클로드 프로그램을 확인하고 있어요…"];
+  $("claudeState").textContent = t[0];
+  const btn = v.state === "missing" ? `<button class="btn primary" id="cInstall">설치하기</button>` : v.state === "ready" ? "" : `<button class="btn primary" id="cLogin">로그인</button>`;
+  $("claudeBody").innerHTML = `<div>${esc(t[1])}</div><div class="cbtns">${btn}<button class="btn" id="cCheck">다시 확인</button></div>
+    ${v.state && v.state !== "missing" ? `<details class="adv"><summary>고급: 로그인 코드 붙여 넣기 (claude setup-token)</summary><div class="row2"><input class="inp" id="cToken" type="password" autocomplete="off" placeholder="sk-ant-oat… (이 PC의 사용자 폴더에만 저장돼요)"><button class="btn" id="cTokSave">저장</button>${v.hasToken ? `<button class="btn" id="cTokClear">지우기</button>` : ""}</div></details>` : ""}
+    <div class="up-hint" style="margin:0">클로드 판단은 버튼을 누를 때만, 레퍼런스 영상의 대사 일부와 장면 그림 몇 장을 내 클로드 계정으로 보내요. 무료로 쓰려면 카드의 [Claude에게 물어볼 내용 복사]로 claude.ai 에 붙여 넣어도 돼요.</div>`;
+  const on = (id, f) => { const e = $(id); if (e) e.onclick = f; };
+  on("cInstall", async () => {
+    if (!confirm("Anthropic 공식 설치 프로그램을 파란 창에서 실행해요. 창이 끝나면 닫고 [다시 확인]을 눌러 주세요")) return;
+    const r = await api("/api/claude/install", {}); if (r.ok) toast("설치 창을 열었어요 · 끝나면 [다시 확인]을 눌러 주세요");
+  });
+  on("cLogin", async () => { const r = await api("/api/claude/login", {}); if (r.ok) toast("로그인 창을 열었어요 · 브라우저에서 로그인한 뒤 [다시 확인]을 눌러 주세요"); });
+  on("cCheck", () => claudeStatus(true));
+  on("cTokSave", async () => { const r = await api("/api/claude/token", { token: $("cToken").value.trim() }); if (r.ok) { toast("로그인 코드를 저장했어요"); claudeStatus(true); } });
+  on("cTokClear", async () => { const r = await api("/api/claude/token", { clear: true }); if (r.ok) { toast("로그인 코드를 지웠어요"); claudeStatus(true); } });
+}
+async function claudeStatus(refresh) {
+  if (refresh) { claude.state = null; renderClaude(); }
+  try { claude.state = await (await fetch(`/api/claude/status${refresh ? "?refresh=1" : ""}`)).json(); } catch (e) { claude.state = { state: "unknown" }; }
+  renderClaude();
+  if (claude.state.state !== "ready" && !refresh && !claude.opened) { $("claudeCard").open = true; claude.opened = true; }
 }
 /* 6-1. 스타일 일치 점수: 고른 영상을 이 스타일로 자동 가편집하면 스타일과 얼마나 닮았는지 (내보내지 않고 바로) */
 const scores = {}, scoreVid = {}, SCORE_HINT = "고른 영상을 이 스타일로 가편집하면 몇 점일지 매겨 봐요";

@@ -40,7 +40,7 @@
 | 실행기 | `updater.py` | 실행, 업데이트 설치·검증, 되돌리기, 앱을 `runpy`로 실행, `--selftest` | 표준 라이브러리 밖 import. 앱 모듈 import(새 버전 확인은 별도 프로세스에서 `IMPORT_CHECK`로). 최신 Python 전용 문법 사용. 실행기가 망가지면 앱이 아예 안 켜지고 되돌릴 수도 없다 |
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`(둘 다 표준 라이브러리만 쓰는 도우미, D-019)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -51,7 +51,9 @@
   - `app`은 `updater`를 함수 안에서 직접 import한다(업데이트 마무리·실행기 경유). `face`는 `thumb`을 거쳐서만 쓴다.
   - `upload` → `editor`, `hooks`, `core`
   - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`
-  - `style`·`qa`·`hooks` → `core`
+  - `style` → `core`, `plan` · `qa`·`hooks` → `core`
+  - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
+  - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
   - `face` → `core`, `thumb`
@@ -71,7 +73,10 @@
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소) |
 | thumb | `thumb.py` | `frame_candidates`(선명도·밝기·인물 × 얼굴·표정, 하이라이트·핵심어 순간, 캐시 `candidates3.json`), `grab`, `remove_bg`(누끼 ONNX), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256 확인 후 제자리에 둠) |
 | face | `face.py` | UltraFace 얼굴 + FER+ 표정 점수. `ensure()`가 처음에 모델을 받고, 실패하면 10분 동안 다시 시도하지 않고 조용히 False를 돌려줌 |
-| style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자), `learn`·`list_styles` |
+| style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
+| plan | `plan.py` | 영상 기획 분석 (D-021). `extract_plan`(1초 한 장 640px 지문·복잡도·잔디·화면 글자 OCR(상한 400장)·소리 종류·화자 수 → `plan_events.json`), `detect`(티저·타이틀·정지·리플레이·삽입·흔들기·몽타주·웃음·효과음·펀치라인 줌·자막 사건 6종), `judge`(인트로·장르·형식·자막·재미 판단 문장 + 확신 + 근거 1~2개 · 채널 공식 한 문장 `headline`), `merge_plans`(길이×확신 투표 · 갈리면 `mixed` 표시), `plan_params`(절반 넘게 같은 판단일 때만 가편집 값), `claude_prompt`·`parse_ai`·`run_ai`(Claude 판단 저장) |
+| avmodels | `avmodels.py` | 기획 분석 모델: PP-OCRv5 글자 찾기·한국어 읽기, YAMNet 소리 종류. `ensure`(처음에 받기 · ✕ 로 멈춤, 실패하면 10분 쉬고 조용히 False · 불러오지 못한 파일은 지워 다시 받게), `usable`(기획 기록 재사용 판단), `ocr`, `tags` |
+| claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |
 | upload | `upload.py` | `build_kit`·`save_edits`·`load_kit`: 제목 후보·설명(템플릿)·챕터·태그·썸네일 확인 → `out/<…>_올리기.txt/.json`. 유튜브 글자 수·챕터 규칙 적용 |
@@ -93,11 +98,12 @@
   - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
   - 백업: `projects/backup/<stem>__YYYYMMDD_HHMMSS[_태그].json`. 자동 백업은 5분마다 최근 10개, 태그 백업(재분석전·덮어쓰기전·변환전)은 따로 10개
 - 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·올린 그림)
-- 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필). 영상별 이벤트(컷·줌 시각) 저장은 2차 작업에서 진행 중
+- 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필) + `plan`(영상 기획 분석: intro·genre·format·captions·fun·summary·apply·agree, Claude 판단 `ai`) · `refs[i].plan`(영상마다). `plan`이 없는 예전 파일도 그대로 읽는다
+  - 영상마다 `analysis/<stem>/style_events.json`(구조, D-015)과 `plan_events.json`(기획 신호: 판 `v`·파일 `sig`·그때의 모델 상태·지문·OCR 줄·소리 점수·화자 수)을 따로 둔다
 - 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
 - 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`
-- 사용자별 `~/.futsal-studio/`: `bin/deno.exe`, `models/*.onnx`, `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
+- 사용자별 `~/.futsal-studio/`: `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각)
 - 앱 폴더의 업데이트 상태: `.update_staging/`, `.rollback/v<이전>/{files/, rollback.json}`, `.update_pending`, `.update_result`, `.req_hash`, `.update_skip` (모두 `.gitignore`에 있음)
 - 규칙·불변식(예: 다시 분석해도 사용자 편집본을 덮어쓰지 않음, `config.json`을 보존함)은 `DOMAIN_KNOWLEDGE.md` 참고
 
