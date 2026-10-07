@@ -95,6 +95,7 @@ NOTE_TEXT = {
     "tunnel": "확인이 필요해요 · 원격 연결이 자꾸 끊겨요",
     "blocked": "확인이 필요해요 · YouTube가 막았어요",
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
+    "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
     "moved": "알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · mulgyeol.kr/futsal 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
@@ -102,6 +103,15 @@ MISSED_MSG = "받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 �
 NOT_STOPPABLE_MSG = "이 작업은 중간에 멈출 수 없어요 · 끝나면 알려 드릴게요"
 BLOCKED_PHONE_MSG = ("YouTube가 막았어요 · PC 스튜디오에서 '업데이트 확인'으로 다운로드 엔진을 최신으로 바꾸거나 "
                      "'크롬 로그인 정보로 받기'를 켜고 다시 받아 주세요")
+# 채널 전략 새로 고침·점검은 멈추거나 막혀도 ok:true (끝난 채널은 저장) → 휴대폰에는 stopped·blocked·net 으로 '멈췄어요'·'확인이 필요해요' (D-028)
+STRATEGY_REFRESHING = {strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK}
+STRATEGY_MSG = {
+    "stopped": "멈췄어요 · 끝난 채널은 저장했어요 · 나머지는 PC 8단계 '채널 전략'에서 다시 새로 고쳐 주세요",
+    "stopped_check": "멈췄어요 · 그때까지 받은 숫자로 점검했어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
+    "blocked": "YouTube가 잠시 막아 6시간 쉬어요 · 남은 채널은 최근 날짜·조회수만 새로 고쳤어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
+    "net": "PC 인터넷이 끊겨 일부 채널만 새로 고쳤어요 · 인터넷을 확인한 뒤 PC 8단계 '채널 전략'에서 다시 새로 고쳐 주세요",
+}
+STALE_CANCEL_MSG = "보던 작업은 이미 끝났어요 · 지금 작업은 멈추지 않았어요"
 # 멈추기(editor.CANCEL·ffmpeg 끄기)를 보는 작업 — 그 밖의 작업은 휴대폰에서 [멈추기]를 보여 주지 않음
 STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보기 만들기", "영상 검수", "스타일 배우기", "학습용 스타일 배우기",
              "스타일 일치 점수", "클로드로 더 깊게 보기",
@@ -1172,13 +1182,20 @@ class Service:
     # ----- 작업이 끝났을 때 (app.JOB_HOOKS) -----
     def job_hook(self, name, error, result, by, secs):
         """last: 휴대폰 '마지막 작업' 칸 — ok(끝)·warn(확인이 필요해요: 막힘·못 받은 영상)·실패. 알림은 정해진 문장만."""
-        ok, err, blocked, warn = True, None, False, False
+        ok, err, blocked, warn, note = True, None, False, False, "missed"
         if error:
             ok, err = False, scrub(error)
         elif isinstance(result, dict) and result.get("ok") is False:
             ok, err, blocked = False, scrub(result.get("error")), bool(result.get("blocked"))
             if blocked:
-                warn, err = True, BLOCKED_PHONE_MSG
+                warn, err, note = True, BLOCKED_PHONE_MSG, "blocked"
+        elif name in STRATEGY_REFRESHING and isinstance(result, dict):  # 멈춤 → '멈췄어요' · 막힘·인터넷 끊김 → '확인이 필요해요' (D-028)
+            if result.get("stopped"):
+                ok, err = False, STRATEGY_MSG["stopped_check" if name == strategy.JOB_CHECK else "stopped"]
+            elif result.get("blocked") or result.get("net"):
+                blocked = bool(result.get("blocked"))
+                ok, warn, note = False, True, "blocked" if blocked else "net"
+                err = STRATEGY_MSG[note]
         elif name == "보관함에 담기" and isinstance(result, list) and result:  # 받기 작업은 못 받은 영상 id 목록을 돌려줌
             ok, warn, err = False, True, MISSED_MSG.format(n=len(result))
         self.last = {"name": name, "ok": ok, "warn": warn, "error": err, "blocked": blocked, "endedAt": int(self.clock()), "by": by}
@@ -1194,7 +1211,7 @@ class Service:
         label = _label(name)
         if warn:
             if n.get("attention"):
-                self._note("attention", NOTE_TEXT["blocked" if blocked else "missed"])
+                self._note("attention", NOTE_TEXT[note])
         elif not ok:
             if n.get("failed") and (by or secs >= 5):
                 self.pub.notify("failed", f"작업이 멈췄어요 · {label} — 휴대폰에서 자세히 보기", 4, "warning")
@@ -1338,7 +1355,7 @@ class Service:
         job = None
         if snap.get("name"):
             pr = snap.get("progress") or {}
-            job = {"name": snap["name"], "by": snap.get("by"), "startedAt": int(snap["t0"]) if snap.get("t0") else None,
+            job = {"name": snap["name"], "id": snap.get("id"), "by": snap.get("by"), "startedAt": int(snap["t0"]) if snap.get("t0") else None,
                    "stoppable": snap["name"] in STOPPABLE,
                    "progress": {"label": scrub(pr.get("label") or ""), "item": self._item_title(pr.get("item")), "pct": pr.get("pct"),
                                 "detail": scrub(pr.get("detail") or ""), "eta": pr.get("eta")}}
@@ -1432,10 +1449,10 @@ class Service:
 
     def r_action(self, dev, b):
         action, args = b.get("action"), b.get("args") if isinstance(b.get("args"), dict) else {}
-        if action not in ACTIONS:
+        if not isinstance(action, str) or action not in ACTIONS:  # 목록·객체(해시 안 됨)도 400 (500·오류 기록 없이)
             raise ActionError("할 수 없는 동작이에요")
         if action == "cancel":
-            return self.r_cancel(dev)
+            return self.r_cancel(dev, args.get("job"))
         return ACTIONS[action](self, dev, args, b.get("confirm"))
 
     def _go(self, dev, label, fn, target):
@@ -1452,11 +1469,16 @@ class Service:
         self.log(f"원격 · {who} · {label}" + (f" · {clean(target, 80)}" if target else ""))
         return {"ok": True, "job": label}
 
-    def r_cancel(self, dev):
+    def r_cancel(self, dev, want=None):
+        """멈추기. want: 휴대폰이 보고 있던 작업 번호(/r/status 의 job.id · 없어도 됨) — 그 작업이 끝나고 다음 작업이 돌면 409 (다른 작업을 멈추지 않게)."""
+        if want is not None and (not isinstance(want, int) or isinstance(want, bool)):
+            raise ActionError("잘못된 요청이에요")
         snap = self.bridge.job() if self.bridge else {}
         name = snap.get("name")
         if not name:
             raise ActionError("지금 하는 작업이 없어요", 409)
+        if want is not None and want != snap.get("id"):
+            raise ActionError(STALE_CANCEL_MSG, 409)
         if name not in STOPPABLE:
             raise ActionError(NOT_STOPPABLE_MSG, 409)
         editor.cancel_export()
@@ -1767,7 +1789,7 @@ class RemoteHandler(BaseHTTPRequestHandler):
         routes = {("GET", "/r/status"): lambda: svc.r_status(dev, _int((parse_qs(u.query).get("since") or ["0"])[0])),
                   ("GET", "/r/library"): lambda: svc.r_library(dev, ip), ("GET", "/r/outputs"): lambda: svc.r_outputs(dev, ip),
                   ("GET", "/r/choices"): lambda: svc.r_choices(dev), ("POST", "/r/action"): lambda: svc.r_action(dev, b),
-                  ("POST", "/r/cancel"): lambda: svc.r_cancel(dev), ("POST", "/r/forget"): lambda: svc.r_forget(dev),
+                  ("POST", "/r/cancel"): lambda: svc.r_cancel(dev, b.get("job")), ("POST", "/r/forget"): lambda: svc.r_forget(dev),
                   ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev)}
         if (method, path) == ("POST", "/r/remote-off"):  # 더 안전하게만 (휴대폰에서 켜는 길은 없음)
             svc.log(f"원격 · {clean(dev['name'], 40)} · 원격 접속 끄기")

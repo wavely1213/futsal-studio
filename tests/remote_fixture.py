@@ -120,7 +120,8 @@ class FakeBridge:
 
     def __init__(self):
         self.lines = []
-        self.job_state = {"name": None, "by": None, "t0": None, "progress": {}, "result": None, "error": None}
+        self.job_state = {"name": None, "id": None, "by": None, "t0": None, "progress": {}, "result": None, "error": None}
+        self.next_id = 0
         self.started = []
         self.lock = threading.Lock()
         self.hooks = []
@@ -143,7 +144,9 @@ class FakeBridge:
         with self.lock:
             if self.job_state["name"]:
                 return False
-            self.job_state.update(name=name, by=by, t0=time.time(), result=None, error=None)
+            self.next_id += 1
+            jid = self.next_id
+            self.job_state.update(name=name, id=jid, by=by, t0=time.time(), result=None, error=None)
             self.started.append((name, by))
 
         def run():
@@ -153,11 +156,11 @@ class FakeBridge:
             except Exception as e:  # noqa: BLE001
                 err = str(e)
             with self.lock:
-                self.job_state.update(name=None, result=res, error=err)
+                self.job_state.update(name=None, id=None, result=res, error=err)
             for h in self.hooks:
                 h(name, err, res, by, 1.0)
         threading.Thread(target=run, daemon=True).start()
-        return True
+        return jid
 
     def wait_idle(self, timeout=60):
         end = time.time() + timeout

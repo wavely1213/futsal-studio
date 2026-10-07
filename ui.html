@@ -306,11 +306,11 @@
   .drawer header .sp { flex: 1; }
   .drawer pre { margin: 0; height: 220px; overflow: auto; padding: 12px 20px; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-2); white-space: pre-wrap; }
 
-  /* 휴대폰으로 보기 (원격 접속 · remote.py) */
-  .rdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 6px; vertical-align: 1px; opacity: .55; }
-  .rdot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
-  .rdot.wait { background: var(--peak); opacity: 1; }
-  .rdot.err { background: var(--danger); opacity: 1; }
+  /* 휴대폰으로 보기 (원격 접속 · remote.py) — 점은 #rmDot 에만 (8단계 점검 알림 점 .step .rdot 과 같은 이름이라 섞이지 않게) */
+  #rmDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 6px; vertical-align: 1px; opacity: .55; }
+  #rmDot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
+  #rmDot.wait { background: var(--peak); opacity: 1; }
+  #rmDot.err { background: var(--danger); opacity: 1; }
   .rmask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 8; padding: 20px; }
   .rmask.show { display: flex; }
   .rbox { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; }
@@ -1954,7 +1954,10 @@ checkUpdate();
     if (SX.autoTried || !o.settings.ownAuto || !o.refresh.ownStale || o.refresh.pause || state.job) return;
     SX.autoTried = true;
     fetch("/api/strategy/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ own: true }) })
-      .then(r => r.json()).then(j => { if (j.ok) waitFor(j, () => load(true)); }).catch(() => {});
+      .then(r => r.json().then(j => {
+        if (j.ok) waitFor(j, () => load(true));
+        else if (r.status === 409) SX.autoTried = false;  // 이 화면이 모르는 새 작업(휴대폰이 시킨 일 등)이 막 시작됨 → 다음에 8단계를 읽을 때 다시
+      })).catch(() => {});
   }
 
   function renderAll() { renderSum(); renderWeek(); renderTabs(); renderComp(); renderPlan(); renderTake(); renderSol(); renderProb(); renderCheck(); renderRemind(); }
@@ -2388,6 +2391,7 @@ checkUpdate();
       if (r.ok) { toast("Claude 의견을 저장했어요"); SX.ov.ai = r.ai; SX.ov.aiStale = false; renderSol(); }
     };
     if (typeof claude !== "undefined" && !claude.state) claudeStatus(false).then(() => { if (SX.tab === "sol") renderSol(); });
+    syncJobUi();  // 새로 그린 [클로드로 더 깊게 보기]도 다른 작업(휴대폰이 시킨 일 포함) 중이면 바로 막힘
   }
 
   /* ---- (5) 가능성 (%) ---- */
@@ -2569,6 +2573,7 @@ checkUpdate();
     };
     $("sxRemOn").onchange = async () => { const r = await api("/api/strategy/settings", { remind: $("sxRemOn").checked }).catch(() => ({})); if (r.ok) { SX.ov.settings = r.settings; toast(r.settings.remind ? "매주 점검 알림을 켰어요" : "점검 알림을 껐어요"); remindCheck(); } };
     $("sxOwnAuto").onchange = async () => { const r = await api("/api/strategy/settings", { ownAuto: $("sxOwnAuto").checked }).catch(() => ({})); if (r.ok) { SX.ov.settings = r.settings; toast(r.settings.ownAuto ? "열 때 우리 채널 숫자를 하루 한 번 기록해요" : "자동 기록을 껐어요 (새로 고침을 눌러 받아요)"); } };
+    syncJobUi();  // 새로 그린 [지금 점검하기]도 작업 중이면 바로 막힘
   }
 
   /* ---- 점검 알림 · 작업 중 표시 ---- */

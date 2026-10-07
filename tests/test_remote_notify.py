@@ -241,6 +241,30 @@ class NotifyTests(NotifyBase):
         self.assertEqual([p[1] for p in self.notes(n=2)], ["작업이 끝났어요 · 채널 전략 새로 고침 (6분)",
                                                            "작업이 멈췄어요 · 클로드로 전략 보기 — 휴대폰에서 자세히 보기"])
 
+    def test_strategy_stopped_blocked_net_not_shown_as_done(self):
+        """합침 검토(D-028): 채널 전략 새로 고침·점검은 멈춰도·막혀도 ok:true → 휴대폰이 '끝 ✓'·'작업이 끝났어요'로 보이면 안 됨.
+        멈춤 = '멈췄어요' · YouTube 막힘·인터넷 끊김 = '확인이 필요해요' · 그대로 끝나면 '끝났어요'."""
+        import strategy
+        self.turn_on()
+        self.svc.job_hook(strategy.JOB_REFRESH, None, {"ok": True, "done": 1, "failed": 1, "todo": 18, "blocked": False, "net": False, "stopped": True},
+                          None, 166)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["error"]), (False, False, remote.STRATEGY_MSG["stopped"]))
+        self.svc.job_hook(strategy.JOB_CHECK, None, {"ok": True, "checkup": {}, "stopped": True, "blocked": False, "net": False}, None, 40)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["error"]), (False, remote.STRATEGY_MSG["stopped_check"]))
+        self.svc.job_hook(strategy.JOB_OWN, None, {"ok": True, "done": 1, "blocked": True, "net": False, "stopped": False}, None, 30)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["blocked"], last["error"]), (False, True, True, remote.STRATEGY_MSG["blocked"]))
+        self.svc.job_hook(strategy.JOB_CHECK, None, {"ok": True, "checkup": {}, "stopped": False, "blocked": False, "net": True}, None, 30)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["blocked"], last["error"]), (False, True, False, remote.STRATEGY_MSG["net"]))
+        self.svc.job_hook(strategy.JOB_AI, None, {"ok": True, "blocked": True, "stopped": True}, None, 60)  # 클로드는 멈추면 ok:false (따로 봄)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (True, False))
+        texts = [p[1] for p in self.notes(n=5)]
+        self.assertEqual(texts, ["작업이 멈췄어요 · 채널 전략 새로 고침 — 휴대폰에서 자세히 보기", "작업이 멈췄어요 · 채널 점검 — 휴대폰에서 자세히 보기",
+                                 remote.NOTE_TEXT["blocked"], remote.NOTE_TEXT["net"], "작업이 끝났어요 · 클로드로 전략 보기 (1분)"])
+        self.assertFalse(any(t.startswith("작업이 끝났어요 · 채널") for t in texts))
+
     def test_blocked_and_missed_are_attention(self):
         self.turn_on()
         self.svc.job_hook("학습용 영상 받기", None, {"ok": False, "error": "막힘", "blocked": True}, "휴대폰 · x", 30)

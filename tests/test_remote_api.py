@@ -596,6 +596,40 @@ class ActionTests(Base):
         self.assertEqual(c.call_count, 2)
         self.assertIn("원격 · iPhone · Safari · 멈추기", self.fb.lines)
 
+    def test_cancel_bound_to_job_phone_saw(self):
+        """합침 검토: 휴대폰이 보던 작업이 끝나고 PC 가 다음 작업을 시작했으면, 그 번호로 보낸 멈추기는 다음 작업을 멈추지 않음 (409).
+        번호 없이 보내면 예전처럼 지금 작업 (휴대폰 페이지가 아직 번호를 보내지 않음 · KNOWN_ISSUES I-037)."""
+        with mock.patch.object(editor, "cancel_export") as c:
+            gate = threading.Event()
+            self.fb.start_job("내보내기", gate.wait)
+            seen = self.call("GET", "/r/status?since=0")[2]["job"]["id"]
+            self.assertIsInstance(seen, int)
+            gate.set()
+            self.fb.wait_idle()
+            gate2 = threading.Event()
+            self.fb.start_job("영상 검수", gate2.wait)  # PC 가 바로 다음 작업
+            now = self.call("GET", "/r/status?since=0")[2]["job"]["id"]
+            self.assertNotEqual(now, seen)
+            st, _, b = self.call("POST", "/r/cancel", {"job": seen})
+            self.assertEqual((st, b["ok"], b["error"]), (409, False, remote.STALE_CANCEL_MSG))
+            self.assertEqual(self.act("cancel", {"job": seen})[0], 409)
+            for bad in ("1", True, 1.5, [now]):
+                self.assertEqual(self.call("POST", "/r/cancel", {"job": bad})[0], 400, bad)
+            self.assertEqual(c.call_count, 0)
+            self.assertEqual(self.call("POST", "/r/cancel", {"job": now})[2], {"ok": True})
+            self.assertEqual(self.act("cancel", {"job": now})[2], {"ok": True})
+            self.assertEqual(self.call("POST", "/r/cancel", {})[2], {"ok": True})
+            gate2.set()
+            self.fb.wait_idle()
+        self.assertEqual(c.call_count, 3)
+
+    def test_non_string_action_is_400_not_500(self):
+        """합침 검토: action 이 목록·객체면 TypeError(해시 안 됨) → 500 · 오류 기록 → 다른 모르는 동작처럼 400."""
+        for bad in (["refresh"], {"a": 1}, None, 1, ["cancel"]):
+            st, _, b = self.call("POST", "/r/action", {"action": bad, "args": {}})
+            self.assertEqual((st, b["error"]), (400, "할 수 없는 동작이에요"), bad)
+        self.assertEqual(self.fb.started, [])
+
     def test_strategy_jobs_phone_sees_and_stops_but_cannot_start(self):
         """채널 전략과 합침(D-028): 휴대폰은 전략 작업을 시작할 수 없고(허용 목록 밖 400), PC 가 시킨 전략 작업은 진행이 보이고 멈출 수 있다."""
         import strategy
@@ -783,6 +817,35 @@ class LocalServerTests(Base):
                 time.sleep(0.01)
         self.assertLessEqual(len(app.DONE), 20)
         self.assertNotIn(a, app.DONE)
+
+    def test_pc_strategy_refresh_stopped_from_phone_is_not_done(self):
+        """합침 검토(D-028 보강): 진짜 app.start_job·strategy.refresh 로 — PC 가 시킨 채널 전략 새로 고침을 휴대폰이 그 작업 번호로 멈추면
+        멈추기는 지금 채널 단계가 끝난 뒤 듣고, 휴대폰 '마지막 작업'은 '끝 ✓'가 아니라 '멈췄어요'."""
+        import strategy
+        app = self.app
+        self.svc.bridge = app._remote_bridge()
+        self.addCleanup(editor.CANCEL.clear)
+        listing = threading.Event()
+
+        def slow_listing(url, kind, limit, log=None, lang=None, sleep_requests=None):
+            listing.set()
+            editor.CANCEL.wait(20)  # yt-dlp 목록 하나가 끝나야 멈춤을 들음 (I-037)
+            return {"entries": []}
+        with mock.patch.object(app, "JOB_HOOKS", [self.svc.job_hook]), mock.patch.object(core, "channel_listing", slow_listing), \
+                mock.patch.object(strategy, "fetch_rss", return_value=(None, "x")), mock.patch.object(strategy, "_sleep", lambda s: None):
+            st, _, b = self.local("POST", "/api/strategy/refresh", {"all": True})
+            self.assertEqual((st, b["ok"]), (200, True))
+            self.assertTrue(listing.wait(20))
+            job = self.call("GET", "/r/status?since=0")[2]["job"]
+            self.assertEqual((job["name"], job["id"], job["stoppable"], job["by"]), (strategy.JOB_REFRESH, b["jobId"], True, None))
+            self.assertEqual(self.call("POST", "/r/cancel", {"job": b["jobId"]})[2], {"ok": True})
+            end = time.time() + 30
+            while app.JOB["name"] and time.time() < end:
+                time.sleep(0.05)
+        self.assertIsNone(app.JOB["name"])
+        self.assertTrue(app.DONE[b["jobId"]]["result"]["stopped"])
+        last = self.call("GET", "/r/status?since=0")[2]["last"]
+        self.assertEqual((last["name"], last["ok"], last["warn"], last["error"]), (strategy.JOB_REFRESH, False, False, remote.STRATEGY_MSG["stopped"]))
 
     def test_start_response_has_job_id(self):
         shutil.copy(self.media / "v.mp4", core.VIDEOS / "p.mp4")

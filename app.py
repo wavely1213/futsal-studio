@@ -113,7 +113,7 @@ def _started(ok):
 def _job_snapshot():
     """휴대폰 화면용 지금 작업 모습 (remote.Bridge.job)."""
     with LOCK:
-        return {"name": JOB["name"], "by": JOB["by"], "t0": JOB["t0"], "progress": dict(core.PROGRESS),
+        return {"name": JOB["name"], "id": JOB["id"] if JOB["name"] else None, "by": JOB["by"], "t0": JOB["t0"], "progress": dict(core.PROGRESS),
                 "result": JOB["result"], "error": JOB["error"]}
 
 

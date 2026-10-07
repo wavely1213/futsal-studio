@@ -297,10 +297,23 @@ class RefreshTests(Base):
                 ev.set()
             return out
         with mock.patch.object(core, "channel_listing", fake), mock.patch.object(strategy, "fetch_rss", side_effect=self.rss_for):
-            strategy.refresh(None, "normal", log=lambda m: None, cancel=ev)
+            r = strategy.refresh(None, "normal", log=lambda m: None, cancel=ev)
         self.assertIsNotNone(strategy.load_channel("own"))
         self.assertIsNotNone(strategy.load_channel(self.A))
         self.assertIsNone(strategy.load_channel(self.B_))
+        self.assertTrue(r["ok"] and r["stopped"])  # 멈췄음을 알려 줌 → 휴대폰 '멈췄어요' (D-028)
+        self.assertFalse(self.run_refresh(keys=[self.B_])["stopped"])
+
+    def test_checkup_reports_refresh_stop_block_net(self):
+        """합침 검토(D-028): 점검은 새로 고침이 멈춰도·막혀도 그때까지의 숫자로 점검하고, 멈춤·막힘·인터넷 끊김을 결과에 같이 알려 줌."""
+        for rf, want in (({"ok": True, "stopped": True, "blocked": False, "net": False}, (True, False, False)),
+                         ({"ok": True, "stopped": False, "blocked": True, "net": False}, (False, True, False)),
+                         ({"ok": True, "stopped": False, "blocked": False, "net": True}, (False, False, True)),
+                         ({"ok": True}, (False, False, False))):
+            with mock.patch.object(strategy, "refresh", return_value=rf):
+                r = strategy.checkup(log=lambda m: None)
+            self.assertTrue(r["ok"] and r["checkup"])
+            self.assertEqual((r["stopped"], r["blocked"], r["net"]), want)
 
     def test_full_scan_schedule_and_ko_titles(self):
         self.run_refresh(keys=[self.A], translated=True)

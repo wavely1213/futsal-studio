@@ -897,8 +897,10 @@ def refresh(keys=None, mode="normal", log=print, cancel=None, label=JOB_REFRESH)
             log("  인터넷 연결이 끊긴 것 같아요 · 남은 채널은 다음에 새로 고칠게요")
             break
     core.set_progress(label=label, pct=100, detail="정리하는 중")
+    # stopped: 이 작업 중에 멈추기(✕)를 눌렀음 — 휴대폰 '마지막 작업'·알림이 '끝났어요'가 아니라 '멈췄어요'로 (D-028)
     return {"ok": True, "done": len(done), "failed": len(failed), "todo": len(todo), "blocked": blocked, "net": net or (bool(todo) and net_n == len(todo)),
-            "listed": listed_n, "rssOnly": rss_only, "paused": not yt_ok, "reason": reason, "secs": round(time.time() - t0, 1)}
+            "listed": listed_n, "rssOnly": rss_only, "paused": not yt_ok, "reason": reason, "secs": round(time.time() - t0, 1),
+            "stopped": bool(cancel is not None and cancel.is_set())}
 
 
 def _seed_for(entry, st=None):
@@ -2371,7 +2373,7 @@ def _approx(x):
 def checkup(log=print, cancel=None, studio=None):
     """점검(작업 안에서): 우리 채널 새로 고침 → 계획 vs 실제 · 잘 되는 것/안 되는 것/바꿀 것 → checkups.json.
     지난 점검이 3일 안이면 그 기록을 이번 결과로 바꿈 (기록이 쌓이지 않고 '최근 점검'이 거의 빈 점검으로 덮이지 않게)."""
-    refresh(mode="check", log=log, cancel=cancel, label=JOB_CHECK)
+    rf = refresh(mode="check", log=log, cancel=cancel, label=JOB_CHECK) or {}
     core.set_progress(label=JOB_CHECK, pct=None, detail="계획과 실제를 비교하는 중")
     now = time.time()
     rec = evaluate(studio=studio, now=now)
@@ -2384,7 +2386,8 @@ def checkup(log=print, cancel=None, studio=None):
     _save_checkups(items)
     log(f"  점검했어요 · 잘 되는 것 {len(rec['good'])} · 안 되는 것 {len(rec['bad'])} · 바꿀 것 {len(rec['change'])}"
         + (" · 최근 점검을 이번 결과로 바꿨어요" if rec.get("replaced") else ""))
-    return {"ok": True, "checkup": rec}
+    # 새로 고침이 멈췄거나·막혔거나·인터넷이 끊겼으면 그대로 알려 줌 (점검은 그때까지 받은 숫자로 · 휴대폰 '마지막 작업' D-028)
+    return {"ok": True, "checkup": rec, "stopped": bool(rf.get("stopped")), "blocked": bool(rf.get("blocked")), "net": bool(rf.get("net"))}
 
 
 def _clean_studio(studio):
