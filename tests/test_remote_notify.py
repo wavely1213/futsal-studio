@@ -288,11 +288,16 @@ class NotifyTests(NotifyBase):
         self.svc.job_hook(yu.JOB_NAME, None, {"ok": False, "paused": True, "error": f"멈췄어요 {url}", "key": "k"}, None, 2)
         self.assertEqual(self.svc.last["error"], remote.YOUTUBE_MSG["paused"])
         self.svc.job_hook(yu.JOB_NAME, None, {"ok": False, "relogin": True, "error": f"다시 연결 {tok}"}, None, 40)
-        self.svc.job_hook(yu.JOB_FINISH, f"boom {tok} {url}?upload_id=XYZ", None, None, 1)
+        self.svc.job_hook(yu.JOB_FINISH, f"boom {tok} {url}?upload_id=XYZ", None, None, 70)
         self.assertEqual(self.svc.last["error"], remote.YOUTUBE_MSG["failed"])
         self.svc.job_hook(yu.JOB_FINISH, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": []}, None, 1)
-        got = self.notes(n=6)
-        self.assertEqual([p[1] for p in got], [remote.YOUTUBE_MSG[k] for k in ("done", "warn", "paused", "relogin", "failed", "finish")])
+        self.assertEqual(self.svc.last["ok"], True)  # PC 에서 누른 짧은 마무리: '마지막 작업' 칸만, 알림은 없음
+        self.svc.job_hook(yu.JOB_FINISH, None, {"ok": True, "videoId": "AbCdEfGhIjK", "url": url, "warnings": []}, None, 90)
+        got = self.notes(n=5)
+        time.sleep(0.3)
+        got = self.notes(n=5)
+        # 멈춤(PC·휴대폰에서 사람이 누름)은 알림 없이 칸만 · 짧은 마무리도 조용히
+        self.assertEqual([p[1] for p in got], [remote.YOUTUBE_MSG[k] for k in ("done", "warn", "relogin", "failed", "finish")])
         blob = json.dumps(got, ensure_ascii=False) + json.dumps(self.svc.last, ensure_ascii=False)
         for bad in ("youtu", "AbCdEfGhIjK", "ya29", "SECRET", "upload_id", "http"):
             self.assertNotIn(bad, "\n".join(p[1] for p in got) + json.dumps(self.svc.last, ensure_ascii=False), bad)

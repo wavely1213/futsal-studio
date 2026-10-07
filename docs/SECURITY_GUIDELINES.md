@@ -94,7 +94,7 @@
     - 응답 화면은 외부 자원 없는 작은 HTML(`Cache-Control: no-store` · `Referrer-Policy: no-referrer`)이다. 결과(코드)는 GET 으로 오지만 이 서버는 그 한 번의 로그인 말고는 아무것도 바꾸지 않는다.
   - `FUTSAL_GOOGLE_API`(시험용 가짜 Google 주소)는 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포·업데이트 목록에는 tests/ 가 없음)만, `http://127.0.0.1:<포트>` 만 받는다(localhost 는 hosts 파일을 타서 안 받음). 다른 값이거나 배포본이면 무시하고 진짜 Google HTTPS 주소를 쓴다. 켜지면 표준 출력에 한 번 알린다(값 없이).
   - 로그인 결과 서버는 `SO_REUSEADDR` 를 끄고(Windows 는 `SO_EXCLUSIVEADDRUSE`) 다른 프로그램이 같은 포트를 함께 잡지 못하게 한다. 앱 서버(8765)도 같은 손질을 한다(`app._bind` · D-030).
-  - `/api/youtube/*` 는 이 PC 화면 전용이다 — 휴대폰 원격(remote) 허용 목록(`remote.ACTIONS`)에 넣지 않는다 — 로그인·연결 끊기·설정·토큰 흐름이고, 올리기 시작도 PC 에서만 한다. 휴대폰은 PC 에서 시킨 올리기의 진행·끝 알림('유튜브에 올리는 중')과 [멈추기]만 본다(D-037). 로그인 주소(state·PKCE challenge)는 상태 응답에 넣지 않고 [유튜브 계정 연결하기] 응답으로만 준다.
+  - `/api/youtube/*` 는 이 PC 화면 전용이다 — 휴대폰 원격(remote) 허용 목록(`remote.ACTIONS`)에 넣지 않는다 — 로그인·연결 끊기·설정·토큰 흐름이고, 올리기 시작도 PC 에서만 한다. 휴대폰은 PC 에서 시킨 올리기의 진행·끝 알림('유튜브에 올리는 중')과 [멈추기]만 본다(D-037). 작업 기록(`/r/status` 로 휴대폰에도 감)에는 영상 번호·주소를 쓰지 않는다(파일 이름만 · 일부 공개 영상은 번호가 곧 공유 주소). 로그인 주소(state·PKCE challenge)는 상태 응답에 넣지 않고 [유튜브 계정 연결하기] 응답으로만 준다.
 - **GET은 읽기 전용으로 둔다.** 다른 사이트의 `<img src="http://127.0.0.1:8765/…">`도 Host가 맞아 통과한다. 응답을 읽지는 못하지만 동작은 일어난다.
   - 지우기·저장·작업 시작·폴더 열기처럼 상태를 바꾸는 동작은 반드시 POST로 만든다.
   - 지금 GET이 하는 쓰기는 캐시 생성(`/frame`·`/api/edit/thumbs.jpg` 등 · 채널 전략 `strategy/forecast.json`·`solution.json`)뿐이다. 사용자 기록(`strategy/state.json` 등)은 GET 에서 쓰지 않는다.
@@ -159,7 +159,7 @@
   - 예외는 원격 리스너 하나(D-027): 정확한 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`)만 그대로 되돌려 주고 `Vary: Origin`, `Allow-Credentials` 없음, `*` 금지. 개발 모드에서만 `FUTSAL_REMOTE_ORIGINS` 를 더한다.
 - **에러 응답**: 스택 트레이스·쿼리를 응답에 넣지 않는다.
   - 예외 메시지가 곧 화면 문구다. 사용자 문장으로 쓴다(`CODING_STANDARDS.md` 5번).
-  - `traceback.print_exc()`는 표준 오류에만 쓴다. 사용자 PC(pythonw)에서는 작업 폴더의 `studio-error.log` 로 모인다(`app._error_log`) — 화면·응답에는 나가지 않지만 경로에 Windows 사용자 이름이 들어갈 수 있다.
+  - 추적은 표준 오류에만 쓴다 — 비밀이 섞일 수 있는 곳(원격·유튜브·`start_job`)은 `remote.redact(traceback.format_exc())`, `youtube_api` 는 위치·종류만(D-037). 사용자 PC(pythonw)에서는 작업 폴더의 `studio-error.log` 로 모인다(`app._error_log`) — 화면·응답에는 나가지 않지만 경로에 Windows 사용자 이름이 들어갈 수 있다.
 - **받은 실행 코드·모델의 무결성**: 새로 받는 실행 파일·모델에는 고정 주소와 크기·sha256 확인을 붙인다. 확인한 뒤에만 임시 파일을 제자리로 옮긴다(`os.replace`). 현재 상태는 다음과 같다.
 
   | 대상 | 확인 방식 |

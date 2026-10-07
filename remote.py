@@ -1241,18 +1241,21 @@ class Service:
     def job_hook(self, name, error, result, by, secs):
         """last: 휴대폰 '마지막 작업' 칸 — ok(끝)·warn(확인이 필요해요: 막힘·못 받은 영상)·실패. 알림은 정해진 문장만."""
         ok, err, blocked, warn, note = True, None, False, False, "missed"
-        yt_msg = None
+        yt_msg, yt_quiet = None, False
         if name in YOUTUBE_JOBS:  # 유튜브: 결과의 오류 글·주소 대신 정해진 문장만 (D-037)
             r = result if isinstance(result, dict) else {}
             if error or r.get("ok") is False:
                 key = "paused" if r.get("paused") else "relogin" if r.get("relogin") else "failed"
                 ok, err, yt_msg = False, YOUTUBE_MSG[key], YOUTUBE_MSG[key]
+                yt_quiet = key == "paused"  # 멈춤은 PC·휴대폰에서 사람이 직접 누른 것 → '마지막 작업' 칸만, 알림은 안 울림
             else:
                 key = "warn" if r.get("warnings") or r.get("locked") or r.get("problem") else \
                     "finish" if name == youtube_upload.JOB_FINISH else "done"
                 yt_msg = YOUTUBE_MSG[key]
                 if key == "warn":  # 영상은 올라갔지만 썸네일·자막·재생목록·잠김·처리 문제 → '확인이 필요해요'
                     ok, warn, err = False, True, yt_msg
+            if name == youtube_upload.JOB_FINISH and not by and secs < 60:
+                yt_quiet = True  # PC 에서 누른 짧은 [마저 하기]·[썸네일 다시 올리기]는 사람이 PC 앞에 있음 → 알림 안 울림 (다른 작업과 같은 기준)
         elif error:
             ok, err = False, scrub(error)
         elif isinstance(result, dict) and result.get("ok") is False:
@@ -1279,8 +1282,10 @@ class Service:
         self.pub.beacon()
         n = self.store.data["settings"]["notify"]
         label = _label(name)
-        if yt_msg:  # 유튜브: PC 에서 시킨 작업이라도 끝·실패는 늘 알림 (자리를 비운 사이 올리기가 끝났는지 알게)
-            if warn:
+        if yt_msg:  # 유튜브: PC 에서 시킨 올리기라도 끝·실패는 알림 (자리를 비운 사이 올리기가 끝났는지 알게) · 멈춤·짧은 마무리는 조용히
+            if yt_quiet:
+                pass
+            elif warn:
                 self._note("attention", yt_msg)
             elif n.get("done" if ok else "failed"):
                 self.pub.notify("done" if ok else "failed", yt_msg, 3 if ok else 4, "white_check_mark" if ok else "warning")

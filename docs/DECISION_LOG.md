@@ -34,17 +34,18 @@
 - **맥락**: 유튜브 바로 올리기(D-035·D-036)는 v2.5.0(휴대폰으로 보기 D-027·D-028, Windows 대비 D-029~D-034) 전 줄기에서 만들어졌다. 작업 시작 응답·휴대폰 작업 이름·알림·저장·HTTPS·오류 기록 규칙이 서로 달랐다.
 - **결정**:
   - **시작 응답**: `/api/youtube/upload`·`resume`·`finish` 는 다른 작업과 같은 `app._started`(`jobId`). 7단계 화면은 그 번호(`YT.jobId`)가 끝났을 때 결과를 본다.
-  - **휴대폰**: `remote.JOB_LABELS`·`STOPPABLE` 에 `youtube_upload.JOB_NAME`('유튜브에 올리기')·`JOB_FINISH`('유튜브 마무리')를 직접 넣는다(`_remote_label()` 지연 등록은 지움). 진행 칸은 '유튜브에 올리는 중'(core.set_progress), 휴대폰 [멈추기]는 `editor.cancel_export` → `editor.CANCEL` 이라 PC [멈추기]와 같다(조각마다 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]). **끝·실패 알림은 PC 에서 시켰어도 늘**(자리를 비운 사이 끝났는지 알게) 보내고, 휴대폰 '마지막 작업' 칸과 알림에는 `remote.YOUTUBE_MSG` 의 정해진 문장만(올렸어요·확인이 필요해요·멈췄어요·연결이 끊겼어요·못 올렸어요) — 영상 주소·번호·Google 오류 글·토큰은 넣지 않는다.
+  - **휴대폰**: `remote.JOB_LABELS`·`STOPPABLE` 에 `youtube_upload.JOB_NAME`('유튜브에 올리기')·`JOB_FINISH`('유튜브 마무리')를 직접 넣는다(`_remote_label()` 지연 등록은 지움). 진행 칸은 '유튜브에 올리는 중'(core.set_progress), 휴대폰 [멈추기]는 `editor.cancel_export` → `editor.CANCEL` 이라 PC [멈추기]와 같다(조각마다 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]). **올리기 끝·실패 알림은 PC 에서 시켰어도**(자리를 비운 사이 끝났는지 알게) 보내되, 사람이 직접 누른 멈춤(PC·휴대폰 [멈추기])과 PC 에서 누른 1분 안의 마무리는 '마지막 작업' 칸만 바꾸고 알림은 울리지 않는다(다른 작업과 같은 기준). 휴대폰 '마지막 작업' 칸과 알림에는 `remote.YOUTUBE_MSG` 의 정해진 문장만(올렸어요·확인이 필요해요·멈췄어요·연결이 끊겼어요·못 올렸어요) — 영상 주소·번호·Google 오류 글·토큰은 넣지 않는다.
   - **휴대폰 허용 목록 밖**: `/api/youtube/*`(로그인·연결 끊기·설정·토큰 흐름)와 올리기 시작은 `remote.ACTIONS` 에 넣지 않는다 — 공개 설정·아동용·감사 전 잠김 확인을 PC 화면에서 사람이 하게(실수로 공개·잠김 방지). 채널 전략(D-028)과 같은 방식.
   - **저장**: `youtube_api.save_secret`·`youtube_upload._write_json` 은 `updater.write_atomic`(Windows 잠금 대기 · 실패하면 임시 파일 지움). 비밀 파일을 위해 `write_atomic(mode=…)` 은 임시 파일을 **처음부터** 그 권한으로 만든다(예전에는 다 쓴 뒤 chmod — 잠깐 644 틈).
   - **HTTPS**: Google 요청은 `_NoRedirect`(토큰이 다른 주소로 따라가지 않게)가 있어야 해서 `updater.urlopen`(리디렉트를 따라감)을 그대로 쓰지 않고, 같은 인증서 설정 `updater._ssl_context()`(Python 3.13+ VERIFY_X509_STRICT 만 끔 · I-047)를 `youtube_api._opener()`(처음 쓸 때 한 번)에 합친다.
-  - **기록**: `remote.redact` 에 Google 비밀 모양(`upload_id=`·`code=`·`state=`·`ya29.`·`1//`·`GOCSPX-`·`Bearer`·JSON 의 `refresh_token`·`uri` 등)을 더하고, `app.log`·`start_job` 의 오류 글·추적(studio-error.log)이 모두 이것을 거친다.
+  - **작업 기록**(`/r/status` 로 휴대폰에도 감)에는 영상 번호·주소를 넣지 않는다 — '유튜브에 올렸어요 · <파일 이름>'·'유튜브 마무리 · <파일 이름>'(일부 공개·예약 영상은 번호가 곧 공유 주소 · 번호와 주소는 7단계 기록에만).
+  - **기록**: `remote.redact` 에 Google 비밀 모양(`upload_id=`·`code=`·`state=`·`ya29.`·`1//`·`GOCSPX-`·`Bearer`·JSON 의 `refresh_token`·`uri` 등)을 더하고, `app.log`·`start_job`·`_youtube_get` 의 오류 글·추적(studio-error.log)이 모두 이것을 거친다. `youtube_api` 는 remote 를 import 하지 않으므로 로그인 결과 처리의 예상 못한 오류는 위치·종류만 남긴다(오류 글 없음). `write_atomic(mode=…)` 은 `open(opener=…)` 로 열어 손잡이를 open() 이 맡는다(중간 실패에도 새지 않음).
 - **이유**: 휴대폰 작업 흐름(D-027·D-028)과 Windows 대비(D-029·D-034)를 한 규칙으로 — 같은 일을 두 방식으로 하지 않게. 올리기는 길어서 휴대폰으로 끝을 아는 것이 가장 쓸모 있고, 시작·설정은 되돌릴 수 없는 공개·잠김이 걸려 PC 에서만.
 - **버린 대안**: 휴대폰에서도 올리기 시작 — 공개 설정·감사 전 잠김 확인을 작은 화면에서 건너뛰기 쉬움 / 결과의 `error` 를 scrub 해서 그대로 보이기 — Google reason 낱말·제목이 섞일 수 있음 / `updater.urlopen` 에 리디렉트 끄기 인자 추가 — 업데이트·모델 받기는 GitHub 리디렉트를 따라가야 함.
 - **영향/제약**: 휴대폰 페이지(와벨리 저장소)는 바꾸지 않았다(작업 이름·진행 칸·알림은 서버가 주는 글 그대로). `remote` 가 `youtube_upload` 를 import 한다.
 
 ## D-036 | 2026-10-07 | 유튜브 바로 올리기 검토 반영: 세션 주소는 사용자 폴더 · 공개 설정은 기억하지 않음 · 감사 전 업로드는 모두 잠김으로 보임 · 끊김은 30분까지
-- **상태**: 채택 (D-035 의 일부를 고침 · 병합 메모: 번호가 겹치면 번호만 바꾼다)
+- **상태**: 채택 (D-035 의 일부를 고침)
 - **맥락**: D-035 보안·사용성·문서 검토(2026-10-07)에서 (1) 작업 폴더(OneDrive·NAS 일 수 있음)의 세션 파일 주소를 바꾸면 이어 올릴 때 access_token 과 영상이 그 주소로 가고, Windows 에 평문 파일을 놓으면 DPAPI 를 건너뛰고, urllib 이 다른 주소로 보내는 응답을 따라가며 Authorization 을 옮기고, 시험 스위치가 배포본에서도 켜짐 (2) [연결 끊기] 뒤 도는 작업이 토큰을 되살리거나 새로 연결한 다른 계정의 토큰을 지움 (3) 감사 전에는 '비공개'로 올려도 잠기는데 화면은 그냥 성공으로 보이고, 감사 뒤에는 지난번 '공개'가 다음 기본값이 되어 확인 없이 공개됨 (4) 앱을 껐다 켜면 멈춘 업로드가 그 영상을 다시 골라야만 보이고, 다른 화면에서는 끝·실패를 알리지 않음 (5) 인터넷이 3분 넘게 끊기면 멈추고 막대는 보낸 양(확인 안 된)으로 멈춰 있음 (6) 가짜 Google 이 세션 PUT 의 Bearer 를 보지 않고 테스트 상태를 refresh_token_expires_in 으로 알려 줘서(실제는 '시간 제한 액세스' 때만) 시험이 실제와 다르게 통과했다.
 - **결정**:
   - **세션 주소**: `~/.futsal-studio/youtube/sessions/<열쇠>.bin`(`save_secret` · DPAPI/600) — 작업 폴더 JSON 에는 `uri: true` 와 짝 번호 `sid` 만. 보낼 때마다(`start_upload`·`upload_status`·`upload_file`) `youtube_api.valid_session_uri`: https · `www.googleapis.com` 또는 `*.googleapis.com`(기본 포트) · `/upload/youtube/v3/videos…`(시험 때는 가짜 Google 주소만). 아니면 Authorization 을 붙이지 않고 `session_expired` → 처음부터. 이상한 주소면 호스트만 표준 출력에 남긴다.
@@ -66,7 +67,7 @@
 - **영향/제약**: 사용자 폴더에 `youtube/sessions/*.bin` 이 생긴다(끝나거나 [그만 올리기]·연결 끊기 때 지움). 예전(이 브랜치 안) 세션 파일 형식 `{p, v}` 는 읽지 않는다(배포 전이라 옮기기 없음). I-049 체크리스트에 실제 Google 확인 항목을 더했다.
 
 ## D-035 | 2026-10-07 | 유튜브에 바로 올리기: 사용자 OAuth 클라이언트(데스크톱 앱) · 루프백+PKCE · 범위 youtube.force-ssl 하나 · DPAPI · 재개 가능한 업로드를 표준 라이브러리로
-- **상태**: 채택 · 일부 → D-036로 대체됨 (세션 주소 자리 · 공개 설정 기억 · 아동용 기본 · 테스트 상태 판단 · 끊김 기다리기) (병합 메모: remote·win 브랜치가 D-035 이후 번호를 먼저 썼으면 번호만 바꾼다)
+- **상태**: 채택 · 일부 → D-036로 대체됨 (세션 주소 자리 · 공개 설정 기억 · 아동용 기본 · 테스트 상태 판단 · 끊김 기다리기) · 휴대폰 원격 부분 → D-037로 대체됨
 - **맥락**: 계획 항목 H — 소유자 요청: 7단계에서 편집본을 키트 그대로 내 채널에 바로 올리기(제목·설명(챕터)·태그·카테고리·언어·아동용·공개/예약·썸네일·자막·재생목록·쇼츠), 손이 덜 가게. 앱에는 서버·계정이 없고(SECURITY 1·3절) 의존성은 표준 라이브러리가 먼저다(DEPENDENCY_POLICY). 이 항목이 DEVELOPMENT_RULES 6의 '밖으로 보내는 새 연동' 승인이다(PROJECT_CONTEXT 6절 · SECURITY 4절에 기록).
 - **결정**:
   - **연결**: 소유자가 자기 Google Cloud 프로젝트에 만든 OAuth 클라이언트(**데스크톱 앱**) JSON 을 7단계 안내 화면에 넣고, 설치형 앱 방식으로 로그인한다 — `http://127.0.0.1:<빈 포트>/` 루프백 · PKCE S256 · `state` · `access_type=offline` · `prompt=select_account consent`. 결과만 받는 작은 서버를 127.0.0.1 의 빈 포트에 **한 번만** 연다(Host·state 확인 · 한 번 받으면 닫음 · 10분). SECURITY 3절 '다른 포트·서버를 새로 열지 않는다'의 문서화한 예외다. 앱 서버(8765)로 받지 않는 까닭: 결과가 GET 으로 와서 상태를 바꾸고(3절 'GET 은 읽기만'), 고정 포트는 다른 프로그램이 먼저 잡을 수 있다.

@@ -385,6 +385,17 @@ class Locks(Work):
         self.assertEqual((self.tmp / "token.bin").read_bytes(), b"FSY1P\n{}")
         self.assertEqual((self.tmp / "글.json").stat().st_mode & 0o777, 0o600)
 
+    def test_write_atomic_mode_fails_cleanly(self):
+        """mode 경로: 파일을 연 뒤 글 쪽 준비가 실패해도(잘못된 인코딩 등) 손잡이가 새지 않고 임시 파일은 지움
+        (open() 의 opener 로 열어 손잡이를 open() 이 맡음 · Windows 는 열린 채면 못 지움)."""
+        before = len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None
+        for _ in range(20):
+            with self.assertRaises(LookupError):
+                updater.write_atomic(self.tmp / "s.json", "{}", encoding="없는-인코딩", mode=0o600)
+        if before is not None:
+            self.assertLessEqual(len(os.listdir("/proc/self/fd")), before)
+        self.assertEqual([x.name for x in self.tmp.iterdir() if x.name.endswith(".tmp")], [], "임시 파일은 지움")
+
     def test_export_final_waits_for_antivirus(self):
         """완성본(final.mp4)을 백신이 1초 잡음: 예전에는 0.25초 뒤 포기하고 임시 폴더째 지워 렌더링을 잃었음."""
         d = core.OUT / ".render_abc"

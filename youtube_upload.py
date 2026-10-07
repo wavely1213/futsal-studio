@@ -1194,7 +1194,7 @@ def _after_upload(c, sess, video, log, cancel, notes):
              "locked": False, "status": {}, "preAudit": not get_settings()["audited"], "processing": True, "problem": None}
     _history_put(entry)  # 영상 번호를 받자마자 기록 (뒤 단계가 실패·앱이 꺼져도 남게)
     _delete_session(sess["key"])
-    log(f"유튜브에 올렸어요 · {vid}")
+    log(f"유튜브에 올렸어요 · {sess['file']}")  # 영상 번호는 기록에 넣지 않음 — 이 기록은 휴대폰 /r/status 로도 감 (주소는 7단계 기록에만 · D-037)
     warnings = _post(c, entry, log, cancel)
     return _done(_result(entry, warnings, notes))
 
@@ -1391,6 +1391,6 @@ def finish(video_id, which, log, cancel):
             _mark_relogin(None)
         return _done({"ok": False, "error": explain(e), "kind": e.kind, "relogin": e.kind == "relogin"})
     entry.setdefault("steps", {})
-    log(f"유튜브 마무리 · {video_id} · {', '.join(only)}")
+    log(f"유튜브 마무리 · {entry.get('file') or entry.get('title') or ''} · {', '.join(only)}")  # 영상 번호는 넣지 않음 (위와 같음)
     warnings = _post(c, entry, log, cancel, only=only, check=False)
     return _done(_result(entry, warnings))

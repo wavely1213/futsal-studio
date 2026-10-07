@@ -108,13 +108,12 @@ def write_atomic(path, data, encoding="utf-8", fsync=False, secs=None, mode=None
     tmp = path.with_name(f"{path.name}.{os.getpid()}_{threading.get_ident()}.tmp")
     try:
         wb = isinstance(data, bytes)
-        if mode is not None:
-            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), mode)  # 줄바꿈은 open() 처럼 글 쪽이
-            f = os.fdopen(fd, "wb") if wb else os.fdopen(fd, "w", encoding=encoding)
-        elif wb:
-            f = open(tmp, "wb")
+        # mode: open() 의 opener 로 처음부터 그 권한 — 파일 손잡이는 open() 이 끝까지 맡음 (중간에 실패해도 새지 않음)
+        opener = None if mode is None else (lambda p, flags: os.open(p, flags, mode))
+        if wb:
+            f = open(tmp, "wb", opener=opener)
         else:
-            f = open(tmp, "w", encoding=encoding)  # Path.write_text 와 같게 (Windows 는 줄바꿈 \r\n)
+            f = open(tmp, "w", encoding=encoding, opener=opener)  # Path.write_text 와 같게 (Windows 는 줄바꿈 \r\n)
         with f:
             f.write(data)
             if fsync:

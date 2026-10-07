@@ -735,9 +735,10 @@ class LoginFlow:
         except ApiError as e:
             h._page(200, "연결하지 못했어요", f"{e} · 이 창은 닫고 스튜디오에서 다시 해 주세요")
             return self._finish(srv, "error", str(e))
-        except Exception:  # noqa: BLE001 — 예상 못한 오류도 화면에는 쉬운 말로 (자세한 내용은 표준 출력만)
+        except Exception as e:  # noqa: BLE001 — 예상 못한 오류도 화면에는 쉬운 말로 (오류 출력에는 위치와 종류만)
             import traceback
-            traceback.print_exc()
+            # 오류 글은 남기지 않음 — 토큰 교환·저장 중이라 글에 비밀이 섞일 수 있고 이 모듈은 remote.redact 를 못 씀 (D-037)
+            sys.stderr.write("".join(traceback.format_tb(e.__traceback__)) + f"{type(e).__name__} (내용은 비밀이 섞일 수 있어 뺌)\n")
             msg = "연결하는 중에 문제가 생겼어요 · 스튜디오에서 다시 눌러 주세요"
             h._page(200, "연결하지 못했어요", msg)
             return self._finish(srv, "error", msg)

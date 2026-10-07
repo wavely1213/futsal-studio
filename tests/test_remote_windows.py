@@ -569,6 +569,17 @@ class Secrets(Home):
         self.assertNotIn(secrets_[0], app.LOG[-1])
         self.assertNotIn(secrets_[0], buf.getvalue())
 
+    def test_youtube_tracebacks_never_raw(self):
+        """유튜브 쪽 추적은 remote.redact 를 거치거나(app) 오류 글 없이 위치·종류만(youtube_api: remote 를 못 씀) — 맨 print_exc 가 다시 생기지 않게."""
+        import re as _re
+        root = Path(app.__file__).resolve().parent
+        for f in ("youtube_api.py", "youtube_upload.py"):
+            self.assertNotIn("print_exc", (root / f).read_text(encoding="utf-8"), f)
+        src = (root / "app.py").read_text(encoding="utf-8")
+        for name in ("_youtube_get", "_youtube_post"):
+            body = _re.search(rf"def {name}\(.*?(?=\n    def )", src, _re.S).group(0)
+            self.assertNotIn("print_exc", body, name)
+
     def test_listener_error_goes_to_error_log_without_secrets(self):
         """pythonw 에서는 오류 출력이 studio-error.log(app._StampedErr)로 감 — 원격 리스너가 요청을 처리하다 난 오류에도 비밀이 없음."""
         with mock.patch.dict(os.environ, dev_env()):

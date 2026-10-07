@@ -1091,7 +1091,7 @@ class Handler(BaseHTTPRequestHandler):
         except LookupError as e:  # 그사이 편집실에서 지운 편집본
             return self._send(400, {"ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001
-            traceback.print_exc()
+            sys.stderr.write(remote.redact(traceback.format_exc()))  # 추적도 비밀은 지우고 (D-037)
             log(f"유튜브 올리기 화면을 읽지 못했어요 · {type(e).__name__}")
             return self._send(500, {"ok": False, "error": "유튜브 올리기 정보를 읽지 못했어요. 잠시 뒤 다시 열어 주세요"})
         return self._send(404, {"error": "not found"})
