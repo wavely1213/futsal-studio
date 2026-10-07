@@ -1604,7 +1604,7 @@ class ReviewFixTests(ServiceBase):
 
     def test_network_outage_keeps_trying_and_shows_waiting(self):
         name, k = self.ready()
-        real, calls, waits = yt._send, [], []
+        real, calls = yt._send, []
 
         def flaky(method, url, *a, **kw):
             if method == "PUT":
