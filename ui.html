@@ -2200,6 +2200,7 @@ checkUpdate();
       const waiting = login.state === "waiting";
       $("ytConnMsg").textContent = waiting ? "브라우저에서 '풋살사관학교' 계정을 고르고 유튜브 권한에 체크한 뒤 [계속]을 눌러 주세요 · 브라우저가 안 열렸으면 [주소 복사]로 주소를 브라우저에 붙여 넣어요"
         : s.needsRelogin ? "" : "Google 설정을 넣었어요 · 이제 풋살사관학교 채널과 연결해요";
+      $("ytConnMsg").hidden = !$("ytConnMsg").textContent;
       const err = s.needsRelogin && !waiting ? s.reloginMsg : login.state === "error" ? login.error : "";
       $("ytConnErr").innerHTML = esc(err || "");
       show("ytConnErr", !!err);
