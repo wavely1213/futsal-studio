@@ -1,6 +1,8 @@
 {
   "version": "2.7.0",
   "notes": "가편집 품질: 구령·환호를 NG로 지우지 않음 · 시범 사이 같은 설명은 남김 · 말 가운데서 자막 깜빡임·빠르기 바뀜 없앰 · 소리 크기를 유튜브 기준(-14 LUFS 안팎)으로 · 강조 큰 글씨가 얼굴을 피함 · 점프 컷마다 화면 크기 바꿈 · 위쪽 자막이 쇼츠 제목과 안 겹침",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/fad8042039e8c3ff2b69e6ef79a501114118701f.zip",
+  "commit": "fad8042039e8c3ff2b69e6ef79a501114118701f",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f996d08fa0fed5005b72904578e6d574874495d0e3ac5c7128ce4bd43fff9a26",
