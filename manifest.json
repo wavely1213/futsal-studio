@@ -1,6 +1,8 @@
 {
   "version": "2.3.0",
   "notes": "채널 전략(8단계): 경쟁 채널 비교·가져올 점·이번 주 할 것·성공 솔루션(30/60/90일)·가능성 %(계획대로/지금 속도)·정기 점검 · 썸네일 편집기 원본 정리",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/b0ec1fa34e7d1e487a49a394461ee9f5f80ce8fd.zip",
+  "commit": "b0ec1fa34e7d1e487a49a394461ee9f5f80ce8fd",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "c678df527b928e598cfb5ba451c0db582b25345e93f329caad61ca7110b16bde",
