@@ -816,7 +816,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def _strategy_get(self, path, q):
-        """채널 전략 읽기 (GET 은 읽기만 · 가능성은 입력이 같으면 캐시, 처음이면 그 자리에서 1~2초 계산)."""
+        """채널 전략 읽기 (GET 은 사용자 기록을 바꾸지 않음 · 쓰는 것은 캐시 forecast.json·solution.json 뿐 ·
+        가능성은 입력이 같으면 캐시, 처음이면 그 자리에서 1~2초 계산 · 계산은 한 번에 하나)."""
         try:
             if path == "/api/strategy":
                 return self._send(200, strategy.overview())
@@ -829,6 +830,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "todos": strategy.todos_for(use if use in ("thumb", "title", "edit", "upload", "plan", "shorts") else "")})
             if path == "/api/strategy/remind":
                 return self._send(200, dict(strategy.remind(), ok=True))
+            if path == "/api/strategy/preview":  # 저장하지 않은 계획의 가능성 미리 보기 (캐시·저장 없음)
+                return self._send(200, dict(strategy.forecast_preview((q.get("L") or ["0"])[0], (q.get("S") or ["0"])[0]), ok=True))
+        except strategy.StrategyError as e:
+            return self._send(400, {"ok": False, "error": str(e)})
         except strategy.forecast.ForecastError as e:
             return self._send(500, {"ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001
@@ -877,6 +882,9 @@ class Handler(BaseHTTPRequestHandler):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게)
                 ok = start_job(name, fn)
                 return self._send(200 if ok else 409, {"ok": ok} if ok else busy)
+            if path == "/api/strategy/pause":  # [지금 다시 시도]: 연달아 실패해서 쉬는 것만 풂
+                strategy.clear_pause()
+                return self._send(200, {"ok": True})
             if path == "/api/strategy/checkup":
                 studio = strategy._clean_studio(b.get("studio"))
                 source.stop_backfill()

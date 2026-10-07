@@ -11,7 +11,9 @@
   가능성(%)은 forecast.py (BR-015). 클로드는 버튼을 눌렀을 때만 숫자만 보낸다(claude_cli).
 - style·claude_cli 는 함수 안에서 지연 import 한다: style → plan → core 순환을 피하고, 앱 시작을 가볍게.
 """
+import functools
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -42,14 +44,17 @@ OWN_STALE = 86400                 # 우리 채널 숫자 기록: 하루 한 번
 OWN_MIN_GAP = 600                 # 점검·기록: 10분 안에 받았으면 다시 받지 않음
 REQ_SLEEP = 0.75                  # yt-dlp 요청 사이 (초)
 GAP, JITTER = 2.0, 0.5            # 채널 사이 2초 + 0~0.5초 흔들기
-PAUSE_SECS = 6 * 3600             # YouTube 가 막으면 이 시간 동안 yt-dlp 단계를 쉼 (RSS 는 계속)
-FAIL_STREAK = 3                   # 같은 새로 고침에서 이만큼 연달아 실패해도 쉼
+PAUSE_SECS = 6 * 3600             # YouTube 가 막으면(봇 확인·403·429) 이 시간 동안 yt-dlp 단계를 쉼 (RSS 는 계속)
+FAIL_PAUSE = 3600                 # 까닭 모를 실패가 연달아 나면 1시간 쉼 (화면에서 [지금 다시 시도]로 풀 수 있음)
+FAIL_STREAK = 3                   # 같은 새로 고침에서 까닭 모를 실패가 이만큼 연달아 나면 쉼 (인터넷 끊김·없는 채널은 세지 않음)
+NET_STREAK = 2                    # 인터넷이 끊긴 채널이 이만큼 연달아 나면 이번 새로 고침을 멈춤 (쉬지는 않음)
 KO_MAX = 60                       # 한국어 원제 목록은 최근 60개까지
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
 RSS_MAX = 2 << 20                 # RSS 응답 2MB 까지
 RSS_TIMEOUT = 20
 RSS_RETRY_WAIT = 5                # 429·5xx 면 5초 뒤 한 번만 다시
-SECS_NORMAL, SECS_FULL = 6, 15    # 채널당 걸리는 시간 어림 (화면 '약 M분')
+NET_MSG = "인터넷 연결을 확인해 주세요"
+SECS_NORMAL, SECS_FULL = 6, 20    # 채널당 걸리는 시간 어림 (화면 '약 M분' · 실제 처음 12곳 225~320초 → 전체 훑기 20초)
 RECENT = 30                       # 통계는 최근 30개 (15개 기준도 함께)
 ACTIVE = ((14, "활발"), (45, "보통"), (180, "쉬는 중"))  # 마지막 업로드 며칠 전 → 활동 상태 (넘으면 '멈춤')
 REVIVE_GAP = 90                   # 90일 넘게 쉰 뒤 첫 업로드 = 다시 시작한 날
@@ -74,12 +79,21 @@ DIR_TAGS = {"A": {"레슨", "시리즈", "권위", "예능", "편집", "쇼츠",
 DEFAULT_PICKS = ("쌈바 풋살 클래스", "샌드박스 풋살", "쪼살", "풋살해주호", "명싸커", "아이콘 풋살", "주재파악 TV", "영타",
                  "JK 아트사커", "축구도사 메기", "축정원", "강코치 풋볼", "지니풋볼", "슛포러브", "도블락")
 NO_TAB = re.compile(r"does not have an? (shorts|videos)\b|no (shorts|videos) tab|This channel does not have", re.I)
+# yt-dlp 오류 글 → 종류: 인터넷 끊김(쉬지 않음) · 없는 채널(실패지만 연달아 세지 않음) · 너무 많이 물음(막힘과 같게)
+NET_ERR = re.compile(r"urlopen error|name resolution|Name or service not known|getaddrinfo|Failed to resolve|Network is unreachable|"
+                     r"No route to host|Connection (?:refused|reset|aborted)|timed out|RemoteDisconnected|Remote end closed|"
+                     r"TransportError|ConnectionError|Temporary failure|Errno -?\d+", re.I)
+GONE_ERR = re.compile(r"does not exist|HTTP Error 404|404: Not Found|This channel is not available|has been terminated|"
+                      r"channel was removed|not a valid URL|Unsupported URL", re.I)
+RATE_ERR = re.compile(r"HTTP Error 429|Too Many Requests|(?<![\w-])429(?![\w-])", re.I)
 UC_RE = re.compile(r"UC[\w-]{22}")
 VID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015", "m": "http://search.yahoo.com/mrss/"}
 
 _LOCK = threading.RLock()
-_CACHE = {}                      # 파일 경로 → ((수정 시각, 크기), 내용) — 1초마다 부르는 화면이 매번 읽지 않게
+_CACHE = {}                      # 파일 경로 → ((수정 시각, 크기), 내용) — 1초마다 부르는 화면이 매번 읽지 않게 (채널 파일은 넣지 않음)
+_SLIM = {}                       # 채널 파일 → ((수정 시각, 크기), 분석용으로 줄인 자료) — 큰 채널 원본을 메모리에 들고 있지 않게
+SLIM_IDS = 120                   # 분석용 자료는 형식마다 최근 120개 + RSS 영상만
 _ANA = {}                        # 채널 분석 캐시 (열쇠·받은 시각 같으면 그대로)
 _sleep = time.sleep              # 시험에서 바꿔 끼움 (예절 대기)
 _jitter = random.random
@@ -108,9 +122,9 @@ def fid(key):
     return hashlib.sha1(str(key).encode("utf-8")).hexdigest()[:16]
 
 
-def _read(path, empty, strict=False):
-    """JSON 읽기 (수정 시각으로 기억): 없으면 empty() · 깨졌으면 .bad 로 남기고 empty() · 잠겨서 못 읽으면 몇 번 다시,
-    그래도 안 되면 strict 일 때 StoreBusy (좋은 파일을 빈 기록으로 덮어쓰지 않게)."""
+def _read(path, empty, strict=False, cache=True):
+    """JSON 읽기 (수정 시각으로 기억 · cache=False 면 기억하지 않음): 없으면 empty() · 깨졌으면 .bad 로 남기고 empty() ·
+    잠겨서 못 읽으면 몇 번 다시, 그래도 안 되면 strict 일 때 StoreBusy (좋은 파일을 빈 기록으로 덮어쓰지 않게)."""
     with _LOCK:
         try:
             st = path.stat()
@@ -148,7 +162,8 @@ def _read(path, empty, strict=False):
             except OSError:
                 pass
             data = empty()
-        _CACHE[str(path)] = (key, data)
+        if cache:
+            _CACHE[str(path)] = (key, data)
         return data
 
 
@@ -174,6 +189,7 @@ def _write(path, data):
             _sleep(0.1)
     with _LOCK:
         _CACHE.pop(str(path), None)
+        _SLIM.pop(str(path), None)
 
 
 def _copy(d):
@@ -184,7 +200,7 @@ def _copy(d):
 
 def _empty_state():
     return {"v": 1, "own": {}, "competitors": None, "removed": [], "strategy": None, "hidden": [], "todos": [],
-            "settings": {"remind": True, "ownAuto": True}, "pause": None, "ai": None, "solution": None}
+            "settings": {"remind": True, "ownAuto": True}, "pause": None, "ai": None}
 
 
 def _clean_state(d):
@@ -200,7 +216,7 @@ def _clean_state(d):
     out["todos"] = [t for t in d.get("todos") or [] if isinstance(t, dict) and isinstance(t.get("id"), str)]
     if isinstance(d.get("settings"), dict):
         out["settings"].update({k: bool(v) for k, v in d["settings"].items() if k in ("remind", "ownAuto")})
-    for k in ("pause", "ai", "solution"):
+    for k in ("pause", "ai"):
         out[k] = d[k] if isinstance(d.get(k), dict) else None
     return out
 
@@ -229,9 +245,40 @@ def _chan_path(key):
     return root() / "channels" / f"{fid(key)}.json"
 
 
-def load_channel(key):
-    d = _read(_chan_path(key), dict)
+def load_channel(key, slim=False):
+    """채널 자료 하나: 새로 고침·점검은 원본 전체(기억하지 않음) · slim=True 면 분석용으로 줄인 것(기억함)."""
+    d = _read_slim(_chan_path(key)) if slim else _read(_chan_path(key), dict, cache=False)
     return d if d.get("key") == key else None
+
+
+def _slim(ch):
+    """분석용으로 줄인 채널 자료: 형식마다 최근 120개 + RSS 영상, 안 쓰는 칸(본 시각·번역 제목) 뺌 · 탭의 전체 개수는 nIds 로."""
+    tabs, keep = {}, set((ch.get("rss") or {}).get("ids") or [])
+    for name, t in (ch.get("tabs") or {}).items():
+        if isinstance(t, dict):
+            ids = t.get("ids") or []
+            tabs[name] = dict(t, ids=ids[:SLIM_IDS], nIds=len(ids))
+            keep |= set(ids[:SLIM_IDS])
+    vids = {i: {k: x for k, x in v.items() if k not in ("seen", "vAt") and not (k == "te" and v.get("t"))}
+            for i, v in (ch.get("videos") or {}).items() if i in keep and isinstance(v, dict)}
+    return dict(ch, tabs=tabs, videos=vids)
+
+
+def _read_slim(path):
+    with _LOCK:
+        try:
+            st = path.stat()
+        except OSError:
+            return {}
+        key = (st.st_mtime_ns, st.st_size)
+        hit = _SLIM.get(str(path))
+        if hit and hit[0] == key:
+            return hit[1]
+    d = _read(path, dict, cache=False)
+    sl = _slim(d) if isinstance(d.get("videos"), dict) else d
+    with _LOCK:
+        _SLIM[str(path)] = (key, sl)
+    return sl
 
 
 def save_channel(data):
@@ -247,7 +294,7 @@ def live_channels():
     except OSError:
         return out
     for f in files:
-        x = _read(f, dict)
+        x = _read_slim(f)
         if isinstance(x.get("key"), str) and isinstance(x.get("videos"), dict):
             out[x["key"]] = x
     return out
@@ -563,8 +610,10 @@ def fetch_rss(cid):
             return None, f"RSS 응답 {e.code}"
         except ValueError as e:
             return None, str(e)
+        except http.client.HTTPException:  # IncompleteRead 처럼 응답이 끊김 (OSError 가 아님)
+            return None, "RSS 를 받지 못했어요"
         except OSError:
-            return None, "인터넷 연결을 확인해 주세요"
+            return None, NET_MSG
     return None, "RSS 를 받지 못했어요"
 
 
@@ -615,7 +664,7 @@ def _new_channel(entry):
     return {"v": 1, "key": entry["key"], "name": entry.get("name"), "handle": entry.get("handle"), "url": entry.get("url"),
             "channelId": entry.get("channelId"), "group": entry.get("group"), "subs": None, "subsAt": None, "src": "live",
             "descFlags": None, "tabs": {"long": {"ids": []}, "shorts": {"ids": []}}, "videos": {}, "rss": None,
-            "translated": False, "errors": [], "at": None}
+            "translated": False, "errors": [], "at": None, "listedAt": None}
 
 
 def _tab_of(k):
@@ -712,16 +761,31 @@ def detect_revived(ch):
     return rev
 
 
-def _history_rec(data, now):
+def _history_rec(data, now, listed):
+    """기록 한 줄: 구독자는 이번에 목록에서 새로 받았을 때만 (RSS 만 받은 날 예전 숫자를 오늘 날짜로 남기지 않음)."""
     vids = data["videos"]
-    rec = {"k": data["key"], "at": now, "subs": data.get("subs"), "n": {}, "sum": {}, "complete": {},
+    rec = {"k": data["key"], "at": now, "subs": data.get("subs") if listed and data.get("subsAt") == now else None, "listed": bool(listed),
            "rss": {i: vids[i].get("v") for i in (data.get("rss") or {}).get("ids") or [] if i in vids}}
-    for k in ("L", "S"):
-        t = data["tabs"].get(_tab_of(k)) or {}
-        rec["n"][k] = t.get("n") or len(t.get("ids") or [])
-        rec["sum"][k] = t.get("sum")
-        rec["complete"][k] = bool(t.get("complete"))
+    if listed:
+        rec.update(n={}, sum={}, complete={})
+        for k in ("L", "S"):
+            t = data["tabs"].get(_tab_of(k)) or {}
+            rec["n"][k] = t.get("n") or len(t.get("ids") or [])
+            rec["sum"][k] = t.get("sum")
+            rec["complete"][k] = bool(t.get("complete"))
     return rec
+
+
+def listed_at(ch):
+    """목록(구독자·조회수)을 마지막으로 받은 시각 · RSS 만 받은 날은 바뀌지 않음. 예전 기록은 탭 시각으로."""
+    if not ch:
+        return None
+    if "listedAt" in ch:
+        return ch["listedAt"]
+    if ch.get("src") == "live":
+        ats = [t.get("at") for t in (ch.get("tabs") or {}).values() if isinstance(t, dict) and isinstance(t.get("at"), (int, float))]
+        return max(ats) if ats else ch.get("at")
+    return None
 
 
 def _paused(st, now=None):
@@ -729,14 +793,31 @@ def _paused(st, now=None):
     return isinstance(p.get("until"), (int, float)) and p["until"] > (now or time.time())
 
 
-def _set_pause(reason, now):
-    _update_state(lambda d: d.__setitem__("pause", {"until": now + PAUSE_SECS, "reason": reason, "at": now}))
+def _set_pause(reason, now, log=print):
+    secs = FAIL_PAUSE if reason == "fails" else PAUSE_SECS
+    try:
+        _update_state(lambda d: d.__setitem__("pause", {"until": now + secs, "reason": reason, "at": now}))
+    except OSError as e:  # 기록 파일이 잠겨도 새로 고침은 이어 감 (이번 새로 고침 안에서는 목록을 쉼)
+        log(f"  쉬는 시간을 기록하지 못했어요 · {e}")
+
+
+def clear_pause():
+    """[지금 다시 시도]: 연달아 실패해서 쉬는 것만 풂 (YouTube 가 막은 6시간은 그대로)."""
+    def put(d):
+        p = d.get("pause") or {}
+        if p.get("reason") in ("blocked", "rate") and isinstance(p.get("until"), (int, float)) and p["until"] > time.time():
+            raise StrategyError("YouTube가 막아서 쉬는 중이에요. 정해진 시각이 지난 뒤 다시 눌러 주세요")
+        d["pause"] = None
+    _update_state(put)
 
 
 def plan_refresh(keys=None, mode="normal", now=None, st=None):
-    """새로 고칠 채널 [(항목, 지금 자료, 전체 훑기?)] · mode: normal(오래된 것만) · all(모두 다시) · own(우리 채널 기록) · check(점검)."""
+    """새로 고칠 채널 [(항목, 지금 자료, 전체 훑기?)] · mode: normal(오래된 것만) · all(모두 다시) · own(우리 채널 기록) · check(점검).
+    오래됨은 목록을 받은 시각으로 (RSS 만 받은 채널은 다시 받을 차례) · 목록을 쉬는 동안은 RSS 를 받은 시각으로.
+    keys 로 고른 채널('이 채널만')은 10분 안에 받은 것만 건너뜀."""
     now = now or time.time()
     st = st or load_state()
+    paused = _paused(st, now)
     entries = [own_entry(st)] + st["competitors"]
     if mode in ("own", "check"):
         entries = entries[:1]
@@ -745,9 +826,9 @@ def plan_refresh(keys=None, mode="normal", now=None, st=None):
         entries = [e for e in entries if e["key"] in ks]
     todo = []
     for e in entries:
-        cur = load_channel(e["key"])
-        last = (cur or {}).get("at") or 0
-        if mode in ("own", "check"):
+        cur = load_channel(e["key"], slim=True)
+        last = ((cur or {}).get("at") if paused else listed_at(cur)) or 0
+        if mode in ("own", "check") or (keys and mode == "normal"):
             gap = OWN_MIN_GAP
         elif mode == "all":
             gap = 0
@@ -767,16 +848,19 @@ def estimate(todo):
 
 
 def refresh(keys=None, mode="normal", log=print, cancel=None, label=JOB_REFRESH):
-    """채널 숫자 새로 고치기 (작업 안에서). 채널 하나 끝날 때마다 저장 → 멈추거나 막혀도 끝난 채널은 남음."""
+    """채널 숫자 새로 고치기 (작업 안에서). 채널 하나 끝날 때마다 저장 → 멈추거나 막혀도 끝난 채널은 남음.
+    채널 하나에서 뜻밖의 오류가 나도 그 채널만 실패로 세고 이어 감. 인터넷이 끊긴 것 같으면 남은 채널은 다음에."""
     t0 = now = time.time()
     st = load_state()
     todo = plan_refresh(keys, mode, now, st)
     yt_ok = not _paused(st, now)
     if not yt_ok:
-        log("  YouTube가 잠시 막아서 목록은 쉬고, 최근 날짜·조회수(RSS)만 새로 고쳐요")
+        log("  YouTube 목록은 잠시 쉬는 중이라 최근 날짜·조회수(RSS)만 새로 고쳐요")
     if not todo:
         log("  새로 고칠 채널이 없어요 (모두 최근에 받았어요)")
-    done, failed, blocked, streak = [], [], False, 0
+    done, failed, blocked, streak, net_n, net = [], [], False, 0, 0, False
+    listed_n = rss_only = 0
+    reason = None
     for i, (entry, cur, full) in enumerate(todo, 1):
         if cancel is not None and cancel.is_set():
             log("  멈췄어요 · 끝난 채널은 저장했어요")
@@ -784,36 +868,88 @@ def refresh(keys=None, mode="normal", log=print, cancel=None, label=JOB_REFRESH)
         if i > 1:
             _sleep(GAP + _jitter() * JITTER)
         name = (cur or {}).get("name") or entry.get("name") or entry["key"]
+        if cur:
+            cur = load_channel(entry["key"])  # 계획은 줄인 자료로 세웠으니 저장할 원본을 다시 읽음
 
         def pg(detail, pct_in=0.0, _i=i, _name=name):
             core.set_progress(label=label, item=_name, step=f"{_i}/{len(todo)}", pct=int(100 * (_i - 1 + pct_in) / len(todo)), detail=detail)
-        res = _refresh_one(entry, cur, full and yt_ok, yt_ok, log, cancel, pg)
+        try:
+            res = _refresh_one(entry, cur, full and yt_ok, yt_ok, log, cancel, pg)
+        except Exception as e:  # noqa: BLE001 — 채널 하나(저장 잠김·뜻밖의 응답)가 나머지를 막지 않게
+            log(f"  {name} · 받지 못했어요 ({str(e)[:160]})")
+            res = {"blocked": False, "ytFail": False, "saved": False, "net": False, "listed": False}
         if res["blocked"] and yt_ok:
-            yt_ok, blocked = False, True
-            _set_pause("blocked", time.time())
+            yt_ok, blocked, reason = False, True, "blocked"
+            _set_pause("blocked", time.time(), log)
             log("  YouTube가 잠시 막았어요 · 남은 채널은 최근 날짜·조회수(RSS)만 새로 고칠게요")
         streak = streak + 1 if res["ytFail"] else 0
         if streak >= FAIL_STREAK and yt_ok:
-            yt_ok = False
-            _set_pause("fails", time.time())
-            log("  채널 목록을 연달아 못 받았어요 · 남은 채널은 RSS 만 새로 고칠게요")
+            yt_ok, reason = False, "fails"
+            _set_pause("fails", time.time(), log)
+            log("  채널 목록을 연달아 못 받았어요 · 1시간 쉬고, 남은 채널은 RSS 만 새로 고칠게요")
         (done if res["saved"] else failed).append(entry["key"])
+        if res["saved"]:
+            listed_n += bool(res.get("listed"))
+            rss_only += not res.get("listed")
+        net_n = net_n + 1 if res.get("net") else 0
+        if net_n >= NET_STREAK and i < len(todo):
+            net = True
+            log("  인터넷 연결이 끊긴 것 같아요 · 남은 채널은 다음에 새로 고칠게요")
+            break
     core.set_progress(label=label, pct=100, detail="정리하는 중")
-    return {"ok": True, "done": len(done), "failed": len(failed), "todo": len(todo), "blocked": blocked,
-            "paused": not yt_ok, "secs": round(time.time() - t0, 1)}
+    return {"ok": True, "done": len(done), "failed": len(failed), "todo": len(todo), "blocked": blocked, "net": net or (bool(todo) and net_n == len(todo)),
+            "listed": listed_n, "rssOnly": rss_only, "paused": not yt_ok, "reason": reason, "secs": round(time.time() - t0, 1)}
+
+
+def _seed_for(entry, st=None):
+    """함께 배포한 비교 데이터의 같은 채널 (처음 새로 고칠 때 출발점 · 목록을 못 받아도 조사 숫자가 사라지지 않게)."""
+    sd = seed()["channels"]
+    if entry["key"] == OWN:
+        c = sd.get(OWN)
+        return c if c and entry.get("channelId") and c.get("channelId") == entry["channelId"] else None
+    c = sd.get(entry["key"])
+    if c:
+        return c
+    cid = entry.get("channelId")
+    return next((x for k, x in sd.items() if k != OWN and cid and x.get("channelId") == cid), None)
+
+
+def _start_data(entry, cur):
+    if cur:
+        return _copy(cur)
+    sd = _seed_for(entry)
+    if not sd:
+        return _new_channel(entry)
+    data = _copy(sd)
+    for t in (data.get("tabs") or {}).values():  # 조사 때 일부만 남긴 목록 → 처음 목록은 전체 훑기로 다시 받음
+        if isinstance(t, dict):
+            t.pop("fullAt", None)
+            t.pop("at", None)
+    data.update(listedAt=None, errors=[], seeded=True)
+    return data
+
+
+def _err_kind(msg):
+    if msg == core.BLOCKED_MSG or core._blocked_text(msg) or RATE_ERR.search(msg):
+        return "blocked"
+    if NET_ERR.search(msg):
+        return "net"
+    if GONE_ERR.search(msg):
+        return "gone"
+    return "fail"
 
 
 def _refresh_one(entry, cur, full, yt_ok, log, cancel, pg):
     now = time.time()
-    data = _copy(cur) if cur else _new_channel(entry)
-    data.update(key=entry["key"], url=entry.get("url") or data.get("url"), src="live", v=1)
+    data = _start_data(entry, cur)
+    data.update(key=entry["key"], url=entry.get("url") or data.get("url"), v=1)
     if entry.get("group"):
         data["group"] = entry["group"]
     for f in ("channelId", "handle"):
         if entry.get(f) and not data.get(f):
             data[f] = entry[f]
-    res = {"blocked": False, "ytFail": False, "saved": False}
-    errors, listed = [], False
+    res = {"blocked": False, "ytFail": False, "saved": False, "net": False, "listed": False}
+    errors, listed, net_list = [], False, False
     limit = FULL_LIMIT if full else LIMIT
     url = data.get("url") or (f"https://www.youtube.com/channel/{data['channelId']}" if data.get("channelId") else data.get("handle"))
     if yt_ok and url:
@@ -829,9 +965,17 @@ def _refresh_one(entry, cur, full, yt_ok, log, cancel, pg):
                     data["tabs"][tab] = {"ids": [], "complete": True, "n": 0, "sum": 0, "at": now, **({"fullAt": now} if full else {})}
                     listed = True
                     continue
-                if msg == core.BLOCKED_MSG or core._blocked_text(msg):
+                kind_ = _err_kind(msg)
+                if kind_ == "blocked":
                     res["blocked"] = True
                     errors.append({"at": now, "what": "blocked"})
+                    break
+                if kind_ == "net":
+                    net_list = True
+                    errors.append({"at": now, "what": "net", "error": NET_MSG})
+                    break
+                if kind_ == "gone":
+                    errors.append({"at": now, "what": lab, "error": "채널을 찾지 못했어요"})
                     break
                 res["ytFail"] = True
                 errors.append({"at": now, "what": lab, "error": msg[:200]})
@@ -840,7 +984,7 @@ def _refresh_one(entry, cur, full, yt_ok, log, cancel, pg):
             listed = True
     if cancel is not None and cancel.is_set() and not listed:
         return res
-    rss_ok = False
+    rss_ok, net_rss = False, False
     if data.get("channelId"):
         pg("최근 15개 날짜·조회수 보는 중", 0.8)
         rss, err = fetch_rss(data["channelId"])
@@ -848,34 +992,44 @@ def _refresh_one(entry, cur, full, yt_ok, log, cancel, pg):
             _merge_rss(data, rss, now)
             rss_ok = True
         else:
+            net_rss = err == NET_MSG
             data["rss"] = dict(data.get("rss") or {}, at=now, ok=False, error=err)
             errors.append({"at": now, "what": "rss", "error": err})
     if yt_ok and full and listed and data.get("translated") and not res["blocked"] and not (cancel is not None and cancel.is_set()):
         pg("한국어 원제 보는 중", 0.9)
-        _ko_titles(data, url, log, errors, now)
+        if _ko_titles(data, url, log, errors, now) == "blocked":
+            res["blocked"] = True
+    if listed:
+        data["listedAt"] = now
+    data["src"] = "live" if data.get("listedAt") or not data.get("seeded") else "seed"
     if not (listed or rss_ok):
+        res["net"] = net_list or net_rss
         data["errors"] = (data.get("errors") or [])[-4:] + errors[-1:]
         if cur:  # 예전 자료는 그대로 두고 오류만 기록
             data["at"] = cur.get("at")
             save_channel(data)
-        log(f"  {data.get('name') or entry['key']} · 받지 못했어요 ({errors[-1]['what'] if errors else '이유 모름'})")
+        log(f"  {data.get('name') or entry['key']} · 받지 못했어요 ({(errors[-1].get('error') or errors[-1]['what']) if errors else '이유 모름'})")
         return res
     _prune(data)
     data["at"] = now
     data["errors"] = ((data.get("errors") or []) + errors)[-5:]
     save_channel(data)
-    append_history(_history_rec(data, now))
-    if entry["key"] == OWN:
-        _after_own(data)
+    res.update(saved=True, listed=listed)
+    try:
+        append_history(_history_rec(data, now, listed))
+        if entry["key"] == OWN:
+            _after_own(data)
+    except OSError as e:  # 기록 줄·우리 채널 정보를 못 남겨도 채널 자료는 저장됨
+        log(f"  {data.get('name') or entry['key']} · 기록을 남기지 못했어요 ({e})")
     nL = data["tabs"].get("long", {}).get("n", 0)
     nS = data["tabs"].get("shorts", {}).get("n", 0)
-    log(f"  {data.get('name') or entry['key']} · 롱폼 {nL}개 · 쇼츠 {nS}개" + (" · 최근 날짜 ✓" if rss_ok else "") + (" · 목록은 쉼" if not listed else ""))
-    res["saved"] = True
+    log(f"  {data.get('name') or entry['key']} · 롱폼 {nL}개 · 쇼츠 {nS}개" + (" · 최근 날짜 ✓" if rss_ok else "") + (" · 목록은 받지 못함" if not listed else ""))
     return res
 
 
 def _ko_titles(data, url, log, errors, now):
-    """번역 제목이 섞인 채널: 원제가 빠진 최근 영상만 한국어 목록으로 채움 (조회수는 기본 목록 것 그대로)."""
+    """번역 제목이 섞인 채널: 원제가 빠진 최근 영상만 한국어 목록으로 채움 (조회수는 기본 목록 것 그대로).
+    YouTube 가 막았으면 'blocked' (새로 고침이 바로 쉬게 · 같은 새로 고침에서 엔진 최신화를 또 하지 않게)."""
     vids = data["videos"]
     for kind, tab in (("videos", "long"), ("shorts", "shorts")):
         miss = {i for i in (data["tabs"].get(tab, {}).get("ids") or [])[:KO_MAX] if i in vids and not vids[i].get("o") and not is_ko(vids[i].get("t"))}
@@ -884,11 +1038,13 @@ def _ko_titles(data, url, log, errors, now):
         try:
             info = core.channel_listing(url, kind, KO_MAX, log, lang="ko", sleep_requests=REQ_SLEEP)
         except Exception as e:  # noqa: BLE001 — 원제는 곁가지 (실패해도 번역 제목으로 계속)
-            errors.append({"at": now, "what": "ko", "error": str(e)[:200]})
-            return
+            msg = str(e)
+            errors.append({"at": now, "what": "ko", "error": msg[:200]})
+            return "blocked" if _err_kind(msg) == "blocked" else None
         for r in normalize_flat(info, kind)["rows"]:
             if r["id"] in miss and is_ko(r["title"]):
                 vids[r["id"]]["t"], vids[r["id"]]["o"] = r["title"], 1
+    return None
 
 
 def _after_own(data):
@@ -937,14 +1093,14 @@ def channel_stats(ch, now=None):
     tabs = ch.get("tabs") or {}
     subs = ch.get("subs") if isinstance(ch.get("subs"), (int, float)) else None
     out = {"key": ch.get("key"), "name": ch.get("name"), "group": ch.get("group"), "subs": subs, "src": ch.get("src") or "live",
-           "at": ch.get("at"), "url": ch.get("url"), "handle": ch.get("handle"), "channelId": ch.get("channelId"),
+           "at": ch.get("at"), "listedAt": listed_at(ch), "url": ch.get("url"), "handle": ch.get("handle"), "channelId": ch.get("channelId"),
            "translated": bool(ch.get("translated")), "descFlags": ch.get("descFlags") or {}}
     for k in ("L", "S"):
         t = tabs.get(_tab_of(k)) or {}
         ids = [i for i in t.get("ids") or [] if i in vids]
         rec = [dict(vids[i], id=i) for i in ids[:RECENT]]
         vs = _vv(r.get("v") for r in rec)
-        d = {"n": int(t.get("n") or len(ids)) if t.get("complete") else len(ids), "complete": bool(t.get("complete")), "n30": len(vs)}
+        d = {"n": int(t.get("n") or len(ids)) if t.get("complete") else int(t.get("nIds") or len(ids)), "complete": bool(t.get("complete")), "n30": len(vs)}
         if vs:
             d.update(median=round(_med(vs)), mean=round(statistics.mean(vs)), p90=round(_q(vs, 0.9)),
                      median15=round(_med(_vv(r.get("v") for r in rec[:15])) or 0) or None,
@@ -978,22 +1134,28 @@ def channel_stats(ch, now=None):
 
 # ---------- 제목 패턴 찾기 ----------
 
-TOPIC_EXTRA = ["팬텀", "드래그", "라크로케타", "피보 턴", "마르세유", "플랩", "레벨", "국가대표", "1대1", "골키퍼", "풋살화", "축구화",
+TOPIC_EXTRA = ["팬텀", "드래그", "라크로케타", "피보 턴", "마르세유", "국가대표", "1대1", "골키퍼", "풋살화", "축구화",
                "헛다리", "방향전환", "페인팅", "넛메그", "기본기", "포지션", "롭 패스", "바디페인팅", "움직임", "전술", "체크백", "킥 연습",
                "슬립백", "엘라스티코", "오버래핑", "세컨볼", "골레이로"]
 _TOPIC_RES = [(t, hooks._term_re(t)) for t in sorted(dict.fromkeys(hooks.TERMS + TOPIC_EXTRA), key=lambda x: -len(x))]
 STOP_EXTRA = {"쇼츠", "shorts", "영상", "채널", "이번", "오늘", "모든", "진짜", "그냥", "하는", "있는", "없는", "되는", "이것", "이거",
               "무조건", "바로", "완벽", "정리", "총정리", "방법", "꿀팁", "이유", "모음", "몰아보기", "실전", "기술"}
+# 주제가 아닌 말 (이력·대상·플랫폼·흔한 말): '‘출신’ 주제를 다뤄 봐요' 같은 쓸모없는 가져올 점이 나오지 않게
+TOPIC_STOP = {"출신", "선출", "비선출", "레벨", "플랩", "프로", "선수", "선수들", "감독", "코치", "레전드", "현역", "은퇴", "세미", "세미프로",
+              "아마추어", "동호인", "초보", "입문", "초등", "유소년", "경기", "하이라이트", "브이로그", "리뷰", "인터뷰", "대회", "리그", "결승",
+              "축구", "풋살", "유튜브", "구독", "구독자", "좋아요", "댓글", "공유", "편", "탄", "시즌", "마지막", "처음", "최초", "역대", "최고",
+              "최악", "레알", "실화", "충격", "반응", "근황", "사람", "친구", "형", "누나", "동생", "우리", "여러분", "선생님", "참가", "도전자",
+              "과연", "역시", "드디어", "정말", "제일", "가장", "모두", "다시", "직접", "요즘", "오늘의", "이번엔"}
 FORMULAS = [
     ("question", "질문형", re.compile(r"\?|？|까\s*$|까[!.~]|나요|을까|할까|될까")),
     ("number", "숫자·목록형", re.compile(r"\d+\s?가지|\d+\s?개|TOP\s?\d+|\d+\s?분", re.I)),
-    ("auth", "권위형", re.compile(r"국가대표|국대|前|現|(?:^|\s)전\s|(?:^|\s)현\s|프로|선출|감독|코치|득점왕|레전드")),
+    ("auth", "권위형", re.compile(r"국가대표|국대|前|現|(?:^|\s)전\s|(?:^|\s)현\s|감독|코치|득점왕|레전드")),  # '비선출'·'프로선수들의 ~'는 이력이 아님
     ("vs", "대결형", re.compile(r"\bvs\b|대결|1\s?:\s?1|1대1|맞대결", re.I)),
     ("howto", "방법·꿀팁형", re.compile(r"하는\s?법|방법|꿀팁|팁|비법")),
     ("why", "이유형", re.compile(r"이유|왜")),
     ("series", "시리즈 표시", re.compile(r"\[[^\]]+\]|EP\.?\s?\d+|\d+\s?탄|시즌\s?\d+", re.I)),
     ("compile", "모음·총정리", re.compile(r"모음|몰아보기|총정리|완전정복|정리")),
-    ("target", "대상 지정", re.compile(r"초보|입문|초등|유소년|아마추어|동호인|플랩|레벨|세미")),
+    ("target", "대상 지정", re.compile(r"초보|입문|초등|유소년|아마추어|동호인")),  # 플랩·레벨은 경기 브이로그 제목에도 흔해 대상 지정으로 보지 않음
     ("promise", "효익 약속", re.compile(r"무조건|바로|끝|99%|완벽")),
     ("engage", "참여 유도", re.compile(r"맞춰|몇\s?번|댓글|저장|공유|보여줘|퀴즈")),
     ("emph", "강조 기호", re.compile("!|ㄷㄷ|ㅋㅋ|[\U0001F300-\U0001FAFF☀-➿]")),
@@ -1010,23 +1172,43 @@ def _clean_t(t):
     return re.sub(r"\s+", " ", re.sub(r"#\S+", "", str(t or ""))).strip(" |ㅣ-")
 
 
+@functools.lru_cache(maxsize=2048)
+def _clean_len(t):
+    return len(_clean_t(t))
+
+
 def _fhit(fid_, rx, t):
     if fid_ == "short":
-        return len(_clean_t(t)) <= 20
+        return _clean_len(t) <= 20
     if fid_ == "long":
-        return len(_clean_t(t)) >= 40
+        return _clean_len(t) >= 40
     return bool(rx.search(t))
 
 
+AGE_WIN = 5  # 목록에서 앞뒤 5편과 견줌 (오래된 영상일수록 조회가 더 쌓여 있어서 · 목록은 최신순)
+
+
+def _resid(vals):
+    """최신순 조회수 → 앞뒤 AGE_WIN 편(자기 빼고)의 ln 중앙값과의 차이: '비슷한 때 올린 영상보다 몇 배'의 ln."""
+    lv = [math.log(v) for v in vals]
+    out = []
+    for i, x in enumerate(lv):
+        nb = lv[max(0, i - AGE_WIN):i] + lv[i + 1:i + 1 + AGE_WIN]
+        out.append(x - _med(nb) if nb else 0.0)
+    return out
+
+
 def formula_stats(rows):
-    """[(제목, 조회수)] → {공식: {share, mult, n, ok}} — mult = 쓴 영상 / 안 쓴 영상의 보통 조회수 (각각 3개 이상이면 '근거 있음')."""
+    """[(제목, 조회수)] (최신순) → {공식: {share, mult, n, ok}} — mult = 쓴 영상 / 안 쓴 영상, 각각 비슷한 때 올린 영상 대비
+    (오래된 영상에 조회가 더 쌓인 것을 빼려고 목록 앞뒤 5편과 견줌) · 각각 3개 이상이면 '근거 있음'."""
     rows = [(t, v) for t, v in rows if t and _vv([v])]
     out = {}
     if len(rows) < 6:
         return out
+    rs = _resid([v for _, v in rows])
     for f_id, lab, rx in FORMULAS:
-        w = [math.log(v) for t, v in rows if _fhit(f_id, rx, t)]
-        wo = [math.log(v) for t, v in rows if not _fhit(f_id, rx, t)]
+        w = [r for (t, _), r in zip(rows, rs) if _fhit(f_id, rx, t)]
+        wo = [r for (t, _), r in zip(rows, rs) if not _fhit(f_id, rx, t)]
         mult = math.exp(_med(w) - _med(wo)) if w and wo else None
         out[f_id] = {"share": round(len(w) / len(rows), 2), "mult": round(mult, 2) if mult else None, "n": len(w), "ok": len(w) >= 3 and len(wo) >= 3}
     return out
@@ -1041,12 +1223,19 @@ def _tokens(t):
     return re.findall(r"[가-힣]{2,10}", re.sub(r"[\[【][^\]】]*[\]】]", " ", _clean_t(t)))
 
 
+@functools.lru_cache(maxsize=2048)
+def _title_parts(t):
+    """제목 하나의 풋살 용어·(낱말, 조사 뗀 꼴) — 한 채널을 볼 때 같은 제목을 두 번 나누지 않게 (작게 기억 · 첫 글자가 없으면 정규식을 돌리지 않음)."""
+    ct = _clean_t(t)
+    terms = frozenset(term for term, rx in _TOPIC_RES if term[0] in ct and rx.search(ct))
+    return terms, tuple((raw, hooks._strip_josa(raw)) for raw in _tokens(t))
+
+
 def _solid(titles):
     """'는·은'으로 끝난 낱말은 풀이말('만드는')일 수 있어, 같은 줄기가 다른 꼴(그대로·다른 조사)로도 나온 것만 이름말로 봄."""
     out = set()
     for t in titles:
-        for raw in _tokens(t):
-            w = hooks._strip_josa(raw)
+        for raw, w in _title_parts(str(t or ""))[1]:
             if w == raw or not raw.endswith(("는", "은")):
                 out.add(w)
     return out
@@ -1054,13 +1243,9 @@ def _solid(titles):
 
 def _words(t, solid=None):
     """제목의 주제어 (풋살 용어 + 조사를 뗀 한글 이름말 · 풀이말 끝은 뺌)."""
-    found = set()
-    ct = _clean_t(t)
-    for term, rx in _TOPIC_RES:
-        if rx.search(ct):
-            found.add(term)
-    for raw in _tokens(t):
-        w = hooks._strip_josa(raw)
+    terms, toks = _title_parts(str(t or ""))
+    found = set(terms)
+    for raw, w in toks:
         if w == raw and _VERB_END.search(raw):
             continue
         if w != raw and raw.endswith(("는", "은")) and (solid is None or w not in solid):
@@ -1071,17 +1256,21 @@ def _words(t, solid=None):
 
 
 def topic_stats(rows, min_free=3):
-    """[(제목, 조회수)] → [{w, n, mult}] (용어는 2번, 그냥 낱말은 3번 이상) · mult = 그 낱말이 든 영상 보통 / 채널 보통."""
+    """[(제목, 조회수)] (최신순) → [{w, n, mult}] (용어는 2번, 그냥 낱말은 3번 이상) · mult = 그 낱말이 든 영상이 비슷한 때 올린 영상보다 몇 배
+    · 주제가 아닌 말(TOPIC_STOP)은 뺌."""
     rows = [(t, v) for t, v in rows if t and _vv([v])]
     if len(rows) < 5:
         return []
-    allm = _med([math.log(v) for _, v in rows])
+    rs = _resid([v for _, v in rows])
+    allm = _med(rs)
     terms = {t for t, _ in _TOPIC_RES}
     solid = _solid(t for t, _ in rows)
     hits = {}
-    for t, v in rows:
+    for (t, v), r in zip(rows, rs):
         for w in _words(t, solid):
-            hits.setdefault(w, []).append(math.log(v))
+            if w in TOPIC_STOP:
+                continue
+            hits.setdefault(w, []).append(r)
     out = []
     for w, lv in hits.items():
         if len(lv) < (2 if w in terms else min_free) or len(lv) >= len(rows):
@@ -1094,11 +1283,20 @@ def topic_stats(rows, min_free=3):
 _SERIES_NUM = re.compile(r"\s*(?:EP\.?\s?\d+|#?\d+\s?탄|시즌\s?\d+|\d+)\s*$", re.I)
 
 
+def _series_name(raw):
+    """'패스 어디까지 해봤니 (' → '패스 어디까지 해봤니' (닫히지 않은 괄호·따옴표 뒤는 버림)."""
+    nm = raw.strip(" \"“”'‘’")
+    for o, c in (("(", ")"), ("[", "]"), ("（", "）"), ("【", "】")):
+        if nm.count(o) > nm.count(c):
+            nm = nm[:nm.rfind(o)]
+    return nm.strip(" \"“”'‘’-·|:")
+
+
 def series_stats(rows):
-    """[(제목, 조회수, id)] → 시리즈·코너 [{name, n, median, mult, top{id,t,v}}] (2편 이상)."""
+    """[(제목, 조회수, id)] (최신순) → 시리즈·코너 [{name, n, median, mult, top{id,t,v}}] (2편 이상) · mult 는 비슷한 때 올린 영상 대비."""
     rows = [(t, v, i) for t, v, i in rows if t]
-    vs = _vv(v for _, v, _ in rows)
-    allm = _med(vs) if vs else None
+    vrows = [(i, v) for t, v, i in rows if _vv([v])]
+    rmap = dict(zip((i for i, _ in vrows), _resid([v for _, v in vrows]))) if len(vrows) >= 3 else {}
     groups = {}
     for t, v, i in rows:
         names = set()
@@ -1107,8 +1305,8 @@ def series_stats(rows):
             if len(nm) >= 2:
                 names.add(f"[{nm}]")
         m = re.search(r"([가-힣A-Za-z][^\[\]|:#]{1,14}?)\s*[\"“']?\s*\d+\s?탄", t)
-        if m:
-            names.add(m.group(1).strip(" \"“'") + " N탄")
+        if m and len(_series_name(m.group(1))) >= 2:
+            names.add(_series_name(m.group(1)) + " N탄")
         m = re.match(r"^\s*([^|:ㅣ\[\]#]{2,20}?)\s*[|:ㅣ]", t)
         if m:
             names.add(m.group(1).strip() + " |")
@@ -1121,9 +1319,10 @@ def series_stats(rows):
             continue
         iv = _vv(v for _, v, _ in items)
         med = _med(iv) if iv else None
+        rr = [rmap[i] for _, _, i in items if i in rmap]
         top = max(items, key=lambda x: x[1] or 0)
         out.append({"name": nm, "n": len(items), "median": round(med) if med else None,
-                    "mult": round(med / allm, 2) if med and allm else None, "top": {"id": top[2], "t": top[0], "v": top[1]}})
+                    "mult": round(math.exp(_med(rr)), 2) if rr else None, "top": {"id": top[2], "t": top[0], "v": top[1]}})
     out.sort(key=lambda x: (-x["n"], -(x["mult"] or 0)))
     return out[:8]
 
@@ -1186,7 +1385,7 @@ def analyze_all(st=None, now=None):
 
 
 def group_summary(ana):
-    """분류마다: 채널 수·보통 구독자·형식별 보통 조회수·반응도·쇼츠 비율·주기 중앙값 + '이 분류에서 잘 되는 공식'."""
+    """분류마다: 채널 수·보통 구독자·형식별 보통 조회수·구독자 대비 조회·쇼츠 비율·주기 중앙값 + '이 분류에서 잘 되는 공식'."""
     out = {}
     for g in GROUPS:
         xs = [a for k, a in ana.items() if k != OWN and a["stats"].get("group") == g]
@@ -1219,29 +1418,36 @@ def group_summary(ana):
     return out
 
 
+def cv_words(cv):
+    """올리는 간격의 변동계수 → 쉬운 말 (작을수록 규칙적)."""
+    if cv is None:
+        return None
+    return "간격이 꽤 규칙적" if cv < 0.5 else "간격이 조금 들쭉날쭉" if cv < 1.0 else "간격이 들쭉날쭉"
+
+
 def strengths(s, m, gs):
-    """강점 문장 (같은 분류 중앙값과 비교 · 숫자를 붙임)."""
+    """강점 문장 (같은 분류 가운데 값과 비교 · 숫자를 붙임)."""
     g = gs.get(s.get("group")) or {}
     out = []
-    for k, lab in (("S", "쇼츠"), ("L", "롱폼")):
+    for k, lab in (("S", "쇼츠가"), ("L", "롱폼이")):
         r, p75 = s[k].get("reach"), g.get(f"reach{k}P75")
         if r and p75 and r >= p75:
-            out.append(f"구독자 대비 {lab} 조회가 분류 상위 25% ({r:g}배 · 분류 중앙값 {g.get('reach' + k) or 0:.2g})")
+            out.append(f"{lab} 구독자 수에 비해 잘 보여요 (분류 상위 25% · 구독자의 {r:g}배 · 분류 가운데 값 {g.get('reach' + k) or 0:.2g}배)")
     c = s.get("cadence") or {}
     pw = (c.get("perWeek") or {}).get("all")
     if pw and pw >= 2 and (c.get("cv") is None or c["cv"] < 0.8):
-        out.append(f"주 {pw:.1f}회 꾸준히 올려요" + (f" (간격 고르기 {c['cv']:g})" if c.get("cv") is not None else ""))
+        out.append(f"주 {pw:.1f}회 꾸준히 올려요" + (f" ({cv_words(c['cv'])})" if c.get("cv") is not None else ""))
     for se in m.get("series") or []:
-        if (se.get("mult") or 0) >= 1.5:
-            out.append(f"‘{se['name']}’ {se['n']}편이 채널 보통의 {se['mult']:g}배")
+        if (se.get("mult") or 0) >= 1.5 and se["n"] >= 3:
+            out.append(f"‘{se['name']}’ {se['n']}편이 비슷한 때 올린 영상의 {se['mult']:g}배")
             break
     lr, lp = s.get("likeRatio"), g.get("likeP75")
     if lr and lp and lr >= lp:
         out.append(f"좋아요 비율 {lr * 100:.1f}% (분류 상위 25%)")
-    if (s["S"].get("reach") or 0) >= 1 and not any("쇼츠 조회" in x for x in out):
+    if (s["S"].get("reach") or 0) >= 1 and not any(x.startswith("쇼츠가") for x in out):
         out.append(f"쇼츠를 구독자 수보다 많이 봐요 ({s['S']['reach']:g}배)")
     if s["L"].get("dur") and s["L"]["dur"] <= 480 and (s["L"].get("reach") or 0) >= (g.get("reachL") or 9):
-        out.append(f"롱폼을 {s['L']['dur'] // 60}분 안팎으로 짧게 만들고 반응도 {s['L']['reach']:g}")
+        out.append(f"롱폼을 {s['L']['dur'] // 60}분 안팎으로 짧게 만들고, 구독자 수에 비해 잘 보여요 ({s['L']['reach']:g}배)")
     return out
 
 
@@ -1283,17 +1489,28 @@ def _style_for(s, styles):
     return []
 
 
+def _ratio_words(a, b):
+    """a 가 b 의 몇 분의 일·몇 배인지 쉬운 말."""
+    if not a or not b:
+        return ""
+    x = a / b
+    return f"약 {x:.1f}배" if x >= 1.15 else "비슷해요" if x >= 0.87 else f"약 1/{max(2, round(1 / x))}"
+
+
 def _gap_lines(own, gs):
-    """우리와 분류 중앙값의 차이 문장."""
-    g = gs.get(own.get("group") or OWN_GROUP) or {}
+    """우리와 같은 분류 가운데 값의 차이 (쉬운 문장)."""
+    grp = own.get("group") or OWN_GROUP
+    g = gs.get(grp) or {}
     out = []
-    for k, lab in (("S", "쇼츠"), ("L", "롱폼")):
+    for k, lab in (("S", "쇼츠가"), ("L", "롱폼이")):
         r, gr = own[k].get("reach"), g.get("reach" + k)
         if r is not None and gr:
-            out.append({"text": f"우리 {lab} 반응도 {r:g} · {own.get('group') or OWN_GROUP} 중앙값 {gr:.2g}", "good": r >= gr})
+            good = r >= gr
+            out.append({"text": f"우리 {lab} 구독자 수에 비해 {'잘' if good else '덜'} 보여요 (구독자 대비 {r:g}배 · {grp} 가운데 값 {gr:.2g}배 · "
+                                f"{_ratio_words(r, gr)})", "good": good})
     pw = ((own.get("cadence") or {}).get("perWeek") or {}).get("all")
     if g.get("perWeek"):
-        out.append({"text": f"우리 업로드 주 {pw or 0:.1f}회 · 분류 중앙값 주 {g['perWeek']:.1f}회", "good": (pw or 0) >= g["perWeek"]})
+        out.append({"text": f"우리 업로드 주 {pw or 0:.1f}회 · {grp} 가운데 값 주 {g['perWeek']:.1f}회", "good": (pw or 0) >= g["perWeek"]})
     return out
 
 
@@ -1333,19 +1550,53 @@ TITLE_RULES = {"auth": ("R-AUTH", "이력을 앞세운 권위형 제목을 써�
                "compile": ("R-COMPILE", "예전 영상을 묶은 ‘총정리·몰아보기’ 편을 만들어요"),
                "vs": ("R-VS", "대결 구도(vs·1대1) 편을 만들어요 (예: ‘[국대 vs 국대] 2탄’)")}
 TIP_CATS = [(re.compile(r"썸네일|제목|문구|캡션|카피"), "썸네일·제목", {"제목"}),
-            (re.compile(r"자막|오버레이|화살표|템포|편집|말풍선|레이아웃|레터박스|누끼"), "편집 스타일", {"편집", "예능"}),
-            (re.compile(r"시리즈|EP|코너|시즌|회차"), "시리즈·코너", {"시리즈"}),
+            (re.compile(r"자막|오버레이|화살표|템포|편집|말풍선|레이아웃|레터박스|누끼|템플릿|로고|브랜드 바|상단|하단|시그니처|촬영"), "편집 스타일", {"편집", "예능"}),
+            (re.compile(r"시리즈|EP|코너|시즌|회차|연작|말머리"), "시리즈·코너", {"시리즈"}),
             (re.compile(r"쇼츠"), "쇼츠 운영", {"쇼츠"}),
-            (re.compile(r"레슨|문의|클래스|센터|아카데미"), "수익화·레슨 연계", {"레슨", "수익"}),
+            (re.compile(r"레슨|문의|클래스|센터|아카데미|수업"), "수익화·레슨 연계", {"레슨", "수익"}),
             (re.compile(r"댓글|퀴즈|참여|맞춰"), "시청자 참여", {"참여"})]
+# 조사 메모 가운데 '할 일'이 아닌 관찰 (숫자·상태·평가): 가져올 점으로 만들지 않음 (채널을 펼치면 메모 전체가 보임)
+TIP_OBS = re.compile(r"\d[\d,.]*\s*(?:만|천)?\s*회|회대|회 안팎|멈춤|경쟁 채널|확인 못|휴면|추정|반면교사|하락|약함|약해|증거|풀로 쓸|"
+                     r"요소는 없음|상위권|최고 조회|\d+\s*배|배 넘|구독자 대비|롱폼이 길어|낮음|높음|좋음|잘 됨|소규모|조회\s*$")
 
 
-def _ev(s, numbers, video=None):
+def tip_parts(tip):
+    """조사 메모 → 할 만한 조각들: 괄호 밖의 쉼표·문장 끝에서만 나누고, 너무 짧거나 관찰(숫자·상태)인 조각은 버림."""
+    tip = str(tip or "")
+    parts, cur, depth = [], "", 0
+    for i, ch in enumerate(tip):
+        if ch in "([{（【":
+            depth += 1
+        elif ch in ")]}）】":
+            depth = max(0, depth - 1)
+        nxt = tip[i + 1] if i + 1 < len(tip) else " "
+        if depth == 0 and (ch == "," or (ch == "." and nxt.isspace())):
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    parts.append(cur)
+    out = []
+    for ph in parts:
+        ph = ph.strip(" .")
+        if len(re.sub(r"\s", "", ph)) < 6 or TIP_OBS.search(ph):
+            continue
+        out.append(ph)
+    return out
+
+
+def _ev(s, numbers, video=None, mult=None):
     v = None
     if video and video.get("id"):
         k = video.get("k") or "L"
         v = {"id": video["id"], "title": video.get("t") or video.get("title") or "", "url": _url_of(video["id"], k)}
-    return {"channel": s.get("name") or s.get("key"), "key": s.get("key"), "group": s.get("group"), "subs": s.get("subs"), "numbers": numbers, "video": v}
+    return {"channel": s.get("name") or s.get("key"), "key": s.get("key"), "group": s.get("group"), "subs": s.get("subs"), "numbers": numbers, "video": v,
+            "mult": round(mult, 2) if isinstance(mult, (int, float)) else None}
+
+
+def _word_rx(w):
+    """주제어로 영상 찾기: 앞에 한글이 붙은 말('비선출' 안의 '선출')은 빼고."""
+    return re.compile(r"(?<![가-힣])" + re.escape(w))
 
 
 def _best_video(ch, rx=None, k=None):
@@ -1371,6 +1622,9 @@ def _cands(st, ana, chans, own_a, gs, styles):
     rec_idx = _rec_index()
 
     def add(rule, pattern, text, ev, mult=None, nvid=1, share=None, ours=None):
+        if mult is not None and ev.get("mult") is None:
+            ev["mult"] = round(mult, 2)
+        ev["n"] = nvid
         out.append({"rule": rule, "pattern": pattern, "text": text, "ev": ev, "mult": mult, "nvid": nvid, "share": share, "ours": ours})
     for key in comp_keys:
         a = ana.get(key)
@@ -1380,7 +1634,7 @@ def _cands(st, ana, chans, own_a, gs, styles):
         for se in m.get("series") or []:
             if se["n"] >= 2 and (se.get("mult") or 0) >= 1.2:
                 add("R-SERIES", "series", "번호 붙은 시리즈·코너를 만들어요 (예: ‘[풋살사관학교 기초반 EP01]’)",
-                    _ev(s, f"‘{se['name']}’ {se['n']}편 보통 {fmt_n(se['median'])}회 = 채널 보통의 {se['mult']:g}배", dict(se["top"], k=se.get("k"))),
+                    _ev(s, f"‘{se['name']}’ {se['n']}편 보통 {fmt_n(se['median'])}회 · 비슷한 때 올린 영상의 {se['mult']:g}배", dict(se["top"], k=se.get("k"))),
                     se["mult"], se["n"])
                 break
         for k in ("L", "S"):
@@ -1392,14 +1646,14 @@ def _cands(st, ana, chans, own_a, gs, styles):
                     rx = FORMULA_RX.get(f_id)
                     vid = _best_video(ch, rx, k) if rx is not None else None
                     lab = "쇼츠" if k == "S" else "롱폼"
-                    add(rule, f_id, text, _ev(s, f"{lab} 제목의 {round(x['share'] * 100)}%가 {FORMULA_LABEL[f_id]} · 쓴 영상이 보통 {x['mult']:g}배", vid),
+                    add(rule, f_id, text, _ev(s, f"{lab} 제목 {x['n']}편({round(x['share'] * 100)}%)이 {FORMULA_LABEL[f_id]} · 비슷한 때 올린 다른 영상보다 {x['mult']:g}배", vid),
                         x["mult"], x["n"], x["share"], (own_fs.get(f_id) or {}).get("share"))
             if k == "S":
                 eg = fs.get("engage")
                 if eg and eg["n"] >= 2 and (eg.get("mult") or 0) >= 1.2:
                     vid = _best_video(ch, re.compile(r"맞춰|몇\s?번|퀴즈|댓글"), "S") or _best_video(ch, FORMULA_RX["engage"], "S")
                     add("R-ENGAGE-Q", "quiz", "쇼츠에 퀴즈·질문을 넣어 댓글을 받아요 (예: ‘몇 번이 제일 어려워요?’)",
-                        _ev(s, f"참여 유도 쇼츠 {eg['n']}개 · 보통 {eg['mult']:g}배", vid), eg["mult"], eg["n"], eg["share"])
+                        _ev(s, f"참여 유도 쇼츠 {eg['n']}개 · 비슷한 때 올린 다른 쇼츠보다 {eg['mult']:g}배", vid), eg["mult"], eg["n"], eg["share"])
         save_v = [dict(v, id=i) for i, v in (ch.get("videos") or {}).items() if "저장" in (v.get("t") or "") and _vv([v.get("v")])]
         if len(save_v) >= 2:
             best = max(save_v, key=lambda v: v["v"])
@@ -1423,7 +1677,7 @@ def _cands(st, ana, chans, own_a, gs, styles):
         rs, ss = s["S"].get("reach"), s["shortsShare"].get("rss")
         if rs and rs >= 1 and ss is not None and ss >= 0.5 and (own_s["shortsShare"].get("rss") or 0) < ss:
             add("R-SHORTS-RATIO", "shorts-ratio", "쇼츠 비중을 늘려요 (기술 한 개 쇼츠를 주 3개 이상)",
-                _ev(s, f"쇼츠 반응도 {rs:g} · 최근 15개 중 쇼츠 {round(ss * 15)}개", _best_video(ch, None, "S")), rs, 15)
+                _ev(s, f"쇼츠가 구독자의 {rs:g}배 보임 · 최근 15개 중 쇼츠 {round(ss * 15)}개", _best_video(ch, None, "S")), rs, 15)
         pairs = _long_short_pairs(ch)
         if len(pairs) >= 2:
             lv, sv = pairs[0]
@@ -1436,7 +1690,7 @@ def _cands(st, ana, chans, own_a, gs, styles):
             (s["L"].get("reach") or 0) >= ((gs.get(s["group"]) or {}).get("reachL") or 99)
         if pw >= 2 and (c.get("cv") is None or c["cv"] < 0.8) and good_reach and own_pw < pw:
             add("R-CADENCE", "cadence", "올리는 요일을 정해 주 2회 이상 꾸준히 올려요",
-                _ev(s, f"주 {pw:.1f}회" + (f" · 간격 고르기 {c['cv']:g}" if c.get("cv") is not None else "") + f" · 우리 주 {own_pw:.1f}회"), None, 15)
+                _ev(s, f"주 {pw:.1f}회" + (f" · {cv_words(c['cv'])}" if c.get("cv") is not None else "") + f" · 우리 주 {own_pw:.1f}회"), None, 15)
         if c.get("activity") in ("쉬는 중", "멈춤"):
             ids_l = [i for i in ((ch.get("tabs") or {}).get("long") or {}).get("ids") or [] if i in ch["videos"]]
             a15 = _vv(ch["videos"][i].get("v") for i in ids_l[:15])
@@ -1462,26 +1716,26 @@ def _cands(st, ana, chans, own_a, gs, styles):
                 add("R-STYLE-PLAN", f"style:{key}", f"{s['name']}의 편집 공식을 따라 해 봐요: {info['headline']}",
                     _ev(s, f"배운 스타일 ‘{info['name']}’ 판단" + (f" · 자막: {info['captions']}" if info.get("captions") else "")), 1.4, 6)
         rc = rec_idx.get(key) or rec_idx.get(s.get("channelId") or "") or {}
-        for n, ph in enumerate(re.split(r"[,.]\s*|\s+\+\s+", rc.get("tip") or "")):
-            ph = ph.strip()
-            if len(ph) < 6:
-                continue
-            add("R-RESEARCH-TIP", f"tip:{key}:{n}", ph, _ev(s, "조사 메모 2026-10-07"), None, 0)
+        for n, ph in enumerate(tip_parts(rc.get("tip"))):
+            add("R-RESEARCH-TIP", f"tip:{key}:{n}", f"참고: {ph}", _ev(s, f"조사 메모 2026-10-07 · 원문 ‘{rc.get('tip')}’"), None, 0)
     topics = {}
+    terms = {t for t, _ in _TOPIC_RES}
     for key in comp_keys:
         a = ana.get(key)
         if not a:
             continue
         for k in ("L", "S"):
             for tp in a["mine"].get(k, {}).get("topics") or []:
-                if tp["mult"] >= 1.5 and tp["n"] >= 2 and tp["w"] not in own_titles:
-                    topics.setdefault(tp["w"], []).append((a["stats"], tp, k))
-    for w, items in sorted(topics.items(), key=lambda kv: -max(x[1]["mult"] for x in kv[1]))[:6]:
+                if tp["mult"] >= 1.5 and tp["n"] >= 2 and tp["w"] not in TOPIC_STOP and not _word_rx(tp["w"]).search(own_titles):
+                    topics.setdefault(tp["w"], {}).setdefault(key, (a["stats"], tp, k))
+    # 풋살 용어가 아니면 두 채널 이상에서 잘 된 낱말만 (사람 이름·한 채널만의 말이 '주제'가 되지 않게)
+    good = {w: list(v.values()) for w, v in topics.items() if w in terms or len(v) >= 2}
+    for w, items in sorted(good.items(), key=lambda kv: (-len(kv[1]), -max(x[1]["mult"] for x in kv[1])))[:6]:
         for s, tp, k in items:
             ch = chans.get(s["key"]) or {}
-            vid = _best_video(ch, re.compile(re.escape(w)), k)
+            vid = _best_video(ch, _word_rx(w), k)
             add("R-TOPIC", f"topic:{w}", f"‘{w}’ 주제를 다뤄 봐요 (다른 채널에서 반응이 좋고 우리는 아직 안 다뤘어요)",
-                _ev(s, f"‘{w}’ 영상 {tp['n']}개가 채널 보통의 {tp['mult']:g}배", vid), tp["mult"], tp["n"])
+                _ev(s, f"‘{w}’ 영상 {tp['n']}개가 비슷한 때 올린 영상의 {tp['mult']:g}배", vid), tp["mult"], tp["n"])
     return out
 
 
@@ -1521,8 +1775,45 @@ def _target_words(strat):
     return out
 
 
+MINED = {"R-TOPIC", "R-AUTH", "R-QUESTION", "R-NUMBER", "R-HOWTO", "R-TARGET", "R-TITLELEN", "R-COMPILE", "R-VS", "R-ENGAGE-Q", "R-SERIES",
+         "R-ENGAGE-SAVE"}
+TIP_MAX = 60       # 조사 메모는 '중'까지만 (숫자 근거가 없음)
+THIN_MAX = 69      # 제목·주제 규칙은 두 채널 이상 · 영상 5편 이상이어야 '상'
+FIT_W = {"G": 0.25, "E": 0.40, "D": 0.15, "F": 0.20}
+
+
+def _size_w(e_subs, own_subs):
+    """근거 채널이 우리보다 얼마나 큰지: 10배 안 1 · 20배 안 0.7 · 그보다 크면 0.5 (구독자를 모르면 0.7)."""
+    if not e_subs or not own_subs:
+        return 0.7
+    r = e_subs / max(own_subs, 1)
+    return 1.0 if r <= 10 else 0.7 if r <= 20 else 0.5
+
+
+def _ev_mult(e, own_subs):
+    """근거 하나의 배수를 영상 수로 줄임 (n/(n+6) · 2~3편의 큰 배수는 우연일 때가 많아서) · 우리보다 20배 넘게 큰 채널은 절반만."""
+    m = e.get("mult")
+    if not m or m <= 0:
+        return None
+    n = e.get("n") or 1
+    x = math.log(m) * n / (n + 6)
+    if _size_w(e.get("subs"), own_subs) < 0.7:
+        x *= 0.5
+    return math.exp(x)
+
+
+def _plan_met(rule, rates):
+    """우리 계획이 이미 그만큼 하고 있으면 (솔루션에서 빼고 '계획에 이미 있어요')."""
+    if rule == "R-SHORTS-RATIO":
+        return rates["S"] >= 3
+    if rule == "R-CADENCE":
+        return rates["L"] + rates["S"] >= 2
+    return False
+
+
 def takeaways(st=None, ana=None, chans=None, now=None):
-    """가져올 점 → [{id, rule, category, text, effort, fit{score,level,G,E,D,F}, notUsed, evidence[], hidden, todo}] (맞춤 점수 순)."""
+    """가져올 점 → [{id, rule, category, text, effort, fit{score,level,G,E,D,F}, notUsed, evidence[], hidden, todo, planMet}] (맞춤 점수 순).
+    맞춤 점수 = 25% 비슷한 분류·규모 + 40% 근거(배수·채널 수·영상 수) + 15% 우리 방향 + 20% 일 크기 (BR-018)."""
     now = now or time.time()
     st = st or load_state()
     chans = chans or known_channels(st)
@@ -1530,6 +1821,7 @@ def takeaways(st=None, ana=None, chans=None, now=None):
     gs = group_summary(ana)
     own_a = ana.get(OWN) or {"stats": channel_stats(_new_channel(own_entry(st)), now), "mine": mine({})}
     strat = st.get("strategy") or preset("A")
+    rates = plan_rates(strat)
     tags = _dir_tags(strat)
     twords = _target_words(strat)
     own_subs = own_a["stats"].get("subs") or 0
@@ -1545,26 +1837,27 @@ def takeaways(st=None, ana=None, chans=None, now=None):
                     break
         tid = hashlib.sha1(f"{rule}|{c['pattern']}".encode("utf-8")).hexdigest()[:10]
         m = merged.setdefault(tid, {"id": tid, "rule": rule, "category": cat, "effort": effort, "tags": rtags, "text": c["text"],
-                                    "evidence": [], "mults": [], "nvid": 0, "shares": [], "ours": c.get("ours"), "pattern": c["pattern"]})
+                                    "evidence": [], "nvid": 0, "shares": [], "ours": c.get("ours"), "pattern": c["pattern"]})
         if any(e["key"] == c["ev"]["key"] for e in m["evidence"]):
             continue
         m["evidence"].append(c["ev"])
-        if c["mult"]:
-            m["mults"].append(c["mult"])
         if c["share"] is not None:
             m["shares"].append(c["share"])
         m["nvid"] += c["nvid"] or 0
     hidden, todos = set(st.get("hidden") or []), {(t.get("from") or {}).get("takeaway"): t for t in st.get("todos") or []}
     out = []
     for m in merged.values():
-        ev = m["evidence"]
-        G = max(GROUP_W.get(e.get("group"), 0.5) * (1.0 if own_subs and e.get("subs") and e["subs"] <= 10 * max(own_subs, 1) else 0.7) for e in ev)
+        ev = sorted(m["evidence"], key=lambda e: -(_ev_mult(e, own_subs) or 0))  # 가장 센 근거(영상 수까지 본 배수) 먼저 ('왜:'·첫 줄)
+        G = max(GROUP_W.get(e.get("group"), 0.5) * _size_w(e.get("subs"), own_subs) for e in ev)
         if m["rule"] == "R-RESEARCH-TIP":
-            E = 0.35
+            E = 0.3
         else:
-            mult = _med(m["mults"]) if m["mults"] else None
-            base = (0.5 * math.log2(mult) if mult and mult > 1 else 0.0) if mult else 0.4
+            mults = [x for x in (_ev_mult(e, own_subs) for e in ev) if x]
+            mult = _med(mults) if mults else None
+            base = (0.5 * math.log2(mult) if mult > 1 else 0.0) if mult else 0.4
             E = max(0.0, min(1.0, base + 0.15 * (len(ev) - 1))) * min(1.0, max(m["nvid"], 1) / 6)
+            if m["nvid"] < 5:
+                E = min(E, 0.5)
         others = _med(m["shares"]) if m["shares"] else None
         not_used = others is not None and others >= 0.5 and (m["ours"] or 0) < 0.2
         if not_used:
@@ -1574,14 +1867,20 @@ def takeaways(st=None, ana=None, chans=None, now=None):
         if twords and any(w in text_all for w in twords):
             D = min(1.0, D + 0.2)
         F = EFFORT_W[m["effort"]]
-        score = round(100 * (0.30 * G + 0.30 * E + 0.25 * D + 0.15 * F))
+        score = round(100 * (FIT_W["G"] * G + FIT_W["E"] * E + FIT_W["D"] * D + FIT_W["F"] * F))
+        thin = m["rule"] in MINED and (len(ev) < 2 or m["nvid"] < 5)
+        if thin:
+            score = min(score, THIN_MAX)
+        if m["rule"] == "R-RESEARCH-TIP":
+            score = min(score, TIP_MAX)
         lvl = "상" if score >= 70 else "중" if score >= 45 else "하"
         td = todos.get(m["id"])
         out.append({"id": m["id"], "rule": m["rule"], "pattern": m["pattern"], "category": m["category"], "text": m["text"], "effort": m["effort"],
-                    "fit": {"score": score, "level": lvl, "G": round(G, 2), "E": round(E, 2), "D": round(D, 2), "F": F},
-                    "notUsed": not_used, "evidence": ev[:6], "nChannels": len(ev), "hidden": m["id"] in hidden,
-                    "todo": td["id"] if td else None, "use": USE.get(m["category"], ["plan"])})
-    out.sort(key=lambda x: (x["hidden"], -x["fit"]["score"], x["text"]))
+                    "fit": {"score": score, "level": lvl, "G": round(G, 2), "E": round(E, 2), "D": round(D, 2), "F": F, "thin": thin},
+                    "notUsed": not_used, "evidence": ev[:6], "nChannels": len(ev), "nVideos": m["nvid"], "hidden": m["id"] in hidden,
+                    "todo": td["id"] if td else None, "use": USE.get(m["category"], ["plan"]), "planMet": _plan_met(m["rule"], rates),
+                    "note": m["rule"] == "R-RESEARCH-TIP"})
+    out.sort(key=lambda x: (x["hidden"], x["note"], x["planMet"], -x["fit"]["score"], x["text"]))  # 계획에 이미 있는 것은 뒤로
     return out
 
 
@@ -1760,8 +2059,7 @@ def save_strategy(d):
     clean = validate_strategy(d)
 
     def put(s):
-        own = s.get("own") or {}
-        clean["startedAt"] = clean["startedAt"] or (s.get("strategy") or {}).get("startedAt") or own.get("revivedAt") or time.time()
+        clean["startedAt"] = clean["startedAt"] or (s.get("strategy") or {}).get("startedAt") or time.time()  # 처음 저장한 날 (다시 시작한 날이 아님)
         clean["updatedAt"] = time.time()
         s["strategy"] = clean
         return clean
@@ -1789,7 +2087,9 @@ def plan_rates(strat):
 
 # ---------- 가능성 (forecast.py 연결 · 캐시) ----------
 
-FC_VER = 1
+FC_VER = 2
+PACE_DAYS = 28                    # '지금 속도' = 최근 4주에 올린 개수 ÷ 4
+_FC_LOCK = threading.Lock()       # 가능성 계산은 한 번에 하나 (같은 입력이면 기다렸다가 캐시를 씀)
 
 
 def _g0(own_hist, own_ch):
@@ -1806,7 +2106,23 @@ def _g0(own_hist, own_ch):
     return max(0.0, _med(xs)) if xs else 0.0
 
 
+def _data_time(ch, now):
+    """채널 자료를 받은 시각 (가능성 입력의 나이·주기는 이 시각 기준 → 시계가 흘러도 같은 자료면 같은 입력 · 캐시가 유지됨)."""
+    ts = [x for x in ((ch.get("rss") or {}).get("at"), ch.get("at")) if isinstance(x, (int, float))]
+    return min(now, max(ts)) if ts else now
+
+
+def own_pace(oc, now=None):
+    """우리 채널 지금 속도 {L, S} (최근 4주 RSS 날짜로 · 주당 개수, 0.5 단위) · RSS 를 못 받았으면 None."""
+    if not oc or not (oc.get("rss") or {}).get("ok"):
+        return None
+    ref = _data_time(oc, now or time.time())
+    rec = [v for v in (oc.get("videos") or {}).values() if isinstance(v.get("pub"), (int, float)) and 0 <= ref - v["pub"] <= PACE_DAYS * 86400]
+    return {k: round(2 * sum(1 for v in rec if v.get("k") == k) / (PACE_DAYS / 7)) / 2 for k in ("L", "S")}
+
+
 def forecast_inputs(st=None, now=None):
+    """forecast.run 입력 {peers, own, plan, goals, group, pace, plans} — 모두 자료 받은 시각 기준 (지금 시각에 따라 바뀌지 않음)."""
     now = now or time.time()
     st = st or load_state()
     chans = known_channels(st)
@@ -1815,62 +2131,105 @@ def forecast_inputs(st=None, now=None):
     for k, c in chans.items():
         if k == OWN:
             continue
+        ref = _data_time(c, now)
         s = _ana(c, now)["stats"]
         vids = c.get("videos") or {}
         rv = [vids[i] for i in (c.get("rss") or {}).get("ids") or [] if i in vids]
-        rec = {"key": k, "group": s["group"], "subs": s["subs"],
-               "L": [vids[i].get("v") for i in ((c.get("tabs") or {}).get("long") or {}).get("ids", [])[:RECENT] if i in vids],
-               "S": [vids[i].get("v") for i in ((c.get("tabs") or {}).get("shorts") or {}).get("ids", [])[:RECENT] if i in vids],
-               "cad": ((s.get("cadence") or {}).get("perWeek") or None), "life": s["life"],
-               "rssL": [v.get("v") for v in rv if v.get("k") == "L" and isinstance(v.get("pub"), (int, float)) and now - v["pub"] >= 14 * 86400],
-               "rssS": [v.get("v") for v in rv if v.get("k") == "S" and isinstance(v.get("pub"), (int, float)) and now - v["pub"] >= 7 * 86400],
-               "history": [{"at": r["at"], "subs": r.get("subs")} for r in hist.get(k, [])]}
-        peers.append(rec)
+        cad = cadence([(v["pub"], v.get("k")) for v in rv if isinstance(v.get("pub"), (int, float))], ref)
+        peers.append({"key": k, "group": s["group"], "subs": s["subs"],
+                      "L": [vids[i].get("v") for i in ((c.get("tabs") or {}).get("long") or {}).get("ids", [])[:RECENT] if i in vids],
+                      "S": [vids[i].get("v") for i in ((c.get("tabs") or {}).get("shorts") or {}).get("ids", [])[:RECENT] if i in vids],
+                      "cad": (cad or {}).get("perWeek"), "life": s["life"],
+                      "rssL": [v.get("v") for v in rv if v.get("k") == "L" and isinstance(v.get("pub"), (int, float)) and ref - v["pub"] >= 14 * 86400],
+                      "rssS": [v.get("v") for v in rv if v.get("k") == "S" and isinstance(v.get("pub"), (int, float)) and ref - v["pub"] >= 7 * 86400],
+                      "history": [{"at": r["at"], "subs": r.get("subs")} for r in hist.get(k, [])]})
     oc = chans.get(OWN) or {}
     os_ = _ana(oc, now)["stats"] if oc else channel_stats(_new_channel(own_entry(st)), now)
+    ref = _data_time(oc, now) if oc else now
     vids = oc.get("videos") or {}
     own = {"subs": os_.get("subs") or 0,
-           "videos": [{"k": v.get("k"), "v": v.get("v"), "age": round((now - v["pub"]) / 86400, 1)}
-                      for v in vids.values() if isinstance(v.get("pub"), (int, float))],
+           "videos": [{"k": v.get("k"), "v": v.get("v"), "age": round((ref - v["pub"]) / 86400, 1)}
+                      for _i, v in sorted(vids.items()) if isinstance(v.get("pub"), (int, float))],
            "life": os_["life"], "g0": _g0(hist.get(OWN), oc)}
     strat = current_strategy(st)
-    return peers, own, plan_rates(strat), (strat.get("goals") or {}), own_entry(st)["group"]
+    return {"peers": peers, "own": own, "plan": plan_rates(strat), "goals": strat.get("goals") or {}, "group": own_entry(st)["group"],
+            "pace": own_pace(oc, now) if oc.get("src") == "live" else None,
+            "plans": {k: plan_rates(preset(k)) for k in ("A", "B", "C")}}
+
+
+def _fc_hash(inp):
+    return forecast.inputs_hash(FC_VER, forecast.B, forecast.M, forecast.W, inp["peers"], inp["own"], inp["plan"], inp["goals"],
+                                inp["group"], inp["pace"], inp["plans"])
 
 
 def forecast_result(st=None, force=False):
-    """가능성 (입력이 같으면 forecast.json 캐시) → forecast.run 결과 + at · numpy 가 없으면 forecast.ForecastError."""
-    peers, own, plan, goals, group = forecast_inputs(st)
-    h = forecast.inputs_hash(FC_VER, forecast.B, forecast.M, forecast.W, peers, own, plan, goals, group)
+    """가능성 (입력이 같으면 forecast.json 캐시) → forecast.run 결과 + at · numpy 가 없으면 forecast.ForecastError.
+    계산은 한 번에 하나: 같이 들어온 요청은 앞 계산이 끝나길 기다렸다가 그 캐시를 씀."""
+    inp = forecast_inputs(st)
+    h = _fc_hash(inp)
     cache = _read(_path("forecast.json"), dict)
     if not force and cache.get("inputsHash") == h and isinstance(cache.get("result"), dict):
         return cache["result"]
-    res = forecast.run(peers, own, plan, goals, group)
-    live = live_channels()
-    res.update(inputsHash=h, at=time.time(), seedAt=seed()["at"], liveN=sum(1 for p in peers if p["key"] in live))
+    with _FC_LOCK:
+        cache = _read(_path("forecast.json"), dict)
+        if not force and cache.get("inputsHash") == h and isinstance(cache.get("result"), dict):
+            return cache["result"]
+        res = forecast.run(inp["peers"], inp["own"], inp["plan"], inp["goals"], inp["group"], pace=inp["pace"], plans=inp["plans"])
+        live = live_channels()
+        res.update(inputsHash=h, at=time.time(), seedAt=seed()["at"], liveN=sum(1 for p in inp["peers"] if p["key"] in live),
+                   draft=(st or load_state()).get("strategy") is None)
+        try:
+            _write(_path("forecast.json"), {"inputsHash": h, "at": res["at"], "result": res})
+        except OSError:
+            pass
+        return res
+
+
+def forecast_preview(L, S, st=None):
+    """저장하지 않은 계획(롱폼 L · 쇼츠 S 주당 개수)의 다음 목표 가능성 미리 보기 (캐시 없음 · 저장 안 함)."""
     try:
-        _write(_path("forecast.json"), {"inputsHash": h, "at": res["at"], "result": res})
-    except OSError:
-        pass
-    return res
+        L, S = float(L), float(S)
+    except (TypeError, ValueError):
+        raise StrategyError("주당 개수는 숫자로 넣어 주세요") from None
+    if not (0 <= L <= MAX_PER_WEEK and 0 <= S <= MAX_PER_WEEK) or math.isnan(L) or math.isnan(S):
+        raise StrategyError(f"주당 개수는 0~{MAX_PER_WEEK}개로 넣어 주세요")
+    inp = forecast_inputs(st)
+    with _FC_LOCK:
+        res = forecast.run(inp["peers"], inp["own"], {"L": L, "S": S}, inp["goals"], inp["group"], plans={"preview": {"L": L, "S": S}})
+    pv = (res.get("plans") or {}).get("preview") or {}
+    return {"rates": {"L": L, "S": S}, "goal": res.get("goal"), "m12": pv.get("m12"), "m6": pv.get("m6"), "subs12": pv.get("subs12"),
+            "conv": pv.get("conv")}
 
 
 # ---------- 성공 솔루션 (30/60/90) ----------
 
 PHASES = (("1~30일", "기본 틀 만들기", 30), ("31~60일", "잘 된 것 늘리기", 60), ("61~90일", "다듬기", 90))
-SENS_FOR = {"썸네일·제목": "u+", "기획·형식": "u+", "편집 스타일": "u+", "시리즈·코너": "u+", "시청자 참여": "c+", "수익화·레슨 연계": "c+",
-            "쇼츠 운영": "S+2", "업로드 주기": "L+1"}
+# 가져올 점이 움직이는 쪽 (그 항목 하나의 효과는 따로 알 수 없어서 %는 붙이지 않음 · 계획 바꾸기 줄에만 %)
+LEVER = {"썸네일·제목": ("u+", "조회수 올리기"), "기획·형식": ("u+", "조회수 올리기"), "편집 스타일": ("u+", "조회수 올리기"),
+         "시리즈·코너": ("u+", "조회수 올리기"), "시청자 참여": ("c+", "구독 전환 올리기"), "쇼츠 운영": ("S+2", "쇼츠 운영"),
+         "업로드 주기": ("L+1", "꾸준히 올리기"), "수익화·레슨 연계": (None, "레슨 연계 (구독 수와는 따로)")}
 EFFORT_DIV = {"쉬움": 1.0, "보통": 1.5, "큼": 2.5}
+SCEN_EFFORT = {"L+1": "큼", "S+2": "보통", "u+": "보통", "c+": "쉬움"}
 
 
-def solution(st, tks, fc, gs=None, topics=None):
-    """성공 솔루션: 구간 3개(올릴 것·할 일·KPI·왜) + 먼저 할 것 (민감도 %p × 맞춤 ÷ 품)."""
+def _sens_small(sens, sid):
+    s = sens.get(sid)
+    return s is not None and (s.get("small") or abs(s.get("d12") or 0) < 5)
+
+
+def solution(st, tks, fc, gs=None, topics=None, own_stats=None):
+    """성공 솔루션: 구간 3개(올릴 것·할 일·KPI·왜) + 먼저 할 것(가져올 점 · 맞춤 ÷ 일 크기 · %는 붙이지 않음)
+    + 계획을 바꾸면(가능성 계산의 시나리오에만 %) + 한 줄 요약(쇼츠·롱폼)."""
     strat = current_strategy(st)
     rates = plan_rates(strat)
     ideas = [s["name"] for s in strat.get("series") or []] + [f"‘{w}’ 주제" for w in (topics or [])]
-    act = [t for t in tks if not t["hidden"] and t["fit"]["score"] >= 55 and t["rule"] != "R-RESEARCH-TIP"]  # 조사 메모는 가져올 점 탭에서만
-    kpi = (fc or {}).get("kpi") or {}
     sens = {s["id"]: s for s in (fc or {}).get("sensitivity") or []}
+    # 계획이 이미 하고 있는 것 · 계산상 거의 차이 없는 쪽(쇼츠 +2 등)은 솔루션에서 뺌 (조언이 서로 어긋나지 않게)
+    act = [t for t in tks if not t["hidden"] and t["fit"]["score"] >= 55 and not t.get("note") and not t.get("planMet")
+           and not (LEVER.get(t["category"], (None,))[0] in ("S+2", "L+1") and _sens_small(sens, LEVER[t["category"]][0]))]
+    kpi = (fc or {}).get("kpi") or {}
     g = (gs or {}).get(own_entry(st)["group"]) or {}
+    own_med = {k: ((own_stats or {}).get(k) or {}).get("median") for k in ("L", "S")}
     phases = []
     k_idea = 0
     for n, (span, title, days) in enumerate(PHASES):
@@ -1892,60 +2251,149 @@ def solution(st, tks, fc, gs=None, topics=None):
         kp = [{"text": f"롱폼 {round(rates['L'] * 30 / 7)}개 · 쇼츠 {round(rates['S'] * 30 / 7)}개 올리기"}]
         for f, lab in (("L", "롱폼"), ("S", "쇼츠")):
             if rates[f] > 0 and vm.get(f):
-                kp.append({"text": f"{lab} 영상 보통 조회수 {vm[f]['p50']:,}회 이상", "target": vm[f]["p50"]})
+                cur = f" · 지금 {fmt_n(own_med[f])}회" if own_med.get(f) else ""
+                kp.append({"text": f"{lab} 영상 보통 조회수: 최소 {vm[f]['p25']:,}회 · 잘 되면 {vm[f]['p50']:,}회{cur}",
+                           "min": vm[f]["p25"], "target": vm[f]["p50"]})
         if kd.get("subs"):
-            kp.append({"text": f"구독자 약 {kd['subs']['p50']:,}명 ({kd['subs']['p25']:,}~{kd['subs']['p75']:,}명)", "target": kd["subs"]["p50"]})
+            kp.append({"text": f"구독자 약 {kd['subs']['p50']:,}명 ({kd['subs']['p25']:,}~{kd['subs']['p75']:,}명 · 계획대로 올리면)", "target": kd["subs"]["p50"]})
         if g.get("likeRatio"):
-            kp.append({"text": f"좋아요 비율 {g['likeRatio'] * 100:.1f}% 이상 (분류 중앙값)"})
+            kp.append({"text": f"좋아요 비율 {g['likeRatio'] * 100:.1f}% 이상 (같은 분류 가운데 값)"})
         phases.append({"span": span, "title": title, "uploads": ups, "todos": [{"id": t["id"], "text": t["text"], "effort": t["effort"],
                                                                              "category": t["category"], "todo": t["todo"]} for t in todo],
                        "kpi": kp, "why": [t["id"] for t in todo]})
-    pri = []
-    for s in sens.values():
-        if s["d12"] > 0 and s["id"] in ("L+1", "S+2", "u+", "c+"):
-            pri.append({"text": s["text"], "impact": s["d12"], "effort": "큼" if s["id"] == "L+1" else "보통", "from": "forecast",
-                        "score": s["raw12"] * 100 / EFFORT_DIV["큼" if s["id"] == "L+1" else "보통"]})
-    per_cat = {}
-    for t in act:
+    scen = []
+    for sid in ("L+1", "S+2", "u+", "c+"):
+        s = sens.get(sid)
+        if s and s["d12"] > 0:
+            scen.append({"id": sid, "text": s["text"], "impact": s["d12"], "effort": SCEN_EFFORT[sid], "conv": s.get("conv"),
+                         "score": s["d12"] / EFFORT_DIV[SCEN_EFFORT[sid]]})
+    scen.sort(key=lambda x: -x["score"])
+    lever_max = {sid: sens[sid]["d12"] for sid in ("u+", "c+") if sid in sens and sens[sid]["d12"] > 0}
+    pri, per_cat = [], {}
+    for t in sorted(act, key=lambda t: -t["fit"]["score"] / EFFORT_DIV[t["effort"]]):
         if per_cat.get(t["category"], 0) >= 2:  # 같은 분류는 두 개까지 (먼저 할 것이 한쪽으로 몰리지 않게)
             continue
         per_cat[t["category"]] = per_cat.get(t["category"], 0) + 1
-        s = sens.get(SENS_FOR.get(t["category"], "u+"))
-        imp = max(0.0, (s or {}).get("raw12") or 0.0) * 100
-        pri.append({"text": t["text"], "impact": forecast.round5(imp / 100) if imp else 0, "effort": t["effort"], "from": t["id"],
-                    "category": t["category"], "score": (imp or 1) * t["fit"]["score"] / 100 / EFFORT_DIV[t["effort"]]})
-    pri.sort(key=lambda x: -x["score"])
-    return {"phases": phases, "priorities": pri[:8], "rates": rates}
+        sid, lever = LEVER.get(t["category"], (None, "기타"))
+        pri.append({"text": t["text"], "effort": t["effort"], "from": t["id"], "category": t["category"], "lever": lever, "leverId": sid,
+                    "fit": t["fit"]["score"], "todo": t["todo"]})
+        if len(pri) >= 6:
+            break
+    note = None
+    sL, sS = sens.get("L+1"), sens.get("S+2")
+    if sL and sS and sL["d12"] >= 5 and _sens_small(sens, "S+2"):
+        note = f"쇼츠는 노출용 · 구독은 롱폼이 만들어요 (쇼츠 +2개는 거의 차이 없고, 롱폼 +1개는 +{sL['d12']}%포인트 안팎)"
+    return {"phases": phases, "priorities": pri, "scenarios": scen, "leverMax": lever_max, "note": note, "rates": rates,
+            "draft": st.get("strategy") is None}
 
 
 # ---------- 점검 ----------
 
+REPLACE_DAYS = 3                  # 지난 점검이 3일 안이면 새 점검이 그 기록을 바꿈 (여러 번 눌러도 쌓이지 않음 · 기간은 그 전 점검부터)
+BAND_MIN_DAYS = 5                 # 예측 띠와 구독자 비교는 5일 넘게 지났을 때만 (며칠 만에는 반올림 단위보다 작게 늘어서)
+SHORT_DAYS = 5                    # 기간이 이보다 짧으면 올린 개수는 판단하지 않음
+RIPE = {"L": 14, "S": 7}          # 조회수를 볼 만큼 지난 영상: 롱폼 14일 · 쇼츠 7일
+RIPE_MAX = 10                     # 조회수 비교는 시작한 뒤 올린 영상 중 최근 10편까지
+STUDIO_DAYS = (7, 28)
+
+
+def sub_step(n):
+    """YouTube 가 보여 주는 구독자 단위 (세 자리까지만 · 버림): 1천 아래 1명 · 1만 아래 10명 · 10만 아래 100명 · 그 위 1,000명."""
+    n = n or 0
+    return 1 if n < 1000 else 10 if n < 10000 else 100 if n < 100000 else 1000 if n < 1000000 else 10000
+
+
 def _subs_at(hist, ts):
-    """ts 이전 가장 가까운 기록의 구독자 (없으면 첫 기록)."""
+    """ts 이전 가장 가까운 기록의 구독자 (없으면 첫 기록) — 지난 예측 맞춤(Brier)용."""
     h = [r for r in hist or [] if isinstance(r.get("subs"), (int, float))]
     before = [r for r in h if r["at"] <= ts]
     r = before[-1] if before else (h[0] if h else None)
     return (r["subs"], r["at"]) if r else (None, None)
 
 
+def _subs_near(hist, ts):
+    """기간 시작의 구독자: 시작 7일 전 ~ 2일 뒤 사이의 기록만 (멀리 떨어진 기록으로 늘어난 수를 지어내지 않게) → (구독자, 시각) | (None, None)."""
+    h = [r for r in hist or [] if isinstance(r.get("subs"), (int, float))]
+    before = [r for r in h if ts - 7 * 86400 <= r["at"] <= ts]
+    if before:
+        return before[-1]["subs"], before[-1]["at"]
+    after = [r for r in h if ts < r["at"] <= ts + 2 * 86400]
+    return (after[0]["subs"], after[0]["at"]) if after else (None, None)
+
+
+def band_at(fb, ts):
+    """점검 때 저장한 예측 띠를 ts 시점으로 (주 사이는 직선 · 0주 = 그때 구독자 s0) → {week, p10, p50, p90} | None."""
+    p10, p50, p90 = fb.get("p10") or [], fb.get("p50") or [], fb.get("p90") or []
+    s0 = fb.get("s0")
+    w = (ts - fb.get("at", ts)) / (7 * 86400)
+    n = min(len(p10), len(p50), len(p90))
+    if not n or w <= 0 or w > n or not isinstance(s0, (int, float)):
+        return None
+    i = int(math.floor(w))
+
+    def at(arr):
+        if i >= n:
+            return arr[n - 1]
+        a = s0 if i == 0 else arr[i - 1]
+        return a + (arr[i] - a) * (w - i)
+    return {"week": round(w, 1), "p10": round(at(p10)), "p50": round(at(p50)), "p90": round(at(p90))}
+
+
+def _band_state(s1, b):
+    """반올림(버림) 단위를 넣고 띠와 견줌: 실제 값은 s1 ~ s1+단위-1 사이라서."""
+    step = sub_step(s1)
+    if s1 + step - 1 < b["p10"]:
+        return "below"
+    if s1 > b["p90"]:
+        return "above"
+    return "inside"
+
+
+def _short_title(t, n=24):
+    """제목 줄이기: 낱말 경계에서 자르고 '…' · 닫히지 않은 괄호는 뺌."""
+    t = re.sub(r"\s+", " ", re.sub(r"#\S+", "", str(t or ""))).strip()
+    if len(t) > n:
+        cut = t[:n]
+        sp = cut.rfind(" ")
+        t = (cut[:sp] if sp >= n * 0.5 else cut).rstrip(" ,.·-|") + "…"
+    for o, c in (("(", ")"), ("[", "]"), ("（", "）"), ("【", "】"), ("“", "”"), ("‘", "’")):
+        if t.count(o) > t.count(c):
+            k = t.rfind(o)
+            t = t[:k].rstrip(" ,.·-|") + "…" if k > 0 else t.replace(o, "")
+    return t.replace("……", "…")
+
+
+def _approx(x):
+    """계획 개수(소수) → 화면 '약 N개' (0.5 이상이면 1개 이상)."""
+    return max(1, round(x)) if x >= 0.5 else 0
+
+
 def checkup(log=print, cancel=None, studio=None):
-    """점검(작업 안에서): 우리 채널 새로 고침 → 계획 vs 실제 · 잘 되는 것/안 되는 것/바꿀 것 → checkups.json."""
+    """점검(작업 안에서): 우리 채널 새로 고침 → 계획 vs 실제 · 잘 되는 것/안 되는 것/바꿀 것 → checkups.json.
+    지난 점검이 3일 안이면 그 기록을 이번 결과로 바꿈 (기록이 쌓이지 않고 '최근 점검'이 거의 빈 점검으로 덮이지 않게)."""
     refresh(mode="check", log=log, cancel=cancel, label=JOB_CHECK)
     core.set_progress(label=JOB_CHECK, pct=None, detail="계획과 실제를 비교하는 중")
-    rec = evaluate(studio=studio)
+    now = time.time()
+    rec = evaluate(studio=studio, now=now)
     items = load_checkups()
-    items.append(rec)
+    if items and now - items[-1]["at"] < REPLACE_DAYS * 86400:
+        rec["replaced"] = items[-1]["at"]
+        items[-1] = rec
+    else:
+        items.append(rec)
     _save_checkups(items)
-    log(f"  점검했어요 · 잘 되는 것 {len(rec['good'])} · 안 되는 것 {len(rec['bad'])} · 바꿀 것 {len(rec['change'])}")
+    log(f"  점검했어요 · 잘 되는 것 {len(rec['good'])} · 안 되는 것 {len(rec['bad'])} · 바꿀 것 {len(rec['change'])}"
+        + (" · 최근 점검을 이번 결과로 바꿨어요" if rec.get("replaced") else ""))
     return {"ok": True, "checkup": rec}
 
 
 def _clean_studio(studio):
+    """스튜디오 숫자 {views, subs, days(7·28)} (예전 꼴 views28·subs28 도 받음)."""
     if not isinstance(studio, dict):
         return None
     out = {}
-    for k in ("views28", "subs28"):
-        v = studio.get(k)
+    for k, old in (("views", "views28"), ("subs", "subs28")):
+        v = studio.get(k, studio.get(old))
         if v in (None, ""):
             continue
         try:
@@ -1955,91 +2403,128 @@ def _clean_studio(studio):
         if abs(v) > 10 ** 9:
             raise StrategyError("스튜디오 숫자를 다시 확인해 주세요")
         out[k] = v
-    return out or None
+    if not out:
+        return None
+    try:
+        days = int(studio.get("days") or (28 if ("views28" in studio or "subs28" in studio) else 7))
+    except (TypeError, ValueError):
+        days = 7
+    out["days"] = days if days in STUDIO_DAYS else 7
+    return out
 
 
 def evaluate(studio=None, now=None):
-    """계획 vs 실제 (점검 기록 하나 · 저장은 부르는 쪽)."""
+    """계획 vs 실제 (점검 기록 하나 · 저장은 부르는 쪽).
+    기간 = 3일 넘게 지난 마지막 점검(없으면 전략을 시작한 날) 뒤 · 올린 개수는 기간이 5일 넘을 때만 판단 ·
+    조회수는 기간이 아니라 영상 나이로(시작한 뒤 올린 영상 중 롱폼 14일·쇼츠 7일 지난 것) · 예측 띠는 5일 넘게 지났을 때 그날로 이어서,
+    반올림 단위를 넣어 비교 · 가운데 예상(P50)은 '위/아래'로만 말하고 최소 목표(P25) 아래일 때만 '안 되는 것'."""
     now = now or time.time()
     studio = _clean_studio(studio)
     st = load_state()
     strat = current_strategy(st)
+    saved = st.get("strategy") is not None
     rates = plan_rates(strat)
-    prev = load_checkups()
-    start = prev[-1]["at"] if prev else (strat.get("startedAt") or (st["own"] or {}).get("revivedAt") or now - 28 * 86400)
+    prev = [c for c in load_checkups() if c["at"] <= now - REPLACE_DAYS * 86400]
+    base = prev[-1] if prev else None
+    s_start = strat.get("startedAt") if saved else None
+    start = base["at"] if base else (s_start or now - 28 * 86400)
     start = min(start, now)
-    weeks = max((now - start) / (7 * 86400), 1 / 7)
+    days = max(0.0, (now - start) / 86400)
+    weeks = max(days / 7, 1 / 7)
     oc = load_channel(OWN) or (known_channels(st).get(OWN) or {})
     vids = oc.get("videos") or {}
-    new = [dict(v, id=i) for i, v in vids.items() if isinstance(v.get("pub"), (int, float)) and start < v["pub"] <= now]
+    dated = [dict(v, id=i) for i, v in vids.items() if isinstance(v.get("pub"), (int, float)) and v["pub"] <= now]
+    new = [v for v in dated if v["pub"] > start]
     actual = {"L": sum(1 for v in new if v.get("k") == "L"), "S": sum(1 for v in new if v.get("k") == "S")}
-    plan = {k: round(rates[k] * weeks, 1) for k in ("L", "S")}
+    plan = {k: round(rates[k] * weeks, 2) for k in ("L", "S")}
+    short = days < SHORT_DAYS
     try:
         fc = forecast_result(st)
     except Exception:  # noqa: BLE001 — 가능성을 못 구해도 점검은 함 (숫자 비교만)
         fc = None
     kpi = ((fc or {}).get("kpi") or {}).get("videoMedian") or {}
     stats = channel_stats(oc, now) if oc else None
-    med = {}
-    for k, age in (("L", 14), ("S", 7)):
-        ripe = _vv(v.get("v") for v in new if v.get("k") == k and now - v["pub"] >= age * 86400)
-        med[k] = {"n": len(ripe), "median": round(_med(ripe)) if ripe else None, "kpi": (kpi.get(k) or {}).get("p50")}
+    since = s_start or (st.get("own") or {}).get("revivedAt") or now - 90 * 86400
+    med, ripe_new = {}, []
+    for k in ("L", "S"):
+        ripe = sorted((v for v in dated if v.get("k") == k and v["pub"] >= since and now - v["pub"] >= RIPE[k] * 86400 and _vv([v.get("v")])),
+                      key=lambda v: -v["pub"])[:RIPE_MAX]
+        ripe_new += [v for v in ripe if v["pub"] + RIPE[k] * 86400 > start]  # 이번 기간에 조회수를 볼 만큼 지난 영상
+        m = round(_med([v["v"] for v in ripe])) if ripe else None
+        kv = kpi.get(k) or {}
+        lo, mid = kv.get("p25"), kv.get("p50")
+        state = None
+        if m and mid and lo:
+            state = "up" if m >= mid else "down" if m < lo else "mid"
+        med[k] = {"n": len(ripe), "median": m, "min": lo, "kpi": mid, "state": state}
     hist = read_history().get(OWN) or []
-    s0, s0at = _subs_at(hist, start)
     s1 = (stats or {}).get("subs")
+    s0, s0at = _subs_near(hist, start)
     delta = (s1 - s0) if isinstance(s1, (int, float)) and isinstance(s0, (int, float)) else None
-    if studio and "subs28" in studio:
-        delta_src = "studio"
-    else:
-        delta_src = "rounded" if delta is not None else None
+    delta_src = "rounded" if delta is not None else None
+    if studio and "subs" in studio and abs(studio["days"] - days) <= 2:
+        delta, delta_src = studio["subs"], "studio"
     band = None
-    if prev and isinstance(prev[-1].get("forecastBand"), dict):
-        fb = prev[-1]["forecastBand"]
-        wk = int((now - fb["at"]) // (7 * 86400))
-        if 0 <= wk < len(fb.get("p50") or []) and isinstance(s1, (int, float)):
-            band = {"week": wk + 1, "p10": fb["p10"][wk], "p50": fb["p50"][wk], "p90": fb["p90"][wk], "actual": s1,
-                    "inside": fb["p10"][wk] <= s1 <= fb["p90"][wk]}
+    fb = (base or {}).get("forecastBand")
+    if isinstance(fb, dict) and isinstance(s1, (int, float)) and now - fb.get("at", now) >= BAND_MIN_DAYS * 86400:
+        b = band_at(fb, now)
+        if b:
+            band = dict(b, actual=s1, step=sub_step(s1), state=_band_state(s1, b))
+            band["inside"] = band["state"] == "inside"
     good, bad, change = [], [], []
     for k, lab, obj in (("L", "롱폼", "롱폼을"), ("S", "쇼츠", "쇼츠를")):
-        if plan[k] >= 1 and actual[k] < 0.7 * plan[k]:
-            bad.append(f"{obj} 계획({plan[k]:g}개)보다 적게 올렸어요 ({actual[k]}개)")
+        pn = _approx(plan[k])
+        if not short and plan[k] >= 1 and actual[k] < 0.7 * plan[k]:
+            bad.append(f"{obj} 계획(약 {pn}개)보다 적게 올렸어요 ({actual[k]}개)")
             change.append("촬영하는 날 쇼츠 4개를 몰아 찍어 두거나, 계획 개수를 현실에 맞게 고쳐요" if k == "S" else
                           "롱폼은 한 번 촬영으로 2편을 나눠 찍거나, 계획 개수를 고쳐요")
-        elif plan[k] >= 1 and actual[k] >= plan[k]:
-            good.append(f"{obj} 계획대로 올렸어요 ({actual[k]}개 / 계획 {plan[k]:g}개)")
+        elif not short and plan[k] >= 1 and actual[k] >= plan[k] - 0.5:
+            good.append(f"{obj} 계획대로 올렸어요 ({actual[k]}개 / 계획 약 {pn}개)")
         m = med[k]
-        if m["median"] and m["kpi"]:
-            if m["median"] >= m["kpi"]:
-                good.append(f"{lab} 보통 조회수 {fmt_n(m['median'])}회로 목표({fmt_n(m['kpi'])}회)를 넘었어요")
-            else:
-                bad.append(f"{lab} 보통 조회수 {fmt_n(m['median'])}회 · 목표 {fmt_n(m['kpi'])}회")
+        if m["state"] == "up":
+            good.append(f"{lab} 보통 조회수 {fmt_n(m['median'])}회 · 가운데 예상({fmt_n(m['kpi'])}회)보다 위예요 ({m['n']}편)")
+        elif m["state"] == "down":
+            bad.append(f"{lab} 보통 조회수 {fmt_n(m['median'])}회 · 최소 목표({fmt_n(m['min'])}회)보다 아래예요 ({m['n']}편)")
     chan_med = {k: ((stats or {}).get(k) or {}).get("median") for k in ("L", "S")}
-    for v in sorted(new, key=lambda v: -(v.get("v") or 0)):
+    for v in sorted(ripe_new, key=lambda v: -(v.get("v") or 0)):
         cm = chan_med.get(v.get("k"))
         if cm and (v.get("v") or 0) > 2 * cm:
-            good.append(f"‘{(v.get('t') or '')[:30]}’ {fmt_n(v['v'])}회 — 채널 보통의 {v['v'] / cm:.1f}배")
-            change.append(f"‘{(v.get('t') or '')[:20]}’ 같은 주제로 2탄을 만들어요")
+            good.append(f"‘{_short_title(v.get('t'), 30)}’ {fmt_n(v['v'])}회 — 채널 보통의 {v['v'] / cm:.1f}배")
+            change.append(f"‘{_short_title(v.get('t'), 20)}’ 같은 주제로 2탄을 만들어요")
             break
-    longs = [v for v in new if v.get("k") == "L" and (v.get("d") or 0) > 720 and _vv([v.get("v")])]
-    if longs and chan_med.get("L") and _med([v["v"] for v in longs]) < chan_med["L"]:
-        bad.append(f"12분 넘는 롱폼 {len(longs)}편의 반응이 약해요")
+    longs = [v for v in dated if v.get("k") == "L" and v["pub"] >= since and now - v["pub"] >= RIPE["L"] * 86400
+             and (v.get("d") or 0) > 720 and _vv([v.get("v")])]
+    if len(longs) >= 2 and chan_med.get("L") and _med([v["v"] for v in longs]) < chan_med["L"]:
+        bad.append(f"12분 넘는 롱폼 {len(longs)}편의 반응이 채널 보통보다 약해요")
         change.append("롱폼을 8분 안팎으로 줄여 봐요")
-    if band and s1 < band["p10"]:
-        bad.append(f"구독자가 예상 범위보다 적게 늘었어요 (지금 {s1:,}명 · 예상 {band['p10']:,}~{band['p90']:,}명)")
+    if band and band["state"] == "below":
+        bad.append(f"구독자가 예상 범위보다 적게 늘었어요 (지금 약 {s1:,}명 · 예상 {band['p10']:,}~{band['p90']:,}명)")
         change.append("롱폼 비중을 늘리고, 영상 끝에 구독을 한 번 부탁해요")
-    elif band and band["inside"]:
-        good.append(f"구독자가 예상 범위 안이에요 ({s1:,}명)")
-    top = sorted(new, key=lambda v: -(v.get("v") or 0))[:3]
-    hits = [lab for f_id, lab, rx in FORMULAS if f_id not in ("short", "long", "hashtag", "emph") and top and all(_fhit(f_id, rx, v.get("t") or "") for v in top[:2])]
-    if hits and len(top) >= 2:
+    elif band and band["state"] == "above":
+        good.append(f"구독자가 예상보다 많이 늘었어요 (지금 약 {s1:,}명 · 예상 {band['p10']:,}~{band['p90']:,}명)")
+    elif band:
+        good.append(f"구독자가 예상 범위 안이에요 (약 {s1:,}명 · 가운데 예상 {band['p50']:,}명보다 {'위' if s1 >= band['p50'] else '아래'})")
+    top = sorted(ripe_new, key=lambda v: -(v.get("v") or 0))[:3]
+    hits = [lab for f_id, lab, rx in FORMULAS if f_id not in ("short", "long", "hashtag", "emph") and len(top) >= 2
+            and all(_fhit(f_id, rx, v.get("t") or "") for v in top[:2])]
+    if hits:
         good.append(f"잘 된 영상들이 ‘{hits[0]}’ 제목이에요 — 계속 써 봐요")
-    if not new:
+    if not new and not short:
         bad.append("이 기간에 올린 영상이 없어요")
         change.append("이번 주에 쇼츠 하나부터 올려 봐요")
+    notes = []
+    if short:
+        notes.append(f"지난 점검 뒤 {int(days)}일밖에 안 지나서 올린 개수는 다음 점검에서 봐요")
+    if delta is None:
+        notes.append("기간을 시작할 때 구독자 기록이 없어서, 구독자 변화는 다음 점검부터 비교해요")
+    if not saved:
+        notes.append("아직 저장한 전략이 없어 방향 A 초안과 비교했어요")
     rec = {"id": hashlib.sha1(f"checkup|{now}".encode()).hexdigest()[:10], "at": now,
-           "period": {"from": start, "to": now, "weeks": round(weeks, 1)}, "plan": plan, "actual": dict(actual, median=med),
-           "subs": {"from": s0, "fromAt": s0at, "to": s1, "delta": delta, "src": delta_src, "studio": studio},
-           "band": band, "good": good[:6], "bad": bad[:6], "change": list(dict.fromkeys(change))[:6], "studio": studio}
+           "period": {"from": start, "to": now, "days": int(round(days)), "weeks": round(weeks, 1), "short": short, "base": (base or {}).get("at")},
+           "plan": plan, "planN": {k: _approx(plan[k]) for k in ("L", "S")}, "actual": dict(actual, median=med),
+           "subs": {"from": s0, "fromAt": s0at, "to": s1, "delta": delta, "src": delta_src, "studio": studio, "step": sub_step(s1)},
+           "band": band, "good": good[:6], "bad": bad[:6], "change": list(dict.fromkeys(change))[:6], "studio": studio, "notes": notes,
+           "draft": not saved}
     if fc:
         tr = fc["trajectory"]
         rec["forecastBand"] = {"at": now, "s0": s1, "p10": tr["p10"][:26], "p50": tr["p50"][:26], "p90": tr["p90"][:26],
@@ -2049,7 +2534,8 @@ def evaluate(studio=None, now=None):
 
 
 def forward_check(items=None, hist=None, now=None):
-    """지난 예측 맞춤 기록: 점검 때 저장한 띠 안에 그 뒤 실제 구독자가 들었는지 · 기한이 지난 목표의 Brier 점수."""
+    """지난 예측 맞춤 기록: 점검 때 저장한 띠(그날로 이어서 · 반올림 단위 넣음) 안에 그 뒤 실제 구독자가 들었는지 ·
+    기한이 지난 목표의 Brier 점수. 점검 뒤 5일 안의 기록은 세지 않음."""
     now = now or time.time()
     items = items if items is not None else load_checkups()
     hist = hist if hist is not None else (read_history().get(OWN) or [])
@@ -2060,10 +2546,12 @@ def forward_check(items=None, hist=None, now=None):
         if not fb.get("p50"):
             continue
         for r in hist:
-            wk = int((r["at"] - fb["at"]) // (7 * 86400))
-            if 1 <= wk <= len(fb["p50"]) and isinstance(r.get("subs"), (int, float)):
+            if not isinstance(r.get("subs"), (int, float)) or r["at"] - fb["at"] < BAND_MIN_DAYS * 86400:
+                continue
+            b = band_at(fb, r["at"])
+            if b:
                 n += 1
-                inside += fb["p10"][wk - 1] <= r["subs"] <= fb["p90"][wk - 1]
+                inside += _band_state(r["subs"], b) == "inside"
         for m in fb.get("milestones") or []:
             due = fb["at"] + (26 if m["horizon"] == 6 else 52) * 7 * 86400
             if due <= now:
@@ -2109,13 +2597,13 @@ def claude_prompt(ov=None, max_chars=6000):
         return "?" if x is None else f"{x:,.0f}" if isinstance(x, (int, float)) and abs(x) >= 10 else f"{x:g}" if isinstance(x, (int, float)) else str(x)
     L = ["당신은 한국 축구·풋살 유튜브 채널 전략가예요. 아래는 '풋살사관학교'(최경진 감독, 다시 시작하는 풋살 레슨 채널)와 비슷한 채널들의 공개 숫자예요.",
          "규칙: 아래 숫자만 근거로 쓰고, 숫자나 확률을 새로 지어내지 마세요. 해요체 한국어로 짧게. 확률은 '가능성' 칸의 어림을 그대로 인용만 하세요.", "",
-         f"## 우리 채널: 구독자 {n(own.get('subs'))} · 롱폼 보통 {n(own.get('L', {}).get('median'))}회(반응도 {n(own.get('L', {}).get('reach'))}) · "
-         f"쇼츠 보통 {n(own.get('S', {}).get('median'))}회(반응도 {n(own.get('S', {}).get('reach'))}) · 주 {n(((own.get('cadence') or {}).get('perWeek') or {}).get('all'))}회 · "
+         f"## 우리 채널: 구독자 {n(own.get('subs'))} · 롱폼 보통 {n(own.get('L', {}).get('median'))}회(구독자 대비 {n(own.get('L', {}).get('reach'))}배) · "
+         f"쇼츠 보통 {n(own.get('S', {}).get('median'))}회(구독자 대비 {n(own.get('S', {}).get('reach'))}배) · 주 {n(((own.get('cadence') or {}).get('perWeek') or {}).get('all'))}회 · "
          f"좋아요 비율 {n(round((own.get('likeRatio') or 0) * 100, 2))}%"]
     for g, x in (ov.get("groups") or {}).items():
         if x.get("n"):
-            L.append(f"- 분류 '{g}' {x['n']}곳 중앙값: 구독자 {n(x.get('subs'))} · 롱폼 {n(x.get('L'))} · 쇼츠 {n(x.get('S'))} · "
-                     f"반응도 롱 {n(x.get('reachL'))}/쇼 {n(x.get('reachS'))} · 주 {n(x.get('perWeek'))}회")
+            L.append(f"- 분류 '{g}' {x['n']}곳 가운데 값: 구독자 {n(x.get('subs'))} · 롱폼 {n(x.get('L'))} · 쇼츠 {n(x.get('S'))} · "
+                     f"구독자 대비 조회 롱 {n(x.get('reachL'))}/쇼 {n(x.get('reachS'))} · 주 {n(x.get('perWeek'))}회")
     L.append("## 경쟁 채널 (구독자 큰 순 10곳)")
     comps = sorted([c for c in ov.get("competitors") or [] if c.get("stats")], key=lambda c: -((c.get("stats") or {}).get("subs") or 0))[:10]
     for c in comps:
@@ -2137,9 +2625,12 @@ def claude_prompt(ov=None, max_chars=6000):
         L.append(f"- {p['span']} {p['title']}: " + ", ".join(f"{u['name']} {u['count']}개" for u in p["uploads"]) + " · KPI " + "; ".join(k["text"] for k in p["kpi"][:3]))
     fc = ov.get("forecast") or {}
     if fc:
-        L.append("## 가능성 (어림 · 비교 채널 숫자로 계산)")
+        r = fc.get("plan") or {}
+        L.append(f"## 가능성 (어림 · 비교 채널 숫자로 계산 · 계획대로 롱폼 주 {r.get('L', 0):g}개·쇼츠 주 {r.get('S', 0):g}개 올린다고 본 값)")
+        if fc.get("pace"):
+            L.append(f"- {fc['pace']['text']}")
         for m in [m for m in fc.get("milestones") or [] if m.get("kind") == "subs" and not m.get("achieved")][:6]:
-            L.append(f"- {m['label']} {m['horizon']}개월: {m['text']} (범위 {m['range']})")
+            L.append(f"- {m['label']} {m['horizon']}개월: {m['text']} (범위 {m['range']} · 믿을 만함 {m.get('confidence')})")
         for s in (fc.get("sensitivity") or [])[:4]:
             L.append(f"- {s['text']}")
         L.append("- 가정: " + " / ".join((fc.get("assumptions") or [])[:4]))
@@ -2249,7 +2740,7 @@ def _comp_view(entry, a, gs, styles, rec_idx, now):
             "topics": _topic_view(m),
             "formulas": _formula_view(m), "series": (m.get("series") or [])[:5], "hashtags": m.get("hashtags") or [], "nKo": m.get("nKo", 0),
             "styles": sty, "memo": {"tip": rc.get("tip"), "format": rc.get("format"), "category": rc.get("category"), "at": "2026-10-07"} if rc else None,
-            "stale": bool(s and s.get("src") == "live" and s.get("at") and now - s["at"] > STALE), "noData": s is None}
+            "stale": bool(s and s.get("src") == "live" and (not s.get("listedAt") or now - s["listedAt"] > STALE)), "noData": s is None}
     return view
 
 
@@ -2272,6 +2763,39 @@ def _formula_view(m):
     return out[:8]
 
 
+def week_view(st, oc, now, tks, rem):
+    """'이번 주' 카드: 월요일부터 올린 개수 vs 계획 · 먼저 할 일 2개 · 다음 점검 날."""
+    lt = datetime.fromtimestamp(now, timezone.utc).astimezone()
+    monday = (lt - timedelta(days=lt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    vids = (oc or {}).get("videos") or {}
+    wk = [v for v in vids.values() if isinstance(v.get("pub"), (int, float)) and monday <= v["pub"] <= now]
+    rates = plan_rates(current_strategy(st))
+    fit = {t["id"]: t["fit"]["score"] for t in tks}
+    open_ = sorted((t for t in st["todos"] if not t.get("done")),
+                   key=lambda t: (-(fit.get((t.get("from") or {}).get("takeaway")) or 50), t.get("createdAt") or 0))
+    items = load_checkups()
+    last = items[-1]["at"] if items else (st.get("strategy") or {}).get("startedAt")
+    return {"from": monday, "L": sum(1 for v in wk if v.get("k") == "L"), "S": sum(1 for v in wk if v.get("k") == "S"),
+            "planL": rates["L"], "planS": rates["S"], "saved": st.get("strategy") is not None,
+            "todos": [{"id": t["id"], "text": t["text"], "category": t.get("category")} for t in open_[:2]], "openN": len(open_),
+            "checkDue": (last + REMIND_DAYS * 86400) if last else None, "checkOn": bool(rem.get("on")), "checkNow": bool(rem.get("due")),
+            "rssAt": ((oc or {}).get("rss") or {}).get("at")}
+
+
+def _preset_refs(ana):
+    """방향 A/B/C 의 참고 채널(조사) 숫자: 보통 조회수 가운데 값 (롱폼·쇼츠)."""
+    rec = recommended()
+    by_name = {c.get("name"): _rec_key(c) for c in rec.get("channels") or []}
+    out = {}
+    for d in rec.get("directions") or []:
+        ks = [by_name.get(c.get("channel")) for c in d.get("channels") or []]
+        st_ = [ana[k]["stats"] for k in ks if k and k in ana]
+        L = [x["L"].get("median") for x in st_ if x["L"].get("median")]
+        S = [x["S"].get("median") for x in st_ if x["S"].get("median")]
+        out[d.get("key")] = {"n": len(st_), "L": round(_med(L)) if L else None, "S": round(_med(S)) if S else None}
+    return out
+
+
 def overview(with_forecast=False):
     """8단계 화면 전체 (숫자 계산은 규칙 · 가능성은 with_forecast 일 때만 · 화면은 /api/strategy/forecast 로 따로 받음)."""
     now = time.time()
@@ -2279,6 +2803,8 @@ def overview(with_forecast=False):
     chans = known_channels(st)
     ana = {k: _ana(c, now) for k, c in chans.items()}
     gs = group_summary(ana)
+    for g, x in gs.items():
+        x["nComp"] = sum(1 for c in st["competitors"] if c.get("group") == g)
     styles = learned_styles()
     rec_idx = _rec_index()
     own_a = ana.get(OWN) or {"stats": channel_stats(_new_channel(own_entry(st)), now), "mine": mine({})}
@@ -2301,20 +2827,24 @@ def overview(with_forecast=False):
             fc_err = str(e)
     cks = load_checkups()
     topics = [t["pattern"].split(":", 1)[1] for t in tks if t["rule"] == "R-TOPIC" and not t["hidden"]][:4]
-    sol = solution(st, tks, fc, gs, topics) if with_forecast else None
+    sol = solution(st, tks, fc, gs, topics, own_a["stats"]) if with_forecast else None
+    rem = remind(now)
+    refs_ = _preset_refs(ana)
+    pre = [dict(x, refs=refs_.get(x["key"]) or {}) for x in presets()]
+    sd = seed()
     out = {"ok": True, "now": now, "own": own, "competitors": comps, "groups": gs, "groupNames": list(GROUPS), "recommended": reco,
-           "strategy": current_strategy(st), "saved": st.get("strategy") is not None, "presets": presets(),
+           "strategy": current_strategy(st), "saved": st.get("strategy") is not None, "presets": pre,
            "directionNames": DIRECTION_NAMES, "targets": list(TARGETS), "cats": list(CATS),
            "takeaways": tks, "todos": st["todos"], "settings": st["settings"],
            "checkups": {"latest": cks[-1] if cks else None, "items": [{"at": c["at"], "good": len(c.get("good") or []), "bad": len(c.get("bad") or []),
                                                                         "subs": (c.get("subs") or {}).get("to"), "id": c.get("id")} for c in cks[-30:]][::-1],
                         "trend": [{"at": r["at"], "subs": r.get("subs")} for r in (read_history().get(OWN) or []) if isinstance(r.get("subs"), (int, float))][-60:],
                         "forward": forward_check(cks)},
-           "ai": st.get("ai"), "remind": remind(now),
+           "ai": st.get("ai"), "remind": rem, "week": week_view(st, oc, now, tks, rem),
            "refresh": {"lastAt": max(lasts) if lasts else None, "staleN": len(todo), "estimate": estimate(todo),
-                       "pause": st.get("pause") if _paused(st, now) else None, "ownAt": oc.get("at") if oc.get("src") == "live" else None,
-                       "ownStale": not (oc.get("src") == "live" and oc.get("at") and now - oc["at"] < OWN_STALE),
-                       "liveN": len(live), "seedAt": seed()["at"], "seedOnly": not live},
+                       "pause": st.get("pause") if _paused(st, now) else None, "ownAt": listed_at(oc),
+                       "ownStale": not (listed_at(oc) and now - listed_at(oc) < OWN_STALE),
+                       "liveN": len(live), "seedAt": sd["at"] if sd["channels"] else None, "seedOnly": not live, "seedN": len(sd["channels"])},
            "jobs": {"refresh": JOB_REFRESH, "own": JOB_OWN, "check": JOB_CHECK, "ai": JOB_AI}}
     if with_forecast:
         out.update(forecast=fc, forecastError=fc_err, solution=sol)
@@ -2323,7 +2853,8 @@ def overview(with_forecast=False):
 
 
 def solution_view():
-    """성공 솔루션만 (가능성 계산을 포함 · 다시 만든 시각 기록)."""
+    """성공 솔루션만 (가능성 계산을 포함). 다시 만든 시각은 캐시 파일 solution.json 에 (GET 이 사용자 기록 state.json 을 쓰지 않게) ·
+    '다시 만들었어요'는 전략이나 채널 자료가 바뀌었을 때만."""
     st = load_state()
     now = time.time()
     chans = known_channels(st)
@@ -2335,17 +2866,15 @@ def solution_view():
     except forecast.ForecastError:
         fc = None
     topics = [t["pattern"].split(":", 1)[1] for t in tks if t["rule"] == "R-TOPIC" and not t["hidden"]][:4]
-    sol = solution(st, tks, fc, gs, topics)
-    h = forecast.inputs_hash(sol, (fc or {}).get("inputsHash"))
-    prev = st.get("solution") or {}
+    own_a = ana.get(OWN)
+    sol = solution(st, tks, fc, gs, topics, (own_a or {}).get("stats"))
+    strat = {k: v for k, v in (st.get("strategy") or {}).items() if k != "updatedAt"}
+    h = forecast.inputs_hash((fc or {}).get("inputsHash"), strat)
+    prev = _read(_path("solution.json"), dict)
     if prev.get("hash") != h:
-        changed = bool(prev.get("hash"))
-        at = now
-
-        def put(d):
-            d["solution"] = {"hash": h, "at": at}
+        changed, at = bool(prev.get("hash")), now
         try:
-            _update_state(put)
+            _write(_path("solution.json"), {"hash": h, "at": at})
         except OSError:
             pass
     else:

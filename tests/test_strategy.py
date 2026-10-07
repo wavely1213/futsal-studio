@@ -72,12 +72,14 @@ class Base(unittest.TestCase):
         for p in self.patches:
             p.start()
         strategy._CACHE.clear()
+        strategy._SLIM.clear()
         strategy._ANA.clear()
 
     def tearDown(self):
         for p in self.patches:
             p.stop()
         strategy._CACHE.clear()
+        strategy._SLIM.clear()
         strategy._ANA.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -519,8 +521,10 @@ class OverviewTests(Base):
 
     def test_solution_phases(self):
         fc = {"kpi": {"day30": {"subs": {"p25": 7800, "p50": 7900, "p75": 8000}}, "day60": {"subs": {"p25": 8000, "p50": 8200, "p75": 8600}},
-                      "day90": {"subs": {"p25": 8100, "p50": 8500, "p75": 9100}}, "videoMedian": {"L": {"p50": 5100}, "S": {"p50": 4900}}},
-              "sensitivity": [{"id": "L+1", "d12": 15, "raw12": 0.15, "text": "롱폼을 주 1→2개로 늘리면: …"}, {"id": "u+", "d12": 10, "raw12": 0.1, "text": "…"}]}
+                      "day90": {"subs": {"p25": 8100, "p50": 8500, "p75": 9100}},
+                      "videoMedian": {"L": {"p25": 3100, "p50": 5100, "p75": 8000}, "S": {"p25": 2000, "p50": 4900, "p75": 9000}}},
+              "sensitivity": [{"id": "L+1", "d12": 15, "raw12": 0.15, "text": "롱폼을 주 1→2개로 늘리면: …", "small": False},
+                              {"id": "u+", "d12": 10, "raw12": 0.1, "text": "…", "small": False}]}
         st = strategy.load_state()
         tks = strategy.takeaways(st)
         sol = strategy.solution(st, tks, fc, strategy.group_summary(strategy.analyze_all(st)), ["팬텀"])
@@ -528,9 +532,11 @@ class OverviewTests(Base):
         p1 = sol["phases"][0]
         self.assertEqual({u["count"] for u in p1["uploads"]}, {4, 13})  # 주 1 → 30일 4개 · 주 3 → 13개
         self.assertTrue(all(t["effort"] == "쉬움" for t in p1["todos"]))
-        self.assertTrue(any("5,100회" in k["text"] for k in p1["kpi"]))
+        self.assertTrue(any("최소 3,100회" in k["text"] and "잘 되면 5,100회" in k["text"] for k in p1["kpi"]))
         self.assertTrue(any("7,900명" in k["text"] for k in p1["kpi"]))
         self.assertTrue(sol["priorities"])
+        self.assertTrue(all("impact" not in x for x in sol["priorities"]))  # 가져올 점에는 %를 붙이지 않음
+        self.assertEqual([x["id"] for x in sol["scenarios"]], ["u+", "L+1"])  # %포인트 ÷ 일 크기 (u+ 10÷1.5 > L+1 15÷2.5)
         self.assertTrue(all(t["rule"] != "R-RESEARCH-TIP" for p in sol["phases"] for t in [x for x in tks if x["id"] in p["why"]]))
 
 
@@ -553,9 +559,9 @@ class CheckupTests(Base):
                                                                            "trajectory": {k: [7700 + 10 * i for i in range(52)] for k in ("p10", "p50", "p90")},
                                                                            "milestones": []}):
             rec = strategy.evaluate()
-        self.assertEqual((rec["plan"]["L"], rec["actual"]["L"], rec["actual"]["S"]), (2.0, 0, 2))
-        self.assertTrue(any(x.startswith("롱폼을 계획(2개)보다 적게") for x in rec["bad"]))
-        self.assertTrue(any(x.startswith("쇼츠를 계획(6개)보다 적게") for x in rec["bad"]))
+        self.assertEqual((rec["planN"]["L"], rec["actual"]["L"], rec["actual"]["S"]), (2, 0, 2))
+        self.assertTrue(any(x.startswith("롱폼을 계획(약 2개)보다 적게") for x in rec["bad"]))
+        self.assertTrue(any(x.startswith("쇼츠를 계획(약 6개)보다 적게") for x in rec["bad"]))
         self.assertTrue(any("2탄" in x for x in rec["change"]))
         self.assertTrue(any("채널 보통의" in x for x in rec["good"]))
         self.assertEqual((rec["subs"]["delta"], rec["subs"]["src"]), (90, "rounded"))
@@ -586,7 +592,10 @@ class CheckupTests(Base):
         self.assertFalse(strategy.remind()["on"])
 
     def test_studio_numbers_checked(self):
-        self.assertEqual(strategy._clean_studio({"views28": "12000", "subs28": ""}), {"views28": 12000})
+        self.assertEqual(strategy._clean_studio({"views28": "12000", "subs28": ""}), {"views": 12000, "days": 28})  # 예전 꼴
+        self.assertEqual(strategy._clean_studio({"views": "900", "subs": "-3", "days": 7}), {"views": 900, "subs": -3, "days": 7})
+        self.assertEqual(strategy._clean_studio({"subs": 5, "days": 99})["days"], 7)
+        self.assertIsNone(strategy._clean_studio({"views": ""}))
         with self.assertRaises(strategy.StrategyError):
             strategy._clean_studio({"views28": "많이"})
 
