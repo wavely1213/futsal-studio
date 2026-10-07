@@ -635,6 +635,7 @@ def _word_bounds(words, a, b):
 
 
 JUMP_EPS = 0.02      # 이웃 컷의 원본이 이만큼 넘게 안 이어지면 잘라 낸 자리(점프 컷)
+FLIP_MIN = 1.5      # 화면 크기를 뒤집은 뒤 이 초(타임라인)가 지나야 다음 점프 컷에서 또 뒤집음 (1초도 안 되는 확대 ↔ 원래 크기 껌뻑임 막기)
 CAP_EDGE = 0.05      # 자막 가장자리에서 이만큼 안쪽부터 '자막 가운데' (단어끼리 살짝 겹친 경계는 가장자리 · timeline_captions 가 0.05초 이하 조각은 안 띄움)
 
 
@@ -675,12 +676,13 @@ def _cap_cuts(xs, spans, words):
 def _shots(cuts, tf, cands, talk):
     """컷 목록 → 화면 크기 표시(zoom)가 붙은 조각. 잘라 낸 자리(점프 컷)마다 원래 크기 ↔ 확대를 뒤집어 머리 위치가 튀지 않게 하고,
     tf(타임라인 위치 → 목표 컷 길이)가 있으면 말하는 컷(talk) 중 그보다 긴 것만 cands(나눌 수 있는 곳) 중 목표에 가까운 곳에서 나눠 또 뒤집음.
-    컷 안의 이어진 말은 나누지 않는 한 크기가 그대로 · 지우는 곳은 없음 (zoom 표시는 _items_from_cuts 가 확대)."""
-    out, pos, zoomed, prev = [], 0.0, False, None
+    컷 안의 이어진 말은 나누지 않는 한 크기가 그대로 · 지우는 곳은 없음 (zoom 표시는 _items_from_cuts 가 확대).
+    한 문장 안에서 '음'·'어'를 여러 번 잘라 내도 화면이 껌뻑이지 않게, 마지막으로 뒤집은 뒤 FLIP_MIN 초가 안 됐으면 그 점프 컷은 그대로 둠."""
+    out, pos, zoomed, prev, flipped = [], 0.0, False, None, 0.0
     for c in cuts:
         a, b = float(c["in"]), float(c["out"])
-        if prev is not None and abs(a - prev) > JUMP_EPS:
-            zoomed = not zoomed
+        if prev is not None and abs(a - prev) > JUMP_EPS and pos - flipped >= FLIP_MIN - 1e-9:
+            zoomed, flipped = not zoomed, pos
         cur = a
         if tf is not None and tf(pos) > 0 and b - a > tf(pos) and talk(a, b):
             bs = cands(a, b)
@@ -694,7 +696,7 @@ def _shots(cuts, tf, cands, talk):
                     break
                 x = min(cand, key=lambda v: abs(v - (cur + t)))
                 out.append({"in": round(cur, 3), "out": x, "zoom": zoomed})
-                cur, zoomed = x, not zoomed
+                cur, zoomed, flipped = x, not zoomed, pos + x - a
         out.append({"in": round(cur, 3), "out": c["out"], "zoom": zoomed})
         pos, prev = pos + b - a, b
     return out
@@ -718,8 +720,12 @@ def _curve_fn(curve3, total):
     return lambda pos: c[0] if pos < 30.0 else c[2] if pos >= total - 20.0 else c[1]
 
 
-def _apply_tempo(cuts, units, cps, factor, spans=()):
-    """말이 촘촘한 곳만 factor 배 빠르게 (1.0~1.12) · 시범처럼 말이 드문 곳은 1.0 그대로.
+def _ov(a, b, spans):
+    return sum(max(0.0, min(b, y) - max(a, x)) for x, y in spans)
+
+
+def _apply_tempo(cuts, units, cps, factor, spans=(), still=()):
+    """말이 촘촘한 곳만 factor 배 빠르게 (1.0~1.12) · 시범처럼 말이 드문 곳·구령이 대부분인 곳(still: 구령 줄 [(시작, 끝)] — 시범 박자)은 1.0 그대로.
     빠르기는 원본이 이어진 구간 안에서 말이 1초(DEMO_GAP) 넘게 쉬는 곳(자막 밖)에서만 바뀜 — 나눈 조각마다 따로 정하면
     문장 가운데서 1.12배 ↔ 1.0배로 말소리가 갑자기 늘어짐. 바뀌는 곳이 조각 안이면 그 자리에서 조각을 나눔 (화면 크기는 그대로)."""
     f = round(min(TEMPO_MAX, max(1.0, float(factor or 1.0))), 3)
@@ -731,9 +737,15 @@ def _apply_tempo(cuts, units, cps, factor, spans=()):
             runs[-1].append(c)
         else:
             runs.append([c])
-    out = []
+    out, last, prev_out = [], None, None
     for run in runs:
         a, b = float(run[0]["in"]), float(run[-1]["out"])
+        # 잘라 낸 자리가 이어 말하는 한 자막 가운데면(앞뒤가 같은 자막 · 양쪽 1초 안에 말) 앞 구간 빠르기를 이어 감
+        # — 한 자막 안에서 1.12배 ↔ 1.0배로 바뀌지 않게 (말이 드문 시범 가운데를 잘라 낸 곳은 그대로)
+        carry = last if last is not None and prev_out is not None and any(
+            s0 + CAP_EDGE < prev_out < s1 and s0 < a < s1 - CAP_EDGE for s0, s1 in spans) and any(
+            prev_out - DEMO_GAP < u[1] and u[0] < prev_out for u in units) and any(
+            a < u[1] and u[0] < a + DEMO_GAP for u in units) else None
         us = sorted(u for u in units if u[1] > a and u[0] < b)
         pts, gaps, me = [a], [], None
         for s, e, _ in us:  # 말이 1초 넘게 쉬는 곳 (자막이 떠 있는 곳은 빼고) — 우선 가운데로 나눠 말이 촘촘한지 봄
@@ -746,7 +758,8 @@ def _apply_tempo(cuts, units, cps, factor, spans=()):
         pts.append(b)
         blocks = []
         for k, (p, q) in enumerate(zip(pts, pts[1:])):
-            sp = f if _is_talk(p, q, units, cps) else 1.0
+            talk = _is_talk(p, q, units, cps) and not (still and _ov(p, q, still) > 0.5 * _ov(p, q, [u[:2] for u in units]))
+            sp = carry if k == 0 and carry is not None else f if talk else 1.0
             if blocks and blocks[-1][2] == sp:
                 blocks[-1][1] = q
             else:
@@ -755,6 +768,7 @@ def _apply_tempo(cuts, units, cps, factor, spans=()):
                     x = round(me + 0.15 if blocks[-1][2] > sp else s0 - 0.15, 3)
                     blocks[-1][1], p = x, x
                 blocks.append([p, q, sp])
+        last, prev_out = blocks[-1][2], b
         for c in run:
             x0, x1 = float(c["in"]), float(c["out"])
             parts = [(max(x0, p), min(x1, q), sp) for p, q, sp in blocks if min(x1, q) - max(x0, p) > 1e-6]
@@ -788,7 +802,10 @@ def _rhythm(cuts, segs, st, every, caps=None):
     else:
         out = _punch(cuts, segs, every, caps)
     ref = float(st.get("tempo") or 0)
-    return _apply_tempo(out, units, cps, ref / cps, _cap_spans(caps, segs)) if ref > 0 and cps > 0 else out
+    if not (ref > 0 and cps > 0):
+        return out
+    still = [(float(s["start"]), float(s["end"])) for s in segs if takes.is_chant(s.get("text"))]
+    return _apply_tempo(out, units, cps, ref / cps, _cap_spans(caps, segs), still)
 
 
 def _new_seq(name, fmt, items, **kw):

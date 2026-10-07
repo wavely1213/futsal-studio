@@ -213,7 +213,8 @@ class TestSplitRhythm(RhythmBase):
             sp = float(it.get("speed") or 1.0)
             self.assertTrue(1.0 <= sp <= 1.12, sp)
             mid = (it["in"] + it["out"]) / 2
-            if any(a <= mid <= b for a, b in DEMO):
+            # 시범 첫 1초는 빼고 봄: 자막 하나가 앞 설명 끝과 시범 첫 낱말을 함께 띄우면, 그 자막 가운데 잘라 낸 자리는 앞 빠르기를 이어 감 (E6 검토)
+            if any(a + 1.0 <= mid <= b for a, b in DEMO):
                 self.assertEqual(sp, 1.0, "시범 부분은 그대로")
         self.assertTrue(any(any(a <= (it["in"] + it["out"]) / 2 <= b for a, b in DEMO) for it in v), "시범도 가편집에 남음")
         talk = [float(it.get("speed") or 1.0) for it in v if not any(a - 1 <= it["in"] and it["out"] <= b + 1 for a, b in DEMO)]
@@ -288,6 +289,62 @@ class TestTempo(RhythmBase):
         self.assertEqual(len(v), len(rec["tidy"]))
         sc = [float(((it.get("fx") or {}).get("scale") or {}).get("v", 100.0)) for it in v]
         self.assertEqual(sc, [100.0 if k % 2 == 0 else 108.0 for k in range(len(v))])
+
+
+class TestShortShotsAndTempoJoins(unittest.TestCase):
+    """E6 검토: 한 문장 안 추임새 컷 여러 개 → 화면 크기 껌뻑임 · 한 자막 가운데 잘라 낸 자리에서 빠르기 바뀜 · 구령 박자."""
+
+    @staticmethod
+    def words(spec):
+        return [{"w": w, "s": s_, "e": e} for w, s_, e in spec]
+
+    def test_filler_cuts_inside_one_sentence_do_not_strobe(self):
+        cuts = [{"in": 0.0, "out": 2.0}, {"in": 2.3, "out": 3.1}, {"in": 3.4, "out": 4.0}, {"in": 4.3, "out": 9.0}]
+        segs = [{"start": 0.0, "end": 9.0, "text": "자 이렇게 공을 발 안쪽으로 받아서 바로 앞으로 치고 나가세요"}]
+        out = editor._rhythm(cuts, segs, {}, 0)
+        zs = [c["zoom"] for c in out]
+        self.assertEqual(zs, [False, True, True, True])  # 2초 뒤 한 번만 뒤집고 0.8초·0.6초 조각에서는 그대로
+        pos, flips, last = 0.0, [], None
+        for c in out:
+            if last is not None and c["zoom"] != last:
+                flips.append(pos)
+            pos, last = pos + c["out"] - c["in"], c["zoom"]
+        self.assertTrue(all(b - a >= editor.FLIP_MIN - 1e-6 for a, b in zip([0.0] + flips, flips)), flips)
+        # 길게 떨어진 점프 컷은 그대로 뒤집음
+        far = editor._rhythm([{"in": 0.0, "out": 2.0}, {"in": 2.5, "out": 5.0}, {"in": 5.5, "out": 8.0}], segs, {}, 0)
+        self.assertEqual([c["zoom"] for c in far], [False, True, False])
+
+    def test_speed_carries_across_jump_cut_inside_one_caption(self):
+        # MSGRAW01 슛포러브 87.4초 재현: 같은 자막('하나, 둘, 셋. 하나,') 가운데 쉼을 잘라 낸 자리에서 1.12 → 1.0 으로 바뀜
+        ws = [("공을", 0.0, 0.3), ("받고", 0.35, 0.7), ("바로", 0.75, 1.1), ("돌아서", 1.15, 1.6), ("패스", 1.65, 2.0), ("하나", 2.05, 2.4),
+              ("둘", 3.6, 3.9), ("셋", 4.6, 4.9)]
+        segs = [{"start": 0.0, "end": 4.9, "text": " ".join(w for w, _, _ in ws), "words": self.words(ws)}]
+        cuts = [{"in": 0.0, "out": 2.5}, {"in": 3.5, "out": 5.0}]
+        caps = [{"start": 0.0, "end": 4.9, "text": segs[0]["text"]}]
+        units = [(s_, e, len(w)) for w, s_, e in ws]
+        out = editor._apply_tempo(cuts, units, 4.0, 1.12, editor._cap_spans(caps))
+        self.assertEqual({float(c.get("speed") or 1.0) for c in out}, {1.12}, out)
+        # 자막이 바뀌는 곳이면 예전처럼 따로 정함
+        caps2 = [{"start": 0.0, "end": 2.45, "text": "a"}, {"start": 3.55, "end": 4.9, "text": "b"}]
+        out2 = editor._apply_tempo(cuts, units, 4.0, 1.12, editor._cap_spans(caps2))
+        self.assertEqual([float(c.get("speed") or 1.0) for c in out2], [1.12, 1.0])
+
+    def test_drill_count_lines_keep_original_speed(self):
+        say = "자 패스하고 바로 앞으로 뛰어나가세요 그리고 공을 받으면 바로 돌아서 다시 패스해 주세요"
+        ws1, t = [], 0.0
+        for w in say.split():
+            ws1.append((w, round(t, 2), round(t + 0.1 * len(w) + 0.05, 2)))
+            t += 0.1 * len(w) + 0.1
+        c0 = t + 1.5  # 1.5초 쉬고 구령
+        count = ["하나", "둘", "셋", "넷", "다섯", "여섯", "일곱", "여덟"]  # 말만큼 촘촘한 구령 (빠르기 규칙대로면 1.12배)
+        ws2 = [(w, round(c0 + 0.22 * k, 2), round(c0 + 0.22 * k + 0.2, 2)) for k, w in enumerate(count)]
+        segs = [{"start": 0.0, "end": ws1[-1][2], "text": say, "words": self.words(ws1)},
+                {"start": ws2[0][1], "end": ws2[-1][2], "text": ", ".join(count) + "!", "words": self.words(ws2)}]
+        out = editor._rhythm([{"in": 0.0, "out": ws2[-1][2] + 0.2}], segs, {"tempo": 99.0}, 0)
+        self.assertEqual(len(out), 2, out)
+        self.assertEqual(float(out[0].get("speed") or 1.0), editor.TEMPO_MAX, out)
+        self.assertEqual(float(out[1].get("speed") or 1.0), 1.0, out)  # 구령은 시범 박자 그대로
+        self.assertLess(out[1]["in"], ws2[0][1])  # 바뀌는 곳은 쉼 안 (구령 앞)
 
 
 class TestCurve3(RhythmBase):
