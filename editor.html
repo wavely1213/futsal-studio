@@ -2545,7 +2545,12 @@ function msgRemove(evId) {
     q.trans = q.trans.filter(t => !ids.has(t.id) && !ids.has(t.a) && !ids.has(t.b));
     if (r.markers) q.markers = q.markers.filter(mk => !r.markers.some(t => Math.abs(t - mk.t) < 1e-3));
   }
-  if (ev.ins && ev.ins.len > 0) { // 끼워 넣은 장면: 그 뒤를 모두 당김 (다른 MSG 기록도 같이)
+  if (r.dim && ev.ins) { // 마무리 인사 위 엔드 화면: 어둡게 한 본편을 원래 밝기로 (msg._end_overlay)
+    for (const it of q.items) if (isV(it) && it.start >= ev.ins.start - 1e-3 && it.color && it.color.exp === r.dim.exp && it.color.sat === r.dim.sat) {
+      const c = { ...it.color }; delete c.exp; delete c.sat; it.color = c;
+    }
+  }
+  if (ev.ins && ev.ins.len > 0 && !ev.ins.overlay) { // 끼워 넣은 장면: 그 뒤를 모두 당김 (다른 MSG 기록도 같이) · 본편 위에 얹은 엔드 화면은 그대로
     const a = ev.ins.start, d = ev.ins.len, sh = x => x >= a + d - 1e-3 ? x - d : x;
     for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
     for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start));

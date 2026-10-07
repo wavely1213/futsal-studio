@@ -332,7 +332,7 @@ class TextSemanticsTest(unittest.TestCase):
         plays = [pl(26.0), pl(54.0), pl(72.0), pl(98.4)]
         moms = plays + [{"kind": "fail", "t": 61.3, "a": 61.3, "b": 64.1}]
         lab = msg._demo_labels(plays, moms)
-        self.assertEqual([lab[id(m)] for m in plays], ["실전 시범", "한 번 더!", "다시 도전", "시범 들어갑니다"])
+        self.assertEqual([lab[id(m)] for m in plays], ["실전 시범", "한 번 더!", "다시 도전", None])  # 다 쓰면 더 안 붙임 (round2: 시범 중간의 예고 말)
 
     def test_scoreboard_final_and_last_try(self):
         self.assertTrue(msg.SECTION.search("마지막 다섯 번째."))
