@@ -35,7 +35,9 @@
 - 검증 도구/패턴: 라이브러리 없이 `app.Handler`가 경계에서 다음 순서로 막는다. 새 API도 같은 순서를 따른다(`ARCHITECTURE.md` 7절 7번).
   1. Host 확인(GET·POST)
   2. Origin 확인(POST, 3번 참고)
-  3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. (빈틈: `/api/thumb/cut` 의 `src` 안 `/frame?name=` 은 검사 없이 `thumb.grab` 으로 간다 — `KNOWN_ISSUES.md` I-021)
+  3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. 주소 안에 든 이름(`/api/thumb/cut` 의 `src` 안 `/frame?name=`)도 `video_path` 를 거친다 (I-021 해결).
+  4. 요청 본문 JSON 의 글자는 `core.clean_json` 이 짝 없는 대리 문자를 '�'로 바꾼 뒤 쓴다 (`KNOWN_ISSUES.md` I-034).
+  - `GET /api/ping` 은 이 앱인지(`{"app": "futsal-studio", "version"}`)만 알려 준다 — 두 번째 실행·실행기가 그 포트의 주인을 확인할 때만 쓰고(D-025), 개인 정보는 없다. 같은 Host 검사를 거친다.
   4. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
 - **SQL 인젝션**: DB가 없다(JSON 파일 저장). 같은 자리의 위험은 **명령·필터 인젝션**이다.
   - 외부 프로그램은 항상 인자 목록으로 `core.run()`/`editor.run_killable()`을 통해 실행한다.
@@ -113,7 +115,7 @@
 - **CORS**: CORS 헤더를 보내지 않는다. 그래서 다른 출처의 스크립트는 응답을 읽지 못한다. `Access-Control-Allow-Origin`을 추가하지 않는다(`*` 금지).
 - **에러 응답**: 스택 트레이스·쿼리를 응답에 넣지 않는다.
   - 예외 메시지가 곧 화면 문구다. 사용자 문장으로 쓴다(`CODING_STANDARDS.md` 5번).
-  - `traceback.print_exc()`는 표준 출력에만 쓴다(사용자 PC에서는 보이지 않음).
+  - `traceback.print_exc()`는 표준 오류에만 쓴다. 사용자 PC(pythonw)에서는 작업 폴더의 `studio-error.log` 로 모인다(`app._error_log`) — 화면·응답에는 나가지 않지만 경로에 Windows 사용자 이름이 들어갈 수 있다.
 - **받은 실행 코드·모델의 무결성**: 새로 받는 실행 파일·모델에는 고정 주소와 크기·sha256 확인을 붙인다. 확인한 뒤에만 임시 파일을 제자리로 옮긴다(`os.replace`). 현재 상태는 다음과 같다.
 
   | 대상 | 확인 방식 |
@@ -123,11 +125,13 @@
   | 얼굴·표정 모델 | 고정 커밋 주소, 크기·sha256 고정값 |
   | 기획 분석 모델(OCR 글자 찾기·한국어 읽기·글자 목록, YAMNet) | 고정 태그·커밋 주소, 주소마다 크기·sha256 고정값 (`avmodels.SPECS`) |
   | Claude Code CLI | 앱이 받지 않음. 사용자가 [설치하기]로 Anthropic 공식 설치 명령을 보이는 창에서 직접 실행 |
+  | Microsoft Visual C++ 재배포 패키지 | 앱은 받지 않음. `시작하기 (Windows).bat` 이 msvcp140 이 없거나 예전일 때만 Microsoft 공식 주소(`aka.ms/vs/17/release/vc_redist.x64.exe`)에서 받아 실행 — 관리자 확인 창(서명된 Microsoft 설치 파일). 안 되면 받는 페이지를 연다 (D-028) |
   | 누끼 모델(rembg 릴리스) | **크기·sha256 확인 없음** (`thumb._model`). `KNOWN_ISSUES.md` I-023 |
   | yt-dlp·pip 패키지·Whisper 모델 | pip와 Hugging Face의 기본 동작에 맡긴다 |
 
 - **의존성 취약점**: `DEPENDENCY_POLICY.md` 참고. audit 경고 발견 시 보고.
 - 밖으로 나가는 통신은 모두 HTTPS다. 업데이트·다운로드 주소를 `http://`로 바꾸지 않는다(`updater.download_and_install`은 형식상 `http`도 받으므로 주소 쪽에서 지킨다).
+  - 업데이트·Deno·모델 받기는 `updater.urlopen` 을 쓴다: 인증서 사슬·주소 확인은 그대로 하고 Python 3.13+ 의 `VERIFY_X509_STRICT` 만 끈다 (백신 'HTTPS 검사'·회사 프록시 인증서가 규격을 조금 벗어나도 3.12 처럼 받게 · I-043). `CERT_NONE`·`check_hostname=False` 로 바꾸지 않는다.
 - 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다.
 
 ## 6. AI 작업 시 보안 체크리스트
@@ -140,7 +144,7 @@
   - 상태를 바꾸는 동작이 POST인가
 - [ ] 새 조회/수정 경로가 `resolve()` 후 허용 폴더 안인지 확인하는가
 - [ ] 쿠키·계정·개인정보(대사 전문 포함)가 코드·로그·`studio.log`에 남지 않는가
-- [ ] 외부 프로그램을 인자 목록으로 실행하는가
+- [ ] 외부 프로그램을 인자 목록으로, `core.run`·`core.popen` 으로 실행하는가 (앱이 꺼지면 같이 꺼지게 · `CODING_STANDARDS.md` 7번)
   - shell을 쓰지 않는가
   - ffmpeg 필터 문자열에 사용자 글자·경로를 그대로 넣지 않는가
 - [ ] 밖에서 온 글자(YouTube 제목·파일 이름·받아쓰기)를 `innerHTML`에 넣을 때 `esc()`를 거치는가

@@ -27,6 +27,14 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
+## I-044 | 2026-10-07 | Windows 대비 묶음(I-034~I-043): Windows 실기 미검증 · 남은 것
+- **상태**: 열림
+- **심각도**: 중간
+- **증상/내용**: 아래는 Linux 에서 흉내로만 확인했다. (1) Job Object(`core.track`)로 앱이 꺼질 때 ffmpeg·pip·claude 가 같이 꺼지는지 · yt-dlp 가 안에서 띄우는 합치기 ffmpeg 는 묶음 밖이라 남을 수 있음. (2) 포트: Windows 에서 SO_REUSEADDR 를 끈 뒤 업데이트 재시작이 바로 같은 포트를 잡는지, 예약 포트(WinError 10013)에서 8766~ 로 켜지는지. (3) 창 닫기 확인(`confirm`)이 WebView2 에서 뜨는지 · pywebview `private_mode=False` 로 설정(localStorage)이 남는지. (4) `studio-error.log`·`faulthandler` 가 pythonw 에서 쓰이는지. (5) bat: `py -3.13` 고르기·`.venv.old` 옮기기·`curl` 로 Visual C++ 설치(관리자 확인 창)·긴 경로 안내. (6) 바로가기 COM·AppUserModelID (I-015). (7) 미뤄 둔 구성요소 설치(`.req_pending`) 동안 창이 늦게 뜨는 시간. (8) 백신이 완성본을 60초보다 오래 잡는 PC.
+  - 남은 것: 받다 끊긴 yt-dlp 중간 파일(`.f137.mp4` 등)은 보관함에서 숨기기만 하고 지우지 않는다(파일 지우기는 승인 사항 · 같은 영상을 다시 받으면 yt-dlp 가 이어 씀). 클로드 대답 시간 제한은 벽시계 기준이지만 Windows 의 `time.monotonic` 도 절전 시간을 세므로 바꾸지 않았다. Modern Standby 노트북에서 `ES_SYSTEM_REQUIRED` 만으로 잠들지 않는지 모른다.
+- **위치**: `core.py` `track`·`popen`·`keep_awake`, `app.py` `_bind`·`_confirm_close`·`_error_log`·`_start_webview`, `winlink.py`, `시작하기 (Windows).bat`·`setup_check.py`, `updater.py` `_deferred_pip`·`_launch_lock`
+- **해결 방향**: 소유자 PC 에서: 내보내기 도중 창 닫기(작업 관리자에 ffmpeg 가 남는지), 아이콘 빠르게 두 번 누르기, 다른 프로그램으로 8765 를 잡은 채 켜기, bat 을 Python 3.13 으로 다시 실행, 바로가기로 켠 창을 작업 표시줄에 고정.
+
 ## I-033 | 2026-10-07 | 한 줄 자막: 글자 폭 어림 · 끊는 곳 품질 · Windows 실기 미검증
 - **상태**: 열림
 - **심각도**: 낮음
@@ -83,18 +91,11 @@
 - **해결 방향**: 두 모델의 크기·sha256을 확인해 `BG_MODELS`에 고정값으로 넣고 `fetch_model`에 넘긴다.
 
 ## I-022 | 2026-10-06 | 최소 지원 Python 버전이 정해지지 않음
-- **상태**: 열림 (소유자 결정 필요)
+- **상태**: 열림 (기본값을 넣음 · 소유자 확인 필요) — 2026-10-07 `시작하기 (Windows).bat`·`setup_check.py` 가 3.10~3.14·64비트(x64)만 쓰고(3.13 우선), 맞지 않거나 깨진 `.venv` 는 옮겨 두고 새로 만든다 (D-028). 3.10 은 2026-10 지원 종료라 더 새 Python 이 있으면 bat 이 옮겨 간다. 소유자가 범위를 확정하면 `setup_check.PY_MIN`·`PY_MAX`·README 를 맞춘다.
 - **심각도**: 중간
-- **증상/내용**: 사용자는 python.org에서 받은 아무 버전이나 쓴다(`py -3`). 코드는 3.10 이상 기능(`TemporaryDirectory(ignore_cleanup_errors=…)`)을 쓰지만 어디에서도 버전을 확인하지 않는다. 3.9 이하면 업데이트 설치(`updater.download_and_install`·`--selftest`)와 Deno 설치(`core._install_deno`)가 실패하고, 막 나온 Python이면 onnxruntime·ctranslate2 Windows 휠이 아직 없어 첫 설치(pip)가 실패할 수 있다.
+- **증상/내용**: (고치기 전) 사용자는 python.org에서 받은 아무 버전이나 쓴다(`py -3`). 코드는 3.10 이상 기능(`TemporaryDirectory(ignore_cleanup_errors=…)`)을 쓰지만 어디에서도 버전을 확인하지 않는다. 3.9 이하면 업데이트 설치(`updater.download_and_install`·`--selftest`)와 Deno 설치(`core._install_deno`)가 실패하고, 막 나온 Python이면 onnxruntime·ctranslate2 Windows 휠이 아직 없어 첫 설치(pip)가 실패할 수 있다.
 - **위치**: `시작하기 (Windows).bat`, `README.md` 설치 안내, `updater.py`·`core.py`
 - **해결 방향**: 지원 범위를 정해 `DEPENDENCY_POLICY.md` 3번에 적고, README 안내와 `.bat`의 버전 확인을 맞춘다.
-
-## I-021 | 2026-10-06 | `/api/thumb/cut`의 장면 주소 이름을 검사하지 않음
-- **상태**: 열림
-- **심각도**: 낮음
-- **증상/내용**: 누끼 요청의 `src`가 `/frame?name=…&t=…`이면 그 `name`을 `editor.safe_name` 없이 `thumb.grab`에 넘긴다. `core.VIDEOS / name`·`core.adir(name)`이 보관함 밖을 가리킬 수 있다. POST는 같은 출처만 받으므로 다른 사이트는 이 경로를 쓸 수 없다.
-- **위치**: `app.py` `do_POST` `/api/thumb/cut`
-- **해결 방향**: `qq["name"][0]`도 `editor.safe_name`·`video_path`를 거치게 한다 (`SECURITY_GUIDELINES.md` 2번 순서).
 
 ## I-020 | 2026-10-06 | 편집실·스타일·검수·분석에 저장소 안 단위 테스트가 없음
 - **상태**: 열림
@@ -148,8 +149,9 @@
   - 켜진 창을 고정한 아이콘이 실행기를 거치는지
   - PowerShell 스크립트가 실제로 도는지
   - 시작 오류 알림 창(MessageBox)과, `python.exe`로 도는 `--selftest`
-- **위치**: `updater.py` `run_app`·`_start_failed`·`_alert`, `app.py` `ensure_shortcut`
-- **해결 방향**: Windows에서 다음 순서로 확인한다: 켜진 창 고정 → 닫기 → 고정 아이콘으로 실행 → 업데이트 한 번.
+  - (2026-10-07) 바로가기는 이제 COM(`IShellLinkW`·`IPropertyStore`)으로 쓰고 AppUserModelID `FutsalAcademy.Studio` 를 바로가기와 앱 프로세스에 같이 준다 (`winlink.py`). venv 의 pythonw 는 진짜 Python 을 자식으로 띄우는 실행기라, 아이디가 없으면 창이 그 pythonw 로 묶여 고정 아이콘과 따로 보였다. 같은 실행 경로면 다시 만들지 않는다(`~/.futsal-studio/shortcut.json`). COM 이 안 되면 예전 PowerShell(아이디 없이). 모두 Windows 실기 미검증 — 예전에 고정한 아이콘은 탐색기를 다시 시작(로그아웃)해야 새 아이디를 읽을 수 있다.
+- **위치**: `updater.py` `run_app`·`_start_failed`·`_alert`, `winlink.py` `prepare`·`write_shortcut`
+- **해결 방향**: Windows에서 다음 순서로 확인한다: 켜진 창 고정 → 닫기 → 고정 아이콘으로 실행 → 업데이트 한 번. 작업 표시줄에 버튼이 하나만 보이는지도.
 
 ## I-014 | 2026-10-06 | Deno 자동 설치 실기 미검증
 - **상태**: 열림
@@ -167,7 +169,8 @@
   - 업데이트: 최대 12번 재시도하고, 실패하면 되돌린다.
   - 편집 프로젝트: 20번 재시도한다.
   - 올리기 키트: ` (2)` 이름으로 저장한다.
-- **위치**: `updater.py` `_retry`·`_replace`, `editor.py` `_replace_retry`, `upload.py` `_write_safe`, `bundle.py` `_replace_retry`
+  - (2026-10-07) 저장·교체는 공통 도구 `updater.write_atomic`·`replace_retry` 로 모았다: 보통 8초(`REPLACE_SECS`), 막 만든 큰 영상(완성본·묶음·미리보기 파일)은 60초(`SETTLE_SECS`)까지 점점 길게 기다린다. 끝내 못 옮긴 완성본·묶음은 지우지 않고 '내보낸 영상_옮기지 못함_…'·'묶은 영상_옮기지 못함_…' 폴더로 남긴다 (I-036). 얼마나 오래 잡는지는 백신마다 다를 수 있다.
+- **위치**: `updater.py` `_retry`·`_replace`·`replace_retry`·`write_atomic`, `editor.py` `_replace_retry`·`_place_final`, `upload.py` `_write_safe`, `bundle.py` `_replace_retry`·`_keep_tmp`
 - **임시방편**: 업데이트는 실패하면 취소하고 이전 버전을 그대로 둔다. 그리고 "다른 프로그램이 앱 파일을 열고 있으면 닫고 다시" 하라고 안내한다.
 
 ## I-012 | 2026-10-06 | 2차 작업(배운 스타일대로 스스로 편집) 진행 중
@@ -246,19 +249,12 @@
 - **위치**: `thumb.py` `_cand_sig`·`frame_candidates`, `face.py` `ensure`
 - **임시방편**: 다른 영상에서 장면 고르기를 하면 모델을 받는다. 그 뒤에는 이 영상도 표정 점수로 다시 고른다. 오프라인 사용자가 열 때마다 기다리지 않게 하려는 선택이다.
 
-## I-003 | 2026-10-06 | 스타일 파일을 바로 덮어씀
-- **상태**: 열림
-- **심각도**: 낮음
-- **증상/내용**: `style.learn`은 `styles/<이름>.json`을 `write_text`로 바로 쓴다. 저장하다 꺼지면 깨진 파일이 남는다. `list_styles`는 깨진 파일을 말없이 건너뛰므로 그 스타일이 목록에서 사라진다. 불변식 "임시 파일 → 바꿔 끼우기"(`DOMAIN_KNOWLEDGE.md` 4절)의 예외다.
-- **위치**: `style.py` `learn`·`list_styles`
-- **해결 방향**: 다른 저장처럼 임시 파일에 쓴 뒤 `os.replace`로 바꾼다.
-
 ## I-002 | 2026-10-06 | 스튜디오 작업은 중간에 멈출 수 없음
 - **상태**: 열림
 - **심각도**: 낮음
 - **증상/내용**: 멈추기(✕) 버튼은 편집실 내보내기·검수·미리보기 파일 만들기에만 있다. 스튜디오 작업(보관함에 담기, 편집점 찾기, 촬영본 묶기, 스타일 배우기)과 썸네일 장면 고르기는 멈출 수 없다. 작업은 한 번에 하나라서 그동안 다른 작업도 못 한다.
 - **위치**: `ui.html`, `app.py` `start_job`, `bundle.py`(복사 경로는 `core.run`)
-- **임시방편**: 앱을 닫으면 끝난다. 남은 임시 폴더(`out/.render_*`)는 다음 실행 때 정리된다.
+- **임시방편**: 앱을 닫으면 끝난다 — 작업 중에 창을 닫으면 한 번 묻고(`app._confirm_close`), 닫으면 그 작업의 ffmpeg·pip·claude 도 같이 꺼진다 (Windows Job Object, I-040 · 예전에는 숨은 ffmpeg 가 몇 분 더 돌았음). 남은 임시 폴더(`out/.render_*`)는 다음 실행 때 정리된다.
 
 ## I-001 | 2026-10-06 | 여러 카메라가 섞인 촬영본은 순서가 틀릴 수 있음
 - **상태**: 열림
@@ -272,6 +268,93 @@
 ## 아카이브 (해결됨)
 
 <!-- 분기별로 해결 항목 이동 -->
+
+## I-043 | 2026-10-07 | Windows: 그 밖의 어긋남 (자막 BOM · NAS 경로 · 스타일 이름 · 바로가기 · 창 설정 · 인증서 · claude 찾기 · 오류 기록 · 끊긴 연결)
+- **상태**: 해결(2026-10-07)
+- **심각도**: 낮음~중간
+- **증상/내용**: (1) 내보낸 `.srt`·`subtitles.srt` 가 BOM 없는 UTF-8 이라 프리미어·옛 메모장이 한글을 깨뜨림. (2) 작업 폴더가 NAS(`\\서버\공유`)면 프리미어 XML 주소에서 서버 이름이 빠져 모든 클립이 오프라인. (3) 스타일 이름 `CON`·`NUL`·`COM1`·붙여 넣은 탭은 배우기를 다 끝낸 뒤 저장에서 실패. (4) 켤 때마다 숨은 PowerShell(-EncodedCommand)로 바로가기를 다시 써서 지운 아이콘이 되살아나고 백신 행동 감시에 걸릴 수 있었음. (5) pywebview 5+ 는 기본이 비공개 모드라 화면 설정(보관함 필터·최근 색·타임라인 높이 등)이 켤 때마다 사라짐. (6) Python 3.13+ 의 엄격한 인증서 검사로 백신 HTTPS 검사·회사 프록시 PC 에서 업데이트·Deno·모델 받기가 '인터넷 확인' 오류. (7) Python 3.12.0 의 `which('claude')` 가 npm 의 확장자 없는 sh 스크립트를 돌려줘 '클로드 프로그램이 없어요'. (8) pythonw 는 `sys.stderr` 가 없어 traceback·스레드 오류·요청 오류가 모두 사라짐. (9) 미리보기를 앞뒤로 옮기면 WebView2 가 끊는 연결(ConnectionAbortedError 10053)이 요청 처리 밖으로 새고, 멈춘 미리보기가 연결·파일을 끝없이 잡음.
+- **위치**: `editor.py` `_pathurl`·`export`, `core.py` `SRT_ENCODING`, `style.py` `clean_style_name`, `winlink.py`, `app.py` `_start_webview`·`_error_log`·`Handler`, `updater.py` `_ssl_context`, `claude_cli.py` `find_exe`
+- **해결**: (1) `.srt` 는 `utf-8-sig` (읽을 때는 이미 BOM 을 지움). (2) UNC 는 `file://서버/공유/…`. (3) 금지·제어 문자를 빼고 60자, 예약 이름이면 ' 스타일' — 화면 `styleFileName` 과 같은 규칙. (4) `winlink.prepare`: 같은 실행 경로면 건너뜀(`shortcut.json`), COM 으로 쓰고 안 되면 PowerShell(60초 제한). (5) `webview.start(private_mode=False, storage_path=~/.futsal-studio/webview)`. (6) `VERIFY_X509_STRICT` 만 끈 공통 `updater.urlopen` (사슬·주소 확인은 그대로) + 인증서 오류면 백신 'HTTPS 검사' 안내. (7) PATHEXT 에 없는 확장자는 건너뛰고 `claude.exe`·`claude.cmd` 를 찾음. (8) `app._error_log` → `studio-error.log` (+ `faulthandler`), 켜다 멈춘 오류는 `updater._error_trace`. (9) `ConnectionError` 전체를 잡고 연결 제한 시간 120초, 오래된 거꾸로 재생 소리 정리 실패는 넘어감. 회귀 시험 `tests/test_windows_compat.py`.
+
+## I-042 | 2026-10-07 | Windows: 업데이트의 구성요소 설치·실행기가 겹칠 때
+- **상태**: 해결(2026-10-07)
+- **심각도**: 중간
+- **증상/내용**: (1) 앱이 불러 둔 .pyd/.dll 을 pip 가 못 바꿔(pip 23.3 미만) 업데이트가 '인터넷 연결 확인' 안내와 함께 되돌려짐. (2) pip 출력이 cp949 로 와서 UTF-8 로 읽어 한국어 오류·한글 경로가 '���'. (3) 아이콘을 거의 동시에 두 번 누르면 두 실행기가 같은 `*.rollback-tmp` 를 쓰거나 이미 지운 표시를 다시 읽어 '업데이트를 되돌리지 못했어요' 알림이 잘못 뜸. (4) 지난번 정리를 다 못 한 `.update_staging` 이 남아 있으면 `mkdir` 이 WinError 183 으로 멈춤. (5) Python 이 오래돼 pip 가 예전 yt-dlp 에서 멈춰도 '이미 최신이에요' (막히면 '크롬 로그인'이라는 틀린 안내).
+- **위치**: `core.py` `update_app`·`_pip_self_upgrade`·`_pip_locked`·`_pip_advice`·`update_engine`·`_engine_needs_newer_python`, `updater.py` `check`·`_launch_lock`·`_deferred_pip`·`rollback`·`install`
+- **해결**: D-027. (1) pip 를 23.3 이상으로 올린 뒤, 그래도 잠금이면 `.req_pending` → 다음 실행 때 실행기가 앱을 불러오기 전에 설치. (2) 파이썬 자식은 `updater.py_env()`(PYTHONIOENCODING·PYTHONUTF8). (3) `.launch_lock` 으로 한 번에 하나 + 잠금 뒤 표시를 다시 읽음, 임시 이름에 pid. (4) `exist_ok=True`. (5) Python 지원이 끝날 무렵이면 PyPI 의 최신 yt-dlp 가 받는 Python 을 확인해 '시작하기 (Windows).bat' 안내(작업 기록·화면 알림 · 막혔을 때도 먼저). 회귀 시험 `tests/test_windows_compat.py` Updates.
+
+## I-041 | 2026-10-07 | Windows: 설치(bat)가 맞지 않는 Python·깨진 .venv·긴 경로·Visual C++ 없음에서 '설치 실패'만 반복
+- **상태**: 해결(2026-10-07) — Windows 실기 미검증 (I-044)
+- **심각도**: 중간
+- **증상/내용**: `py -3` 이 휠 없는 3.15·ARM64·32비트를 골라 설치 실패. `.venv` 를 만든 Python 을 지우면 아이콘은 영어 오류 창, bat 은 파일이 있다고 venv 를 다시 만들지 않아 영원히 실패. 앱 폴더 경로가 길면(긴 경로 설정 꺼짐) onnxruntime 의 깊은 파일에서 pip 실패. Visual C++ 구성요소가 없으면 설치는 되는데 받아쓰기·누끼가 DLL 오류(소리·OCR 모델은 지웠다 다시 받기를 반복).
+- **위치**: `시작하기 (Windows).bat`, `setup_check.py`, `core.py` `_whisper`·`dll_missing`, `thumb.py` `remove_bg`, `avmodels.py` `ensure`
+- **해결**: D-028. 회귀 시험 `tests/test_windows_compat.py` Install (bat 은 CRLF·괄호 블록 안전 확인까지).
+
+## I-040 | 2026-10-07 | Windows: 앱을 닫아도 남는 자식 프로세스 · 작업 중 창 닫기 · 절전으로 멈추는 긴 작업
+- **상태**: 해결(2026-10-07) — Windows 실기 미검증 (I-044)
+- **심각도**: 중간
+- **증상/내용**: Windows 는 부모가 꺼져도 자식을 끄지 않아, 묶기(복사)·소리 꺼내기·pip·claude 가 창을 닫은 뒤에도 숨어서 돌며 파일을 잡음(다음 묶기의 정리·공간 확인이 틀어짐, pip 두 개가 같은 venv 를 고침). 작업 중에 창을 닫아도 묻지 않고 끝냄. 절전 막기는 편집점 찾기에만 있어 내보내기·받기·묶기·스타일 배우기는 자리를 비우면 PC 가 잠들어 멈춤.
+- **위치**: `core.py` `popen`·`run`·`track`·`keep_awake`, `editor.py`·`style.py`·`plan.py`·`claude_cli.py` 의 자식 실행, `app.py` `start_job`·`_on_closing`·`_confirm_close`
+- **해결**: 자식은 `core.popen`/`run` 으로만 띄워 `KILL_ON_JOB_CLOSE` Job Object 에 넣음(D-024). 작업 중이면 "지금 '…' 중이에요. 창을 닫으면 이 작업이 멈춰요" 확인. 모든 작업(`start_job`)이 `core.keep_awake()` 안에서 돔.
+
+## I-039 | 2026-10-07 | Windows: 앱이 둘 뜨거나(SO_REUSEADDR) 8765 를 못 쓰면 아무 말 없이 빈 화면
+- **상태**: 해결(2026-10-07)
+- **심각도**: 중간
+- **증상/내용**: 막 켜지는 중에 또 누르기·브라우저로 쓰는 중·PC 에 프록시 설정이 있으면 두 번째 실행이 같은 포트를 같이 잡아 앱이 둘 뜸(작업·저장·임시 폴더 정리가 섞임). Hyper-V·WSL·Docker 가 8765 를 예약했거나 다른 프로그램이 쓰면 10초 뒤 빈/남의 페이지만 열리고 studio.log 에도 남지 않음. 실행기도 남의 프로그램을 '켜져 있는 앱'으로 보고 업데이트 확인을 건너뜀.
+- **위치**: `app.py` `_Server`·`_bind`·`_ours`·`_focus_running`·`/api/ping`·`/api/focus`, `updater.py` `_app_running`·`_app_ports`
+- **해결**: D-025. 회귀 시험 `tests/test_windows_compat.py` Ports.
+
+## I-038 | 2026-10-07 | 받다 끊긴 yt-dlp 중간 파일이 보관함 영상으로 보임 · 긴 작업 폴더에서 받은 파일 이름이 잘림
+- **상태**: 해결(2026-10-07)
+- **심각도**: 중간
+- **증상/내용**: 절전·창 닫기·네트워크 끊김·백신 잠금으로 합치기 전에 끊기면 `….f137.mp4`(소리 없음)·`….temp.mp4` 가 남아 보관함에 하나 더 보였고, 편집점 찾기는 '소리를 꺼내지 못했어요'. 받는 중에도 잠깐씩 보였고, 출처 기록·학습용 옮기기가 진짜 영상 대신 그것을 고를 수 있었음. 목록과 `stat` 사이에 파일이 사라지면 `/api/state` 가 끊김. `trim_file_name` 이 폴더까지 포함해 120자로 잘라 긴 작업 폴더면 제목이 사라지거나 파일이 다른 폴더로 나감.
+- **위치**: `core.py` `is_partial`·`is_video_file`·`local_videos`·`download`, `source.py` `_find_file`·`_library`, `refs.py` `_staged`·`_scan`
+- **해결**: 받은 영상 이름 꼴(`YYYYMMDD_<id>_…`)의 `.f<형식>.`·`.temp.` 파일은 목록에서 뺌(사용자 파일 'game.f1.mp4' 는 그대로) · `stat` 실패는 건너뜀 · 폴더는 `paths.home` 으로 따로. 남은 중간 파일은 지우지 않음 (I-044).
+
+## I-037 | 2026-10-07 | 확장자(또는 Windows 에서 대소문자)만 다른 영상이 분석·편집본·썸네일을 함께 씀
+- **상태**: 해결(2026-10-07)
+- **심각도**: 중간
+- **증상/내용**: `IMG_1234.MOV`·`IMG_1234.mp4`(또는 OBS `.mkv`·바꾼 `.mp4`)가 같은 `analysis/IMG_1234`·`projects/IMG_1234.json` 을 써서 두 번째 영상이 첫 영상의 받아쓰기·편집본·미리보기 파일로 열리고, 다시 분석하면 첫 영상 결과를 덮어씀.
+- **위치**: `core.py` `adir`·`library_dir`·`_alt_key`·`_folder_owner`, `refs.py` 옮기기·되돌리기·`projects_using`
+- **해결**: D-026. 회귀 시험 `tests/test_windows_compat.py` LibraryNames.
+
+## I-036 | 2026-10-07 | Windows: 막 만든 파일을 백신·탐색기·OneDrive 가 잡으면 결과를 잃음 (완성본·묶음·미리보기·썸네일 디자인·분석)
+- **상태**: 해결(2026-10-07) — 잠금 시간은 Windows 실기 미검증 (I-013·I-044)
+- **심각도**: 높음
+- **증상/내용**: (1) 내보내기: 완성본 옮기기를 0.25초만 다시 해 보고, 원본이 잠긴 것인데도 '(2)…(99)' 이름으로 헛되이 다시 한 뒤 임시 폴더째 지워 렌더링 전체를 잃음(안내도 '같은 이름 파일이 열려 있어요'로 틀림). 묶기는 10초 뒤 같은 일. 미리보기 파일은 다시 시도가 없음. (2) 썸네일 디자인 저장: 지금 파일을 .bak 으로 먼저 옮긴 뒤 바꿔 끼우기가 실패하면 지금 파일이 없어지고, 요청은 응답 없이 끊겨 화면이 '저장 중…'에 멈춤(뒤로 가기는 반응 없음). (3) 편집점 찾기: 받아쓰기 뒤 `audio.wav` 를 결과 쓰기 전에 지우다 잠기면 받아쓰기를 통째로 잃음 · 결과 파일을 제자리에 써서 꺼지면 반쪽 transcript.json 이 '분석함'으로 보임. (4) 편집본 저장은 됐는데 백업·정리 실패로 '저장 실패'. (5) 가져오기·장면·정지 화면이 반쪽 파일로 남아 계속 쓰임. (6) 스타일 파일을 바로 덮어씀 (I-003).
+- **위치**: `updater.py` `replace_retry`·`write_atomic`, `editor.py` `_place_final`·`make_proxy`·`save_upload`·`freeze_frame`·`save_project`, `bundle.py`, `thumb.py` `save_docs`·`grab`·`export_image`, `core.py` `_analyze`, `style.py` `learn`, `app.py` `/api/thumb/save`·`upload`·`export`·`/api/style/delete`, `thumb_src/parts/p2_view.js`·`p5_canvas.js`·`p6_ops.js`·`p7_auto.js`
+- **해결**: 공통 도구로 (D-024): 큰 영상은 60초까지 기다리고 끝내 못 옮기면 보이는 폴더로 남겨 위치를 알림, 같은 이름 대상이 열려 있을 때만 다른 이름. 썸네일은 지금 파일을 끝까지 두고 .bak 은 복사, 실패하면 500 JSON → 화면이 '저장 실패 · 잠시 뒤 다시' 후 다시 저장, 뒤로 가기는 실패하면 물어봄. 그림 올리기·내보내기·브러시 저장도 실패하면 JSON 으로 답하고 화면이 알림(예전: 레이어 그림 주소가 비어 깨짐). 분석 결과는 임시 파일 → 바꿔 끼우기(타임라인을 맨 마지막), 소리 파일 지우기는 곁가지. 가져오기는 끝까지 받은 것만, 장면·정지 화면은 성공한 것만 제 이름으로. 회귀 시험 `tests/test_windows_compat.py` Locks·AnalyzeResults.
+
+## I-035 | 2026-10-07 | config.json 을 메모장으로 고치면(BOM·ANSI·역슬래시 하나) 앱이 아예 안 켜짐 · 기록도 엉뚱한 폴더에
+- **상태**: 해결(2026-10-07)
+- **심각도**: 중간
+- **증상/내용**: 설정 화면이 없어 작업 폴더를 옮기려면 config.json 을 고쳐야 하는데, `"D:\풋살작업"`(탐색기 주소 붙여 넣기)·UTF-8(BOM)·ANSI 저장이면 core import 에서 멈춰 앱이 켜지지 않고, 실행기는 같은 오류를 삼켜 기본 폴더에 studio.log 를 남김. `"D:\new"` 는 줄바꿈으로 읽혀 폴더를 못 만듦. 빠진 외장 드라이브도 같은 결과(기록조차 없음). dict.json 도 BOM·ANSI 면 기본 사전으로 돌아가 다음 저장 때 덮어씀.
+- **위치**: `updater.py` `read_config`·`loads_tolerant`·`workspace`·`studio_log`, `core.py` `CONFIG`·`_open_workspace`·`CONFIG_NOTES`, `captions.py` `load_dict`, `app.py` `_after_start`
+- **해결**: BOM·cp949·하나뿐인 역슬래시(끝 역슬래시 포함)를 읽고, 그래도 못 읽으면 기본 설정 + 안내(작업 기록·화면 알림). 쓸 수 없는 작업 폴더면 기본 작업 폴더로 열고 안내. dict.json 은 못 읽으면 그 내용을 `dict.json.bad` 로 남김. 회귀 시험 `tests/test_windows_compat.py` NotepadJson.
+
+## I-034 | 2026-10-07 | 반쪽 이모지(JS .slice 가 자른 대리 문자) 하나로 화면이 멈추고 스타일 목록이 계속 깨짐
+- **상태**: 해결(2026-10-07)
+- **심각도**: 높음
+- **증상/내용**: 제목에 이모지가 있는 영상으로 이름 없이 스타일 배우기 → `niceName(…).slice(0,12)` 가 🔥 를 반으로 잘라 `'…🔥\ud83d 스타일'` 이 서버로 옴. Windows 는 그 이름의 파일을 만들 수 있어 저장은 되지만, `log()` 의 studio.log 쓰기가 UnicodeEncodeError(ValueError 라 `except OSError` 를 지나침)로 작업이 실패하고, 그 줄이 든 `/api/state` 가 응답 없이 끊겨 화면(작업·진행률·보관함)이 다시 켤 때까지 멈춤. 다시 켜도 `/api/style/list` 가 매번 끊겨 모든 스타일이 사라져 보임(파일을 손으로 지울 때까지). 썸네일 자동 제목(24자)·편집본 이름으로 만든 제목(16자)도 같은 이유로 저장이 말없이 실패. v1.9.2 의 cp949 print 오류(I-030)와 같은 종류.
+- **위치**: `ui.html`·`editor.html`·`thumb_src/parts/p1_core.js`·`p7_auto.js`(`cutText`), `app.py` `Handler._body`·`_send`·`log`, `core.py` `clean_text`·`clean_json`, `style.py` `clean_style_name`·`_repair_name`, `thumb.py` `export_image`, `updater.py` `studio_log`
+- **해결**: 화면은 글자 단위로 자름(`cutText`). 서버는 모든 POST 본문을 `core.clean_json` 으로 고치고(짝 없는 것은 '�'), 응답은 UTF-8 로 못 쓰면 `\uXXXX` 로, `log()` 는 고친 글을 `errors="replace"` 로 쓰고 ValueError 도 넘어감. 스타일 이름은 반쪽·금지·제어 문자를 빼고, 예전에 반쪽 이름으로 저장된 파일은 목록을 볼 때 고친 이름으로 바꿈. 회귀 시험 `tests/test_windows_compat.py` HalfEmoji (node 로 세 화면의 자르기 도우미를 직접 돌림).
+
+## I-003 | 2026-10-06 | 스타일 파일을 바로 덮어씀
+- **상태**: 해결(2026-10-07)
+- **심각도**: 낮음
+- **증상/내용**: `style.learn`은 `styles/<이름>.json`을 `write_text`로 바로 쓴다. 저장하다 꺼지면 깨진 파일이 남는다. `list_styles`는 깨진 파일을 말없이 건너뛰므로 그 스타일이 목록에서 사라진다. 불변식 "임시 파일 → 바꿔 끼우기"(`DOMAIN_KNOWLEDGE.md` 4절)의 예외다.
+- **위치**: `style.py` `learn`·`list_styles`
+- **해결 방향**: 다른 저장처럼 임시 파일에 쓴 뒤 `os.replace`로 바꾼다.
+- **해결**: `updater.write_atomic`(임시 파일 → 바꿔 끼우기, 잠금이면 다시)으로 저장 (I-036 묶음).
+
+## I-021 | 2026-10-06 | `/api/thumb/cut`의 장면 주소 이름을 검사하지 않음
+- **상태**: 해결(2026-10-07)
+- **심각도**: 낮음
+- **증상/내용**: 누끼 요청의 `src`가 `/frame?name=…&t=…`이면 그 `name`을 `editor.safe_name` 없이 `thumb.grab`에 넘긴다. `core.VIDEOS / name`·`core.adir(name)`이 보관함 밖을 가리킬 수 있다. POST는 같은 출처만 받으므로 다른 사이트는 이 경로를 쓸 수 없다.
+- **위치**: `app.py` `do_POST` `/api/thumb/cut`
+- **해결 방향**: `qq["name"][0]`도 `editor.safe_name`·`video_path`를 거치게 한다 (`SECURITY_GUIDELINES.md` 2번 순서).
+- **해결**: 장면 주소 안의 이름도 `editor.video_path`(이름 검사 + 보관함 안의 파일)를 거친다. 회귀 시험 `tests/test_windows_compat.py` Names.
+
 
 ## I-026 | 2026-10-06 | 편집실 미리보기가 내보내기와 다름: 노래방 효과 시각 · 쇼츠 편집본 자막 나누기
 - **상태**: 해결(2026-10-07)
