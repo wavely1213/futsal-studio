@@ -1,6 +1,8 @@
 {
   "version": "2.2.0",
   "notes": "자막을 한 줄씩 짧게: 새 자막은 항상 한 줄(쇼츠 13자·롱폼 17자 안팎, 자연스럽게 끊기는 곳), 예전 편집본은 자막 탭 '자막 한 줄씩 나누기' 한 번으로",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/89a79ae9ba18707665d232a57c2c073bd4157c14.zip",
+  "commit": "89a79ae9ba18707665d232a57c2c073bd4157c14",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "a665d3b209720b518a58d941157ec481e88d846581ff9a6ac158d7a25d56d860",
