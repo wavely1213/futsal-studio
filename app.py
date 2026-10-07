@@ -21,6 +21,7 @@ import core
 import cutout_worker
 import editor
 import hooks
+import idle
 import plan
 import qa
 import qr
@@ -1124,6 +1125,8 @@ def main():
     log(f"작업 폴더 · {core.WORK}")
     _after_start()
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
+    JOB_HOOKS.append(idle.touch)  # 작업이 끝나고 5분 동안 다른 작업이 없으면 불러 둔 모델을 내려놓음 (메모리 반환)
+    idle.start(LOCK, lambda: bool(JOB["name"]))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
         remote.init(_remote_bridge())
