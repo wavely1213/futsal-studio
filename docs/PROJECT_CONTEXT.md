@@ -108,7 +108,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_PORT`: 로컬 서버 포트 (기본 8765)
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
-  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. `http://127.0.0.1:<포트>`·`http://localhost:<포트>`만 받고 다른 값은 무시 (시험 전용 · D-027)
+  - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-027·D-028)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`: 내부용. 재시작·실행기 경유를 표시하며 직접 설정하지 않는다.
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)

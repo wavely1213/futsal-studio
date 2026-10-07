@@ -14,7 +14,7 @@
   - API 키·서버·로그인이 없다. `config.json`에는 공개값(채널 주소·작업 폴더·업데이트 주소)만 있다.
   - 예외 하나: 사용자가 '클로드 계정으로 쓰기'의 고급 칸에 붙여 넣은 로그인 코드(`claude setup-token`, `sk-ant-oat…`)는 `~/.futsal-studio/claude_token`(사용자 폴더, 앱 폴더·`config.json` 밖, 권한 600)에 둔다. 자식 프로세스 환경 변수 `CLAUDE_CODE_OAUTH_TOKEN`으로만 넘기고 기록·응답·화면에 내보내지 않는다. [지우기]로 지운다 (D-021).
   - 예외 둘: **유튜브 바로 올리기**(D-027). 비밀은 셋이다 — 소유자가 만든 Google OAuth 클라이언트의 보안 비밀번호(`client.bin`), Google 토큰(refresh·access, `token.bin`), 올리던 업로드 세션 주소(업로드 권한이 들어 있는 주소).
-    - 둘 곳: `~/.futsal-studio/youtube/client.bin`·`token.bin`(사용자 폴더 · 앱 폴더·`config.json` 밖). Windows 는 DPAPI(이 Windows 사용자만 풂 · `youtube_api.protect`), 그 밖은 권한 600(폴더 700). 세션 주소는 작업 폴더 `youtube/uploads/<열쇠>.json` 안에 같은 방식으로 보호해 넣는다(권한 600).
+    - 둘 곳: `~/.futsal-studio/youtube/client.bin`·`token.bin`(사용자 폴더 · 앱 폴더·`config.json` 밖). Windows 는 DPAPI(이 Windows 사용자만 풂 · `youtube_api.protect`), 그 밖은 권한 600(폴더 700). 세션 주소도 같은 곳 `sessions/<열쇠>.bin`(D-028) — 작업 폴더(OneDrive·NAS 일 수 있음) `youtube/uploads/<열쇠>.json` 에는 `uri: true` 와 짝 번호(`sid`)만 둔다. 읽을 때는 이 PC 방식 머리만 받는다(Windows 에 놓인 평문 `FSY1P` 는 '없음'). [연결 끊기]·[Google 설정 지우기]는 도는 작업을 먼저 멈추고 세션 주소도 지운다.
     - 화면·응답·`studio.log`·오류 문장에 넣지 않는다. `/api/youtube/status`·`/client` 는 클라이언트 ID 앞 12자만 돌려준다. 오류 문장은 한국어 틀 + Google 의 reason 낱말만 쓰고 응답 원문·주소를 넣지 않는다. `tests.test_youtube`·e2e 가 시크릿 위생(기록·작업 폴더·응답에 가짜 토큰·코드·비밀번호·세션 주소가 없음)을 확인한다.
     - [연결 끊기]·[Google 설정 지우기]는 Google 에도 취소(revoke)하고 파일을 지운다. 다른 클라이언트로 바꾸면 예전 연결은 끊는다.
     - 깨졌거나 다른 사용자·PC 의 파일(DPAPI 실패)은 '없음'으로 보고 다시 연결하게 한다.
@@ -69,7 +69,9 @@
     - `127.0.0.1` 에만 · 결과 한 번만 받고 닫음 · 10분 넘으면 닫음 · 새로 연결하면 앞의 것을 닫음.
     - Host 가 `127.0.0.1:<그 포트>`가 아니면 400, `/` 밖의 주소는 404, `state` 는 `hmac.compare_digest` 로 비교(다르면 400 · 기다림은 그대로), 한 번 받은 뒤에는 다시 받지 않음. PKCE(S256)라 코드를 가로채도 토큰으로 바꿀 수 없다.
     - 응답 화면은 외부 자원 없는 작은 HTML(`Cache-Control: no-store` · `Referrer-Policy: no-referrer`)이다. 결과(코드)는 GET 으로 오지만 이 서버는 그 한 번의 로그인 말고는 아무것도 바꾸지 않는다.
-  - `FUTSAL_GOOGLE_API`(시험용 가짜 Google 주소)는 `http://127.0.0.1:<포트>`·`http://localhost:<포트>`만 받는다. 다른 값이면 무시하고 진짜 Google HTTPS 주소를 쓴다.
+  - `FUTSAL_GOOGLE_API`(시험용 가짜 Google 주소)는 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포·업데이트 목록에는 tests/ 가 없음)만, `http://127.0.0.1:<포트>` 만 받는다(localhost 는 hosts 파일을 타서 안 받음). 다른 값이거나 배포본이면 무시하고 진짜 Google HTTPS 주소를 쓴다. 켜지면 표준 출력에 한 번 알린다(값 없이).
+  - 로그인 결과 서버는 `SO_REUSEADDR` 를 끄고(Windows 는 `SO_EXCLUSIVEADDRUSE`) 다른 프로그램이 같은 포트를 함께 잡지 못하게 한다. 앱 서버(8765)의 같은 손질은 Windows 손질 브랜치(feat_win `_bind`)에서 함께 한다.
+  - `/api/youtube/*` 는 이 PC 화면 전용이다 — 휴대폰 원격(remote) 허용 목록에 넣지 않는다. 로그인 주소(state·PKCE challenge)는 상태 응답에 넣지 않고 [유튜브 계정 연결하기] 응답으로만 준다.
 - **GET은 읽기 전용으로 둔다.** 다른 사이트의 `<img src="http://127.0.0.1:8765/…">`도 Host가 맞아 통과한다. 응답을 읽지는 못하지만 동작은 일어난다.
   - 지우기·저장·작업 시작·폴더 열기처럼 상태를 바꾸는 동작은 반드시 POST로 만든다.
   - 지금 GET이 하는 쓰기는 캐시 생성(`/frame`·`/api/edit/thumbs.jpg` 등 · 채널 전략 `strategy/forecast.json`·`solution.json`)뿐이다. 사용자 기록(`strategy/state.json` 등)은 GET 에서 쓰지 않는다.
@@ -125,7 +127,7 @@
     - 엔진 최신화나 Deno 설치에 실패하면 하루 동안 다시 하지 않는다(`ENGINE_RETRY`).
     - 얼굴 모델 다운로드에 실패하면 10분 동안 다시 하지 않는다(`face.RETRY`).
   - YouTube를 반복해서 두드리는 루프나 우회 로직을 만들지 않는다.
-  - 유튜브 바로 올리기(D-027): 끊김·5xx·429 는 조각마다 1·2·4·8·16·32·60·60초(+0~1초) 기다린 뒤 상태를 묻고, 다 쓰면 멈추고 [이어 올리기]를 기다린다. `rateLimitExceeded` 는 60초 쉬고 한 번만 다시. 세션 만료(404)는 한 번만 새로 시작. 연결이 끊기면(invalid_grant) 남은 단계는 부르지 않는다. 할당량은 화면에 '이번에 쓰는 양'과 남은 양을 보이고, 모자라면 올리기 전에 확인을 받는다.
+  - 유튜브 바로 올리기(D-027): 끊김·5xx·429 는 조각마다 1·2·4·8·16·32·60·60초(+0~1초) 기다린 뒤 상태를 묻고, 다 쓰면 멈추고 [이어 올리기]를 기다린다. 인터넷 끊김만은 그 뒤에도 1분마다, 처음 끊긴 때부터 30분까지 다시 해 본다(세션 주소 하나에 상태 묻기 · 사용자가 [멈추기]로 바로 멈춤 · D-028). 308 인데 받은 데가 늘지 않으면 3번 뒤 쉬었다 묻고 계속이면 멈춘다. 올린 지 10분 안의 썸네일·자막·재생목록은 5xx·videoNotFound 를 5·15·45초 기다려 다시(처리 중). 처리 상태 확인은 화면이 올린 뒤 30분까지 1분마다 한 번(videos.list 1단위). `rateLimitExceeded` 는 60초 쉬고 한 번만 다시. 세션 만료(404)는 한 번만 새로 시작. 연결이 끊기면(invalid_grant) 남은 단계는 부르지 않는다. 할당량은 화면에 '이번에 쓰는 양'과 남은 양을 보이고, 모자라면 올리기 전에 확인을 받는다.
   - 채널 전략 새로 고침(BR-016): 사용자가 누를 때만 작업 하나로, 요청 사이 0.75초·채널 사이 2초+흔들기, 목록을 받은 지 3일 안인 채널은 건너뜀, YouTube 가 막으면(봇 확인·403·429) 6시간·까닭 모를 실패가 3곳 연달아면 1시간 목록 단계를 쉼(사용자가 [지금 다시 시도]로 풀 수 있는 것은 1시간 쉼뿐), 인터넷이 끊기면 그 새로 고침만 멈춤. 자동 요청은 8단계를 열 때 우리 채널 숫자 하루 한 번뿐(설정에서 끔 · 쉬는 중이면 건너뜀). 주기적 자동 새로 고침은 만들지 않는다.
   - 받은 RSS(XML)는 2MB까지만 읽고, `<!DOCTYPE`·`<!ENTITY`가 들어 있으면 해석하지 않고 버린다(XML 폭탄·외부 개체 대비). 응답의 제목·채널 이름은 화면에 `esc()`로만 넣는다.
 - **CORS**: CORS 헤더를 보내지 않는다. 그래서 다른 출처의 스크립트는 응답을 읽지 못한다. `Access-Control-Allow-Origin`을 추가하지 않는다(`*` 금지).
@@ -146,7 +148,8 @@
 
 - **의존성 취약점**: `DEPENDENCY_POLICY.md` 참고. audit 경고 발견 시 보고.
 - 밖으로 나가는 통신은 모두 HTTPS다. 업데이트·다운로드 주소를 `http://`로 바꾸지 않는다(`updater.download_and_install`은 형식상 `http`도 받으므로 주소 쪽에서 지킨다). 예외는 시험용 `FUTSAL_GOOGLE_API`(루프백만, 3번)다.
-- 유튜브 업로드 세션 주소(`Location`)는 업로드 주소와 같은 scheme·host 일 때만 쓴다(다른 곳으로 영상을 보내지 않음).
+- 유튜브 업로드 세션 주소(`Location`)는 보낼 때마다 `youtube_api.valid_session_uri` 로 확인한다: https · `www.googleapis.com`/`*.googleapis.com`(기본 포트) · `/upload/youtube/v3/videos…`. 아니면 토큰을 붙이지 않고 처음부터(다른 곳으로 영상·토큰을 보내지 않음).
+- Google 요청은 다른 주소로 보내는 응답(3xx Location)을 따라가지 않는다(`youtube_api._NoRedirect` — urllib 은 따라갈 때 Authorization 을 다른 곳·http 로도 옮김).
 - 로컬 서버는 루프백 전용 HTTP다. 쿠키·세션을 쓰지 않는다.
 
 ## 6. AI 작업 시 보안 체크리스트
