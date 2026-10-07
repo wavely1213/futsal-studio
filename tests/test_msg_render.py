@@ -64,13 +64,13 @@ class NoCaps(unittest.TestCase):
 
 class CaptionJoin(unittest.TestCase):
     def test_caption_split_by_cut_stays_one(self):
-        """확대 컷으로 나뉜 같은 자막은 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게) · 잘라 낸 사이가 있으면 그대로 둘."""
+        """확대 컷으로 나뉜 같은 자막은 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게) · 타임라인에서 사이가 비면 그대로 둘."""
         it = lambda i, s, a, b: {"id": i, "track": "V1", "media": "main", "start": s, "in": a, "out": b, "speed": 1.0}  # noqa: E731
         seq = {"items": [it("a", 0, 0, 2), it("b", 2, 2, 4), it("c", 4, 5, 7)], "titles": [], "shapes": [], "format": "long",
                "captions": [{"id": "c1", "start": 1.0, "end": 3.5, "text": "이어지는 말"}, {"id": "c2", "start": 3.8, "end": 6.0, "text": "잘린 말"}]}
         caps = editor.timeline_captions(seq)
         self.assertEqual([(round(c["start"], 2), round(c["end"], 2), c["text"]) for c in caps],
-                         [(1.0, 3.5, "이어지는 말"), (4.0, 5.0, "잘린 말")])
+                         [(1.0, 3.5, "이어지는 말"), (3.8, 5.0, "잘린 말")])  # 원본 4~5초를 잘라 냈어도 화면에서는 이어짐
         two = dict(seq, items=[it("a", 0, 0, 2), it("b", 2.5, 2, 4)])
         self.assertEqual(len(editor.timeline_captions(dict(two, captions=seq["captions"][:1]))), 2)
 
