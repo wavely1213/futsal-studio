@@ -158,7 +158,7 @@ def auto_grade(src, close=False):
     return g
 
 
-SAT_GAIN = 1.2   # 자동 보정 뒤 채도 목표 (원본 대비 · 기준표 +5~35%)
+SAT_GAIN = 1.24  # 자동 보정 뒤 채도 목표 (원본 대비 · 기준표 +5~35% · 판정 '무보정 캡처 같다' 뒤 1.2 → 1.24, 화면 보정의 선명하게가 조금 더 올림)
 
 
 def _sat_after(a, g):

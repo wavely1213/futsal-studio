@@ -2932,7 +2932,7 @@ const T_NEW = {
       const lg = logoLayer(ctx, [hd.box].concat(sl ? [bbox([sl])] : [])); if (lg) ls.push(lg);
       return ls;
     } },
-    "인물 + 오른쪽 제목 (해주호형)": { prior: -1.5, needs: { kinds: ["mid", "close"] }, fn: ctx => {
+    "인물 + 오른쪽 제목 (해주호형)": { prior: -2, needs: { kinds: ["mid", "close"] }, fn: ctx => {
       const bg = frameLayer(ctx, { zoom: zoomFor(ctx, 0.9, 1.05, 2), target: [ctx.W * 0.27, ctx.H * 0.5] }), ls = [bg];
       ls.push(L("shape", { name: "오른쪽 어둡게", x: ctx.W * 0.38, y: 0, w: ctx.W * 0.62, h: ctx.H, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 0, opacity: 0.72 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
@@ -2965,11 +2965,11 @@ const T_NEW = {
       ls.push(noL, xm, yesL, scr, ...hd.layers);
       return ls;
     } },
-    "리액션 클로즈업": { prior: -1.5, needs: { kinds: ["close"], sharp: 0.25 }, fn: ctx => {
+    "리액션 클로즈업": { prior: -2.5, needs: { kinds: ["close"], sharp: 0.25 }, fn: ctx => {
       const fc = ctx.frame.faces[0].box, z = clamp(0.5 / Math.max(0.12, fc[3]), 1, 1.6);
       const bg = frameLayer(ctx, { zoom: z, focus: [fc[0] + fc[2] / 2, fc[1] + fc[3] / 2], target: [ctx.W * 0.66, ctx.H * 0.4] }), ls = [bg];
       ls.push(L("shape", { name: "왼쪽 어둡게", x: 0, y: 0, w: ctx.W * 0.6, h: ctx.H, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 0, opacity: 0.7 }));
-      const hd = headline(ctx, { x: ctx.W * 0.04, y: ctx.H * 0.08, w: ctx.W * 0.52, h: ctx.H * 0.82 }, { style: "word", align: "left", anchor: "middle", size: Math.round(ctx.H * 0.25), ratio: 0.6 });
+      const hd = headline(ctx, { x: ctx.W * 0.04, y: ctx.H * 0.08, w: ctx.W * 0.56, h: ctx.H * 0.82 }, { style: "word", align: "left", anchor: "middle", size: Math.round(ctx.H * 0.3), ratio: 0.66 });  // 제목이 작아 얼굴에 묻힌다는 평
       ls.push(...hd.layers);
       return ls;
     } },
@@ -3000,10 +3000,10 @@ const T_NEW = {
       ls.push(...hd.layers);
       return ls;
     } },
-    "쇼츠 · 위 제목 + 아래 누끼": { needs: { cut: true }, fn: ctx => {
+    "쇼츠 · 위 제목 + 아래 누끼": { prior: -0.5, needs: { cut: true }, fn: ctx => {
       const z = zoomFor(ctx, 0.58, 1, 1.8), bg = frameLayer(ctx, { zoom: z, target: [ctx.W * 0.46, ctx.H * 0.6] }), ls = [bg];
       Object.assign(bg, { bright: 72 });  // 흐리면 누끼 둘레에 잔상이 보인다는 평
-      ls.push(L("shape", { name: "위 판", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.5, fill: ctx.brand.colors.box, fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.96 }));
+      ls.push(L("shape", { name: "위 판", x: 0, y: 0, w: ctx.W, h: ctx.H * 0.62, fill: ctx.brand.colors.box, fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.96 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 9 }); if (cut) { cut.bright = 100; ls.push(cut); }
       const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.08, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "word", size: Math.round(ctx.W * 0.2), ratio: 0.66, emphScale: 1.1, grad: false });
       ls.push(...hd.layers);
@@ -3017,11 +3017,11 @@ const T_NEW = {
       ls.push(...hd.layers);
       return ls;
     } },
-    "쇼츠 · 얼굴 + 아래 제목": { prior: 0, needs: { kinds: ["close"] }, fn: ctx => {  // 인터뷰처럼 얼굴이 위쪽에 큰 장면: 얼굴은 위에 두고 제목은 아래 안전 영역 끝에
+    "쇼츠 · 얼굴 + 아래 제목": { prior: -1.5, needs: { kinds: ["close"] }, fn: ctx => {  // 인터뷰처럼 얼굴이 위쪽에 큰 장면: 얼굴은 위에 두고 제목은 아래 안전 영역 끝에
       const bg = frameLayer(ctx, { zoom: 1.05, target: [ctx.W * 0.47, ctx.H * 0.3] }), ls = [bg];
       ls.push(L("shape", { name: "아래 어둡게", x: 0, y: ctx.H * 0.38, w: ctx.W, h: ctx.H * 0.62, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.92 }));
       const cut = cutLayer(ctx, bg, { outline: "#FFFFFF", ow: 7 }); if (cut) ls.push(cut);
-      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.5, w: ctx.W * 0.76, h: ctx.H * 0.25 }, { style: "line", anchor: "bottom", size: Math.round(ctx.W * 0.21), ratio: 0.62 });
+      const hd = headline(ctx, { x: ctx.W * 0.07, y: ctx.H * 0.44, w: ctx.W * 0.76, h: ctx.H * 0.31 }, { style: "line", anchor: "bottom", size: Math.round(ctx.W * 0.25), ratio: 0.7 });  // 제목이 작다는 평
       ls.push(...hd.layers);
       return ls;
     } },
@@ -3062,8 +3062,8 @@ function fits(t, ctx) {
 }
 function buildDoc(name, t, ctx) {
   const layers = t.fn(ctx).filter(Boolean).map(normLayer);
-  if ((ctx.frame.text || 0) >= TEXTY && !layers.some(l => l.name === "누끼"))  // 글자 박힌 장면인데 누끼가 없으면 주인공까지 흐려지지 않게 어둡게만
-    for (const l of layers) if (l.type === "image" && l.name === "배경" && l.blur) l.blur = 0;
+  if ((ctx.frame.text || 0) >= TEXTY && !layers.some(l => l.name === "누끼"))  // 글자 박힌 장면인데 누끼가 없으면 덜 흐림 (안 흐리면 박힌 글자와 제목이 다툼 · 많이 흐리면 주인공도 흐림)
+    for (const l of layers) if (l.type === "image" && l.name === "배경" && l.blur) l.blur = Math.round(ctx.W * 0.006);
   return { w: ctx.W, h: ctx.H, bg: "#000000", layers };
 }
 
