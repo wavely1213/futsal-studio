@@ -51,6 +51,31 @@ class IdleTest(unittest.TestCase):
                 time.sleep(0.05)
             self.assertEqual(len(f._SESS), 0)
 
+    def test_waits_for_leftover_model_thread(self):
+        """멈춘 작업이 남긴 글자 읽기 스레드(model-ocr)가 아직 돌면 작업이 없어도 안 내려놓음."""
+        f = _fake("face")
+        stop = threading.Event()
+        th = threading.Thread(target=stop.wait, name="model-ocr", daemon=True)
+        th.start()
+        try:
+            self.assertTrue(idle.models_in_use())
+            with mock.patch.dict(sys.modules, {"face": f}), mock.patch.object(idle, "CHECK_SEC", 0.05), \
+                    mock.patch.dict(idle._ST, {"thread": None, "dirty": False}):
+                idle.touch()
+                idle.start(threading.Lock(), lambda: False, idle_sec=0.1)
+                time.sleep(0.6)
+                self.assertEqual(len(f._SESS), 2)
+                stop.set()
+                th.join(2)
+                self.assertFalse(idle.models_in_use())
+                for _ in range(40):
+                    if not f._SESS:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(len(f._SESS), 0)
+        finally:
+            stop.set()
+
 
 if __name__ == "__main__":
     unittest.main()
