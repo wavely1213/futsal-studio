@@ -151,28 +151,42 @@ def split2(t):
     return (best[1], best[2]) if best else None
 
 
+SKILLS = ("드래그", "드리블", "페인트", "턴", "돌파", "개인기", "스텝오버")  # 수비를 속이는 기술 (속이는 틀은 이 기술 + 대사에 '속이' 가 있을 때만)
+
+
 def rule_candidates(title, texts):
-    """규칙으로 만든 후보 전부 (점수 전)."""
+    """규칙으로 만든 후보 전부 (점수 전).
+    레퍼런스(쪼살·쌈바·해주호·JK)의 '결과·대상이 있는 문구' 틀: 무조건 봐(큰 노란 줄) · ~의 비밀 · 영상만 봐도 늘어요 · 플랩 레벨업 · 수비를 속이는 X ·
+    N초면 끝 · 이렇게 하면 안 돼요 · 못하는 진짜 이유 · 질문형 · 반전 O/X · 대사 핵심 문장."""
     tp = topics(title, texts)
     X = tp[0] if tp else (title_phrase(title) or "풋살")
     Y = tp[1] if len(tp) > 1 else X
     body = " ".join(texts) + " " + (title or "")
     has = lambda *ks: any(k in body for k in ks)  # noqa: E731
     C = []
-    C.append(_cand(X, "무조건 봐", 0, X, "1분만 투자하세요", "must", 1.0, "레퍼런스 쪼살형 '무조건 봐' (주제를 크게)"))
+    # 쪼살형 'V자 어려우면 / 무조건 봐 / 1분안에 알려줄게': '무조건 봐'가 가장 큰 노란 줄 (작은 흰 꼬리표로 두면 훅이 아님 — 판정)
+    C.append(_cand(f"{X} 어려우면", "무조건 봐", 1, "무조건 봐", "1분 만에 알려줄게요", "must", 0.85, "쪼살형 '무조건 봐' (가장 큰 노란 줄 · 흔한 말이라 조금 낮게)"))
     C.append(_cand("고수만 아는", f"{X}의 비밀", 1, X, "실전에서 바로 써먹는", "secret", 0.95, "'~의 비밀' 궁금증"))
     C.append(_cand("영상만 봐도", "실력이 늘어요", 1, "실력이 늘어요", f"{X} 1분 강좌", "grow", 0.9, "쪼살형 약속 문구"))
-    C.append(_cand(X, "이렇게 하세요", 0, X, "감독이 직접 알려줘요", "howto", 0.8, "주제 + 해결"))
-    C.append(_cand("이것만 알면", f"{X} 끝!", 1, X, "1분만 투자하세요", "only", 0.85, "'이것만 알면' 단순화"))
-    C.append(_cand("플랩 레벨업", "바로 됩니다", 0, "레벨업", X, "levelup", 0.8, "쪼살형 결과 약속"))
-    C.append(_cand(X, "진짜 쉽게", 0, X, "초보도 바로 따라 해요", "easy", 0.7, "쉬움 강조 (주제를 크게)"))
+    C.append(_cand(X, "이렇게 하세요", 0, X, "감독이 직접 알려줘요", "howto", 0.75, "주제 + 해결"))
+    C.append(_cand("이것만 알면", f"{X} 끝!", 1, X, "1분만 투자하세요", "only", 0.8, "'이것만 알면' 단순화"))
+    C.append(_cand(f"{X} 하나로", "플랩 레벨업", 1, "레벨업", "바로 됩니다", "levelup", 0.75, "쪼살형 결과 약속 (플랩 레벨업)"))
+    C.append(_cand(X, "진짜 쉽게", 0, X, "초보도 바로 따라 해요", "easy", 0.65, "쉬움 강조 (주제를 크게)"))
     C.append(_cand("왜 나만", f"{X} 안 될까?", 1, X, "이유는 딱 하나예요", "why", 0.8, "질문형 훅"))
+    C.append(_cand(f"{X} 못하는", "진짜 이유", 1, "진짜 이유", "이것만 고치세요", "reason", 0.8, "궁금증 (못하는 진짜 이유)"))
+    if any(k in X for k in SKILLS) and has("속이", "속여", "속았", "페인트"):
+        C.append(_cand("수비를 속이는", X, 1, X, "1분 강좌", "deceive", 0.95, "쌈바형 '수비를 속이는 X' (대상·결과)"))
+    m = re.search(r"(\d{1,2})\s*초", body)
+    if m and 1 <= int(m[1]) <= 10:
+        C.append(_cand(f"{m[1]}초면 끝나는", X, 1, X, "", "secs", 0.85, "숫자 훅 (대사의 N초)"))
     if has("실수", "안 돼", "하지 마", "틀린", "많은데"):
-        C.append(_cand(X, "이 실수 하지 마세요", 1, "실수", "다들 여기서 틀려요", "dont", 0.95, "대사에 실수 이야기 → 경고형"))
+        C.append(_cand(X, "이렇게 하면 안 돼요", 1, "안 돼요", "다들 여기서 틀려요", "dont", 0.95, "대사에 실수 이야기 → 경고형"))
     if has("첫 번째", "두 번째", "세 가지", "3가지", "몇 가지", "하나 더"):
         C.append(_cand(f"{X} 3가지", "총정리!", 1, "총정리!", "이것만 기억하세요", "list", 0.75, "모음형"))
     if has("국가대표", "프로", "감독"):  # 이력은 모르므로 '감독이 직접' 까지만 (과장 없이)
         C.append(_cand("감독이 직접", f"알려주는 {X}", 1, X, "", "pro", 0.75, "권위형 (대사에 감독·프로)"))
+    if has("동호인") and has("차이", "국가대표", "프로"):
+        C.append(_cand("국대와 동호인", f"{X} 차이", 1, X, "이것 하나 달라요", "gap", 0.85, "비교 궁금증 (대사에 차이)"))
     if has("대박", "속았", "들어갔", "와 "):
         C.append(_cand("이게", "된다고?", 1, "된다고?", f"{X} 실전 장면", "wow", 0.85, "놀람 질문형 (대사에 감탄)"))
     if Y != X and has("보다", "차이", "vs", "VS", "대신", "비교"):
@@ -186,7 +200,7 @@ def rule_candidates(title, texts):
                 a, b = found[0], found[-1]
                 C.append(_cand(f"{a}?", f"{b}!", 1, b, f"{a} 대신 {b}", "ox", 0.9, "반전 O/X (대사)", ox=[a, b]))
                 break
-    # 대사에서 바로 (핵심어 많은 문장 2개 · 문장 안에서 주제가 든 마디만)
+    # 대사에서 바로 (핵심어 많은 문장 2개 · 문장 안에서 주제가 든 마디만) — 주제가 든 줄을 크게
     k = 0
     for w, sent in _sentences(texts):
         if w <= 0 or k >= 2:
@@ -197,7 +211,7 @@ def rule_candidates(title, texts):
         if sp and sp[1]:
             l1, l2 = sp
             e = next((t for t in tp if t in l1 + l2), "")
-            C.append(_cand(l1, l2, 1 if e in l2 or not e else 0, e or l2.split()[-1], "", f"line{k}", 0.75, "대사에서 핵심 문장"))
+            C.append(_cand(l1, l2, 1 if e in l2 or not e else 0, e or l2.split()[-1], "", f"line{k}", 0.7, "대사에서 핵심 문장"))
             k += 1
     tl = split2(title or "")
     if tl and tl[1] and not re.search(r"테스트|세로|영상$", title or ""):
@@ -208,10 +222,13 @@ def rule_candidates(title, texts):
     return C, tp
 
 
+HOOKS = ("무조건", "비밀", "레벨업", "끝", "이유", "?", "!", "안 돼", "늘어요", "총정리", "차이", "속이는")
+
+
 CONTEXT = (  # 영상 성격 → 잘 맞는 문구 틀에 더할 값
-    (("공간", "오프더볼", "전술", "압박", "프레스", "전환", "움직임", "시야", "패스 앤 무브"), {"secret": 0.15, "levelup": 0.12, "grow": 0.05}),
-    (("드리블", "드래그", "턴", "페인트", "터치", "개인기", "돌파", "스텝오버"), {"howto": 0.12, "must": 0.05, "easy": 0.1, "ox": 0.05}),
-    (("슈팅", "슛", "골", "킥"), {"wow": 0.12, "must": 0.05, "line0": 0.05}),
+    (("공간", "오프더볼", "전술", "압박", "프레스", "전환", "움직임", "시야", "패스 앤 무브"), {"secret": 0.15, "levelup": 0.12, "grow": 0.05, "gap": 0.05}),
+    (("드리블", "드래그", "턴", "페인트", "터치", "개인기", "돌파", "스텝오버"), {"howto": 0.08, "must": 0.05, "easy": 0.05, "ox": 0.05, "deceive": 0.1}),
+    (("슈팅", "슛", "골", "킥"), {"wow": 0.12, "must": 0.05, "line0": 0.05, "reason": 0.08}),
     (("유소년", "아이들", "초보", "기본기"), {"easy": 0.15, "grow": 0.15, "list": 0.05}),
     (("실수", "안 돼", "하지 마"), {"dont": 0.12}),
 )
@@ -250,6 +267,10 @@ def score(c, tp):
     if c.get("emph"):
         ln, a, b = c["emph"]
         s += 0.6 if 1 <= len(nospace((c["l1"], c["l2"])[ln][a:b])) <= 5 else 0.2
+        big, other = (c["l1"], c["l2"])[ln], (c["l1"], c["l2"])[1 - ln]
+        if tp and other and any(nospace(t) in nospace(other) for t in tp[:2]) and not any(nospace(t) in nospace(big) for t in tp[:2]) \
+                and not any(h in big for h in HOOKS):
+            s -= 1.5  # 핵심 낱말(주제)이 작은 줄로 가고 큰 줄은 밋밋함 ('디딤발 위치가 / 핵심이에요' — 판정)
     return round(s, 3)
 
 
@@ -325,17 +346,30 @@ def prompt(name):
     tp = topics(title, texts)
     body = " ".join(texts)
     key = [s for _, s in _sentences(texts)[:8]]
-    L = ["당신은 한국 풋살·축구 유튜브 썸네일 문구 전문가예요. 아래 영상의 썸네일에 크게 들어갈 2줄 헤드라인을 만들어 주세요.",
-         "채널: '풋살사관학교'(최경진 감독의 풋살 레슨 채널). 시청자: 풋살 동호인·플랩(FLAB) 참가자.", "",
+    L = ["당신은 구독자 수십만 한국 풋살·축구 레슨 채널(쪼살·쌈바 풋살 클래스·풋살해주호·JK 아트사커)의 썸네일 카피라이터예요.",
+         "아래 영상의 썸네일에 크게 들어갈 2줄 헤드라인을 만들어 주세요. 채널: '풋살사관학교'(최경진 감독의 풋살 레슨 채널). 시청자: 풋살 동호인·플랩(FLAB) 참가자.", "",
          f"[영상 제목] {title}", f"[주제 낱말] {', '.join(tp) or '없음'}", "[대사 요약 (앞부분)]", body[:2500], "[핵심 문장]"] + [f"- {s}" for s in key] + [
-         "", "[잘 되는 문구 틀 — 레퍼런스 채널 예시 (낱말은 이 영상에 맞게 바꾸세요)]"] + [f"- {x}" for x in REF_EXAMPLES] + [
-         "", "[규칙]", "- 한 줄은 띄어쓰기 빼고 3~9자 (많아야 12자), 두 줄 합쳐 20자 이내. 작은 화면(휴대폰 목록)에서도 읽혀야 해요.",
-         "- 두 줄 중 한 낱말(1~5자)을 강조 낱말로 고르세요 (노랑·크게 칠할 곳). 강조 낱말은 l1 또는 l2 안에 글자 그대로 있어야 해요.",
-         "- 영상 내용과 맞는 말만. 과장·낚시(충격·경악·실화냐·100%)는 쓰지 마세요. 해요체·반말 질문형 모두 좋아요.",
-         "- sub 는 작은 보조 문구(선택, 12자 이내).",
+         "", "[잘 되는 문구 — 레퍼런스 채널 실제 예시 (낱말은 이 영상에 맞게 바꾸세요)]"] + [f"- {x}" for x in REF_EXAMPLES] + [
+         "", "[좋은 썸네일 문구의 조건]",
+         "- 결과나 대상이 보여야 해요: '실력이 늘어요', '플랩 레벨업 바로 됩니다', '수비를 속이는 발바닥 드래그'처럼 보면 무엇이 좋아지는지·누구를 이기는지.",
+         "- 궁금증: '~의 비밀', '못하는 진짜 이유', '왜 나만 ~?', 질문형(반말 질문도 좋아요).",
+         "- '무조건 봐'·'이렇게 하세요'만 붙인 밋밋한 문구, 같은 틀 반복은 피하세요. 10개가 서로 다른 틀이어야 해요.",
+         "- 영상 내용과 맞는 말만. 과장·낚시(충격·경악·실화냐·100%·역대급)는 쓰지 마세요. 해요체·반말 질문형 모두 좋아요.",
+         "", "[형식 규칙]", "- 한 줄은 띄어쓰기 빼고 3~9자 (많아야 12자), 두 줄 합쳐 20자 이내. 작은 화면(휴대폰 목록)에서도 읽혀야 해요.",
+         "- emph = 노랗고 가장 크게 칠할 낱말(1~6자). l1 또는 l2 안에 글자 그대로 있어야 하고, 그 줄이 가장 큰 줄이 돼요. 보통 주제 낱말이나 결과·훅 낱말.",
+         "- sub = 어두운 상자 안에 작게 들어갈 보조 문구(선택, 12자 이내, 예: '1분만 투자하세요', '1분 강좌', '감독이 직접 알려줘요').",
          f"- 서로 다른 틀로 {AI_N}개.", "", "[대답 형식] JSON 배열만 (설명 없이):",
          '[{"l1": "첫 줄", "l2": "둘째 줄", "emph": "강조 낱말", "sub": "보조 문구"}]']
     return "\n".join(L)
+
+
+def ai_ready():
+    """클로드 프로그램이 이 PC에 있고 로그인돼 있는지 (상태는 60초 기억 · 실패하면 False)."""
+    try:
+        import claude_cli
+        return bool(claude_cli.find_exe()) and claude_cli.status().get("state") == "ready"
+    except Exception:
+        return False
 
 
 def _check_ai(x):
@@ -377,13 +411,16 @@ def parse_ai(text):
     return out
 
 
-def run_ai(name, log=print, cancel=None):
-    """내 클로드 계정으로 문구 10개 → 검사해서 기억 → {"ok", "items"} (실패하면 규칙 문구만 쓰게 ok False + 안내)."""
+def run_ai(name, log=print, cancel=None, progress=True):
+    """내 클로드 계정으로 문구 10개 → 검사해서 기억 → {"ok", "items"} (실패하면 규칙 문구만 쓰게 ok False + 안내).
+    progress=False: 진행 표시를 바꾸지 않음 (썸네일 분석 작업 안에서 동시에 돌 때)."""
     import claude_cli
-    core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail="내 클로드 계정 사용 · 문구 만드는 중")
+    if progress:
+        core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail="내 클로드 계정 사용 · 문구 만드는 중")
 
     def tick(sec):
-        core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail=f"클로드가 썸네일 문구를 만드는 중… (내 클로드 계정 사용 · {sec}초)")
+        if progress:
+            core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail=f"클로드가 썸네일 문구를 만드는 중… (내 클로드 계정 사용 · {sec}초)")
     try:
         res = claude_cli.run(prompt(name), cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT)
     except claude_cli.ClaudeError as e:

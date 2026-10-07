@@ -56,11 +56,38 @@ class RuleTests(unittest.TestCase):
         self.assertIn("wow", pids, "대사에 감탄 → 놀람 질문형")
         ox = next(c for c in C if c["pid"] == "ox")
         self.assertEqual(ox["ox"], ["슛", "드래그"], "반전 O/X: 슛? X / 드래그 O")
-        # 판정 피드백: '무조건 봐'·'진짜 쉽게' 처럼 흔한 말보다 주제(기술 이름)가 큰 줄이어야 무슨 영상인지 바로 보임
-        for pid in ("must", "easy", "howto"):
+        # 판정 피드백: '진짜 쉽게'·'이렇게 하세요' 처럼 흔한 말보다 주제(기술 이름)가 큰 줄이어야 무슨 영상인지 바로 보임
+        for pid in ("easy", "howto"):
             c = next(c for c in C if c["pid"] == pid)
             self.assertEqual(c["emph"][0], 0, pid)
             self.assertEqual(c["l1"][c["emph"][1]:c["emph"][2]], tp[0], pid)
+        # 판정 1회차: '무조건 봐'는 작은 흰 꼬리표가 아니라 가장 큰 노란 줄 (쪼살 'V자 어려우면 / 무조건 봐') · 주제는 첫 줄에 그대로
+        must = next(c for c in C if c["pid"] == "must")
+        self.assertEqual((must["l2"], must["emph"]), ("무조건 봐", [1, 0, 5]))
+        self.assertIn(tp[0], must["l1"])
+        self.assertIn("deceive", pids, "드래그 + 대사에 '속이' → '수비를 속이는 X'")
+        self.assertEqual(next(c for c in C if c["pid"] == "deceive")["l2"], tp[0])
+
+    def test_no_misleading_patterns(self):
+        """대사·주제와 맞지 않는 틀은 만들지 않음: 슈팅은 '수비를 속이는'이 아님 · 동호인 얘기가 없으면 '국대와 동호인' 없음 · 대사에 N초가 있을 때만 숫자 훅."""
+        C, _ = tc.rule_candidates("슈팅 연습", ["슈팅 이렇게 차면 무조건 들어가요", "골키퍼가 속았어요"])
+        pids = {c["pid"] for c in C}
+        self.assertNotIn("deceive", pids)
+        self.assertNotIn("gap", pids)
+        self.assertNotIn("secs", pids)
+        C, _ = tc.rule_candidates("수비 전환", ["공을 뺏기면 3초 안에 압박하세요", "국가대표와 동호인의 차이예요"])
+        secs = next(c for c in C if c["pid"] == "secs")
+        self.assertEqual((secs["l1"], secs["l2"]), ("3초면 끝나는", "수비 전환"))
+        self.assertIn("gap", {c["pid"] for c in C})
+
+    def test_topic_in_small_line_is_penalized(self):
+        """핵심 낱말(주제)이 작은 줄로 가고 큰 줄은 밋밋하면 감점 (판정: '디딤발 위치가 / 핵심이에요')."""
+        tp = ["디딤발", "슈팅"]
+        flat = tc.finish(tc._cand("디딤발 위치", "중요해요", 1, "중요해요", "", "x", 0.8, ""), tp)
+        good = tc.finish(tc._cand("디딤발 위치", "중요해요", 0, "디딤발", "", "x", 0.8, ""), tp)
+        hook = tc.finish(tc._cand("디딤발 모르면", "무조건 봐", 1, "무조건 봐", "", "x", 0.8, ""), tp)
+        self.assertGreater(good["score"], flat["score"] + 1)
+        self.assertGreaterEqual(hook["score"], good["score"] - 0.3, "큰 줄이 훅이면 감점 없음")
 
     def test_context_boost_by_topic(self):
         self.assertGreater(tc.context_boost("오프더볼 공간")["secret"], 0)

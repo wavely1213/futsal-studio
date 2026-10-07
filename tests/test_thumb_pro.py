@@ -180,7 +180,9 @@ class GradeTests(unittest.TestCase):
             self.assertTrue(thumb.GAMMA_RANGE[0] <= g["gamma"] <= thumb.GAMMA_RANGE[1] and -40 <= g["vib"] <= 80 and -20 <= g["temp"] <= 30, g)
         self.assertGreater(thumb.auto_grade(_img((40, 45, 60)))["gamma"], 1.0, "어두우면 밝게")
         self.assertLess(thumb.auto_grade(_img((215, 215, 215), noise=20))["gamma"], 1.0, "밝으면 어둡게")
-        self.assertEqual(thumb.auto_grade(_img((120, 120, 120)), close=True)["clarity"], 20)
+        # 얼굴 클로즈업은 클래리티를 덜 (판정 1회차 뒤 전체를 낮춤: '과하게 보정돼 기계로 만든 느낌' → 25 · 클로즈업 15)
+        self.assertEqual(thumb.auto_grade(_img((120, 120, 120)), close=True)["clarity"], 15)
+        self.assertEqual(thumb.auto_grade(_img((120, 120, 120)))["clarity"], 25)
 
     def test_blue_fluorescent_gets_warmer(self):
         g = thumb.auto_grade(_img((110, 125, 150), noise=8))

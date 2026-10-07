@@ -43,7 +43,8 @@ MACT.tacAuto = async () => {  // 지금 디자인의 배경 장면에서 찾은 
   if (!f || !(f.persons || []).length) return toast("이 장면에서 선수를 찾지 못했어요 · 메뉴에서 하나씩 넣어 주세요");
   const cx = ctxFor(f, AI.copy[0] || { l1: "", l2: "" }, H > W ? "short" : "long", 1);
   const heads = D.doc.layers.filter(l => l.type === "text" && !l.hidden).map(l => bbox([l]));
-  const ls = tactics(cx, bg, heads); if (!ls.length) return toast("넣을 자리가 없었어요 (제목과 겹쳐서)");
+  let ls = tactics(cx, bg, heads); if (!ls.length) ls = tactics(cx, bg, heads, { loose: true });  // 자동 추천 기준(선수 2명·발이 보임)을 못 넘어도 직접 부르면 놓을 수 있는 만큼
+  if (!ls.length) return toast("넣을 자리가 없었어요 (제목과 겹쳐서)");
   commit("전술 그래픽 자동"); D.doc.layers.splice(D.doc.layers.indexOf(bg) + 1, 0, ...ls); selIds = ls.map(l => l.id); changed();
   toast(`전술 그래픽 ${ls.length}개를 넣었어요 · 한 묶음이라 함께 옮겨져요 (Ctrl+Shift+G 로 풀기)`);
 };
@@ -148,7 +149,8 @@ async function openBrand() {
       <div class="f"><label>기본 글꼴</label><select class="s" id="bkFont">${FONT_OPTS.filter(([v]) => v !== "Dokdo").map(([v, t]) => `<option value="${v}" ${b.font === v ? "selected" : ""}>${t}</option>`).join("")}</select><span></span></div>
       <div class="f"><label>시리즈 이름</label><input class="s" id="bkSeries" maxlength="20" value="${esc(b.series || "")}"><span></span></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSeriesOn" ${b.seriesOn ? "checked" : ""}> 모든 추천에 시리즈 이름 넣기 (강좌 시리즈 템플릿은 늘 넣어요)</label>
-      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkApply" ${b.apply !== false ? "checked" : ""}> 새 추천에 적용</label>`;
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkApply" ${b.apply !== false ? "checked" : ""}> 새 추천에 적용</label>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkAi" ${b.aiCopy !== false ? "checked" : ""}> 분석할 때 클로드로 문구 만들기·장면 고르기 (클로드가 로그인돼 있을 때 · 내 클로드 계정 사용량을 써요)</label>`;
     body.querySelectorAll("[data-bc]").forEach(i => (i.oninput = () => { b.colors[i.dataset.bc] = i.value.toUpperCase(); i.nextElementSibling.textContent = i.value.toUpperCase(); }));
     body.querySelectorAll("#bkPos button").forEach(x => (x.onclick = () => { b.logoPos = x.dataset.v; draw(); }));
     $("bkLogo").onclick = () => { const fi = document.createElement("input"); fi.type = "file"; fi.accept = "image/*"; fi.onchange = async () => {
@@ -159,7 +161,7 @@ async function openBrand() {
   };
   draw(); m.classList.add("show");
   $("brandSave").onclick = async () => {
-    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked });
+    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked, aiCopy: $("bkAi").checked });
     const j = await post("/api/thumb/brand", { brand: b });
     if (!j.ok) return toast(j.error || "저장하지 못했어요");
     AI.brand = j.brand; m.classList.remove("show"); toast("브랜드 키트를 저장했어요 · 새 추천부터 반영돼요");

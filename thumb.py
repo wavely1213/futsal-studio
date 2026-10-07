@@ -104,14 +104,14 @@ def hamming(a, b):
 
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
-GAMMA_RANGE = (0.8, 1.8)  # 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25 로는 모자랐음)
+GAMMA_RANGE = (0.8, 2.2)  # 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
 
 
 def auto_grade(src, close=False):
     """장면 한 장의 자동 보정 숫자 (화면 thumb.html 의 applyGrade 와 짝: 레벨 lo/hi·색온도 → 감마(밝기에만) → 자연 채도 → 클래리티 → 샤픈).
     - 레벨: 채널별 0.5%/99.5% 지점 (밝기 기준에서 ±12 안쪽으로 — 잔디 초록에 끌려 색이 틀어지지 않게, 이동량 ≤ MAX_SHIFT)
     - 감마: 보정 뒤 평균 밝기가 0.48 이 되게 (0.8~1.8) · 자연 채도: 보정 뒤 채도가 약 1.2배 되게 · 색온도: 회색 부분이 푸르면(형광등) 따뜻하게
-    - 클래리티 35 (얼굴 클로즈업이면 20) · 샤픈 25"""
+    - 클래리티 25 (얼굴 클로즈업이면 15) · 샤픈 18"""
     import numpy as np
     from PIL import Image
     im = src if isinstance(src, Image.Image) else Image.open(src)
@@ -146,7 +146,7 @@ def auto_grade(src, close=False):
             temp = int(round(min(30, -d * 1.5)))     # 푸른 형광등 → 따뜻하게
         elif d > 14:
             temp = -int(round(min(20, d - 14)))      # 너무 누런 조명 → 조금 차갑게
-    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 20 if close else 35, "temp": temp, "sharpen": 25}
+    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
     # 자연 채도: 레벨만으로도 채도가 오르므로, 보정 뒤 채도가 원본의 약 1.2배가 되는 값을 고름 (화면 applyGrade 와 같은 계산으로 어림)
     s0 = float(sat.mean())
     best = None
@@ -274,6 +274,68 @@ def headless(persons, ball, faces):
     return m[1] < 0.01 and m[3] < 0.97
 
 
+SIT_AR = 0.45     # 사람 상자 가로/세로(픽셀 기준)가 이 이상이고 화면 높이 70% 안쪽이면 앉았거나 웅크린 자세로 봄
+BENCH_K = 0.5     # 벤치·관중석(앉은 사람 둘 이상이 한 줄, 공은 멀리) 배율 — 판정 '레슨과 상관없는 장면'
+BACK_K = 0.6      # 크게 나온 주인공인데 그 사람 얼굴이 안 보임(뒷모습·뒤통수) 배율
+EDGE_K = 0.75     # 주인공이 화면 왼쪽·오른쪽 끝에 걸려 몸이 잘림
+CROWD_K = 0.7     # 상반신 여럿이 나란히(관중석·벤치 뒤) · 공 없음
+SMALL_K = 0.85    # 주인공이 아주 작음(화면 높이 18% 아래) — 목록 크기에서 누가 주인공인지 안 보임
+LESSON_K = 1.3    # 레슨 액션: 공이 주인공 발 가까이 · 주인공 크기 알맞음 (레퍼런스는 거의 다 '공을 다루는 순간')
+
+
+def _feet_d(p, ball, ar):
+    """사람 발(상자 아래 가운데)과 공 가운데 거리 (화면 높이 기준 — 가로·세로 영상 모두 같은 눈금)."""
+    bx, by = ball[0] + ball[2] / 2, ball[1] + ball[3] / 2
+    return (((p[0] + p[2] / 2 - bx) * ar) ** 2 + (p[1] + p[3] - by) ** 2) ** 0.5
+
+
+def scene_flags(persons, ball, faces, ar=16 / 9):
+    """썸네일감인지 보는 장면 표시 (선수 찾기 결과로):
+    bench 앉은 사람이 한 줄로 둘 이상이고 공은 그 발 근처에 없음 · crowd 아래가 잘린 상반신 셋 이상·공 없음 · back 크게 나온(높이 55% 이상) 주인공의 얼굴이 안 보임(얼굴 모델이 돌았을 때만)
+    · edge 주인공이 화면 좌우 끝에 걸림 · small 주인공 높이 18% 미만 · lesson 공이 주인공 발 가까이(화면 높이 18% 안)이고 주인공 높이 22~80%."""
+    out = {"bench": False, "back": False, "edge": False, "small": False, "lesson": False, "crowd": False}
+    if not persons:
+        return out
+    upper = [p for p in persons if p[1] + p[3] > 0.97 and p[3] >= 0.5]  # 아래가 잘린 상반신 셋 이상 + 공 없음 = 관중·벤치 뒤 (레슨 장면 아님)
+    out["crowd"] = len(upper) >= 3 and not ball
+    sit = [p for p in persons if p[2] * ar / max(1e-6, p[3]) >= SIT_AR and p[3] < 0.86]
+    for i, a in enumerate(sit):  # 나란히 붙어 앉은 사람 (발 높이·키가 같고 옆 사람과 거의 붙음) — 공 다투는 선수는 공이 발 근처라 뺌
+        row = [b for b in sit if b is a or (max(a[0], b[0]) - min(a[0] + a[2], b[0] + b[2]) < 0.5 * min(a[2], b[2])
+                                             and abs((a[1] + a[3]) - (b[1] + b[3])) < 0.05 and 0.75 < b[3] / max(1e-6, a[3]) < 1.33)]
+        cut = a[1] + a[3] > 0.97  # 아래가 화면에 잘린 상반신 줄 (관중석·벤치 뒤) 은 셋 이상일 때만 (상반신 둘은 인터뷰일 수 있음)
+        if len(row) >= (3 if cut else 2) and not (ball and min(_feet_d(b, ball, ar) for b in row) < 0.12):
+            out["bench"] = True
+            break
+    mi = main_person(persons, ball)
+    m = persons[mi]
+    if faces is not None and m[3] >= 0.55 and m[1] > 0.02:  # 머리가 화면 안에 있는데 그 얼굴이 없음 (다리만 나온 장면은 headless 가 따로 봄)
+        cx = m[0] + m[2] / 2  # 그 사람 얼굴 = 상자 가운데 쪽(±28%) 위 42% 안 (옆에 걸친 다른 사람 얼굴은 아님)
+        top = (cx - m[2] * 0.28, m[1] - 0.02, cx + m[2] * 0.28, m[1] + m[3] * 0.42)
+        out["back"] = not any(top[0] <= f["box"][0] + f["box"][2] / 2 <= top[2] and top[1] <= f["box"][1] + f["box"][3] / 2 <= top[3] for f in faces)
+    out["edge"] = (m[0] < 0.006 or m[0] + m[2] > 0.994) and m[3] < 0.95 and m[2] * ar / max(1e-6, m[3]) < 0.32
+    out["small"] = m[3] < 0.18
+    out["lesson"] = bool(ball) and 0.22 <= m[3] <= 0.8 and _feet_d(m, ball, ar) < 0.18
+    return out
+
+
+def flags_mult(fl):
+    """장면 표시 → 점수 배율."""
+    k = 1.0
+    if fl.get("bench"):
+        k *= BENCH_K
+    if fl.get("back"):
+        k *= BACK_K if not fl.get("lesson") else 0.8
+    if fl.get("edge"):
+        k *= EDGE_K
+    if fl.get("small"):
+        k *= SMALL_K
+    if fl.get("crowd"):
+        k *= CROWD_K
+    if fl.get("lesson"):
+        k *= LESSON_K
+    return k
+
+
 def scene_kind(face_h, persons):
     """장면 종류 (템플릿 궁합): close 얼굴 크게 · mid 사람 크게 · wide 선수 여럿 작게 · scene 사람 없음."""
     if face_h and face_h >= 0.18:
@@ -288,11 +350,14 @@ def scene_kind(face_h, persons):
     return "scene"
 
 
-CANDIDATES = "candidates5.json"
+CANDIDATES = "candidates6.json"
 N_EVEN = 36         # 고르게 나눠 보는 장면 수
 TOP_N = 16          # 후보로 남길 장면 수
 SAME_HASH = 10      # 지문 해밍 거리 이하면 같은 장면
 PER_SCENE = 3       # 같은 장면에서는 많아야 3장 (말하는 얼굴의 다른 표정은 남게)
+CLOSE_MAX = 6       # 얼굴 클로즈업(인터뷰)은 후보 16개 중 많아야 6개 — 다른 장면이 있으면 (판정: 6장 모두 같은 인터뷰 얼굴)
+REFINE_N = 8        # 표정 좋은 순간 찾기(앞뒤 ±0.2·0.4초)는 얼굴 장면 8개까지
+FACE_CAP = 2.2      # 얼굴·표정 배율 상한 (예전 3.1 — 인터뷰 얼굴이 공 다루는 장면을 늘 이기지 않게)
 # 대사 핵심어(editor.KEYWORDS)에 더해, 반응 얼굴이 잘 나오는 감탄사
 REACTIONS = {"대박": 3, "우와": 3, "미쳤": 3, "깜짝": 3, "헐": 2, "ㅋㅋ": 2, "웃기": 2}
 
@@ -391,14 +456,13 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
                 fs = face.faces(rgb) or []
             except Exception:
                 fs = []
-            sc *= face.boost(fs)
-        sc *= blur_penalty(blur) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0)
+            sc *= min(face.boost(fs), FACE_CAP)
+        fl = scene_flags(persons or [], ball, fs if use_faces else None, rgb.size[0] / max(1, rgb.size[1]))
+        sc *= blur_penalty(blur) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0) * flags_mult(fl)
         m = face.main(fs) if fs else None
-        band, band_y = _band(p)
-        info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb), "band": band, "bandY": band_y,
-                "kind": scene_kind(m["box"][3] if m else 0, persons or []), "det": det is not None}
-        info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
-        return sc, fs, info
+        info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb),
+                "kind": scene_kind(m["box"][3] if m else 0, persons or []), "det": det is not None, "flags": [k for k, v in fl.items() if v]}
+        return sc, fs, info  # 자막 띠·자동 보정은 뽑힌 장면에만 (frame_candidates 끝에서 — 세로 영상 첫 분석이 102초 걸린 원인)
 
     out = {}
     with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2)) as ex:
@@ -419,21 +483,27 @@ TEXT_FLOOR = 0.35   # 감점은 여기까지 (글자 있는 장면만 있는 영
 TEXT_MIN_H = 0.06   # 글자 상자 높이가 화면의 6% 보다 낮으면(간판·등번호·작은 자막) 셈하지 않음
 
 
-def text_area(rgb, band=None, band_y=None):
-    """장면에 이미 박혀 있는 큰 글자 넓이(0~1). 글자 읽기 모델이 받아져 있을 때만 (여기서 내려받지 않음) · 없으면 None.
-    템플릿이 잘라 내는 자막·방송 띠 안 글자는 셈하지 않음."""
+def text_boxes(rgb, band=None, band_y=None):
+    """장면에 이미 박혀 있는 큰 글자 상자들 [[x, y, w, h]] (0~1). 글자 읽기 모델이 받아져 있을 때만 (여기서 내려받지 않음) · 없으면 None.
+    템플릿이 잘라 내는 자막·방송 띠 안 글자와 작은 글자(간판·등번호)는 뺌."""
     import numpy as np
     import avmodels  # 지연 import: avmodels → thumb
     if not (avmodels.available("ocr") or (avmodels.ready("ocr") and avmodels.ensure("ocr", label="썸네일 분석"))):
         return None
-    a = 0.0
+    out = []
     for x in avmodels.ocr(np.asarray(rgb)) or []:
         x0, y0, x1, y1 = x["box"]
         cy = (y0 + y1) / 2
         if x["h"] < TEXT_MIN_H or (band == "bottom" and band_y and cy > band_y) or (band == "top" and band_y and cy < band_y):
             continue
-        a += (x1 - x0) * (y1 - y0)
-    return round(min(1.0, a), 4)
+        out.append([round(x0, 4), round(y0, 4), round(x1 - x0, 4), round(y1 - y0, 4)])
+    return out
+
+
+def text_area(rgb, band=None, band_y=None):
+    """장면에 이미 박혀 있는 큰 글자 넓이(0~1) — text_boxes 의 넓이 합 · 모델이 없으면 None."""
+    bs = text_boxes(rgb, band, band_y)
+    return None if bs is None else round(min(1.0, sum(b[2] * b[3] for b in bs)), 4)
 
 
 def text_penalty(area):
@@ -448,7 +518,7 @@ def frame_candidates(name, n=TOP_N):
     뽑힌 장면은 ±0.2·0.4초 옆 장면 중 표정이 가장 좋은 것으로. 영상·편집점 분석·모델 유무가 바뀌면 다시 고름.
     항목: {t, url, score, kind, persons[[x,y,w,h,확률]], ball, main, blur, band, bandY, grade, hash, (faces, emo, face)}"""
     from editor import media_info  # 순환 import 피함
-    from PIL import Image
+    from PIL import Image, ImageOps
     import face
     import detect
     items = cached_candidates(name)
@@ -476,22 +546,27 @@ def frame_candidates(name, n=TOP_N):
     scored = _score_frames(name, uniq, use_faces, prog(0, span, "장면·선수 살펴보는 중"), use_det)
     gap = dur * 0.05  # 후보끼리 영상 길이의 5% 이상 떨어지게 (예전 규칙 그대로)
 
-    def pick(cands, chosen):
+    def pick(cands, chosen, close_max=n):
         out = list(chosen)
         for t in sorted(cands, key=lambda x: -scored[x][0]):
             if t in out or any(abs(t - q) <= gap for q in out):
                 continue
             if sum(hamming(scored[q][2]["hash"], scored[t][2]["hash"]) <= SAME_HASH for q in out) >= PER_SCENE:
                 continue
+            if scored[t][2]["kind"] == "close" and sum(scored[q][2]["kind"] == "close" for q in out) >= close_max:
+                continue
             out.append(t)
             if len(out) >= n:
                 break
         return out
-    picked = pick(scored, [])
+    picked = pick(scored, [], CLOSE_MAX)
+    if len(picked) < n:  # 다른 장면이 모자라면 얼굴 클로즈업으로 채움
+        picked = pick(scored, picked)
     if use_faces and picked:  # 뽑힌 장면 앞뒤 0.2·0.4초 중 표정(점수)이 가장 좋은 순간으로
         def near(t):
             return [x for x in (round(t + d, 1) for d in (-0.4, -0.2, 0.2, 0.4)) if 0 < x < dur]
-        todo = sorted({x for t in picked if scored[t][1] for x in near(t)} - set(scored))  # 얼굴이 있는 장면만 다듬음
+        faced = [t for t in picked if scored[t][1]][:REFINE_N]  # 얼굴이 있는 좋은 장면만 다듬음 (많아야 REFINE_N 개)
+        todo = sorted({x for t in faced for x in near(t)} - set(scored))
         scored.update(_score_frames(name, todo, True, prog(span, 100, "표정 좋은 순간 찾는 중"), use_det))
         best = []
         for k, t in enumerate(picked):  # 옮겨도 다른 장면과 너무 가까워지지 않게 (짧은 영상)
@@ -504,15 +579,22 @@ def frame_candidates(name, n=TOP_N):
     for k, t in enumerate(sorted(picked, key=lambda x: -scored[x][0])):
         sc, fs, info = scored[t]
         core.set_progress(label="장면 고르는 중", item=name, pct=99, detail=f"글자가 박힌 장면 살피는 중 {k + 1}/{len(picked)}")
-        try:  # 다른 썸네일·타이틀 화면처럼 큰 글자가 이미 있는 장면은 뒤로
+        info["band"], info["bandY"] = _band(grab(name, t))
+        tb = None
+        try:  # 다른 썸네일·타이틀 화면처럼 큰 글자가 이미 있는 장면은 뒤로 (상자는 화면이 피해서 자르거나 가리는 데 씀)
             with Image.open(grab(name, t)) as im:
-                ta = text_area(im.convert("RGB"), info["band"], info["bandY"])
+                rgb = ImageOps.exif_transpose(im).convert("RGB")
+            info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
+            tb = text_boxes(rgb, info["band"], info["bandY"])
         except Exception:
-            ta = None
+            info.setdefault("grade", None)
+        ta = None if tb is None else round(min(1.0, sum(b[2] * b[3] for b in tb)), 4)
         sc *= text_penalty(ta)
         it = {"t": t, "url": f"/frame?name={name}&t={t}", "score": round(sc, 3), "kind": info["kind"], "persons": info["persons"], "ball": info["ball"],
               "main": main_person(info["persons"], info["ball"]), "blur": info["blur"], "band": info["band"], "bandY": info["bandY"],
-              "grade": info["grade"], "hash": info["hash"], "text": ta}
+              "grade": info["grade"], "hash": info["hash"], "text": ta, "flags": info.get("flags", [])}
+        if tb:
+            it["tboxes"] = tb[:12]
         if fs:
             m = face.main(fs)
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)
@@ -622,16 +704,126 @@ def remove_bg(src_path, kind="hq"):
 
 
 CUT_MARGIN = 1.6   # 자동 누끼: 주인공 상자를 이만큼 넓혀 잘라서 모델에 넣음 (넓은 장면의 작은 선수도 또렷하게)
+CUT_VER = 3        # 자동 누끼 판 (마스크 다듬기·품질 검사가 바뀌면 올림 → 다시 땀)
+CUT_LO, CUT_HI = 0.2, 0.8   # 다듬기: 알파 0.2 아래는 버리고 0.8 위는 꽉 채움 (흐린 잔상·반투명 번짐이 외곽선·광선을 끌고 다니지 않게)
+# 누끼 품질 합격선 (판정: 작은·흐린 선수 누끼가 얼굴이 하얗게 번지고 외곽선이 벽으로 샘)
+CUT_Q = {"leak": 0.12, "fill": 0.22, "comp": 0.8, "face": 0.8, "soft": 0.35}
 
 
-def cut_auto(name, t, box=None, kind="fast"):
-    """자동 추천용 누끼: 장면 t 에서 주인공 상자(0~1) 주변만 잘라 배경을 지우고, 원본 크기 투명 PNG 에 다시 붙임.
-    상자가 없으면 장면 전체. (영상, 시각, 종류, 상자)가 같으면 만들어 둔 파일을 그대로 씀."""
+def _components(b):
+    """흑백(참/거짓) 2차원 배열의 4-연결 덩어리 → (번호 배열(0 = 바탕), 덩어리별 크기 목록). 작은 그림에서만 씀 (순수 파이썬)."""
+    import numpy as np
+    h, w = b.shape
+    lab = np.zeros((h, w), np.int32)
+    sizes = [0]
+    flat = b.ravel()
+    lf = lab.ravel()
+    for start in np.flatnonzero(flat):
+        if lf[start]:
+            continue
+        k = len(sizes)
+        stack, n = [start], 0
+        lf[start] = k
+        while stack:
+            i = stack.pop()
+            n += 1
+            y, x = divmod(i, w)
+            for j in (i - w if y else -1, i + w if y < h - 1 else -1, i - 1 if x else -1, i + 1 if x < w - 1 else -1):
+                if j >= 0 and flat[j] and not lf[j]:
+                    lf[j] = k
+                    stack.append(j)
+        sizes.append(n)
+    return lab, sizes
+
+
+def clean_mask(mask, box=None, erase=None, keep=None):
+    """배경 제거 마스크(L) 다듬기: 반투명 번짐을 끊고(CUT_LO~HI), 영상에 박힌 큰 글자 상자(erase, 0~1)는 지우고(얼굴 상자 keep 은 남김),
+    주인공 상자와 닿는 덩어리만 남김 (벽·다른 사람 조각·글자 조각 버림) → L."""
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(mask, np.float32) / 255
+    a = np.clip((a - CUT_LO) / (CUT_HI - CUT_LO), 0, 1)
+    H, W = a.shape
+    for b in erase or []:  # 누끼 모델은 박힌 글자도 '앞의 것'으로 남김 ('(진정해ㅎ' 같은 글자 조각이 누끼에 붙어 나옴)
+        x0, y0, x1, y1 = int(max(0, (b[0] - 0.01) * W)), int(max(0, (b[1] - 0.01) * H)), int(min(W, (b[0] + b[2] + 0.01) * W)), int(min(H, (b[1] + b[3] + 0.01) * H))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        saved = [(k, a[max(0, int(k[1] * H)):int((k[1] + k[3]) * H), max(0, int(k[0] * W)):int((k[0] + k[2]) * W)].copy()) for k in keep or []]
+        a[y0:y1, x0:x1] = 0
+        for k, v in saved:
+            a[max(0, int(k[1] * H)):int((k[1] + k[3]) * H), max(0, int(k[0] * W)):int((k[0] + k[2]) * W)] = v
+    k = 160 / max(1, H)
+    sw, sh = max(8, int(W * k)), 160
+    small = np.asarray(Image.fromarray((a * 255).astype(np.uint8)).resize((sw, sh), Image.BILINEAR), np.float32) / 255 > 0.5
+    lab, sizes = _components(small)
+    if len(sizes) > 1:
+        keep = np.zeros(len(sizes), bool)
+        if box:
+            x, y, w, h = box[:4]
+            x0, y0, x1, y1 = int((x - w * 0.08) * sw), int((y - h * 0.05) * sh), int((x + w * 1.08) * sw) + 1, int((y + h * 1.05) * sh) + 1
+            ids = np.unique(lab[max(0, y0):max(0, y1), max(0, x0):max(0, x1)])
+            big = max(sizes[1:])
+            for i in ids:
+                if i and sizes[i] >= max(4, big * 0.03):
+                    keep[i] = True
+        else:
+            keep[int(np.argmax(sizes[1:])) + 1] = True
+        km = Image.fromarray((keep[lab] * 255).astype(np.uint8)).resize((W, H), Image.BILINEAR)
+        from PIL import ImageFilter
+        km = np.asarray(km.filter(ImageFilter.MaxFilter(5)), np.float32) / 255  # 덩어리 가장자리 반 칸을 잃지 않게 조금 넓혀서 곱함
+        a = a * np.clip(km * 1.5, 0, 1)
+    return Image.fromarray((a * 255).astype(np.uint8))
+
+
+def cut_quality(mask, box=None, faces=None):
+    """다듬은 누끼 마스크의 품질 → {leak, fill, comp, face, soft, ok, q}.
+    leak 주인공 상자 밖으로 나간 몫 · fill 상자 안을 채운 몫 · comp 가장 큰 덩어리 몫 · face 주인공 얼굴 안 평균 알파 · soft 반투명 테두리 비율.
+    q 0~1 (합격선에 가까울수록 낮음) · ok = 합격선을 모두 넘음."""
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(mask, np.float32) / 255
+    H, W = a.shape
+    tot = float(a.sum()) + 1e-6
+    r = {"leak": 0.0, "fill": 1.0, "comp": 1.0, "face": 1.0, "soft": 0.0}
+    k = 160 / max(1, H)
+    small = np.asarray(Image.fromarray((a * 255).astype(np.uint8)).resize((max(8, int(W * k)), 160), Image.BILINEAR), np.float32) / 255 > 0.5
+    _, sizes = _components(small)
+    r["comp"] = round(max(sizes[1:]) / max(1, sum(sizes[1:])), 3) if len(sizes) > 1 else 0.0
+    solid = float((a > 0.5).sum()) + 1e-6
+    r["soft"] = round(float(((a > 0.08) & (a < 0.92)).sum()) / solid, 3)
+    if box:
+        x, y, w, h = box[:4]
+        x0, y0, x1, y1 = int(max(0, (x - w * 0.08) * W)), int(max(0, (y - h * 0.05) * H)), int(min(W, (x + w * 1.08) * W)), int(min(H, (y + h * 1.05) * H))
+        r["leak"] = round(1 - float(a[y0:y1, x0:x1].sum()) / tot, 3)
+        bx0, by0, bx1, by1 = int(x * W), int(y * H), max(int(x * W) + 1, int((x + w) * W)), max(int(y * H) + 1, int((y + h) * H))
+        r["fill"] = round(float((a[by0:by1, bx0:bx1] > 0.5).mean()), 3)
+        for f in faces or []:
+            fx, fy, fw, fh = f["box"][:4]
+            if not (x <= fx + fw / 2 <= x + w and y <= fy + fh / 2 <= y + h * 0.5):
+                continue
+            px0, py0, px1, py1 = int((fx + fw * 0.2) * W), int((fy + fh * 0.2) * H), int((fx + fw * 0.8) * W) + 1, int((fy + fh * 0.8) * H) + 1
+            r["face"] = round(min(r["face"], float(a[py0:py1, px0:px1].mean()) if py1 > py0 and px1 > px0 else 1.0), 3)
+    elif tot < 1:
+        r["fill"] = 0.0
+    lim = CUT_Q
+    r["ok"] = bool(r["leak"] <= lim["leak"] and r["fill"] >= lim["fill"] and r["comp"] >= lim["comp"] and r["face"] >= lim["face"] and r["soft"] <= lim["soft"])
+    q = min(1.0, (1 - r["leak"]) / (1 - lim["leak"])) * min(1.0, r["fill"] / 0.4) * min(1.0, r["comp"]) * min(1.0, r["face"] / 0.95) * min(1.0, (1 - r["soft"]) / (1 - lim["soft"] / 2))
+    r["q"] = round(max(0.0, q), 3)
+    return r
+
+
+def cut_auto(name, t, box=None, kind="fast", faces=None, tboxes=None):
+    """자동 추천용 누끼: 장면 t 에서 주인공 상자(0~1) 주변만 잘라 배경을 지우고, 다듬어(clean_mask) 원본 크기 투명 PNG 에 다시 붙임.
+    상자가 없으면 장면 전체. 품질(cut_quality)은 옆 JSON 에 기억. (영상, 시각, 종류, 상자, 판)이 같으면 만들어 둔 파일을 그대로 씀 → (PNG 경로, 품질)."""
     from PIL import Image
     dst = _cut_path(name, t, box, kind)
     box = [round(float(v), 3) for v in box[:4]] if box else None
-    if dst.is_file():
-        return dst
+    qf = dst.with_suffix(".json")
+    if dst.is_file() and qf.is_file():
+        try:
+            return dst, json.loads(qf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
     with Image.open(grab(name, t)) as im:
         img = im.convert("RGB")
     W, H = img.size
@@ -645,68 +837,289 @@ def cut_auto(name, t, box=None, kind="fast"):
         full.paste(_bg_mask(img.crop((x0, y0, x1, y1)), kind), (x0, y0))
     else:
         full = _bg_mask(img, kind)
+    full = clean_mask(full, box, tboxes, [f["box"] for f in faces or []])
+    q = cut_quality(full, box, faces)
     out = img.convert("RGBA")
     out.putalpha(full)
     tmp = dst.with_suffix(".tmp")
     out.save(tmp, "PNG")
     updater._replace(tmp, dst)
-    return dst
+    try:
+        qt = qf.with_suffix(".jtmp")
+        qt.write_text(json.dumps(q), encoding="utf-8")
+        updater._replace(qt, qf)
+    except OSError:
+        pass
+    return dst, q
 
 
-AUTO_CUTS = 3   # 분석할 때 미리 딸 누끼 (좋은 장면 순, 사람·얼굴이 있는 장면)
+AUTO_CUTS = 4   # 분석할 때 미리 딸 누끼 (좋은 장면 순, 사람·얼굴이 있는 장면) — 추천에 쓰는 장면 6개 중 앞쪽
+CUT_MIN_H = 0.3   # 누끼 딸 주인공은 원본 화면 높이의 30% 이상 (작은 선수 누끼는 깨짐 — 판정)
+CUT_MAX_BLUR = 0.35
 
 
 def _cut_targets(items):
-    """미리 딸 누끼 대상: 사람이나 얼굴이 있는 좋은 장면 3개 → [(장면, 주인공 상자 또는 None)]."""
-    out = []
+    """미리 딸 누끼 대상: 주인공이 크고(높이 30% 이상) 또렷한 좋은 장면 3개 (얼굴 클로즈업 포함) → [(장면, 주인공 상자 또는 None)].
+    뒷모습·좌우 끝에 걸린 사람·벤치 장면은 뺌."""
+    ok = []
     for it in items:
         box = it["persons"][it["main"]][:4] if it.get("main", -1) >= 0 and it.get("persons") else None
         if box is None and not it.get("faces"):
             continue
-        out.append((it, box))
-        if len(out) >= AUTO_CUTS:
-            break
-    return out
+        if (box and box[3] < CUT_MIN_H and not it.get("faces")) or (it.get("blur") or 0) > CUT_MAX_BLUR or set(it.get("flags") or []) & {"back", "edge", "bench"}:
+            continue
+        ok.append((it, box))
+    out = []
+    for it, box in ok:  # 서로 다른 장면 먼저 (같은 화면 세 장을 따면 추천도 한 장면만 누끼를 씀)
+        if not any(hamming(it.get("hash"), o.get("hash")) <= SAME_HASH for o, _ in out):
+            out.append((it, box))
+    out += [x for x in ok if x not in out]
+    return out[:AUTO_CUTS]
 
 
 def _cut_path(name, t, box, kind="fast"):
     import hashlib
     box = [round(float(v), 3) for v in box[:4]] if box else None
-    key = hashlib.sha1(f"{core.adir(name).name}|{float(t):.3f}|{kind}|{box}".encode("utf-8")).hexdigest()[:16]
+    key = hashlib.sha1(f"{core.adir(name).name}|{float(t):.3f}|{kind}|{box}|v{CUT_VER}".encode("utf-8")).hexdigest()[:16]
     return ASSETS / f"cut_auto_{key}.png"
+
+
+def _cut_q(p):
+    """옆 JSON 에 기억한 누끼 품질 (없으면 None)."""
+    try:
+        return json.loads(p.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def cached_analysis(name):
     """썸네일 분석(장면 후보·자동 누끼·문구)이 다 돼 있으면 바로 → dict, 아니면 None."""
     items = cached_candidates(name)
-    if items is None:
+    if items is None or need_ai_frames(name, items):  # 클로드 장면 고르기만 남았어도 분석 작업으로 (장면·누끼는 캐시라 금방)
         return None
     cuts = {}
     for it, box in _cut_targets(items):
         p = _cut_path(name, it["t"], box)
-        if not p.is_file():
+        q = _cut_q(p)
+        if not p.is_file() or q is None:
             return None
-        cuts[str(it["t"])] = {"cut": asset_url(p), "src": it["url"], "box": box}
+        cuts[str(it["t"])] = {"cut": asset_url(p), "src": it["url"], "box": box, "q": q}
     import thumbcopy  # 문구 (가벼운 규칙 · 지연 import: thumbcopy → hooks)
-    return {"frames": items, "cuts": cuts, "copy": thumbcopy.suggest(name)}
+    return {"frames": _with_ai_frames(name, items), "cuts": cuts, "copy": thumbcopy.suggest(name)}
+
+
+AI_COPY_WAIT = 160   # 분석 끝에 클로드 문구를 기다리는 최대 시간(초) — 장면·누끼와 동시에 시작함
+
+
+def _ai_on(name):
+    """클로드 자동 (문구·장면 고르기): 브랜드 키트에서 켜져 있고 클로드 프로그램이 로그인돼 있을 때만."""
+    import thumbcopy
+    try:
+        return bool(load_brand().get("aiCopy", True)) and thumbcopy.ai_ready()
+    except Exception:
+        return False
+
+
+def _start_ai_copy(name, log):
+    """클로드 문구를 장면 분석과 동시에 (브랜드 키트 '클로드 자동'이 켜져 있고, 클로드 프로그램이 로그인돼 있고, 기억한 문구가 없을 때만) → 스레드 또는 None."""
+    import thumbcopy
+    try:
+        if thumbcopy.load_ai(name) is not None or not _ai_on(name):
+            return None
+    except Exception:
+        return None
+    import editor  # 멈추기(✕) — 지연 import (무거운 모듈)
+
+    def go():
+        try:
+            thumbcopy.run_ai(name, log, editor.CANCEL, progress=False)
+        except Exception as e:  # 클로드가 안 돼도 규칙 문구로 계속
+            log(f"  클로드 문구를 받지 못했어요 · {type(e).__name__}")
+    th = threading.Thread(target=go, daemon=True)
+    th.start()
+    return th
+
+
+# ---------- 클로드 장면 고르기 (선택 · 내 클로드 계정): 후보 장면 시트를 보여 주고 썸네일 배경으로 1~10점 ----------
+# 판정에서 가장 큰 감점이 '장면이 약함·레슨과 무관'(61/84) 이었고 규칙(선수·공·얼굴)만으로는 관중·앵커·잡지 같은 장면을 못 거름 → 같은 판단을 사용자 클로드에게
+AI_FRAMES = "thumb_frames_ai.json"
+AI_FRAMES_PROMPT = """당신은 구독자 수십만 한국 풋살·축구 레슨 채널(쪼살·쌈바 풋살 클래스·풋살해주호)의 썸네일 디자이너예요.
+같은 폴더의 frames.jpg 를 Read 도구로 열어 보세요. 영상 '{title}'(주제: {topics})에서 뽑은 장면 후보 {n}개에 노란 번호(1~{n})가 붙어 있어요.
+각 장면을 이 영상 썸네일의 배경 사진으로 쓰기에 얼마나 좋은지 1~10점으로 매기세요 (5 = 그럭저럭, 8 = 프로 레슨 채널이 쓸 만함). 엄격하게:
+- 좋은 장면: 공을 다루는 순간(드리블·슈팅·패스·1대1·트래핑)이 또렷함 · 주인공이 크고 얼굴이나 몸 전체가 보임 · 영상 주제와 맞음 · 설명하는 코치/선수의 표정이 살아 있는 얼굴
+- 나쁜 장면: 흐림·흔들림 · 뒷모습·뒤통수 · 벤치·관중·구경꾼 · 사람이 아주 작고 멂 · 빈 벽·바닥 · 다른 썸네일이나 큰 글자가 박힌 화면 · 주제와 상관없는 사람(앵커·관중)이나 물건
+대답은 JSON 하나만 (설명 없이): {{"frames": [{{"n": 1, "score": 0, "why": "한 줄"}}, ...]}}"""
+
+
+def _frames_sig(items):
+    return [round(float(it["t"]), 2) for it in items]
+
+
+AI_RETRY = 3600   # 클로드 장면 고르기가 실패했으면 1시간 동안은 다시 부르지 않음 (한도·로그인 문제로 열 때마다 기다리지 않게)
+
+
+def _ai_frames_file(name):
+    try:
+        return json.loads((core.adir(name) / AI_FRAMES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def load_ai_frames(name, items):
+    """기억해 둔 클로드 장면 점수 {t(문자): {score, why}} (후보 장면이 그대로일 때만) 또는 None."""
+    d = _ai_frames_file(name)
+    if isinstance(d, dict) and d.get("sig") == _frames_sig(items) and isinstance(d.get("items"), dict):
+        return d["items"]
+    return None
+
+
+def need_ai_frames(name, items):
+    """클로드 장면 고르기를 (다시) 해야 하는지: 클로드 자동이 켜져 있고, 이 후보로 받은 점수가 없고, 최근에 실패하지 않았음."""
+    if load_ai_frames(name, items) is not None:
+        return False
+    d = _ai_frames_file(name)
+    if isinstance(d, dict) and d.get("failSig") == _frames_sig(items) and 0 <= time.time() - float(d.get("failAt") or 0) < AI_RETRY:
+        return False
+    return _ai_on(name)
+
+
+def _save_ai_frames(name, data):
+    p = core.adir(name) / AI_FRAMES
+    try:
+        tmpf = p.with_suffix(".tmp")
+        tmpf.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        updater._replace(tmpf, p)
+    except OSError:
+        pass
+
+
+def _frame_sheet(name, items, path):
+    """후보 장면 시트 (4열 격자, 왼쪽 위 노란 번호) → path."""
+    from PIL import Image, ImageDraw, ImageFont
+    tiles = []
+    for it in items:
+        with Image.open(grab(name, it["t"])) as im:
+            rgb = im.convert("RGB")
+        rgb.thumbnail((440, 440))
+        tiles.append(rgb)
+    tw, th = max(t.size[0] for t in tiles), max(t.size[1] for t in tiles)
+    cols = 4
+    rows = (len(tiles) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * (tw + 8) + 8, rows * (th + 8) + 8), (20, 20, 20))
+    d = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.truetype(str(core.APP_DIR / "fonts" / "Pretendard-Black.otf"), 34)
+    except OSError:
+        font = ImageFont.load_default()
+    for i, t in enumerate(tiles):
+        x, y = 8 + (i % cols) * (tw + 8), 8 + (i // cols) * (th + 8)
+        sheet.paste(t, (x + (tw - t.size[0]) // 2, y + (th - t.size[1]) // 2))
+        d.rectangle([x, y, x + 52, y + 44], fill=(255, 210, 0))
+        d.text((x + 8, y + 2), str(i + 1), fill=(0, 0, 0), font=font)
+    sheet.save(path, quality=88)
+
+
+def parse_ai_frames(text, n):
+    """클로드 대답 → {번호(1~n): (점수 1~10, 이유)}. 형식이 아니면 ValueError."""
+    s = str(text or "")
+    a, b = s.find("{"), s.rfind("}")
+    if a < 0 or b <= a:
+        raise ValueError("장면 점수 형식을 찾지 못했어요")
+    try:
+        d = json.loads(s[a:b + 1])
+    except ValueError:
+        raise ValueError("장면 점수 형식이 깨져 있어요") from None
+    out = {}
+    for x in (d.get("frames") if isinstance(d, dict) else None) or []:
+        try:
+            k, sc = int(x.get("n")), float(x.get("score"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if 1 <= k <= n:
+            out[k] = (max(1.0, min(10.0, sc)), re.sub(r"\s+", " ", str(x.get("why") or "")).strip()[:80])
+    if not out:
+        raise ValueError("장면 점수가 없었어요")
+    return out
+
+
+def run_ai_frames(name, items, log=print, cancel=None):
+    """후보 장면 시트를 내 클로드 계정에 보여 주고 장면마다 1~10점 → 기억 (analysis/<영상>/thumb_frames_ai.json) → {t: {score, why}} 또는 None."""
+    import tempfile
+    import claude_cli
+    import thumbcopy
+    items = items[:16]
+    if not items:
+        return None
+    with tempfile.TemporaryDirectory(prefix="futsal-frames-", ignore_cleanup_errors=True) as tmp:
+        sheet = Path(tmp) / "frames.jpg"
+        _frame_sheet(name, items, sheet)
+        title = thumbcopy.nice_title(name)
+        tp = thumbcopy.topics(title, thumbcopy._texts(name))
+        prompt = AI_FRAMES_PROMPT.format(title=title, topics=", ".join(tp) or "풋살", n=len(items))
+        try:
+            res = claude_cli.run(prompt, images=[(sheet, "frames.jpg")], cancel=cancel, timeout=thumbcopy.AI_TIMEOUT)
+        except claude_cli.ClaudeError as e:
+            log(f"  클로드 장면 고르기 · {e.kind}")
+            if e.kind != "cancel":
+                _save_ai_frames(name, {"failSig": _frames_sig(items), "failAt": int(time.time())})
+            return None
+    try:
+        sc = parse_ai_frames(res.get("text"), len(items))
+    except ValueError:
+        log("  클로드 장면 고르기 · 형식 다름")
+        _save_ai_frames(name, {"failSig": _frames_sig(items), "failAt": int(time.time())})
+        return None
+    out = {str(it["t"]): {"score": sc[i + 1][0], "why": sc[i + 1][1]} for i, it in enumerate(items) if i + 1 in sc}
+    _save_ai_frames(name, {"sig": _frames_sig(items), "items": out})
+    log(f"  클로드 장면 고르기 · {len(out)}장")
+    return out
+
+
+def _with_ai_frames(name, items):
+    """장면 후보에 클로드 장면 점수(ai 1~10)·이유를 붙인 사본."""
+    sc = load_ai_frames(name, items) or {}
+    out = []
+    for it in items:
+        x = dict(it)
+        a = sc.get(str(it["t"]))
+        if a:
+            x["ai"], x["aiWhy"] = a.get("score"), a.get("why", "")
+        out.append(x)
+    return out
+
+
+def _wait(threads, name, what):
+    t0 = time.time()
+    for th in threads:
+        while th is not None and th.is_alive() and time.time() - t0 < AI_COPY_WAIT:
+            core.set_progress(label="썸네일 분석", item=name, pct=99, detail=f"클로드가 {what} (내 클로드 계정 사용 · {int(time.time() - t0)}초)")
+            th.join(0.5)
 
 
 def analyze(name, log=print):
-    """'AI 추천 썸네일' 분석 작업: 장면·선수 후보(v4) → 주인공 누끼 3장(빠른 모델) → 문구 후보. 누끼를 못 따도 나머지는 그대로."""
+    """'AI 추천 썸네일' 분석 작업: (클로드 문구 · 동시에) 장면·선수 후보(v6) → (클로드 장면 고르기 · 동시에) 주인공 누끼 4장(빠른 모델, 다듬기·품질 검사) → 문구 후보.
+    누끼·클로드를 못 써도 나머지는 그대로."""
+    ai = _start_ai_copy(name, log)
     items = frame_candidates(name)
+    af = None
+    if need_ai_frames(name, items):
+        import editor  # 멈추기(✕)
+        af = threading.Thread(target=lambda: run_ai_frames(name, items, log, editor.CANCEL), daemon=True)
+        af.start()
     cuts = {}
     todo = _cut_targets(items)
     for i, (it, box) in enumerate(todo):
         core.set_progress(label="썸네일 분석", item=name, pct=int(i * 100 / max(1, len(todo))), detail=f"주인공 누끼 따는 중 {i + 1}/{len(todo)}")
         try:
-            p = cut_auto(name, it["t"], box)
+            p, q = cut_auto(name, it["t"], box, faces=it.get("faces"), tboxes=it.get("tboxes"))
         except Exception as e:  # 모델을 못 받는 등 — 누끼 없는 추천으로 계속
             log(f"  자동 누끼를 따지 못했어요 · {e}")
             break
-        cuts[str(it["t"])] = {"cut": asset_url(p), "src": it["url"], "box": box}
+        cuts[str(it["t"])] = {"cut": asset_url(p), "src": it["url"], "box": box, "q": q}
     import thumbcopy
+    _wait([ai, af], name, "제목 문구·장면을 고르는 중…")
     core.set_progress(label="썸네일 분석", item=name, pct=99, detail="제목 문구 만드는 중")
-    return {"frames": items, "cuts": cuts, "copy": thumbcopy.suggest(name)}
+    return {"frames": _with_ai_frames(name, items), "cuts": cuts, "copy": thumbcopy.suggest(name)}
 
 
 OCR_MAX = 400_000   # 검수용 글자 읽기에 받는 그림 크기 상한 (dataURL 글자 수)
@@ -733,7 +1146,7 @@ def read_text(data_url):
 BRAND_COLORS = ("hl", "hl2", "accent", "neon", "box")   # 강조 글자 · 기본 글자 · 포인트(빨강) · 네온(전술) · 상자
 BRAND_FONTS = ("Black Han Sans", "Do Hyeon", "Jua", "Pretendard Black", "Pretendard Bold", "Dokdo")
 BRAND_DEFAULT = {"logo": "", "logoPos": "tr", "colors": {"hl": "#FFE14D", "hl2": "#FFFFFF", "accent": "#FF3B30", "neon": "#00D1FF", "box": "#111111"},
-                 "font": "Black Han Sans", "series": "풋사관 강좌", "seriesOn": False, "handle": "@풋살사관학교", "apply": True}
+                 "font": "Black Han Sans", "series": "풋사관 강좌", "seriesOn": False, "handle": "@풋살사관학교", "apply": True, "aiCopy": True}
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -772,7 +1185,7 @@ def check_brand(d):
         if not isinstance(v, str) or len(v) > n or any(c in v for c in "<>\r\n"):
             raise ValueError(f"{'시리즈 이름' if k == 'series' else '채널 이름'}은 {n}자 안쪽으로 써 주세요")
         out[k] = v.strip()
-    for k in ("seriesOn", "apply"):
+    for k in ("seriesOn", "apply", "aiCopy"):
         out[k] = bool(d.get(k, out[k]))
     return out
 

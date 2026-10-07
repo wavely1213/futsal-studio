@@ -256,17 +256,22 @@ function showTab(t) { document.querySelectorAll(".ph .tab").forEach(x => x.class
 document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.dataset.tab)));
 
 /* ---------- 내보내기 ---------- */
+const PNG_LIMIT = 2e6;  // 유튜브 썸네일 용량 한도 (바이트)
 async function exportImg() {
   if (!D) return; if (editing) endEdit();
   const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
   if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return;
   const c = newCanvas(W, H); renderDoc(c.getContext("2d"), D.doc, 1);
-  const fmt = $("exFmt").value; let data;
-  if (fmt === "png") data = c.toDataURL("image/png");
-  else { let q = 0.93; do { data = c.toDataURL("image/jpeg", q); q -= 0.07; } while (data.length * 0.75 > 1.95e6 && q > 0.5); }
+  let fmt = $("exFmt").value, data;
+  const jpg = () => { let q = 0.93, d; do { d = c.toDataURL("image/jpeg", q); q -= 0.07; } while (d.length * 0.75 > 1.95e6 && q > 0.5); return d; };
+  if (fmt === "png") {
+    data = c.toDataURL("image/png");
+    // 유튜브 썸네일은 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음)
+    if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1e6).toFixed(1)}MB 라 유튜브 썸네일 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
+  } else data = jpg();
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
-  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
+  if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 유튜브에 바로 못 올려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
 }
 $("exportBtn").onclick = exportImg;
 
