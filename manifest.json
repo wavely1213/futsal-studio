@@ -1,6 +1,8 @@
 {
   "version": "2.1.0",
   "notes": "학습용 영상: 스타일 배울 영상을 보관함과 따로 채널별로 보관, 채널 추가·추천 채널 51곳·방향별 한 번에 담기, 보관함에서 학습용으로 옮기기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/9bbd478a2b97c010ef43ac8715fa05bdd4ced0d2.zip",
+  "commit": "9bbd478a2b97c010ef43ac8715fa05bdd4ced0d2",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "57a7fc83aac79782eedcd0111c6b4e58ab25af6fa0efbe317032cfe36da71d9a",
