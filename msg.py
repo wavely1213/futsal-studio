@@ -1256,6 +1256,7 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
             v, au = B.clip(max(0.0, h["a"] - 0.1), h["b"] + 0.2, nocaps=True)
             hk = B.title(_short_text(h["text"], 18), 0.0, B.pos, dict(looks["emphasis"], y=0.2 if cap_y > 0.5 else 0.7, size=80, fill="#FFFFFF", effect="pop"))
             B.event("teaser", 0.0, hk["text"], "첫 질문으로 시작", refs={"items": [v["id"], au["id"]], "titles": [hk["id"]]}, ins={"start": 0.0, "len": round(B.pos, 3)})
+    shorts_hook = fmt == "shorts"  # 쇼츠: 티저 없이 맨 위에 훅 자막을 처음 2.5초 (본편을 다 만든 뒤 넣음)
     first_main = cuts[0]["in"] if cuts else 0.0
     if fmt == "long" and intro.get("titleCard"):
         ff = _freeze(name, first_main + 0.2)
@@ -1387,6 +1388,11 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
             B.sfx.append((st_t, c["sfx"], None, c["kind"]))
             refs["sfx"] = [len(B.sfx) - 1]
         B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
+
+    if shorts_hook and B.pos > 3.0:
+        hk = B.title(_short_text(hook, 14), 0.0, 2.5, dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop"))
+        B.sfx.append((0.0, pal.get("title", "짠"), None, "title"))
+        B.event("hook", 0.0, hk["text"], "쇼츠 첫 2.5초 훅 자막", refs={"titles": [hk["id"]], "sfx": [len(B.sfx) - 1]})
 
     # --- 몽타주 (끝나기 전 · 시범 4개 넘을 때) ---
     if mont and fmt == "long":
@@ -1698,7 +1704,23 @@ def _audio_items(B, sig, sections, seed, snd, intensity):
         if mine:
             mine[-1]["fadeOut"] = 1.0 if k < len(sections) - 1 else 2.5
         B.event("bgm", a, mood, f"배경음악 {mood} {mmss(a)}~{mmss(b)}", refs={"items": [x["id"] for x in mine]})
+    if intensity == "듬뿍":  # 펀치라인 바로 앞에서 음악을 0.4초 멈춤 (웃음 포인트를 살리는 예능 편집)
+        for e in [e for e in B.events if e["kind"] == "inner" and re.search(r"웃음|농담", e.get("why") or "")][:2]:
+            _music_gap(B, e["t"] - 0.45, 0.45)
     return {"sfx": n_sfx, "bgm": len(sections), "musicDb": lvl}
+
+
+def _music_gap(B, t, ln):
+    """배경음악 클립을 t 에서 ln 초 비움 (앞은 짧게 줄이고 뒤는 서서히 다시)."""
+    for it in [x for x in B.items if x["track"] in ("A3", "A4") and x["start"] + 0.3 < t < editor.i_end(x) - ln - 0.3]:
+        cut = t - it["start"]
+        tail = dict(it, id=editor._nid(), start=round(t + ln, 4), **{"in": round(it["in"] + cut + ln, 4)}, fadeIn=0.3)
+        it["out"] = round(it["in"] + cut, 4)
+        it["fadeOut"] = 0.12
+        B.items.append(tail)
+        for e in B.events:
+            if e["kind"] == "bgm" and it["id"] in e["refs"].get("items", []):
+                e["refs"]["items"].append(tail["id"])
 
 
 def _chapters(B, moms, topic):

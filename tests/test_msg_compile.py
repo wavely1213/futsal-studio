@@ -123,6 +123,23 @@ class Compile(unittest.TestCase):
         for q in sh:
             self.assertFalse(any(e["kind"] in ("end", "title", "montage") for e in q["msg"]["events"]), q["name"])
             self.assertLessEqual(editor.seq_total(q), 180)
+            hk = [e for e in q["msg"]["events"] if e["kind"] == "hook"]
+            self.assertEqual(len(hk), 1, q["name"])
+            t = next(t for t in q["titles"] if t["id"] in hk[0]["refs"]["titles"])
+            self.assertEqual((t["start"], t["dur"]), (0.0, 2.5))
+            self.assertLess(t["style"]["y"], 0.3)
+
+    def test_music_stops_before_punchline_only_when_generous(self):
+        """듬뿍: 펀치라인 바로 앞에서 배경음악이 0.45초 비었다가 다시 (보통·담백은 그대로 이어짐)."""
+        def gap_near(q, t):
+            mus = [it for it in q["items"] if it["track"] in ("A3", "A4")]
+            return not any(it["start"] <= t < editor.i_end(it) for it in mus)
+        for k in ("보통", "듬뿍"):
+            q = self.res[k]["sequences"][0]
+            pl = [e for e in q["msg"]["events"] if e["kind"] == "inner" and ("웃음" in e["why"] or "농담" in e["why"])]
+            if not pl:
+                continue
+            self.assertEqual(gap_near(q, pl[0]["t"] - 0.2), k == "듬뿍", (k, pl[0]))
 
     def test_export_smoke_and_auto_check(self):
         """예능 MSG형 · 보통 롱폼을 실제로 내보내 자동 검수: 고칠 것 0 · 소리 크기 목표대로 · 길이가 편집본과 같음."""
