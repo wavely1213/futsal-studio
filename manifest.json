@@ -1,6 +1,8 @@
 {
   "version": "2.5.0",
   "notes": "Windows 대비 41건: 백신·OneDrive 잠금에도 완성본 안 지움 · 포트 겹치면 다른 포트로 · 꺼질 때 ffmpeg 함께 끔 · 작업 중 창 닫기 확인 · 메모장 설정 파일·반쪽 이모지 · 설치 확인(Python 3.10~3.14 64비트) · 휴대폰 작업 중엔 업데이트 재시작 미룸",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/d0ebe6f30fba33f078f0cf38be998b4bf90e3659.zip",
+  "commit": "d0ebe6f30fba33f078f0cf38be998b4bf90e3659",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "6dec7301867b6f1d046b8da1dd4d5e76e7f55b9ad1ee385a25aebea1d17f94d4",
