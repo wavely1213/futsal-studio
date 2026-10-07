@@ -674,15 +674,19 @@ function boxBlur(src, w, h, r) {  // 상자 흐림 한 번 (가로 → 세로, �
 }
 function applyGrade(px, w, h, g) {
   const a = clamp(g.amt ?? 1, 0, 1.5), n = w * h, lo0 = g.lo || [0, 0, 0], hi0 = g.hi || [255, 255, 255];
-  const lut = [0, 1, 2].map(ch => {  // 채널별 표: 레벨(lo~hi 를 0~255 로) · 감마 · 색온도(빨강↑ 파랑↓)
-    const lo = lo0[ch] * a, hi = 255 + (hi0[ch] - 255) * a, gm = Math.max(0.2, 1 + ((g.gamma || 1) - 1) * a);
+  const lut = [0, 1, 2].map(ch => {  // 채널별 표: 레벨(lo~hi 를 0~255 로) · 색온도(빨강↑ 파랑↓)
+    const lo = lo0[ch] * a, hi = 255 + (hi0[ch] - 255) * a;
     const tk = 1 + (ch === 0 ? 1 : ch === 2 ? -1 : 0) * (g.temp || 0) * a / 260, t = new Float32Array(256);
-    for (let v = 0; v < 256; v++) t[v] = Math.pow(clamp((v - lo) / Math.max(1, hi - lo), 0, 1), 1 / gm) * 255 * tk;
+    for (let v = 0; v < 256; v++) t[v] = clamp((v - lo) / Math.max(1, hi - lo), 0, 1) * 255 * tk;
     return t;
   });
+  // 감마는 밝기에만 (세 채널을 같은 비율로) — 채널마다 감마를 걸면 밝힐 때 색이 빠짐 (thumb.auto_grade 와 같은 계산)
+  const gm = Math.max(0.2, 1 + ((g.gamma || 1) - 1) * a), GL = new Float32Array(1025);
+  for (let v = 0; v <= 1024; v++) GL[v] = Math.pow(v / 1024, 1 / gm) * 255;
   const vib = (g.vib || 0) * a / 100, cl = (g.clarity || 0) * a / 100, sh = (g.sharpen || 0) * a / 100, L = cl > 0 || sh > 0 ? new Float32Array(n) : null;
   for (let i = 0, p = 0; i < n; i++, p += 4) {
     let r = lut[0][px[p]], gg = lut[1][px[p + 1]], b = lut[2][px[p + 2]];
+    if (gm !== 1) { const y = 0.299 * r + 0.587 * gg + 0.114 * b, k = GL[Math.min(1024, Math.round(y * 4.0157))] / Math.max(0.5, y); r *= k; gg *= k; b *= k; }
     if (vib) {
       const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
       if (mx > mn) {
@@ -698,14 +702,15 @@ function applyGrade(px, w, h, g) {
   }
   if (!L) return;
   let add = null;
+  const mid = v => { const m = v / 127.5 - 1, q = Math.max(0, 1 - m * m); return q * Math.sqrt(q); };  // 중간 밝기 1 → 아주 밝은·어두운 곳 0 (하얗게 날아가지 않게)
   if (cl > 0) {  // 클래리티: 큰 반경(화면 폭 1.2%) 흐림과의 차이를 중간 밝기 위주로 더함
     const r = Math.max(2, Math.round(w * 0.012)); let B = boxBlur(L, w, h, r); B = boxBlur(B, w, h, r); B = boxBlur(B, w, h, r);
     add = new Float32Array(n);
-    for (let i = 0; i < n; i++) { const m = L[i] / 127.5 - 1; add[i] = (L[i] - B[i]) * cl * 1.1 * (1 - 0.75 * m * m); }
+    for (let i = 0; i < n; i++) add[i] = (L[i] - B[i]) * cl * 1.2 * mid(L[i]);
   }
   if (sh > 0) {  // 샤픈: 반경 1
     const B = boxBlur(L, w, h, 1); add = add || new Float32Array(n);
-    for (let i = 0; i < n; i++) add[i] += (L[i] - B[i]) * sh * 1.6;
+    for (let i = 0; i < n; i++) add[i] += (L[i] - B[i]) * sh * 1.6 * mid(L[i]);
   }
   for (let i = 0, p = 0; i < n; i++, p += 4) { const d = add[i]; px[p] += d; px[p + 1] += d; px[p + 2] += d; }
 }
