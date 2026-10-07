@@ -86,7 +86,14 @@ class NotifyBase(unittest.TestCase):
 class BeaconTests(NotifyBase):
     def test_on_beacon_per_device_and_only_own_key(self):
         self.turn_on()
-        msg = self.beacons()[-1][1]
+        # 켜는 동안 먼저 나간 비콘('켜는 중' 등)이 있을 수 있음 → '켜짐' 비콘이 올 때까지 기다림 (바쁜 PC 에서 순서 경쟁)
+        end = time.time() + 20
+        while True:
+            msg = self.beacons()[-1][1]
+            a = open_beacon(msg, self.a)
+            if (a and a.get("state") == "on") or time.time() > end:
+                break
+            time.sleep(0.05)
         self.assertTrue(msg.startswith("fsb1."))
         a, b = open_beacon(msg, self.a), open_beacon(msg, self.b)
         self.assertEqual(a["state"], "on")
