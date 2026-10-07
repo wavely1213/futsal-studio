@@ -69,8 +69,11 @@ hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
 refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) → WORK/refs/<채널>/ · refs/refs.json
 ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
+strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
+forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
+strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트는 저장소 밖)
 takes.py            NG 테이크·슬레이트·말더듬 찾기 (2차 작업 중, 아직 커밋 전)
-ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기)
+ui.html             스튜디오 화면 (1 소재 찾기 ~ 7 올리기 · 8 채널 전략)
 editor.html         편집실 화면 (프리미어식)
 thumb.html          썸네일 편집기 화면 (포토샵식). 빌드 산출물이며 원본은 저장소 밖에 있음 (아래 주의)
 fonts/              자막·썸네일 폰트 + OFL 라이선스
@@ -117,16 +120,17 @@ icon.ico / icon.png 앱 아이콘
 | 서비스 | 용도 | 키 관리 위치 |
 |---|---|---|
 | YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '크롬 로그인 정보로 받기'를 켤 때만 그 브라우저에서 읽음 (`cookiesfrombrowser`) |
+| YouTube 공개 RSS (`www.youtube.com/feeds/videos.xml?channel_id=UC…`) | 채널 전략: 채널마다 최근 15개 영상의 정확한 날짜·조회수·좋아요·원제. 사용자가 [새로 고침]·[지금 점검하기]를 누를 때와 8단계를 열 때 우리 채널 하루 한 번만 (D-024 · BR-016) · 시간 제한 20초 · 응답 2MB 까지 · DOCTYPE/ENTITY 가 든 응답은 거절 · 429·5xx 는 5초 뒤 한 번만 다시 | 키 없음. 쿠키 없음 (User-Agent `futsal-studio/<버전>`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치 | 없음 |
 | GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
 | GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` | 없음 |
 | ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
-| Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
+| Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). 채널 전략의 [클로드로 더 깊게 보기]를 누를 때만: 공개 채널 숫자·가져올 점·우리 전략 글·가능성 요약(약 6000자 · 영상·대사 없음, D-024). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |
 | Hugging Face Hub | faster-whisper가 받아쓰기 모델을 처음 한 번 받음 (라이브러리 기본 동작) | 없음 |
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
-| i.ytimg.com | 소재 찾기 목록의 영상 미리보기 그림 | 없음 |
+| i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
 
 ## 7. 참고 링크

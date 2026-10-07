@@ -81,11 +81,11 @@
   - 포트는 `FUTSAL_PORT=8766`처럼 바꾼다.
   - 저장소의 `config.json`은 배포 파일이라 고치지 않는다. 테스트 작업 폴더가 필요하면 저장소를 복사한 폴더의 `config.json`만 바꾼다.
 - **사용자와 같은 실행 경로**: `python3 updater.py --launch` (업데이트 확인 → 같은 프로세스에서 app.py 실행)
-- **단위 테스트 (전체, 약 450개)**: `python3 -m unittest discover -s tests`
+- **단위 테스트 (전체, 약 570개)**: `python3 -m unittest discover -s tests`
   - 파일별: `python3 -m unittest tests.test_<영역>` (파일 목록은 `docs/TESTING_GUIDELINES.md` 1번). `tests.test_update`는 배포 전 필수이고 `release.sh`가 자동으로 돌린다.
 - **실행기 자가 시험**: `python3 updater.py --selftest` → `selftest ok`
 - **린트**: 설정 파일은 없다. `python3 -m pyflakes *.py` — 새 경고가 없어야 한다(지금 남은 경고는 `docs/KNOWN_ISSUES.md` I-019). 고친 HTML의 JS는 문법만 확인한다(`docs/CODING_STANDARDS.md` 3번). pyflakes가 없으면 최소 `python3 -m py_compile *.py`.
 - **저장소 밖 작업 공간 `$SCRATCH`**: 썸네일 원본·빌드 스크립트·e2e 묶음은 저장소가 아니라 리드 개발 환경의 scratchpad에 있다(`docs/KNOWN_ISSUES.md` I-018). 작성 시점 경로는 `/tmp/claude-0/-home-user-wavely/0fb55fd4-356e-5366-99c4-2fddb0b4f464/scratchpad`이고 세션·환경마다 바뀔 수 있다. 다른 문서는 이 경로를 `$SCRATCH`로만 적는다.
-- **E2E (Playwright)**: 편집실 `$SCRATCH/ed2_test.py`(193개 확인), 썸네일 `$SCRATCH/th2_test.py`, 스타일 배우기 `$SCRATCH/style_test.py`(기획 분석·클로드 카드는 `bash $SCRATCH/plan_run.sh` 시험 앱 8911 + `STYLE_PORT=8911 PLAN_DIR=$SCRATCH/plantest`), 학습용 영상 `bash $SCRATCH/refs_e2e/run.sh`(8931) → `python3 $SCRATCH/refs_e2e/refs_ui_test.py <폴더>`, 자막 한 줄씩 나누기 `bash $SCRATCH/cape2e/setup.sh` → `python3 $SCRATCH/cape2e/cap_e2e.py`(8951·8952, 저장소는 `CAP_REPO`). 영향받는 화면을 고쳤으면 해당 묶음을 돌린다. 시험 앱 띄우기·실행 명령은 `docs/TESTING_GUIDELINES.md` 1번.
+- **E2E (Playwright)**: 편집실 `$SCRATCH/ed2_test.py`(193개 확인), 썸네일 `$SCRATCH/th2_test.py`, 스타일 배우기 `$SCRATCH/style_test.py`(기획 분석·클로드 카드는 `bash $SCRATCH/plan_run.sh` 시험 앱 8911 + `STYLE_PORT=8911 PLAN_DIR=$SCRATCH/plantest`), 학습용 영상 `bash $SCRATCH/refs_e2e/run.sh`(8931) → `python3 $SCRATCH/refs_e2e/refs_ui_test.py <폴더>`, 자막 한 줄씩 나누기 `bash $SCRATCH/cape2e/setup.sh` → `python3 $SCRATCH/cape2e/cap_e2e.py`(8951·8952, 저장소는 `CAP_REPO`), 채널 전략 `bash $SCRATCH/strat_e2e/run_all.sh` → `python3 $SCRATCH/strat_e2e/strat_ui_test.py <폴더>`(8981~8983, 저장소는 `STRAT_REPO` · 8984 는 인터넷으로 실제 새로 고침 `live_ui.py`). 영향받는 화면을 고쳤으면 해당 묶음을 돌린다. 시험 앱 띄우기·실행 명령은 `docs/TESTING_GUIDELINES.md` 1번.
 - **빌드**: 앱 자체는 빌드가 없다(파이썬·HTML을 그대로 배포). 예외는 `thumb.html` 하나다. `python3 thumb_src/build.py`가 저장소 안 `thumb_src/head.html` + `thumb_src/parts/p1_core.js`…`p7_auto.js`를 이어 붙여 같은 저장소의 `thumb.html`을 쓰고 node로 JS 문법을 확인한다(`syntax ok`). `thumb_src/`는 배포 파일 목록(manifest)에서 빠진다. 규칙은 `docs/ARCHITECTURE.md` 7절 6번.
 - **배포**: `./release.sh X.Y.Z "변경 내용 한 줄"` — 절대 규칙 2에 따라 소유자 승인 후에만 한다. `git add -A`를 하므로 커밋 안 한 다른 작업이 있으면 깨끗한 클론에서 한다. 절차·주의는 `docs/DEVELOPMENT_RULES.md` 8번.
