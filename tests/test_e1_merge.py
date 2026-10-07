@@ -163,7 +163,7 @@ class ErrorLogTests(LogBase):
     def test_stamped_err_redacts_any_write(self):
         sys.stderr.write(f"직접 쓴 글 {URL}/r/m/{TICKET}\n")
         self.assertClean(self.err.getvalue())
-        self.assertRegex(self.err.getvalue(), r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2} 직접 쓴 글")
+        self.assertRegex(self.err.getvalue(), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 직접 쓴 글", "studio.log 와 같은 연도 붙은 시각")
 
     def test_job_hook_error_is_traced_not_printed_raw(self):
         def bad_hook(*a):
@@ -198,7 +198,9 @@ class PhoneTests(unittest.TestCase):
     def test_pc_download_result_with_why_is_attention(self):
         self.svc.job_hook("보관함에 담기", None, {"failed": ["AbCdEfGhIjK"], "why": {"AbCdEfGhIjK": {"msg": "막힘"}}}, None, 30)
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (False, True))
-        self.assertEqual(self.svc.last["error"], remote.MISSED_MSG.format(n=1))
+        self.assertEqual(self.svc.last["error"], remote.MISSED_WHY_MSG.format(n=1, why="막힘"), "까닭을 알면 그 까닭으로")
+        self.svc.job_hook("보관함에 담기", None, {"failed": ["AbCdEfGhIjK"], "why": {}}, None, 30)
+        self.assertEqual(self.svc.last["error"], remote.MISSED_MSG.format(n=1), "모르면 예전 문구")
         self.assertNotIn("크롬 로그인 정보로 받기", remote.MISSED_MSG + remote.BLOCKED_PHONE_MSG + core.REMOTE_BLOCKED_MSG)
         self.svc.job_hook("보관함에 담기", None, {"failed": [], "why": {}}, None, 30)
         self.assertEqual((self.svc.last["ok"], self.svc.last["warn"]), (True, False))
@@ -211,6 +213,41 @@ class PhoneTests(unittest.TestCase):
         self.assertTrue(last["error"].startswith("편집점을 찾지 못한 영상이 1개 있어요 · "), last["error"])
         self.assertNotIn("moov", last["error"])
 
+    def test_refs_result_with_failed_why_is_not_partial_analyze(self):
+        """검토: 학습용 영상 받기 결과({got, failed, why, ok})는 '편집점을 찾지 못한 영상'이 아님 → 예전처럼 끝."""
+        res = {"got": ["a"], "failed": ["b", "c"], "why": {"b": {"msg": "막힘"}}, "ok": True}
+        self.svc.job_hook("학습용 영상 받기", None, res, "휴대폰 · x", 30)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["error"]), (True, False, None))
+        self.svc.job_hook("편집점 찾기", None, {"done": [], "failed": ["x.mp4"], "why": {}}, None, 30)
+        self.assertIn("까닭은 PC 작업 기록에", self.svc.last["error"], "까닭이 없으면 빈 칸 대신 안내")
+
+    def test_phone_download_returns_reason_and_hint_only_for_login(self):
+        logs = []
+
+        def fake(ids, log, ck, why=None, **k):
+            why[ids[0]] = trouble.explain(RuntimeError("ERROR: [youtube] x: Video unavailable. This video is private"))
+            return list(ids)
+        svc = mock.Mock()
+        svc.bridge.log = logs.append
+        svc._go = lambda dev, name, run, what: run()
+        with mock.patch.object(core, "download", fake), mock.patch.object(remote.source, "stop_backfill"):
+            res = remote._a_download(svc, None, {"url": "https://youtu.be/AbCdEfGhIjK"}, None)
+        self.assertEqual(res["failed"], ["AbCdEfGhIjK"])
+        self.assertEqual(res["why"]["AbCdEfGhIjK"]["kind"], "unavailable")
+        self.assertFalse(any("로그인 정보로 받기" in x for x in logs), "비공개 영상에 로그인 안내를 붙이지 않음")
+        self.assertEqual(trouble.explain(RuntimeError("ERROR: [youtube] aaaaaaaaaaa: This video is unavailable"))["kind"], "unavailable")
+        self.svc.job_hook("보관함에 담기", None, res, "휴대폰 · x", 30)
+        self.assertIn("이 영상은 지금 받을 수 없어요", self.svc.last["error"])
+        self.assertNotIn("YouTube가 막았을 수 있어요", self.svc.last["error"])
+
+        def fake_login(ids, log, ck, why=None, **k):
+            why[ids[0]] = trouble.explain(RuntimeError("ERROR: Sign in to confirm your age"))
+            return list(ids)
+        with mock.patch.object(core, "download", fake_login), mock.patch.object(remote.source, "stop_backfill"):
+            remote._a_download(svc, None, {"url": "https://youtu.be/AbCdEfGhIjK"}, None)
+        self.assertTrue(any("로그인 정보로 받기" in x for x in logs))
+
 
 class CoreTests(LogBase):
     def test_phone_download_blocked_points_to_pc(self):
@@ -222,6 +259,91 @@ class CoreTests(LogBase):
         why2 = {}
         core._failed_one("AbCdEfGhIjK", RuntimeError("ERROR: Sign in to confirm you're not a bot"), logs.append, "firefox", None, why2)
         self.assertIn("파이어폭스 로그인 정보로도", why2["AbCdEfGhIjK"]["msg"], "PC 에서 브라우저를 고른 받기는 그 안내")
+
+    def test_phone_refs_download_blocked_uses_remote_msg(self):
+        """검토: 학습용 받기(refs 가 화면용 BLOCKED_MSG 를 넘김)도 휴대폰에서 시켰으면 PC 에서 할 일 문구."""
+        import refs
+        why = {}
+        with core.no_self_update():
+            core._failed_one("AbCdEfGhIjK", RuntimeError("ERROR: Sign in to confirm you're not a bot"), lambda m: None, None,
+                             refs.BLOCKED_MSG, why)
+        self.assertEqual(why["AbCdEfGhIjK"]["msg"], " ".join(core.REMOTE_BLOCKED_MSG.split()))
+        why = {}
+        core._failed_one("AbCdEfGhIjK", RuntimeError("ERROR: Sign in to confirm you're not a bot"), lambda m: None, None,
+                         refs.BLOCKED_MSG, why)
+        self.assertEqual(why["AbCdEfGhIjK"]["msg"], " ".join(refs.BLOCKED_MSG.split()), "PC 에서는 이 화면용 안내")
+
+    def test_phone_refs_list_blocked_uses_remote_msg(self):
+        lines = []
+
+        def blocked():
+            raise RuntimeError(core.BLOCKED_MSG)
+        with mock.patch.object(app, "log", lines.append):
+            with core.no_self_update():
+                r = app._refs_job(blocked)
+            self.assertEqual(r["error"], " ".join(core.REMOTE_BLOCKED_MSG.split()))
+            self.assertFalse(any("최신으로 바꿔 다시 해 봤지만" in x for x in lines), lines)
+            r = app._refs_job(blocked)
+            self.assertIn("'채널 추가' 칸", r["error"], "PC 에서는 이 화면을 가리킴")
+
+    def test_expected_failure_has_no_location_or_traceback(self):
+        with mock.patch.object(app, "JOB_HOOKS", []), mock.patch.object(app, "log", lambda m: None):
+            def copying():
+                raise trouble.Trouble("copying", "아직 복사 중이에요")
+            app.start_job("편집점 찾기", copying)
+            self.assertTrue(_wait_idle())
+
+            def private():
+                raise RuntimeError("ERROR: [youtube] x: Video unavailable. This video is private")
+            app.start_job("보관함에 담기", private)
+            self.assertTrue(_wait_idle())
+            time.sleep(0.1)
+        self.assertIn("원문 · ERROR: [youtube] x: Video unavailable", self.text())
+        self.assertNotIn("오류 위치", self.text())
+        self.assertNotIn("Traceback", self.err.getvalue())
+
+    def test_remote_listener_hangup_is_not_logged(self):
+        srv = object.__new__(remote.RemoteServer)
+        for e in (ConnectionResetError(104, "Connection reset by peer"), TimeoutError("timed out")):
+            try:
+                raise e
+            except (ConnectionError, TimeoutError):
+                srv.handle_error(None, ("127.0.0.1", 1))
+        try:
+            raise ValueError("진짜 오류")
+        except ValueError:
+            srv.handle_error(None, ("127.0.0.1", 1))
+        self.assertEqual(self.text().count("휴대폰 연결 오류 위치"), 1, self.text())
+        self.assertIn("ValueError", self.text())
+
+    def test_launcher_error_trace_has_year_and_no_secrets(self):
+        with mock.patch.object(updater, "workspace", return_value=self.tmp):
+            try:
+                raise RuntimeError(RAW)
+            except RuntimeError:
+                updater._error_trace(self.tmp)
+        text = (self.tmp / "studio-error.log").read_text(encoding="utf-8")
+        self.assertRegex(text, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 프로그램을 켜다 멈춤")
+        self.assertClean(text)
+
+
+class MarkerTests(LogBase):
+    def test_session_end_keeps_marker_written_by_new_process(self):
+        """검토: 다시 시작 — 새 프로세스가 먼저 표시를 쓴 뒤 옛 프로세스의 session_end 가 그것을 지우면 안 됨."""
+        studiolog.session_start("9.9.9")
+        running = self.tmp / studiolog.RUNNING
+        running.write_text(json.dumps({"pid": 999999999, "start": "x", "version": "9.9.10", "job": None}), encoding="utf-8")
+        studiolog.session_end()
+        self.assertTrue(running.exists(), "새 프로세스의 표시는 그대로")
+        studiolog.session_start("9.9.9")
+        studiolog.session_end()
+        self.assertFalse(running.exists(), "자기 표시는 지움")
+
+    def test_unclean_exit_line_is_conditional(self):
+        (self.tmp / studiolog.RUNNING).write_text(json.dumps({"pid": 1, "start": "x", "version": "1", "job": None}), encoding="utf-8")
+        r = studiolog.session_start("9.9.9")
+        self.addCleanup(studiolog.session_end)
+        self.assertIn("남은 위치가 있으면 studio-error.log", r["log"])
 
 
 class AppFlowTests(LogBase):
@@ -309,7 +431,7 @@ class PhoneCannotPickBrowserTests(RemoteBase):
             st, _, _ = self.call("GET", path)
             self.assertIn(st, (400, 404), path)
         got = []
-        with mock.patch.object(core, "download", lambda ids, log, ck: got.append(ck) or []):
+        with mock.patch.object(core, "download", lambda ids, log, ck, **k: got.append(ck) or []):
             st, _, b = self.act("download", {"url": "https://youtu.be/AbCdEfGhIjK", "cookies": "firefox"})
             self.assertEqual(st, 200, b)
             self.assertTrue(self.fb.wait_idle())

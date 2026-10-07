@@ -229,10 +229,10 @@ def session_start(version):
     job = old.get("job") if isinstance(old.get("job"), str) else None
     if not job:
         return {"log": f"지난번 실행({started})이 정상적으로 끝나지 않았어요 (PC를 껐거나 프로그램이 갑자기 꺼졌을 수 있어요 · "
-                       "멈춘 위치는 studio-error.log)",
+                       "남은 위치가 있으면 studio-error.log)",
                 "notice": None}
     return {"log": f"지난번 실행({started})이 '{job}' 중에 갑자기 꺼졌어요 ({old.get('jobAt') or '?'}에 시작한 작업 · "
-                   "멈춘 위치는 studio-error.log)",
+                   "남은 위치가 있으면 studio-error.log)",
             "notice": f"지난번에 '{job}' 중에 프로그램이 갑자기 꺼졌어요. 그 작업을 다시 해 주세요. "
                       "계속 꺼지면 작업 폴더의 studio.log 파일을 관리자에게 보내 주세요 (같은 폴더에 studio-error.log 가 있으면 그것도요)."}
 
@@ -246,13 +246,23 @@ def job(name):
 
 
 def session_end():
-    """정상 종료: 실행 표시를 지움 (창 닫기·업데이트 재시작)."""
+    """정상 종료: 실행 표시를 지움 (창 닫기·업데이트 재시작).
+    이 프로세스가 쓴 표시만 — 다시 시작할 때 새 프로세스가 먼저 자기 표시를 썼으면 그대로 둠 (새 실행의 '갑자기 꺼짐'을 잃지 않게)."""
     if not _SESSION:
         return
     _SESSION.clear()
     r = _running()
+    if r is None:
+        return
     try:
-        if r is not None:
-            r.unlink()
+        cur = json.loads(r.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError):  # 깨진 표시 → 누구 것인지 모름 · 지움
+        cur = None
+    if isinstance(cur, dict) and cur.get("pid") not in (None, os.getpid()):
+        return
+    try:
+        r.unlink()
     except OSError:
         pass

@@ -365,7 +365,7 @@ def _failed_one(vid, e, log, browser, blocked_msg, why):
     """영상 하나를 받지 못함: 화면 기록에는 쉬운 한 줄, studio.log 에만 원문 (영어 원문이 화면에 보이지 않게)."""
     import studiolog
     import trouble
-    if not blocked_msg and not self_update_allowed():  # 휴대폰에서 시킨 받기: 엔진을 바꾸지 않았으니 PC 에서 할 일을 알려 줌
+    if not self_update_allowed():  # 휴대폰에서 시킨 받기(학습용 포함): 엔진을 바꾸지 않았으니 PC 에서 할 일 (PC 화면용 안내 대신)
         blocked_msg = REMOTE_BLOCKED_MSG
     info = trouble.explain(e, browser=browser, blocked=blocked_msg)  # 막힘: 이 화면용 안내 (없으면 '브라우저를 골라 다시 받아 보세요')
     if info["kind"] == "blocked":

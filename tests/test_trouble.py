@@ -212,7 +212,7 @@ class FakeYDL:
             info = {"id": vid, "title": "제목", "upload_date": "20240101", "ext": "mp4"}
             for h in self.opts["progress_hooks"]:
                 h({"status": "finished", "info_dict": info})
-            (Path(self.opts.get("paths", {}).get("home", "")) / self.opts["outtmpl"].replace("%(upload_date)s", "20240101").replace("%(id)s", vid)  # 폴더는 paths (D-031)
+            (Path(self.opts.get("paths", {}).get("home", "")) / self.opts["outtmpl"].replace("%(upload_date)s", "20240101").replace("%(id)s", vid)  # 폴더는 paths (I-042)
                  .replace("%(title).60B", "제목").replace("%(ext)s", "mp4")).write_bytes(b"\0" * 10)
 
     def close(self):

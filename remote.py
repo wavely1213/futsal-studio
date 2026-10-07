@@ -102,6 +102,7 @@ NOTE_TEXT = {
 }
 MISSED_MSG = ("받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 "
               "브라우저를 골라 다시 받아 주세요")
+MISSED_WHY_MSG = "받지 못한 영상이 {n}개 있어요 · {why}"  # 까닭을 아는 받기 (trouble.explain · 막힘이면 PC 에서 할 일까지 들어 있음)
 PARTIAL_MSG = "편집점을 찾지 못한 영상이 {n}개 있어요 · {why}"  # 여러 영상 중 그 파일만의 문제(깨짐 등)로 건너뜀 (core.analyze_many)
 NOT_STOPPABLE_MSG = "이 작업은 중간에 멈출 수 없어요 · 끝나면 알려 드릴게요"
 BLOCKED_PHONE_MSG = ("YouTube가 막았어요 · PC 스튜디오에서 '업데이트 확인'으로 다운로드 엔진을 최신으로 바꾸거나 "
@@ -209,6 +210,15 @@ def _missed(result):
     if isinstance(result, dict):
         result = result.get("failed")
     return result if isinstance(result, list) else []
+
+
+def _first_why(result, failed):
+    """{failed, why} 결과 → 처음 실패한 영상의 쉬운 까닭 한 줄 (없으면 '')."""
+    why = result.get("why") if isinstance(result, dict) else None
+    if not isinstance(why, dict) or not failed:
+        return ""
+    first = why.get(failed[0])
+    return str(first.get("msg") or "") if isinstance(first, dict) else ""
 
 
 def _lru_put(d, k, v, cap=LRU_MAX):
@@ -1243,13 +1253,15 @@ class Service:
                 blocked = bool(result.get("blocked"))
                 ok, warn, note = False, True, "blocked" if blocked else "net"
                 err = STRATEGY_MSG[note]
-        elif name == "보관함에 담기" and _missed(result):  # 받기: 못 받은 영상 id 목록 (PC 화면이 시킨 받기는 {failed, why})
-            ok, warn, err = False, True, MISSED_MSG.format(n=len(_missed(result)))
-        elif isinstance(result, dict) and isinstance(result.get("failed"), list) and result["failed"] \
-                and isinstance(result.get("why"), dict):  # 편집점 찾기: 일부 영상만 건너뜀 → 쉬운 한 줄 (trouble.explain)
-            first = result["why"].get(result["failed"][0]) or {}
+        elif name == "보관함에 담기" and _missed(result):  # 받기: 못 받은 영상 id 목록 · {failed, why} 면 첫 영상의 쉬운 까닭으로
+            missed = _missed(result)
+            first = _first_why(result, missed)
+            ok, warn = False, True
+            err = scrub(MISSED_WHY_MSG.format(n=len(missed), why=first)) if first else MISSED_MSG.format(n=len(missed))
+        elif name == "편집점 찾기" and isinstance(result, dict) and isinstance(result.get("failed"), list) and result["failed"] \
+                and isinstance(result.get("why"), dict):  # 일부 영상만 건너뜀 → 쉬운 한 줄 (trouble.explain) · 학습용 받기 결과는 해당 없음
             ok, warn, note = False, True, "partial"
-            err = scrub(PARTIAL_MSG.format(n=len(result["failed"]), why=first.get("msg") or ""))
+            err = scrub(PARTIAL_MSG.format(n=len(result["failed"]), why=_first_why(result, result["failed"]) or "까닭은 PC 작업 기록에 있어요"))
         self.last = {"name": name, "ok": ok, "warn": warn, "error": err, "blocked": blocked, "endedAt": int(self.clock()), "by": by}
         if name == "영상 검수" and isinstance(result, dict) and result.get("file"):  # 검수 결과는 완성본 목록에 같이 보여 줌
             summary = {k: result.get(k) for k in ("score", "bad", "warn", "duration", "width", "height")}
@@ -1605,10 +1617,11 @@ def _a_download(svc, dev, a, tok):
     log = svc.bridge.log
 
     def run():
-        failed = core.download([vid], log, None)  # 원격에서는 쿠키를 쓰지 않음 (D-009 · 브라우저 고르기는 PC 화면에서만) — 막히면 PC 에서 '로그인 정보로 받기'
-        if failed:
+        why = {}
+        failed = core.download([vid], log, None, why=why)  # 원격에서는 쿠키를 쓰지 않음 (D-009 · 브라우저 고르기는 PC 화면에서만)
+        if any((why.get(v) or {}).get("kind") in ("login", "empty") for v in failed):  # 막힘(REMOTE_BLOCKED_MSG)은 할 일이 이미 들어 있음
             log("  PC에서 '로그인 정보로 받기'로 브라우저를 골라 다시 받아 주세요")
-        return failed
+        return {"failed": failed, "why": why}
     return svc._go(dev, "보관함에 담기", run, vid)
 
 
@@ -1718,6 +1731,8 @@ class RemoteServer(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         """처리 밖으로 나온 오류: socketserver 기본은 보낸 곳 주소와 추적을 그대로 오류 출력(→ studio-error.log)에 → 비밀을 지우고 추적만."""
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):  # 휴대폰·터널이 연결을 끊음 — 오류가 아님 (app._Server 와 같게)
+            return
         _trace()
 
 

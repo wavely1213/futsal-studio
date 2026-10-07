@@ -58,7 +58,7 @@
 | 원격 경계 | `remote.py` (`RemoteHandler`·`Service`) | 터널로 들어온 요청만: Host 표시·수 제한·CORS·서명/표 확인·허용 동작 목록, 짝짓기·기기 열쇠(`remote.json`)·비콘·알림·자동 끄기·절전 막기. 기능은 app 이 넘긴 `Bridge` 와 기능 모듈 함수를 부르기만 한다 | `app` import. 로컬 `Handler`의 API 를 터널에 내주기. 허용 목록 밖 동작(지우기·설정·업데이트·켜기·임의 경로). 비밀(코드·열쇠·주제·터널 주소·표) 기록 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
 | 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
-| 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`·`intake`·`trouble`·`studiolog`(모두 표준 라이브러리만 쓰는 도우미, D-019·D-035~029)를 뺀 다른 앱 모듈 import |
+| 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`·`intake`·`trouble`·`studiolog`(모두 표준 라이브러리만 쓰는 도우미, D-019·D-035~D-037)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
 

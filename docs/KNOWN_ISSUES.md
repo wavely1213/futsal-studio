@@ -49,7 +49,7 @@
 - **임시방편**: 7단계 화면에서 후보를 고르거나 제목 칸을 고쳐 쓴다(고친 제목은 그대로 저장 · BR-007).
 - **해결 방향**: 쓸모없는 틀이 자주 나오면 그 낱말을 `_EVENT`·`_KEEP_LEFT`·`_GENERIC`에, 새 기술 이름은 `SKILLS` 와 `_CATEGORY` 에 더한다. 채널 전략 주제어를 키트와 맞추려면 `strategy._TOPIC_RES` 를 `hooks.topic_terms()`·`_kit_re` 로 바꾸고 `tests.test_strategy*` 기대값을 확인한다.
 
-## I-051 | 2026-10-07 | studio.log: 실행기 줄은 아직 연도 없음 · 네이티브 충돌 기록은 Windows 대비 작업 몫 · '갑자기 꺼짐'은 PC 끄기와 구별 못 함
+## I-051 | 2026-10-07 | studio.log: '갑자기 꺼짐'은 PC 끄기와 구별 못 함 · 같은 작업 폴더 두 앱
 - **상태**: 열림 — (1)·(2)·(a)·(b)·(c)는 합치며 해결(2026-10-07 · D-044: 실행기 줄도 연도 · 네이티브 충돌은 studio-error.log 의 faulthandler · 꺼짐 기록·알림·`trouble.OTHER` 가 studio-error.log 도 가리킴 · 문서는 '두 파일' · webview `private_mode=False` 있음). 남은 것은 (3)·(4)
 - **심각도**: 낮음
 - **증상/내용**: (1) `updater.studio_log`(앱이 켜지기 전·업데이트 되돌리기)는 아직 `MM-DD HH:MM:SS` 로 쓴다 — 같은 함수를 Windows 대비 작업(feat_win)이 고치고 있어 이번에 건드리지 않았다. (2) faulthandler(WebView2·onnxruntime 같은 네이티브 충돌)와 traceback 전체는 Windows 대비 작업의 `studio-error.log`(pythonw 의 stderr) 몫이라 이 작업(studiolog)은 하지 않았다 — 두 작업을 합치기 전에는 네이티브 충돌의 위치가 남지 않고, studio.log 에는 '지난번 실행이 정상적으로 끝나지 않았어요'만 남는다. (3) 실행 표시(`studio.running.json`)는 PC 를 끄거나 로그아웃할 때 창 닫기가 끝까지 안 돌아도 남는다 → 다음에 켤 때 기록 한 줄(작업 중이 아니면 화면 알림은 없음). (4) 같은 작업 폴더로 앱 두 개를 띄우면(보통은 막힘) 두 번째가 첫 번째를 '갑자기 꺼짐'으로 적을 수 있다.

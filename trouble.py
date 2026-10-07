@@ -153,7 +153,7 @@ _RULES = [
     ("unavailable", r"[Pp]rivate video|video is private|has been removed|members[- ]only|Join this channel|"
                     r"not available in your country|blocked it in your country|live event will begin|Premieres in|"
                     r"no longer available|account .{0,60}terminated|"
-                    r"[Vv]ideo unavailable(?!.*try again later)|This video is not available",
+                    r"[Vv]ideo (?:is )?unavailable(?!.*try again later)|This video is not available",
      "이 영상은 지금 받을 수 없어요 (비공개·삭제·회원 전용·지역 제한이거나 아직 공개 전이에요)", [], None),
     ("blocked", r"try again later|HTTP Error 429|Too Many Requests|not a bot|Sign in|(?<![\w-])403(?![\w-])|"
                 r"YouTube가 (?:계속 |받기를 )?막고",

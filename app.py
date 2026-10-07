@@ -79,6 +79,10 @@ def log(msg):
     studiolog.write(msg)  # 콘솔 없이 실행되므로 파일에도 남김 (연도 붙은 시각 · 커지면 studio.old.log 로 · 비밀은 '…' · 실패해도 작업은 계속)
 
 
+# 프로그램 오류가 아닌 실패(사용자가 멈춤·복사 중·YouTube 막힘·비공개 영상·로그인·탭 없음): studio.log 에 원문 줄만 — 오류 위치·traceback 은 남기지 않음
+EXPECTED_KINDS = {"cancelled", "copying", "blocked", "unavailable", "login", "notab"}
+
+
 def start_job(name, fn, by=None, ctx=None):
     """긴 작업 하나 시작 → 작업 번호(1부터 · 참) · 이미 돌고 있으면 False. by: 휴대폰에서 시켰으면 '휴대폰 · <기기 이름>'.
     실패하면 JOB error(쉬운 한 줄)·fail(종류·할 일 · trouble.explain) — 끝난 작업(DONE[번호])에도 같이 남겨 그 작업을 시킨 화면이 받음.
@@ -102,7 +106,8 @@ def start_job(name, fn, by=None, ctx=None):
             JOB["error"], JOB["fail"] = info["msg"], info
             log(f"문제가 생겼어요 · {info['msg']}")
             studiolog.write(f"  원문 · {' '.join(str(e).split())[:400]}")
-            studiolog.trace(e)
+            if info["kind"] not in EXPECTED_KINDS:  # 사용자 쪽 사정(멈춤·복사 중·막힘…)은 원문 줄만
+                studiolog.trace(e)
         finally:
             core.set_progress()
             err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
@@ -165,7 +170,8 @@ def _refs_job(fn, ck=None):
     except RuntimeError as e:
         if str(e) != core.BLOCKED_MSG:
             raise
-        info = trouble.explain(e, browser=ck, blocked=refs.BLOCKED_MSG)
+        # 휴대폰에서 시킨 받기는 엔진을 바꾸지 않았고 이 화면도 없음 → PC 에서 할 일 (core.REMOTE_BLOCKED_MSG)
+        info = trouble.explain(e, browser=ck, blocked=refs.BLOCKED_MSG if core.self_update_allowed() else core.REMOTE_BLOCKED_MSG)
         log(f"  {info['msg']}")
         return {"ok": False, "error": info["msg"], "blocked": True,  # 고르지 않았으면 이 화면의 '로그인 정보로 받기'를 가리킴
                 "fail": info}
@@ -1386,9 +1392,8 @@ class _StampedErr:
         s = str(s)
         out = []
         for line in remote.redact(s).splitlines(True):  # 비밀(터널 주소·주제·표·서명)은 '…' — 어디서 찍든 이 파일에는 남지 않게
-
             if self.bol:
-                out.append(time.strftime("%m-%d %H:%M:%S "))
+                out.append(studiolog.stamp())  # studio.log 와 같은 연도 붙은 시각 (두 파일을 맞춰 보기 쉽게)
             out.append(line)
             self.bol = line.endswith("\n")
         try:

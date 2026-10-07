@@ -1025,8 +1025,14 @@ def _error_trace(app_dir):
     try:
         import traceback
         ws = workspace(app_dir)
+        text = traceback.format_exc()
+        try:  # 비밀(터널 주소·주제 등)은 '…' — 규칙은 remote.redact 한 곳 (켜다 멈춘 까닭이 그 모듈이면 그대로)
+            import remote
+            text = remote.redact(text)
+        except Exception:  # noqa: BLE001
+            pass
         with open(ws / "studio-error.log", "a", encoding="utf-8", errors="replace") as f:
-            f.write(time.strftime("%m-%d %H:%M:%S ") + "프로그램을 켜다 멈춤\n" + traceback.format_exc())
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + "프로그램을 켜다 멈춤\n" + text)
     except (OSError, ValueError):
         pass
 
