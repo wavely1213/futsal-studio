@@ -942,7 +942,8 @@ def _find_emph(toks):
 
 
 def emphasis_label(txt, terms=None, short=True):
-    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로(끝 마침표·쉼표는 뗌 · short=False 면 안 씀), 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로(끝 마침표·쉼표는 뗌), 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+    short=False(대사 자막이 켜짐): 짧은 말도 '기술 이름 + 강조 낱말!' · '강조 낱말!' 로만 — 자막과 같은 글이면 None.
     기술 이름도 강조 낱말도 낱말 전체가 맞을 때만 — 낱말 조각('잘하!'·'턴!')은 만들지 않음."""
     terms = terms if terms is not None else _emph_terms()
     toks = _tokens(txt)
@@ -952,13 +953,19 @@ def emphasis_label(txt, terms=None, short=True):
         return None, 0
     flat = re.sub(r"\s+", " ", str(txt or "")).strip()
     score = len(found) + (2 if emph else 0)
-    if len(flat.replace(" ", "")) <= EMPH_SHORT and short:
+    is_short = len(flat.replace(" ", "")) <= EMPH_SHORT
+    if is_short and short:
         return re.sub(r"[\s.,。、…]+$", "", flat) or flat, score
+    lab = None
     if found and emph:
-        return f"{found[0][2]} {emph}!", score
-    if found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
-        return f"{found[0][2]}!", score
-    return None, 0
+        lab = f"{found[0][2]} {emph}!"
+    elif found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
+        lab = f"{found[0][2]}!"
+    elif is_short and emph:  # 자막이 켜진 짧은 말: 말 전체 대신 강조 낱말만 ('세번째 포인트.' → '포인트!')
+        lab = f"{emph}!"
+    if lab is None or (is_short and _norm(lab) == _norm(flat)):  # 자막과 같은 글은 한 화면에 두 번 띄우지 않음
+        return None, 0
+    return lab, score
 
 
 def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
@@ -1030,7 +1037,7 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None, caption
     """받아쓰기에서 기술 이름·강조 낱말이 든 말을 골라 1.5초 큰 색 글씨(titles)로 — 1분에 per_min 개까지, 서로 EMPH_GAP 초 넘게 떨어뜨림.
     teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀).
     place(글, 모양, 시작, 끝) → (x, y): 자리 고르기 (emphasis_placer · 없으면 예전처럼 화면 위 30%).
-    captions_on: 대사 자막이 켜져 있으면 짧은 말을 그대로 띄우지 않음 (같은 글이 자막과 강조 글씨로 한 화면에 두 번) — '기술 이름 + 강조 낱말!' 만."""
+    captions_on: 대사 자막이 켜져 있으면 짧은 말을 그대로 띄우지 않음 (같은 글이 자막과 강조 글씨로 한 화면에 두 번) — 강조 낱말만 ('포인트!')."""
     total = max([i_end(it) for it in items] or [0.0])
     cap = int(per_min * total / 60.0 + 1e-9)
     if cap <= 0 or not segs:

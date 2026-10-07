@@ -263,7 +263,8 @@ class EmphasisAutoSeqTest(AutoSeqBase):
     def test_emphasis_label_does_not_repeat_caption(self):
         # E6 검토: 도블락 렌더 '세번째 포인트.' 가 대사 자막과 강조 글씨로 한 화면에 두 번 · 끝 마침표까지
         self.assertEqual(editor.emphasis_label("세번째 포인트.", {})[0], "세번째 포인트")
-        self.assertIsNone(editor.emphasis_label("세번째 포인트.", {}, short=False)[0])
+        self.assertEqual(editor.emphasis_label("세번째 포인트.", {}, short=False)[0], "포인트!")  # 자막이 켜지면 강조 낱말만
+        self.assertIsNone(editor.emphasis_label("포인트!", {}, short=False)[0])  # 자막과 같은 글이면 안 띄움
         st = {"emphasisTitles": {"perMin": 3.3, "color": "#FFE14D"}}
         with mock.patch.object(editor, "_faces_on_screen", return_value=None):
             q = editor.auto_sequences(self.name, self.info, st, ("long",))[0]
