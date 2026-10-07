@@ -67,6 +67,7 @@ STEP_OP = {"thumbnail": "thumbnails.set", "captions": "captions.insert", "playli
 LOCKED_MSG = ("Google이 이 프로젝트를 아직 확인(감사)하지 않아 영상이 '비공개(잠김)'로 올라갔어요 · 잠긴 영상은 공개로 바꿀 수 없어요 · "
               "감사를 받은 뒤 다시 올려 주세요 (안내 9단계)")
 LENGTH_MSG = "15분이 넘는 영상은 채널 인증(전화번호 확인)이 있어야 올라가요 · youtube.com/verify 에서 인증한 뒤 다시 올려 주세요"
+RELOGIN_STEP = "유튜브 연결이 끊겼어요 · 위에서 [다시 연결하기]를 누른 뒤 [마저 하기]를 눌러 주세요"
 TESTING_HINT = "Google Cloud 앱이 '테스트' 상태라 7일마다 끊겨요 · 안내 5단계의 [앱 게시]를 하면 더 끊기지 않아요"
 SETTINGS_DEFAULT = {"v": 1, "privacy": "private", "madeForKids": False, "notify": True, "thumbnail": True, "captions": True,
                     "playlistId": "", "playlistTitle": "", "audited": False, "consentMode": None, "channelOk": ""}
@@ -254,6 +255,18 @@ def _exhausted(op):
             _write_json(_wdir() / "quota.json", q)
         except OSError:
             pass
+
+
+def _clear_exhausted(op):
+    """그 묶음으로 부른 것이 잘 됐으면 '다 씀' 표시를 지움 (Google 이 다시 채웠거나 한도를 늘림)."""
+    bucket = COST.get(op, ("units", 1))[0]
+    with _LOCK:
+        q = _quota(True)
+        if q["exhausted"].pop(bucket, None):
+            try:
+                _write_json(_wdir() / "quota.json", q)
+            except OSError:
+                pass
 
 
 def quota_view():
@@ -634,7 +647,8 @@ def _plan(name, seq=None, privacy=None):
     last = next((x for x in hist if x.get("name") == name and (x.get("seq") or None) == seq), None)
     dup = next((x for x in hist if qh and x.get("quick") == qh), None)
     if dup:
-        when = time.strftime("%m월 %d일 %H:%M", time.localtime(dup.get("at") or 0))
+        lt = time.localtime(dup.get("at") or 0)
+        when = f"{lt.tm_mon}월 {lt.tm_mday}일 {lt.tm_hour:02d}:{lt.tm_min:02d}"
         warnings.append(f"이 영상은 {when}에 이미 올렸어요 ({dup.get('url')}) · 또 올리면 같은 영상이 두 개가 돼요")
         pub["duplicate"] = {"at": dup.get("at"), "url": dup.get("url"), "videoId": dup.get("videoId")}
     if privacy and privacy != "private" and not st["audited"]:
@@ -1010,6 +1024,7 @@ def _drive(sess, log, cancel, notes=None, restarted=False):
             uri = c.start_upload(_body(sess["meta"]), size, sess.get("mime") or yt._mime(path), bool(sess["meta"].get("notify", True)))
             sess.update(uri=_wrap(uri), offset=0, state="uploading", error=None, kind=None, startedAt=time.time())
             _save_session(sess)
+            _clear_exhausted("videos.insert")
             log(f"유튜브에 올리기 시작 · {sess['file']} ({_mb(size)}MB · {PRIVACY_KO.get(sess['meta']['privacy'], '')})")
         else:
             core.set_progress(label="유튜브에 올리는 중", item=sess["name"], step="1/4", pct=None, detail="올린 데까지 확인하는 중")
@@ -1094,7 +1109,7 @@ def _thumb_path(w, entry):
 def _post(c, entry, log, cancel, only=None, check=True):
     """썸네일 → 자막 → 재생목록 → 상태 확인. 단계마다 따로 (하나가 실패해도 다음으로) · 끝날 때마다 기록."""
     vid, want, steps = entry["videoId"], entry.get("want") or {}, entry["steps"]
-    warnings = []
+    warnings, dead = [], False  # dead: 연결이 끊김 → 남은 단계는 부르지 않고 '다시 연결한 뒤 마저 하기'로
     for i, name in enumerate(STEP_ORDER, 2):
         w = want.get(name)
         if only is not None and name not in only:
@@ -1104,6 +1119,9 @@ def _post(c, entry, log, cancel, only=None, check=True):
             continue
         if cancel is not None and cancel.is_set():
             steps[name] = {"state": "todo", "msg": "멈췄어요 · [마저 하기]를 눌러 주세요"}
+            continue
+        if dead:
+            steps[name] = {"state": "todo", "msg": RELOGIN_STEP}
             continue
         core.set_progress(label="유튜브 마무리 중", item=entry["name"], step=f"{i}/4", pct=None,
                           detail={"thumbnail": "썸네일 올리는 중", "captions": "자막 올리는 중", "playlist": "재생목록에 넣는 중"}[name])
@@ -1115,6 +1133,7 @@ def _post(c, entry, log, cancel, only=None, check=True):
             else:
                 c.add_to_playlist(w["id"], vid)
             steps[name] = {"state": "ok"}
+            _clear_exhausted(STEP_OP[name])
         except yt.ApiError as e:
             if e.kind == "exists":
                 steps[name] = {"state": "ok", "msg": "이미 올라가 있어요"}
@@ -1123,9 +1142,11 @@ def _post(c, entry, log, cancel, only=None, check=True):
                 steps[name] = {"state": "quota", "msg": explain(e)}
             elif e.kind == "thumb_verify":
                 steps[name] = {"state": "needs_verify", "msg": str(e)}
+            elif e.kind == "relogin":
+                _mark_relogin()
+                dead = True
+                steps[name] = {"state": "todo", "msg": RELOGIN_STEP}
             else:
-                if e.kind == "relogin":
-                    _mark_relogin()
                 steps[name] = {"state": "error", "msg": explain(e)}
             log(f"  {({'thumbnail': '썸네일', 'captions': '자막', 'playlist': '재생목록'})[name]} · {steps[name]['state']}"
                 + (f" ({e.reason})" if e.reason else ""))
@@ -1134,7 +1155,7 @@ def _post(c, entry, log, cancel, only=None, check=True):
                            ("썸네일 편집기에서 다시 저장해 주세요" if name == "thumbnail" else "편집실에서 다시 내보내 주세요")}
             log(f"  {({'thumbnail': '썸네일', 'captions': '자막', 'playlist': '재생목록'})[name]} · 파일을 읽지 못함")
         _history_put(entry)
-    if check and not (cancel is not None and cancel.is_set()):
+    if check and not dead and not (cancel is not None and cancel.is_set()):
         core.set_progress(label="유튜브 마무리 중", item=entry["name"], step="4/4", pct=None, detail="올라간 상태 확인하는 중")
         try:
             v = c.video_status(vid) or {}

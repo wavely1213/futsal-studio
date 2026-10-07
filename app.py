@@ -1034,6 +1034,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"ok": False, "error": "영상을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요"})
         except (ValueError, LookupError) as e:
             return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
+        except (BrokenPipeError, ConnectionResetError):  # 화면이 응답을 기다리지 않고 닫힘 (작업은 그대로)
+            return None
         except OSError as e:
             log(f"유튜브 올리기 설정을 저장하지 못했어요 · {type(e).__name__}")
             return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})

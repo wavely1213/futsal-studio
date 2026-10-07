@@ -913,6 +913,7 @@ class UploadFlowTests(ServiceBase):
         self.mode(upload_limit=False)
         r = yu.resume(yu.session_key(name, None), self.log, self.cancel)
         self.assertTrue(r["ok"], r)
+        self.assertFalse(yu.quota_view()["exhausted"]["uploads"])  # 다시 잘 되면 '다 씀' 표시를 지움
 
     def test_revoked_connection_then_reconnect_and_resume(self):
         name, k = self.ready()
@@ -939,6 +940,30 @@ class UploadFlowTests(ServiceBase):
         self.assertFalse(yu.status()["needsRelogin"])
         r = yu.resume(yu.session_key(name, None), self.log, self.cancel)
         self.assertTrue(r["ok"], r)
+        self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
+
+    def test_connection_lost_after_video_steps_wait_for_reconnect(self):
+        """세션 주소로 영상은 끝까지 올라갔는데 연결이 끊김 → 썸네일·자막·재생목록은 '다시 연결한 뒤 마저 하기'(Google 을 더 두드리지 않음)."""
+        name, k = self.ready()
+        pl = yu.create_playlist("기본기", "public")["playlist"]
+        self.mode(rate=150 * KB)
+        threading.Timer(0.6, self.cancel.set).start()
+        with mock.patch.object(yt, "CHUNK", 64 * UNIT):
+            self.assertTrue(self.run_up(opts={"playlistId": pl["id"]})["paused"])
+        self.mode(rate=None)
+        yt.revoke(yt.load_secret(yu._token_path()))
+        self.cancel.clear()
+        before = self.fake.snapshot()["log"].count("token:refresh")
+        r = yu.resume(yu.session_key(name, None), self.log, self.cancel)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual({k2: v["state"] for k2, v in r["steps"].items()}, {"thumbnail": "todo", "captions": "todo", "playlist": "todo"})
+        self.assertEqual(r["steps"]["captions"]["msg"], yu.RELOGIN_STEP)
+        self.assertEqual(self.fake.snapshot()["log"].count("token:refresh"), before)  # 새 토큰을 받으려다 실패한 뒤로는 부르지 않음
+        self.assertTrue(yu.status()["needsRelogin"])
+        self.connect()
+        r2 = yu.finish(r["videoId"], None, self.log, self.cancel)
+        self.assertEqual({k2: v["state"] for k2, v in r2["steps"].items()}, {"thumbnail": "ok", "captions": "ok", "playlist": "ok"})
+        self.assertEqual(self.video()["playlists"], [pl["id"]])
         self.assertEqual(self.fake.snapshot()["insert_calls"], 1)
 
     def test_api_disabled_and_no_channel_on_connect(self):
