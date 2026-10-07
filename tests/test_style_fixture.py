@@ -239,7 +239,7 @@ class TestOldStyleCompat(StyleFixtureBase):
         # 컷 리듬 맞추기(#7) 값은 새로 더해짐 (예전 스타일: 3구간 모두 가운데 컷 길이 · 말 빠르기는 배운 값)
         self.assertEqual({k: st["params"].pop(k) for k in ("splitShot", "curve3", "tempo")}, {"splitShot": 2.5, "curve3": [2.5] * 3, "tempo": 7.12})
         self.assertEqual(st["params"], {"keepPause": 0.41, "targetShot": 2.5, "zoomEvery": 16.8, "zoomScale": 1.22, "captions": True,
-                                        "captionPos": "bottom", "captionColor": "#FFE14D", "lufs": -14.45})
+                                        "captionPos": "bottom", "captionColor": "#FFE14D", "lufs": -14.0})  # E6(D-045): 소리 목표는 -14~-13 안으로 (예전 -14.45)
         self.assertEqual(st["desc"], "컷이 3.16초마다 바뀌고(1분에 19.23번), 16.8초마다 확대 컷(약 1.22배)이 나와요. "
                                      "말 사이 0.41초 넘게 쉬면 잘라요. 자막이 화면의 65%에 아래쪽으로 깔려요.")
         self.assertEqual({k: v for k, v in style.edit_params(self.old["refs"][0]).items() if k not in ("splitShot", "curve3", "tempo")}, {"keepPause": 0.38, "targetShot": 2.25, "zoomEvery": 14.3, "zoomScale": 1.24,
@@ -469,12 +469,14 @@ class TestScoreFixes(StyleFixtureBase):
         self.assertAlmostEqual(w["소리"], style.W_CAP, delta=0.002, msg=w)  # 상한이 없으면 0.5 넘게 소리 혼자
         self.assertLessEqual(max(w.values()), style.W_CAP + 0.002)
         self.assertAlmostEqual(sum(w.values()), 1.0, delta=0.01)
-        # 같은 영상 둘(소리 크기 거의 같음)로 배운 스타일 → 가편집 점수에서 소리는 '스타일대로'
+        # 같은 영상 둘(소리 크기 거의 같음)로 배운 스타일 → 가편집 점수에서 소리는 빼고 봄 (E6: 가편집은 소리를 유튜브 기준 -14~-13 으로 맞춤
+        # → 시험 영상처럼 작게 녹음된 스타일이면 소리 부분 점수는 100 이 아닐 수 있음 · 전체 점수에는 안 들어감)
         style.learn("소리 스타일", [MAIN, COPY], lambda m: None)
         (core.adir(MAIN) / "transcript.json").write_text(json.dumps(speech_segments(), ensure_ascii=False), encoding="utf-8")
         r = style.score_video("소리 스타일", MAIN)
         self.assertEqual(r["fixed"], ["소리"])
-        self.assertEqual((r["parts"]["소리"], r["weights"]["소리"]), (100, 0.0))
+        self.assertEqual(r["weights"]["소리"], 0.0)
+        self.assertIsNotNone(r["parts"]["소리"])
         used = [k for k, v in r["weights"].items() if v]
         self.assertAlmostEqual(sum(r["weights"].values()), 1.0, delta=0.01)
         self.assertAlmostEqual(r["score"], sum(r["weights"][k] * r["parts"][k] for k in used), delta=1.0)
@@ -544,7 +546,7 @@ class TestScoreFixes(StyleFixtureBase):
 
 
 class TestScoreReview2(StyleFixtureBase):
-    """두 번째 검토: 소리 '스타일대로' 판정 · 가편집 자막 색 그대로 · 멈추기와 실패 기록."""
+    """두 번째 검토: 소리는 점수에서 뺌 · 가편집 자막 색 그대로 · 멈추기와 실패 기록."""
 
     def _style(self, nm, **kw):
         style.learn(nm, [MAIN], lambda m: None)
@@ -555,7 +557,7 @@ class TestScoreReview2(StyleFixtureBase):
         (core.adir(MAIN) / "transcript.json").write_text(json.dumps(speech_segments(), ensure_ascii=False), encoding="utf-8")
 
     def test_loudness_fixed_on_rounding_and_clamp(self):
-        """반올림 경계(-16.45·-19.95)·범위 밖(-7.5·-26)이어도 가편집은 스타일 값을 그대로 쓰므로 '스타일대로'."""
+        """반올림 경계(-16.45·-19.95)·범위 밖(-7.5·-26)이어도 소리는 점수에서 뺌 (가편집은 유튜브 기준으로 맞춤)."""
         for lufs in (-16.45, -19.95, -19.75, -7.5, -26.0):
             self._style("소리 경계 스타일", lufs=lufs)
             r = style.score_video("소리 경계 스타일", MAIN)

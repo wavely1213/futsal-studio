@@ -2429,7 +2429,7 @@ async function renderRec() {
       ${STYLES.length ? `${STYLES.map((s, i) => `<div class="rec ${i === 0 ? "on" : ""}" data-sty="${i}" style="cursor:pointer"><b>${esc(s.name)}</b><div class="m" style="margin:0">${esc(s.desc || "")}</div></div>`).join("")}
         <div class="seg" id="styKind" style="margin-bottom:8px"><button data-v="long" class="on">롱폼만</button><button data-v="both">롱폼 + 쇼츠</button></div>
         <div><button class="btn pri" id="styGo">이 스타일로 새 편집본 만들기</button></div>
-        <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "○○ 스타일 가편집"을 새로 만들어요. 쉬는 틈 자르기·확대 컷·자막 위치/색·소리 크기가 스타일대로 맞춰져요.</div>`
+        <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "○○ 스타일 가편집"을 새로 만들어요. 쉬는 틈 자르기·확대 컷·자막 위치/색이 스타일대로 맞춰져요 (소리 크기는 유튜브 기준 -14 근처로).</div>`
       : `<div class="hint">아직 배운 스타일이 없어요. 스튜디오의 "스타일 배우기"에서 참고할 유튜버 영상을 먼저 배워 주세요.</div>`}
     </div>
     <div class="sec"><h4>쇼츠 추천 구간 <span class="hint">(AI 없이 PC에서 계산)</span></h4>

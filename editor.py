@@ -569,23 +569,13 @@ def _items_from_cuts(cuts, fade_last=0.0, zoom=1.0):
     return items
 
 
-def _punch(cuts, segs, every):
-    """약 every 초마다 말이 시작하는 곳(또는 원래 컷)에서 나눠, 번갈아 확대 표시."""
-    if not every or every <= 0:
-        return cuts
-    starts = sorted(s["start"] for s in segs)
-    out, pos, last, zoomed = [], 0.0, 0.0, False
-    for c in cuts:
-        a = c["in"]
-        if pos > 0 and pos - last >= every:  # 점프 컷 자리에서 확대/원래 크기 바꾸기
-            zoomed, last = not zoomed, pos
-        for s in starts:
-            if a + 0.6 < s < c["out"] - 0.6 and pos + (s - c["in"]) - last >= every:
-                out.append({"in": round(a, 3), "out": round(s, 3), "zoom": zoomed})
-                a, zoomed, last = s, not zoomed, pos + (s - c["in"])
-        out.append({"in": round(a, 3), "out": c["out"], "zoom": zoomed})
-        pos += c["out"] - c["in"]
-    return out
+def _punch(cuts, segs, every, caps=None):
+    """약 every 초마다 말이 시작하는 곳에서 나눠 확대 ↔ 원래 크기를 번갈아 (잘라 낸 자리도 뒤집음 · 자막 가운데서는 안 나눔).
+    단어 시각이 없는 예전 받아쓰기의 컷 리듬 (_rhythm 이 부름)."""
+    starts = sorted(float(s["start"]) for s in segs or ())
+    spans = _cap_spans(caps, segs)
+    return _shots(cuts, (lambda pos, t=float(every or 0): t) if every and every > 0 else None,
+                  lambda a, b: [x for x in starts if a + 0.6 < x < b - 0.6 and not _in_cap(x, spans)], lambda a, b: True)
 
 
 # ---------- 컷 리듬 맞추기 (#7): 배운 컷 길이로 긴 말 컷 나누기 · 말 빠르기 ----------
@@ -644,19 +634,58 @@ def _word_bounds(words, a, b):
     return out
 
 
-def _split_rhythm(cuts, words, target, units=None, cps=None):
-    """말하는 컷 중 목표 컷 길이(targetShot)보다 긴 것을 단어 경계에서 나눔 — 나눈 곳마다 원래 크기 ↔ 확대(zoomScale)를 번갈아
-    (카메라 두 대처럼 · zoom 표시는 _punch 와 같음: _items_from_cuts 가 확대). 지우는 곳은 없음 (나누기만).
-    target: 초, 또는 타임라인 위치 → 초 (도입·본론·마무리). 시범처럼 말이 드문 컷은 그대로."""
-    tf = target if callable(target) else (lambda pos, t=float(target or 0): t)
-    units = words if units is None else units
-    cps = cps or 0.0  # 모르면 말이 드문 컷도 나눔
-    out, pos = [], 0.0
+JUMP_EPS = 0.02      # 이웃 컷의 원본이 이만큼 넘게 안 이어지면 잘라 낸 자리(점프 컷)
+FLIP_MIN = 1.5      # 화면 크기를 뒤집은 뒤 이 초(타임라인)가 지나야 다음 점프 컷에서 또 뒤집음 (1초도 안 되는 확대 ↔ 원래 크기 껌뻑임 막기)
+CAP_EDGE = 0.05      # 자막 가장자리에서 이만큼 안쪽부터 '자막 가운데' (단어끼리 살짝 겹친 경계는 가장자리 · timeline_captions 가 0.05초 이하 조각은 안 띄움)
+
+
+def _cap_spans(caps, segs=None):
+    """나누면 안 되는 곳 [(시작, 끝)] — 자막(없으면 받아쓴 구간)이 떠 있는 동안. 여기서 컷을 나누면 같은 자막이 다시 나타나 깜빡임."""
+    src = caps if caps else segs or ()
+    out = []
+    for c in src:
+        try:
+            a, b = float(c["start"]), float(c["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if b > a:
+            out.append((a, b))
+    return sorted(out)
+
+
+def _in_cap(x, spans):
+    return any(a + CAP_EDGE < x < b - CAP_EDGE for a, b in spans)
+
+
+def _cap_cuts(xs, spans, words):
+    """단어 경계 xs 중 자막이 바뀌는 곳만 — 자막 경계가 단어 사이 가운데와 조금 다르면(다음 낱말 시작에 맞춘 자막) 그 경계로 옮김.
+    옮긴 곳도 낱말 가운데는 아니어야 함."""
+    edges = sorted({e for ab in spans for e in ab})
+    out = []
+    for x in xs:
+        if not _in_cap(x, spans):
+            out.append(x)
+            continue
+        near = [y for y in edges if abs(y - x) <= 0.15 and not _in_cap(y, spans)
+                and not any(s + 0.05 < y < e - 0.05 for s, e, _ in words if s < x + 1 and e > x - 1)]
+        if near:
+            out.append(round(min(near, key=lambda y: abs(y - x)), 3))
+    return sorted(set(out))
+
+
+def _shots(cuts, tf, cands, talk):
+    """컷 목록 → 화면 크기 표시(zoom)가 붙은 조각. 잘라 낸 자리(점프 컷)마다 원래 크기 ↔ 확대를 뒤집어 머리 위치가 튀지 않게 하고,
+    tf(타임라인 위치 → 목표 컷 길이)가 있으면 말하는 컷(talk) 중 그보다 긴 것만 cands(나눌 수 있는 곳) 중 목표에 가까운 곳에서 나눠 또 뒤집음.
+    컷 안의 이어진 말은 나누지 않는 한 크기가 그대로 · 지우는 곳은 없음 (zoom 표시는 _items_from_cuts 가 확대).
+    한 문장 안에서 '음'·'어'를 여러 번 잘라 내도 화면이 껌뻑이지 않게, 마지막으로 뒤집은 뒤 FLIP_MIN 초가 안 됐으면 그 점프 컷은 그대로 둠."""
+    out, pos, zoomed, prev, flipped = [], 0.0, False, None, 0.0
     for c in cuts:
         a, b = float(c["in"]), float(c["out"])
-        cur, k0 = a, len(out)
-        if tf(pos) > 0 and b - a > tf(pos) and (not cps or _is_talk(a, b, units, cps)):
-            bs = _word_bounds(words, a, b)
+        if prev is not None and abs(a - prev) > JUMP_EPS and pos - flipped >= FLIP_MIN - 1e-9:
+            zoomed, flipped = not zoomed, pos
+        cur = a
+        if tf is not None and tf(pos) > 0 and b - a > tf(pos) and talk(a, b):
+            bs = cands(a, b)
             while True:
                 t = tf(pos + cur - a)
                 if t <= 0 or b - cur <= 1.5 * t:
@@ -666,12 +695,23 @@ def _split_rhythm(cuts, words, target, units=None, cps=None):
                 if not cand:
                     break
                 x = min(cand, key=lambda v: abs(v - (cur + t)))
-                out.append({"in": round(cur, 3), "out": x, "zoom": bool((len(out) - k0) % 2)})
-                cur = x
-        # 나눈 조각만 원래 크기 ↔ 확대 번갈아 (안 나눈 컷·시범 장면은 원래 화면 그대로)
-        out.append({"in": round(cur, 3), "out": c["out"], "zoom": bool((len(out) - k0) % 2)})
-        pos += b - a
+                out.append({"in": round(cur, 3), "out": x, "zoom": zoomed})
+                cur, zoomed, flipped = x, not zoomed, pos + x - a
+        out.append({"in": round(cur, 3), "out": c["out"], "zoom": zoomed})
+        pos, prev = pos + b - a, b
     return out
+
+
+def _split_rhythm(cuts, words, target, units=None, cps=None, caps=None, segs=None):
+    """말하는 컷 중 목표 컷 길이(targetShot)보다 긴 것을 단어 경계에서 나눔 — 자막이 바뀌는 곳에서만 (자막 가운데서 나누면 같은 자막이 깜빡임).
+    나눈 곳·잘라 낸 자리마다 원래 크기 ↔ 확대(zoomScale)를 뒤집음 (카메라 두 대처럼 · _shots).
+    target: 초, 또는 타임라인 위치 → 초 (도입·본론·마무리). 시범처럼 말이 드문 컷은 나누지 않음."""
+    tf = target if callable(target) else (lambda pos, t=float(target or 0): t)
+    units = words if units is None else units
+    cps = cps or 0.0  # 모르면 말이 드문 컷도 나눔
+    spans = _cap_spans(caps, segs)
+    return _shots(cuts, tf, lambda a, b: [x for x in _cap_cuts(_word_bounds(words, a, b), spans, words) if a < x < b],
+                  lambda a, b: not cps or _is_talk(a, b, units, cps))
 
 
 def _curve_fn(curve3, total):
@@ -680,25 +720,92 @@ def _curve_fn(curve3, total):
     return lambda pos: c[0] if pos < 30.0 else c[2] if pos >= total - 20.0 else c[1]
 
 
-def _apply_tempo(cuts, units, cps, factor):
-    """말이 촘촘한 컷만 factor 배 빠르게 (1.0~1.12) · 시범처럼 말이 드문 곳은 1.0 그대로."""
+def _ov(a, b, spans):
+    return sum(max(0.0, min(b, y) - max(a, x)) for x, y in spans)
+
+
+def _apply_tempo(cuts, units, cps, factor, spans=(), still=()):
+    """말이 촘촘한 곳만 factor 배 빠르게 (1.0~1.12) · 시범처럼 말이 드문 곳·구령이 대부분인 곳(still: 구령 줄 [(시작, 끝)] — 시범 박자)은 1.0 그대로.
+    빠르기는 원본이 이어진 구간 안에서 말이 1초(DEMO_GAP) 넘게 쉬는 곳(자막 밖)에서만 바뀜 — 나눈 조각마다 따로 정하면
+    문장 가운데서 1.12배 ↔ 1.0배로 말소리가 갑자기 늘어짐. 바뀌는 곳이 조각 안이면 그 자리에서 조각을 나눔 (화면 크기는 그대로)."""
     f = round(min(TEMPO_MAX, max(1.0, float(factor or 1.0))), 3)
-    return [dict(c, speed=f) if f > 1.0 and _is_talk(c["in"], c["out"], units, cps) else dict(c) for c in cuts]
+    if f <= 1.0:
+        return [dict(c) for c in cuts]
+    runs = []
+    for c in cuts:  # 원본이 이어진 조각끼리 묶음
+        if runs and abs(float(c["in"]) - float(runs[-1][-1]["out"])) <= JUMP_EPS:
+            runs[-1].append(c)
+        else:
+            runs.append([c])
+    out, last, prev_out = [], None, None
+    for run in runs:
+        a, b = float(run[0]["in"]), float(run[-1]["out"])
+        # 잘라 낸 자리가 이어 말하는 한 자막 가운데면(앞뒤가 같은 자막 · 양쪽 1초 안에 말) 앞 구간 빠르기를 이어 감
+        # — 한 자막 안에서 1.12배 ↔ 1.0배로 바뀌지 않게 (말이 드문 시범 가운데를 잘라 낸 곳은 그대로)
+        carry = last if last is not None and prev_out is not None and any(
+            s0 + CAP_EDGE < prev_out < s1 and s0 < a < s1 - CAP_EDGE for s0, s1 in spans) and any(
+            prev_out - DEMO_GAP < u[1] and u[0] < prev_out for u in units) and any(
+            a < u[1] and u[0] < a + DEMO_GAP for u in units) else None
+        us = sorted(u for u in units if u[1] > a and u[0] < b)
+        pts, gaps, me = [a], [], None
+        for s, e, _ in us:  # 말이 1초 넘게 쉬는 곳 (자막이 떠 있는 곳은 빼고) — 우선 가운데로 나눠 말이 촘촘한지 봄
+            if me is not None and s - me > DEMO_GAP:
+                m = round((me + s) / 2, 3)
+                if a + 0.2 < m < b - 0.2 and not _in_cap(m, spans):
+                    pts.append(m)
+                    gaps.append((me, s))
+            me = e if me is None else max(me, e)
+        pts.append(b)
+        blocks = []
+        for k, (p, q) in enumerate(zip(pts, pts[1:])):
+            talk = _is_talk(p, q, units, cps) and not (still and _ov(p, q, still) > 0.5 * _ov(p, q, [u[:2] for u in units]))
+            sp = carry if k == 0 and carry is not None else f if talk else 1.0
+            if blocks and blocks[-1][2] == sp:
+                blocks[-1][1] = q
+            else:
+                if blocks:  # 빠르기가 바뀌는 쉼: 쉬는 동안은 느린 쪽(시범)으로 — 바뀌는 곳은 말 바로 뒤·바로 앞 0.15초
+                    me, s0 = gaps[k - 1]
+                    x = round(me + 0.15 if blocks[-1][2] > sp else s0 - 0.15, 3)
+                    blocks[-1][1], p = x, x
+                blocks.append([p, q, sp])
+        last, prev_out = blocks[-1][2], b
+        for c in run:
+            x0, x1 = float(c["in"]), float(c["out"])
+            parts = [(max(x0, p), min(x1, q), sp) for p, q, sp in blocks if min(x1, q) - max(x0, p) > 1e-6]
+            merged = []
+            for p, q, sp in parts:  # 0.2초도 안 되는 자투리는 옆 조각 빠르기로
+                if merged and (q - p < 0.2 or merged[-1][1] - merged[-1][0] < 0.2):
+                    merged[-1] = (merged[-1][0], q, merged[-1][2] if q - p < 0.2 else sp)
+                else:
+                    merged.append((p, q, sp))
+            for k, (p, q, sp) in enumerate(merged):
+                d = dict(c, **{"in": c["in"] if k == 0 else round(p, 3), "out": c["out"] if k == len(merged) - 1 else round(q, 3)})
+                if sp > 1.0:
+                    d["speed"] = sp
+                else:
+                    d.pop("speed", None)
+                out.append(d)
+    return out
 
 
-def _rhythm(cuts, segs, st, every):
-    """스타일 가편집의 컷 목록 → 컷 리듬(나누기·번갈아 확대) + 말 빠르기. 스타일 값이 없으면 예전처럼 줌 컷만."""
+def _rhythm(cuts, segs, st, every, caps=None):
+    """스타일 가편집의 컷 목록 → 컷 리듬(잘라 낸 자리·나눈 곳마다 화면 크기 뒤집기) + 말 빠르기.
+    caps: 이 편집본에 쓸 자막 [{start, end}] — 그 가운데서는 나누지도 빠르기를 바꾸지도 않음 (없으면 받아쓴 구간).
+    스타일 값이 없으면 나누지 않고 잘라 낸 자리에서만 뒤집음."""
     words = _rhythm_words(segs)
     units = words or [(float(s["start"]), float(s["end"]), len(str(s["text"]).replace(" ", ""))) for s in segs]
     cps = _coach_cps(segs)
     split = float(st.get("splitShot") or 0)
     c3 = st.get("curve3") if isinstance(st.get("curve3"), list) and len(st["curve3"]) == 3 else [split] * 3
     if split > 0 and words:
-        out = _split_rhythm(cuts, words, _curve_fn(c3, sum(c["out"] - c["in"] for c in cuts)), units, cps)
+        out = _split_rhythm(cuts, words, _curve_fn(c3, sum(c["out"] - c["in"] for c in cuts)), units, cps, caps, segs)
     else:
-        out = _punch(cuts, segs, every)
+        out = _punch(cuts, segs, every, caps)
     ref = float(st.get("tempo") or 0)
-    return _apply_tempo(out, units, cps, ref / cps) if ref > 0 and cps > 0 else out
+    if not (ref > 0 and cps > 0):
+        return out
+    still = [(float(s["start"]), float(s["end"])) for s in segs if takes.is_chant(s.get("text"))]
+    return _apply_tempo(out, units, cps, ref / cps, _cap_spans(caps, segs), still)
 
 
 def _new_seq(name, fmt, items, **kw):
@@ -727,6 +834,55 @@ def _hook(rec_item):
 
 
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
+TXT_LINE = 1.25   # 글 상자 한 줄 높이 = 글자 크기 × 1.25 (editor.html .txt line-height · 내보내기 ASS 도 같은 크기)
+TXT_GAP = 0.012   # 자동으로 놓는 글 상자끼리 띄울 틈 (화면 높이 비율)
+
+
+def frame_size(fmt):
+    """글자 크기·자리의 기준 화면 (내보내기 BW×BH 와 같음)."""
+    return (1080, 1920) if fmt == "shorts" else (1920, 1080)
+
+
+def text_box(text, st, W, H):
+    """글 상자 (왼, 위, 오른, 아래) — 화면 비율 0~1. y 는 글 아래 끝 (editor.html styleText · ASS \\an2·\\pos 와 같음).
+    화면 폭 92% 안에서 띄어쓰기마다 줄을 바꿔 셈 (editor.html .txt max-width 92%) · 글자 폭은 cap_fit 과 같은 어림."""
+    size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
+    black = st.get("weight") == "Black"
+    avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
+    widths = []
+    for para in str(text or "").replace("\r", "").split("\n"):
+        cur = 0.0
+        for w in para.split(" "):
+            ww = sum(_em(ch, black) for ch in w) * size
+            if cur and cur + sp + ww > avail:
+                widths.append(cur)
+                cur = ww
+            else:
+                cur = cur + (sp if cur else 0.0) + ww
+        widths.append(cur)
+    wd = min(avail, max(widths or [0.0])) + 2 * stroke
+    h = len(widths or [0]) * TXT_LINE * size + 2 * stroke
+    x, al = float(st.get("x", 0.5)) * W, st.get("align", "center")
+    left = x if al == "left" else x - wd if al == "right" else x - wd / 2
+    y = float(st.get("y", 0.5)) * H
+    return (left / W, (y - h) / H, (left + wd) / W, y / H)
+
+
+def _cap_band(st, H, lines=1):
+    """자막 글줄이 차지하는 높이 (위, 아래) 0~1 — 한 줄 자막 기준 (넘치면 cap_fit 이 글자를 줄여 한 줄로)."""
+    h = (lines * TXT_LINE * float(st.get("size") or 0) + 2 * float(st.get("strokeW") or 0)) / H
+    return float(st.get("y", 0.85)) - h, float(st.get("y", 0.85))
+
+
+def _stack_below(top_bottom, st, H, lines=1):
+    """st 글 상자를 위 글 상자 아래 끝(top_bottom) 밑으로 — 새 y (글 아래 끝)."""
+    h = (lines * TXT_LINE * float(st.get("size") or 0) + 2 * float(st.get("strokeW") or 0)) / H
+    return math.ceil((top_bottom + TXT_GAP + h) * 1000 - 1e-6) / 1000  # 올림: 반올림으로 틈이 조금이라도 줄지 않게
+
+
+def _overlap(a, b, gap=0.0):
+    """두 (위, 아래) 띠가 gap 안으로 겹치는지."""
+    return a[0] < b[1] + gap and b[0] < a[1] + gap
 
 # ---------- 영상 기획 분석 (plan) 반영: 인트로 티저 · 강조 자막 — 스타일 가편집(롱폼)에만, 원본 장면은 지우지 않음 ----------
 # 강조 낱말: 명사·부사만 (낱말 줄기 '잘하'·'힘들', 흔한 말 '진짜'·'어떻게' 는 뺌) — 낱말 전체가 같을 때만 (부분 일치 금지: '패턴'의 '턴')
@@ -785,8 +941,9 @@ def _find_emph(toks):
     return None
 
 
-def emphasis_label(txt, terms=None):
-    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+def emphasis_label(txt, terms=None, short=True):
+    """말 한 줄 → 화면에 띄울 강조 글자 (없으면 None). 짧은 말은 그대로(끝 마침표·쉼표는 뗌), 길면 '기술 이름 + 강조 낱말!' ('인사이드 패스 핵심!').
+    short=False(대사 자막이 켜짐): 짧은 말도 '기술 이름 + 강조 낱말!' · '강조 낱말!' 로만 — 자막과 같은 글이면 None.
     기술 이름도 강조 낱말도 낱말 전체가 맞을 때만 — 낱말 조각('잘하!'·'턴!')은 만들지 않음."""
     terms = terms if terms is not None else _emph_terms()
     toks = _tokens(txt)
@@ -796,13 +953,19 @@ def emphasis_label(txt, terms=None):
         return None, 0
     flat = re.sub(r"\s+", " ", str(txt or "")).strip()
     score = len(found) + (2 if emph else 0)
-    if len(flat.replace(" ", "")) <= EMPH_SHORT:
-        return flat, score
+    is_short = len(flat.replace(" ", "")) <= EMPH_SHORT
+    if is_short and short:
+        return re.sub(r"[\s.,。、…]+$", "", flat) or flat, score
+    lab = None
     if found and emph:
-        return f"{found[0][2]} {emph}!", score
-    if found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
-        return f"{found[0][2]}!", score
-    return None, 0
+        lab = f"{found[0][2]} {emph}!"
+    elif found and len(found[0][2].replace(" ", "")) >= 3:  # 기술 이름만 있으면 이름이 충분히 길 때만 ('인사이드 패스!', '트래핑!')
+        lab = f"{found[0][2]}!"
+    elif is_short and emph:  # 자막이 켜진 짧은 말: 말 전체 대신 강조 낱말만 ('세번째 포인트.' → '포인트!')
+        lab = f"{emph}!"
+    if lab is None or (is_short and _norm(lab) == _norm(flat)):  # 자막과 같은 글은 한 화면에 두 번 띄우지 않음
+        return None, 0
+    return lab, score
 
 
 def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
@@ -870,9 +1033,11 @@ def _src_to_tl(items, t):
     return None
 
 
-def _emphasis_titles(items, segs, per_min, color, after=0.0):
+def _emphasis_titles(items, segs, per_min, color, after=0.0, place=None, captions_on=False):
     """받아쓰기에서 기술 이름·강조 낱말이 든 말을 골라 1.5초 큰 색 글씨(titles)로 — 1분에 per_min 개까지, 서로 EMPH_GAP 초 넘게 떨어뜨림.
-    teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀)."""
+    teaser 가 있으면 그 뒤(after)부터. 글자는 emphasis_label (짧은 말은 그대로, 길면 '기술 이름 + 강조 낱말!', 맞는 게 없으면 건너뜀).
+    place(글, 모양, 시작, 끝) → (x, y): 자리 고르기 (emphasis_placer · 없으면 예전처럼 화면 위 30%).
+    captions_on: 대사 자막이 켜져 있으면 짧은 말을 그대로 띄우지 않음 (같은 글이 자막과 강조 글씨로 한 화면에 두 번) — 강조 낱말만 ('포인트!')."""
     total = max([i_end(it) for it in items] or [0.0])
     cap = int(per_min * total / 60.0 + 1e-9)
     if cap <= 0 or not segs:
@@ -881,7 +1046,7 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0):
     cands = []
     for s in segs:
         txt = str(s.get("text") or "").strip()
-        label, score = emphasis_label(txt, terms)
+        label, score = emphasis_label(txt, terms, short=not captions_on)
         if not label:
             continue
         t = float(s["start"])
@@ -902,8 +1067,189 @@ def _emphasis_titles(items, segs, per_min, color, after=0.0):
             picked.append((tl, label))
     fill = str(color or "").upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color or "")) else "#FFE14D"
     sty = dict(TITLE_STYLE, fill=fill, size=88, y=0.3)
-    return [{"id": _nid(), "text": label, "start": round(tl, 2), "dur": EMPH_DUR, "style": dict(sty), "plan": "emphasis"}
-            for tl, label in sorted(picked)]
+    out = []
+    if place is not None and hasattr(place, "prefetch"):  # 볼 장면을 한꺼번에 (하나씩 보면 10분 영상에 1분 넘게 걸림)
+        place.prefetch([(tl, tl + EMPH_DUR) for tl, _ in picked])
+    for tl, label in sorted(picked):
+        st1 = dict(sty)
+        if place is not None:  # 그 장면 얼굴·자막을 피한 빈자리
+            st1["x"], st1["y"] = place(label, st1, tl, tl + EMPH_DUR)
+        out.append({"id": _nid(), "text": label, "start": round(tl, 2), "dur": EMPH_DUR, "style": st1, "plan": "emphasis"})
+    return out
+
+
+# ---------- 자동 강조 글씨 자리: 얼굴(눈)을 가리지 않게 머리 위·옆·아래 빈자리로 ----------
+EMPH_SAFE = (0.03, 0.04, 0.97, 0.96)   # 글 상자가 들어갈 화면 안쪽 (왼, 위, 오른, 아래)
+FACE_PAD = (0.02, 0.06, 0.02, 0.02)    # 얼굴 상자 둘레 여유 (왼, 위(머리카락), 오른, 아래)
+FACE_GUESS = [[0.35, 0.12, 0.30, 0.26]]  # 얼굴을 못 찾을 때(모델 없음) 말하는 장면의 흔한 얼굴 자리 (가운데 · 화면 높이 12~38% — 실측 얼굴 15~35% + 여유)
+
+
+def emphasis_spot(text, st, W, H, faces, avoid=()):
+    """강조 글씨를 놓을 자리 (x, y) — 얼굴 상자 faces [[x, y, w, h] 0~1] 와 피할 띠 avoid [(위, 아래)] (대사 자막·쇼츠 훅)와
+    겹치지 않는 곳 중 먼저: 원래 자리(스타일 x·y) → 머리 위 → 옆(오른쪽·왼쪽) → 화면 위쪽 빈 띠 → 자막 위 빈 띠 → 얼굴 아래(몸·공).
+    다 겹치면 얼굴과 가장 적게 겹치는 곳."""
+    fb = [(f[0] - FACE_PAD[0], f[1] - FACE_PAD[1], f[0] + f[2] + FACE_PAD[2], f[1] + f[3] + FACE_PAD[3]) for f in faces or ()]
+    x0, y0 = float(st.get("x", 0.5)), float(st.get("y", 0.3))
+    b0 = text_box(text, dict(st, x=0.5, y=0.5), W, H)
+    bw, bh = b0[2] - b0[0], b0[3] - b0[1]
+    cands = [(x0, y0)]
+    if fb:
+        f = max(fb, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))  # 주인공 얼굴 (가장 큰 얼굴)
+        cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+        cands += [(cx, f[1] - TXT_GAP), (f[2] + TXT_GAP + bw / 2, cy + bh / 2), (f[0] - TXT_GAP - bw / 2, cy + bh / 2)]
+    low = min([a for a, b in avoid if a > 0.5] or [EMPH_SAFE[3]]) - TXT_GAP
+    high = max([b for a, b in avoid if b < 0.5] or [EMPH_SAFE[1]]) + TXT_GAP + bh
+    cands += [(0.5, high), (0.5, low)]
+    if fb:  # 얼굴 바로 아래(가슴·공 — 시범 동작을 가림)는 마지막에
+        cands.append((cx, f[3] + TXT_GAP + bh))
+
+    def fit(x, y):  # 화면 안으로 (가로만 밀어 넣음)
+        return min(max(x, EMPH_SAFE[0] + bw / 2), EMPH_SAFE[2] - bw / 2), y
+
+    def bad(x, y):
+        box = (x - bw / 2, y - bh, x + bw / 2, y)
+        face = sum(max(0.0, min(box[2], r[2]) - max(box[0], r[0])) * max(0.0, min(box[3], r[3]) - max(box[1], r[1])) for r in fb)
+        out = box[1] < EMPH_SAFE[1] - 1e-6 or box[3] > EMPH_SAFE[3] + 1e-6 or box[0] < EMPH_SAFE[0] - 1e-6 or box[2] > EMPH_SAFE[2] + 1e-6
+        band = any(_overlap((box[1], box[3]), b, TXT_GAP / 2) for b in avoid)
+        return out or band, face
+
+    best = None
+    for x, y in cands:
+        x, y = fit(x, y)
+        hard, face = bad(x, y)
+        if not hard and face <= 1e-9:
+            return round(x, 3), round(y, 3)
+        key = (hard, face)
+        if best is None or key < best[0]:
+            best = (key, (round(x, 3), round(y, 3)))
+    return best[1]
+
+
+FACE_W = 640           # 얼굴 찾기용 장면 가로 크기 (썸네일 장면 캐시와 따로 · 임시 폴더에 만들고 지움)
+FACE_FRAMES_MAX = 48   # 강조 글씨 자리 찾기에 볼 장면 수 한도 — 넘으면 글씨마다 가운데 한 장면만 (긴 레슨도 가편집이 오래 안 걸리게)
+FACE_LABEL = "자동 가편집 만드는 중"
+
+
+def _face_ready(name):
+    """얼굴 모델이 이미 있으면 불러 둠 (없으면 내려받지 않고 False). 부르는 동안 띄운 진행 표시는 원래대로 돌려놓음
+    (가편집은 작업(job)이 아니라 바로 답하는 요청이라 진행 표시를 지워 줄 곳이 없음)."""
+    try:
+        import face
+        if not face.ready():
+            return False
+        before = dict(core.PROGRESS)
+        try:
+            return bool(face.ensure(item=name, label=FACE_LABEL))
+        finally:
+            if core.PROGRESS.get("label") == FACE_LABEL:
+                core.set_progress(**before)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _face_samples(items, a, b, one=False):
+    """타임라인 a~b 초 동안 볼 장면 [(원본 시각, 확대 배율)] — 처음·끝 (one 이면 가운데 하나). 원본이 아닌 클립(사진 등)은 뺌."""
+    out = []
+    for t in (((a + b) / 2,) if one else (a + 0.2, b - 0.2)):
+        it = next((it for it in items if it.get("track") == "V1" and float(it["start"]) - 1e-6 <= t < i_end(it)), None)
+        if it is None or it.get("media", "main") != "main":
+            continue
+        src = i_mt(it, t)
+        out.append((round(src, 2), float(kf_at(param(it, "scale"), src)) / 100.0))
+    return out
+
+
+def _grab_small(name, t, folder):
+    """원본 t 초 장면 → folder 안 FACE_W 크기 그림 (못 만들면 None) · 썸네일 장면 캐시(frames/h_*.jpg, 1920)와 섞이지 않게 따로."""
+    out = Path(folder) / f"f_{t:09.3f}.jpg"
+    r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(core.VIDEOS / name), "-frames:v", "1",
+                  "-vf", f"scale='min({FACE_W},iw)':-2", "-q:v", "3", str(out)])
+    return out if r.returncode == 0 and out.is_file() and out.stat().st_size > 0 else None
+
+
+def _faces_at(name, srcs, cache):
+    """원본 시각들의 얼굴 상자를 cache {시각: [[x, y, w, h]] | None} 에 채움 — 없는 것만, 4장씩 함께 (ffmpeg 장면 뽑기가 대부분의 시간)."""
+    todo = sorted({t for t in srcs if t not in cache})
+    if not todo:
+        return cache
+    import face
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(t, folder):
+        try:
+            p = _grab_small(name, t, folder)
+            fs = face.faces(p) if p else None
+        except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
+            fs = None
+        return t, None if fs is None else [list(f["box"]) for f in fs]
+    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4) as ex:
+        for t, fs in ex.map(lambda x: one(x, folder), todo):
+            cache[t] = fs
+    return cache
+
+
+def _faces_on_screen(name, items, a, b, cache=None, one=False):
+    """타임라인 a~b 초 동안 화면의 얼굴 상자 [[x, y, w, h]] (롱폼 · 클립 확대 반영) — 처음·끝 두 장면 (one 이면 가운데 하나).
+    얼굴 모델이 없거나(내려받지 않음) 장면을 하나도 못 보면 None. cache: 장면별로 찾은 얼굴 (emphasis_placer 가 미리 채움)."""
+    if not _face_ready(name):
+        return None
+    cache = {} if cache is None else cache
+    smp = _face_samples(items, a, b, one)
+    _faces_at(name, [t for t, _ in smp], cache)
+    out, seen = [], 0
+    for t, s in smp:
+        fs = cache.get(t)
+        if fs is None:
+            continue
+        seen += 1
+        for x, y, w, h in fs:
+            out.append([0.5 + (x - 0.5) * s, 0.5 + (y - 0.5) * s, w * s, h * s])
+    return out if seen else None
+
+
+def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=None):
+    """_emphasis_titles 에 넘길 자리 고르기 (롱폼만) — 그 장면 얼굴(못 보면 흔한 얼굴 자리)·대사 자막 줄·hook(제목 상자)을 피함.
+    place.prefetch([(a, b)]) 로 볼 장면을 한꺼번에(4장씩 함께) 찾아 둠 · 장면이 FACE_FRAMES_MAX 넘으면 글씨마다 가운데 한 장면만.
+    쇼츠는 영상이 9:16 화면 안 상자(BOX_LAYOUT)에 들어가 얼굴 좌표를 그대로 못 써서 아직 안 받음."""
+    if fmt != "long":
+        raise ValueError("emphasis_placer: 롱폼만 (쇼츠는 상자 배치 좌표 변환이 없음)")
+    W, H = frame_size(fmt)
+    avoid = []
+    if captions_on and cap_style:
+        avoid.append(_cap_band(cap_style, H))
+    if hook:
+        hb = text_box(hook["text"], hook["style"], W, H)
+        avoid.append((hb[1], hb[3]))
+    state = {"cache": {}, "one": False}
+
+    def prefetch(spans):
+        spans = list(spans)
+        state["one"] = 2 * len(spans) > FACE_FRAMES_MAX
+        if spans and _face_ready(name):
+            _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
+
+    def place(text, st, a, b):
+        fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
+        return emphasis_spot(text, st, W, H, FACE_GUESS if fs is None else fs, avoid)
+    place.prefetch = prefetch
+    return place
+
+
+# 자동 가편집의 소리 크기 목표 범위 — 유튜브는 -14 LUFS 로 맞춰 틀고 작은 소리는 키워 주지 않음 (검수는 -16 밑이면 경고).
+# 아래 끝을 -16 이 아니라 -14 로 둔 것은 한 번 맞추기(loudnorm)가 0.6~1.1dB 모자라게 나와도 -16 밑으로 안 가게
+# (실측: 목표 -16 → -16.6 · -15 → -16.1 · -14 → -14.7 LUFS — I-056 · 2패스 맞추기가 들어오면 다시 볼 것)
+AUTO_LUFS = (-14.0, -13.0)
+
+
+def auto_lufs(v, nd=1):
+    """배운 스타일의 소리 크기(레퍼런스 원본을 잰 값, 예: -27) → 가편집 목표 (-14~-13 · 모르면 -14).
+    레퍼런스가 작게 올라가 있어도 우리 영상까지 유튜브에서 8~10dB 작게 들리면 안 되므로 범위 안으로만. nd: 반올림 자리 (None 이면 그대로)."""
+    try:
+        x = float(v) if v is not None else -14.0
+    except (TypeError, ValueError):
+        x = -14.0
+    x = min(AUTO_LUFS[1], max(AUTO_LUFS[0], x if math.isfinite(x) else -14.0))
+    return x if nd is None else round(x, nd)
 
 
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
@@ -912,10 +1258,15 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     st = style or {}
     rec = recommend(name, keep_pause=st.get("keepPause"))
     segs = _segments_of(name)
-    every, zoom = float(st.get("zoomEvery") or 0), min(1.6, max(1.0, float(st.get("zoomScale") or 1.0)))
-    if every <= 0:  # 컷 리듬 (#7): 확대 컷이 거의 없는 스타일 → 나눈 곳만 살짝
+    # 화면 크기: 잘라 낸 자리(점프 컷)·나눈 곳마다 뒤집음 — 스타일 zoomScale, 스타일이 없으면 살짝(1.08배)
+    every, zoom = float(st.get("zoomEvery") or 0), min(1.6, max(1.0, float(st.get("zoomScale") or SOFT_ZOOM)))
+    if every <= 0:  # 컷 리듬 (#7): 확대 컷이 거의 없는 스타일 → 살짝만
         zoom = min(zoom, SOFT_ZOOM)
-    master = {"volume": 1.0, "normalize": True, "lufs": round(min(-9.0, max(-24.0, float(st.get("lufs") or -14.0))), 1)}
+    try:  # 이 영상의 기본 자막 (편집실이 처음 만드는 것과 같음) — 그 가운데서는 컷을 나누거나 말 빠르기를 바꾸지 않음
+        caps = _captions_of(segs, info, silences_of(name))
+    except Exception:  # noqa: BLE001 — 용어 사전을 못 읽는 등: 받아쓴 구간 단위로
+        caps = None
+    master = {"volume": 1.0, "normalize": True, "lufs": auto_lufs(st.get("lufs"))}
 
     def cap(base):
         c = dict(base)
@@ -929,7 +1280,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     seqs = []
     if "long" in kinds:
         tidy = rec["tidy"] or [{"in": 0.0, "out": info["duration"]}]
-        items, extra = _items_from_cuts(_rhythm(tidy, segs, st, every), zoom=zoom), {}
+        items, extra = _items_from_cuts(_rhythm(tidy, segs, st, every, caps), zoom=zoom), {}
         tz, em = st.get("introTeaser") or {}, st.get("emphasisTitles") or {}
         titles = []
         if tz.get("on") and float(tz.get("sec") or 0) > 0:  # 기획 분석: 티저형 인트로 스타일
@@ -938,20 +1289,32 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
             except Exception:  # noqa: BLE001
                 peaks = None
             items, titles = _intro_teaser(items, rec, tidy, min(6.0, max(3.0, float(tz["sec"]))), segs, peaks)
-        if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막
-            titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0)
+        cl = cap(LONG_STYLE)
+        if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막 (그 장면 얼굴·대사 자막을 피한 자리)
+            titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0,
+                                       emphasis_placer(name, items, "long", cl, caps_on), captions_on=caps_on)
+        W, H = frame_size("long")
+        for t in titles:  # 위쪽 자막 스타일: 티저 제목이 대사 자막과 같은 자리면 제목을 자막 아래로
+            tb = text_box(t["text"], t["style"], W, H)
+            if t.get("plan") == "teaser" and _overlap(_cap_band(cl, H), (tb[1], tb[3]), TXT_GAP):
+                t["style"]["y"] = math.ceil((_cap_band(cl, H)[1] + TXT_GAP + (tb[3] - tb[1])) * 1000 - 1e-6) / 1000
         if titles:
             extra["titles"] = titles
-        seqs.append(_new_seq("롱폼 가편집", "long", items, captionStyle=cap(LONG_STYLE),
+        seqs.append(_new_seq("롱폼 가편집", "long", items, captionStyle=cl,
                              layout={"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0},
                              master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
         for i, r in enumerate(rec["shorts"], 1):
-            items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every), 0.3, zoom=zoom)
+            items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every, caps), 0.3, zoom=zoom)
             length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
-            seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cap(SHORTS_STYLE),
-                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on,
-                                 titles=[{"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}]))
+            hook = {"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}
+            cs = cap(SHORTS_STYLE)
+            W, H = frame_size("shorts")
+            tb = text_box(hook["text"], hook["style"], W, H)
+            if _overlap(_cap_band(cs, H), (tb[1], tb[3]), TXT_GAP):  # 위쪽 자막 스타일: 쇼츠 내내 떠 있는 훅 제목 아래(영상 위 칸)로
+                cs["y"] = _stack_below(tb[3], cs, H)
+            seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs,
+                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on, titles=[hook]))
     for q in seqs:  # 자동으로 만든 가편집 표시 ('가편집 다시 만들기'는 이것만 바꿈 · 스타일 가편집은 app.py 에서 따로 표시)
         q["auto"] = "style" if style else "rough"
     return seqs
@@ -1462,14 +1825,14 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
 
-    # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김)
+    # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김) — 구령·환호('셋!' · '골!' · '나이스! 나이스!')는 그대로
     junk = set()
     for i, s in enumerate(segs):
-        if _norm(s["text"]) in FILLERS or len(_norm(s["text"])) <= 1:
+        if _norm(s["text"]) in FILLERS or (len(_norm(s["text"])) <= 1 and not takes.is_chant(s["text"])):
             junk.add(i)
-        if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]):
+        if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]) and not takes.repeat_ok(s["text"], segs[i + 1]["text"]):
             junk.add(i)
-    junk_iv = takes.find_junk(segs, extra.get("silences", []))  # NG 테이크·슬레이트·말더듬 구간
+    junk_iv = takes.find_junk(segs, extra.get("silences", []), peaks)  # NG 테이크·슬레이트·말더듬 구간 (사이에 시범 소리가 있으면 같은 설명도 그대로)
     junk |= {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in junk_iv)}  # 그 안에 든 말도 군더더기
     # 단어 시각이 있으면: 말 사이에 홀로 떨어진 '음'·'어' 같은 추임새 단어도 뺌 (이미 빠지는 곳에 든 것은 셈하지 않음)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]

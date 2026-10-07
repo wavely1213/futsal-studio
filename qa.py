@@ -8,6 +8,11 @@ import re
 
 import core
 
+# 소리 크기 기준 (유튜브: -14 LUFS 로 맞춰 틀고, 작은 소리는 키워 주지 않음 · 최대 피크는 -1 dBTP 이하 권장)
+QUIET, LOUD, PEAK_MAX = -16.0, -10.0, -1.0
+ON_TARGET = 1.0     # 목표와 이만큼(dB) 안이면 '목표대로' · 넘으면 얼마나 모자란지·넘치는지 경고 (유튜브는 작은 소리를 키우지 않음)
+RAISE_MAX = -12.0   # '목표를 올려 다시 내보내세요' 안내의 가장 큰 값 (한 번 맞추기가 모자란 정도는 영상마다 달라 너무 올리면 다른 영상이 커짐)
+
 
 def _t(s):
     s = max(0, int(round(s)))
@@ -78,23 +83,28 @@ def check_video(path, fmt=None, master=None, run=None):
         P = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)
         lufs, peak = (float(I[-1]) if I else None), (float(P[-1]) if P else None)
         norm = bool(master) and master.get("normalize", True)
-        if lufs is not None and norm:  # 소리 크기 맞추기를 켠 영상: 정한 목표대로 됐는지
-            tgt = min(-9.0, max(-24.0, float(master.get("lufs") or -14.0)))
-            if abs(lufs - tgt) > 2:
-                add("warn", "소리 크기", f"{lufs:.1f} LUFS — 목표 {tgt:g} LUFS와 달라요.")
-            elif abs(tgt + 14) > 3:
-                add("ok", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})대로 맞췄어요. 유튜브는 -14 근처로 맞춰 틀어요.")
-            else:
-                add("ok", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})대로 맞췄어요.")
-        elif lufs is not None:
-            if lufs < -18:
-                add("warn", "소리가 작아요", f"{lufs:.1f} LUFS — 유튜브 기준(-14 근처)보다 작아요. 내보내기에서 '소리 크기 맞추기'를 켜세요.")
-            elif lufs > -10:
-                add("warn", "소리가 커요", f"{lufs:.1f} LUFS — 유튜브가 줄여서 틀어요. -14 근처가 좋아요.")
-            else:
-                add("ok", "소리 크기", f"{lufs:.1f} LUFS — 적당해요.")
-        if peak is not None and peak > -0.5:
-            add("warn", "소리 깨짐 가능", f"최대 피크 {peak:.1f} dBFS — 소리가 찢어질 수 있어요.")
+        tgt = min(-9.0, max(-24.0, float(master.get("lufs") or -14.0))) if norm else None
+        if lufs is None:
+            pass
+        elif lufs < QUIET:  # 목표와 상관없이: 유튜브는 작은 소리를 키워 주지 않음 → 다른 영상보다 작게 들림
+            how = (f"편집실 '소리 크기 맞추기' 목표가 {tgt:g} LUFS예요. -14로 바꿔 다시 내보내세요." if tgt is not None and tgt < QUIET
+                   else "편집실에서 '소리 크기 맞추기'를 켜고(목표 -14) 다시 내보내세요." if tgt is None
+                   else f"목표({tgt:g})보다 {tgt - lufs:.1f}dB 작게 나왔어요(순간만 큰 소리가 있으면 덜 키워져요). "
+                        f"'소리 크기 맞추기' 목표를 {min(RAISE_MAX, float(round(2 * tgt - lufs + 0.3))):g}로 올려 다시 내보내세요.")
+            add("warn", "소리가 작아요", f"{lufs:.1f} LUFS — 유튜브는 작은 소리를 키워 주지 않아서 다른 영상보다 작게 들려요. {how}")
+        elif lufs > LOUD:
+            add("warn", "소리가 커요", f"{lufs:.1f} LUFS — 유튜브가 -14 근처로 줄여서 틀어요(그만큼 소리가 납작해져요). -14 근처가 좋아요.")
+        elif tgt is not None and lufs < tgt - ON_TARGET:  # 한 번 맞추기(loudnorm)가 모자라게 나옴 — '목표대로'라고 하지 않음
+            add("warn", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})보다 {tgt - lufs:.1f}dB 작게 나왔어요. 유튜브는 키워 주지 않아요. "
+                f"'소리 크기 맞추기' 목표를 {min(RAISE_MAX, float(round(2 * tgt - lufs + 0.3))):g}로 올려 다시 내보내세요.")
+        elif tgt is not None and lufs > tgt + ON_TARGET:
+            add("warn", "소리 크기", f"{lufs:.1f} LUFS — 목표 {tgt:g} LUFS보다 {lufs - tgt:.1f}dB 커요.")
+        elif tgt is not None:
+            add("ok", "소리 크기", f"{lufs:.1f} LUFS — 목표({tgt:g})대로 맞췄어요.")
+        else:
+            add("ok", "소리 크기", f"{lufs:.1f} LUFS — 적당해요.")
+        if peak is not None and peak > PEAK_MAX:
+            add("warn", "소리 깨짐 가능", f"최대 피크 {peak:.1f} dBTP — 유튜브 권장(-1 dBTP 이하)보다 커서 소리가 찢어질 수 있어요.")
     bad = sum(i["lv"] == "bad" for i in items)
     warn = sum(i["lv"] == "warn" for i in items)
     order = {"bad": 0, "warn": 1, "ok": 2}

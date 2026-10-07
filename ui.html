@@ -1643,9 +1643,9 @@ async function claudeStatus(refresh) {
 const scores = {}, scoreVid = {}, SCORE_HINT = "고른 영상을 이 스타일로 가편집하면 몇 점일지 매겨 봐요";
 const SCORING_TXT = `처음 보는 영상이라 원본 화면을 한 번 살펴본 뒤 점수를 매겨요. 영상이 길면 몇 분 걸려요… <button class="btn" data-sstop>멈추기</button>`;
 let scoring = null;  // 작업으로 매기는 중인 점수 {name, vid} — 카드를 다시 그려도 '매기는 중'·멈추기를 그대로 보여 줌
-function scoreText(r) {  // fixed: 가편집이 스타일 값을 그대로 옮겨 써서 늘 맞는 부분 (소리 크기) → 점수에는 안 넣고 '스타일대로'
+function scoreText(r) {  // fixed: 가편집이 스타일과 상관없이 맞추는 부분 (소리 크기 → 유튜브 기준) → 점수에는 안 넣음
   const fx = r.fixed || [], parts = Object.entries(r.parts || {}).filter(([, v]) => v !== null && v !== undefined)
-    .map(([k, v]) => fx.includes(k) ? `<span title="가편집이 스타일 값을 그대로 써서 점수에는 넣지 않아요">${esc(k)} 스타일대로</span>` : `${esc(k)} ${v}`);
+    .map(([k, v]) => fx.includes(k) ? `<span title="가편집은 소리 크기를 유튜브 기준(-14 근처)으로 맞춰서 점수에는 넣지 않아요">${esc(k)} 유튜브 기준</span>` : `${esc(k)} ${v}`);
   return `스타일 가편집 일치 <b>${r.score}점</b>${parts.length ? " · " + parts.join(" · ") : ""}${r.guessed ? ` <span title="원본 화면을 살펴보지 못해 한 자리에서 계속 찍은 영상으로 보고 매겼어요">(어림 점수)</span>` : ""}`;
 }
 function scoreBlock(name, stamp) {  // stamp: 스타일을 배운 시각 → 같은 이름으로 다시 배우면 예전 점수는 안 보임
