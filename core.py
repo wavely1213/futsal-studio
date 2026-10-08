@@ -282,6 +282,19 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
+# 같은 해상도·fps 면 H.264(avc1) 화면을 먼저 (yt-dlp 기본은 AV1 > VP9 > H.264 라 '399+140' AV1 을 고름).
+# 편집실은 같은 원본을 미리보기·파형·장면 고르기·내보내기·검수에서 여러 번 다시 푸는데, AV1 은 풀기가 1.3~1.4배 무겁고
+# 하드웨어 풀기가 없는 구형 노트북·Premiere 에서 끊기거나 안 열림. H.264 가 없거나 해상도가 낮으면 지금 규칙(해상도·fps 먼저) 그대로.
+# 'res'·'fps' 를 앞에 둬서 1080p AV1 대신 720p H.264 로 떨어지지 않게 · HDR 은 그 뒤라 같은 해상도면 SDR H.264 (편집·내보내기용)
+FORMAT_SORT = ["res", "fps", "vcodec:h264"]
+
+
+def format_opts(max_height=1080):
+    """yt-dlp 형식 고르기: mp4 화면 + m4a 소리 (없으면 합쳐진 것) · 같은 해상도면 H.264 먼저."""
+    return {"format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
+            "format_sort": list(FORMAT_SORT)}
+
+
 def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None,
              why=None, blocked_msg=None):
     """영상 받기 → 받지 못한 영상 id 목록. 기본은 편집용 보관함(VIDEOS · archive.txt · 출처는 sources.json).
@@ -312,7 +325,7 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
             set_progress(label=label, item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=99, detail="영상과 소리를 합치는 중")
 
     opts = {
-        "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
+        **format_opts(max_height),
         "merge_output_format": "mp4",
         # 폴더는 paths 로 따로: trim_file_name 은 outtmpl 전체(폴더 포함)를 자르므로 긴 작업 폴더면 제목이 사라지거나
         # 받은 파일이 다른 폴더로 나감 (yt-dlp _prepare_filename)
