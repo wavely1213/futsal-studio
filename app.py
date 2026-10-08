@@ -570,9 +570,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "영상을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요"})
             seq = parse_qs(u.query, keep_blank_values=True).get("seq", [src["default"]])[0]
             try:
-                kit = upload.load_kit(n, seq)
+                kit = upload.load_kit(n, seq, live=True)
             except LookupError:  # 그 사이 편집실에서 지운 편집본
-                seq, kit = "", upload.load_kit(n, "")
+                seq, kit = "", upload.load_kit(n, "", live=True)
             return self._send(200, dict(src, seq=seq, kit=kit))
         if u.path == "/api/upload/thumb":  # 완성본 폴더의 썸네일 미리보기
             try:

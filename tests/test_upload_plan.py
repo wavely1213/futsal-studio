@@ -59,6 +59,47 @@ class SlotTests(unittest.TestCase):
         self.assertEqual(p["weekSlots"], 0)
         self.assertEqual(strategy.slot_text(p["slots"][0]), "10-12(월) 12:00")
 
+    def test_scheduled_upload_takes_its_own_slot(self):
+        """검토: 추천 시각(수 12:00)에 예약하면 그 자리가 차고 다음 편집본은 그다음 자리 — 월요일을 놓쳤어도 '앞자리부터 찼다'고 보지 않음."""
+        ups = [(kst(2026, 10, 7, 12, 0), "S", "a")]
+        p = strategy.upload_slots(plan_c(), "S", NOW, ups, (18, 0, "x"))
+        self.assertEqual(strategy.slot_text(p["slots"][0]), "10-07(수) 18:00")
+        self.assertEqual((p["used"], p["left"], p["weekSlots"], p["behind"]), (1, 4, 2, 2))
+        ups.append((kst(2026, 10, 7, 18, 0), "S", "b"))
+        p = strategy.upload_slots(plan_c(), "S", NOW, ups, (18, 0, "x"))
+        self.assertEqual(strategy.slot_text(p["slots"][0]), "10-09(금) 18:00")
+        self.assertEqual(p["weekSlots"], 1)
+
+    def test_future_schedule_this_week_and_next(self):
+        thu = kst(2026, 10, 8, 13, 0)
+        p = strategy.upload_slots(plan_c(), "S", thu, [(kst(2026, 10, 9, 18, 0), "S", "a")], (18, 0, "x"))
+        self.assertEqual(p["weekSlots"], 0)  # 금요일 자리는 예약으로 참
+        self.assertEqual(strategy.slot_text(p["slots"][0]), "10-12(월) 12:00")
+        p = strategy.upload_slots(plan_c(), "S", thu, [(kst(2026, 10, 12, 12, 0), "S", "b")], (18, 0, "x"))
+        texts = [strategy.slot_text(t) for t in p["slots"]]
+        self.assertNotIn("10-12(월) 12:00", texts)  # 다음 주 예약도 그 주 자리를 채움
+        self.assertEqual(texts[:3], ["10-09(금) 18:00", "10-12(월) 18:00", "10-14(수) 12:00"])
+
+    def test_make_up_upload_fills_missed_slot(self):
+        ups = [(kst(2026, 10, 5, 18, 5), "S", "a"), (kst(2026, 10, 6, 13, 0), "S", "b")]  # 월 18시 · 화 13시(놓친 월 12시를 메움)
+        p = strategy.upload_slots(plan_c(), "S", NOW, ups, (18, 0, "x"))
+        self.assertEqual((p["left"], p["weekSlots"], p["behind"]), (3, 3, 0))
+        self.assertEqual(strategy.slot_text(p["slots"][0]), "10-07(수) 12:00")
+
+    def test_plan_start_drops_earlier_slots(self):
+        """검토: 목요일에 처음 세운 계획은 그 전 월·수 자리를 개수·밀림에서 뺌."""
+        thu = kst(2026, 10, 8, 10, 0)
+        p = strategy.upload_slots(plan_c(), "S", thu, [], (18, 0, "x"), start=kst(2026, 10, 8, 9, 0))
+        self.assertEqual((p["q"], p["left"], p["weekSlots"], p["behind"]), (1, 1, 1, 0))
+        self.assertEqual(strategy.slot_text(p["slots"][0]), "10-09(금) 18:00")
+        self.assertEqual(strategy.upload_slots(plan_c(), "S", thu, [], (18, 0, "x"))["behind"], 4)  # 계획이 그 전부터면 놓친 자리
+        d = dict(plan_c(), startedAt=kst(2026, 10, 8, 12), firstSavedAt=kst(2026, 10, 8, 9, 30))
+        self.assertEqual(strategy.plan_start(d), kst(2026, 10, 8, 9, 30))
+        self.assertEqual(strategy.plan_start(dict(d, firstSavedAt=None)), kst(2026, 10, 8))  # 모르면 시작한 날 0시
+        self.assertEqual(strategy.plan_start(dict(d, startedAt=kst(2026, 10, 1, 12))), kst(2026, 10, 1))  # 일부러 지난 날짜로 정함 → 그날부터
+        self.assertEqual(strategy.plan_start(dict(d, startedAt=kst(2026, 10, 12, 12))), kst(2026, 10, 12))  # 앞으로의 날
+        self.assertIsNone(strategy.plan_start({}))
+
     def test_half_per_week_alternates(self):
         p = strategy.upload_slots(plan_c(), "L", NOW, [], (18, 0, "x"))
         self.assertEqual(p["q"], 1)  # 지난주에 안 올렸으니 이번 주 1개 (월요일 자리는 지남)
@@ -148,6 +189,20 @@ class Base(unittest.TestCase):
         (self.tmp / "youtube").mkdir(exist_ok=True)
         (self.tmp / "youtube" / "history.json").write_text(json.dumps({"v": 1, "items": items}, ensure_ascii=False), encoding="utf-8")
 
+    def save_plan(self, d, first=NOW - 30 * 86400):
+        """전략 저장 (시험 시각 NOW 는 실제 시각보다 앞이라 '처음 저장한 때'·'시작한 날'을 NOW 기준으로 맞춤)."""
+        strategy.save_strategy(d)
+
+        def put(s):
+            s["strategy"].update(firstSavedAt=first, startedAt=first)
+        strategy._update_state(put)
+
+
+def sched(name, seq, at, vid):
+    """유튜브에 바로 올린 기록 한 줄 — 비공개로 올리고 at(한국 시간)에 공개 예약."""
+    iso = datetime.fromtimestamp(at, KST).astimezone(strategy.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"videoId": vid, "name": name, "seq": seq, "file": "", "at": NOW, "title": seq, "shorts": True, "privacy": "private", "publishAt": iso}
+
 
 class StockTests(Base):
     """만들어 둔 편집본: 내보냈고 아직 안 올린 것 (유튜브 올린 기록 · 우리 채널 제목으로 올렸는지 봄)."""
@@ -174,20 +229,40 @@ class StockTests(Base):
 class KitSlotTests(Base):
     def test_kit_slot_order_and_line(self):
         self.assertIsNone(strategy.kit_slot("a.mp4", "s1", "S", NOW))  # 전략을 저장하기 전에는 없음
-        strategy.save_strategy(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
         self.video("a.mp4", [("s1", "쇼츠 1", "shorts"), ("s2", "쇼츠 2", "shorts"), ("s4", "쇼츠 4", "shorts")], exported=("s1", "s2"), at=NOW - 3600)
         with mock.patch.object(strategy, "recent_uploads", return_value=[]):
             a = strategy.kit_slot("a.mp4", "s1", "S", NOW)
             b = strategy.kit_slot("a.mp4", "s2", "S", NOW)
             c = strategy.kit_slot("a.mp4", "s4", "S", NOW)  # 아직 안 내보냄 → 준비된 것 다음
         self.assertEqual((a["text"], b["text"], c["text"]), ("10-07(수) 12:00", "10-07(수) 18:00", "10-09(금) 18:00"))
-        self.assertEqual(a["line"], "다음 올릴 날: 10-07(수) 12:00 · 이번 주 남은 자리 3")
+        self.assertEqual(a["line"], "다음 올릴 날: 10-07(수) 12:00 · 이번 주에 쇼츠 3개 더 올려요")
         self.assertEqual(a["behind"], 2)  # 월요일 두 자리를 놓침
         self.assertTrue(a["local"].startswith("2026-10-07T12:00"))
         self.assertIn("월·수·금", a["why"])
+        self.assertIn("수요일은 하루 쇼츠 2개라 12:00·18:00에 올려요", a["why"])  # 12:00 자리 옆에 '저녁 6시'만 쓰지 않음
+
+    def test_scheduling_in_turn_moves_to_next_slot(self):
+        """검토: 쇼츠 1~3을 차례로 '다음 올릴 날'에 공개 예약하면 저마다 다른 날을 받고 이번 주에 더 올릴 수가 줄어듦 ·
+        예약한 키트는 새 날 대신 '이미 공개 예약했어요'."""
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.video("a.mp4", [("s1", "쇼츠 1", "shorts"), ("s2", "쇼츠 2", "shorts"), ("s3", "쇼츠 3", "shorts")], exported=("s1", "s2", "s3"), at=NOW - 3600)
+        hist, got = [], []
+        with mock.patch.object(strategy, "known_channels", return_value={}):
+            for i, sid in enumerate(("s1", "s2", "s3")):
+                k = strategy.kit_slot("a.mp4", sid, "S", NOW)
+                got.append((k["text"], k["left"]))
+                hist.insert(0, sched("a.mp4", sid, k["at"], f"vid{i:08d}"))
+                self.history(hist)
+            done = upload.kit_schedule("a.mp4", "s1", "shorts")
+        self.assertEqual(got, [("10-07(수) 12:00", 3), ("10-07(수) 18:00", 2), ("10-09(금) 18:00", 1)])
+        self.assertTrue(done["done"])
+        self.assertIn("10-07(수) 12:00", done["line"])
+        self.assertTrue(done["line"].startswith("이미"))
+        self.assertIsNone(upload.upload_state("a.mp4", "s4"))
 
     def test_kit_has_schedule_and_text_line(self):
-        strategy.save_strategy(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
         kit = {"version": 1, "made": "2026-10-07 10:00", "name": "a.mp4", "source": {"id": "", "label": "원본 영상 그대로"}, "format": "shorts",
                "duration": 40.0, "topics": ["패스"], "titles": ["패스 꿀팁"], "title": "패스 꿀팁", "chapters": [], "hashtags": [], "tags": [], "description": ""}
         upload.annotate(kit)
@@ -205,7 +280,7 @@ class WeekPlanTests(Base):
         self.assertIsNone(self.week())
 
     def test_blocked_on_upload_with_stock(self):
-        strategy.save_strategy(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
         self.video("a.mp4", [("s1", "쇼츠 1", "shorts"), ("s2", "쇼츠 2", "shorts"), ("s3", "쇼츠 3", "shorts")], exported=("s1", "s2", "s3"), at=NOW - 3600)
         w = self.week()
         self.assertTrue(w["isDay"])  # 수요일 = 올리는 날
@@ -217,28 +292,62 @@ class WeekPlanTests(Base):
         self.assertTrue(any("2개가 밀렸어요" in n for n in w["notes"]), w["notes"])
 
     def test_warn_when_stock_runs_out_and_blocked_edit_or_shoot(self):
-        strategy.save_strategy(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
         self.video("a.mp4", [("s1", "쇼츠 1", "shorts"), ("s2", "쇼츠 2", "shorts")], exported=("s1",), at=NOW - 3600)
         w = self.week()
         self.assertEqual(len(w["warns"]), 1)
         self.assertIn("쇼츠 더 만들기", w["warns"][0]["text"])
-        self.assertIn("10-07(수) 18:00 전에 2개를", w["warns"][0]["text"])
+        self.assertIn("10-07(수) 18:00 전에 2개를 더 내보내 두세요", w["warns"][0]["text"])  # 편집 중인 쇼츠가 있으면 내보내기
+        self.assertEqual(w["warns"][0]["go"], "cut")
         (core.OUT / "a_쇼츠 1.mp4").unlink()
         w = self.week()
         self.assertEqual((w["blocked"], w["action"]["go"]), ("edit", "cut"))  # 안 내보낸 편집본만 있음
+        self.assertTrue(w["blockText"].startswith("쇼츠는 편집에서 막혀 있어요"), w["blockText"])
+        self.assertIsNone(w["warns"][0]["go"])  # 막힌 곳 줄과 같은 '4 편집실 열기' 단추를 두 번 두지 않음
         editor._ppath("a.mp4").unlink()
         w = self.week()
         self.assertEqual((w["blocked"], w["action"]["go"]), ("shoot", "library"))
+        self.assertEqual(w["blockText"], "쇼츠는 촬영부터 해야 해요 (편집 중인 쇼츠도 없어요)")
+        self.assertIn("더 찍어서 만들어요", w["warns"][0]["text"])  # 내보낼 것이 없으면 '내보내 두세요'가 아님
+        self.assertIsNone(w["warns"][0]["go"])
+
+    def test_plan_saved_today_is_not_behind(self):
+        """검토: 목요일 아침에 처음 저장한 계획이 바로 '밀렸어요'가 되지 않음 · 요일을 정하지 않았으면 놓친 날로 탓하지 않음."""
+        thu = kst(2026, 10, 8, 10, 0)
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]), first=kst(2026, 10, 8, 9, 50))
+        w = self.week(now=thu)
+        self.assertFalse(any("밀렸어요" in n for n in w["notes"]), w["notes"])
+        self.assertEqual((w["left"]["S"], w["slots"]["S"]), (1, 1))
+        self.save_plan(dict(strategy.preset("C"), days=[]))
+        w = self.week(now=thu)
+        self.assertFalse(any("밀렸어요" in n for n in w["notes"]), w["notes"])
+        with mock.patch.object(strategy, "recent_uploads", return_value=[]):
+            self.assertEqual(strategy.kit_slot("a.mp4", "", "S", thu)["behind"], 0)
+
+    def test_block_names_format_and_no_remaining_days_note(self):
+        """검토: 쇼츠는 이번 주 다 올렸고 롱폼 월요일 자리를 놓침 → '롱폼은 촬영부터' · 이번 주 남은 날이 없으면 '남은 날에 더 올리거나' X."""
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.video("a.mp4", [("s1", "쇼츠 1", "shorts")], exported=("s1",), at=NOW - 3600)
+        ups = [(kst(2026, 10, 5, 12), "S", "a"), (kst(2026, 10, 5, 18), "S", "b"), (kst(2026, 10, 6, 18), "S", "c"),
+               (kst(2026, 10, 7, 9), "S", "d"), (kst(2026, 10, 7, 9, 30), "S", "e")]
+        w = self.week(ups=ups)
+        self.assertEqual(w["left"], {"S": 0, "L": 1})
+        self.assertEqual((w["blocked"], w["action"]["kind"]), ("shoot", "L"))
+        self.assertEqual(w["blockText"], "롱폼은 촬영부터 해야 해요 (편집 중인 롱폼도 없어요)")
+        w = self.week(now=kst(2026, 10, 10, 20, 0), ups=ups)
+        note = [n for n in w["notes"] if "밀렸어요" in n]
+        self.assertTrue(note, w["notes"])
+        self.assertNotIn("남은 날에", note[0])
 
     def test_shorts_only_plan(self):
-        strategy.save_strategy(dict(strategy.preset("C"), days=["화"], formats=[{"id": "f", "name": "쇼츠", "kind": "shorts", "perWeek": 2}]))
+        self.save_plan(dict(strategy.preset("C"), days=["화"], formats=[{"id": "f", "name": "쇼츠", "kind": "shorts", "perWeek": 2}]))
         w = self.week()
         self.assertIsNotNone(w)  # 롱폼 0개 계획도 카드가 그대로
         self.assertEqual((w["left"]["L"], w["slots"]["L"]), (0, 0))
         self.assertIsNone(strategy.kit_slot("a.mp4", "", "L", NOW))
 
     def test_week_done(self):
-        strategy.save_strategy(dict(strategy.preset("A"), days=["화", "목"]))  # 롱폼 1 · 쇼츠 3
+        self.save_plan(dict(strategy.preset("A"), days=["화", "목"]))  # 롱폼 1 · 쇼츠 3
         ups = [(kst(2026, 10, 5, 18), "S", "a"), (kst(2026, 10, 6, 18), "S", "b"), (kst(2026, 10, 6, 19), "S", "c"), (kst(2026, 10, 6, 20), "L", "d")]
         w = self.week(ups=ups)
         self.assertEqual(w["left"], {"S": 0, "L": 0})
@@ -246,7 +355,7 @@ class WeekPlanTests(Base):
         self.assertFalse(w["isDay"])  # 수요일은 화·목 계획 밖
 
     def test_overview_week_has_plan(self):
-        strategy.save_strategy(dict(strategy.preset("C"), days=["월", "수", "금"]))
+        self.save_plan(dict(strategy.preset("C"), days=["월", "수", "금"]))
         ov = strategy.overview()
         self.assertIn("plan", ov["week"])
         self.assertEqual(ov["week"]["plan"]["days"], ["월", "수", "금"])

@@ -2273,14 +2273,16 @@ checkUpdate();
     const k = up.kit, sc = k && k.schedule, box = $("upSched");
     box.hidden = !k;
     if (!k) return;
-    box.innerHTML = sc ? `<b>${esc(sc.line)}</b><button class="btn" id="upSchedCopy">복사</button><span class="why">${esc(sc.why || "")}${sc.behind ? ` · 이번 주 계획보다 ${sc.behind}개 밀렸어요` : ""}</span>`
+    box.innerHTML = sc && sc.done ? `<b>${esc(sc.line)}</b>`  // 이미 올렸거나 공개 예약한 편집본 (새 날을 주지 않음)
+      : sc ? `<b>${esc(sc.line)}</b><button class="btn" id="upSchedCopy">복사</button><span class="why">${esc(sc.why || "")}${sc.behind ? ` · 이번 주 계획보다 ${sc.behind}개 밀렸어요` : ""}</span>`
       : `<span class="why">${k.planSaved ? `저장한 채널 전략에 ${k.format === "shorts" ? "쇼츠" : "롱폼"} 계획(주당 개수)이 없어서 다음 올릴 날은 정하지 않았어요`
         : "8 채널 전략에서 [우리 전략]을 저장하면 다음 올릴 날(요일·시각)을 여기에 알려 드려요"}</span>`;
-    if (sc) $("upSchedCopy").onclick = async () => { await copyText(sc.line); toast("다음 올릴 날을 복사했어요"); };
+    if (sc && !sc.done) $("upSchedCopy").onclick = async () => { await copyText(sc.line); toast("다음 올릴 날을 복사했어요"); };
   }
   function renderGuests() {  // 출연자·게스트 (D-085): 넣은 게스트 · 대사에서 부른 이름 제안 · 적어 둔 게스트 목록
-    const k = up.kit, gs = k.guests || [], have = new Set(gs.map(g => g.name.replace(/\s+/g, "")));
-    const sug = (k.guestHint || []).filter(n => !have.has(n.replace(/\s+/g, "")));
+    const gkey = n => (n || "").replace(/\s*(?:선수|코치|감독|님|쌤|선생님)$/, "").replace(/\s+/g, "");  // upload.guest_key 와 같은 규칙
+    const k = up.kit, gs = k.guests || [], have = new Set(gs.map(g => gkey(g.name)));
+    const sug = (k.guestHint || []).filter(n => !have.has(gkey(n)));
     $("upGuests").innerHTML = gs.map((g, i) => `<span class="g">${esc(g.name)}${g.bio ? ` <small>${esc(g.bio)}</small>` : ""}<button data-gx="${i}" aria-label="빼기" title="빼기">×</button></span>`).join("")
       + sug.map(n => `<button class="g sug" data-gs="${esc(n)}" title="대사에서 이 이름을 불렀어요">+ ${esc(n)} 게스트로 넣기</button>`).join("");
     $("upGuestNote").textContent = gs.length ? `${gs.length}명` : "";
@@ -2474,7 +2476,7 @@ checkUpdate();
     show("ytSched", o.privacy === "scheduled");
     $("ytWhen").min = localDT(new Date(Date.now() + schedMin() * 60e3));
     if (document.activeElement !== $("ytWhen")) $("ytWhen").value = o.when;
-    const sc = (ctx().kit || {}).schedule, fromPlan = sc && o.when && o.when === localDT(new Date(sc.at * 1000));
+    const sc = (ctx().kit || {}).schedule, fromPlan = sc && !sc.done && o.when && o.when === localDT(new Date(sc.at * 1000));
     $("ytSchedNote").textContent = o.when ? `이 시각에 공개돼요 (그 전까지 비공개)${fromPlan ? " · 채널 전략의 다음 올릴 날이에요" : ""}` : `공개할 날짜·시각을 골라 주세요 (지금부터 ${schedMin()}분 뒤부터)`;
     show("ytAudit", !audited());
     document.querySelectorAll('input[name="ytKids"]').forEach(r => (r.checked = r.value === o.kids));
@@ -2786,7 +2788,7 @@ checkUpdate();
   $("ytPriv").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
     YT.opts.privacy = b.dataset.v;
     const sc = (ctx().kit || {}).schedule;  // 예약 공개 기본값 = 채널 전략의 다음 올릴 날 (D-086 · 바꿔도 됨)
-    if (b.dataset.v === "scheduled" && !YT.opts.when && sc && sc.at * 1000 > Date.now() + schedMin() * 60e3) YT.opts.when = localDT(new Date(sc.at * 1000));
+    if (b.dataset.v === "scheduled" && !YT.opts.when && sc && !sc.done && sc.at * 1000 > Date.now() + schedMin() * 60e3) YT.opts.when = localDT(new Date(sc.at * 1000));
     syncInputs(planNow()); renderProbs(planNow() || {});
   }));
   $("ytWhen").addEventListener("change", () => { YT.opts.when = $("ytWhen").value; syncInputs(planNow()); renderProbs(planNow() || {}); });
@@ -3013,14 +3015,14 @@ checkUpdate();
     const due = w.checkDue ? Math.ceil((w.checkDue - Date.now() / 1000) / 86400) : null;
     const up = (n, plan, lab) => { const goal = plan === 0.5 ? 1 : Math.round(plan); return plan > 0 ? `${lab} <span class="${n >= goal ? "ok" : ""}">${n}</span>/${plan === 0.5 ? "2주에 1" : goal}개` : `${lab} ${n}개`; };
     const p = w.plan, act = p && p.action;  // 올리는 요일·만들어 둔 편집본·막힌 곳 (D-086)
-    const BLOCK = { upload: "올리기에서 막혀 있어요", edit: "편집에서 막혀 있어요 (내보낸 편집본이 없어요)", shoot: "촬영부터 해야 해요 (아직 안 내보낸 편집본도 없어요)" };
     const stock = p ? [p.ready.S || p.slots.S ? `쇼츠 ${p.ready.S}개` : "", p.ready.L || p.slots.L ? `롱폼 ${p.ready.L}개` : ""].filter(Boolean).join(" · ") : "";
     const planRow = !p ? "" : `<div class="wr"><span class="t">${p.isDay ? `<span class="ok">오늘은 올리는 날</span>` : "오늘은 쉬는 날"} (${esc(p.days.join("·"))}${p.daysSet ? "" : " · 요일을 정하지 않아 고른 기본 요일"})
-        · ${p.next ? `다음 자리 <b>${esc(p.next.text)}</b>` : "이번 주 자리 없음"} · 이번 주 남은 자리 쇼츠 ${p.slots.S} · 롱폼 ${p.slots.L}
-        <br>올릴 준비 ${esc(stock || "없음")} <span class="sx-note" style="margin:0">(내보냄·아직 안 올림)</span>${p.blocked ? ` · <span class="no">${esc(BLOCK[p.blocked])}</span>` : ""}</span>
+        · ${p.next ? `다음 올릴 날 <b>${esc(p.next.text)}</b>` : "이번 주 올릴 날 없음"} · 이번 주 남은 올릴 날 쇼츠 ${p.slots.S}번 · 롱폼 ${p.slots.L}번
+        <br>올릴 준비 ${esc(stock || "없음")} <span class="sx-note" style="margin:0">(내보냄·아직 안 올림)</span>${p.blocked ? ` · <span class="no">${esc(p.blockText || "")}</span>` : ""}</span>
         <button class="btn${p.blocked ? " primary" : ""}" data-wact="1">${esc(act.label)}</button></div>`
-      + p.warns.map(x => `<div class="wr warn"><span class="t">⚠ ${esc(x.text)}</span><button class="btn" data-wgo="cut">4 편집실 열기</button></div>`).join("")
+      + p.warns.map(x => `<div class="wr warn"><span class="t">⚠ ${esc(x.text)}</span>${x.go ? `<button class="btn" data-wgo="${esc(x.go)}">${esc(x.label)}</button>` : ""}</div>`).join("")
       + p.notes.map(x => `<div class="wr sub"><span class="t">${esc(x)}</span></div>`).join("");
+    const checkMain = w.checkNow && !(p && p.blocked);  // 초록 단추는 하나만 (막힌 곳이 먼저)
     box.innerHTML = `<b>이번 주 할 것 <span class="sx-note" style="margin:0;font-weight:400">(${esc(dayOf(w.from))} 월요일부터)</span></b>
       <div class="wr"><span class="t">${w.saved ? `올린 영상: ${up(w.L, w.planL, "롱폼")} · ${up(w.S, w.planS, "쇼츠")}${w.rssAt ? ` <span class="sx-note" style="margin:0">(${ago(w.rssAt)} 기록 기준)</span>` : ""}`
         : "아직 우리 전략을 저장하지 않았어요 · 방향을 골라 저장하면 주마다 올릴 개수가 생겨요"}</span>
@@ -3028,7 +3030,7 @@ checkUpdate();
       <div class="wr"><span class="t">${w.todos.length ? w.todos.map(t => `<label><input type="checkbox" data-wtd="${esc(t.id)}"><span>${esc(t.text)}</span></label>`).join("")
         : "할 일이 없어요 · [가져올 점]에서 [작업으로 만들기]를 눌러 보세요"}</span><button class="btn" data-wtab="take">할 일 ${w.openN}개 보기</button></div>
       <div class="wr"><span class="t">${w.checkNow ? `<span class="no">점검할 때예요</span> · 계획대로 가고 있는지 확인해요` : due !== null ? `다음 점검: ${esc(dayOf(w.checkDue))} (${due <= 0 ? "오늘" : `${due}일 뒤`})` : "전략을 저장하면 7일마다 점검을 알려 드려요"}</span>
-        <button class="btn${w.checkNow ? " primary" : ""}" data-wtab="check" data-wck="${w.checkNow ? 1 : 0}">${w.checkNow ? "지금 점검하기" : "점검 보기"}</button></div>`;
+        <button class="btn${checkMain ? " primary" : ""}" data-wtab="check" data-wck="${w.checkNow ? 1 : 0}">${w.checkNow ? "지금 점검하기" : "점검 보기"}</button></div>`;
     box.querySelectorAll("[data-wgo]").forEach(b => b.onclick = () => go(b.dataset.wgo));
     box.querySelectorAll("[data-wact]").forEach(b => b.onclick = async () => {  // '7 올리기'면 내보낸 편집본을 골라 둔 채로
       go(act.go);
@@ -3298,7 +3300,10 @@ checkUpdate();
     clearTimeout(SX.draftTimer); SX.draftTimer = setTimeout(sendDraft, 700);
   }
   const prevFlushSx = window.flushBeforeClose;
-  window.flushBeforeClose = async () => { if (SX.draftTimer) await sendDraft(); return prevFlushSx ? prevFlushSx() : true; };
+  window.flushBeforeClose = async () => {  // 창을 닫기 전: 기다리던 초안을 보내고, 이미 가는 중인 초안도 끝날 때까지
+    if (SX.draftTimer) await sendDraft(); else await (SX.draftChain || Promise.resolve());
+    return prevFlushSx ? prevFlushSx() : true;
+  };
   window.addEventListener("pagehide", () => {
     if (!SX.draftTimer || !SX.dirty || !SX.draft) return;
     clearTimeout(SX.draftTimer); SX.draftTimer = null;
@@ -3329,14 +3334,15 @@ checkUpdate();
     };
     $("sxSave").onclick = async () => {
       readForm();
-      const body = JSON.parse(JSON.stringify(SX.draft));
       $("sxSave").disabled = true;
+      // 저장보다 먼저: 기다리던 초안은 보내지 않고, 이미 가는 중인 초안은 닿을 때까지 기다림 → 저장(서버가 초안을 지움)보다 늦게 닿는 초안이 없음
+      clearTimeout(SX.draftTimer); SX.draftTimer = null; await SX.draftChain;
+      const body = JSON.parse(JSON.stringify(SX.draft));
       const r = await api("/api/strategy/save", { strategy: body }).catch(() => ({}));
       $("sxSave").disabled = false;
-      if (!r.ok) { if (!r.error) toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return; }
-      clearTimeout(SX.draftTimer); SX.draftTimer = null; await SX.draftChain;  // 늦게 간 초안이 저장 뒤에 다시 생기지 않게
-      SX.dirty = false; SX.restoredAt = null; SX.fc = null; SX.sol = null; dirtyMark();
-      api("/api/strategy/draft", { clear: true }).catch(() => {});
+      if (!r.ok) { sendDraft(); if (!r.error) toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return; }  // 못 했으면 적던 내용은 초안으로
+      if (!SX.draftTimer) { SX.dirty = false; SX.restoredAt = null; }  // 저장하는 동안 또 고쳤으면 '저장 안 됨' 그대로
+      SX.fc = null; SX.sol = null; dirtyMark();
       toast("저장했어요 · 성공 솔루션과 가능성을 다시 계산했어요");
       load(true);
     };

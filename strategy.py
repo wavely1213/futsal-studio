@@ -2102,7 +2102,9 @@ def save_strategy(d):
     clean = validate_strategy(d)
 
     def put(s):
-        clean["startedAt"] = clean["startedAt"] or (s.get("strategy") or {}).get("startedAt") or time.time()  # 처음 저장한 날 (다시 시작한 날이 아님)
+        prev = s.get("strategy") or {}
+        clean["startedAt"] = clean["startedAt"] or prev.get("startedAt") or time.time()  # 처음 저장한 날 (다시 시작한 날이 아님)
+        clean["firstSavedAt"] = prev.get("firstSavedAt") if prev else time.time()  # 처음 저장한 때 (이번 주 그 전 자리는 '밀림'으로 안 셈 · D-086)
         clean["updatedAt"] = time.time()
         s["strategy"] = clean
         return clean
@@ -2935,7 +2937,7 @@ def post_time(kind, chans=None):
         win = [(hours[(h - 1) % 24] + hours[h] + hours[(h + 1) % 24], -abs(h - POST_DEFAULT[0]), h) for h in range(24)]
         c, _, h = max(win)
         return h, 0, f"비슷한 채널 영상 {n}편 중 {round(100 * c / n)}%가 {(h - 1) % 24}~{(h + 1) % 24}시에 올라와요 (가운데 {h}시)"
-    return POST_DEFAULT[0], POST_DEFAULT[1], "저녁 6시예요 (우리·비슷한 채널 올린 시각을 아직 몰라요)"
+    return POST_DEFAULT[0], POST_DEFAULT[1], "우리·비슷한 채널이 올린 시각을 아직 몰라서 저녁 6시를 기준으로 해요"
 
 
 def published(h):
@@ -2992,43 +2994,98 @@ def _per_day(q, days):
     return {d: base + (1 if i < extra else 0) for i, d in enumerate(days) if base + (1 if i < extra else 0)}
 
 
-def upload_slots(strat, kind, now, uploads, tod=None, weeks=SLOT_WEEKS):
-    """kind('L'|'S')의 앞으로 올릴 자리 (D-086) → {slots[시각], q(이번 주 개수), used(이번 주 올린 수), left(이번 주 남은 자리),
-    perDay{요일: 개수}, days, daysSet, tod(시, 분, 이유), rate}.
-    이번 주는 이미 올린 만큼 앞자리를 채운 것으로 보고 지난 자리는 버림 (계획 요일 밖의 날은 만들지 않음 · 모자라면 카드가 알림)."""
+SLOT_LATE = 2 * 3600  # 자리 시각보다 이만큼 이르게 올린 것까지는 '그 자리 무렵·그 뒤에 올림'으로 봄 (_fill_slots)
+
+
+def _week_slots(start, q, days, h, m):
+    """한 주(start = 월요일 0시)의 자리 [시각] · 요일별 개수 (하루 여러 개: 첫 자리 = 정한 시각 · 나머지는 6시간 안에 고르게,
+    오후 시각이면 앞으로 · 2개면 6시간 앞)."""
+    per = _per_day(q, days)
+    slots = []
+    for d in days:
+        day = start + timedelta(days=DOW.index(d))
+        n = per.get(d, 0)
+        first = day.replace(hour=h, minute=m)
+        for k in range(n):
+            off = (-SECOND_GAP_H if h >= 12 else SECOND_GAP_H) * k / max(1, n - 1)
+            slots.append((first + timedelta(hours=off)).timestamp())
+    return sorted(slots), per
+
+
+def _fill_slots(slots, ups):
+    """올린(공개 예약 포함) 시각마다 같은 주의 자리 하나를 채움 → 안 채워진 자리 (D-086 보강).
+    가까운 짝부터: 그 자리 시각 무렵(SLOT_LATE 안)이나 그 뒤에 올린 것 → 지난 빈자리를 메운 것 → 없으면 가장 가까운 앞으로의 자리.
+    그래서 다음 올릴 날 12:00 에 예약하면 그 자리가 차고, 다음 편집본은 그다음 자리를 받음 ('앞자리부터 찼다'고 보지 않음)."""
+    pairs = []
+    for i, u in enumerate(ups):
+        for j, sl in enumerate(slots):
+            late = sl <= u + SLOT_LATE  # 자리 시각이 올린 때보다 앞(또는 거의 같음) = 그 자리를 채운 것
+            pairs.append((0 if late else 1, abs(u - sl), i, j))
+    used_u, used_s = set(), set()
+    for _, _, i, j in sorted(pairs):
+        if i in used_u or j in used_s:
+            continue
+        used_u.add(i)
+        used_s.add(j)
+    return [sl for j, sl in enumerate(slots) if j not in used_s]
+
+
+def upload_slots(strat, kind, now, uploads, tod=None, weeks=SLOT_WEEKS, start=None):
+    """kind('L'|'S')의 앞으로 올릴 자리 (D-086) → {slots[시각], q(이번 주 개수), used(이번 주 올린·예약한 수), left(이번 주 더 올릴 수),
+    weekSlots(이번 주 남은 올릴 날 수), behind(지난 올릴 날에 못 올린 수), perDay{요일: 개수}, days, daysSet, tod(시, 분, 이유), rate, dayTimes}.
+    올린 것·공개 예약한 것은 주마다 가장 가까운 자리를 채움 (_fill_slots · 다음 주 예약도) · 계획 요일 밖의 날은 만들지 않음.
+    start: 계획을 세운 때 — 이번 주 그 전의 빈자리는 개수에서 뺌 (방금 저장한 계획이 '밀렸어요'가 되지 않게)."""
     rate = plan_rates(strat)[kind]
     days, days_set = plan_days(strat)
     h, m, why = tod or (POST_DEFAULT[0], POST_DEFAULT[1], "")
     mon0 = _monday_dt(now)
     ups = [ts for ts, k, _ in uploads if k == kind]
     prev = sum(1 for ts in ups if (mon0 - timedelta(days=7)).timestamp() <= ts < mon0.timestamp())
-    out = {"slots": [], "q": 0, "used": 0, "left": 0, "weekSlots": 0, "perDay": {}, "days": days, "daysSet": days_set, "tod": [h, m, why], "rate": rate}
+    out = {"slots": [], "q": 0, "used": 0, "left": 0, "weekSlots": 0, "behind": 0, "perDay": {}, "days": days, "daysSet": days_set,
+           "tod": [h, m, why], "rate": rate, "dayTimes": {}}
     if rate <= 0:
         return out
     for w in range(weeks):
-        start = mon0 + timedelta(days=7 * w)
+        begin = mon0 + timedelta(days=7 * w)
+        a, b = begin.timestamp(), (begin + timedelta(days=7)).timestamp()
         q = _quota(rate, prev)
-        per = _per_day(q, days)
-        slots = []
-        for d in days:
-            day = start + timedelta(days=DOW.index(d))
-            n = per.get(d, 0)
-            first = day.replace(hour=h, minute=m)
-            for k in range(n):  # 하루 여러 개: 첫 자리 = 정한 시각 · 나머지는 6시간 안에 고르게 (오후 시각이면 앞으로 · 2개면 6시간 앞)
-                off = (-SECOND_GAP_H if h >= 12 else SECOND_GAP_H) * k / max(1, n - 1)
-                slots.append((first + timedelta(hours=off)).timestamp())
-        slots.sort()
+        slots, per = _week_slots(begin, q, days, h, m)
+        for sl in slots:
+            d = _lt(sl)
+            out["dayTimes"].setdefault(f"{d.year:04d}-{d.month:02d}-{d.day:02d}", []).append(f"{d.hour:02d}:{d.minute:02d}")
+        wk = [ts for ts in ups if a <= ts < b]
+        free = _fill_slots(slots, wk)
         if w == 0:
-            used = sum(1 for ts in ups if start.timestamp() <= ts < (start + timedelta(days=7)).timestamp())
+            bound = max(a, start or 0)
+            before = [ts for ts in free if ts < bound]  # 계획을 세우기 전에 지난 빈자리
+            free = [ts for ts in free if ts >= bound]
+            q = max(0, q - len(before))
+            used = len(wk)
             left = max(0, q - used)
-            fut = [ts for ts in slots[used:] if ts >= now + SLOT_AHEAD][:left]
-            out.update(q=q, used=used, left=left, perDay=per, weekSlots=len(fut))
+            fut = [ts for ts in free if ts >= now + SLOT_AHEAD][:left]
+            out.update(q=q, used=used, left=left, perDay=per, weekSlots=len(fut), behind=max(0, left - len(fut)))
             out["slots"] += fut
             prev = used + len(fut)  # 이번 주 남은 자리까지 올린다고 보고 다음 주 개수를 정함
         else:
-            out["slots"] += slots
+            out["slots"] += [ts for ts in free if ts >= now + SLOT_AHEAD]
             prev = q
+    out["dayTimes"] = {d: t for d, t in out["dayTimes"].items() if len(t) >= 2}  # 하루 2개 넘게 올리는 날만
     return out
+
+
+def _day0(ts):
+    return _lt(ts).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def plan_start(strat):
+    """계획을 세운 때 (이번 주 그 전 빈자리는 '밀림'으로 안 셈 · D-086): '시작한 날'(그날 0시 · 한국 시간)을 처음 저장한 날보다
+    이른 날(지난 날짜)로 일부러 정했으면 그날부터 · 아니면 처음 저장한 때 (시작한 날 칸은 처음 저장한 날이 기본이라) · 모르면 None."""
+    st_at = strat.get("startedAt")
+    day0 = _day0(st_at) if isinstance(st_at, (int, float)) else None
+    first = strat.get("firstSavedAt") if isinstance(strat.get("firstSavedAt"), (int, float)) else None
+    if day0 is None or first is None:
+        return day0 if first is None else first
+    return day0 if day0 < _day0(first) else max(day0, first)
 
 
 def _plan_ctx(st, now, chans=None):
@@ -3038,13 +3095,25 @@ def _plan_ctx(st, now, chans=None):
         return None
     chans = known_channels(st) if chans is None else chans
     ups = recent_uploads(chans.get(OWN), now)
-    return {k: upload_slots(strat, k, now, ups, post_time(k, chans)) for k in ("S", "L")}
+    start = plan_start(strat)
+    return {k: upload_slots(strat, k, now, ups, post_time(k, chans), start=start) for k in ("S", "L")}
+
+
+def _slot_why(p, ts, lab):
+    """올릴 시각의 까닭 — 하루 여러 개 올리는 날이면 그날 시각들 ('수요일은 하루 쇼츠 2개라 12:00·18:00')."""
+    h, m, why = p["tod"]
+    d = _lt(ts)
+    times = p.get("dayTimes", {}).get(f"{d.year:04d}-{d.month:02d}-{d.day:02d}")
+    if times:
+        return f"{DOW[d.weekday()]}요일은 하루 {lab} {len(times)}개라 {'·'.join(times)}에 올려요 · {h:02d}:{m:02d} 기준: {why}"
+    return why
 
 
 def kit_slot(name, seq, kind, now=None):
     """올리기 키트의 '다음 올릴 날' (D-086): 저장한 전략의 요일·주당 개수·시각으로 앞으로의 자리를 만들고, 내보냈지만 아직 안 올린
     편집본(upload.stock · 내보낸 순)에 차례로 줌 — 이 편집본이 그 안에 있으면 그 차례, 아니면 그 뒤 자리.
-    → {at, local(예약 칸 값), text, left, kind, line(복사 줄), why, order} · 전략을 저장하지 않았거나 자리가 없으면 None."""
+    → {at, local(예약 칸 값), text, left, behind, kind, line(복사 줄), why, order} · 전략을 저장하지 않았거나 자리가 없으면 None.
+    이미 올렸거나 예약한 편집본은 upload.kit_schedule 이 먼저 거름."""
     now = now or time.time()
     st = load_state()
     ctx = _plan_ctx(st, now)
@@ -3057,12 +3126,14 @@ def kit_slot(name, seq, kind, now=None):
     if idx >= len(p["slots"]):
         return None
     ts = p["slots"][idx]
-    h, m, why = p["tod"]
     days = "·".join(p["days"]) + ("" if p["daysSet"] else " (요일을 정하지 않아 고른 기본 요일)")
     lab = "쇼츠" if kind == "S" else "롱폼"
-    return {"at": ts, "local": _lt(ts).strftime("%Y-%m-%dT%H:%M"), "text": slot_text(ts), "left": p["weekSlots"], "behind": max(0, p["left"] - p["weekSlots"]),
-            "kind": kind, "order": idx + 1, "line": f"다음 올릴 날: {slot_text(ts)} · 이번 주 남은 자리 {p['weekSlots']}",
-            "why": f"{days} · {lab} 주 {fmt_w(p['rate'])}개 · {why}" + (f" · 올릴 준비된 {lab} {len(ready)}개 다음 차례" if idx >= len(ready) and ready else "")}
+    more = f"이번 주에 {lab} {p['weekSlots']}개 더 올려요" if p["weekSlots"] else f"이번 주 {lab}는 다 채웠어요"
+    return {"at": ts, "local": _lt(ts).strftime("%Y-%m-%dT%H:%M"), "text": slot_text(ts), "left": p["weekSlots"],
+            "behind": p["behind"] if p["daysSet"] else 0,  # 요일을 정하지 않았으면 놓친 날로 탓하지 않음
+            "kind": kind, "order": idx + 1, "line": f"다음 올릴 날: {slot_text(ts)} · {more}",
+            "why": f"{days} · {lab} 주 {fmt_w(p['rate'])}개 · {_slot_why(p, ts, lab)}"
+                   + (f" · 올릴 준비된 {lab} {len(ready)}개 다음 차례" if idx >= len(ready) and ready else "")}
 
 
 def fmt_w(x):
@@ -3089,33 +3160,51 @@ def week_plan(st, oc, now, chans=None):
     nxt = sorted((ctx[k]["slots"][0], k) for k in ("S", "L") if ctx[k]["slots"])
     left = {k: ctx[k]["left"] for k in ("S", "L")}
     slots = {k: ctx[k]["weekSlots"] for k in ("S", "L")}
+    josa = hooks.josa
+    need = [k for k in ("S", "L") if left[k]]  # 이번 주에 더 올릴 형식 (쇼츠 먼저)
+    bk = None
+    if not need:
+        blocked, action, btext = None, {"go": "cut", "label": "4 편집실 열기"}, ""
+    elif any(ready[k] for k in need):
+        bk = next(k for k in need if ready[k])
+        blocked, action = "upload", {"go": "upload", "label": "7 올리기", "name": ready[bk][0]["name"], "seq": ready[bk][0]["seq"]}
+        btext = f"{lab[bk]}{josa(lab[bk], '은')} 올리기만 하면 돼요 (내보낸 {lab[bk]} {len(ready[bk])}개)"
+    else:
+        bk = next((k for k in need if sk["drafts"][k]), None)
+        if bk:
+            blocked, action = "edit", {"go": "cut", "label": "4 편집실 열기"}
+            btext = f"{lab[bk]}{josa(lab[bk], '은')} 편집에서 막혀 있어요 (편집 중인 {lab[bk]} {sk['drafts'][bk]}개 · 아직 안 내보냄)"
+        else:
+            bk = need[0]
+            blocked, action = "shoot", {"go": "library", "label": "2 보관함 열기"}
+            btext = f"{lab[bk]}{josa(lab[bk], '은')} 촬영부터 해야 해요 (편집 중인 {lab[bk]}도 없어요)"
+    action["kind"] = bk
     warns, notes = [], []
     for k in ("S", "L"):
         p = ctx[k]
         if p["weekSlots"] and len(ready[k]) < p["weekSlots"]:  # 비축분이 다음 올리는 날 전에 바닥남
             more = p["weekSlots"] - len(ready[k])
-            warns.append({"kind": k, "text": f"{lab[k]} 더 만들기: 이번 주 남은 {lab[k]} 자리 {p['weekSlots']}개인데 준비된 {lab[k]}는 {len(ready[k])}개예요"
-                                             f" · {slot_text(p['slots'][len(ready[k])])} 전에 {more}개를 더 내보내 두세요"})
-        if p["left"] > p["weekSlots"]:
-            notes.append(f"이번 주 계획보다 {lab[k]} {p['left'] - p['weekSlots']}개가 밀렸어요 (지난 올리는 날에 못 올림) · 남은 날에 더 올리거나 [우리 전략]에서 개수를 고쳐요")
-        q, nd = p["q"], len(p["days"])
-        if days_set and q > nd and nd:
-            two = [d for d, c in p["perDay"].items() if c >= 2]
-            notes.append(f"요일 {nd}개에 {lab[k]} 주 {q}개라 {'·'.join(two)}요일은 하루 {lab[k]} 2개 올리는 날이에요")
-    if left["S"] + left["L"] == 0:
-        blocked, action = None, {"go": "cut", "label": "4 편집실 열기"}
-    elif any(ready[k] for k in ("S", "L") if left[k]):
-        k = next(k for k in ("S", "L") if left[k] and ready[k])
-        blocked, action = "upload", {"go": "upload", "label": "7 올리기", "name": ready[k][0]["name"], "seq": ready[k][0]["seq"]}
-    elif any(sk["drafts"][k] for k in ("S", "L") if left[k]):
-        blocked, action = "edit", {"go": "cut", "label": "4 편집실 열기"}
-    else:
-        blocked, action = "shoot", {"go": "library", "label": "2 보관함 열기"}
+            when = slot_text(p["slots"][len(ready[k])])
+            head = f"{lab[k]} 더 만들기: 이번 주에 {lab[k]} {p['weekSlots']}개를 더 올려야 하는데 준비된 {lab[k]}{josa(lab[k], '은')} {len(ready[k])}개예요"
+            if sk["drafts"][k]:  # 편집 중인 것이 있으면 내보내기 · 없으면 찍기 (막힌 곳 줄과 같은 행동이면 단추는 그 줄 하나만)
+                w = {"text": f"{head} · {when} 전에 {more}개를 더 내보내 두세요 (편집 중인 {lab[k]} {sk['drafts'][k]}개)", "go": "cut", "label": "4 편집실 열기"}
+            else:
+                w = {"text": f"{head} · {when} 전에 {more}개를 더 찍어서 만들어요 (편집 중인 {lab[k]}도 없어요)", "go": "library", "label": "2 보관함 열기"}
+            if blocked in ("edit", "shoot") and bk == k and action["go"] == w["go"]:  # 막힌 곳 줄이 같은 말·단추를 이미 보임
+                w["go"] = None
+                w["text"] = re.sub(r" \(편집 중인 [^)]*\)$", "", w["text"])
+            warns.append(dict(w, kind=k))
+        if p["behind"] and days_set:  # 요일을 정하지 않았으면 놓친 날로 탓하지 않음 · 계획을 세우기 전 자리는 upload_slots 가 이미 뺌
+            notes.append(f"이번 주 계획보다 {lab[k]} {p['behind']}개가 밀렸어요 (지난 올리는 날에 못 올림) · "
+                         + ("남은 날에 더 올리거나 [우리 전략]에서 개수를 고쳐요" if p["weekSlots"] else "다음 주에 맞춰 올리거나 [우리 전략]에서 개수를 고쳐요"))
+        two = [d for d, c in p["perDay"].items() if c >= 2]
+        if days_set and two:
+            notes.append(f"요일 {len(p['days'])}개에 {lab[k]} 주 {sum(p['perDay'].values())}개라 {'·'.join(two)}요일은 하루 {lab[k]} 2개 올리는 날이에요")
     return {"today": today, "isDay": today in days or bool(today_n["S"] + today_n["L"]), "todayN": today_n, "days": days, "daysSet": days_set,
             "next": {"at": nxt[0][0], "text": slot_text(nxt[0][0]), "kind": nxt[0][1]} if nxt else None,
             "left": left, "slots": slots, "q": {k: ctx[k]["q"] for k in ("S", "L")}, "used": {k: ctx[k]["used"] for k in ("S", "L")},
             "ready": {k: len(ready[k]) for k in ("S", "L")}, "readyItems": [{k2: x[k2] for k2 in ("name", "seq", "label", "kind", "export")} for x in sk["ready"][:6]],
-            "drafts": sk["drafts"], "blocked": blocked, "action": action, "warns": warns, "notes": notes,
+            "drafts": sk["drafts"], "blocked": blocked, "blockText": btext, "action": action, "warns": warns, "notes": notes,
             "tod": {k: ctx[k]["tod"] for k in ("S", "L")}}
 
 
