@@ -7,7 +7,8 @@
   비교 데이터(strategy_seed.json, 2026-10-07)를 쓴다 (실제로 새로 고친 자료가 먼저).
 - 새로 고침은 작업(start_job) 하나 · 요청 사이 0.75초 · 채널 사이 2초+흔들기 · 3일 안에 받은 채널은 건너뜀 ·
   막히면 6시간 쉼(RSS 는 계속) (BR-016). 자동으로 하는 것은 우리 채널 숫자 기록(하루 한 번)뿐.
-- 분석은 규칙: 채널 통계 · 제목 공식·주제어·시리즈 찾기 · 가져올 점 8분류(맞춤 점수·품) · 30/60/90 계획 · 점검 피드백.
+- 분석은 규칙: 채널 통계 · 제목 공식·주제어·시리즈 찾기 · 가져올 점 8분류(맞춤 점수·품) · 30/60/90 계획 · 점검 피드백 ·
+  올릴 자리(요일·주당 개수·시각 → 이번 주 카드·올리기 키트의 다음 올릴 날 · D-086) · 저장 안 한 '우리 전략' 초안(draft.json · D-087).
   가능성(%)은 forecast.py (BR-015). 클로드는 버튼을 눌렀을 때만 숫자만 보낸다(claude_cli).
 - style·claude_cli 는 함수 안에서 지연 import 한다: style → plan → core 순환을 피하고, 앱 시작을 가볍게.
 """
@@ -485,6 +486,34 @@ def known_channels(st=None):
         if k == OWN:
             out[k] = dict(c, group=own["group"])
     return out
+
+
+def own_channel(st=None):
+    """우리 채널 자료 하나 (새로 고친 자료 · 없으면 같은 채널일 때만 함께 배포한 비교 데이터) — known_channels 의 우리 채널과 같은 규칙이지만
+    다른 채널 파일은 읽지 않음 (올리기 키트·이번 주 카드가 매번 부름). 없으면 None."""
+    ch = load_channel(OWN, slim=True)
+    if ch and isinstance(ch.get("videos"), dict) and ch["videos"]:
+        return ch
+    return _seed_for(own_entry(st))
+
+
+def own_listing(st=None):
+    """올리기 키트의 제목 틀 배우기용 우리 채널 목록 (hooks.own_rows · D-080) → {"videos": [...], "shorts": [...], "at": 받은 시각}
+    · 줄마다 {title, views, duration, id} (channel_cache.json 과 같은 꼴) · 자료가 없으면 None."""
+    ch = own_channel(st)
+    if not ch:
+        return None
+    vids = ch.get("videos") or {}
+    out = {"at": ch.get("at") or listed_at(ch) or 0}
+    for kind, tab in (("videos", "long"), ("shorts", "shorts")):
+        rows = []
+        for i in (ch.get("tabs") or {}).get(tab, {}).get("ids") or []:
+            v = vids.get(i) or {}
+            t = v.get("t") or v.get("te")
+            if t:
+                rows.append({"title": str(t), "views": int(v.get("v") or 0), "duration": v.get("d") or 0, "id": i})
+        out[kind] = rows
+    return out if out["videos"] or out["shorts"] else None
 
 
 # ---------- 글자·숫자 도우미 ----------
@@ -1940,10 +1969,21 @@ def todo_remove(tid):
     _update_state(put)
 
 
+_TITLE_TODO = re.compile(r"해시태그|제목")
+
+
+def todo_uses(t):
+    """할 일의 쓰임: 저장된 use + '쇼츠 운영'의 해시태그·제목 할 일은 올리기 키트(title)에서도 (해시태그·제목은 키트가 만듦 · D-083)."""
+    uses = list(t.get("use") or USE.get(t.get("category"), ["plan"]))
+    if t.get("category") == "쇼츠 운영" and _TITLE_TODO.search(str(t.get("text") or "")) and "title" not in uses:
+        uses.append("title")
+    return uses
+
+
 def todos_for(use):
     """다른 단계(썸네일·올리기·편집)가 읽는 할 일: 아직 안 끝난 것 중 그 쓰임."""
     st = load_state()
-    return [t for t in st["todos"] if not t.get("done") and (not use or use in (t.get("use") or []))]
+    return [t for t in st["todos"] if not t.get("done") and (not use or use in todo_uses(t))]
 
 
 def set_hidden(tid, hide):
@@ -2066,7 +2106,81 @@ def save_strategy(d):
         clean["updatedAt"] = time.time()
         s["strategy"] = clean
         return clean
-    return _update_state(put)
+    out = _update_state(put)
+    clear_draft()  # 저장했으니 저장 안 한 초안은 지움
+    return out
+
+
+# ---- 저장 안 한 '우리 전략' 초안 (D-087) ----
+
+def _draft_path():
+    return _path("draft.json")
+
+
+def _clean_draft(d):
+    """화면 양식의 초안 → 양식이 다시 읽을 수 있는 꼴 (검사는 [저장] 때 validate_strategy · 여기서는 길이만 잘라 둠)."""
+    if not isinstance(d, dict):
+        raise StrategyError("전략 형식이 아니에요")
+
+    def txt(x, n):
+        return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(x if x is not None else ""))[:n]
+
+    def num(x):
+        if isinstance(x, bool) or x is None or x == "":
+            return None
+        if isinstance(x, (int, float)):
+            return x if math.isfinite(x) else None
+        return txt(x, 20) or None
+
+    def lst(k, n):
+        v = d.get(k)
+        return v[:n] if isinstance(v, list) else []
+    formats = []
+    for i, f in enumerate(lst("formats", MAX_FORMATS)):
+        if isinstance(f, dict):
+            try:
+                pw = float(f.get("perWeek") or 0)
+            except (TypeError, ValueError):
+                pw = 0.0
+            formats.append({"id": txt(f.get("id") or f"f{i + 1}", 20), "name": txt(f.get("name"), 100),
+                            "kind": "shorts" if f.get("kind") == "shorts" else "long",
+                            "perWeek": max(0.0, min(float(MAX_PER_WEEK), pw)) if math.isfinite(pw) else 0.0})
+    goals = d.get("goals") if isinstance(d.get("goals"), dict) else {}
+    return {"direction": d.get("direction") if d.get("direction") in ("A", "B", "C", "custom") else "custom",
+            "target": [t for t in lst("target", len(TARGETS)) if isinstance(t, str) and t in TARGETS], "targetNote": txt(d.get("targetNote"), TEXT_MAX),
+            "formats": formats, "days": [x for x in lst("days", 7) if x in DOW], "differentiation": txt(d.get("differentiation"), LONG_MAX),
+            "series": [{"name": txt(x.get("name"), 100), "desc": txt(x.get("desc"), 300)} for x in lst("series", MAX_SERIES) if isinstance(x, dict)],
+            "goals": {"m6": num(goals.get("m6")), "m12": num(goals.get("m12"))}, "startedAt": num(d.get("startedAt"))}
+
+
+def save_draft(d):
+    """'우리 전략'에 적던 내용을 저장 안 한 초안으로 남김 (고칠 때마다 화면이 보냄 · 다른 화면에 다녀오거나 창을 닫아도 남게)."""
+    clean = _clean_draft(d)
+    with _LOCK:
+        _write(_draft_path(), {"v": 1, "at": time.time(), "strategy": clean})
+    return clean
+
+
+def load_draft():
+    """저장 안 한 초안 {at, strategy} · 없으면 None."""
+    d = _read(_draft_path(), dict)
+    if not isinstance(d.get("strategy"), dict):
+        return None
+    try:
+        return {"at": d.get("at"), "strategy": _clean_draft(d["strategy"])}
+    except StrategyError:
+        return None
+
+
+def clear_draft():
+    with _LOCK:
+        try:
+            _draft_path().unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:  # 잠겨 있으면 빈 초안으로 (다음에 열 때 보이지 않게)
+            _write(_draft_path(), {"v": 1, "at": time.time(), "strategy": None})
+        _CACHE.pop(str(_draft_path()), None)
 
 
 def set_revived(ts):
@@ -2767,8 +2881,247 @@ def _formula_view(m):
     return out[:8]
 
 
-def week_view(st, oc, now, tks, rem):
-    """'이번 주' 카드: 월요일부터 올린 개수 vs 계획 · 먼저 할 일 2개 · 다음 점검 날."""
+# ---------- 올리는 요일·시각 · 이번 주 남은 자리 · 만들어 둔 편집본 (D-086) ----------
+
+DOW = ("월", "화", "수", "목", "금", "토", "일")
+DEFAULT_DAYS = {1: "목", 2: "화금", 3: "월수금", 4: "월화목금", 5: "월화수목금", 6: "월화수목금토", 7: "월화수목금토일"}
+POST_DEFAULT = (18, 0)            # 우리·비슷한 채널 시각을 모를 때
+POST_STEADY_MIN = 60              # 우리 채널 같은 형식 최근 3편이 이 안(분)에 몰려 있으면 '늘 올리던 시각'
+POST_PEER_MIN = 20                # 비슷한 채널 RSS 영상이 이만큼 넘으면 그 채널들의 흔한 시각대
+SECOND_GAP_H = 6                  # 하루 2개 올리는 날: 두 번째 자리는 이만큼 떨어진 시각
+SLOT_AHEAD = 15 * 60              # 지금부터 15분 뒤 자리부터 (유튜브 예약 공개도 15분 뒤부터)
+SLOT_WEEKS = 3                    # 이번 주 + 다음 2주 자리까지
+KST = timezone(timedelta(hours=9))  # 요일·시각은 한국 시간으로 (사용자 PC 와 같음 · 개발 PC 의 시간대와 상관없이)
+
+
+def _lt(ts):
+    return datetime.fromtimestamp(ts, KST)
+
+
+def _monday_dt(now):
+    lt = _lt(now)
+    return (lt - timedelta(days=lt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def slot_text(ts):
+    """'10-09(금) 18:00'."""
+    d = _lt(ts)
+    return f"{d.month:02d}-{d.day:02d}({DOW[d.weekday()]}) {d.hour:02d}:{d.minute:02d}"
+
+
+def post_time(kind, chans=None):
+    """올릴 시각 (시, 분, 이유 · D-086): 우리 채널 같은 형식 최근 3편이 한 시간 안에 몰려 있으면 그 시각(10분 단위) →
+    아니면 비슷한 채널 RSS 최근 영상이 가장 많이 올라오는 세 시간대의 가운데 → 모르면 18:00."""
+    chans = known_channels() if chans is None else chans
+    own = chans.get(OWN) or {}
+    pubs = sorted((v["pub"] for v in (own.get("videos") or {}).values() if v.get("k") == kind and isinstance(v.get("pub"), (int, float))),
+                  reverse=True)[:3]
+    if len(pubs) >= 2:
+        mins = [_lt(p).hour * 60 + _lt(p).minute for p in pubs]
+        if max(mins) - min(mins) <= POST_STEADY_MIN:
+            m = int(round(statistics.median(mins) / 10.0) * 10) % 1440
+            return m // 60, m % 60, f"우리 {'쇼츠를' if kind == 'S' else '롱폼을'} 늘 올리던 시각이에요"
+    hours = [0] * 24
+    for k, c in chans.items():
+        if k == OWN:
+            continue
+        vids = c.get("videos") or {}
+        for i in ((c.get("rss") or {}).get("ids") or [])[:15]:
+            p = (vids.get(i) or {}).get("pub")
+            if isinstance(p, (int, float)):
+                hours[_lt(p).hour] += 1
+    n = sum(hours)
+    if n >= POST_PEER_MIN:
+        win = [(hours[(h - 1) % 24] + hours[h] + hours[(h + 1) % 24], -abs(h - POST_DEFAULT[0]), h) for h in range(24)]
+        c, _, h = max(win)
+        return h, 0, f"비슷한 채널 영상 {n}편 중 {round(100 * c / n)}%가 {(h - 1) % 24}~{(h + 1) % 24}시에 올라와요 (가운데 {h}시)"
+    return POST_DEFAULT[0], POST_DEFAULT[1], "저녁 6시예요 (우리·비슷한 채널 올린 시각을 아직 몰라요)"
+
+
+def published(h):
+    """유튜브에 바로 올린 기록 한 줄이 실제로 공개(또는 공개 예약)된 것인지 — 감사 전에 잠긴 비공개·그냥 비공개는 아직 '올림'이 아님."""
+    return not h.get("preAudit") and not h.get("locked") and (h.get("privacy") in ("public", "unlisted") or bool(h.get("publishAt")))
+
+
+def recent_uploads(oc, now=None):
+    """우리 채널에 올린(또는 예약한) 영상 [(시각, 'L'|'S', 영상 id)]: 채널 자료(RSS·목록의 날짜) + 유튜브에 바로 올린 기록 중 공개·일부 공개·
+    공개 예약(예약이면 공개 시각 · 감사 전 잠긴 비공개는 빼고 · published)."""
+    now = now or time.time()
+    out, seen = [], set()
+    for i, v in ((oc or {}).get("videos") or {}).items():
+        if isinstance(v.get("pub"), (int, float)) and now - v["pub"] <= 60 * 86400:
+            out.append((v["pub"], "S" if v.get("k") == "S" else "L", i))
+            seen.add(i)
+    try:
+        import youtube_upload  # 지연 import (youtube_upload → upload → editor 가 무거움)
+        hist = youtube_upload.history(youtube_upload.HISTORY_MAX)["items"]
+    except Exception:
+        hist = []
+    for h in hist:
+        vid = h.get("videoId")
+        if vid in seen or not published(h):
+            continue
+        ts = _iso(h.get("publishAt")) if h.get("publishAt") else h.get("at")
+        if isinstance(ts, (int, float)) and now - ts <= 60 * 86400:
+            out.append((ts, "S" if h.get("shorts") else "L", vid))
+            seen.add(vid)
+    return sorted(out)
+
+
+def _quota(rate, prev_n):
+    """한 주에 올릴 개수: 주 2.5개 → 2 또는 3 (지난주에 덜 올렸으면 3) · 주 0.5개(2주에 1) → 지난주에 안 올렸으면 1."""
+    whole = int(rate)
+    return whole + (1 if rate - whole > 0 and prev_n < math.ceil(rate) else 0)
+
+
+def plan_days(strat):
+    """올리는 요일 (월요일부터 · 정하지 않았으면 주당 개수에 맞춘 기본 요일 · 정했는지)."""
+    days = [d for d in DOW if d in (strat.get("days") or [])]
+    if days:
+        return days, True
+    r = plan_rates(strat)
+    n = max(1, min(7, math.ceil(r["L"]) + math.ceil(r["S"])))
+    return list(DEFAULT_DAYS[n]), False
+
+
+def _per_day(q, days):
+    """q 개를 요일에 나눔 (앞 요일부터 하나씩 더) → {요일: 개수}."""
+    if not days or q <= 0:
+        return {}
+    base, extra = divmod(q, len(days))
+    return {d: base + (1 if i < extra else 0) for i, d in enumerate(days) if base + (1 if i < extra else 0)}
+
+
+def upload_slots(strat, kind, now, uploads, tod=None, weeks=SLOT_WEEKS):
+    """kind('L'|'S')의 앞으로 올릴 자리 (D-086) → {slots[시각], q(이번 주 개수), used(이번 주 올린 수), left(이번 주 남은 자리),
+    perDay{요일: 개수}, days, daysSet, tod(시, 분, 이유), rate}.
+    이번 주는 이미 올린 만큼 앞자리를 채운 것으로 보고 지난 자리는 버림 (계획 요일 밖의 날은 만들지 않음 · 모자라면 카드가 알림)."""
+    rate = plan_rates(strat)[kind]
+    days, days_set = plan_days(strat)
+    h, m, why = tod or (POST_DEFAULT[0], POST_DEFAULT[1], "")
+    mon0 = _monday_dt(now)
+    ups = [ts for ts, k, _ in uploads if k == kind]
+    prev = sum(1 for ts in ups if (mon0 - timedelta(days=7)).timestamp() <= ts < mon0.timestamp())
+    out = {"slots": [], "q": 0, "used": 0, "left": 0, "weekSlots": 0, "perDay": {}, "days": days, "daysSet": days_set, "tod": [h, m, why], "rate": rate}
+    if rate <= 0:
+        return out
+    for w in range(weeks):
+        start = mon0 + timedelta(days=7 * w)
+        q = _quota(rate, prev)
+        per = _per_day(q, days)
+        slots = []
+        for d in days:
+            day = start + timedelta(days=DOW.index(d))
+            n = per.get(d, 0)
+            first = day.replace(hour=h, minute=m)
+            for k in range(n):  # 하루 여러 개: 첫 자리 = 정한 시각 · 나머지는 6시간 안에 고르게 (오후 시각이면 앞으로 · 2개면 6시간 앞)
+                off = (-SECOND_GAP_H if h >= 12 else SECOND_GAP_H) * k / max(1, n - 1)
+                slots.append((first + timedelta(hours=off)).timestamp())
+        slots.sort()
+        if w == 0:
+            used = sum(1 for ts in ups if start.timestamp() <= ts < (start + timedelta(days=7)).timestamp())
+            left = max(0, q - used)
+            fut = [ts for ts in slots[used:] if ts >= now + SLOT_AHEAD][:left]
+            out.update(q=q, used=used, left=left, perDay=per, weekSlots=len(fut))
+            out["slots"] += fut
+            prev = used + len(fut)  # 이번 주 남은 자리까지 올린다고 보고 다음 주 개수를 정함
+        else:
+            out["slots"] += slots
+            prev = q
+    return out
+
+
+def _plan_ctx(st, now, chans=None):
+    """저장한 전략의 올릴 자리 (형식마다) · 저장 안 했으면 None."""
+    strat = st.get("strategy")
+    if not strat:
+        return None
+    chans = known_channels(st) if chans is None else chans
+    ups = recent_uploads(chans.get(OWN), now)
+    return {k: upload_slots(strat, k, now, ups, post_time(k, chans)) for k in ("S", "L")}
+
+
+def kit_slot(name, seq, kind, now=None):
+    """올리기 키트의 '다음 올릴 날' (D-086): 저장한 전략의 요일·주당 개수·시각으로 앞으로의 자리를 만들고, 내보냈지만 아직 안 올린
+    편집본(upload.stock · 내보낸 순)에 차례로 줌 — 이 편집본이 그 안에 있으면 그 차례, 아니면 그 뒤 자리.
+    → {at, local(예약 칸 값), text, left, kind, line(복사 줄), why, order} · 전략을 저장하지 않았거나 자리가 없으면 None."""
+    now = now or time.time()
+    st = load_state()
+    ctx = _plan_ctx(st, now)
+    if not ctx or not ctx[kind]["slots"]:
+        return None
+    import upload  # 지연 import: upload → editor (무거움) · upload 도 strategy 를 함수 안에서 부름
+    ready = [x for x in upload.stock(now)["ready"] if x["kind"] == kind]
+    idx = next((i for i, x in enumerate(ready) if (x["name"], x["seq"]) == (name, seq or "")), len(ready))
+    p = ctx[kind]
+    if idx >= len(p["slots"]):
+        return None
+    ts = p["slots"][idx]
+    h, m, why = p["tod"]
+    days = "·".join(p["days"]) + ("" if p["daysSet"] else " (요일을 정하지 않아 고른 기본 요일)")
+    lab = "쇼츠" if kind == "S" else "롱폼"
+    return {"at": ts, "local": _lt(ts).strftime("%Y-%m-%dT%H:%M"), "text": slot_text(ts), "left": p["weekSlots"], "behind": max(0, p["left"] - p["weekSlots"]),
+            "kind": kind, "order": idx + 1, "line": f"다음 올릴 날: {slot_text(ts)} · 이번 주 남은 자리 {p['weekSlots']}",
+            "why": f"{days} · {lab} 주 {fmt_w(p['rate'])}개 · {why}" + (f" · 올릴 준비된 {lab} {len(ready)}개 다음 차례" if idx >= len(ready) and ready else "")}
+
+
+def fmt_w(x):
+    return f"{x:g}"
+
+
+def week_plan(st, oc, now, chans=None):
+    """'이번 주 할 것' 카드의 올리기 줄 (D-086): 오늘이 올리는 날인지 · 다음 자리 · 이번 주 남은 자리 · 만들어 둔 편집본(내보냄·아직 안 올림) ·
+    막힌 곳(촬영·편집·올리기)과 다음 행동 · 비축분이 다음 올리는 날 전에 바닥나면 경고 · 요일보다 주당 개수가 많으면 '하루 2개 올리는 날'."""
+    ctx = _plan_ctx(st, now, chans)
+    if not ctx:
+        return None
+    try:
+        import upload
+        sk = upload.stock(now)
+    except Exception:  # 편집본을 못 읽어도 카드는 보여 줌
+        sk = {"ready": [], "drafts": {"S": 0, "L": 0}}
+    ready = {k: [x for x in sk["ready"] if x["kind"] == k] for k in ("S", "L")}
+    lab = {"S": "쇼츠", "L": "롱폼"}
+    today = DOW[_lt(now).weekday()]
+    days, days_set = ctx["S"]["days"], ctx["S"]["daysSet"]
+    end_today = (_lt(now).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
+    today_n = {k: sum(1 for ts in ctx[k]["slots"] if ts < end_today) for k in ("S", "L")}
+    nxt = sorted((ctx[k]["slots"][0], k) for k in ("S", "L") if ctx[k]["slots"])
+    left = {k: ctx[k]["left"] for k in ("S", "L")}
+    slots = {k: ctx[k]["weekSlots"] for k in ("S", "L")}
+    warns, notes = [], []
+    for k in ("S", "L"):
+        p = ctx[k]
+        if p["weekSlots"] and len(ready[k]) < p["weekSlots"]:  # 비축분이 다음 올리는 날 전에 바닥남
+            more = p["weekSlots"] - len(ready[k])
+            warns.append({"kind": k, "text": f"{lab[k]} 더 만들기: 이번 주 남은 {lab[k]} 자리 {p['weekSlots']}개인데 준비된 {lab[k]}는 {len(ready[k])}개예요"
+                                             f" · {slot_text(p['slots'][len(ready[k])])} 전에 {more}개를 더 내보내 두세요"})
+        if p["left"] > p["weekSlots"]:
+            notes.append(f"이번 주 계획보다 {lab[k]} {p['left'] - p['weekSlots']}개가 밀렸어요 (지난 올리는 날에 못 올림) · 남은 날에 더 올리거나 [우리 전략]에서 개수를 고쳐요")
+        q, nd = p["q"], len(p["days"])
+        if days_set and q > nd and nd:
+            two = [d for d, c in p["perDay"].items() if c >= 2]
+            notes.append(f"요일 {nd}개에 {lab[k]} 주 {q}개라 {'·'.join(two)}요일은 하루 {lab[k]} 2개 올리는 날이에요")
+    if left["S"] + left["L"] == 0:
+        blocked, action = None, {"go": "cut", "label": "4 편집실 열기"}
+    elif any(ready[k] for k in ("S", "L") if left[k]):
+        k = next(k for k in ("S", "L") if left[k] and ready[k])
+        blocked, action = "upload", {"go": "upload", "label": "7 올리기", "name": ready[k][0]["name"], "seq": ready[k][0]["seq"]}
+    elif any(sk["drafts"][k] for k in ("S", "L") if left[k]):
+        blocked, action = "edit", {"go": "cut", "label": "4 편집실 열기"}
+    else:
+        blocked, action = "shoot", {"go": "library", "label": "2 보관함 열기"}
+    return {"today": today, "isDay": today in days or bool(today_n["S"] + today_n["L"]), "todayN": today_n, "days": days, "daysSet": days_set,
+            "next": {"at": nxt[0][0], "text": slot_text(nxt[0][0]), "kind": nxt[0][1]} if nxt else None,
+            "left": left, "slots": slots, "q": {k: ctx[k]["q"] for k in ("S", "L")}, "used": {k: ctx[k]["used"] for k in ("S", "L")},
+            "ready": {k: len(ready[k]) for k in ("S", "L")}, "readyItems": [{k2: x[k2] for k2 in ("name", "seq", "label", "kind", "export")} for x in sk["ready"][:6]],
+            "drafts": sk["drafts"], "blocked": blocked, "action": action, "warns": warns, "notes": notes,
+            "tod": {k: ctx[k]["tod"] for k in ("S", "L")}}
+
+
+def week_view(st, oc, now, tks, rem, chans=None):
+    """'이번 주' 카드: 월요일부터 올린 개수 vs 계획 · 먼저 할 일 2개 · 다음 점검 날 ·
+    저장한 전략이면 올리는 요일·만들어 둔 편집본·막힌 곳·다음 행동 (plan · week_plan · D-086)."""
     lt = datetime.fromtimestamp(now, timezone.utc).astimezone()
     monday = (lt - timedelta(days=lt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     vids = (oc or {}).get("videos") or {}
@@ -2783,7 +3136,19 @@ def week_view(st, oc, now, tks, rem):
             "planL": rates["L"], "planS": rates["S"], "saved": st.get("strategy") is not None,
             "todos": [{"id": t["id"], "text": t["text"], "category": t.get("category")} for t in open_[:2]], "openN": len(open_),
             "checkDue": (last + REMIND_DAYS * 86400) if last else None, "checkOn": bool(rem.get("on")), "checkNow": bool(rem.get("due")),
-            "rssAt": ((oc or {}).get("rss") or {}).get("at")}
+            "rssAt": ((oc or {}).get("rss") or {}).get("at"), "plan": _safe_week_plan(st, oc, now, chans)}
+
+
+def _safe_week_plan(st, oc, now, chans):
+    try:
+        return week_plan(st, oc, now, chans)
+    except Exception as e:  # noqa: BLE001 — 올리기 줄을 못 만들어도 카드는 예전처럼
+        try:
+            import studiolog
+            studiolog.write(f"이번 주 올리기 줄을 만들지 못했어요 · {e}")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
 
 
 def _preset_refs(ana):
@@ -2837,14 +3202,14 @@ def overview(with_forecast=False):
     pre = [dict(x, refs=refs_.get(x["key"]) or {}) for x in presets()]
     sd = seed()
     out = {"ok": True, "now": now, "own": own, "competitors": comps, "groups": gs, "groupNames": list(GROUPS), "recommended": reco,
-           "strategy": current_strategy(st), "saved": st.get("strategy") is not None, "presets": pre,
+           "strategy": current_strategy(st), "saved": st.get("strategy") is not None, "draft": load_draft(), "presets": pre,
            "directionNames": DIRECTION_NAMES, "targets": list(TARGETS), "cats": list(CATS),
            "takeaways": tks, "todos": st["todos"], "settings": st["settings"],
            "checkups": {"latest": cks[-1] if cks else None, "items": [{"at": c["at"], "good": len(c.get("good") or []), "bad": len(c.get("bad") or []),
                                                                         "subs": (c.get("subs") or {}).get("to"), "id": c.get("id")} for c in cks[-30:]][::-1],
                         "trend": [{"at": r["at"], "subs": r.get("subs")} for r in (read_history().get(OWN) or []) if isinstance(r.get("subs"), (int, float))][-60:],
                         "forward": forward_check(cks)},
-           "ai": st.get("ai"), "remind": rem, "week": week_view(st, oc, now, tks, rem),
+           "ai": st.get("ai"), "remind": rem, "week": week_view(st, oc, now, tks, rem, chans),
            "refresh": {"lastAt": max(lasts) if lasts else None, "staleN": len(todo), "estimate": estimate(todo),
                        "pause": st.get("pause") if _paused(st, now) else None, "ownAt": listed_at(oc),
                        "ownStale": not (listed_at(oc) and now - listed_at(oc) < OWN_STALE),

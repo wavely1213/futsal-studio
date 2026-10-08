@@ -411,6 +411,25 @@
   .up-acts { display: grid; gap: 8px; }
   .up-meta { color: var(--ink-3); font-size: 12px; margin: -8px 0 14px; overflow-wrap: anywhere; }
   .up-meta:empty { display: none; }
+  /* 제목 후보 꼬리표 (게스트·시리즈·질문형·길어요·겹쳐요) · 전략 맞춤 · 다음 올릴 날 · 출연자 칸 (D-082~D-086) */
+  .up-cands .tt { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .up-cands .tg { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; white-space: nowrap; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
+  .up-cands .tg.good { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
+  .up-cands .tg.bad { color: var(--danger); border-color: var(--danger); background: transparent; }
+  .up-cands .c.over { color: var(--danger); }
+  .up-applied { background: var(--brand-soft); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+  .up-sched { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: -6px 0 14px; font-size: 13px; }
+  .up-sched[hidden] { display: none; }
+  .up-sched .why { color: var(--ink-3); font-size: 12px; flex: 1 1 260px; min-width: 0; }
+  .up-sched .btn { padding: 4px 10px; font-size: 12px; }
+  .up-grow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .up-grow .up-in { flex: 1 1 150px; min-width: 0; width: auto; }
+  .up-gl { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .up-gl:empty { display: none; }
+  .up-gl .g { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 12px; font-size: 13px; background: var(--surface-2); max-width: 100%; }
+  .up-gl .g small { color: var(--ink-3); overflow-wrap: anywhere; }
+  .up-gl .g button { border: 0; background: transparent; cursor: pointer; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 2px 6px; }
+  .up-gl .g.sug { border-style: dashed; background: var(--surface); padding-right: 12px; cursor: pointer; color: var(--ink-2); }
   @media (max-width: 860px) { .up-grid { grid-template-columns: 1fr; } }
   /* 7-2. 유튜브에 바로 올리기 (카드 · 설정 안내) — 색은 위 토큰만 (다크 모드 자동) */
   .yt-card [hidden], .yt-guide [hidden], .yt-guide[hidden] { display: none !important; }
@@ -534,6 +553,10 @@
   .sx-week .wr .btn { padding: 5px 10px; font-size: 12px; }
   .sx-week .wr label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
   .sx-week .ok { color: var(--brand); font-weight: 700; } .sx-week .no { color: var(--peak); font-weight: 700; }
+  .sx-week .wr.warn .t { color: var(--peak); font-weight: 600; }
+  .sx-week .wr.sub { border-top: 0; padding-top: 0; color: var(--ink-2); font-size: 12px; }
+  .sx-dirty { margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--peak); white-space: nowrap; }
+  .sx-savebar .linkbtn { font-size: 12px; }
   .sx-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-3); margin: 8px 2px 0; }
   .sx-legend .sx-act { margin-right: 4px; }
   .sx-cmp { margin-top: 4px; padding-top: 6px; border-top: 1px dashed var(--line); display: grid; gap: 2px; }
@@ -888,6 +911,7 @@
         <button class="btn primary" id="upMake">올리기 키트 만들기</button>
       </div>
       <div class="up-meta" id="upMeta"></div>
+      <div class="up-sched" id="upSched" hidden></div>
       <div class="up-notes" id="upNotes"></div>
       <div class="card sttodo" id="upTodos" hidden></div>
       <div class="up-grid" id="upBody" style="display:none">
@@ -896,6 +920,13 @@
             <h3>제목<span class="sp"></span><span class="up-cnt" id="upTitleCnt"></span><button class="btn" data-upcopy="title">복사</button></h3>
             <div class="up-cands" id="upCands"></div>
             <input class="up-in" id="upTitle" spellcheck="false" placeholder="제목 (후보를 누르거나 직접 써 주세요)">
+          </div>
+          <div class="card up-card" id="upGuestCard">
+            <h3>출연자·게스트<span class="sp"></span><span class="up-cnt" id="upGuestNote"></span></h3>
+            <div class="up-gl" id="upGuests"></div>
+            <div class="up-grow"><input class="up-in" id="upGName" maxlength="20" spellcheck="false" list="upGBook" placeholder="게스트 이름 (예: 이한울)"><input class="up-in" id="upGBio" maxlength="40" spellcheck="false" placeholder="이력 한 줄 (예: 현 풋살 국가대표)"><button class="btn" id="upGAdd">넣기</button></div>
+            <datalist id="upGBook"></datalist>
+            <p class="up-hint">게스트를 넣으면 제목 후보·태그·해시태그·설명의 '▶ 출연' 줄에 이름이 들어가요. 적어 둔 게스트는 다음 영상에서 골라 쓰고, 다시 나오면 '2탄'처럼 세어 드려요.</p>
           </div>
           <div class="card up-card">
             <h3>설명<span class="sp"></span><span class="up-cnt" id="upDescCnt"></span><button class="btn" data-upcopy="desc">복사</button></h3>
@@ -2170,6 +2201,9 @@ checkUpdate();
   const hashCount = s => (s.match(/(^|[^0-9A-Za-z가-힣_&#])#[0-9A-Za-z가-힣_]+/g) || []).length;
   const chText = () => ((up.kit && up.kit.chapters) || []).map(c => `${c.time} ${c.title}`).join("\n");
   const edits = () => ({ title: $("upTitle").value, description: $("upDesc").value, tags: $("upTags").value });
+  // 겹침 검사 열쇠 — upload.py·hooks.norm_title 과 같은 규칙 (괄호 속 말·[시리즈]·해시태그·기호·띄어쓰기는 안 봄 · feat./vs 괄호는 봄)
+  const normTitle = t => (t || "").replace(/\((?![^)]*(?:feat|ft\.|vs))[^)]*\)|\[[^\]]*\]|【[^】]*】/gi, "").replace(/#\S+/g, "").replace(/[^0-9A-Za-z가-힣]/g, "").toLowerCase();
+  const TAG_CLS = { "게스트": "good", "시리즈": "good", "질문형": "good", "길어요": "bad", "겹쳐요": "bad", "같은 틀": "" };
 
   function fillVids() {
     const list = state.local, key = JSON.stringify(list.map(v => [v.name, v.analyzed, srcNote(v)]));
@@ -2225,17 +2259,49 @@ checkUpdate();
       : `<b>아직 만든 올리기 키트가 없어요</b>'올리기 키트 만들기'를 누르면 영상 내용으로 제목 후보·설명·챕터·태그를 만들어 드려요.${state.local.some(v => v.name === up.name && !v.analyzed) ? "<br>보관함에서 '편집점 찾기'를 먼저 하면 챕터와 설명이 훨씬 좋아져요." : ""}`;
     $("upMake").textContent = k ? "다시 만들기" : "올리기 키트 만들기";
     $("upMake").disabled = !up.name;
-    $("upNotes").innerHTML = k ? (k.notes || []).concat(k.alerts || []).map(n => `<div class="up-note">${esc(n)}</div>`).join("") : "";
+    $("upNotes").innerHTML = k ? (k.notes || []).concat(k.alerts || []).map(n => `<div class="up-note">${esc(n)}</div>`).join("")
+      + ((k.applied || []).length ? `<div class="up-applied"><b>채널 전략에 맞췄어요</b>${k.applied.map(n => `<br>· ${esc(n)}`).join("")}</div>` : "") : "";
     meta();
+    renderSched();
     if (!k) return;
     $("upTitle").value = k.title || "";
     $("upDesc").value = k.description || "";
     $("upTags").value = (k.tags || []).join(", ");
-    renderCands(); renderChs(); renderThumb(); counts();
+    renderCands(); renderChs(); renderThumb(); renderGuests(); counts();
+  }
+  function renderSched() {  // 다음 올릴 날 (채널 전략의 요일·주당 개수·시각 · D-086)
+    const k = up.kit, sc = k && k.schedule, box = $("upSched");
+    box.hidden = !k;
+    if (!k) return;
+    box.innerHTML = sc ? `<b>${esc(sc.line)}</b><button class="btn" id="upSchedCopy">복사</button><span class="why">${esc(sc.why || "")}${sc.behind ? ` · 이번 주 계획보다 ${sc.behind}개 밀렸어요` : ""}</span>`
+      : `<span class="why">${k.planSaved ? `저장한 채널 전략에 ${k.format === "shorts" ? "쇼츠" : "롱폼"} 계획(주당 개수)이 없어서 다음 올릴 날은 정하지 않았어요`
+        : "8 채널 전략에서 [우리 전략]을 저장하면 다음 올릴 날(요일·시각)을 여기에 알려 드려요"}</span>`;
+    if (sc) $("upSchedCopy").onclick = async () => { await copyText(sc.line); toast("다음 올릴 날을 복사했어요"); };
+  }
+  function renderGuests() {  // 출연자·게스트 (D-085): 넣은 게스트 · 대사에서 부른 이름 제안 · 적어 둔 게스트 목록
+    const k = up.kit, gs = k.guests || [], have = new Set(gs.map(g => g.name.replace(/\s+/g, "")));
+    const sug = (k.guestHint || []).filter(n => !have.has(n.replace(/\s+/g, "")));
+    $("upGuests").innerHTML = gs.map((g, i) => `<span class="g">${esc(g.name)}${g.bio ? ` <small>${esc(g.bio)}</small>` : ""}<button data-gx="${i}" aria-label="빼기" title="빼기">×</button></span>`).join("")
+      + sug.map(n => `<button class="g sug" data-gs="${esc(n)}" title="대사에서 이 이름을 불렀어요">+ ${esc(n)} 게스트로 넣기</button>`).join("");
+    $("upGuestNote").textContent = gs.length ? `${gs.length}명` : "";
+    $("upGBook").innerHTML = (k.guestBook || []).map(g => `<option value="${esc(g.name)}">${esc(g.bio || "")}${g.n ? ` · ${g.n}번 나옴` : ""}</option>`).join("");
+    $("upGuests").querySelectorAll("[data-gx]").forEach(b => (b.onclick = () => setGuests(gs.filter((_, j) => j !== +b.dataset.gx))));
+    $("upGuests").querySelectorAll("[data-gs]").forEach(b => (b.onclick = () => setGuests([...gs, { name: b.dataset.gs, bio: "" }])));
+  }
+  async function setGuests(list) {  // 게스트를 바꾸면 제목 후보·태그·해시태그·설명 출연 줄을 서버가 다시 맞춤 (손으로 고른 제목은 그대로)
+    if (!up.kit) return;
+    await flush();
+    const n = up.name, seq = up.seq;
+    const j = await api("/api/upload/kit", { name: n, seq, guests: list.slice(0, 3) });
+    if (!j.ok || n !== up.name || seq !== up.seq) return;
+    up.kit = j.kit;
+    render();
+    toast(list.length ? "게스트를 제목 후보·태그·설명에 넣었어요" : "게스트를 뺐어요");
   }
   function renderCands() {
     const cur = $("upTitle").value;
-    $("upCands").innerHTML = (up.kit.titles || []).map((t, i) => `<button class="${t === cur ? "on" : ""}" data-i="${i}"><span class="k">${i + 1}</span><span>${esc(t)}</span><span class="c">${ulen(t)}자</span></button>`).join("");
+    const info = up.kit.titleInfo || [], lim = up.kit.maxLen;
+    $("upCands").innerHTML = (up.kit.titles || []).map((t, i) => { const f = info[i] || {}; return `<button class="${t === cur ? "on" : ""}" data-i="${i}"${f.why ? ` title="${esc(f.why)}"` : ""}><span class="k">${i + 1}</span><span class="tt">${esc(t)}</span>${(f.tags || []).map(g => `<span class="tg ${TAG_CLS[g] || ""}">${esc(g)}</span>`).join("")}<span class="c${lim && ulen(t) > lim ? " over" : ""}">${ulen(t)}자</span></button>`; }).join("");
     $("upCands").querySelectorAll("button").forEach(b => (b.onclick = () => { $("upTitle").value = up.kit.titles[+b.dataset.i]; changed(); }));
   }
   function renderChs() {
@@ -2260,7 +2326,8 @@ checkUpdate();
   function counts() {
     const set = (id, n, max, extra) => { const el = $(id), bad = n > max || !!extra; el.textContent = `${n.toLocaleString()} / ${max.toLocaleString()}자${extra ? " · " + extra : ""}`; el.classList.toggle("over", bad); };
     const t = $("upTitle").value, d = $("upDesc").value, h = hashCount(d);
-    set("upTitleCnt", ulen(t), 100, /[<>]/.test(t) ? "< > 는 못 써요" : "");
+    const key = normTitle(t), dup = key.length >= 2 && ((up.kit.taken || []).find(x => x.k === key)), lim = up.kit.maxLen;
+    set("upTitleCnt", ulen(t), 100, /[<>]/.test(t) ? "< > 는 못 써요" : dup ? `${dup.from} 제목과 같아요` : lim && ulen(t) > lim ? `전략 할 일: ${lim}자 안쪽` : "");
     set("upDescCnt", ulen(d), 5000, /[<>]/.test(d) ? "< > 는 못 써요" : h > 15 ? `해시태그 ${h}개 (15개까지)` : "");
     set("upTagsCnt", tagsLen(tagsOf($("upTags").value)), 500, "");
     $("upCands").querySelectorAll("button").forEach(b => b.classList.toggle("on", up.kit.titles[+b.dataset.i] === t));
@@ -2272,6 +2339,15 @@ checkUpdate();
     up.timer = setTimeout(() => { up.timer = null; save(); }, 1000);
   }
   ["upTitle", "upDesc", "upTags"].forEach(id => $(id).addEventListener("input", changed));
+  const addGuest = () => {
+    const name = $("upGName").value.trim(), book = ((up.kit && up.kit.guestBook) || []).find(g => g.name === name);
+    if (!name || !up.kit) return;
+    setGuests([...(up.kit.guests || []).filter(g => g.name !== name), { name, bio: $("upGBio").value.trim() || (book ? book.bio : "") }]);
+    $("upGName").value = ""; $("upGBio").value = "";
+  };
+  $("upGAdd").onclick = addGuest;
+  ["upGName", "upGBio"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) addGuest(); }));
+  $("upGName").addEventListener("change", () => { const g = ((up.kit && up.kit.guestBook) || []).find(x => x.name === $("upGName").value.trim()); if (g && !$("upGBio").value) $("upGBio").value = g.bio || ""; });
   $("upVid").onchange = () => load();
   $("upSrc").onchange = () => load($("upSrc").value);
   document.querySelector('.step[data-p="upload"]').addEventListener("click", async () => { await flush(); fillVids(); load(up.name === $("upVid").value ? up.seq : undefined); });
@@ -2398,7 +2474,8 @@ checkUpdate();
     show("ytSched", o.privacy === "scheduled");
     $("ytWhen").min = localDT(new Date(Date.now() + schedMin() * 60e3));
     if (document.activeElement !== $("ytWhen")) $("ytWhen").value = o.when;
-    $("ytSchedNote").textContent = o.when ? "이 시각에 공개돼요 (그 전까지 비공개)" : `공개할 날짜·시각을 골라 주세요 (지금부터 ${schedMin()}분 뒤부터)`;
+    const sc = (ctx().kit || {}).schedule, fromPlan = sc && o.when && o.when === localDT(new Date(sc.at * 1000));
+    $("ytSchedNote").textContent = o.when ? `이 시각에 공개돼요 (그 전까지 비공개)${fromPlan ? " · 채널 전략의 다음 올릴 날이에요" : ""}` : `공개할 날짜·시각을 골라 주세요 (지금부터 ${schedMin()}분 뒤부터)`;
     show("ytAudit", !audited());
     document.querySelectorAll('input[name="ytKids"]').forEach(r => (r.checked = r.value === o.kids));
     const f = (p && p.files) || {};
@@ -2706,7 +2783,12 @@ checkUpdate();
   $("ytCopyUrl").onclick = async () => { if (YT.loginUrl) { await copyText(YT.loginUrl); toast("주소를 복사했어요 · 브라우저 주소 칸에 붙여 넣어 주세요"); } };
   $("ytPause").onclick = async () => { $("ytPause").disabled = true; const j = await api("/api/youtube/pause", {}); if (j.ok) toast("멈추는 중이에요…"); };
   $("ytGo").onclick = () => go(false);
-  $("ytPriv").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { YT.opts.privacy = b.dataset.v; syncInputs(planNow()); renderProbs(planNow() || {}); }));
+  $("ytPriv").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    YT.opts.privacy = b.dataset.v;
+    const sc = (ctx().kit || {}).schedule;  // 예약 공개 기본값 = 채널 전략의 다음 올릴 날 (D-086 · 바꿔도 됨)
+    if (b.dataset.v === "scheduled" && !YT.opts.when && sc && sc.at * 1000 > Date.now() + schedMin() * 60e3) YT.opts.when = localDT(new Date(sc.at * 1000));
+    syncInputs(planNow()); renderProbs(planNow() || {});
+  }));
   $("ytWhen").addEventListener("change", () => { YT.opts.when = $("ytWhen").value; syncInputs(planNow()); renderProbs(planNow() || {}); });
   document.querySelectorAll('input[name="ytKids"]').forEach(r => r.addEventListener("change", () => (YT.opts.kids = r.value)));
   $("ytThumb").addEventListener("change", () => { YT.opts.thumbnail = $("ytThumb").checked; renderProbs(planNow() || {}); });
@@ -2850,7 +2932,8 @@ checkUpdate();
   const P = x => x === null || x === undefined ? "—" : `${Math.round(x * 100)}%`;
   const R = x => x === null || x === undefined ? "—" : `${+(+x).toFixed(2)}`;
   const pad = n => String(n).padStart(2, "0");
-  const dayOf = ts => { if (!ts) return ""; const d = new Date(ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const dayOf = ts => { if (!ts) return ""; if (typeof ts === "string") return /^\d{4}-\d{2}-\d{2}$/.test(ts) ? ts : "";  // 양식에서 읽은 날짜 칸 값(초안)도
+    const d = new Date(ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   const ago = ts => { if (!ts) return "—"; const d = Math.floor((Date.now() / 1000 - ts) / 86400); return d <= 0 ? "오늘" : `${d}일 전`; };
   const ACT = { "활발": "a0", "보통": "a1", "쉬는 중": "a2", "멈춤": "a3" };
   const actDot = c => c ? `<i class="sx-act ${ACT[c.activity] || ""}" title="${esc(c.activity)} · 마지막 업로드 ${c.lastDays}일 전"></i>` : `<i class="sx-act" title="업로드 날짜를 아직 몰라요"></i>`;
@@ -2868,7 +2951,10 @@ checkUpdate();
     if (!j || !j.ok) { $("sxSum").innerHTML = `<div class="s">${esc((j && j.error) || "채널 전략을 읽지 못했어요. 잠시 뒤 다시 열어 주세요")}</div>`; return; }
     SX.ov = j;
     if (!SX.tab) SX.tab = j.saved ? "sol" : "plan";
-    if (!SX.dirty) SX.draft = JSON.parse(JSON.stringify(j.strategy));
+    if (!SX.dirty) {  // 저장 안 한 초안이 있으면 그것을 이어서 (다른 화면에 다녀왔거나 창을 닫았다 열었음 · D-087)
+      if (j.draft && j.draft.strategy) { SX.draft = j.draft.strategy; SX.dirty = true; SX.restoredAt = j.draft.at; }
+      else SX.draft = JSON.parse(JSON.stringify(j.strategy));
+    }
     renderAll();
     autoOwn();
     remindCheck();
@@ -2926,22 +3012,43 @@ checkUpdate();
     box.hidden = false;
     const due = w.checkDue ? Math.ceil((w.checkDue - Date.now() / 1000) / 86400) : null;
     const up = (n, plan, lab) => { const goal = plan === 0.5 ? 1 : Math.round(plan); return plan > 0 ? `${lab} <span class="${n >= goal ? "ok" : ""}">${n}</span>/${plan === 0.5 ? "2주에 1" : goal}개` : `${lab} ${n}개`; };
+    const p = w.plan, act = p && p.action;  // 올리는 요일·만들어 둔 편집본·막힌 곳 (D-086)
+    const BLOCK = { upload: "올리기에서 막혀 있어요", edit: "편집에서 막혀 있어요 (내보낸 편집본이 없어요)", shoot: "촬영부터 해야 해요 (아직 안 내보낸 편집본도 없어요)" };
+    const stock = p ? [p.ready.S || p.slots.S ? `쇼츠 ${p.ready.S}개` : "", p.ready.L || p.slots.L ? `롱폼 ${p.ready.L}개` : ""].filter(Boolean).join(" · ") : "";
+    const planRow = !p ? "" : `<div class="wr"><span class="t">${p.isDay ? `<span class="ok">오늘은 올리는 날</span>` : "오늘은 쉬는 날"} (${esc(p.days.join("·"))}${p.daysSet ? "" : " · 요일을 정하지 않아 고른 기본 요일"})
+        · ${p.next ? `다음 자리 <b>${esc(p.next.text)}</b>` : "이번 주 자리 없음"} · 이번 주 남은 자리 쇼츠 ${p.slots.S} · 롱폼 ${p.slots.L}
+        <br>올릴 준비 ${esc(stock || "없음")} <span class="sx-note" style="margin:0">(내보냄·아직 안 올림)</span>${p.blocked ? ` · <span class="no">${esc(BLOCK[p.blocked])}</span>` : ""}</span>
+        <button class="btn${p.blocked ? " primary" : ""}" data-wact="1">${esc(act.label)}</button></div>`
+      + p.warns.map(x => `<div class="wr warn"><span class="t">⚠ ${esc(x.text)}</span><button class="btn" data-wgo="cut">4 편집실 열기</button></div>`).join("")
+      + p.notes.map(x => `<div class="wr sub"><span class="t">${esc(x)}</span></div>`).join("");
     box.innerHTML = `<b>이번 주 할 것 <span class="sx-note" style="margin:0;font-weight:400">(${esc(dayOf(w.from))} 월요일부터)</span></b>
       <div class="wr"><span class="t">${w.saved ? `올린 영상: ${up(w.L, w.planL, "롱폼")} · ${up(w.S, w.planS, "쇼츠")}${w.rssAt ? ` <span class="sx-note" style="margin:0">(${ago(w.rssAt)} 기록 기준)</span>` : ""}`
         : "아직 우리 전략을 저장하지 않았어요 · 방향을 골라 저장하면 주마다 올릴 개수가 생겨요"}</span>
-        ${w.saved ? `<button class="btn" data-wgo="cut">4 편집실 열기</button>` : `<button class="btn primary" data-wtab="plan">우리 전략 열기</button>`}</div>
+        ${w.saved ? (p ? "" : `<button class="btn" data-wgo="cut">4 편집실 열기</button>`) : `<button class="btn primary" data-wtab="plan">우리 전략 열기</button>`}</div>${planRow}
       <div class="wr"><span class="t">${w.todos.length ? w.todos.map(t => `<label><input type="checkbox" data-wtd="${esc(t.id)}"><span>${esc(t.text)}</span></label>`).join("")
         : "할 일이 없어요 · [가져올 점]에서 [작업으로 만들기]를 눌러 보세요"}</span><button class="btn" data-wtab="take">할 일 ${w.openN}개 보기</button></div>
       <div class="wr"><span class="t">${w.checkNow ? `<span class="no">점검할 때예요</span> · 계획대로 가고 있는지 확인해요` : due !== null ? `다음 점검: ${esc(dayOf(w.checkDue))} (${due <= 0 ? "오늘" : `${due}일 뒤`})` : "전략을 저장하면 7일마다 점검을 알려 드려요"}</span>
         <button class="btn${w.checkNow ? " primary" : ""}" data-wtab="check" data-wck="${w.checkNow ? 1 : 0}">${w.checkNow ? "지금 점검하기" : "점검 보기"}</button></div>`;
     box.querySelectorAll("[data-wgo]").forEach(b => b.onclick = () => go(b.dataset.wgo));
+    box.querySelectorAll("[data-wact]").forEach(b => b.onclick = async () => {  // '7 올리기'면 내보낸 편집본을 골라 둔 채로
+      go(act.go);
+      if (act.go === "upload" && act.name && window.upSelect) await window.upSelect(act.name, act.seq);
+    });
     box.querySelectorAll("[data-wtab]").forEach(b => b.onclick = () => { openTab(b.dataset.wtab); if (b.dataset.wck === "1" && $("sxCheckGo")) $("sxCheckGo").click(); });
     box.querySelectorAll("[data-wtd]").forEach(c => c.onchange = async () => {
       const r = await api("/api/strategy/todo", { update: { id: c.dataset.wtd, done: c.checked } }).catch(() => ({}));
       if (r.ok) { toast("할 일을 끝냈어요 ✓"); load(false); }
     });
   }
+  function dirtyMark() {  // '우리 전략' 탭 옆 '저장 안 됨'
+    const b = $("sxTabs").querySelector('[data-v="plan"]');
+    if (!b) return;
+    let m = b.querySelector(".sx-dirty");
+    if (SX.dirty && !m) { m = document.createElement("span"); m.className = "sx-dirty"; m.textContent = "저장 안 됨"; b.appendChild(m); }
+    if (!SX.dirty && m) m.remove();
+  }
   function renderTabs() {
+    dirtyMark();
     $("sxTabs").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === SX.tab));
     Object.entries(TABS).forEach(([k, id]) => { $(id).hidden = k !== SX.tab; });
     if (SX.tab === "prob" && SX.fc) renderProb();  // 그림을 지금 화면 폭에 맞춰 다시
@@ -3135,7 +3242,7 @@ checkUpdate();
           <div><button class="btn sx-mini" id="sxSAdd"${(d.series || []).length >= 20 ? " disabled" : ""}>시리즈 더하기</button></div></div>
         <div class="sx-field"><span class="lb">목표 구독자 (선택)</span><div class="sx-goals">6개월 <input class="inp" id="sxG6" inputmode="numeric" value="${(d.goals || {}).m6 || ""}" placeholder="예: 10000"> 12개월 <input class="inp" id="sxG12" inputmode="numeric" value="${(d.goals || {}).m12 || ""}" placeholder="예: 20000"></div><span class="hint">넣으면 가능성 표에 '우리 목표' 줄이 생겨요</span></div>
         <div class="sx-field"><label for="sxStart">시작한 날</label><input class="inp" type="date" id="sxStart" value="${esc(dayOf(d.startedAt) || dayOf(Date.now() / 1000))}" style="width:180px"><span class="hint">처음 저장한 날이 기본이에요. 점검은 이날부터(또는 지난 점검부터) 계획대로 올렸는지 봐요 · 지난 날짜를 넣으면 그날부터 올린 영상을 계획과 견줘요</span></div>
-        <div class="sx-savebar"><button class="btn primary" id="sxSave">저장</button><span class="sx-note" style="margin:0" id="sxSaveState">${SX.dirty ? "고친 내용이 있어요 · [저장]을 눌러야 반영돼요" : o.saved ? "저장된 전략이에요" : ""}</span></div>
+        <div class="sx-savebar"><button class="btn primary" id="sxSave">저장</button><span class="sx-note" style="margin:0" id="sxSaveState">${saveStateText()}</span><button class="linkbtn" id="sxDraftDrop"${SX.dirty ? "" : " hidden"}>적던 내용 버리기</button></div>
       </div>
       <div class="card sx-ownc"><b>우리 채널 숫자</b>${s.src === "seed" ? ` <span class="sx-seed">조사 자료 · 새로 고치면 바뀌어요</span>` : ""}
         <div class="kv"><span>구독자</span><b>${N(s.subs)}</b><span>롱폼 보통 · 평균</span><b>${V(s.L.median)} · ${V(s.L.mean)} (구독자 대비 ${R(s.L.reach)})</b>
@@ -3169,7 +3276,34 @@ checkUpdate();
     d.goals = { m6: num($("sxG6").value), m12: num($("sxG12").value) };
     d.startedAt = $("sxStart").value || null;
   }
-  function touched() { SX.dirty = true; const s = $("sxSaveState"); if (s) s.textContent = "고친 내용이 있어요 · [저장]을 눌러야 반영돼요"; }
+  function saveStateText() {
+    if (!SX.dirty) return SX.ov && SX.ov.saved ? "저장된 전략이에요" : "";
+    const at = SX.restoredAt ? new Date(SX.restoredAt * 1000) : null;
+    return at ? `저장하지 않고 적어 둔 내용을 이어서 보여 드려요 (${at.getMonth() + 1}월 ${at.getDate()}일 ${pad(at.getHours())}:${pad(at.getMinutes())}) · [저장]을 눌러야 반영돼요`
+      : "고친 내용이 있어요 · 적는 대로 따로 남겨 둬요 · [저장]을 눌러야 반영돼요";
+  }
+  // 저장 안 한 초안: 고칠 때마다 서버에 따로 남김 (0.7초 모아서) · 다른 화면·편집실로 가거나 창을 닫을 때도 (D-087)
+  function sendDraft() {
+    clearTimeout(SX.draftTimer); SX.draftTimer = null;
+    if (!SX.dirty || !SX.draft) return SX.draftChain || Promise.resolve();
+    const body = { strategy: JSON.parse(JSON.stringify(SX.draft)) };
+    SX.draftChain = (SX.draftChain || Promise.resolve()).then(() => fetch("/api/strategy/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {}));
+    return SX.draftChain;
+  }
+  function touched() {
+    SX.dirty = true; SX.restoredAt = null;
+    const s = $("sxSaveState"); if (s) s.textContent = saveStateText();
+    if ($("sxDraftDrop")) $("sxDraftDrop").hidden = false;
+    dirtyMark();
+    clearTimeout(SX.draftTimer); SX.draftTimer = setTimeout(sendDraft, 700);
+  }
+  const prevFlushSx = window.flushBeforeClose;
+  window.flushBeforeClose = async () => { if (SX.draftTimer) await sendDraft(); return prevFlushSx ? prevFlushSx() : true; };
+  window.addEventListener("pagehide", () => {
+    if (!SX.draftTimer || !SX.dirty || !SX.draft) return;
+    clearTimeout(SX.draftTimer); SX.draftTimer = null;
+    navigator.sendBeacon("/api/strategy/draft", new Blob([JSON.stringify({ strategy: SX.draft })], { type: "text/plain;charset=UTF-8" }));  // 서버는 내용만 JSON 으로 읽음
+  });
   function bindPlan() {
     const f = $("sxForm"), rer = () => { readForm(); touched(); renderPlan(); };
     f.querySelectorAll("input, textarea, select").forEach(x => x.addEventListener("input", () => { readForm(); touched(); }));
@@ -3200,9 +3334,18 @@ checkUpdate();
       const r = await api("/api/strategy/save", { strategy: body }).catch(() => ({}));
       $("sxSave").disabled = false;
       if (!r.ok) { if (!r.error) toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return; }
-      SX.dirty = false; SX.fc = null; SX.sol = null;
+      clearTimeout(SX.draftTimer); SX.draftTimer = null; await SX.draftChain;  // 늦게 간 초안이 저장 뒤에 다시 생기지 않게
+      SX.dirty = false; SX.restoredAt = null; SX.fc = null; SX.sol = null; dirtyMark();
+      api("/api/strategy/draft", { clear: true }).catch(() => {});
       toast("저장했어요 · 성공 솔루션과 가능성을 다시 계산했어요");
       load(true);
+    };
+    $("sxDraftDrop").onclick = async () => {
+      if (!confirm("저장하지 않고 적던 내용을 버리고 저장된 전략(없으면 방향 A 초안)으로 되돌릴까요?")) return;
+      clearTimeout(SX.draftTimer); SX.draftTimer = null; await SX.draftChain;
+      await api("/api/strategy/draft", { clear: true }).catch(() => ({}));
+      SX.dirty = false; SX.restoredAt = null; SX.draft = JSON.parse(JSON.stringify(SX.ov.strategy));
+      dirtyMark(); renderPlan(); toast("적던 내용을 버렸어요");
     };
     $("sxRevSave").onclick = async () => { const v = $("sxRev").value; if (!v) return; const r = await api("/api/strategy/save", { revivedAt: v }); if (r.ok) { toast("다시 시작한 날을 고쳤어요"); load(true); } };
   }
