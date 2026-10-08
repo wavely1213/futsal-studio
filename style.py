@@ -785,10 +785,14 @@ def list_styles():
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
             fm = formats_of(d)
+            pl = d.get("plan") if isinstance(d.get("plan"), dict) else None
+            if fm and isinstance(fm["long"].get("plan"), dict):  # 섞어 배운 스타일: 카드·채널 전략의 기획 분석은 긴 영상 것 (클로드 판단은 그대로 붙임)
+                pl = dict(fm["long"]["plan"], **({"ai": d["plan"]["ai"]} if pl and pl.get("ai") else {}))
             out.append({"name": f.stem, "profile": d, "params": edit_params(d), "desc": describe(d),
-                        "plan": d.get("plan") if isinstance(d.get("plan"), dict) else None, "plan_desc": plan.describe_plan(d.get("plan")),
-                        # 쇼츠·긴 영상을 섞어 배운 스타일: 형식마다 값 (스타일 카드 '구조 수치'에 따로 보여 줌)
-                        "formats": {k: {"count": v.get("count", 1), "profile": _with_user(v, d), "params": edit_params(d, k), "desc": _describe(_with_user(v, d))}
+                        "plan": pl, "plan_desc": plan.describe_plan(pl),
+                        # 쇼츠·긴 영상을 섞어 배운 스타일: 형식마다 값 (스타일 카드 '구조 수치'에 따로 보여 줌 · 쇼츠 기획은 한 줄로)
+                        "formats": {k: {"count": v.get("count", 1), "profile": _with_user(v, d), "params": edit_params(d, k), "desc": _describe(_with_user(v, d)),
+                                        "headline": (v.get("plan") or {}).get("headline") if isinstance(v.get("plan"), dict) else None}
                                     for k, v in fm.items()} if fm else None})
         except Exception:
             pass

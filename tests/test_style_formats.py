@@ -100,6 +100,20 @@ class SplitTest(Work):
         self.assertIn("롱폼 가편집:", st["desc"])
         self.assertIn("쇼츠 가편집:", st["desc"])
 
+    def test_card_shows_long_plan_for_mixed_style(self):
+        """검토 고침: 섞어 배운 스타일 카드·채널 전략의 기획 분석은 긴 영상 것 (클로드 판단은 그대로) · 쇼츠 기획은 한 줄."""
+        self.learn()
+        f = style.STYLES / "섞은 스타일.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d["plan"] = {"headline": "섞인 기획 한 줄", "refs": 3, "ai": {"summary": "클로드 요약"}}
+        d["formats"]["long"]["plan"] = {"headline": "긴 영상 기획 한 줄", "refs": 2}
+        d["formats"]["shorts"]["plan"] = {"headline": "쇼츠 기획 한 줄", "refs": 1}
+        f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        st = style.list_styles()[0]
+        self.assertEqual((st["plan"]["headline"], st["plan"]["refs"], st["plan"]["ai"]), ("긴 영상 기획 한 줄", 2, {"summary": "클로드 요약"}))
+        self.assertEqual(st["formats"]["shorts"]["headline"], "쇼츠 기획 한 줄")
+        self.assertEqual(json.loads(f.read_text(encoding="utf-8"))["plan"]["headline"], "섞인 기획 한 줄")  # 파일은 그대로 (예전 판이 읽는 값)
+
     def test_one_format_style_is_unchanged(self):
         res, _ = self.learn("긴 영상만", (LONG1, LONG2))
         d = json.loads((style.STYLES / "긴 영상만.json").read_text(encoding="utf-8"))
