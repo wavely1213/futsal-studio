@@ -305,3 +305,125 @@ def find_fillers(segs):
         if before >= FILLER_GAP and after >= FILLER_GAP:
             out.append((round(max(0.0, w["s"] - min(0.1, before / 2)), 2), round(w["e"] + min(0.1, after / 2), 2), "추임새"))
     return out
+
+
+# ---------- 영상 밖 말: 촬영 준비 말 · 촬영 끝 말 · 구독/홍보 안내 (E12 · D-100 · BR-060) ----------
+# 문장 단위(captions.split_sentences)로 봄. 가편집·티저는 첫 인사 앞·마지막 끝인사 뒤를 자르고, 쇼츠는 안내 말까지 모두 뺌 (롱폼 중간 안내 말은 표시만).
+PRE, POST, CTA, PROMO = "촬영 준비 말", "촬영 끝 말", "영상 밖 안내 말", "영상 밖 안내 말"
+PRE_MAX = 90.0       # 촬영 준비 말은 첫 인사 앞, 이 초 안에서만 찾음
+TAIL_FROM = 0.6      # 끝인사는 말이 끝나는 시각의 60% 뒤에서만 찾음 (중간에 수강생에게 한 '감사합니다'는 아님)
+POST_SHORT = 6.0     # 끝인사 뒤 말이 촬영 끝 낱말 없이 이 초 이하 대답·인사뿐이면 그것도 촬영 끝 말
+NEAR = 3.0           # 안내 말 바로 옆(이 초 안)에 이어지는 말도 같은 안내 말로 봄
+# 첫 인사·주제 소개 (plan.GREETING 과 같은 갈래 · '오늘은 … 알려 드릴게요/해 볼게요')
+OPENING = re.compile(r"안녕하세요|안녕하십니까|반갑습니다|(?:저는|제가|여기는)\s?.{1,12}(?:입니다|이에요|예요)|\S{2,10}의\s?\S{2,6}입니다|"
+                     r"사관학교\s?\S*입니다|최경진입니다|오늘은\s.{2,40}(?:알려\s?드|배워\s?(?:볼|보)|해\s?(?:볼|보)|연습|알아\s?(?:볼|보))")
+# 촬영 준비 말: 녹화·찍힘·빨간불·마이크·'됐어?'·'레디 액션'·카운트다운
+PREROLL = re.compile(r"녹화|찍히|찍혀|찍고\s?있|찍는\s?(?:중|거)|빨간\s?불|녹음\s?(?:되|돼|중)|레코딩|카메라\s?(?:켜|돌|됐|돼|켰|괜찮)|"
+                     r"마이크\s?(?:켜|됐|돼|테스트|체크|괜찮)|소리\s?(?:들어가|잘\s?들|나와)|(?:준비|시작)\s?(?:됐|되었|돼)|"
+                     r"(?:됐|돼|되)(?:어|나|지|니|죠)?\s*\?|레디|액션|큐\s?(?:사인|줄게|들어|주세요)|슛\s?들어|"
+                     r"하나\s*,?\s*둘\s*,?\s*셋\s*(?:하면|갈게|큐|들어)", re.I)
+# 짧은 대답 ('네' · '네, 좋아요' · '오케이') — 준비 말·끝 말 사이에 끼면 같이 자름
+REPLY = re.compile(r"^(?:네|예|넵|응|어|오케이|ok|좋아요|좋습니다|알겠어요|알겠습니다|그래요|됐어요|돼요|네네|그럼요)(?:\s+(?:네|좋아요|좋습니다|됐어요|돼요|알겠어요))*$", re.I)
+# 끝인사
+CLOSING = re.compile(r"오늘은\s?여기까지|여기까지\s?(?:입니다|할게요|하겠습니다|예요)|다음\s?(?:영상|시간|편|주)(?:에서|에|으로)?\s?(?:또\s?)?(?:만나|봬|뵙|뵐|찾아)|"
+                     r"시청해\s?주셔서|봐\s?주셔서|감사합니다|고맙습니다|안녕히\s?(?:계세요|가세요)|다음에\s?(?:또\s?)?(?:만나|봬|뵐|뵙)")
+STRONG_CLOSING = re.compile(r"오늘은\s?여기까지|여기까지\s?(?:입니다|할게요|하겠습니다|예요)|다음\s?(?:영상|시간|편|주)(?:에서|에|으로)?\s?(?:또\s?)?(?:만나|봬|뵙|뵐|찾아)|"
+                            r"시청해\s?주셔서|안녕히\s?(?:계세요|가세요)|다음에\s?(?:또\s?)?(?:만나|봬|뵐|뵙)")
+# 촬영 끝 말 ('컷' · '수고했어요' · '한 번 더 찍을까' · '물 좀 마시고') — 축구 말 '컷백'·'컷인'은 아님
+POSTROLL = re.compile(r"(?<![가-힣])컷(?!백|인|트|팅)|수고|고생\s?(?:했|하셨|많)|끝났|(?:한\s?번|다시)\s?더?\s?찍|다시\s?찍|물\s?(?:좀\s?)?마시|"
+                      r"쉬었다|쉬고\s?(?:할|갈|다시)|녹화\s?(?:끝|꺼|멈|그만)|카메라\s?(?:꺼|끄)|끊을게|끊어\s?(?:주|요)", re.I)
+# 구독·좋아요·알림 부탁 ('좋아요'만으로는 아님 — '좋아요!'는 칭찬)
+CTA_RX = re.compile(r"구독|좋아요\s?(?:와|랑|하고|도|한\s?번|눌러|부탁|꾹|버튼)|알림\s?(?:설정|버튼|까지)|댓글\s?(?:로\s?)?(?:남겨|달아|많이)")
+# 레슨·수강·인스타 홍보 (강한 말) · 바로 옆에 강한 말이 있을 때만 홍보로 보는 말 ('주말반 아직 자리 있어요')
+PROMO_RX = re.compile(r"레슨\s?(?:문의|신청|받|모집)|수강\s?(?:문의|신청|생\s?모집)|문의\s?(?:는|주|하|사항)|인스타(?:그램)?\s?(?:디엠|dm|DM|메시지|으로|에)|"
+                      r"디엠|(?<![A-Za-z])dm(?![A-Za-z])|카톡\s?(?:으로|문의|채널)|카카오\s?(?:톡|채널)|오픈\s?채팅|프로필\s?(?:에\s?)?링크|설명란|고정\s?댓글", re.I)
+PROMO_WEAK = re.compile(r"(?:주말|평일|저녁|오전|오후|성인|유소년|초등|원데이)\s?(?:반|클래스|수업)|자리\s?(?:있|남|없)|모집|신청\s?(?:받|하)|마감|등록")
+CONT = re.compile(r"^(?:한\s?번씩\s?)?(?:눌러|꾹|부탁|해\s?주|해주|남겨|구독)")  # 앞 안내 말에 이어지는 말 ('구독이랑 좋아요' / '한 번씩 눌러 주시고요')
+
+
+def _reply(t):
+    return bool(REPLY.match(re.sub(r"[.,!?~…]+", "", str(t or "")).strip()))
+
+
+def _plain_t(t):
+    return re.sub(r"[\s.,!?~…]+", "", str(t or ""))
+
+
+def _span(sents, k, lo=None, hi=None):
+    """문장 k 를 뺄 구간: 앞뒤 말과의 빈 곳 절반(0.3초까지)을 함께."""
+    s = sents[k]
+    a = float(s["start"]) - min(0.3, max(0.0, (float(s["start"]) - float(sents[k - 1]["end"])) / 2) if k else 0.3)
+    b = float(s["end"]) + min(0.3, max(0.0, (float(sents[k + 1]["start"]) - float(s["end"])) / 2) if k + 1 < len(sents) else 0.3)
+    return round(max(0.0, a if lo is None else lo), 2), round(b if hi is None else hi, 2)
+
+
+def find_offscript(sents, dur=None):
+    """문장들 → 영상 밖 말 [{a, b, why, kind, text}] (a 순서).
+    kind: pre(첫 인사·주제 소개 앞의 촬영 준비 말과 대답 — 0초부터 첫 내용 말 시작까지) · post(마지막 끝인사 뒤 촬영 끝 말 — 영상 끝까지) ·
+    cta(구독·좋아요 부탁) · promo(레슨·인스타 홍보). 훅처럼 내용이 있는 말이 나오면 준비 말 찾기는 거기서 멈춤.
+    끝인사 뒤 말은 촬영 끝 낱말('컷'·'수고'·'한 번 더 찍')이 있거나 짧은 대답뿐일 때만 (덤 영상·이어지는 설명은 그대로)."""
+    sents = sorted((s for s in sents or () if _plain_t(s.get("text"))), key=lambda s: (float(s["start"]), float(s["end"])))
+    if not sents:
+        return []
+    out = []
+    # 1) 촬영 준비 말
+    k, hit = 0, False
+    while k < len(sents) and float(sents[k]["start"]) < PRE_MAX:
+        t = str(sents[k]["text"])
+        if OPENING.search(t):
+            break
+        if PREROLL.search(t):
+            hit = True
+        elif not _reply(t):
+            break
+        k += 1
+    pre_end = 0
+    if hit and 0 < k < len(sents):
+        pre_end = k
+        out.append({"a": 0.0, "b": round(float(sents[k]["start"]), 2), "why": PRE, "kind": "pre",
+                    "text": " ".join(str(s["text"]) for s in sents[:k])})
+    # 2) 촬영 끝 말: 끝 무렵 첫 끝인사(강한 말 우선)부터 끝인사·안내 말이 이어지는 곳까지가 마무리 · 그 뒤
+    last_end = float(sents[-1]["end"])
+    tail = [i for i in range(pre_end, len(sents)) if float(sents[i]["start"]) >= TAIL_FROM * last_end]
+    c = next((i for i in tail if STRONG_CLOSING.search(str(sents[i]["text"]))), None)
+    if c is None:
+        c = next((i for i in tail if CLOSING.search(str(sents[i]["text"]))), None)
+    post_from = len(sents)
+    if c is not None:
+        e = c
+        while e + 1 < len(sents) and (CLOSING.search(str(sents[e + 1]["text"])) or CTA_RX.search(str(sents[e + 1]["text"]))) \
+                and not POSTROLL.search(str(sents[e + 1]["text"])):
+            e += 1
+        after = sents[e + 1:]
+        talk = sum(float(s["end"]) - float(s["start"]) for s in after)
+        replies = all(_reply(s["text"]) or CLOSING.search(str(s["text"])) for s in after)
+        if after and (any(POSTROLL.search(str(s["text"])) for s in after) or (replies and talk <= POST_SHORT)):
+            post_from = e + 1
+            a = float(sents[e]["end"]) + min(0.3, max(0.0, (float(after[0]["start"]) - float(sents[e]["end"])) / 2))
+            end = max(float(dur or 0), last_end) + 1.0
+            out.append({"a": round(a, 2), "b": round(end, 2), "why": POST, "kind": "post", "text": " ".join(str(s["text"]) for s in after)})
+    # 3) 구독·홍보 안내 (준비 말·끝 말 안은 빼고)
+    kinds = {}
+    for i in range(pre_end, post_from):
+        t = str(sents[i]["text"])
+        if CTA_RX.search(t):
+            kinds[i] = "cta"
+        elif PROMO_RX.search(t):
+            kinds[i] = "promo"
+    for i in list(kinds):  # 바로 옆(3초 안) 이어지는 말: '한 번씩 눌러 주시고요' · '주말반 아직 자리 있어요'
+        for j in (i - 1, i + 1):
+            if not (pre_end <= j < post_from) or j in kinds:
+                continue
+            gap = float(sents[j]["start"]) - float(sents[i]["end"]) if j > i else float(sents[i]["start"]) - float(sents[j]["end"])
+            if gap <= NEAR:
+                t = str(sents[j]["text"]).strip()
+                if (kinds[i] == "cta" and j > i and CONT.match(t)) or (kinds[i] == "promo" and PROMO_WEAK.search(t)):
+                    kinds[j] = kinds[i]
+    for i in sorted(kinds):
+        a, b = _span(sents, i)
+        o = out[-1] if out and out[-1]["kind"] == kinds[i] and out[-1]["b"] >= a - 0.05 else None
+        if o:  # 이어진 안내 말은 한 덩어리로
+            o["b"], o["text"] = b, o["text"] + " " + str(sents[i]["text"])
+        else:
+            out.append({"a": a, "b": b, "why": CTA if kinds[i] == "cta" else PROMO, "kind": kinds[i], "text": str(sents[i]["text"])})
+    return sorted(out, key=lambda o: (o["a"], o["b"]))

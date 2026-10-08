@@ -543,3 +543,56 @@ def from_segments(segs, fmt="long", terms=(), silences=()):
     flush()
     out.sort(key=lambda c: c["start"])
     return _tidy(out)
+
+
+# ---------- 문장 단위로 나누기 (E12 · D-101) ----------
+# 받아쓰기가 앞 구간 글에 기대지 않으면(condition_on_previous_text=False) 문장부호가 줄고 한 구간이 30초 넘게 길어짐 →
+# 가편집·쇼츠 경계·영상 밖 말 찾기는 단어 시각으로 문장마다 나눠서 봄 (구간을 문장 끝(마침표가 없어도 '~요·~니다·~죠')·1초 넘게 쉰 곳에서).
+SENT_GAP = 1.0
+LONG_SEG = 8.0  # 단어 시각이 없는 구간은 이보다 길 때만 글자 수로 어림해서 나눔
+_LIKE = re.compile(r"^좋아요[,]?$")
+_SUB = re.compile(r"구독(?:이랑|하고|과|도|이나|랑)?[,]?$")
+
+
+def ends_sentence(w):
+    """낱말 하나가 문장 끝인지 ('있어요' · '됩니다' · '봤죠?' · '나이스!' — '필요'·'중요'·'~는데,' 는 아님)."""
+    t = re.sub(r"[\"'”’)\]]+$", "", str(w or "").strip())
+    return bool(_END.search(t)) or bool(_FIN.search(re.sub(r"[~]+$", "", t)))
+
+
+def split_sentences(segs, gap=SENT_GAP):
+    """받아쓰기 구간 → 문장 구간 [{start, end, text(, words)}] (시간 순).
+    단어 시각이 있고 한 구간에 문장이 둘 넘으면 문장 끝 낱말 뒤·gap 초 넘게 쉰 곳에서 나눔 (글은 그 문장의 낱말을 이은 것 ·
+    첫 문장 시작·마지막 문장 끝은 원래 구간 그대로). 한 문장뿐인 구간은 그대로 · 단어 시각이 없는 구간(예전 받아쓰기)은
+    LONG_SEG 초보다 길 때만 글자 수대로 시각을 어림해서 나눔 (나눈 조각에는 words 를 넣지 않음).
+    나눈 둘째 문장부터는 cont=True (원래 한 구간이었음)."""
+    out = []
+    for s in segs or ():
+        if not str(s.get("text") or "").strip():
+            continue
+        ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]
+        guess = not ws and float(s["end"]) - float(s["start"]) > LONG_SEG  # 단어 시각이 없는 긴 구간: 글자 수대로 어림해서 나눔
+        if guess:
+            ws = even_words(str(s["text"]).split(), float(s["start"]), float(s["end"]))
+        parts, cur = [], []
+        for i, w in enumerate(ws):
+            cur.append(w)
+            nxt = ws[i + 1] if i + 1 < len(ws) else None
+            liked = i and _LIKE.match(str(w["w"]).strip()) and _SUB.search(str(ws[i - 1]["w"]))  # '구독이랑 좋아요 눌러 주세요'의 '좋아요'는 이름씨
+            if nxt is None or (ends_sentence(w["w"]) and not liked) or float(nxt["s"]) - float(w["e"]) >= gap:
+                parts.append(cur)
+                cur = []
+        if len(parts) < 2:
+            out.append(dict(s))
+            continue
+        for k, p in enumerate(parts):
+            a = float(s["start"]) if k == 0 else float(p[0]["s"])
+            b = float(s["end"]) if k == len(parts) - 1 else float(p[-1]["e"])
+            piece = {"start": round(a, 2), "end": round(max(a, b), 2), "text": " ".join(str(w["w"]).strip() for w in p)}
+            if k:
+                piece["cont"] = True  # 같은 받아쓰기 구간의 뒷 문장 (가편집은 예전처럼 사이를 자르지 않음 — 말 없는 시범이 그 사이에 있을 수 있음)
+            if not guess:
+                piece["words"] = p
+            out.append(piece)
+    out.sort(key=lambda x: (x["start"], x["end"]))
+    return out

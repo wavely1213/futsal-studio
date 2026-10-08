@@ -978,6 +978,7 @@ def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
         return items, []
     talk = [(float(s["start"]), float(s["end"])) for s in segs or [] if float(s.get("end", 0)) > float(s.get("start", 0))]
     rr = (float(r["start"]), float(r["end"])) if r and "start" in r and "end" in r else None
+    away = [(float(o["a"]), float(o["b"])) for o in rec.get("offscript") or ()]  # 구독·홍보 안내 말은 티저로 안 씀 (E12 · BR-060)
     pk, per = None, 50
     if peaks and peaks.get("peaks"):
         pk, per = peaks["peaks"], int(peaks.get("per_sec") or 50)
@@ -1003,7 +1004,7 @@ def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
             t = a0
             while True:
                 a, b = t, min(b0, t + sec)
-                if b - a >= min(sec, b0 - a0) - 1e-6:
+                if b - a >= min(sec, b0 - a0) - 1e-6 and not any(x < b and a < y for x, y in away):
                     sc = -2.0 * speech(a, b) + loud(a, b) + (0.3 if rr and rr[0] <= a and b <= rr[1] else 0.0)
                     if best is None or sc > best[0] + 1e-9:
                         best = (sc, a, b)
@@ -1799,6 +1800,71 @@ def _minus(cuts, ivs, pre=0.0):
     return out
 
 
+# 쇼츠 문장 경계 (E12 · BR-061)
+SHORT_END_MAX = 5.0    # 쇼츠 끝이 문장 중간이면 문장 끝(captions.ends_sentence)까지 이만큼(초)까지 늘림 · 안 되면 앞 문장 끝에서 자름
+SHORT_LEAD_MAX = 10.0  # 첫 줄이 반응 말이면 그 앞의 말 없는 시범을 이만큼(초)까지 당겨 넣음
+REACT_GAP = 1.5        # 반응 말 앞이 이만큼 넘게 말 없이 비고 큰 소리 봉우리가 있으면(없으면 3초 넘게 비면) 시범으로 봄
+# 시범을 보고 하는 반응 말 ('나이스!' · '아이고, 공이 뒤로 갔네요' · '들어갔어요' · '아깝다' · '봤죠?' · 앞에 짧은 말 두 개까지: '아 씨, 또 놓쳤네')
+REACTION = re.compile(r"^(?:(?:아+|오+|와+|어+|우와|와우)[\s,!.~…]*|\S{1,2}[\s,!.~…]+){0,2}(?:나이스|아이고|아이구|아이쿠|들어갔|아깝|아까워|아까비|아쉽|아쉬워|봤죠|보셨죠|"
+                      r"됐다|됐어|그렇지|그렇죠|이거죠|이거예요|대박|완벽|깔끔|놓쳤|빗나갔|안\s?들어갔|좋습니다|좋아요|굿|오케이)")
+# 앞 말에 기대는 첫마디 — 쇼츠 첫 문장이면 점수를 덜 줌 ('그 다음에'·'자'·'그리고 마지막으로'처럼 순서를 여는 말은 아님)
+LEANS = re.compile(r"^(?:그래야|그래서|그러니까|그니까|왜냐하면|그러면|그럼|근데|그런데|하지만|그래도|그러나|그렇게|이렇게|그게|그거)(?![가-힣])")
+OPENER = re.compile(r"^(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로)")
+REACT_ONLY = 16        # 앞에 시범이 없으면 이 글자 이하의 반응 말 줄은 쇼츠 첫 줄에서 뺌 ('좋아요, 그럼 두 번째는…' 같은 긴 줄은 그대로)
+
+
+def _sent_end(seg):
+    toks = str(seg.get("text") or "").split()
+    return bool(toks) and captions.ends_sentence(toks[-1])
+
+
+def _demo_before(segs, k, peaks=()):
+    """문장 k 가 반응 말이고 바로 앞이 말 없는 시범(REACT_GAP 초 넘게 비고 큰 소리 봉우리 · 봉우리가 없으면 그 두 배 넘게 빔)이면
+    그 시범을 넣을 시작 시각 (앞 말 끝 0.1초 뒤 · 반응 말 SHORT_LEAD_MAX 초 앞까지) · 아니면 None."""
+    if not REACTION.match(str(segs[k]["text"]).strip()):
+        return None
+    st = segs[k]["start"]
+    prev_end = max([s["end"] for s in segs[max(0, k - 30):k] if s["end"] <= st + 0.05] or [0.0])  # 바로 앞 말 (문장은 시작 순서)
+    gap, pk = st - prev_end, [p for p in peaks or () if prev_end <= p < st]
+    if gap >= REACT_GAP and (pk or gap >= 2 * REACT_GAP):
+        return round(max(prev_end + 0.1, st - SHORT_LEAD_MAX), 2)
+    return None
+
+
+def _short_edges(segs, junk, i, j, peaks=()):
+    """쇼츠 후보 [i..j] (문장 번호, junk 는 뺄 문장) → (i, j, lead): 문장 경계에 맞춘 첫·끝 문장 번호와 앞에 당겨 넣을 시범 시작 시각(없으면 None).
+    끝: 마지막 남길 문장이 문장 끝이 아니면 이어지는 문장 끝까지 SHORT_END_MAX 초 안에서 늘림(군더더기·1.5초 넘게 쉰 곳은 넘지 않음) ·
+    안 되면 그 앞 문장 끝에서 자름. 시작: 첫 줄이 반응 말이면 그 앞 말 없는 시범(큰 소리 봉우리)부터 — 시범이 없으면 짧은 반응 줄은 뺌."""
+    last = next((k for k in range(j, i - 1, -1) if k not in junk), None)
+    if last is None:
+        return i, j, None
+    if not _sent_end(segs[last]):
+        end0, prev, got = segs[last]["end"], segs[last]["end"], None
+        for k in range(last + 1, len(segs)):
+            if k in junk or segs[k]["end"] - end0 > SHORT_END_MAX or (segs[k]["start"] - prev > 1.5 and not segs[k].get("cont")):
+                break
+            if _sent_end(segs[k]):
+                got = k
+                break
+            prev = segs[k]["end"]
+        if got is None:
+            got = next((k for k in range(last - 1, i - 1, -1) if k not in junk and _sent_end(segs[k])), None)
+        if got is not None:
+            j = got
+    first = next((k for k in range(i, j + 1) if k not in junk), i)
+    text = str(segs[first]["text"]).strip()
+    if not REACTION.match(text):
+        return i, j, None
+    lead = _demo_before(segs, first, peaks)
+    if lead is not None:
+        return first, j, lead
+    if len(re.sub(r"[\s.,!?~…]+", "", text)) <= REACT_ONLY:  # 원인 장면이 없는 반응 줄은 빼고 다음 문장부터
+        nxt = next((k for k in range(first + 1, j + 1) if k not in junk and not REACTION.match(str(segs[k]["text"]).strip())), None)
+        if nxt is not None:
+            return nxt, j, None
+    return i, j, None
+
+
 def _covered(ivs, a, b):
     """[a, b) 가운데 정리할 구간에 덮인 길이(초) — 서로 겹친 곳은 한 번만 셈."""
     got, end = 0.0, a
@@ -1824,6 +1890,11 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     extra_p = core.adir(name) / "analysis.json"
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
+    segs = captions.split_sentences(segs)  # 문장 단위 (받아쓰기 한 구간이 문장 여럿을 이으면 나눔 · E12)
+    # 영상 밖 말 (E12 · BR-060): 촬영 준비 말·촬영 끝 말은 가편집·쇼츠에서 자르고, 구독·홍보 안내 말은 쇼츠·티저에서만 뺌
+    off = takes.find_offscript(segs)
+    edge_iv = [(o["a"], o["b"], o["why"]) for o in off if o["kind"] in ("pre", "post")]
+    off_iv = [(o["a"], o["b"], o["why"]) for o in off]
 
     # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김) — 구령·환호('셋!' · '골!' · '나이스! 나이스!')는 그대로
     junk = set()
@@ -1837,6 +1908,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     # 단어 시각이 있으면: 말 사이에 홀로 떨어진 '음'·'어' 같은 추임새 단어도 뺌 (이미 빠지는 곳에 든 것은 셈하지 않음)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
     fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
+    sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
@@ -1846,11 +1918,11 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     cands = []
     for i in range(len(segs)):
         start = segs[i]["start"]
-        if i in junk:
+        if i in sjunk:
             continue
         j, sc, chars, junk_n = i, 0.0, 0, 0
         while j < len(segs) and segs[j]["end"] - start <= max_len:
-            if j in junk:
+            if j in sjunk:
                 junk_n += 1
             else:
                 sc += seg_score(segs[j])
@@ -1862,23 +1934,41 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
                 # 첫 문장이 강한 말로 시작하면 가산 (훅)
                 if any(k in segs[i]["text"] for k in ("팁", "중요", "자 여기서", "비결", "어떻게", "?")):
                     score += 4
+                elif LEANS.match(segs[i]["text"]):  # 앞 말에 기대는 첫 문장('그래야 …' · '그래서 …')은 덜 (E12: 문장 단위라 어디서나 시작할 수 있어서)
+                    score -= 3
+                elif OPENER.match(segs[i]["text"]):  # 순서를 여는 첫 문장('자, 두 번째 포인트는 …')은 조금 더
+                    score += 2
                 cands.append((score / (dur ** 0.35), start, end, i, j))
             j += 1
     cands.sort(reverse=True)
     picked = []
     for score, s0, e0, i, j in cands:
+        if not all(e0 <= p["start"] or s0 >= p["end"] for p in picked):
+            continue
+        # 문장 경계 맞추기 (E12 · BR-061): 끝은 문장 끝까지 늘리거나 앞 문장 끝에서 자름 · 반응 말로 시작하면 앞 시범부터
+        i, j, lead = _short_edges(segs, sjunk, i, j, peaks)
+        s0, e0 = (lead if lead is not None else segs[i]["start"]), segs[j]["end"]
         if all(e0 <= p["start"] or s0 >= p["end"] for p in picked):
             # 구간 안에서 군더더기·긴 무음을 빼고 컷 목록 생성
             cuts, cur = [], None
+            if lead is not None:  # 반응 말 앞의 말 없는 시범·큰 소리 (원인 → 반응)
+                cur = {"in": round(lead, 2), "out": round(max(lead, segs[i]["start"] - pre), 2)}
             for k in range(i, j + 1):
                 s = segs[k]
-                if k in junk:
+                if k in sjunk:
                     if cur:
                         cuts.append(cur)
                         cur = None
                     continue
                 a, b = max(0.0, s["start"] - pre), s["end"] + min(0.2, post)
-                if cur and a - cur["out"] <= gap_s:
+                demo = _demo_before(segs, k, peaks) if k > i else None
+                if demo is not None:  # 구간 안의 반응 말도 그 앞 시범과 함께 (원인 → 반응 · '두 번째 슛.' → 공 소리 → '들어갔어요.')
+                    a = min(a, demo)
+                if k == j and k + 1 < len(segs):  # 끝 문장 바로 뒤에 이어 붙은 말(같은 받아쓰기 구간의 다음 문장)은 안 들어가게
+                    b = min(b, max(s["end"], (s["end"] + segs[k + 1]["start"]) / 2))
+                if k == i and k and lead is None:
+                    a = max(a, min(s["start"], (segs[k - 1]["end"] + s["start"]) / 2))
+                if cur and (a - cur["out"] <= gap_s or s.get("cont") or demo is not None and a <= cur["out"] + 0.2):  # 같은 받아쓰기 구간 안의 문장 사이는 예전처럼 그대로 (시범)
                     cur["out"] = b
                 else:
                     if cur:
@@ -1886,8 +1976,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
                     cur = {"in": round(a, 2), "out": round(b, 2)}
             if cur:
                 cuts.append(cur)
-            cuts = _minus(_minus(cuts, junk_iv, pre), fill_iv)
-            if not cuts or e0 - s0 - _covered(junk_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
+            cuts = _minus(_minus(cuts, junk_iv + off_iv, pre), fill_iv)
+            if not cuts or e0 - s0 - _covered(junk_iv + off_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
                 continue
             hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
             hits.sort(key=lambda k: (k in GENERIC, -KEYWORDS[k], -len(k)))  # 주제어 먼저
@@ -1907,7 +1997,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
                 cur = None
             continue
         a, b = max(0.0, s["start"] - pre), s["end"] + post
-        if cur and a - cur["out"] <= gap_l:
+        if cur and (a - cur["out"] <= gap_l or s.get("cont")):  # 같은 받아쓰기 구간 안의 문장 사이는 예전처럼 그대로 (시범)
             cur["out"] = b
         else:
             if cur:
@@ -1915,9 +2005,11 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
             cur = {"in": round(a, 2), "out": round(b, 2)}
     if cur:
         tidy.append(cur)
-    tidy = _minus(_minus(tidy, junk_iv, pre), fill_iv)
-    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv), "segments": len(segs),
-            "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + fill_iv, key=lambda x: (x[0], -x[1]))]}
+    tidy = _minus(_minus(tidy, junk_iv + edge_iv, pre), fill_iv)
+    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv), "segments": len(segs),
+            "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + edge_iv + fill_iv, key=lambda x: (x[0], -x[1]))],
+            # 영상 밖 말 (추천 탭에 보여 줌) · cut: long 은 가편집(롱폼)에서도 자른 것, shorts 는 쇼츠·티저에서만 뺀 것 (롱폼은 표시만)
+            "offscript": [dict(o, cut="long" if o["kind"] in ("pre", "post") else "shorts") for o in off]}
 
 
 # ---------- 타임라인 계산 (editor.html 과 같은 규칙) ----------

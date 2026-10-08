@@ -38,10 +38,13 @@ _LOCK = threading.RLock()  # 만들기·고친 내용 저장이 겹쳐도 파일
 DEFAULT_TEMPLATE = """## 올리기 키트의 설명 틀이에요. 고쳐서 저장하면 다음에 만드는 키트부터 그대로 들어가요.
 ## '##'로 시작하는 줄은 설명에 들어가지 않아요 (안내용이에요).
 ## {훅} 영상 내용으로 만든 첫 두 줄 · {챕터} 목차 (3분 넘는 긴 영상만) · {해시태그} 해시태그 · {제목} 고른 제목 · {주제} 주제어
+## {레슨 문의} 영상에서 말한 레슨·수강 안내 (인스타 DM·주말반 등 · 말하지 않았으면 빠져요)
 {훅}
 
 ▶ 출연
 최경진 감독 (풋살사관학교)
+
+{레슨 문의}
 
 {챕터}
 
@@ -443,6 +446,54 @@ def fit_description(text, notes=None):
     return text
 
 
+# ---------- 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (E12 · BR-062) ----------
+PROMO_SLOT = "{레슨 문의}"
+PROMO_HEAD = "▶ 레슨 문의"
+_PROMO_LEAD = re.compile(r"^(?:(?:아\s*참|아참|참|참고로|그리고|아|자|또)[\s,.~!]*)+")
+
+
+def promo_lines(segs):
+    """받아쓰기 → 영상에서 말한 레슨·수강 홍보 문장들 (설명 '▶ 레슨 문의' 줄 · 나중에 설명 틀 링크 칸의 기본값으로도).
+    takes.find_offscript 가 '영상 밖 안내 말(홍보)'로 본 문장 그대로 — 앞 군말('아 참,')만 떼고 'dm'은 'DM', 끝에 마침표."""
+    import captions
+    import takes
+    sents = captions.split_sentences(segs or [])
+    spans = [(o["a"], o["b"]) for o in takes.find_offscript(sents) if o["kind"] == "promo"]
+    out = []
+    for s in sents:
+        if not any(a <= (s["start"] + s["end"]) / 2 <= b for a, b in spans):
+            continue
+        t = _PROMO_LEAD.sub("", re.sub(r"\s+", " ", str(s["text"])).strip())
+        t = re.sub(r"(?<![A-Za-z])dm(?![A-Za-z])", "DM", t, flags=re.I).strip(" ,")
+        if len(t) >= 4:
+            t = t if re.search(r"[.!?…]$", t) else t + "."
+            if t not in out:
+                out.append(t)
+    return out
+
+
+def add_promo(text, lines, notes=None):
+    """설명 글에 '▶ 레슨 문의' 묶음을 넣음 — 설명 틀의 {레슨 문의} 자리 (없으면 목차·해시태그 앞, 그것도 없으면 맨 끝).
+    lines 가 비면 {레슨 문의} 자리만 지움."""
+    text = str(text or "")
+    block = (PROMO_HEAD + "\n" + "\n".join(lines)) if lines else ""
+    if PROMO_SLOT in text:
+        text = text.replace(PROMO_SLOT, block)
+    elif block:
+        ls = text.split("\n")
+        at = next((i for i, ln in enumerate(ls) if ln.startswith("▶ 목차")), None)
+        if at is None:
+            at = next((i for i in range(len(ls) - 1, -1, -1) if _HASHTAG.match(ls[i].strip())), None)
+        if at is None:
+            ls += ["", block]
+        else:
+            ls[at:at] = [block, ""]
+        text = "\n".join(ls)
+        if notes is not None:
+            notes.append("영상에서 말한 레슨 안내를 설명의 '▶ 레슨 문의'에 넣었어요 (설명 틀에 {레슨 문의} 자리를 두면 그 자리에 들어가요)")
+    return fit_description(text, notes)
+
+
 def description(hook, chs, tags_h, title="", topics=(), template=None, notes=None):
     """설명 틀(upload_template.txt)의 {훅} {챕터} {해시태그} {제목} {주제} 를 채움."""
     notes = [] if notes is None else notes
@@ -796,6 +847,8 @@ def build_kit(name, seq=None, save=True):
     kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur), chs, tags_h, kit["title"], topics, notes=notes)
     kit["thumbnail"] = thumbnail_check(name, fmt)
     kit["prompt"] = claude_prompt(kit, segs)
+    kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
+    kit["description"] = add_promo(kit["description"], kit["promo"], notes)
     kit["notes"] = notes
     kit["counts"] = counts(kit)
     kit["limits"] = {"title": TITLE_MAX, "description": DESC_MAX, "tags": TAGS_MAX, "hashtags": HASHTAG_MAX}
