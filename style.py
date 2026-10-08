@@ -8,6 +8,7 @@ AI 비용 없는 규칙 기반 분석:
 - 소리 크기(LUFS)·말 빠르기(받아쓰기가 있으면)
 영상마다 살펴본 기록(스타일 이벤트)은 analysis/<영상>/style_events.json 에 남기고 (파일이 그대로면 다시 안 봄),
 기록을 요약해 프로필을 만든다. 여러 영상을 배우면 기록을 이어 붙여 하나의 스타일로 합친다.
+쇼츠와 긴 영상을 섞어 배우면 형식마다 따로도 합쳐 formats {long, shorts} 에 두고, 가편집은 형식에 맞는 값을 쓴다 (E12 · D-102).
 스타일 일치 점수: 배운 스타일 ↔ 자동 가편집(편집본 JSON)을 내보내지 않고 바로 비교 (profile_from_sequence · distance).
 """
 import bisect
@@ -42,6 +43,10 @@ CURVE_HEAD, CURVE_TAIL = 30.0, 20.0   # 컷 리듬 3구간 (#7): 도입 30초 ·
 TEMPO_MAX = 1.12                     # 말 빠르기 맞추기: 최대 12% 빠르게
 FEW_CUTS, RATE_FLOOR = 3, 0.5        # 일치 점수: 컷이 3번 안 되면 1분당 컷 수로 비교 · 1분에 0.5번 밑은 '컷 거의 없음'으로 같게 봄
 FAIL_TTL = 6 * 3600                  # 원본 살펴보기 실패 기록은 6시간 뒤 잊음 (잠깐 잠긴 파일 등)
+SHORTS_MAX = 180.0                   # 세로 영상이 이 초 이하면 쇼츠 (BR-001 · upload.SHORTS_MAX 와 같음)
+FORMATS = ("long", "shorts")
+FMT_KO = {"long": "긴 영상", "shorts": "쇼츠"}
+_FMT_MEMO = {}                       # 레퍼런스 영상 이름 → 형식 (한 번 알아낸 것은 앱이 켜져 있는 동안 기억)
 
 
 class StyleError(ValueError):
@@ -591,13 +596,112 @@ def _ok3(c):
     return isinstance(c, list) and len(c) == 3 and all(isinstance(x, (int, float)) and x > 0 for x in c)
 
 
+# ---------- 형식(쇼츠·긴 영상)마다 따로 (E12 · D-102) ----------
+
+def ref_format(name):
+    """레퍼런스 영상의 형식 'shorts' | 'long' (모르면 None) — 학습용 영상 기록의 받은 탭(쇼츠·긴 영상) → 영상 파일(세로이고 3분 이하면 쇼츠)
+    → 파일을 지웠으면 기획 분석 기록의 화면 크기·길이."""
+    name = os.path.basename(str(name or ""))
+    if name in _FMT_MEMO:
+        return _FMT_MEMO[name]
+    fmt = None
+    try:
+        import refs
+        kind = (refs.find(name) or {}).get("kind")
+        fmt = {"shorts": "shorts", "videos": "long"}.get(kind)
+    except Exception:  # noqa: BLE001 — 학습용 기록을 못 읽어도 파일로 봄
+        fmt = None
+    if fmt is None:
+        try:
+            path = core.video_file(name)
+            if path.is_file():
+                dur, w, h = plan._probe(path)
+            else:
+                pe = json.loads(plan._plan_file(name).read_text(encoding="utf-8"))
+                w, h = pe["size"]
+                dur = float(pe.get("duration") or 0)
+            fmt = "shorts" if h > w and 0 < dur <= SHORTS_MAX else "long"
+        except Exception:  # noqa: BLE001 — 모르면 None (형식으로 나누지 않음)
+            fmt = None
+    if fmt is not None:
+        _FMT_MEMO[name] = fmt
+    return fmt
+
+
+def _fmt_of(p):
+    """레퍼런스 프로필 하나의 형식 (배울 때 적어 둔 값 · 예전 스타일은 영상 이름으로 알아냄)."""
+    f = p.get("format") if isinstance(p, dict) else None
+    if f in FORMATS:
+        return f
+    src = p.get("source") if isinstance(p, dict) else None
+    return ref_format(src) if isinstance(src, str) else None
+
+
+def split_formats(profs, evs=None):
+    """레퍼런스 프로필들 → {형식: 그 형식 영상만 합친 프로필(+기획 분석 · count)} — 쇼츠와 긴 영상이 둘 다 있을 때만 (아니면 None).
+    evs(영상마다 기록)가 다 있으면 기록을 이어 붙여 다시 계산 (merge 와 같음) · 없으면 평균 (예전 스타일 파일)."""
+    fm = [_fmt_of(p) for p in profs]
+    if not (set(fm) >= set(FORMATS)):
+        return None
+    out = {}
+    for f in FORMATS:
+        idx = [k for k, x in enumerate(fm) if x == f]
+        sub = [profs[k] for k in idx]
+        sev = [evs[k] for k in idx] if evs and len(evs) == len(profs) else None
+        one = merge(sub, sev)
+        one.pop("plan", None)
+        one.pop("format", None)
+        pl = plan.merge_plans([p["plan"] for p in sub if isinstance(p.get("plan"), dict)])
+        if pl:
+            one["plan"] = pl
+        one["count"] = len(sub)
+        out[f] = one
+    return out
+
+
+def formats_of(prof):
+    """스타일 파일 → 형식별 프로필 {long, shorts} 또는 None. 새로 배운 스타일은 저장해 둔 formats,
+    예전 스타일은 레퍼런스(refs)의 형식을 알아내 그 자리에서 나눔 (쇼츠·긴 영상이 섞인 예전 스타일도 다시 배우지 않고 형식에 맞는 값)."""
+    if not isinstance(prof, dict):
+        return None
+    fm = prof.get("formats")
+    if isinstance(fm, dict) and all(isinstance(fm.get(f), dict) for f in FORMATS):
+        return fm
+    rs = [r for r in prof.get("refs") or [] if isinstance(r, dict)]
+    if len(rs) < 2:
+        return None
+    try:
+        return split_formats(rs)
+    except Exception:  # noqa: BLE001 — 예전 파일이 깨져 있어도 스타일은 한 벌 값으로 그대로
+        return None
+
+
+def _with_user(sub, prof):
+    """형식별 프로필 + 스타일 전체에 둔 사용자 설정 (말 빠르기 맞추기 끔 tempoOn)."""
+    out = dict(sub)
+    if prof.get("tempoOn") is False:
+        out["tempoOn"] = False
+    return out
+
+
 def _auto_lufs(v):
     import editor as ed
     return ed.auto_lufs(v, None)
 
 
-def edit_params(prof):
-    """스타일 프로필 → 자동 가편집에 쓸 값."""
+def edit_params(prof, fmt=None):
+    """스타일 프로필 → 자동 가편집에 쓸 값. 쇼츠·긴 영상을 섞어 배운 스타일이면
+    fmt('long'|'shorts')를 주면 그 형식 값 · 안 주면 전체 값 + byFormat {long, shorts} (editor.auto_sequences 가 형식마다 골라 씀)."""
+    fm = formats_of(prof)
+    if fm and fmt in FORMATS:
+        return _params(_with_user(fm[fmt], prof))
+    out = _params(prof)
+    if fm:
+        out["byFormat"] = {f: _params(_with_user(fm[f], prof)) for f in FORMATS}
+    return out
+
+
+def _params(prof):
     keep_pause = round(min(0.8, max(0.12, prof["pauseP75"] * 0.9)), 2)
     zoom_every = round(60 / prof["zoomCutsPerMin"], 1) if prof["zoomCutsPerMin"] >= 0.3 else 0
     # 컷 리듬 맞추기 (#7): 긴 말 컷을 이 길이로 나눔 (도입·본론·마무리) · 말 빠르기 목표(1초 글자 수, 0이면 안 맞춤)
@@ -620,8 +724,16 @@ def edit_params(prof):
 
 
 def describe(prof):
-    """사람이 읽기 쉬운 한 줄 설명."""
-    p = edit_params(prof)
+    """사람이 읽기 쉬운 한 줄 설명 (쇼츠·긴 영상을 섞어 배웠으면 형식마다)."""
+    fm = formats_of(prof)
+    if fm:
+        return (f"{FMT_KO['long']} {fm['long'].get('count', 1)}개와 {FMT_KO['shorts']} {fm['shorts'].get('count', 1)}개를 따로 배웠어요. "
+                f"롱폼 가편집: {_describe(_with_user(fm['long'], prof))} 쇼츠 가편집: {_describe(_with_user(fm['shorts'], prof))}")
+    return _describe(prof)
+
+
+def _describe(prof):
+    p = _params(prof)
     pos = {"bottom": "아래", "middle": "가운데", "top": "위"}[prof["captionPos"]]
     return (f"컷이 {prof['avgShot']}초마다 바뀌고(1분에 {prof['cutsPerMin']}번), "
             + (f"{p['zoomEvery']}초마다 확대 컷(약 {p['zoomScale']}배)이 나와요. " if p["zoomEvery"] else "확대 컷은 거의 없어요. ")
@@ -672,8 +784,12 @@ def list_styles():
             continue
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
+            fm = formats_of(d)
             out.append({"name": f.stem, "profile": d, "params": edit_params(d), "desc": describe(d),
-                        "plan": d.get("plan") if isinstance(d.get("plan"), dict) else None, "plan_desc": plan.describe_plan(d.get("plan"))})
+                        "plan": d.get("plan") if isinstance(d.get("plan"), dict) else None, "plan_desc": plan.describe_plan(d.get("plan")),
+                        # 쇼츠·긴 영상을 섞어 배운 스타일: 형식마다 값 (스타일 카드 '구조 수치'에 따로 보여 줌)
+                        "formats": {k: {"count": v.get("count", 1), "profile": _with_user(v, d), "params": edit_params(d, k), "desc": _describe(_with_user(v, d))}
+                                    for k, v in fm.items()} if fm else None})
         except Exception:
             pass
     return out
@@ -698,6 +814,7 @@ def learn(style_name, names, log=print):
             log(f"  배우지 못했어요 · {n} · {e}")
             continue
         _log_prof(p, log)
+        p["format"] = ref_format(n) or "long"  # 쇼츠·긴 영상을 따로 합치려고 (E12)
         try:
             pl = plan.judge(plan.extract_plan(n, ev, log, step=step), ev)
             p["plan"] = pl
@@ -712,10 +829,15 @@ def learn(style_name, names, log=print):
         raise RuntimeError("고른 영상에서 배울 수 있는 게 없었어요 (파일이 깨졌거나 화면이 없어요)")
     prof = merge(profs, evs)
     prof.pop("plan", None)
+    prof.pop("format", None)
     merged = plan.merge_plans([p["plan"] for p in profs if p.get("plan")])  # 기획 분석을 못 한 영상은 빼고 합침
     if merged:
         prof["plan"] = merged
     prof["refs"] = profs
+    fm = split_formats(profs, evs)  # 쇼츠와 긴 영상을 섞어 배우면 형식마다 따로 (가편집은 형식에 맞는 값)
+    if fm:
+        prof["formats"] = fm
+        log(f"  {FMT_KO['long']} {fm['long']['count']}개·{FMT_KO['shorts']} {fm['shorts']['count']}개를 따로 배웠어요 (롱폼엔 긴 영상 값, 쇼츠엔 쇼츠 값)")
     try:  # 같은 이름으로 다시 배워도 '말 빠르기 맞추기'를 꺼 둔 것은 그대로
         if json.loads((STYLES / f"{style_name}.json").read_text(encoding="utf-8")).get("tempoOn") is False:
             prof["tempoOn"] = False
@@ -1211,7 +1333,8 @@ def score_video(style_name, name, log=None, analyze=False):
     info = ed.media_info(name)
     # 기획 분석 값(인트로 티저·강조 자막)은 빼고 매김: 점수는 '구조 수치'(컷·확대·공백·자막 위치·소리) 비교라서
     # 티저 경계(컷 하나)·강조 글자(자막 시간)가 v1.9.2 와 다른 점수를 만들지 않게 (기획 판단은 점수에 넣지 않음)
-    params = {k: v for k, v in st["params"].items() if k not in PLAN_PARAM_KEYS}
+    fl = (st.get("formats") or {}).get("long")  # 쇼츠·긴 영상을 섞어 배운 스타일: 롱폼 가편집은 긴 영상 값과 비교 (E12)
+    params = {k: v for k, v in (fl["params"] if fl else st["params"]).items() if k not in PLAN_PARAM_KEYS}
     seq = ed.auto_sequences(name, info, params, ("long",))[0]
     proj = {"source": name, "info": info, "captions": [x for x in segs if x["text"].strip()],
             "media": [{"id": "main", "kind": "video", "src": "videos", "file": name, "dur": info["duration"], "w": info["width"],
@@ -1220,7 +1343,7 @@ def score_video(style_name, name, log=None, analyze=False):
     mst = seq.get("master") or {}
     # 소리 크기를 맞추면(normalize) 가편집은 유튜브 기준(-14~-13)으로 맞춤 — 스타일과 일부러 다를 수 있어 점수에서는 늘 뺌
     fixed = ["소리"] if (mst.get("normalize", True) and prof.get("lufs") is not None) else []
-    res = distance(st["profile"], prof, params=params, fixed=fixed)
+    res = distance(fl["profile"] if fl else st["profile"], prof, params=params, fixed=fixed)
     res.update(style=style_name, name=name, guessed=_cached_events(name) is None, rough={k: prof[k] for k in ("cutsPerMin", "avgShot", "zoomCutsPerMin", "pauseP75",
                                                                           "captionRatio", "captionPos", "captionColor", "lufs")})
     return res

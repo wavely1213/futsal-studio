@@ -1255,7 +1255,11 @@ def auto_lufs(v, nd=1):
 
 def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
-    style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기·컷 리듬·말 빠르기) — 있으면 그 스타일대로."""
+    style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기·컷 리듬·말 빠르기) — 있으면 그 스타일대로.
+    쇼츠·긴 영상을 섞어 배운 스타일(byFormat)이면 롱폼은 긴 영상 값, 쇼츠는 쇼츠 값으로 (E12 · D-102)."""
+    by = (style or {}).get("byFormat")
+    if isinstance(by, dict) and by:
+        return [q for k in kinds for q in auto_sequences(name, info, by.get(k) or next(iter(by.values())), (k,))]
     st = style or {}
     rec = recommend(name, keep_pause=st.get("keepPause"))
     segs = _segments_of(name)
