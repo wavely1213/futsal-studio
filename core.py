@@ -646,7 +646,8 @@ def _analysis_session():
 
 
 def _whisper_opts(m, vocab):
-    """단어 시각 + 용어 사전 힌트 (첫머리 initial_prompt, 설치된 faster-whisper 가 받으면 매 구간 hotwords)."""
+    """단어 시각 + 용어 사전 힌트 (첫머리 initial_prompt, 설치된 faster-whisper 가 받으면 매 구간 hotwords) ·
+    앞 구간 글에 기대지 않기 (condition_on_previous_text=False — 같은 문장을 한 번 더 쓰거나 하지 않은 끝말을 지어내지 않게 · E12 D-103)."""
     import inspect
     import captions
     tok = getattr(m, "hf_tokenizer", None)
@@ -667,6 +668,8 @@ def _whisper_opts(m, vocab):
     h = captions.hotwords(vocab["terms"], 60, count) if "hotwords" in params else ""
     if h:
         opts["hotwords"] = h
+    if "condition_on_previous_text" in params:  # 앞 문장에 기대지 않음 (같은 말 되풀이·지어내기 막기)
+        opts["condition_on_previous_text"] = False
     return opts
 
 
