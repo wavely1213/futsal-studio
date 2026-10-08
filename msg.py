@@ -195,6 +195,8 @@ def align_to_sound(segs, blobs):
             # (추임새 덩어리 안에서 시작해 그 안에서 끝나고 덩어리의 더 많은 부분을 차지한 내용 낱말은 그 덩어리가 제 소리 —
             #  받아쓰기 '아,' 15.8~16.96 · '아깝다.' 17.16~17.74 · 소리 16.8~17.84: 다음 덩어리로 옮기면 '아 아깝다'가 추임새로 잘림 ·
             #  예전에는 한 번 옮긴 뒤 다음 판(ALIGN_VER 4)이 되돌려서만 맞았음 → 처음 받아쓴 영상에서는 반응이 빠짐)
+            if own and k > 0 and INTERJ.match(str(ws[k - 1]["w"]).strip()) and bl[0] < float(ws[k - 1]["e"]) < s0 - 0.02:
+                ws[k - 1]["e"] = round(s0 - 0.02, 2)  # 같은 덩어리의 '아' 소리는 반응에 붙은 말 — 홀로 떨어진 추임새로 잘라 '아깝다' 첫소리까지 잘리지 않게
             if bl is not None and nxt is not None and not own and nxt[0] - bl[1] >= 0.12 and nxt[0] - new_s <= 1.4 and (
                     bl is filler_blob  # 추임새 낱말이 든 덩어리
                     or (e0 >= nxt[0] and short_part and e0 - new_s > 0.15 + 0.2 * syl + 0.5 * (nxt[0] - bl[1]))):  # 앞 덩어리까지 늘여 적은 낱말

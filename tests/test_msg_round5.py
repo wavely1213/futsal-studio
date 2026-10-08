@@ -366,6 +366,9 @@ class FinalJudgeAlignTest(unittest.TestCase):
         out, _ = msg.align_to_sound(segs, blobs)
         ws = out[0]["words"]
         self.assertTrue(17.0 <= ws[1]["s"] <= 17.2 and ws[1]["e"] >= 17.7, ws[1])
+        self.assertGreater(ws[0]["e"], ws[1]["s"] - 0.05)                 # '아,'는 반응에 붙음 → 홀로 떨어진 추임새 컷이 '아깝다' 첫소리를 자르지 않음
+        import takes
+        self.assertFalse([f for f in takes.find_fillers(out) if f[1] > 16.8], takes.find_fillers(out))
         again, _ = msg.align_to_sound(out, blobs)                         # 두 번 맞춰도 그대로
         self.assertAlmostEqual(again[0]["words"][1]["s"], ws[1]["s"], places=2)
         # 진짜 추임새 소리에 붙여 적은 낱말(덩어리 밖으로 이어짐)은 여전히 다음 덩어리로
