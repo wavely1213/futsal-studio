@@ -1,4 +1,4 @@
-"""MSG 자동 편집 (D-023): 재미없는 원본 → 예능 자막·효과음·확대·다시 보기·배경음악을 넣은 편집본 후보.
+"""MSG 자동 편집 (D-140): 재미없는 원본 → 예능 자막·효과음·확대·다시 보기·배경음악을 넣은 편집본 후보.
 
 흐름 (모두 PC에서 규칙으로 · AI 사용료 없음):
 1. signals(name)  — 원본 신호: 받아쓰기 낱말 · 정리할 곳 · 소리 세기 · 움직임 · 공 차는 소리(순간 큰 소리) · YAMNet 웃음/환호 · 얼굴
@@ -2603,7 +2603,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             # (예산과 따로: 재미 순간이 없는 긴 설명 위라 멈춘 화면을 확대 대신 글자로 깸 · 양 범위는 govern 이 맞춤)
             cand(x["kind"], m, 1.2, text=ai_txt(m, x["kind"]), dur=1.6, free=True)
         if k == "emphasis" and not mild:
-            # 강조 글자가 말 자막과 같아 빠졌으면 그 순간은 확대가 맡음 — 강조 글자 자리의 우선순위로 (D-037 뒤 강조 순간이 통째로 빠지던 것 ·
+            # 강조 글자가 말 자막과 같아 빠졌으면 그 순간은 확대가 맡음 — 강조 글자 자리의 우선순위로 (D-154 뒤 강조 순간이 통째로 빠지던 것 ·
             # 판정 round6 순간 재현율: S1 강조 6개 중 3개)
             cand("punch", m, (2.0 if len(cands) == n_before else 1.2) + sc, dur=2.4, t=m["t"])
     demo_label = _demo_labels(plays, moms)

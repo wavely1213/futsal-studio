@@ -1,4 +1,4 @@
-"""MSG 편집본 만들기 (msg.plan_events · compile_seq · build_variants, D-023) — 저장소 폴더에서 python3 -m unittest tests.test_msg_compile
+"""MSG 편집본 만들기 (msg.plan_events · compile_seq · build_variants, D-140) — 저장소 폴더에서 python3 -m unittest tests.test_msg_compile
 시험 원본으로 기본 스타일 × 양을 만들어 불변식을 확인: V1 클립 겹침 없음 · 전환이 모두 유효 · 클립이 있는 미디어만 씀 ·
 끼워 넣은 장면(다시 보기·티저)은 말 자막을 다시 안 띄움 · 사건 기록의 재료 id 가 실제로 있음 · 같은 입력이면 같은 결과 ·
 양이 많을수록 사건이 많음 · 담백은 속마음·효과 글자·흔들기 없음 · 글자는 말 자막 자리를 피함 · 30초 남짓 실제 내보내기 + 자동 검수."""

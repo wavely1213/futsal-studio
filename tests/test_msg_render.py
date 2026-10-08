@@ -209,7 +209,7 @@ class Loudness(_Render):
 
 
     def test_short_peaky_clip_uses_two_pass_loudnorm(self):
-        """판정 round6: 37초 쇼츠(공 소리 잦음)가 -15.9 LUFS — 한 번 재기 loudnorm 이 끝까지 덜 키움 → 재서 선형으로 (D-038)."""
+        """판정 round6: 37초 쇼츠(공 소리 잦음)가 -15.9 LUFS — 한 번 재기 loudnorm 이 끝까지 덜 키움 → 재서 선형으로 (D-155)."""
         work = core.WORK
         r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i",
                       "aevalsrc='0.03*sin(2*PI*180*t)*(0.5+0.5*sin(2*PI*2.3*t))*gt(mod(t,7),1.5)+0.98*lt(mod(t,3.1),0.008)*sin(2*PI*70*t)':s=48000:d=37",

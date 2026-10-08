@@ -165,7 +165,7 @@ class VoiceBusTest(unittest.TestCase):
             return real(args, *x, **k)
         with mock.patch.object(editor, "_run_ff", spy), mock.patch.object(editor, "_true_peak", lambda *x, **k: next(tps)):
             editor.export("시험.mp4", p, {"preset": "small", "hw": False, "xml": False, "srt": False}, lambda m: None)
-        tpv = [float(re.search(r"TP=(-?[\d.]+)", x)[1]) for x in seen if "print_format" not in x]   # (재기만 하는 첫 번째 loudnorm 빼고 · D-038)
+        tpv = [float(re.search(r"TP=(-?[\d.]+)", x)[1]) for x in seen if "print_format" not in x]   # (재기만 하는 첫 번째 loudnorm 빼고 · D-155)
         self.assertEqual(len(tpv), 2, seen)
         self.assertTrue(all("linear=true" in x for x in seen if "print_format" not in x), seen)   # 두 번 재기(선형)
         self.assertAlmostEqual(tpv[0], editor.LOUD_TP, places=2)

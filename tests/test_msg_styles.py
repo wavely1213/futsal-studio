@@ -1,4 +1,4 @@
-"""MSG 스타일 (기본 스타일 · 배운 스타일 부분 값 · 스타일 섞기, D-023) — 저장소 폴더에서 python3 -m unittest tests.test_msg_styles
+"""MSG 스타일 (기본 스타일 · 배운 스타일 부분 값 · 스타일 섞기, D-140) — 저장소 폴더에서 python3 -m unittest tests.test_msg_styles
 기본 스타일 4개 · 배운 값을 범위로 묶기 · 섞은 스타일 저장(styles/섞기)·'좋아요' 고르기·최근 바꾼 것 · 지운 스타일은 기본값으로 ·
 배운 스타일 목록(list_styles)과 섞이지 않음 · /api/style/presets·mix·mix_pick·/api/edit/msg 경로."""
 import json
@@ -61,7 +61,7 @@ class Presets(Base):
         self.assertEqual(a["rhythm"]["zoomEvery"], 0)          # 0.5초마다 확대 → 너무 잦음 → 안 함
         self.assertLessEqual(a["rhythm"]["zoomScale"], 1.3)
         self.assertLessEqual(a["rhythm"]["splitShot"], 12.0)
-        self.assertTrue(all(v <= 3.0 for v in a["fun"]["perMin"].values()), a["fun"]["perMin"])  # 글자 양은 재미 부분 (D-031)
+        self.assertTrue(all(v <= 3.0 for v in a["fun"]["perMin"].values()), a["fun"]["perMin"])  # 글자 양은 재미 부분 (D-148)
         self.assertTrue(all(v <= 1.6 for k, v in a["fun"].items() if isinstance(v, float)), a["fun"])
         self.assertTrue(-16 <= a["sound"]["lufs"] <= -12)
         self.assertEqual(a["intro"]["type"], "teaser")

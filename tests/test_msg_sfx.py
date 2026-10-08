@@ -1,4 +1,4 @@
-"""효과음·배경음악 (sfxlib.py, D-024) — 저장소 폴더에서 python3 -m unittest tests.test_msg_sfx
+"""효과음·배경음악 (sfxlib.py, D-141) — 저장소 폴더에서 python3 -m unittest tests.test_msg_sfx
 실은 효과음의 출처 기록(sfx/LICENSE.txt) · PC에서 만드는 소리가 늘 같은지 · 길이·크기 · 편집실 미디어 폴더에 준비 · 배경음악이 음악으로 들리는지(소리 모델이 있을 때)."""
 import shutil
 import sys

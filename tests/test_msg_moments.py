@@ -1,4 +1,4 @@
-"""MSG 신호·재미 순간 (msg.signals · moments, D-023) — 저장소 폴더에서 python3 -m unittest tests.test_msg_moments
+"""MSG 신호·재미 순간 (msg.signals · moments, D-140) — 저장소 폴더에서 python3 -m unittest tests.test_msg_moments
 정답을 아는 시험 원본(make_msg_fixture: 말 + 말 없는 시범 · 공 소리 · 웃음 · NG 다시 찍기)으로
 순간 찾기(정답 80% 넘게) · NG 안에서는 아무것도 안 찾음 · 공 소리만 (말 첫소리·웃음은 아님) · 시범 구간을 살림 · 캐시 · 문장 나누기."""
 import json

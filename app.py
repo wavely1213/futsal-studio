@@ -312,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
             return self._send(200, {"styles": style.list_styles()})
-        # ---- MSG 자동 편집 스타일 (기본 스타일 · 배운 스타일 · 섞은 스타일 · D-023) ----
+        # ---- MSG 자동 편집 스타일 (기본 스타일 · 배운 스타일 · 섞은 스타일 · D-140) ----
         if u.path == "/api/style/presets":
             return self._send(200, msg.sources_listing())
         if u.path == "/api/style/mix":
