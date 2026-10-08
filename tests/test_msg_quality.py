@@ -194,7 +194,7 @@ class SoundAlignTest(unittest.TestCase):
         words = [(5.0, 6.7, "알아볼게요.", 0), (7.32, 7.9, "어...", 1), (8.51, 9.0, "왜", 1), (9.0, 9.6, "다들", 1),
                  (58.62, 59.3, "그래서", 2), (59.49, 60.1, "인사이드로", 2), (71.0, 72.0, "좋아요", 3)]
         f = msg.blob_fillers(blobs, words, onsets=[70.1])
-        self.assertEqual([(a, b) for a, b, _ in f], [(7.29, 8.45)])  # '어...' 덩어리만 (공 소리 덩어리·'그래서'는 아님)
+        self.assertEqual([(a, b) for a, b, _ in f], [(7.29, 8.39)])  # '어...' 덩어리만 (공 소리 덩어리·'그래서'는 아님) · 다음 말 앞 SNAP_PRE 여유
         cuts = msg.snap_edges([{"in": 58.3, "out": 61.2}], blobs, words, [(56.0, 58.4, "슬레이트 말")])
         self.assertEqual(cuts[0]["in"], 58.62 - msg.SNAP_PRE)  # 첫소리 앞 여유 (round4: 문장 사이 숨)
 

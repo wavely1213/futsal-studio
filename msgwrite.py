@@ -13,7 +13,7 @@ import json
 import os
 import re
 
-VER = 3
+VER = 4
 TIMEOUT = 240
 MAX_LEN = {"inner": 11, "fx": 7, "situ": 11}   # 글자 수 한도 (띄어쓰기·괄호·문장 부호 빼고)
 TALK_GAP = 12.0     # 재미 순간 없이 말만 이만큼(초) 이어지면 그 가운데 말에도 글자 한 줄을 물어봄
@@ -21,7 +21,7 @@ TALK_GAP = 12.0     # 재미 순간 없이 말만 이만큼(초) 이어지면 �
 KINDS = {"punchline": ("inner",), "fail": ("inner", "fx"), "success": ("fx", "inner"), "surprise": ("fx",), "question": ("inner",),
          "aside": ("inner",), "play": ("inner", "fx"), "talk": ("inner",)}
 KO = {"inner": "속마음", "fx": "효과 글자", "situ": "상황"}
-BANNED = re.compile(r"진심 ?어린|참 쉽|역시 프로|얼굴|외모|못생|뚱뚱|살[이찐]|배[가 ]?나|키[가 ]?작|대머리|머리숱|늙|나이|노안|아재|꼰대|멍청|바보|한심|창피|망신|못하네|허접|"
+BANNED = re.compile(r"명장면|진심 ?어린|참 쉽|역시 프로|얼굴|외모|못생|뚱뚱|살[이찐]|배[가 ]?나|키[가 ]?작|대머리|머리숱|늙|나이|노안|아재|꼰대|멍청|바보|한심|창피|망신|못하네|허접|"
                     r"실력[이 ]?[없부]|굴욕|흑역사|ㅋ{2,}|ㅎ{2,}|ㅠ|씨[발바]|시[발바]|ㅅㅂ|병신|존나|개[같못]|[\U0001F300-\U0001FAFF☀-➿]")
 
 
@@ -65,7 +65,9 @@ def candidates(moms, lines, junk=()):
         return any(float(j[0]) - 0.1 <= mid <= float(j[1]) + 0.1 for j in junk or ())
     for i, x in enumerate(out, 1):
         t = x["t"]
-        near = [ln for ln in lines if float(ln["end"]) >= t - 6.0 and float(ln["start"]) <= t + 4.0 and not cut(ln)]
+        # 앞뒤 말은 그 순간까지만 (뒤 4초 말까지 보내면 7초 뒤에 나올 말에 맞춘 글이 먼저 뜸 · 판정 round5 최종 '(발밑으로 쏙)')
+        near = [ln for ln in lines if float(ln["end"]) >= t - 6.0 and float(ln["start"]) <= t + (3.0 if x["kind"] == "play" else 1.0)
+                and not cut(ln)]   # (시범은 바로 뒤 반응 말까지)
         said = next((ln["text"] for ln in lines if float(ln["start"]) - 0.3 <= t <= float(ln["end"]) + 0.3), "")
         res.append({"id": i, "kind": x["kind"], "t": round(t, 2), "said": said, "ctx": " / ".join(str(ln["text"]) for ln in near)[:220], "m": x["m"]})
     return res
@@ -82,6 +84,7 @@ def build_prompt(cands, title=""):
             "- 지금 말한 낱말을 그대로 되풀이하지 않아요 (말 자막이 이미 보여 줌) — 새 재미나 시청자 마음을 보태요.\n"
             "- 비꼬거나 반어로 읽힐 수 있는 글은 쓰지 않아요 (예: '진심 어린 조언' · '참 쉽죠' · '역시 프로'). 딴소리·여담에는 가벼운 공감만.\n"
             "- 앞뒤 말에 없는 일(편집에서 잘린 실수 등)은 지어내지 않아요.\n"
+            "- 글은 그 순간의 '지금 말'에 맞춰요 (아직 안 나온 말을 미리 쓰지 않아요). 여담·잡담을 팁·핵심처럼 부풀리지 않아요.\n"
             "- 순간마다 다른 글을 써요. 어울리는 글이 없으면 그 번호는 빼요.\n"
             'JSON 한 줄만 답해요: {"lines":[{"id":번호,"kind":"inner|fx|situ","t":"글"}]}\n\n' + rows)
 

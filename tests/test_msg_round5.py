@@ -493,6 +493,21 @@ class LongSourceTest(unittest.TestCase):
                             self.assertFalse(t["start"] < s0 - 0.03 and t["start"] + t["dur"] > s0 + 0.03, (q["name"], t["text"], t["start"], s0))
         self.assertGreater(n, 10)
 
+    def test_teaser_hook_text_only_over_highlights(self):
+        """판정 round5 최종: 훅 글자가 티저 끝 질문 장면(감독님이 다른 말부터 함)까지 남아 말과 자막이 다름 → 질문 장면은 말 자막."""
+        seen = 0
+        for r in self.res.values():
+            for q in r["sequences"]:
+                for e in q["msg"]["events"]:
+                    if e["kind"] == "teaser" and "미리 보기 + 첫 질문" in (e.get("why") or "") and e.get("ins"):
+                        seen += 1
+                        hk = next((t for t in q["titles"] if t["id"] in e["refs"]["titles"]), None)
+                        self.assertIsNotNone(hk, (q["name"], e, [(t["text"], t["start"]) for t in q["titles"] if t["start"] < 12]))
+                        qv = [i for i in q["items"] if i["id"] in e["refs"]["items"] and i["track"] == "V1"][-1]
+                        self.assertLessEqual(hk["start"] + hk["dur"], qv["start"] + 0.05, q["name"])
+                        self.assertFalse(qv.get("noCaps"), q["name"])
+        self.assertGreater(seen, 0)
+
     def test_single_final_closing(self):
         q = next(q for q in self.res["듬뿍"]["sequences"] if "예능" in q["name"])
         mont = [e for e in q["msg"]["events"] if e["kind"] == "montage"]
@@ -796,3 +811,51 @@ class FinalJudge2Test(unittest.TestCase):
         lk = msg.text_looks(msg.PRESETS["예능 MSG형"], "long", 0.86)["inner"]
         self.assertEqual(lk["effect"], "pop")
         self.assertGreaterEqual(lk["size"], 70)
+
+    def test_praise_emphasis_is_not_swapped_for_a_term(self):
+        caps = [{"start": 60.5, "end": 62.0, "text": "완벽해요."}]
+        self.assertIsNone(msg._dedupe_text("emphasis", "완벽!", 61.1, 1.2, caps, (), "패스"))      # 예전 '패스 체크!'
+        caps2 = [{"start": 60.5, "end": 62.0, "text": "디딤발이 중요해요."}]
+        self.assertIsNone(msg._dedupe_text("emphasis", "중요!", 61.1, 1.2, caps2, (), "패스"))      # 예전 '패스 체크!' (지금 말과 안 맞음)
+
+    def test_writer_context_stops_at_the_moment(self):
+        import msgwrite
+        lines = [{"start": 80.0, "end": 82.0, "text": "하나, 둘, 셋 리듬으로 패스해요."},
+                 {"start": 89.0, "end": 91.0, "text": "받는 사람 발 쪽으로 정확하게 패스해 주세요."}]
+        moms = [{"kind": "aside", "a": 80.0, "b": 82.0, "t": 81.0, "score": 1.0, "text": "", "why": ""}]
+        c = msgwrite.candidates(moms, lines)
+        self.assertNotIn("발 쪽으로", c[0]["ctx"])                  # 7초 뒤 말에 맞춘 글이 먼저 뜨지 않게
+        self.assertGreaterEqual(msgwrite.VER, 4)
+        self.assertIsNone(msgwrite.clean("inner", "(진심 어린 조언)"))
+
+    def test_filler_cut_leaves_lead_before_next_word(self):
+        blobs = [[130.0, 134.5], [136.56, 137.09], [137.67, 138.7]]
+        words = [(130.0, 134.5, "받아요.", 0), (136.56, 137.09, "어…", 1), (137.67, 137.98, "세번째", 1)]
+        f = msg.blob_fillers(blobs, words)
+        self.assertEqual(len(f), 1)
+        self.assertAlmostEqual(f[0][1], 137.67 - msg.SNAP_PRE, places=2)   # 예전 0.06초 앞 → 'ㅅ' 첫소리가 잘림
+
+    def test_shorts_starting_with_a_reaction_keeps_the_demo_before(self):
+        rec = {"shorts": [{"start": 30.0, "end": 70.0, "cuts": [{"in": 30.0, "out": 70.0}]}]}
+        w = msg._shorts_window(rec, [], 120.0, [[23.5, 28.6], [40.0, 45.0]])
+        self.assertAlmostEqual(w[0]["in"], 23.5)                       # '아이고, 공이 조금 뒤로 갔네요' 앞의 시범부터
+        w2 = msg._shorts_window(rec, [], 120.0, [[10.0, 15.0]])
+        self.assertAlmostEqual(w2[0]["in"], 30.0)                      # 멀리 떨어진 시범은 안 붙임
+
+    def test_recap_list_split_by_a_pause_keeps_every_item(self):
+        lines = [{"start": 180.3, "end": 182.4, "text": "오늘 배운 거 정리해볼게요."},
+                 {"start": 183.3, "end": 185.7, "text": "고개 들기, 디딤발 거리, 그리고"},
+                 {"start": 186.2, "end": 187.6, "text": "다음 방향으로 받기."},
+                 {"start": 188.0, "end": 191.0, "text": "이 세 가지만 바꿔도 첫 터치가 완전히 달라져요."}]
+        r = msg._recap_items(lines, 0)
+        self.assertEqual(r[0], "① 고개 들기\n② 디딤발 거리\n③ 다음 방향으로 받기")       # 예전 ①② 둘만
+        one = [{"start": 0.0, "end": 9.0, "text": "오늘 배운 거 정리해볼게요. 고개 들기, 디딤발 거리, 그리고 다음 방향으로 받기. 이 세 가지만 바꿔도 달라져요."}]
+        self.assertEqual(msg._recap_items(one, 0)[0].count("\n"), 2)
+
+    def test_shorts_does_not_end_inside_a_new_section(self):
+        rec = {"shorts": [{"start": 10.0, "end": 52.0, "cuts": [{"in": 10.0, "out": 30.0}, {"in": 31.0, "out": 52.0}]}]}
+        moms = [{"kind": "section", "a": 45.0, "b": 47.0, "t": 45.0, "score": 1.0, "text": "세 번째 포인트", "why": ""},
+                {"kind": "play", "a": 20.0, "b": 24.0, "t": 22.0, "score": 2.0, "text": "", "why": ""}]
+        w = msg._shorts_window(rec, moms, 120.0, [])
+        self.assertLessEqual(w[-1]["out"], 44.9)                         # '세 번째 포인트' 앞에서 끝
+        self.assertAlmostEqual(w[0]["in"], 10.0)

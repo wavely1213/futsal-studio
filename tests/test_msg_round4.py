@@ -240,7 +240,7 @@ class CaptionDupTest(unittest.TestCase):
         self.assertEqual(msg._situ_badge("마지막! 세 번째 포인트"), "마지막! 포인트 ③")
         self.assertIsNone(msg._situ_badge("시범 들어갑니다"))
         self.assertIsNone(msg._dedupe_text("emphasis", "완전히 달라져요!", 10.5, 1.0, caps))  # round5: 새 정보가 없으면 안 띄움 (확대가 맡음)
-        self.assertEqual(msg._dedupe_text("emphasis", "완전히 달라져요!", 10.5, 1.0, caps, term="디딤발"), ("디딤발 체크!", 10.5))
+        self.assertIsNone(msg._dedupe_text("emphasis", "완전히 달라져요!", 10.5, 1.0, caps, term="디딤발"))  # round5 최종: 근처 기술 이름으로 안 바꿈
 
 
 class AlignTest(unittest.TestCase):
