@@ -1248,12 +1248,13 @@ function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · 
     nocookies: "로그인 정보 없이 다시 하기", otherkind: otherKind === "shorts" ? "쇼츠로 다시 불러오기" : "긴 영상으로 다시 불러오기",
     resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기",
     fast: "빠르게로 다시 하기" };
+  Object.assign(label, f.labels || {});  // 그 카드만의 버튼 이름 (예: 꺼짐 카드의 '정확하게로 다시 하기')
   const btns = acts.map((a, i) => a === "cookies"
     ? `<span class="ckpick">로그인 정보 <select class="sel" data-fck>${list.map(k => `<option value="${k}"${k === ckPick ? " selected" : ""}>${BROWSERS[k]}${BROWSER_NOTE[k] || ""}</option>`).join("")}</select></span><button class="btn${i ? "" : " primary"}" data-fa="cookies">이 브라우저로 다시 받기</button>`
     : `<button class="btn${i ? "" : " primary"}" data-fa="${a}">${label[a]}</button>`).join("");
   const msg = acts.includes("cookies") && f.card ? f.card : f.msg;  // 카드 안에 브라우저 고르기가 있으면 '아래에서 고르고…' (화면 설정 칸을 또 가리키지 않게)
   const slot = failSlot(panel);
-  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")} · ${hm}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
+  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")}${f.kind === "crash" ? "" : ` · ${hm}`}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
   const card = slot.firstElementChild;
   card.querySelector(".fx").onclick = () => { slot.innerHTML = ""; };
   if (/^cookie_/.test(f.kind || "") && ckCur && $("cookies").value === ckCur) useCookies(null);  // 그 브라우저 로그인 정보를 못 읽음 → 화면 설정은 '안 씀'으로 (다음 작업까지 같은 오류가 나지 않게 · 카드의 고르기는 그대로)
@@ -1486,12 +1487,18 @@ $("btnAnalyze").onclick = () => analyzeNames(libChecked());
 function analyzeNames(names, changedFile) {
   if (state.job || !names.length) return;
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
-  if (again && !confirm(`${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
+  if (again && !confirm(againMsg(again, changedFile))) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
 }
+function againMsg(again, changedFile) {  // 이미 편집점을 찾은 영상을 다시 찾을 때 확인 (보관함 버튼 · 꺼짐 카드의 다시 하기)
+  return `${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`;
+}
 /* 2-1b. 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (서버 app.CRASH · D-072): 다시 하는 곳(보관함)에 그 영상 이름 +
-   [다시 하기]·[빠르게로 다시 하기] 카드 · 그 영상은 고른 채로 · 줄에도 표시 · ✕ 나 다시 하기를 누르면 서버에서도 내림 */
+   [다시 하기]·[빠르게로 다시 하기] 카드 · 줄에도 표시 · ✕ 나 다시 하기를 누르면 서버에서도 내림.
+   처음 한 번만(꺼짐 id 기억) 그 영상을 고르고 보관함으로 데려감 — 카드를 그냥 두고 편집실·썸네일에 다녀올 때마다 끌려오거나
+   고른 영상이 바뀌지 않게 · 썸네일·편집실에서 돌아와 갈 화면(7 올리기·4 편집실)이 있으면 그 화면 그대로 */
 let crashShown = "";
+const CRASH_SEEN = "crashSeen";
 const crashModel = m => m === "small" ? "빠르게" : m === "large-v3-turbo" ? "정확하게" : "";
 function crashOf(name) {
   const c = state.crash;
@@ -1504,18 +1511,31 @@ function showCrash(c) {
   const have = new Set(state.local.map(v => v.name)), names = (c.names || []).filter(n => have.has(n));
   const dismiss = () => api("/api/crash/dismiss", {}).catch(() => {});
   if (!names.length) { dismiss(); return; }  // 그 영상이 보관함에 없음 (지웠거나 이름을 바꿈) → 다시 할 것이 없음
-  const who = `'${cutText(niceName(names[0]), 30)}'${names.length > 1 ? ` 외 ${names.length - 1}개` : ""} 영상`;
-  const how = crashModel(c.model), bund = c.path === "/api/bundle";
+  const nm = n => cutText(niceName(n).replace(/\.[^.]+$/, ""), 30);  // 확장자 없이 ('…mp4' 영상의 → '…' 영상의)
+  const who = `'${nm(names[0])}'${names.length > 1 ? ` 외 ${names.length - 1}개` : ""} 영상`;
+  const how = crashModel(c.model), bund = c.path === "/api/bundle", heavy = c.model !== "small";
   const msg = `지난번에 ${who}${bund ? "을 한 영상으로 묶다가" : `의 편집점을 찾다가${how ? ` (받아쓰기 '${how}')` : ""}`} 프로그램이 갑자기 꺼졌어요 · `
-    + (c.model === "large-v3-turbo" ? "메모리가 모자랐을 수 있어요. '빠르게'는 메모리를 ⅓쯤만 써요" : "아래에서 바로 다시 할 수 있어요");
+    + (c.model === "large-v3-turbo" ? "메모리가 모자랐을 수 있어요. '빠르게'는 메모리를 3분의 1쯤만 써요" : "아래에서 바로 다시 할 수 있어요");
   const body = bund ? { names, title: c.title || "촬영본", model: c.model } : { names, model: c.model };
   const done = bund ? bundleDone : analyzed;
-  libSel.clear(); names.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
-  if (curPanel() !== "p-library") go("library");
-  showFail({ kind: "crash", msg, actions: ["retry", ...(c.model !== "small" ? ["fast"] : []), "log", "logfile"], job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
-    { path: c.path, body, done, panel: "p-library", on: { fast: () => {
+  const rerun = model => {  // 보관함 [편집점 찾기]처럼: 이미 찾은 영상이면 한 번 확인
+    const again = bund ? 0 : state.local.filter(v => v.analyzed && names.includes(v.name)).length;
+    if (again && !confirm(againMsg(again))) return;
+    job(c.path, { ...body, model }, done);
+  };
+  let seen = "";
+  try { seen = localStorage.getItem(CRASH_SEEN) || ""; } catch (e) {}
+  if (seen !== String(c.id)) {
+    try { localStorage.setItem(CRASH_SEEN, String(c.id)); } catch (e) {}
+    libSel.clear(); names.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
+    if (!window.landedOn && curPanel() !== "p-library") go("library");
+  }
+  // '정확하게'로 꺼졌으면 [빠르게로 다시 하기]가 먼저(눈에 띄는 버튼) · 다른 버튼은 무엇으로 다시 하는지 이름에 (받아쓰기 고르기와 헷갈리지 않게)
+  showFail({ kind: "crash", msg, actions: [...(heavy ? ["fast"] : []), "retry", "log", "logfile"],
+    labels: c.model === "large-v3-turbo" ? { retry: "정확하게로 다시 하기" } : {}, job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
+    { path: c.path, body, done, panel: "p-library", on: { retry: () => rerun(c.model), fast: () => {
       setSeg("modelSeg", "small"); try { localStorage.setItem(MODEL_KEY, "small"); } catch (e) {} renderModelHint();
-      job(c.path, { ...body, model: "small" }, done);
+      rerun("small");
     } } });
   const card = failSlot("p-library").querySelector(".card.fail");
   if (card) card.querySelector(".fx").addEventListener("click", dismiss);
