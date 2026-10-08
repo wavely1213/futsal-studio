@@ -55,6 +55,7 @@
 - **위치**: `tests/test_remote_*.py`(뒤에 남는 알림 스레드), `remote.py` `_post`·`_send_beacon`, `updater._ssl_context`
 - **임시방편**: `for m in tests/test_*.py; do python3 -m unittest tests.$(basename $m .py); done` 로 파일마다 돌린다.
 - **해결 방향**: remote 시험 끝에서 알림 스레드를 멈추고 기다리기(시험 쪽만).
+- **관찰 (2026-10-08 v2.11.0 회귀)**: 전체 실행 한 번이 학습용 영상(refs) 시험 직후 중간에 `exit 139` 로 멈춤(끝 무렵이 아니라 중간). 같은 코드로 `python3 -X faulthandler -m unittest discover` 다시 돌리니 1519개 모두 통과·멈춤 없음 → 드물게 나는 네이티브 충돌(시험 묶음 안). 제품 기능과 관련 있는지는 아직 모름 · 다시 나면 faulthandler 출력으로 위치를 찾는다.
 
 ## I-080 | 2026-10-08 | 게스트 이름표가 썸네일에는 아직 안 들어감
 - **상태**: 열림
