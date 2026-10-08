@@ -2766,6 +2766,22 @@ LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(d
 #                   loudnorm 한 번(실시간)으로는 목표까지 못 올림 (최대 크기 제한에 걸려 -17 LUFS 처럼 작게 남음)
 
 
+def _loud_measure(mix, tmp, af, lufs, abort=None):
+    """loudnorm 첫 번째 재기 (print_format=json) → 잰 값 dict 또는 None (못 재면 한 번 재기로)."""
+    try:
+        r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af",
+                     ",".join(list(af) + [f"loudnorm=I={lufs:.1f}:TP={LOUD_TP:.2f}:LRA=11:print_format=json"]), "-f", "null", "-"],
+                    tmp, abort=abort, want_err=True)
+        m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r or "", re.S)
+        d = json.loads(m.group(0)) if m else None
+        keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+        if not d or any(k not in d for k in keys) or any(not re.fullmatch(r"-?[\d.]+", str(d[k]).strip()) for k in keys):
+            return None   # (-inf 같은 값: 조용한 소리 → 한 번 재기)
+        return {k: str(d[k]).strip() for k in keys}
+    except (RuntimeError, ValueError):
+        return None
+
+
 def _loud_pre(mix, tmp, lufs, vol, abort=None):
     """소리 크기 맞추기 전처리: 섞은 소리를 한 번 재서(ebur128) 목표까지 모자란 만큼 미리 키우고, 그때 넘치는 순간 소리만 리미터로 누름.
     리미터가 누른 만큼 다시 한 번 재서 더 키움(2번 재기, 소리만이라 빠름). 그다음 loudnorm 은 남은 1dB 안팎만 맞춤 →
@@ -2786,8 +2802,10 @@ def _loud_pre(mix, tmp, lufs, vol, abort=None):
     if i_in is None or i_in < -60 or lufs - i_in <= 0.5:  # 조용한 영상 · 이미 충분히 크면 loudnorm 만
         return []
     gain = min(lufs - i_in, 24.0)
-    i2 = measure(chain(gain))
-    if i2 is not None and lufs - i2 > 0.4:  # 리미터가 눌러 모자란 만큼 한 번 더
+    for _ in range(3):  # 리미터가 눌러 모자란 만큼 더 (공 차는 소리가 잦은 짧은 영상은 두 번으로 모자라 -15.7 LUFS · 판정 round6 U3)
+        i2 = measure(chain(gain))
+        if i2 is None or lufs - i2 <= 0.4 or gain >= 30.0:
+            break
         gain = min(gain + (lufs - i2) * 1.15, 30.0)
     return chain(gain)
 
@@ -2991,7 +3009,14 @@ def export(name, proj, opts, log):
                         if "chain" not in pre:  # (다시 만들 때는 잰 값 그대로)
                             pre["chain"] = _loud_pre(mix, tmp, lufs, float(m.get("volume", 1.0)), abort_a)
                         af += pre["chain"]
-                        af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11")
+                        if pre["chain"] and "meas" not in pre:
+                            pre["meas"] = _loud_measure(mix, tmp, af, lufs, abort_a)
+                        ms = pre.get("meas")
+                        if ms:  # 두 번 재기(선형): 한 번 재기 loudnorm 은 짧은 영상에서 끝까지 덜 키워 -15.9 LUFS (판정 round6 U3 · 쇼츠)
+                            af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11:measured_I={ms['input_i']}:measured_TP={ms['input_tp']}:"
+                                      f"measured_LRA={ms['input_lra']}:measured_thresh={ms['input_thresh']}:offset={ms['target_offset']}:linear=true")
+                        else:
+                            af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11")
                     af += ["aresample=48000", "asetpts=N/SR/TB"]  # 소리 크기 맞추기 뒤 시각을 다시 매겨 끝이 잘리거나 길어지지 않게
                     _run_ff(["-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",
                              "-ar", "48000", "audio.m4a"], tmp, on_time=lambda t: astate.update(frac=0.4 + 0.6 * min(1.0, t / max(0.1, span))),

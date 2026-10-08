@@ -208,5 +208,28 @@ class Loudness(_Render):
         self.assertLessEqual(tp, -1.0, tp)  # 유튜브 기준 -1 dBTP (AAC 로 줄인 뒤 · LOUD_TP 여유)
 
 
+    def test_short_peaky_clip_uses_two_pass_loudnorm(self):
+        """판정 round6: 37초 쇼츠(공 소리 잦음)가 -15.9 LUFS — 한 번 재기 loudnorm 이 끝까지 덜 키움 → 재서 선형으로 (D-038)."""
+        work = core.WORK
+        r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i",
+                      "aevalsrc='0.03*sin(2*PI*180*t)*(0.5+0.5*sin(2*PI*2.3*t))*gt(mod(t,7),1.5)+0.98*lt(mod(t,3.1),0.008)*sin(2*PI*70*t)':s=48000:d=37",
+                      "-ac", "2", str(work / "edit_media" / "peaky37.wav")])
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        md = {"id": "pk", "kind": "audio", "src": "assets", "file": "peaky37.wav", "dur": 37.0, "w": 0, "h": 0, "fps": 30.0, "audio": True}
+        items = [{"id": "v", "track": "V1", "media": "bk", "start": 0, "in": 0, "out": 2, "speed": 1, "rev": False, "link": None, "fit": "auto", "fx": {}, "color": {}},
+                 {"id": "a", "track": "A1", "media": "pk", "start": 0, "in": 0, "out": 37, "speed": 1, "rev": False, "link": None, "fx": {}, "gain": 0,
+                  "fadeIn": 0, "fadeOut": 0, "mute": False}]
+        p = {"id": "s", "name": "소리 크기 짧은", "format": "long", "v": 2, "captionsOn": False, "captionStyle": dict(editor.LONG_STYLE), "titles": [],
+             "shapes": [], "layout": {"mode": "fill"}, "master": {"volume": 1, "normalize": True, "lufs": -14}, "duck": {"on": False},
+             "tracks": editor.default_tracks(), "items": items, "trans": [], "markers": [], "captions": [], "info": {"duration": 2.0, "width": 320,
+             "height": 180, "fps": 30.0}, "source": "시험.mp4", "media": self.media + [md]}
+        out = editor.export("시험.mp4", p, {"preset": "small", "hw": False, "xml": False, "srt": False}, lambda m: None)
+        err = core.run([FF, "-hide_banner", "-nostats", "-i", str(core.OUT / out[0]), "-af", "ebur128=peak=true", "-f", "null", "-"]).stderr
+        i_out = float(re.findall(r"I:\s+(-?[\d.]+) LUFS", err)[-1])
+        tp = float(re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)[-1])
+        self.assertLessEqual(abs(i_out + 14.0), 0.8, i_out)
+        self.assertLessEqual(tp, -1.0, tp)
+
+
 if __name__ == "__main__":
     unittest.main()

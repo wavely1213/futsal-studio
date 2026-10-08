@@ -9,7 +9,7 @@
 ## 1. 테스트 도구와 실행
 
 - 테스트 프레임워크: 표준 `unittest` (+ `unittest.mock`). pytest 는 쓰지 않는다. 화면 e2e 는 Playwright(Python, Chromium).
-- 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 660개, 개발 환경에서 9분 남짓. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
+- 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 680개, 개발 환경에서 9~14분. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
 - 단일 파일 실행: `python3 -m unittest tests.test_update` / 하나만: `python3 -m unittest tests.test_update.InstallTests.test_hash_mismatch_leaves_app_unchanged`
 - 테스트 파일 위치·네이밍: `tests/test_<영역>.py` (평평한 구조), 고정 자료는 `tests/fixtures/`. `tests/` 는 배포 목록에서 빠진다.
 
@@ -48,7 +48,7 @@
 
 | `msg_ui/msg_ui_test.py` | MSG 화면 (`editor.html` '재미있게 자동 편집'·`ui.html` 기본 스타일·스타일 섞기 · 38개 확인: 접힌 다른 자동 편집 · 클로드 재미 자막 체크 칸 · '세 가지 모두'와 이어지는 후보 글자 · 1~9 키 · 다시 보기 빼기 · 섞은 스타일 고르기·저장한 양 · 좋아요는 지금 고른 섞은 스타일) | `bash $SCRATCH/msg_ui/serve.sh 8942 fresh` (저장소 작업 트리(기본 `$SCRATCH/feat_msg`, `REPO` 로 바꿈)를 `msg_ui/app` 에 복사 · 작업 폴더에 round5 시험 원본 3개) → `python3 $SCRATCH/msg_ui/msg_ui_test.py 8942` |
 
-- MSG 판정(round5~, 저장소 밖, 개발용): 시험 원본 `python3 -I $SCRATCH/msg_judge5/build5.py $SCRATCH/msg_judge5/fixwork`(Supertonic-2 TTS 가상 코치 대사 + Mixkit 무료 라이선스 축구·풋살 영상 + CC0 웃음·공 소리 · 출처는 파일 머리말) → 받아쓰기 `msg_judge5/tools/asr.py` → 후보 렌더 `python3 $SCRATCH/msg_judge5/export_run.py <A|B|C> <S1|S2|S3>`(1080p 롱폼 15개 + 보통 쇼츠) → `jm.py`(사건/분·멈춘 화면·U1~U12·F1~F7·글자/분) → `judge.py`(사용자 클로드 계정 판정) → `report.py` → `$SCRATCH/msg_out/<라운드>/SCORES.md`.
+- MSG 판정(round5~, 저장소 밖, 개발용): 시험 원본 `python3 -I $SCRATCH/msg_judge5/build5.py $SCRATCH/msg_judge5/fixwork`(Supertonic-2 TTS 가상 코치 대사 + Mixkit 무료 라이선스 축구·풋살 영상 + CC0 웃음·공 소리 · 출처는 파일 머리말) → 받아쓰기 `msg_judge5/tools/asr.py` → 후보 렌더 `python3 $SCRATCH/msg_judge5/export_run.py <A|B|C> <S1|S2|S3>`(1080p 롱폼 15개 + 보통 쇼츠) → `jm.py`(사건/분·멈춘 화면·U1~U12·F1~F7·글자/분) → `judge.py`(사용자 클로드 계정 판정) → `report.py` → `$SCRATCH/msg_out/<라운드>/SCORES.md`. round6~ 최종 판정은 같은 도구를 `$SCRATCH/msg_judge6/`(출력 `msg_out/final`)에 두고 `export_run.py`·`jm.py sweep <태그>`·`judge.py pairs 3`·`judge.py caps`·`judge.py diff` 를 함께 돌린 뒤 `report.py` → `scores5.py`. 시험 원본은 받아쓰기를 처음 받아쓴 그대로(맞춘 적 없음) 써야 한다 — 맞춘 받아쓰기를 다시 쓰면 맞추기 규칙이 두 번 돌아 실제 사용자와 결과가 달라짐(D-035).
 - MSG 품질 평가·샘플(round4 까지): 시험 원본 만들기 `bash $SCRATCH/msg_fix/rebuild.sh`(TTS·NASA PD·CC0 소리 → `msg_fix/fixwork` + large-v3-turbo 받아쓰기) → `python3 $SCRATCH/msg_eval/run.py <라운드> [--judge]` → `$SCRATCH/msg_out/<라운드>/` 영상·시트·`report.html`(검수·LUFS·사건/분·무음/분 · `--judge` 는 사용자 클로드 계정으로 원본↔편집본 비교 판정, 라운드당 25번 안).
 - `th_run.sh`·`style_test.py` 는 8765 를 쓰므로, 개발용으로 띄운 앱(기본 8765)과 동시에 돌리지 않는다.
 

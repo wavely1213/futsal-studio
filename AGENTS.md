@@ -81,7 +81,7 @@
   - 포트는 `FUTSAL_PORT=8766`처럼 바꾼다.
   - 저장소의 `config.json`은 배포 파일이라 고치지 않는다. 테스트 작업 폴더가 필요하면 저장소를 복사한 폴더의 `config.json`만 바꾼다.
 - **사용자와 같은 실행 경로**: `python3 updater.py --launch` (업데이트 확인 → 같은 프로세스에서 app.py 실행)
-- **단위 테스트 (전체, 약 660개)**: `python3 -m unittest discover -s tests`
+- **단위 테스트 (전체, 약 680개)**: `python3 -m unittest discover -s tests`
   - 파일별: `python3 -m unittest tests.test_<영역>` (파일 목록은 `docs/TESTING_GUIDELINES.md` 1번). `tests.test_update`는 배포 전 필수이고 `release.sh`가 자동으로 돌린다.
 - **실행기 자가 시험**: `python3 updater.py --selftest` → `selftest ok`
 - **린트**: 설정 파일은 없다. `python3 -m pyflakes *.py` — 새 경고가 없어야 한다(지금 남은 경고는 `docs/KNOWN_ISSUES.md` I-019). 고친 HTML의 JS는 문법만 확인한다(`docs/CODING_STANDARDS.md` 3번). pyflakes가 없으면 최소 `python3 -m py_compile *.py`.
