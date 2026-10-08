@@ -1,6 +1,8 @@
 {
   "version": "2.14.0",
   "notes": "AI 추천 썸네일이 더 프로처럼: 쇼츠는 한 장면을 꽉 차게, 머리·발이 잘리지 않게 자르고, 제목 글꼴을 프리텐다드 블랙으로 · 다리만 나온 장면·뒷모습을 덜 고르고 동작이 큰 순간을 골라요 · 빨간 공 동그라미는 공이 확실할 때만, 쇼츠 버튼 자리를 피해요 · 추천이 0개면 까닭을 쉬운 말로 알려 줘요",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/6e0eb9995a279bb781addc06611eb736e6665c04.zip",
+  "commit": "6e0eb9995a279bb781addc06611eb736e6665c04",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "66d0496afbf75df5029866eb317be95f251a4a365b67138b0bfa8238b1786236",
