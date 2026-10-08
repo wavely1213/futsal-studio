@@ -293,7 +293,7 @@ class TestFrameCandidates(FaceBase):
         face._SESS.clear()
         tried, shown = [], []
 
-        def stall(url, dest, progress=None, timeout=30):
+        def stall(url, dest, progress=None, timeout=30, **kw):  # resume: 모델 받기는 이어받기를 켬
             tried.append((url, timeout))
             shown.append(dict(core.PROGRESS))
             raise urllib.error.URLError(socket.timeout("timed out"))
@@ -394,7 +394,7 @@ class TestFetchModel(unittest.TestCase):
         good = hashlib.sha256(body).hexdigest()
         urls = []
 
-        def fake(url, dest, progress=None, timeout=30):
+        def fake(url, dest, progress=None, timeout=30, **kw):  # resume: 모델 받기는 이어받기를 켬
             urls.append(url)
             Path(dest).write_bytes(body if "good" in url else body[:-1] + b"X")
             if progress:
@@ -417,7 +417,7 @@ class TestFetchModel(unittest.TestCase):
         """대답 없이 시간이 다 되면 다음 주소로 넘어가지 않음 (같은 인터넷이라 또 기다리게 될 뿐). 다른 오류는 다음 주소로."""
         urls = []
 
-        def fake(url, dest, progress=None, timeout=30):
+        def fake(url, dest, progress=None, timeout=30, **kw):  # resume: 모델 받기는 이어받기를 켬
             urls.append((url, timeout))
             Path(dest).write_bytes(b"half")
             if "read" in url:

@@ -7,6 +7,7 @@ import re
 import socket
 import threading
 import time
+import urllib.error
 from pathlib import Path
 
 import core
@@ -241,36 +242,123 @@ def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, t
     path = MODELS / fname
     with _DL_LOCK:
         if path.is_file():
-            return path
+            if model_whole(path):
+                return path
+            _unlink(path)  # 예전 판이 받다 끊긴 반쪽 모델을 완성본으로 저장해 둠 → 지우고 다시 받음 (그대로 두면 계속 고장)
         tmp, err = path.with_suffix(".part"), None
         for entry in urls:
             url, want_size, want_sha = (entry if isinstance(entry, (tuple, list)) else (entry, size, sha256))
+            got = {"n": 0}
 
-            def hook(got, total, want_size=want_size):
+            def hook(n, total, want_size=want_size):
                 if cancel is not None and cancel():
                     raise DownloadCancelled()
+                got["n"] = n
                 total = total or want_size or 0
                 if total > 0:
-                    core.set_progress(label=label, item=item, pct=min(99, int(got * 100 / total)), detail=detail)
+                    core.set_progress(label=label, item=item, pct=min(99, int(n * 100 / total)), detail=detail)
             try:
-                updater.download(url, tmp, hook, timeout=timeout)
+                for k in range(RESUME_TRIES):  # 와이파이가 끊겨도 받은 데까지는 두고 그 자리부터 다시 (220MB 를 처음부터 받지 않게)
+                    before = _size(tmp)
+                    try:
+                        updater.download(url, tmp, hook, timeout=timeout, resume=True)
+                        break
+                    except updater.NET_ERRORS as e:
+                        if k + 1 >= RESUME_TRIES or isinstance(e, urllib.error.HTTPError) or got["n"] <= before:
+                            raise
                 if want_size and tmp.stat().st_size != want_size:
                     raise OSError("받은 파일 크기가 달라요")
                 if want_sha and updater.sha256(tmp) != want_sha:
                     raise OSError("받은 파일 확인(sha256)에 실패했어요")
                 updater._replace(tmp, path)
+                updater._drop_resume(tmp)
                 return path
             except Exception as e:
                 err = e
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
+                # 받다 끊김(이어받기 기록이 있음)이면 받은 데까지 남겨 다음에 이어받음 · 그 밖(멈춤·확인 실패·없는 주소)은 지움
+                resumable = isinstance(e, updater.NET_ERRORS) and not isinstance(e, (urllib.error.HTTPError, DownloadCancelled)) \
+                    and updater._resume_meta(tmp).exists() and _size(tmp) > 0
+                if not resumable:
+                    _unlink(tmp)
+                    updater._drop_resume(tmp)
                 if isinstance(e, DownloadCancelled):
                     raise
                 if _timed_out(e):
                     break
         raise err or OSError("내려받을 주소가 없어요")
+
+
+RESUME_TRIES = 3  # 한 번 누를 때 받다 끊기면 이어받기를 몇 번까지 (조금이라도 더 받았을 때만 다시)
+
+
+def _size(p):
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+def _unlink(p):
+    try:
+        p.unlink()
+    except OSError:
+        pass
+
+
+def _varint(buf, i):
+    """protobuf 정수 하나 → (값, 다음 위치) · 모자라면 (None, i)."""
+    v = shift = 0
+    while i < len(buf):
+        b = buf[i]
+        v |= (b & 0x7F) << shift
+        i += 1
+        if not b & 0x80:
+            return v, i
+        shift += 7
+        if shift > 63:
+            break
+    return None, i
+
+
+def model_whole(path, suffix=None):
+    """모델 파일이 끝까지 있는지 (받다 끊긴 반쪽이 아닌지). ONNX(protobuf)는 맨 위 칸의 길이를 따라가 파일 끝과 딱 맞는지
+    (몇 바이트씩만 읽음 · 220MB 도 바로) — 끝이 모자라거나 모델 본체(graph, 7번 칸)가 없으면 반쪽.
+    모르는 꼴·ONNX 가 아닌 파일은 판단하지 않음(참). 빈 파일은 반쪽."""
+    path = Path(path)
+    size = _size(path)
+    if size <= 0:
+        return False
+    if (suffix or path.suffix).lower() != ".onnx":
+        return True
+    try:
+        with open(path, "rb") as f:
+            pos, graph = 0, False
+            while pos < size:
+                f.seek(pos)
+                head = f.read(24)
+                key, i = _varint(head, 0)
+                if key is None:
+                    return False
+                wire, graph = key & 7, graph or key >> 3 == 7
+                if wire == 0:
+                    v, i = _varint(head, i)
+                    if v is None:
+                        return False
+                    pos += i
+                elif wire == 1:
+                    pos += i + 8
+                elif wire == 5:
+                    pos += i + 4
+                elif wire == 2:
+                    n, i = _varint(head, i)
+                    if n is None:
+                        return False
+                    pos += i + n
+                else:  # 그룹 등 쓰지 않는 꼴 → 판단하지 않음 (멀쩡한 파일을 지우지 않게)
+                    return True
+            return pos == size and graph
+    except OSError:  # 잠깐 못 읽음 → 판단하지 않음
+        return True
 
 
 def _model(kind):

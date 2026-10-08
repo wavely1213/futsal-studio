@@ -395,19 +395,82 @@ def fetch_manifest(url, timeout=15):
     return m, raw
 
 
-def download(url, dest, progress=None, timeout=30):
-    req = urllib.request.Request(url, headers=UA)
-    with urlopen(req, timeout) as r, open(dest, "wb") as f:
-        total = int(r.headers.get("Content-Length") or 0)
-        got = 0
-        while True:
-            chunk = r.read(1 << 18)
-            if not chunk:
-                break
-            f.write(chunk)
-            got += len(chunk)
-            if progress:
-                progress(got, total)
+RESUME_SUFFIX = ".resume"  # 받다 만 파일 옆 기록: 주소·전체 길이·ETag/Last-Modified (같은 파일을 이어받는지 확인)
+_RANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
+
+
+def _resume_meta(dest):
+    return Path(str(dest) + RESUME_SUFFIX)
+
+
+def _read_resume(dest, url):
+    """이어받을 수 있으면 (이미 받은 바이트 수, 기록) · 아니면 (0, None)."""
+    try:
+        meta = json.loads(_resume_meta(dest).read_text(encoding="utf-8"))
+        have = Path(dest).stat().st_size
+    except (OSError, ValueError):
+        return 0, None
+    if not isinstance(meta, dict) or meta.get("url") != url or not have or not isinstance(meta.get("total"), int) or have >= meta["total"]:
+        return 0, None
+    return have, meta
+
+
+def _drop_resume(dest):
+    try:
+        _resume_meta(dest).unlink()
+    except OSError:
+        pass
+
+
+def download(url, dest, progress=None, timeout=30, resume=False):
+    """url → dest. 서버가 알려 준 길이(Content-Length)만큼 다 받지 못하면 IncompleteRead (반쪽 파일을 완성본으로 쓰지 않게 —
+    http.client 는 길이를 정해 읽을 때 연결이 먼저 끊기면 오류 없이 빈 조각을 돌려줌).
+    resume: 받다 끊겨 dest 에 남은 파일과 옆 기록(<dest>.resume)이 같은 주소면 그 자리부터 이어받음 (Range · If-Range 로
+    서버 파일이 그대로일 때만) — 서버가 206 으로 그 자리부터 주면 이어 붙이고, 200 이면(바뀜·이어받기 안 됨) 처음부터.
+    끊기면 dest 와 기록을 남겨 다음에 이어받음 · 다 받으면 기록을 지움. progress(받은 바이트, 전체 바이트)."""
+    have, meta = _read_resume(dest, url) if resume else (0, None)
+    headers = dict(UA)
+    if have:
+        headers["Range"] = f"bytes={have}-"
+        if meta.get("etag") or meta.get("modified"):
+            headers["If-Range"] = meta.get("etag") or meta.get("modified")
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        r = urlopen(req, timeout)
+    except urllib.error.HTTPError as e:
+        if not (have and e.code == 416):  # 이어받을 자리가 서버 파일보다 뒤 → 처음부터
+            raise
+        e.close()
+        _drop_resume(dest)
+        return download(url, dest, progress, timeout, resume)
+    with r:
+        m = _RANGE.match(r.headers.get("Content-Range") or "")
+        if have and r.status == 206 and m and int(m[1]) == have and int(m[3]) == meta["total"]:
+            got, total, mode = have, meta["total"], "ab"
+        else:
+            if have and r.status == 206:  # 엉뚱한 구간 → 처음부터 다시 (이어 붙이면 깨진 파일)
+                _drop_resume(dest)
+                return download(url, dest, progress, timeout, False)
+            got, total, mode = 0, int(r.headers.get("Content-Length") or 0), "wb"
+            if resume and total:
+                try:
+                    write_atomic(_resume_meta(dest), json.dumps({"url": url, "total": total, "etag": r.headers.get("ETag"),
+                                                                "modified": r.headers.get("Last-Modified")}))
+                except OSError:  # 기록을 못 쓰면 이어받기만 못 함
+                    pass
+        with open(dest, mode) as f:
+            while True:
+                chunk = r.read(1 << 18)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if progress:
+                    progress(got, total)
+    if total and got != total:
+        raise http.client.IncompleteRead(b"", total - got)
+    if resume:
+        _drop_resume(dest)
     return dest
 
 
