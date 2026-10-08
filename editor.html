@@ -2226,7 +2226,7 @@ function edgeOp(mode, ids, edge, d) {
     if (shrink > 0) { const ml = maxLeft(pivot, ign); if (edge === "l") hi = Math.min(hi, ml); else lo = Math.max(lo, -ml); }
     d = clamp(d, lo, hi);
     const delta = edge === "l" ? -d : d;
-    if (delta < 0) markCut(pivot + delta, pivot);  // 줄어든 만큼 사라진 장면 위 마커 (잘라내기와 같은 규칙)
+    if (edge === "r" && delta < 0) markCut(pivot + delta, pivot);  // 끝을 줄여 사라진 장면 위 마커 (잘라내기와 같은 규칙 · 앞을 줄이면 사라지는 곳이 클립 머리라 따로 안 함)
     shiftAfter(pivot, delta, ign);
     for (const x of its) { if (edge === "l") { const s0 = x.start; trimStart(x, fr(s0 + d)); x.start = s0; } else trimEnd(x, fr(iEnd(x) + d)); }
   } else if (mode === "roll") {
