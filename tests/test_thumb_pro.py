@@ -202,7 +202,7 @@ class GradeTests(unittest.TestCase):
             after = self.stats(self.run_js(sc, g))
             self.assertTrue(0.38 <= after[0] <= 0.62, (k, g, before, after))
             # 판정 5회차(D-093): 이미 쨍한 원본은 절대 목표(0.32) 쪽으로 — 내릴 수 있음 · q5 1회차(D-097): 0.62배까지 + 노이즈뿐인 색(어두운 장면 dn)은 더 빠짐
-            # q5 2회차(D-109): 원본의 0.95배 아래로는 빼지 않음 — 어두운 장면의 색 얼룩 줄이기(dn)가 빼는 노이즈 색은 따로 (0.55배까지)
+            # q5 2회차(D-101): 원본의 0.95배 아래로는 빼지 않음 — 어두운 장면의 색 얼룩 줄이기(dn)가 빼는 노이즈 색은 따로 (0.55배까지)
             lo = 1.05 if before[1] * thumb.SAT_GAIN <= thumb.SAT_ABS else thumb.SAT_ABS_FLOOR - 0.08 if not g.get("dn") else 0.55
             self.assertTrue(lo <= after[1] / max(1e-6, before[1]) <= 1.35, (k, g, before, after))
             self.assertLessEqual(after[2] - before[2], 0.02, (k, g, before, after))  # 보정이 새로 잘라 먹은 픽셀 (원본이 이미 하얗게 날아간 곳은 빼고)

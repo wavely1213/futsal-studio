@@ -95,7 +95,7 @@ class GradeTests(unittest.TestCase):
         self.assertIn("GRADE_VER", inspect.getsource(thumb._cand_sig))
 
 
-JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "SHORT_ZOOM_CAP", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "LOUD", "loud", "loudMult", "blurQ", "frameQ", "weakScenes", "headlessBad")
+JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "SHORT_ZOOM_CAP", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "LOUD", "loud", "loudMult", "blurQ", "tangleOf", "biggerRival", "frameQ", "weakScenes", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }

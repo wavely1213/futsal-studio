@@ -107,7 +107,7 @@ class SceneTests(unittest.TestCase):
         self.assertIn('"color"', inspect.getsource(thumb.frame_candidates))
 
 
-JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "blurQ", "frameQ", "srcHeadCut", "footClose", "headlessBad")
+JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "blurQ", "tangleOf", "biggerRival", "frameQ", "srcHeadCut", "footClose", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }

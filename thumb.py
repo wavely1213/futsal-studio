@@ -996,14 +996,23 @@ CUT_MAX_BLUR = 0.35
 def _cut_targets(items):
     """미리 딸 누끼 대상: 주인공이 크고(높이 30% 이상) 또렷한 좋은 장면 3개 (얼굴 클로즈업 포함) → [(장면, 주인공 상자 또는 None)].
     뒷모습·좌우 끝에 걸린 사람·벤치 장면은 뺌."""
-    ok = []
+    ok, spare = [], []
     for it in items:
         box = it["persons"][it["main"]][:4] if it.get("main", -1) >= 0 and it.get("persons") else None
         if box is None and not it.get("faces"):
             continue
-        if (box and box[3] < CUT_MIN_H and not it.get("faces")) or (it.get("blur") or 0) > CUT_MAX_BLUR or set(it.get("flags") or []) & {"back", "edge", "bench"}:
+        fl = set(it.get("flags") or [])
+        if (box and box[3] < CUT_MIN_H and not it.get("faces")) or (it.get("blur") or 0) > CUT_MAX_BLUR or "bench" in fl:
             continue
-        ok.append((it, box))
+        (spare if fl & {"back", "edge"} else ok).append((it, box))
+    # 검토(D-108): 좋은 장면이 한 장면 묶음뿐이면(THUMBTEST01 — 모든 장면에 큰 글자가 박혀 누끼가 있어야 하는데, 그 묶음 누끼가 품질 검사에 떨어져 추천 0개)
+    # 뒷모습·끝에 걸린 장면도 누끼 대상으로 (다른 영상은 그대로 — 서로 다른 좋은 장면이 둘 넘음)
+    groups = []
+    for it, _ in ok:
+        if not any(hamming(it.get("hash"), o.get("hash")) <= SAME_HASH for o in groups):
+            groups.append(it)
+    if len(groups) < 2:
+        ok += spare
     out = []
     for it, box in ok:  # 서로 다른 장면 먼저 (같은 화면 세 장을 따면 추천도 한 장면만 누끼를 씀)
         if not any(hamming(it.get("hash"), o.get("hash")) <= SAME_HASH for o, _ in out):

@@ -40,7 +40,12 @@ def bundle(pg, fmt, name):
     weak = pg.evaluate("!!AI.weak")
     W, H = (1280, 720) if fmt == "long" else (1080, 1920)
     want = 2 if weak else 6
-    check(len(items) >= (1 if weak else 4) and len(items) <= 6, f"{key} {len(items)}개 (쓸 만한 장면 없음={weak})", key)
+    # D-110: 쓸 만한 장면이 없는 영상(약한 영상)은 0~2개 — 0개면 상태 줄에 까닭과 '장면 고르기' 안내 (THUMBTEST01 쇼츠: 흐린 판에 뜬 작은 누끼뿐 · 판정 pro 2.0~2.5 라 내지 않음)
+    if weak and not items:
+        st = pg.evaluate("document.getElementById('aiStat') ? document.getElementById('aiStat').textContent : ''")
+        check("추천을 만들지 못했어요" in st and "장면 고르기" in st, f"{key} 0개 · 상태 줄 '{st[:60]}'", key)
+    else:
+        check(len(items) >= (1 if weak else 4) and len(items) <= (2 if weak else 6), f"{key} {len(items)}개 (쓸 만한 장면 없음={weak})", key)
     if len(items) < want:
         print(f"  NOTE {key}: 굳은 규칙을 지키느라 {len(items)}개만 냄", flush=True)
     check(all((x["doc"]["w"], x["doc"]["h"]) == (W, H) for x in items), f"{key} 크기 {W}×{H}", key)

@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 HAS_NODE = shutil.which("node") is not None
 
 JS = ("srcW", "srcCap", "SHORT_FULL_CAP", "SHORT_ZOOM_CAP", "bandCrop", "arEff", "maxZoom", "coverUp", "fullOk", "imgRect", "f2c", "boxC", "clipTo", "areaOf",
-      "interArea", "mainBox", "mainFace", "headBox", "srcHeadCut", "headlessBad", "footClose", "blurQ", "subjQ", "TEXTY", "LOUD", "loud", "loudMult", "frameQ",
-      "hamming", "sameFace", "sceneGroups", "usableFrame", "isExpr", "aiFrames", "edgeCutCost", "GFX_NAME", "hasGfx", "DECOR", "UNDER_TITLE", "underTitle", "WIDE_MIN")
+      "interArea", "mainBox", "mainFace", "headBox", "srcHeadCut", "headlessBad", "footClose", "blurQ", "subjQ", "TEXTY", "LOUD", "loud", "loudMult", "tangleOf", "biggerRival", "frameQ",
+      "hamming", "sameFace", "sceneGroups", "usableFrame", "isExpr", "aiFrames", "ECC", "edgeCutCost0", "edgeCutCost", "GFX_NAME", "hasGfx", "DECOR", "UNDER_TITLE", "underTitle", "WIDE_MIN")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => {  // 함수 또는 한 문장 상수 (줄 끝 주석 빼고 ';' 로 끝나는 줄까지)
