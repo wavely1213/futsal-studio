@@ -1814,6 +1814,7 @@ REACTION = re.compile(r"^(?:(?:아+|오+|와+|어+|우와|와우)[\s,!.~…]*|\S
 # 앞 말에 기대는 첫마디 — 쇼츠 첫 문장이면 점수를 덜 줌 ('그 다음에'·'자'·'그리고 마지막으로'처럼 순서를 여는 말은 아님)
 LEANS = re.compile(r"^(?:그래야|그래서|그러니까|그니까|왜냐하면|그러면|그럼|근데|그런데|하지만|그래도|그러나|그렇게|이렇게|그게|그거)(?![가-힣])")
 OPENER = re.compile(r"^(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로)")
+FRESH = re.compile(r"^(?:자[\s,]|오늘은?\s|이제\s|그리고\s|(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로))")  # 새 문장을 여는 첫마디
 REACT_ONLY = 16        # 앞에 시범이 없으면 이 글자 이하의 반응 말 줄은 쇼츠 첫 줄에서 뺌 ('좋아요, 그럼 두 번째는…' 같은 긴 줄은 그대로)
 
 
@@ -1922,8 +1923,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     cands = []
     for i in range(len(segs)):
         start = segs[i]["start"]
-        if i in sjunk:
-            continue
+        if i in sjunk or (segs[i].get("cont") and not _sent_end(segs[i - 1]) and not FRESH.match(segs[i]["text"])):
+            continue  # 문장 가운데(쉼으로만 나뉜 곳)에서는 시작하지 않음 ('…멈추는 게 아니라' / '다음 방향으로 보내는 거예요')
         j, sc, chars, junk_n = i, 0.0, 0, 0
         while j < len(segs) and segs[j]["end"] - start <= max_len:
             if j in sjunk:

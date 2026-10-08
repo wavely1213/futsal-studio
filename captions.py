@@ -582,6 +582,10 @@ def split_sentences(segs, gap=SENT_GAP):
             if nxt is None or (ends_sentence(w["w"]) and not liked) or float(nxt["s"]) - float(w["e"]) >= gap:
                 parts.append(cur)
                 cur = []
+        for k in range(len(parts) - 2, -1, -1):  # 쉼으로만 떨어진 한두 글자('세' … '번째 포인트')는 뒤 문장에 붙임 (단어 시각이 앞으로 쏠린 것)
+            p = parts[k]
+            if len(re.sub(r"\s+", "", "".join(str(w["w"]) for w in p))) <= 2 and not ends_sentence(p[-1]["w"]):
+                parts[k:k + 2] = [p + parts[k + 1]]
         if len(parts) < 2:
             out.append(dict(s))
             continue

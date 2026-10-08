@@ -70,6 +70,14 @@ class SplitSentencesTest(unittest.TestCase):
         self.assertTrue(captions.ends_sentence("봤죠?"))
         self.assertTrue(captions.ends_sentence("됩니다"))
 
+    def test_dangling_syllable_joins_next_sentence(self):
+        # 받아쓰기가 '세'의 시각을 시범 앞으로 당겨 써서 4.9초 쉼으로 떨어짐 → '세 번째 포인트 …'로 (nocond MSGRAW01 실측)
+        seg = S(128.45, 143.69, "오늘 진짜 물 좀 마시고 할게요 세 번째 포인트 트래핑 할 때는",
+                W(("오늘", 128.45, 128.9), ("진짜", 128.9, 129.4), ("물", 129.4, 129.7), ("좀", 129.7, 130.0), ("마시고", 130.0, 130.8),
+                  ("할게요", 130.8, 131.85), ("세", 131.85, 132.93), ("번째", 137.79, 138.3), ("포인트", 138.3, 139.0), ("트래핑", 139.2, 140.0),
+                  ("할", 140.0, 140.3), ("때는", 140.3, 143.69)))
+        self.assertEqual([s["text"] for s in captions.split_sentences([seg])], ["오늘 진짜 물 좀 마시고 할게요", "세 번째 포인트 트래핑 할 때는"])
+
     def test_long_segment_without_words_is_guessed(self):
         seg = S(141.82, 158.24, "정리할게요 주고 바로 뛰기 원터치 리턴 이 세가지만 지키면 무조건 됩니다 오늘은 여기까지 다음 영상에서 만나요 감사합니다")
         out = captions.split_sentences([seg])
@@ -129,6 +137,19 @@ class FindOffscriptTest(unittest.TestCase):
         self.assertEqual(self.kinds([S(1.0, 3.0, "안녕하세요"), S(5.0, 8.0, "주말반 친구들이랑 같이 해 볼게요")]), [])
         self.assertEqual(self.kinds([S(1.0, 3.0, "안녕하세요"), S(5.0, 8.0, "수강 문의는 프로필 링크로 주세요"), S(8.5, 10.0, "평일반도 모집 중이에요")]),
                          [("promo", "수강 문의는 프로필 링크로 주세요 평일반도 모집 중이에요")])
+
+
+class NoCondTranscriptTest(unittest.TestCase):
+    """condition_on_previous_text=False 로 받아쓴 같은 소리 (문장부호가 적고 한 구간이 30초 넘음) — 그래도 같은 판단."""
+
+    def test_lesson04_offscript_found(self):
+        v = FIX["LESSON04_nocond"]
+        self.assertTrue(any(s["end"] - s["start"] > 30 for s in v["transcript"]))
+        by = {o["kind"]: o for o in takes.find_offscript(captions.split_sentences(v["transcript"]), v["duration"])}
+        self.assertEqual(sorted(by), ["cta", "post", "pre", "promo"])
+        self.assertEqual(by["pre"]["b"], 10.42)
+        self.assertIn("자 컷 수고했어요", by["post"]["text"])
+        self.assertIn("DM", by["promo"]["text"])
 
 
 class Work(unittest.TestCase):
@@ -230,6 +251,18 @@ class ShortsEdgesTest(Work):
         self.assertTrue(hit)
         self.assertGreaterEqual(hit[0]["end"], 143.6)
         self.assertLessEqual(hit[0]["end"] - 141.58, editor.SHORT_END_MAX)
+
+    def test_nocond_shorts_start_and_end_on_sentences(self):
+        self.put("MSGRAW01_nocond", "MSGRAW01.mp4")
+        r = editor.recommend("MSGRAW01.mp4")
+        sents = captions.split_sentences(FIX["MSGRAW01_nocond"]["transcript"])
+        for s in r["shorts"]:
+            first = [x for x in sents if x["end"] > s["cuts"][0]["in"] + 0.05][0]
+            k = sents.index(first)
+            self.assertTrue(k == 0 or captions.ends_sentence(sents[k - 1]["text"].split()[-1]) or editor.FRESH.match(first["text"]), first["text"])
+            last = [x for x in sents if x["start"] < s["cuts"][-1]["out"] - 0.05][-1]
+            self.assertTrue(captions.ends_sentence(last["text"].split()[-1]), last["text"])
+        self.assertTrue(any(s["title"].startswith("세 번째 포인트") for s in r["shorts"]), [s["title"] for s in r["shorts"]])
 
     def test_msgraw02_reaction_starts_after_its_demo(self):
         self.put("MSGRAW02", "MSGRAW02.mp4")
