@@ -2566,6 +2566,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
     for m in moms:
         k, sc = m["kind"], m["score"]
         txt = m.get("text") or ""
+        n_before = len(cands)
         if k == "emphasis":
             cand("emphasis", m, 2.0 + sc, text=m["text"] or None, dur=1.6)
         elif k == "section" or (k == "demo_call" and any(0.0 <= p["a"] - m["b"] <= 8.0 for p in plays)):  # 시범 예고는 곧 시범이 이어질 때만
@@ -2602,7 +2603,9 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             # (예산과 따로: 재미 순간이 없는 긴 설명 위라 멈춘 화면을 확대 대신 글자로 깸 · 양 범위는 govern 이 맞춤)
             cand(x["kind"], m, 1.2, text=ai_txt(m, x["kind"]), dur=1.6, free=True)
         if k == "emphasis" and not mild:
-            cand("punch", m, 1.2 + sc, dur=2.4, t=m["t"])
+            # 강조 글자가 말 자막과 같아 빠졌으면 그 순간은 확대가 맡음 — 강조 글자 자리의 우선순위로 (D-037 뒤 강조 순간이 통째로 빠지던 것 ·
+            # 판정 round6 순간 재현율: S1 강조 6개 중 3개)
+            cand("punch", m, (2.0 if len(cands) == n_before else 1.2) + sc, dur=2.4, t=m["t"])
     demo_label = _demo_labels(plays, moms)
     for i, m in enumerate(plays):
         ons = [o for o in onsets if m["a"] <= o <= m["b"]]
@@ -2760,6 +2763,8 @@ def glyph_safe(text, font):
     rep = _NO_GLYPH.get(font)
     if not rep:
         return text
+    if "·" in rep:  # 점수판 '3/5 · 2골': 쉼표로 바꾸면 검은고딕에서 마침표처럼 보여 '3/5. 2골' (판정 round6) → '3/5 - 2골'
+        text = re.sub(r"([가-힣])\s*·\s*(\d)", r"\1: \2", re.sub(r"(\d)\s*·\s*", r"\1 - ", text))   # ('최종 결과: 5번 중 3골!')
     out = "".join(rep.get(ch, ch) for ch in str(text))
     return re.sub(r"[ ]+,", ",", re.sub(r"[ ]{2,}", " ", out)).strip()
 
@@ -3680,7 +3685,9 @@ def _shorts_window(rec, moms, dur, sig_demo=()):
         cuts = keep_cuts(best["cuts"], demo)
         # 끝 15초 안에서 새 순서('세 번째 포인트')를 꺼내고 설명 중에 끝나면 그 말 앞에서 끝냄 (판정 round5 최종: 쇼츠가 설명 중간에 잘린 채 끝남)
         end = float(cuts[-1]["out"]) if cuts else 0.0
-        sec = [float(m["a"]) for m in moms if m["kind"] == "section" and end - 15.0 < float(m["a"]) < end - 0.5]
+        # (끝 8초 안의 딴소리('물 좀 마시고 할게요')로 끝나도 그 앞에서 — 마무리 없이 흐지부지 · 판정 round6)
+        sec = [float(m["a"]) for m in moms if (m["kind"] == "section" and end - 15.0 < float(m["a"]) < end - 0.5)
+               or (m["kind"] == "aside" and end - 8.0 < float(m["a"]) < end - 0.5)]
         if sec and min(sec) - 0.2 - float(cuts[0]["in"]) >= 20.0:
             stop = min(sec) - 0.2
             cuts = [dict(c, out=min(float(c["out"]), stop)) for c in cuts if float(c["in"]) < stop - 0.3]

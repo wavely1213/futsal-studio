@@ -114,7 +114,9 @@ class TextTest(unittest.TestCase):
 
     def test_glyphs_missing_from_title_fonts(self):
         self.assertEqual(msg.glyph_safe("아깝다…", "Black Han Sans"), "아깝다...")
-        self.assertEqual(msg.glyph_safe("2/5 · 1골", "Black Han Sans"), "2/5, 1골")
+        self.assertEqual(msg.glyph_safe("2/5 · 1골", "Black Han Sans"), "2/5 - 1골")   # (", " 는 마침표처럼 보임 · round6)
+        self.assertEqual(msg.glyph_safe("최종 결과 · 5번 중 3골!", "Black Han Sans"), "최종 결과: 5번 중 3골!")
+        self.assertEqual(msg.glyph_safe("구독 · 좋아요 부탁해요!", "Black Han Sans"), "구독, 좋아요 부탁해요!")
         self.assertEqual(msg.glyph_safe("포인트 ③", "Black Han Sans"), "포인트 3")
         self.assertEqual(msg.glyph_safe("포인트 ③", "Do Hyeon"), "포인트 3")   # 도현에는 있지만 작게 뭉개짐 (판정 round5 최종)
         self.assertEqual(msg.glyph_safe("포인트 ③", None), "포인트 3")
@@ -881,3 +883,9 @@ class FinalJudge2Test(unittest.TestCase):
                 {"start": 58.12, "end": 59.74, "text": "마지막 다섯 번째,", "words": [{"w": "마지막", "s": 58.12, "e": 58.92}, {"w": "번째,", "s": 58.92, "e": 59.74}]}]
         out, _ = msg.align_to_sound(segs, [[56.3, 56.7], [57.51, 58.4], [58.5, 59.8]])
         self.assertLessEqual(out[0]["words"][-1]["e"], out[1]["words"][0]["s"] - 0.02 + 1e-6)   # 말 자막 두 줄이 한꺼번에 뜨지 않게
+
+    def test_shorts_does_not_end_on_an_aside(self):
+        rec = {"shorts": [{"start": 10.0, "end": 50.0, "cuts": [{"in": 10.0, "out": 50.0}]}]}
+        moms = [{"kind": "aside", "a": 45.5, "b": 49.0, "t": 46.5, "score": 1.0, "text": "(물 타임)", "why": ""}]
+        w = msg._shorts_window(rec, moms, 120.0, [])
+        self.assertLessEqual(w[-1]["out"], 45.4)                          # '물 좀 마시고 할게요'로 끝나지 않게
