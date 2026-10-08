@@ -339,6 +339,47 @@ class FinalJudgeAlignTest(unittest.TestCase):
         out2, _ = msg.align_to_sound(segs, short)
         self.assertGreaterEqual(out2[0]["words"][1]["s"], 18.4)
 
+    def test_word_in_silence_takes_the_blob_right_after(self):
+        """S1 '발을 살짝 뒤로': 받아쓰기는 '살짝'을 소리 덩어리 0.03초 앞에서 시작 — 예전에는 그 덩어리를 건너뛰고 다음 덩어리로
+        옮겨 '발을 살짝' 소리를 낱말 없는 추임새로 잘랐음 (판정 round5 최종: '살짝' 빠짐)."""
+        segs = [{"start": 144.18, "end": 147.28, "text": "공이 튀어나가요.",
+                 "words": [{"s": 146.24, "e": 146.64, "w": "공이"}, {"s": 146.64, "e": 147.28, "w": "튀어나가요."}]},
+                {"start": 148.84, "end": 152.1, "text": "살짝 뒤로 빼주면서 방향만 바꿔주세요.",
+                 "words": [{"s": 148.84, "e": 149.2, "w": "살짝"}, {"s": 149.2, "e": 149.68, "w": "뒤로"}, {"s": 149.68, "e": 150.44, "w": "빼주면서"},
+                           {"s": 150.44, "e": 151.48, "w": "방향만"}, {"s": 151.48, "e": 152.1, "w": "바꿔주세요."}]}]
+        blobs = [[145.98, 147.37], [148.87, 149.31], [149.47, 150.59], [151.01, 152.2]]
+        out, _ = msg.align_to_sound(segs, blobs)
+        ws = out[1]["words"]
+        self.assertTrue(148.85 <= ws[0]["s"] <= 148.9, ws[0])          # 바로 뒤 덩어리 시작으로 (예전 149.47)
+        self.assertLess(ws[0]["s"], 149.31)
+        self.assertGreaterEqual(msg.ALIGN_VER, 5)
+        fl = msg.blob_fillers(blobs, msg._words(out))
+        self.assertFalse(any(a < 149.2 and b > 148.9 for a, b, *_ in fl), fl)   # 그 덩어리는 추임새로 자르지 않음
+
+    def test_fresh_transcript_keeps_reaction_inside_interjection_blob(self):
+        """처음 받아쓴 영상(맞춘 적 없음): '아,' 15.8~16.96 · '아깝다.' 17.16~17.74 · 소리 16.8~17.84 — 예전에는 '아깝다'를 다음 덩어리
+        (18.52)로 옮겨 '아 아깝다' 소리를 추임새로 잘랐고, 두 번째 맞추기(ALIGN_VER 4)에서만 되돌아왔음 (한 번에 맞아야 함)."""
+        segs = [{"start": 15.8, "end": 19.32, "text": "아, 아깝다. 골대 맞았어요.",
+                 "words": [{"s": 15.8, "e": 16.96, "w": "아,"}, {"s": 17.16, "e": 17.74, "w": "아깝다."}, {"s": 18.46, "e": 18.78, "w": "골대"},
+                           {"s": 18.78, "e": 19.32, "w": "맞았어요."}]}]
+        blobs = [[14.29, 14.78], [16.8, 17.84], [18.52, 19.41], [19.92, 20.38]]
+        out, _ = msg.align_to_sound(segs, blobs)
+        ws = out[0]["words"]
+        self.assertTrue(17.0 <= ws[1]["s"] <= 17.2 and ws[1]["e"] >= 17.7, ws[1])
+        again, _ = msg.align_to_sound(out, blobs)                         # 두 번 맞춰도 그대로
+        self.assertAlmostEqual(again[0]["words"][1]["s"], ws[1]["s"], places=2)
+        # 진짜 추임새 소리에 붙여 적은 낱말(덩어리 밖으로 이어짐)은 여전히 다음 덩어리로
+        segs2 = [{"start": 9.2, "end": 10.8, "text": "음 패스는", "words": [{"s": 9.2, "e": 9.5, "w": "음"}, {"s": 9.55, "e": 10.8, "w": "패스는"}]}]
+        out2, _ = msg.align_to_sound(segs2, [[9.2, 9.7], [10.0, 10.9]])
+        self.assertAlmostEqual(out2[0]["words"][1]["s"], 10.0, places=2)
+
+    def test_last_word_moved_into_sound_keeps_its_tail(self):
+        segs = [{"start": 199.16, "end": 199.88, "text": "감사합니다.", "words": [{"s": 199.16, "e": 199.88, "w": "감사합니다."}]}]
+        out, _ = msg.align_to_sound(segs, [[197.1, 198.9], [199.61, 200.26]])
+        w = out[0]["words"][0]
+        self.assertAlmostEqual(w["s"], 199.61, places=2)
+        self.assertAlmostEqual(w["e"], 200.26, places=2)                  # 예전 199.91 (끝 0.35초가 컷에서 잘림)
+
     def test_demo_call_before_a_silent_demo(self):
         self.assertTrue(msg._demo_call_ok(166.84, [173.53], [], [[166.94, 171.54]]))     # 공 소리를 못 잡아도 시범이 바로 뒤
         self.assertFalse(msg._demo_call_ok(166.84, [167.5], [], [[168.0, 171.54]]))      # 다음 말이 먼저 → 다시 찍기 신호

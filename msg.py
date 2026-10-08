@@ -102,9 +102,11 @@ def mmss(t):
 
 # ---------- 0. 받아쓰기 다시 듣기·다듬기 ----------
 RELISTEN_LABEL = "말 다시 듣는 중"
-ALIGN_VER = 4   # 단어 시각을 소리에 맞추는 규칙 판 (asr.json 'aligned' · 규칙을 고치면 올림 · 2: 뭉개진 낱말·잡음 덩어리까지 늘여 적은 낱말 ·
+ALIGN_VER = 5   # 단어 시각을 소리에 맞추는 규칙 판 (asr.json 'aligned' · 규칙을 고치면 올림 · 2: 뭉개진 낱말·잡음 덩어리까지 늘여 적은 낱말 ·
 #                 3: 조용한 틈에서 시작해 제 시각 안에서 소리가 시작하는 낱말(영상 첫 낱말 '안녕하세요'를 0초부터 적음)은 그 소리부터 ·
-#                 4: 추임새('아,') 뒤 뭉개진 낱말('아깝다.' 0.05초)을 추임새가 든 긴 소리 덩어리 뒷부분으로 — '아 아깝다' 소리를 추임새로 잘라 반응이 빠짐)
+#                 4: 추임새('아,') 뒤 뭉개진 낱말('아깝다.' 0.05초)을 추임새가 든 긴 소리 덩어리 뒷부분으로 — '아 아깝다' 소리를 추임새로 잘라 반응이 빠짐
+#                 5: 조용한 틈에서 시작한 낱말은 바로 뒤(0.03초 안)에서 시작하는 소리 덩어리로 — 그 덩어리를 건너뛰어 '발을 살짝'이 잘림 ·
+#                    추임새 덩어리 안에서 시작·끝나고 그 덩어리를 더 많이 차지한 내용 낱말('아깝다.')은 옮기지 않음 — 처음 받아쓴 영상에서 반응이 잘림)
 ORIG_TRANSCRIPT = "transcript.원본.json"   # MSG 가 다시 듣기 전 받아쓰기 (한 번만 남김)
 
 
@@ -178,6 +180,9 @@ def align_to_sound(segs, blobs):
             new_s = s0
             bl = _blob_at(blobs, s0)
             nxt = next((b for b in blobs if b[0] > s0 + 0.03), None)
+            if bl is None:  # 조용한 틈의 다음 소리는 바로 뒤에서 시작하는 덩어리도 (예전 +0.03초 거름: 0.03초 뒤 덩어리('발을 살짝')를 건너뛰고
+                #               그다음 덩어리로 옮겨 그 소리를 낱말 없는 추임새로 잘랐음 · 판정 round5 S1 '살짝' 빠짐)
+                nxt = next((b for b in blobs if b[0] > s0), None)
             if bl is None and nxt is not None and (nxt[0] - s0 <= 0.8 or nxt[0] < e0 - 0.1):  # 조용한 틈에서 시작 → 다음 소리에서
                 # (제 시각 안에서 소리가 시작하면 멀어도: 받아쓰기가 영상 첫 낱말을 앞 무음 0초부터 적음 → 컷이 그 낱말 소리 바로 앞에서
                 #  시작해도 낱말 가운데가 클립 앞이라 자막에서 빠짐 · 판정: 첫 자막이 '여러분.'만 · 인사가 빠져 밋밋한 시작)
@@ -185,14 +190,23 @@ def align_to_sound(segs, blobs):
                 nxt = next((b for b in blobs if b[0] > nxt[0] + 0.03), None)
             syl = len(re.findall(r"[가-힣]", str(w["w"]))) or 1
             short_part = bl is not None and (bl[1] - bl[0] <= 0.9 or (bl[1] - new_s <= 0.9 and new_s - prev_e >= 0.3))
-            if bl is not None and nxt is not None and nxt[0] - bl[1] >= 0.12 and nxt[0] - new_s <= 1.4 and (
+            own = bl is not None and bl is filler_blob and e0 <= bl[1] + 0.05 and e0 - s0 >= 0.1 * syl0 \
+                and min(e0, bl[1]) - max(s0, bl[0]) > min(prev_e, bl[1]) - max(prev_s, bl[0])
+            # (추임새 덩어리 안에서 시작해 그 안에서 끝나고 덩어리의 더 많은 부분을 차지한 내용 낱말은 그 덩어리가 제 소리 —
+            #  받아쓰기 '아,' 15.8~16.96 · '아깝다.' 17.16~17.74 · 소리 16.8~17.84: 다음 덩어리로 옮기면 '아 아깝다'가 추임새로 잘림 ·
+            #  예전에는 한 번 옮긴 뒤 다음 판(ALIGN_VER 4)이 되돌려서만 맞았음 → 처음 받아쓴 영상에서는 반응이 빠짐)
+            if bl is not None and nxt is not None and not own and nxt[0] - bl[1] >= 0.12 and nxt[0] - new_s <= 1.4 and (
                     bl is filler_blob  # 추임새 낱말이 든 덩어리
                     or (e0 >= nxt[0] and short_part and e0 - new_s > 0.15 + 0.2 * syl + 0.5 * (nxt[0] - bl[1]))):  # 앞 덩어리까지 늘여 적은 낱말
                 new_s = nxt[0]
             new_s = max(new_s, prev_s + 0.05)
             if new_s > s0 + 0.02:
                 w["s"] = round(new_s, 2)
-                w["e"] = round(max(e0, new_s + min(0.3, max(0.12, e0 - s0))), 2)
+                e1 = max(e0, new_s + min(0.3, max(0.12, e0 - s0)))
+                nb = _blob_at(blobs, new_s + 0.01)
+                if nb is not None and k + 1 == len(ws):  # 구간 마지막 낱말을 늦춰 옮기면 그 소리 덩어리 끝까지 ('감사합니다.' 끝 0.35초가 잘리던 것)
+                    e1 = max(e1, nb[1])
+                w["e"] = round(e1, 2)
                 moved += 1
             elif e0 - s0 < 0.06 * syl:  # 뭉개진 낱말 → 그 소리 덩어리만큼
                 hb = _blob_at(blobs, s0 + 0.01)
