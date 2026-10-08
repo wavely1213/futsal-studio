@@ -1249,7 +1249,7 @@ PRESETS = {
                      "emphBox": "#0F7A3D", "emphEffect": "fade", "situLook": "box"},
         "fun": {"punch_zoom": 0.6, "slowmo_replay": 0.5, "freeze": 0.0, "shake": 0.0, "montage": 0.0, "sfx": 0.45, "reaction": 0.3, "replayLook": "plain",
                 "perMin": {"emphasis": 1.6, "situ": 0.8, "inner": 0.6, "fx": 0.3}},
-        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "잔잔", "lesson": "잔잔", "demo": "경쾌", "outro": "잔잔"}, "duck": -14.0, "bgmDb": -10.0,
+        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "잔잔", "lesson": "잔잔", "demo": "경쾌", "outro": "잔잔"}, "duck": -8.0, "bgmDb": -7.0,
                   "palette": "clean"},
     },
     "예능 MSG형": {
@@ -1261,7 +1261,7 @@ PRESETS = {
                      "emphEffect": "stamp", "situLook": "box", "capWeight": "Black", "capSize": 62, "capStroke": 9},
         "fun": {"punch_zoom": 1.0, "slowmo_replay": 1.0, "freeze": 1.0, "shake": 1.0, "montage": 1.0, "sfx": 1.0, "reaction": 1.0, "replayLook": "plain",
                 "perMin": {"emphasis": 2.4, "situ": 1.2, "inner": 1.4, "fx": 1.4}},
-        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "신남", "lesson": "잔잔", "demo": "경쾌", "outro": "신남"}, "duck": -13.0, "bgmDb": -8.0,
+        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "신남", "lesson": "잔잔", "demo": "경쾌", "outro": "신남"}, "duck": -7.0, "bgmDb": -5.0,
                   "palette": "variety"},
     },
     "쇼츠 하이텐션형": {
@@ -1273,7 +1273,7 @@ PRESETS = {
                      "emphEffect": "pop", "situLook": "box"},
         "fun": {"punch_zoom": 1.3, "slowmo_replay": 0.8, "freeze": 0.6, "shake": 1.5, "montage": 1.0, "sfx": 1.4, "reaction": 1.0, "replayLook": "plain",
                 "perMin": {"emphasis": 2.0, "situ": 0.8, "inner": 1.2, "fx": 2.2}},
-        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "신남", "lesson": "신남", "demo": "신남", "outro": "신남"}, "duck": -13.0, "bgmDb": -7.0,
+        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "신남", "lesson": "신남", "demo": "신남", "outro": "신남"}, "duck": -7.0, "bgmDb": -6.0,
                   "palette": "variety"},
     },
     "다큐 감성형": {
@@ -1285,13 +1285,13 @@ PRESETS = {
                      "emphEffect": "fade", "situLook": "plain", "capSize": 56, "capStroke": 7, "capWeight": "Bold"},
         "fun": {"punch_zoom": 0.4, "slowmo_replay": 1.4, "freeze": 1.2, "shake": 0.0, "montage": 0.6, "sfx": 0.35, "reaction": 0.3, "replayLook": "letterbox",
                 "perMin": {"emphasis": 1.0, "situ": 1.4, "inner": 0.4, "fx": 0.0}},
-        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "감성", "lesson": "감성", "demo": "감성", "outro": "감성"}, "duck": -14.0, "bgmDb": -8.0,
+        "sound": {"lufs": -14.0, "bgm": True, "moods": {"intro": "감성", "lesson": "감성", "demo": "감성", "outro": "감성"}, "duck": -8.0, "bgmDb": -6.0,
                   "palette": "cinematic"},
     },
 }
 # 배운 값을 묶어 둘 범위 (이상한 레퍼런스 하나가 터무니없는 양을 만들지 않게) — 기본 스타일 범위의 바깥쪽 조금까지
 BANDS = {"keepPause": (0.2, 0.8), "splitShot": (0.0, 12.0), "zoomEvery": (0.0, 20.0), "zoomScale": (1.0, 1.3), "tempo": (0.0, 9.0),
-         "perMin": (0.0, 3.0), "weight": (0.0, 1.6), "duck": (-20.0, -12.0), "lufs": (-15.0, -13.0), "bgmDb": (-13.0, -7.0)}
+         "perMin": (0.0, 3.0), "weight": (0.0, 1.6), "duck": (-14.0, -6.0), "lufs": (-15.0, -13.0), "bgmDb": (-10.0, -4.0)}
 CAP_Y = {"bottom": 0.9, "middle": 0.62, "top": 0.16}
 
 
@@ -1608,6 +1608,34 @@ def _cap_dup(text, t0, t1, caps):
         if cn and (n in cn or cn in n):
             return True
     return False
+
+
+TITLE_SHIFT = 4.0   # 작은 제목을 같은 말 자막 뒤로 미루는 한도 (초)
+
+
+def _title_after_said(B, s0, ln, topic, caps, main_end):
+    """작은 제목('슈팅 챌린지')이 보이는 동안 본편 말 자막이 같은 말('오늘은 슈팅 챌린지예요')을 하면 → (시작, 길이):
+    그 말이 1.2초 넘게 뒤에 나오면 제목을 그 전에 끝내고(첫 질문 장면 위 제목), 아니면 그 자막이 끝난 뒤로 미룸(TITLE_SHIFT 초 안·본편 안) ·
+    둘 다 안 되면 그대로 (판정 round5: 제목과 자막이 같은 말을 한꺼번에)."""
+    if not topic:
+        return s0, ln
+    for it in sorted(B.main, key=lambda x: float(x["start"])):
+        a, b = max(s0, float(it["start"])), min(s0 + ln, editor.i_end(it))
+        if b <= a:
+            continue
+        sp = editor.i_sp(it)
+        src_a, src_b = float(it["in"]) + (a - float(it["start"])) * sp, float(it["in"]) + (b - float(it["start"])) * sp
+        for c in sorted(caps or (), key=lambda c: float(c["start"])):
+            if float(c["end"]) <= src_a or float(c["start"]) >= src_b or not _cap_dup(topic, float(c["start"]), float(c["end"]), [c]):
+                continue
+            said = max(a, B.src_to_tl(float(c["start"])) or a)
+            if said - s0 >= 1.2:
+                return s0, round(said - s0 - 0.05, 3)
+            e = B.src_to_tl(float(c["end"]) - 0.02)
+            if e is not None and s0 < e + 0.1 <= s0 + TITLE_SHIFT and e + 0.1 + ln <= main_end:
+                return round(e + 0.1, 3), ln
+            return s0, ln
+    return s0, ln
 
 
 def _dedupe_text(kind, text, t, dur, caps, alts=(), term=""):
@@ -2698,6 +2726,12 @@ class _Build:
                 return float(it["start"]) + (t - float(it["in"])) / editor.i_sp(it)
         return None
 
+    def tl_to_src(self, t):
+        for it in self.main:
+            if float(it["start"]) <= t < editor.i_end(it):
+                return float(it["in"]) + (t - float(it["start"])) * editor.i_sp(it)
+        return None
+
 
 def _split(pieces, t, min_len=0.25):
     """조각 목록에서 원본 t 초를 경계로 나눔 (너무 짧은 조각이 생기면 안 나눔) → 그 경계 뒤 조각 번호 또는 None."""
@@ -3141,6 +3175,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         s0 = 0.0 if hook_clip else main_start if intro.get("type") == "title_first" or mild_open or big_title else \
             main_start + min(3.0, (main_end - main_start) / 4)
         ln = TITLE_CARD + (1.0 if hook_over else 0.6)
+        s0, ln = _title_after_said(B, s0, ln, topic, caps, main_end)
         refs = {"shapes": [], "titles": []}
         for kind, tx, look in _small_title(st, _short_text(topic, 10), hook_over or (hook_clip and not film_open), big=big_title):
             if kind == "shape":
@@ -4014,7 +4049,9 @@ def _audio_items(B, sig, sections, seed, snd, intensity, words=()):
         if "sfx" in e["refs"]:
             e["refs"]["items"] = e["refs"].get("items", []) + [idmap[k] for k in e["refs"].pop("sfx") if idmap.get(k)]
     # 배경음악
-    # 말이 없을 때 배경음악 평균 크기 = 말 평균 크기(채널 기준) + bgmDb (말할 때는 duck 만큼 더 줄어 말보다 20dB 넘게 작음)
+    # 말이 없을 때 배경음악 평균 크기 = 말 평균 크기(채널 기준) + bgmDb · 말할 때는 duck(-7~-8dB)만큼 더 줄어 보정한 말보다 약 21~23dB 작게
+    # (판정 round5: 예전 bgmDb -7~-10 · duck -13~-14 는 말보다 30dB 남짓 작아 '배경음악이 거의 안 들림' · 판정 기준은 15dB 넘게 작게 ·
+    #  말 크기 기준 dialogDb 는 보정 전 원본 소리라 보정한 말이 5~6dB 더 큼)
     music_db = float(sig.get("dialogDb") or -24.0) + float(snd.get("bgmDb") or -8.0)
     lvl = round(min(6.0, max(SFX_FLOOR, music_db - sfxlib.BGM_RMS_DB)), 1)
     tracks = ("A3", "A4")

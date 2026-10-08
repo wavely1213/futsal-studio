@@ -252,6 +252,34 @@ class ColdOpenTest(unittest.TestCase):
         self.assertTrue(any(e["kind"] == "end" for e in ev), [e["kind"] for e in ev])    # 엔드 화면도 남음
 
 
+class FinalJudgeTest(unittest.TestCase):
+    """round5 최종 판정 중간 결과에서 고침: 배경음악이 말보다 30dB 남짓 작아 '거의 안 들림' · 작은 제목과 같은 말 자막이 한꺼번에."""
+
+    def test_music_bed_stays_audible_under_speech(self):
+        for n, p in msg.PRESETS.items():
+            self.assertTrue(-9.0 <= p["sound"]["duck"] <= -6.0, n)             # 말할 때 줄이는 양 (예전 -13~-14)
+            self.assertTrue(-8.0 <= p["sound"]["bgmDb"] <= -4.0, n)            # 예전 -7~-10 (보정 전 말 크기 기준)
+            self.assertGreaterEqual(-(p["sound"]["bgmDb"] + p["sound"]["duck"]), 11.0, n)   # 말할 때 보정 전 말보다 11dB 넘게 작게 → 보정한 말보다 약 21~23dB
+        self.assertEqual(msg.BANDS["duck"], (-14.0, -6.0))
+        self.assertEqual(msg.BANDS["bgmDb"], (-10.0, -4.0))
+
+    def test_small_title_waits_for_the_line_that_says_it(self):
+        B = msg._Build.__new__(msg._Build)
+        B.main = [{"start": 3.0, "in": 10.0, "out": 40.0, "speed": 1.0, "track": "V1"}]
+        caps = [{"start": 10.2, "end": 12.4, "text": "오늘은 슈팅 챌린지예요."}, {"start": 12.6, "end": 15.0, "text": "다섯 번 차 볼게요."}]
+        s0, ln = msg._title_after_said(B, 3.0, 2.6, "슈팅 챌린지", caps, 30.0)
+        self.assertAlmostEqual(s0, 3.0 + 2.38 + 0.1, places=2)        # 그 말 자막이 끝난 뒤
+        self.assertEqual(ln, 2.6)
+        self.assertEqual(msg._title_after_said(B, 3.0, 2.6, "퍼스트 터치", caps, 30.0), (3.0, 2.6))   # 다른 말이면 그대로
+        long_caps = [{"start": 10.2, "end": 18.0, "text": "오늘은 슈팅 챌린지를 아주 길게 설명해요."}]
+        self.assertEqual(msg._title_after_said(B, 3.0, 2.6, "슈팅 챌린지", long_caps, 30.0), (3.0, 2.6))  # 너무 늦어지면 그대로
+        # 첫 질문 장면(0~2초, 본편 아님) 위 제목: 본편 첫 말이 제목과 같으면 그 말 전에 제목을 끝냄
+        B.main = [{"start": 2.0, "in": 10.0, "out": 40.0, "speed": 1.0, "track": "V1"}]
+        s0, ln = msg._title_after_said(B, 0.0, 2.6, "슈팅 챌린지", [{"start": 10.0, "end": 12.4, "text": "안녕하세요. 오늘은 슈팅 챌린지예요."}], 30.0)
+        self.assertEqual(s0, 0.0)
+        self.assertAlmostEqual(ln, 1.95, places=2)
+
+
 def _long_fixture(work, reps=16):
     """make_msg_fixture 원본을 reps 번 이어 붙인 약 9분 원본 (받아쓰기 시각도 옮김)."""
     name, truth = mf.make_msg_fixture(work)
