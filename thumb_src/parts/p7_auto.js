@@ -203,7 +203,8 @@ function makeCands() {
   if (!FRAMES.length) { $("cands").innerHTML = `<div class="hint" style="padding:10px">장면을 고르는 중이에요…</div>`; return; }
   const a = $("aL1").value.trim() || "제목", b = $("aL2").value.trim(), fr = FRAMES.map(f => f.t), sets = [fr, [...fr.slice(2), ...fr.slice(0, 2)]];
   const f = FMT[AUTO_FMT]; CANDS = [];
-  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: fn(sets[k], a, b, CUT_AUTO) } });
+  // 칸마다 얼굴·머리에 맞춰 자름 (anchorTpl · 판정 5회차 D-092: 가운데 자르기로 머리 없는 칸 34%)
+  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]) } });
   const cw = AUTO_FMT === "short" ? 180 : 320, ch = AUTO_FMT === "short" ? 320 : 180;
   $("cands").innerHTML = CANDS.map((c, i) => `<div class="cand" data-c="${i}"><canvas width="${cw}" height="${ch}"></canvas><div>${c.name}</div></div>`).join("");
   drawCands();

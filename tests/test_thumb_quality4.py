@@ -83,9 +83,9 @@ class DetailTests(unittest.TestCase):
             C, tp = tc.rule_candidates(title, texts)
             body = " ".join(texts) + " " + title
             top = sorted((tc.finish(c, tp, body) for c in C), key=lambda c: -c["score"])[:5]
-            self.assertFalse(any(c["stock"] for c in top), (name, [(c["l1"], c["l2"]) for c in top]))
+            self.assertLessEqual(sum(c["stock"] for c in top), 1, (name, [(c["l1"], c["l2"]) for c in top]))  # 판정 5회차: 묶음에 1개까지 (화면이 지킴)
             for c in top:
-                self.assertNotIn(".", c["l1"] + c["l2"], "받아쓰기 마침표가 썸네일에")
+                self.assertNotRegex(c["l1"] + c["l2"], r"(?<!\.)\.(?!\.)", "받아쓰기 마침표가 썸네일에 (말줄임 '..' 는 훅 틀)")
         self.assertEqual([p for p, _ in tc.details(asr("MSGRAW01_퍼스트 터치 레슨"), ["퍼스트 터치"])], ["고개 들기", "디딤발"])
         self.assertEqual(tc.transcript_question(asr("MSGRAW01_퍼스트 터치 레슨"), ["퍼스트 터치"]), "왜 공 놓칠까?")
 
@@ -103,11 +103,14 @@ class StockGroundTests(unittest.TestCase):
         self.assertTrue(tc.stock(c, "패스 앤 무브 이것만 알면 플랩 레벨업 바로 됩니다"))
         self.assertTrue(tc.stock(tc._cand("드리블", "꿀팁 1가지", 1, "", "", "x", 1, "")))
 
-    def test_grounded_ignores_punctuation_and_needs_real_overlap(self):
+    def test_grounded_ignores_punctuation_and_needs_real_quote(self):
         body = "자, 디딤발 위치가, 정말 핵심이에요."
         self.assertTrue(tc.grounded("디딤발 위치", "정말 핵심", "디딤발 위치가 정말 핵심이에요", body))
-        self.assertFalse(tc.grounded("오늘은", "이것만 보세요", "오늘은 퍼스트 터치 꿀팁", "오늘은 퍼스트 터치 꿀팁을 알려드릴게요"), "두 글자('오늘')만 겹침")
-        self.assertFalse(tc.grounded("플랩 레벨업", "바로 됩니다", "바로 해 볼게요", "바로 해 볼게요"))
+        # 판정 5회차(D-094): 낱말 겹침은 보지 않음 (훅 문구가 65% 버려짐) — 인용이 대사에 그대로 있는지 · 숫자·이력이 대사에 있는지만
+        self.assertTrue(tc.grounded("오늘은", "이것만 보세요", "오늘은 퍼스트 터치 꿀팁", "오늘은 퍼스트 터치 꿀팁을 알려드릴게요"))
+        self.assertFalse(tc.grounded("오늘은", "이것만 보세요", "퍼스트 터치는 어려워요", "오늘은 퍼스트 터치 꿀팁을 알려드릴게요"), "대사에 없는 인용")
+        self.assertFalse(tc.grounded("3초면", "끝나요", "디딤발 위치가 정말 핵심이에요", body), "대사에 없는 숫자")
+        self.assertFalse(tc.grounded("프로가 쓰는", "디딤발", "디딤발 위치가 정말 핵심이에요", body), "대사에 없는 이력")
 
     def test_ungrounded_is_its_own_error(self):
         txt = json.dumps([{"l1": "플랩 레벨업", "l2": "바로 됩니다", "emph": "", "sub": "", "q": "없는 말"}], ensure_ascii=False)

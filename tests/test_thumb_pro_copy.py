@@ -33,7 +33,7 @@ class RuleTests(unittest.TestCase):
         good = tc.finish(tc._cand("드리블", "무조건 봐", 1, "무조건 봐", "", "must", 1.0, ""), ["드리블"])
         long = tc.finish(tc._cand("드리블을 정말 잘하는 방법을 지금", "알려드릴게요", 1, "", "", "x", 1.0, ""), ["드리블"])
         banned = tc.finish(tc._cand("충격", "드리블", 1, "", "", "x", 1.0, ""), ["드리블"])
-        self.assertGreater(good["score"], 5)
+        self.assertGreater(good["score"], 3)  # 판정 5회차(D-094): 막연 문구 감점은 작게 · 주제 가산 1.5 → 0.6
         self.assertLess(long["score"], 0, "한 줄 12자 넘으면 버림")
         self.assertLess(banned["score"], 0, "낚시 금지어")
         self.assertEqual(good["emph"], [1, 0, 5])
@@ -132,7 +132,9 @@ class AiTests(unittest.TestCase):
         grounded = tc.parse_ai(txt, body, ["발바닥 드래그", "수비"])
         self.assertEqual([c["l1"] for c in grounded], ["수비를 속이는"], "대사가 있으면 근거(q) 인용이 맞는 문구만")
         self.assertEqual(grounded[0]["q"], body)
-        self.assertFalse(tc.grounded("수비 전환", "이 순서대로!", "수비 전환이 중요해요", "수비 전환이 중요해요", ["수비 전환"]), "주제 말고 대사에 없는 꼬리표")
+        # 판정 5회차(D-094): 근거는 인용이 대사에 있는지만 (낱말 겹침 조건은 훅 문구 65% 를 버렸음) · 상투 꼬리표는 따로 표시해 묶음에 1개만
+        self.assertTrue(tc.grounded("수비 전환", "이 순서대로!", "수비 전환이 중요해요", "수비 전환이 중요해요", ["수비 전환"]))
+        self.assertTrue(tc.stock({"l1": "수비 전환", "l2": "이 순서대로!"}))
         self.assertEqual(out[0]["emph"], [1, 4, 7])
         self.assertIsNone(out[1]["emph"], "줄에 없는 강조 낱말은 강조 없음")
         self.assertEqual(out[0]["src"], "ai")
@@ -145,8 +147,9 @@ class AiTests(unittest.TestCase):
         self.assertIn("발바닥 드래그 기본기", p)
         self.assertIn("발바닥 드래그로 수비를 속이세요", p)
         self.assertIn("JSON 배열", p)
-        self.assertIn("수비 전환 / 3초 법칙", p)
-        self.assertNotIn("영상만 봐도 / 실력이 늘어요", p, "판정 4회차: 금지한 상투 꼬리표는 예시에서도 뺌")
+        self.assertIn("'여기' 봐야 / 뚫립니다", p)
+        self.assertIn("영상만 봐도 실력이 늘어요", p, "판정 5회차(D-094): 쪼살 자신의 인기 문구는 말투 예시로 (묶음에 1개는 화면이 지킴)")
+        self.assertIn("서술어", p)
 
     def test_run_ai_caches_and_invalidates(self):
         reply = json.dumps([{"l1": "수비를 속이는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌", "q": "발바닥 드래그로 수비를 속이세요"},

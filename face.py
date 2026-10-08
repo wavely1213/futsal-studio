@@ -164,6 +164,61 @@ def faces(src, min_h=MIN_H, top=6):
     return out
 
 
+HEAD_MIN_P = 0.2    # 키가 화면 높이 20% 넘는 사람만 머리 쪽을 다시 봄
+HEAD_MIN_H = 0.025  # 머리 쪽에서 찾은 얼굴은 화면 높이 2.5% 넘게
+HEAD_THRESH = 0.9   # 머리 쪽에서는 더 확실한 것만 (공·무릎을 얼굴로 보지 않게)
+
+
+def head_faces(src, persons, known=(), top=6):
+    """작은 얼굴: 큰 사람(키 0.2H 넘게) 상자 위쪽(38%)만 잘라 다시 찾음 → faces() 와 같은 모양 + head: True.
+    판정 5회차(D-092): 화면 전체를 320×240 으로 줄여 찾으면 4~7%H 얼굴(멀리 선 선수)을 못 찾음 — 후보 중 18% 에만 얼굴, 그래서 머리 지키기·앞뒤·표정이 거의 안 쓰였음.
+    이미 찾은 얼굴(known)과 겹치거나 사람 상자 위 40% 가운데 쪽이 아니면 뺌. 모델이 없으면 []."""
+    if not _SESS or not persons:
+        return []
+    from PIL import Image, ImageOps
+    if isinstance(src, Image.Image):
+        rgb = ImageOps.exif_transpose(src).convert("RGB")
+    else:
+        with Image.open(src) as img:
+            rgb = ImageOps.exif_transpose(img).convert("RGB")
+    W, H = rgb.size
+    gray, out = None, []
+    have = [list(f["box"]) for f in known or []]
+
+    def iou(a, b):
+        ix = max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+        iy = max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+        u = a[2] * a[3] + b[2] * b[3] - ix * iy
+        return ix * iy / u if u > 0 else 0.0
+    for p in sorted(persons, key=lambda q: -q[3])[:6]:
+        x, y, w, h = p[:4]
+        if h < HEAD_MIN_P or y <= 0.012:  # 머리가 화면 위로 잘린 사람은 머리가 없음
+            continue
+        bx0, by0 = max(0.0, x - w * 0.15), max(0.0, y - h * 0.04)
+        bx1, by1 = min(1.0, x + w * 1.15), min(1.0, y + h * 0.38)
+        if bx1 - bx0 < 0.01 or by1 - by0 < 0.01:
+            continue
+        crop = rgb.crop((int(bx0 * W), int(by0 * H), max(int(bx0 * W) + 8, int(bx1 * W)), max(int(by0 * H) + 8, int(by1 * H))))
+        for x1, y1, x2, y2, sc in _detect(crop):
+            if sc < HEAD_THRESH:
+                continue
+            fx1, fx2 = bx0 + x1 * (bx1 - bx0), bx0 + x2 * (bx1 - bx0)
+            fy1, fy2 = by0 + y1 * (by1 - by0), by0 + y2 * (by1 - by0)
+            fw, fh = fx2 - fx1, fy2 - fy1
+            cx, cy = (fx1 + fx2) / 2, (fy1 + fy2) / 2
+            if fh < HEAD_MIN_H or fh > h * 0.4 or fw > w * 0.9 or not (x <= cx <= x + w and y - 0.02 <= cy <= y + h * 0.4):
+                continue
+            b = [round(fx1, 4), round(fy1, 4), round(fw, 4), round(fh, 4)]
+            if any(iou(b, o) > 0.3 for o in have):
+                continue
+            if gray is None:
+                gray = rgb.convert("L")
+            emo, sharp = _expr(gray, (fx1, fy1, fx2, fy2))
+            have.append(b)
+            out.append({"box": b, "score": round(sc, 3), "emo": emo, "sharp": sharp, "head": True})
+    return sorted(out, key=lambda f: -f["box"][3])[:top]
+
+
 def expression(f):
     """웃음·놀람 정도 (0~1)."""
     e = f.get("emo") or {}

@@ -201,7 +201,8 @@ class GradeTests(unittest.TestCase):
             before = self.stats(np.asarray(sc, np.float32))
             after = self.stats(self.run_js(sc, g))
             self.assertTrue(0.38 <= after[0] <= 0.62, (k, g, before, after))
-            self.assertTrue(1.05 <= after[1] / max(1e-6, before[1]) <= 1.35, (k, g, before, after))
+            lo = 1.05 if before[1] * thumb.SAT_GAIN <= thumb.SAT_ABS else 0.9  # 판정 5회차(D-093): 이미 쨍한 원본은 절대 목표(0.32) 쪽으로 — 조금 내릴 수 있음
+            self.assertTrue(lo <= after[1] / max(1e-6, before[1]) <= 1.35, (k, g, before, after))
             self.assertLessEqual(after[2] - before[2], 0.02, (k, g, before, after))  # 보정이 새로 잘라 먹은 픽셀 (원본이 이미 하얗게 날아간 곳은 빼고)
 
     @unittest.skipUnless(HAS_NODE, "node 가 없어요")
