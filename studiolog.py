@@ -206,9 +206,13 @@ def _save_running():
         return
     tmp = r.with_name(RUNNING + ".tmp")
     try:
-        tmp.write_text(json.dumps(_SESSION, ensure_ascii=False), encoding="utf-8")
+        try:
+            text = json.dumps(_SESSION, ensure_ascii=False).encode("utf-8")
+        except ValueError:  # 짝 없는 반쪽 글자가 든 이름(요청 본문에서 옴) → \u 꼴로 (작업을 막지 않게)
+            text = json.dumps(_SESSION).encode("ascii")
+        tmp.write_bytes(text)
         os.replace(tmp, r)
-    except OSError:  # 잠김(백신 등) → 다음 기회에
+    except (OSError, ValueError):  # 잠김(백신 등) → 다음 기회에
         pass
 
 

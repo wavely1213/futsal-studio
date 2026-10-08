@@ -208,6 +208,13 @@ class CrashTargetTests(Base):
         self.assertNotIn("model", c, "꼴이 다른 값은 버림")
         self.assertNotIn("cookies", c, "모르는 칸은 남기지 않음")
 
+    def test_lone_surrogate_name_does_not_break_job(self):
+        """검토 재현: 요청 본문의 이름에 짝 없는 반쪽 글자(\\ud800)가 있으면 실행 표시를 쓰다 UnicodeEncodeError(ValueError)가
+        빠져나와 작업이 시작도 못 하고 날것의 오류를 냄 → 이제 \\u 꼴로 쓰고 작업은 그대로 · 다음에 켤 때 그대로 읽힘."""
+        bad = "IMG_\ud800.mp4"
+        note = self.crash(path="/api/analyze", names=[bad], model="small")
+        self.assertEqual(note["crash"]["names"], [bad])
+
     def test_hand_edited_marker(self):
         (self.tmp / studiolog.RUNNING).write_text(json.dumps({"start": "x", "version": "1", "job": "편집점 찾기",
                                                               "what": {"names": "a.mp4", "path": 7}}), encoding="utf-8")

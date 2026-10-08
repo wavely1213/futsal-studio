@@ -138,24 +138,86 @@ def start_job(name, fn, by=None, ctx=None):
 
 
 _SECS = {}  # 보관함 영상 길이 (이름, 크기, 수정 시각) → 초 · 받아쓰기 예상 시간용 (ffmpeg -i 를 고를 때마다 다시 안 부름)
+_SECS_RUN = set()  # 지금 길이를 읽는 중인 영상 (같은 영상을 두 요청이 동시에 읽지 않게)
+_SECS_LOCK = threading.Lock()
+_SECS_FILL = {"q": [], "on": False}  # 뒤에서 하나씩 읽을 영상 (마지막으로 고른 것만)
+PROBE_MAX = 6  # 한 번 물을 때 그 자리에서 길이를 읽는 영상 수 · 나머지는 크기로 어림하고 뒤에서 하나씩 (100개를 골라도 요청이 안 막히게)
 
 
-def _video_secs(name):
-    """보관함 영상 길이(초) · 없거나 못 읽으면 0."""
-    p = core.VIDEOS / name
+def _secs_key(name):
     try:
-        st = p.stat()
+        st = (core.VIDEOS / name).stat()
     except OSError:
-        return 0.0
-    key = (name, st.st_size, st.st_mtime_ns)
-    if key not in _SECS:
+        return None, 0
+    return (name, st.st_size, st.st_mtime_ns), st.st_size
+
+
+def _probe_secs(key):
+    """영상 하나의 길이(초)를 읽어 기억 → 초 (못 읽으면 0) · 다른 요청이 읽는 중이면 None (기다리지 않음)."""
+    with _SECS_LOCK:
+        if key in _SECS:
+            return _SECS[key]
+        if key in _SECS_RUN:
+            return None
+        _SECS_RUN.add(key)
+    try:
         try:
-            _SECS[key] = float(editor.probe(p)["duration"] or 0)
+            v = float(editor.probe(core.VIDEOS / key[0])["duration"] or 0)
         except Exception:  # noqa: BLE001 — 안내용 · 못 읽으면 0
-            _SECS[key] = 0.0
-        if len(_SECS) > 2000:
-            _SECS.clear()
-    return _SECS[key]
+            v = 0.0
+        with _SECS_LOCK:
+            if len(_SECS) > 2000:
+                _SECS.clear()
+            _SECS[key] = v
+        return v
+    finally:
+        with _SECS_LOCK:
+            _SECS_RUN.discard(key)
+
+
+def _fill_secs_later(keys):
+    """어림한 영상들의 길이는 뒤에서 한 번에 하나씩 읽어 둠 (다음에 물으면 정확히) · 새로 고르면 그 목록으로 바꿈."""
+    with _SECS_LOCK:
+        _SECS_FILL["q"] = list(keys)
+        if _SECS_FILL["on"]:
+            return
+        _SECS_FILL["on"] = True
+
+    def run():
+        while True:
+            with _SECS_LOCK:
+                if not _SECS_FILL["q"]:
+                    _SECS_FILL["on"] = False
+                    return
+                k = _SECS_FILL["q"].pop(0)
+            _probe_secs(k)
+    threading.Thread(target=run, daemon=True, name="영상 길이 읽기").start()
+
+
+def _selected_secs(names):
+    """고른 영상들의 길이 합 → (초, 크기로 어림한 영상 수). 기억한 길이 + 이번에 PROBE_MAX 개까지 읽고, 나머지는
+    읽은 영상들의 초당 바이트(모르면 초당 1MB)로 어림 · 뒤에서 하나씩 읽어 둠."""
+    total, rest, probed, known_b, known_s = 0.0, [], 0, 0, 0.0
+    for n in names:
+        key, size = _secs_key(n)
+        if key is None:
+            continue
+        with _SECS_LOCK:
+            v = _SECS.get(key)
+        if v is None and probed < PROBE_MAX:
+            v = _probe_secs(key)  # 뒤에서 읽는 중이면 None (기다리지 않고 어림 · 읽은 수에도 안 셈)
+            probed += v is not None
+        if v is None:
+            rest.append((key, size))
+            continue
+        total += v
+        if v > 0:
+            known_b, known_s = known_b + size, known_s + v
+    if rest:
+        bps = known_b / known_s if known_s else 1e6
+        total += sum(size / bps for _, size in rest)
+        _fill_secs_later([k for k, _ in rest])
+    return total, len(rest)
 
 
 def _started(ok):
@@ -1012,7 +1074,8 @@ class Handler(BaseHTTPRequestHandler):
                     editor.safe_name(n)
             except ValueError:
                 return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
-            return self._send(200, dict(core.whisper_estimate(sum(_video_secs(n) for n in names)), ok=True))
+            secs, guess = _selected_secs(names)
+            return self._send(200, dict(core.whisper_estimate(secs), ok=True, guess=guess))
         # ---- 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 (원본은 그대로) ----
         if path == "/api/bundle":
             try:

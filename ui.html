@@ -2160,9 +2160,9 @@ $("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
 const MODEL_KEY = "whisperModel", MODELS = ["large-v3-turbo", "small"];
 let modelInfo = null, modelAsk = 0, modelSelKey = null, modelTimer = 0;
 function modelSaved() { try { const v = localStorage.getItem(MODEL_KEY); return MODELS.includes(v) ? v : ""; } catch (e) { return ""; } }
-function longTxt(sec) {  // 예상 시간: 약 16분 · 약 1시간 20분 · 1분 안
+function longTxt(sec) {  // 예상 시간: 약 16분 · 약 1시간 20분 · 1분도 안 걸려요
   const m = Math.round(sec / 60);
-  if (m < 1) return "1분 안";
+  if (m < 1) return "1분도 안 걸려요";
   return m < 60 ? `약 ${m}분` : `약 ${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
 }
 function renderModelHint() {
@@ -2171,9 +2171,12 @@ function renderModelHint() {
   const v = segVal("modelSeg"), m = j.models[v], rec = j.models[j.default], n = libSel.size;
   const spec = j.memGB ? `메모리 ${Math.round(j.memGB)}GB · ${j.cores}코어` : `${j.cores}코어`;
   const gb = mb => (mb / 1000).toFixed(1).replace(/\.0$/, "");  // 765MB → 0.8GB
-  if (!n) { el.innerHTML = `이 PC(${spec})에는 <b>'${rec.label}'</b>가 알맞아요 · 60분 영상이면 '${m.label}' ${longTxt(m.perHour)} · 메모리 약 ${gb(m.memMB)}GB`; return; }
+  const acc = j.models["large-v3-turbo"];  // 왜 '빠르게'가 알맞은지 (메모리가 넉넉한데 덜 정확한 쪽을 고른 까닭이 궁금하지 않게)
+  const why = j.default !== "small" ? "" : j.why === "mem" ? ` (메모리가 ${Math.round(j.memGB)}GB라 '정확하게'는 느려지거나 멈출 수 있어요)`
+    : j.why === "cores" ? ` (코어가 ${j.cores}개라 '정확하게'는 60분 영상에 ${longTxt(acc.perHour)} 걸려요)` : "";
+  if (!n) { el.innerHTML = `이 PC(${spec})에는 <b>'${rec.label}'</b>가 알맞아요${why} · 60분 영상이면 '${m.label}' ${longTxt(m.perHour)} · 메모리 약 ${gb(m.memMB)}GB`; return; }
   const warn = v !== j.default && m.tight ? ` · 이 PC 메모리로는 느려질 수 있어서 '${rec.label}'를 권해요` : "";
-  el.innerHTML = `고른 영상 ${n}개${j.dur ? ` (${mmss(j.dur)})` : ""} · <b>'${m.label}'</b> ${longTxt(m.secs)} · 메모리 약 ${gb(m.memMB)}GB${warn}`;
+  el.innerHTML = `고른 영상 ${n}개${j.dur ? ` (${j.guess ? "약 " : ""}${mmss(j.dur)})` : ""} · <b>'${m.label}'</b> ${longTxt(m.secs)} · 메모리 약 ${gb(m.memMB)}GB${warn}`;
 }
 async function loadModelInfo() {
   const names = [...libSel], k = ++modelAsk;
@@ -2182,6 +2185,7 @@ async function loadModelInfo() {
   modelInfo = j;
   if (!modelSaved()) setSeg("modelSeg", j.default);  // 고른 적이 없으면 이 PC 에 맞는 값
   renderModelHint();
+  if (j.guess) setTimeout(() => { if (k === modelAsk) loadModelInfo(); }, 3000);  // 많이 골라 일부는 크기로 어림함 → 서버가 뒤에서 길이를 읽는 동안 조금 뒤 다시
 }
 function watchModelSel() {  // 고른 영상이 바뀌면 (조금 뒤 한 번) 예상 시간을 다시
   const key = [...libSel].sort().join("\n");

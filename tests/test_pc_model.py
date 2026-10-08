@@ -40,11 +40,19 @@ class SpecTests(unittest.TestCase):
         """화면·휴대폰이 보낸 값은 아는 모델만 (없거나 모르는 값·경로 → 이 PC 기본값)."""
         with mock.patch.object(core, "pc_spec", return_value=DESKTOP):
             self.assertEqual(core.model_of("small"), "small")
-            for v in (None, "", "medium", "../../evil", "C:\\models\\x", 3):
+            for v in (None, "", "medium", "../../evil", "C:\\models\\x", 3, ["small"], {"m": 1}):  # 목록·객체: 예전엔 TypeError 로 작업이 시작도 못 함
                 self.assertEqual(core.model_of(v), "large-v3-turbo", v)
         with mock.patch.object(core, "pc_spec", return_value=LAPTOP_8GB):
             self.assertEqual(core.model_of(None), "small")
             self.assertEqual(core.model_of("large-v3-turbo"), "large-v3-turbo", "고른 값은 그대로")
+
+    def test_estimate_says_why_fast_is_default(self):
+        """기본값이 '빠르게'인 까닭 (화면 안내: 메모리 · 코어 수) — 16GB·4코어 PC 에서 덜 정확한 쪽을 고른 까닭이 궁금하지 않게."""
+        why = lambda spec: core.whisper_estimate(0, spec)["why"]  # noqa: E731
+        self.assertEqual(why(LAPTOP_8GB), "mem")
+        self.assertEqual(why({"memGB": 15.7, "cores": 4}), "cores")
+        self.assertEqual(why({"memGB": None, "cores": 2}), "cores")
+        self.assertIsNone(why(DESKTOP))
 
     def test_estimate_from_measured_lesson(self):
         """60분 영상: '빠르게' 약 16분·0.8GB, '정확하게' 약 48분·2GB (4코어 실측) · 코어가 적으면 그만큼 느리게 · 많아도 더 빠르다고 안 함."""
@@ -91,6 +99,41 @@ class RouteTests(Server):
             self.assertEqual((st, j["dur"]), (200, 0.0))
         for bad in (["..\\밖.mp4"], ["C:\\x.mp4"], "x", [1], ["a"] * 501):
             self.assertEqual(self.call("/api/whisper/estimate", {"names": bad})[0], 400, bad)
+
+    def test_many_selected_videos_do_not_block_request(self):
+        """검토 재현: 100개 넘게 고르면 요청 안에서 ffmpeg 를 영상마다 차례로 불렀다 → 한 번에 PROBE_MAX 개까지만 읽고
+        나머지는 크기로 어림(guess) · 뒤에서 하나씩 읽어 다음 물음엔 정확히 · 같은 영상을 두 번 동시에 읽지 않음."""
+        import threading
+        import time
+        names = [f"레슨 {i:02d}.mp4" for i in range(15)]
+        for n in names:
+            self.video(n, b"\1" * 2000)
+        calls, gate = [], threading.Event()
+
+        def probe(p):
+            calls.append(Path(p).name)
+            if threading.current_thread().name == "영상 길이 읽기":
+                gate.wait(10)  # 뒤에서 읽는 중 (첫 영상에서 멈춰 둠)
+            return {"duration": 60.0}
+        app._SECS.clear()
+        with mock.patch.object(editor, "probe", side_effect=probe), mock.patch.object(core, "pc_spec", return_value=DESKTOP):
+            st, j = self.call("/api/whisper/estimate", {"names": names})
+            self.assertEqual((st, j["guess"]), (200, len(names) - app.PROBE_MAX))
+            self.assertEqual(j["dur"], 60.0 * len(names), "나머지는 읽은 영상의 초당 바이트로 어림 (같은 크기 → 같은 길이)")
+            end = time.time() + 5
+            while len(calls) < app.PROBE_MAX + 1 and time.time() < end:  # 뒤에서 첫 영상을 읽기 시작
+                time.sleep(0.02)
+            self.assertEqual(len(calls), app.PROBE_MAX + 1, "요청 안에서는 PROBE_MAX 개까지만 · 뒤에서는 한 번에 하나")
+            st, j2 = self.call("/api/whisper/estimate", {"names": names})  # 뒤에서 읽는 중인 영상은 다시 안 읽음
+            self.assertEqual((st, j2["guess"]), (200, len(names) - 2 * app.PROBE_MAX))
+            self.assertEqual(len(calls), len(set(calls)), calls)
+            gate.set()
+            end = time.time() + 10
+            while len(app._SECS) < len(names) and time.time() < end:
+                time.sleep(0.05)
+            st, j3 = self.call("/api/whisper/estimate", {"names": names})
+        self.assertEqual((j3["guess"], j3["dur"]), (0, 60.0 * len(names)))
+        self.assertEqual(sorted(calls), sorted(names), "영상마다 한 번만")
 
     def test_analyze_uses_pc_default_when_not_chosen(self):
         """편집점 찾기: 고른 값이 없거나 모르는 값이면 이 PC 기본값 (예전: 늘 large-v3-turbo · 아무 문자열이나 모델 이름으로)."""

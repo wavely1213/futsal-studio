@@ -747,7 +747,7 @@ def default_model(spec=None):
 
 def model_of(v):
     """화면·휴대폰이 보낸 모델 이름 → 아는 모델만 (없거나 모르는 값이면 이 PC 기본값)."""
-    return v if v in WHISPER_COST else default_model()
+    return v if isinstance(v, str) and v in WHISPER_COST else default_model()  # 목록·객체가 오면 `in` 이 TypeError
 
 
 def whisper_estimate(secs, spec=None):
@@ -760,7 +760,9 @@ def whisper_estimate(secs, spec=None):
     models = {m: {"secs": round(max(0.0, float(secs or 0)) * rate * slow), "perHour": round(3600 * rate * slow), "memMB": mb,
                   "label": WHISPER_LABEL[m], "tight": bool(mem) and mb / 1024 > mem * 0.25}
               for m, (rate, mb) in WHISPER_COST.items()}
-    return {"default": default_model(spec), "memGB": mem, "cores": spec.get("cores"), "dur": round(float(secs or 0), 1), "models": models}
+    why = "mem" if mem is not None and mem <= LOW_MEM_GB else "cores" if (spec.get("cores") or 4) <= LOW_CORES else None  # 기본값이 '빠르게'인 까닭
+    return {"default": default_model(spec), "why": why, "memGB": mem, "cores": spec.get("cores"), "dur": round(float(secs or 0), 1),
+            "models": models}
 
 
 class FileProblem(RuntimeError):
