@@ -25,7 +25,7 @@ class StockCopyTests(unittest.TestCase):
     """판정 3회차: '이 순서대로!' 15/76 · '플랩 레벨업' 7 · 상투 꼬리표가 있는 장과 클로드 총점 상관 −0.33."""
 
     def cands(self, title, texts):
-        C, tp = thumbcopy.rule_candidates(title, texts)
+        C, tp = thumbcopy.rule_candidates(title, texts, rotate=False)
         body = " ".join(texts) + " " + title
         return {c["pid"]: thumbcopy.finish(c, tp, body) for c in C}, tp
 
@@ -53,7 +53,7 @@ class StockCopyTests(unittest.TestCase):
         # 판정 5회차(D-094): 맨 위는 구체 낱말 라벨이 아니라 말하듯 끝나는 훅 (라벨 '슈팅 / 디딤발 위치'는 판정 3/6/3) — 구체 낱말은 훅의 보조 문구로
         self.assertTrue(thumbcopy.spoken(best), (best["l1"], best["l2"]))
         self.assertIn("디딤발 위치", [x["l2"] for x in c.values() if x.get("detail")])
-        self.assertIn("디딤발 위치", [x["sub"] for x in c.values() if x["pid"] in ("regret", "semi", "hide")], "구체 낱말은 훅의 작은 줄로")
+        self.assertIn("디딤발 위치", [x["sub"] for x in c.values() if x["pid"] in thumbcopy.HOOK_SUB], "구체 낱말은 훅의 작은 줄로")
         q = [x for x in c.values() if x["pid"].startswith("detailq")]
         self.assertTrue(q and q[0]["l1"].endswith("?"), "문제 질문 + 대사의 해답")
         for k in ("one", "result"):
@@ -107,7 +107,7 @@ class SceneTests(unittest.TestCase):
         self.assertIn('"color"', inspect.getsource(thumb.frame_candidates))
 
 
-JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "frameQ", "srcHeadCut", "footClose", "headlessBad")
+JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "blurQ", "frameQ", "srcHeadCut", "footClose", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }

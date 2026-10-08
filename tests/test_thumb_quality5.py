@@ -38,8 +38,8 @@ const pick = n => {  // 함수 (기본값 '= {}' 매개변수 건너뜀) 또는 
 const NAMES = JSON.parse(process.argv[2]);
 eval('var clamp = (v, a, b) => Math.min(b, Math.max(a, v)); var INFO = { width: 1920, height: 1080 }; var AI = { frames: [] }; var FRAMES = [];' +
   'var frameAspect = () => INFO.width / INFO.height; var frameSrc = t => "/frame?name=x&t=" + t;' +
-  'var setInfo = (w, h) => { INFO = { width: w, height: h }; return true; }; var setFrames = fs => { AI.frames = fs; return true; };' +
-  NAMES.map(pick).join('\n') + '; globalThis.T = {' + NAMES.join(',') + ', setInfo, setFrames};');
+  'var setInfo = (w, h) => { INFO = { width: w, height: h }; return true; }; var setFrames = fs => { AI.frames = fs; return true; }; var setPick = t => { AI.pick = t; return true; };' +
+  NAMES.map(pick).join('\n') + '; globalThis.T = {' + NAMES.join(',') + ', setInfo, setFrames, setPick};');
 const cases = JSON.parse(fs.readFileSync(0, 'utf8')); const out = cases.map(([fn, args]) => (typeof T[fn] === 'function' ? T[fn](...args) : T[fn]));
 process.stdout.write(JSON.stringify(out));
 """
@@ -89,20 +89,22 @@ class ScreenMath5Tests(unittest.TestCase):
                            ["setInfo", [1080, 1920]], ["fullOk", [vctx]], ["fullOk", [dict(ctx, short=False)]]])
         self.assertTrue(out[1], "1080p 가로 영상 → 9:16 전체 (1.78배)")
         self.assertAlmostEqual(out[2], 1920 * 16 / 9 / 1920, places=3)
-        self.assertFalse(out[4], "720p 가로 영상은 2.67배 → 예전 칸")
+        self.assertTrue(out[4], "판정 q5 1회차(D-096): 720p 가로 영상도 2.67배로 꽉 찬 장면 (목록 크기에서는 원본보다 작게 보임)")
         self.assertTrue(out[6], "세로 영상")
         self.assertFalse(out[7], "롱폼은 해당 없음")
 
     def test_heads_of_others_and_foot_rule(self):
         f = {"persons": [[0.4, 0.2, 0.1, 0.6, 0.9], [0.7, 0.3, 0.08, 0.3, 0.9], [0.1, 0.5, 0.03, 0.1, 0.9], [0.85, 0.0, 0.1, 0.5, 0.9]], "main": 0, "faces": []}
-        foot = {"persons": [[0.3, 0.0, 0.4, 0.9, 0.9]], "main": 0, "ball": [0.45, 0.7, 0.08, 0.1], "faces": [], "kind": "mid", "color": 40}
-        out = self.run_js([["headsOf", [f]], ["footOk", [foot, {"l1": "발바닥", "l2": "드래그 했네.."}]], ["footOk", [foot, {"l1": "왜 막힐까?", "l2": "상체 페인트"}]],
-                           ["footOk", [dict(foot, color=95), {"l1": "발바닥", "l2": "드래그"}]], ["srcHeadCut", [foot]]])
+        foot = {"t": 7, "persons": [[0.3, 0.0, 0.4, 0.9, 0.9]], "main": 0, "ball": [0.45, 0.7, 0.08, 0.1], "faces": [], "kind": "mid", "color": 40}
+        out = self.run_js([["headsOf", [f]], ["footOk", [foot, {"l1": "발바닥", "l2": "드래그 했네.."}]], ["setPick", [7]], ["footOk", [foot, {"l1": "발바닥", "l2": "드래그 했네.."}]],
+                           ["footOk", [foot, {"l1": "왜 막힐까?", "l2": "상체 페인트"}]], ["footOk", [dict(foot, color=95), {"l1": "발바닥", "l2": "드래그"}]], ["srcHeadCut", [foot]]])
+        self.assertFalse(out[1], "판정 q5 1회차(D-098): 자동 추천은 다리만 나온 장면을 안 씀")
+        out = out[:1] + out[3:]
         heads = out[0]
         self.assertEqual(len(heads), 2, "주인공 + 키 0.15H 넘는 사람 (작은 사람·머리가 화면 위로 잘린 사람은 뺌)")
         self.assertTrue(heads[0]["main"])
         self.assertFalse(heads[1]["main"])
-        self.assertTrue(out[1], "발 이야기 문구 + 차분한 배경")
+        self.assertTrue(out[1], "사용자가 그 장면을 골랐고 발 이야기 문구 + 차분한 배경")
         self.assertFalse(out[2], "발 이야기가 아니면 다리만 나온 장면은 안 씀")
         self.assertFalse(out[3], "요란한 낙서 벽이면 안 씀")
         self.assertTrue(out[4])
@@ -187,16 +189,31 @@ class Copy5Tests(unittest.TestCase):
 
     def items(self, title="발바닥 드래그 기본기", texts=None):
         texts = texts or self.TEXTS
-        C, tp = tc.rule_candidates(title, texts)
+        C, tp = tc.rule_candidates(title, texts, rotate=False)
         body = " ".join(texts) + " " + title
         return {c["pid"]: c for c in (tc.finish(c, tp, body) for c in C)}
 
     def test_hook_templates(self):
         it = self.items()
         self.assertEqual((it["regret"]["l1"], it["regret"]["l2"]), ("이것도 모르고", "드래그 했네.."), "줄이 길면 주제의 마지막 낱말")
-        self.assertIn("semi", it)
+        self.assertNotIn("semi", it, "판정 q5 1회차(D-100): 풋살해주호 제목('플랩 세미 가는 기술')을 그대로 가져온 틀은 뺌")
+        self.assertFalse(any("플랩 세미" in c["l1"] + c["l2"] for c in it.values()))
         self.assertIn("hide", it)
-        self.assertTrue(all(len(x) <= 10 for c in it.values() if c["pid"] in ("regret", "foryou", "semi", "hide") for x in (c["l1"], c["l2"])))
+        for pid in ("stuck", "diff", "please", "beatit"):  # 우리 말로 쓴 새 훅 틀 (대사에 실수·'못 따라와요'가 있음)
+            self.assertIn(pid, it)
+        self.assertTrue(all(len(x) <= 10 for c in it.values() if c["pid"] in tc.HOOK_SUB for x in (c["l1"], c["l2"])))
+
+    def test_hooks_rotate_per_video(self):
+        """판정 q5 1회차(D-100): 'X가 / 이렇게 쉬웠어?' 18/18 묶음 · '이것만 알면 / X 끝!' 9/9 영상 → 영상(제목)마다 훅 틀 4개·흔한 틀 4개만, 늘 같게."""
+        C, _ = tc.rule_candidates("발바닥 드래그 기본기", self.TEXTS)
+        C2, _ = tc.rule_candidates("발바닥 드래그 기본기", self.TEXTS)
+        hooks = [c["pid"] for c in C if c["pid"] in tc.HOOK_PIDS]
+        self.assertLessEqual(len(hooks), tc.HOOK_KEEP)
+        self.assertLessEqual(len([c for c in C if c["pid"] in tc.GENERIC_PIDS]), tc.GENERIC_KEEP)
+        self.assertEqual([c["pid"] for c in C], [c["pid"] for c in C2], "다시 열어도 같은 틀")
+        sets = {tuple(sorted(c["pid"] for c in tc.rule_candidates(t, self.TEXTS)[0] if c["pid"] in tc.HOOK_PIDS + tc.GENERIC_PIDS))
+                for t in ("발바닥 드래그 기본기", "발바닥 드래그 실전", "발바닥 드래그 강좌", "발바닥 드래그 레슨")}
+        self.assertGreater(len(sets), 1, "제목이 다르면 다른 틀 묶음")
 
     def test_hooks_beat_labels(self):
         it = self.items()

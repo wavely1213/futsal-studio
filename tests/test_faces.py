@@ -266,6 +266,13 @@ class TestFrameCandidates(FaceBase):
         # 없는 영상 → None
         self.assertIsNone(thumb.cached_candidates("없는 영상.mp4"))
 
+    def test_empty_scoring_not_cached(self):
+        """판정 q5 1회차 개발 중: 장면 점수가 하나도 안 나온(뽑기가 다 실패한) 결과를 기억하면 그 영상은 계속 '쓸 만한 장면을 찾지 못했어요' → 기억하지 않음."""
+        with mock.patch.object(thumb, "_score_frames", return_value={}):
+            self.assertEqual(thumb.frame_candidates(self.name), [])
+        self.assertFalse((core.adir(self.name) / "frames" / thumb.CANDIDATES).exists())
+        self.assertIsNone(thumb.cached_candidates(self.name))
+
     def test_download_failure_falls_back(self):
         """모델을 못 받으면(인터넷 없음) 조용히 예전 점수로 장면을 고름."""
         empty = self.tmp / "모델 없음"

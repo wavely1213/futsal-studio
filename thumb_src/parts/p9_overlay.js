@@ -100,7 +100,7 @@ function tacFieldsHtml(l) {
   return h + `<div class="hint">${l.pts ? "선택하면 보이는 점(동그라미)을 끌어 모양을 바꿔요 · Shift 반듯하게 · " : ""}네온 느낌은 '외부 광선' 효과로 조절해요</div>`;
 }
 Object.assign(FM, { width: { min: 1, max: 120, unit: "px" }, head: { min: 0, max: 240, unit: "px" }, fillA: { min: 0, max: 100, mul: 100, unit: "%" }, topW: { min: 2, max: 100, mul: 100, unit: "%" },
-  "grade.amt": { min: 0, max: 150, mul: 100, unit: "%" }, "grade.clarity": { min: 0, max: 100 }, "grade.vib": { min: -40, max: 140 }, "grade.temp": { min: -50, max: 50 }, "grade.sharpen": { min: 0, max: 100 } });
+  "grade.amt": { min: 0, max: 150, mul: 100, unit: "%" }, "grade.clarity": { min: 0, max: 100 }, "grade.vib": { min: -100, max: 140 }, "grade.temp": { min: -50, max: 50 }, "grade.sharpen": { min: 0, max: 100 } });
 ACT.reseed = () => { const l = selL(); if (!l) return; commit("다시 그리기"); l.seed = Math.floor(Math.random() * 1e6); changed(); };
 ACT.gradeAuto = () => {  // 그 장면의 자동 보정 값 다시 (분석 결과)
   const l = selL(); if (!l || l.type !== "image") return;

@@ -117,19 +117,25 @@ def hamming(a, b):
         return 64
 
 
-CAND_VER = 4       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로 · 3: 이름 띠 조건을 좁힘(광고판·바닥 글자 아님) ·
-#                    4: 머리 쪽 작은 얼굴 · 주인공 흔들림 · 레슨은 머리가 보일 때만 · 얼굴 없는 장면도 앞뒤 다듬기 (D-092))
-GRADE_VER = 6      # (6: 채도 절대 목표 SAT_ABS · D-093) 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
+CAND_VER = 5       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로 · 3: 이름 띠 조건을 좁힘(광고판·바닥 글자 아님) ·
+#                    4: 머리 쪽 작은 얼굴 · 주인공 흔들림 · 레슨은 머리가 보일 때만 · 얼굴 없는 장면도 앞뒤 다듬기 (D-092) ·
+#                    5: 주인공이 또렷이 한 명(크고 비슷한 키의 다른 사람이 적음) · 사람 많은 장면 가산 줄임 (D-095))
+GRADE_VER = 7      # (7: 채도 절대 목표를 끝까지(원본 대비 0.62배까지) · 초록/자주 색 틀어짐(tint) · 어두운 장면 색 얼룩 줄이기(dn) · 감마 상한 3.3 — D-097)
+#                    (6: 채도 절대 목표 SAT_ABS · D-093) 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
-GAMMA_RANGE = (0.8, 2.8)  # 판정 2회차: 아주 어두운 세로 영상(평균 0.15)이 2.2 에 걸려 0.378 → 2.8 · 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
+GRADE_MEAN_DARK = 0.41  # 아주 어두운 원본(평균 밝기 DARK_SRC 아래)의 목표 — 밤 장면 노이즈를 덜 키움 (D-097)
+DARK_SRC = 0.2
+GAMMA_RANGE = (0.8, 3.3)  # 판정 q5 1회차(D-097): 밤 장면(THQSTOCK004)이 2.8 에 걸려 밝기 0.34 → 3.3 · 판정 2회차: 아주 어두운 세로 영상(평균 0.15)이 2.2 에 걸려 0.378 → 2.8 · 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
 
 
 def auto_grade(src, close=False):
     """장면 한 장의 자동 보정 숫자 (화면 thumb.html 의 applyGrade 와 짝: 레벨 lo/hi·색온도 → 감마(밝기에만) → 자연 채도 → 클래리티 → 샤픈).
     - 레벨: 채널별 0.5%/99.5% 지점 (밝기 기준에서 ±12 안쪽으로 — 잔디 초록에 끌려 색이 틀어지지 않게, 이동량 ≤ MAX_SHIFT)
     - 감마: 보정 뒤 평균 밝기가 0.48 이 되게 (0.8~1.8) · 자연 채도: 보정 뒤 채도가 약 1.2배 되게 · 색온도: 회색 부분이 푸르면(형광등) 따뜻하게
-    - 클래리티 25 (얼굴 클로즈업이면 15) · 샤픈 18"""
+    - 클래리티 25 (얼굴 클로즈업이면 15) · 샤픈 18
+    - tint: 회색 부분이 초록(+)·자주(−)로 치우친 만큼 초록 채널을 고침 · dn: 감마가 크면(어두운 장면을 많이 밝힘) 색 얼룩·노이즈 줄이기 0~1 ·
+      sat: 자연 채도로 못 내린 쨍한 원본의 전체 채도 배율 (D-097)"""
     import numpy as np
     from PIL import Image
     im = src if isinstance(src, Image.Image) else Image.open(src)
@@ -145,14 +151,16 @@ def auto_grade(src, close=False):
         hi.append(int(round(np.clip(np.clip(c_hi, lhi - 12, lhi + 12), 255 - MAX_SHIFT, 255))))
     lv = np.clip((a - np.array(lo, np.float32)) / np.maximum(1, np.array(hi, np.float32) - np.array(lo, np.float32)), 0, 1) @ np.array([0.299, 0.587, 0.114], np.float32)
     g0, g1 = GAMMA_RANGE  # 평균 밝기는 감마에 따라 늘기만 함 → 반으로 나눠 찾기
-    if (lv ** (1 / g1)).mean() < GRADE_MEAN:
+    # 판정 q5 1회차(D-097): 밤 장면을 0.48 까지 밝히면 하늘의 압축 노이즈가 보라·초록 얼룩으로 ('노이즈와 색 번짐이 심해') → 아주 어두운 원본은 0.41 (밤 느낌은 남기고 목표 범위 안)
+    want = GRADE_MEAN_DARK if lum.mean() / 255 < DARK_SRC else GRADE_MEAN
+    if (lv ** (1 / g1)).mean() < want:
         gamma = g1
-    elif (lv ** (1 / g0)).mean() > GRADE_MEAN:
+    elif (lv ** (1 / g0)).mean() > want:
         gamma = g0
     else:
         for _ in range(18):
             gm = (g0 + g1) / 2
-            g0, g1 = (gm, g1) if (lv ** (1 / gm)).mean() < GRADE_MEAN else (g0, gm)
+            g0, g1 = (gm, g1) if (lv ** (1 / gm)).mean() < want else (g0, gm)
         gamma = (g0 + g1) / 2
     mx, mn = a.max(2), a.min(2)
     sat = (mx - mn) / np.maximum(mx, 1)
@@ -164,23 +172,36 @@ def auto_grade(src, close=False):
             temp = int(round(min(30, -d * 1.5)))     # 푸른 형광등 → 따뜻하게
         elif d > 14:
             temp = -int(round(min(20, d - 14)))      # 너무 누런 조명 → 조금 차갑게
-    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
+    tint = 0
+    if neutral.mean() > 0.02:  # 판정 q5 1회차(D-097): 밤 장면의 초록·보라 색 틀어짐 — 회색 부분의 초록이 빨강·파랑 평균에서 벗어난 만큼 (+ 초록을 뺌 · − 자주를 뺌)
+        dg = float((a[..., 1] - (a[..., 0] + a[..., 2]) / 2)[neutral].mean())
+        if abs(dg) > TINT_MIN:
+            tint = int(round(max(-TINT_MAX, min(TINT_MAX, dg * 1.3))))
+    dn = round(float(min(1.0, max(0.0, (gamma - DN_GAMMA[0]) / (DN_GAMMA[1] - DN_GAMMA[0])))), 2)  # 많이 밝히는 어두운 장면만 색 얼룩·노이즈를 줄임
+    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "tint": tint, "dn": dn, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
     # 자연 채도: 레벨만으로도 채도가 오르므로, 보정 뒤 채도가 원본의 약 1.2배가 되는 값을 고름 (화면 applyGrade 와 같은 계산으로 어림)
     # 판정 2회차: 이미 채도가 높은 원본(낙서 벽 0.48)에 vib 55 → '과한 형광 필터' · 레벨만으로 +46% (vib −40 에 걸림) → 원본 채도가 높으면 목표·상한을 낮추고, 그래도 넘으면 레벨을 덜 늘림
     s0 = float(sat.mean())
     target, vmax = (SAT_GAIN_HI, VIB_HI) if s0 > SAT_HIGH else (SAT_GAIN, 80)
     # 판정 5회차(D-093): 원본 대비 배율만 보면 이미 쨍한 스톡(0.385)이 0.46 까지 → 보정 뒤 채도를 절대값 SAT_ABS(레퍼런스 0.29~0.33)로 · SAT_ABS_MAX 넘지 않게
+    # 판정 q5 1회차(D-097): 원본 대비 0.92배 아래로는 안 내려 쨍한 스톡(0.41~0.55)이 0.38~0.51 로 남음(93장 중 35장) → 0.62배까지 · 원본이 상한보다 쨍하면 올리지 않음
     target = min(target, max(SAT_ABS_FLOOR, SAT_ABS / max(1e-6, s0)))
     for shrink in (1.0, 0.6, 0.3, 0.0):
         if shrink < 1:
             g["lo"] = [int(round(v * shrink)) for v in lo]
             g["hi"] = [int(round(255 - (255 - v) * shrink)) for v in hi]
-        rs = [(v, _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)) for v in range(-60, vmax + 1, 5)]
+        rs = [(v, _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)) for v in range(VIB_MIN, vmax + 1, 5)]
         ok = [x for x in rs if x[1] <= SAT_MAX and x[1] * s0 <= max(SAT_ABS_MAX, s0)]
         best = min(ok or rs, key=lambda x: abs(x[1] - target))
         if ok:
             break
     g["vib"] = best[0]
+    # 판정 q5 1회차(D-097): 자연 채도는 이미 쨍한 픽셀을 거의 못 내림(채도 낮은 곳일수록 많이) → 그래도 목표보다 쨍하면 전체 채도를 곱해서 (0.6~1)
+    if best[1] > target + 0.03 and not g["dn"]:  # (어두운 장면은 색 얼룩 줄이기(dn)가 채도를 이미 뺌)
+        g["sat"] = round(max(0.6, min(1.0, target / best[1])), 3)
+        now = _sat_after(a, g) / max(1e-6, s0)  # 레벨·자연 채도와 겹쳐 덜 빠지면 한 번 더
+        if now > target + 0.03:
+            g["sat"] = round(max(0.6, g["sat"] * target / now), 3)
     if g["gamma"] > 2.0:  # 아주 어두운 장면을 크게 밝히면 노이즈가 커짐 → 선명하게·클래리티를 줄임 (판정: '노이즈가 심하고 흐릿')
         g["sharpen"], g["clarity"] = 0, 8
     return g
@@ -193,14 +214,18 @@ VIB_HI = 20        # 그때의 자연 채도 상한
 SAT_MAX = 1.28     # 보정 뒤 채도가 이보다 크면 레벨을 덜 늘려 다시 (화면 보정 뒤 +30% 넘지 않게 · 선명하게가 조금 더 올림)
 SAT_ABS = 0.32     # 보정 뒤 채도 절대 목표 (판정 5회차: 레퍼런스 0.29~0.33 · 우리 0.39~0.46)
 SAT_ABS_MAX = 0.36  # 보정 뒤 채도 절대 상한 (원본이 이미 더 높으면 원본 그대로까지)
-SAT_ABS_FLOOR = 0.92  # 절대 목표 때문에 원본보다 이만큼 넘게 빼지는 않음
+SAT_ABS_FLOOR = 0.62  # 절대 목표 때문에 원본보다 이만큼 넘게 빼지는 않음 (D-097: 0.92 → 0.62 · 쨍한 스톡 0.55 도 0.36 아래로)
+VIB_MIN = -100     # 자연 채도 아래 끝 (채도 낮추기 · D-097: −60 으로는 0.62배까지 못 내림)
+TINT_MIN = 5       # 회색 부분 초록 치우침이 이보다 크면 색 틀어짐으로 봄 (0~255)
+TINT_MAX = 24      # 색 틀어짐 고치기 상한
+DN_GAMMA = (1.6, 2.5)  # 감마가 이 사이면 색 얼룩·노이즈 줄이기 0 → 1 (밤 장면을 크게 밝힐 때 보라·초록 얼룩 — 판정 q5 1회차)
 
 
 def _sat_after(a, g):
     """applyGrade(thumb.html)의 레벨·색온도·감마(밝기에만)·자연 채도까지를 numpy 로 어림 → 평균 채도 (자연 채도 값 고르기용)."""
     import numpy as np
     lo, hi = np.array(g["lo"], np.float32), np.array(g["hi"], np.float32)
-    x = np.clip((a - lo) / np.maximum(1, hi - lo), 0, 1) * 255 * (1 + np.array([1, 0, -1], np.float32) * g["temp"] / 260)
+    x = np.clip((a - lo) / np.maximum(1, hi - lo), 0, 1) * 255 * (1 + np.array([1, 0, -1], np.float32) * g["temp"] / 260) * (1 - np.array([0, 1, 0], np.float32) * g.get("tint", 0) / 260)
     y = x @ np.array([0.299, 0.587, 0.114], np.float32)
     x = np.clip(x * ((np.clip(y, 0, 255) / 255) ** (1 / g["gamma"]) * 255 / np.maximum(0.5, y))[..., None], 0, 255)  # 감마는 밝기에만
     if g["vib"]:
@@ -213,6 +238,9 @@ def _sat_after(a, g):
         k = np.where(skin, k * 0.5, k)
         y = x @ np.array([0.299, 0.587, 0.114], np.float32)
         x = np.clip(y[..., None] + (x - y[..., None]) * (1 + k), 0, 255)
+    if g.get("sat", 1) != 1:
+        y = x @ np.array([0.299, 0.587, 0.114], np.float32)
+        x = np.clip(y[..., None] + (x - y[..., None]) * g["sat"], 0, 255)
     mx, mn = x.max(2), x.min(2)
     return float(((mx - mn) / np.maximum(mx, 1)).mean())
 
@@ -272,7 +300,8 @@ def action_score(persons, ball):
     n = len(persons)
     if not n:
         return 0.85
-    k = {1: 1.0, 2: 1.12, 3: 1.18, 4: 1.2, 5: 1.18, 6: 1.15}.get(n, 1.05)
+    # 판정 q5 1회차(D-095): 사람이 많을수록 '주인공 불분명'(107번) · 쇼츠 사람 수 ↔ pro −0.56 → 2명이 가장 좋고 4명부터 내림 (예전 4명 1.2)
+    k = {1: 1.06, 2: 1.12, 3: 1.1, 4: 1.04, 5: 0.98, 6: 0.94}.get(n, 0.9)
     hmax = max(p[3] for p in persons)
     k *= 1.15 if 0.15 <= hmax <= 0.6 else 1.05 if hmax > 0.6 else 0.9
     if ball:
@@ -303,14 +332,27 @@ def main_person(persons, ball):
     return max(range(len(persons)), key=lambda i: persons[i][3])
 
 
+def protagonist_mult(persons, mi):
+    """주인공이 또렷이 한 명인지 (판정 q5 1회차 D-095: '작음/멀음' 116번 · '주인공 불분명' 107번 — 쇼츠 주인공 키 ↔ scene +0.49, 두 번째로 큰 사람 비율 ↔ pro −0.47):
+    주인공이 클수록(키 0.3H → 0.7H) 최대 ×1.25 · 주인공 키의 70% 넘는 다른 사람이 있으면 한 명마다 ×0.9 (최소 ×0.75) → 약 0.7~1.25."""
+    if not persons or mi < 0:
+        return 1.0
+    h = persons[mi][3]
+    k = 1 + 0.25 * min(1.0, max(0.0, (h - 0.3) / 0.4))
+    rivals = sum(1 for i, p in enumerate(persons) if i != mi and p[3] >= 0.7 * h)
+    return round(k * max(0.75, 0.9 ** rivals), 4)
+
+
 HEADLESS = 0.7   # 주인공 머리가 화면 위로 잘렸는데 얼굴도 안 보이는 장면(다리·몸통만) 배율
 
 
 def headless(persons, ball, faces):
     """주인공이 위로 잘려 다리·몸통만 보이는지 (얼굴을 찾았으면 아님)."""
-    if faces or not persons:
+    if not persons:
         return False
     m = persons[main_person(persons, ball)]
+    if any(f["box"][1] > 0.01 for f in faces or []):  # 판정 q5 1회차(D-098): 위 끝에 걸린(이마가 잘린) 얼굴만 있으면 머리 잘림으로 봄
+        return False
     return m[1] < 0.01 and m[3] < 0.97
 
 
@@ -502,6 +544,7 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
             sc *= min(face.boost(fs), FACE_CAP)
         fl = scene_flags(persons or [], ball, fs if use_faces else None, rgb.size[0] / max(1, rgb.size[1]))
         sc *= (subject_blur_mult(blur) if persons else blur_penalty(blur)) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0) * flags_mult(fl)
+        sc *= protagonist_mult(persons or [], main_person(persons, ball) if persons else -1)
         m = face.main(fs) if fs else None
         info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb),
                 "kind": scene_kind(m["box"][3] if m else 0, persons or []), "det": det is not None, "flags": [k for k, v in fl.items() if v]}
@@ -688,6 +731,9 @@ def frame_candidates(name, n=TOP_N):
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)
         items.append(it)
     items.sort(key=lambda x: -x["score"])
+    if not items and uniq:  # 판정 q5 1회차 개발 중: 장면을 하나도 못 본(뽑기·점수가 다 실패한) 결과를 기억하면 다음 분석도 '쓸 만한 장면을 찾지 못했어요'로 굳음 → 기억하지 않고 다음에 다시
+        studiolog.write(f"  장면 후보 0개 · {name} · 살펴본 장면 {len(scored)}/{len(uniq)} — 기억하지 않고 다음 분석 때 다시 골라요")
+        return items
     cache = _frames_dir(name) / CANDIDATES
     try:  # 임시 파일에 쓴 뒤 바꿔치기 (중간에 꺼져도 깨진 캐시가 남지 않게 · Windows 잠금이면 잠깐 기다렸다 다시)
         updater.write_atomic(cache, json.dumps({"sig": sig, "items": items}, ensure_ascii=False))

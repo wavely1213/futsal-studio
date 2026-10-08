@@ -54,8 +54,9 @@ def bundle(pg, fmt, name):
     groups = pg.evaluate("(() => { const g = sceneGroups(AI.frames); return Object.fromEntries(Object.entries(g).map(([k, v]) => [k, String(v)])); })()")
     sc = [groups.get(str(x["t"]), str(x["t"])) for x in items]
     ngroups = len(set(groups.values()))
+    pool_sc = pg.evaluate("AI.dbg && AI.dbg.scenes") or ngroups  # 판정 q5 1회차: 흔들린 장면(주인공 0.3 넘게)·머리 잘린 장면을 빼고 남은 후보의 장면 묶음 수
     if not weak and len(items) >= 4:
-        check(len(set(x["t"] for x in items)) >= min(3, ngroups), f"{key} 장면 {len(set(x['t'] for x in items))}장 (≥3)", key)
+        check(len(set(x["t"] for x in items)) >= min(3, ngroups, pool_sc), f"{key} 장면 {len(set(x['t'] for x in items))}장 (≥{min(3, ngroups, pool_sc)} · 후보 장면 묶음 {pool_sc})", key)
     check(max([sc.count(g) for g in sc] or [0]) <= (2 if ngroups >= 3 else 3), f"{key} 같은 장면 묶음 ≤{2 if ngroups >= 3 else 3} {sc}", key)
     l2k = pg.evaluate("items => items.map(c => l2Key(c))", [x["copy"] for x in items])
     check(len(set(l2k)) == len(l2k), f"{key} 같은 둘째 줄 없음 {l2k}", key)

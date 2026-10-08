@@ -23,7 +23,7 @@ class CopyPromiseTests(unittest.TestCase):
     """판정 2회차: 문구 이유 44/84 '흔한·막연한 문구, 구체적 약속이 없음'."""
 
     def cands(self, title, texts):
-        C, tp = thumbcopy.rule_candidates(title, texts)
+        C, tp = thumbcopy.rule_candidates(title, texts, rotate=False)
         return {c["pid"]: thumbcopy.finish(c, tp) for c in C}
 
     def test_concrete_templates_and_flags(self):
@@ -86,7 +86,7 @@ class GradeTests(unittest.TestCase):
         from PIL import Image
         a = (np.random.default_rng(2).random((90, 160, 3)) * 70 + 5).astype(np.uint8)
         g = thumb.auto_grade(Image.fromarray(a))
-        self.assertGreater(g["gamma"], 2.2, "감마 상한 2.2 에 걸려 0.378 이던 세로 영상")
+        self.assertGreater(g["gamma"], 1.8, "감마 상한 2.2 에 걸려 0.378 이던 세로 영상 (판정 q5 1회차 D-097: 아주 어두운 원본은 목표 0.41 이라 감마가 조금 낮음)")
         self.assertLessEqual(g["gamma"], thumb.GAMMA_RANGE[1])
 
     def test_grade_version_in_candidate_signature(self):
@@ -95,7 +95,7 @@ class GradeTests(unittest.TestCase):
         self.assertIn("GRADE_VER", inspect.getsource(thumb._cand_sig))
 
 
-JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "LOUD", "loud", "loudMult", "frameQ", "weakScenes", "headlessBad")
+JS = ("clamp", "srcW", "srcCap", "imgRect", "upOf", "bandCrop", "arEff", "SHORT_ZOOM_CAP", "maxZoom", "panelH", "mainBox", "mainFace", "srcHeadCut", "footClose", "copyFits", "rebalance", "LOUD", "loud", "loudMult", "blurQ", "frameQ", "weakScenes", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }
@@ -142,14 +142,14 @@ class ScreenMath2Tests(unittest.TestCase):
         ctx = {"W": 1080, "H": 1920, "ar": 16 / 9}
         out = self.run_js([["srcCap", []], ["panelH", [ctx, 1300]], ["maxZoom", [{"W": 1280, "H": 720, "ar": 16 / 9}]],
                            ["setInfo", [{"width": 1920, "height": 1080}]], ["srcCap", []], ["panelH", [ctx, 1300]], ["panelH", [dict(ctx, ar=9 / 16), 1500]]])
-        # 판정 5회차(D-091): 1.3배 넘게 키운 장이 판정에서 깎이지 않음 → 720p 도 1.5배
+        # 판정 5회차(D-091): 1.3배 넘게 키운 장이 판정에서 깎이지 않음 → 720p 도 1.5배 (판정 q5 1회차 D-096: 롱폼 2.0배는 차이가 흔들림 안이라 그대로)
         self.assertEqual(out[0], 1.5)
         self.assertEqual(out[1], 1080, "720p 가로 장면: 칸 높이 1080 (1.5배)")
         self.assertAlmostEqual(out[2], 1.5)
         self.assertEqual(out[4], 1.5)
         self.assertEqual(out[5], 1300, "1080p: 칸이 남은 높이를 다 써도 1.5배 안")
         self.assertEqual(out[6], 1500, "세로 장면은 폭으로 맞춰져 높이 제한 없음")
-        band = self.run_js([["setInfo", [{"width": 1920, "height": 1080}]], ["panelH", [dict(ctx, band="bottom", frame={"bandY": 0.8}), 1700]]])[1]
+        band = self.run_js([["setInfo", [{"width": 1920, "height": 1080}]], ["panelH", [dict(ctx, band="bottom", frame={"bandY": 0.8}), 1900]]])[1]
         self.assertEqual(band, round(1.5 * 1920 * 0.79 / (16 / 9)), "방송 띠를 잘라내면 남은 장면이 더 커지므로 칸을 그만큼 줄임 (판정: 1.66배)")
         lay = {"x": 0, "y": 0, "w": 1080, "h": 972, "fit": "cover", "fx": 0.5, "fy": 0.5}
         up = self.run_js([["setInfo", [{"width": 1280, "height": 720}]], ["upOf", [lay, 16 / 9]]])[1]

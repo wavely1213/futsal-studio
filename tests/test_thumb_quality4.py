@@ -80,7 +80,7 @@ class DetailTests(unittest.TestCase):
             for ph, src in ds:
                 self.assertFalse(tc.NEG.search(src[src.find(ph.split()[0]):]) and ph.split()[0] in src, (name, ph, src))
                 self.assertNotIn("?", src)
-            C, tp = tc.rule_candidates(title, texts)
+            C, tp = tc.rule_candidates(title, texts, rotate=False)
             body = " ".join(texts) + " " + title
             top = sorted((tc.finish(c, tp, body) for c in C), key=lambda c: -c["score"])[:5]
             self.assertLessEqual(sum(c["stock"] for c in top), 1, (name, [(c["l1"], c["l2"]) for c in top]))  # 판정 5회차: 묶음에 1개까지 (화면이 지킴)
@@ -90,7 +90,7 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(tc.transcript_question(asr("MSGRAW01_퍼스트 터치 레슨"), ["퍼스트 터치"]), "왜 공 놓칠까?")
 
     def test_topic_word_not_on_both_lines(self):
-        C, _ = tc.rule_candidates("슈팅 디딤발", ["디딤발 위치가 핵심이에요"])
+        C, _ = tc.rule_candidates("슈팅 디딤발", ["디딤발 위치가 핵심이에요"], rotate=False)
         for c in C:
             if c.get("detail"):
                 self.assertFalse(c["l1"] == "슈팅 디딤발" and "디딤발" in c["l2"], (c["l1"], c["l2"]))

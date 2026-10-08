@@ -41,7 +41,7 @@ class RuleTests(unittest.TestCase):
 
     def test_suggest_is_diverse_and_short(self):
         texts = ["오늘은 발바닥 드래그를 알려드릴게요", "실수하는 분들이 많은데 무게중심이 뒤에 있으면 안 돼요", "슛하는 척하다가 드래그로 방향을 바꾸세요", "대박 수비가 완전히 속았어요"]
-        C, tp = tc.rule_candidates("발바닥 드래그 기본기", texts)
+        C, tp = tc.rule_candidates("발바닥 드래그 기본기", texts, rotate=False)
         items = tc._pick([tc.finish(c, tp) for c in C])
         self.assertGreaterEqual(len(items), 6)
         self.assertEqual(len({c["pid"] for c in items}), len(items), "같은 틀은 하나씩")
@@ -64,7 +64,7 @@ class RuleTests(unittest.TestCase):
         # 판정 1회차: '무조건 봐'는 작은 흰 꼬리표가 아니라 가장 큰 노란 줄 (쪼살 'V자 어려우면 / 무조건 봐') · 주제는 첫 줄에 그대로
         # 판정 2회차: 주제가 4자 넘으면('발바닥 드래그 어려우면') 쇼츠 한 줄을 넘어 만들지 않음 → 짧은 주제로 확인
         self.assertNotIn("must", pids)
-        C2, tp2 = tc.rule_candidates("드리블 기본기", ["드리블 실수하는 분들이 많은데"])
+        C2, tp2 = tc.rule_candidates("드리블 기본기", ["드리블 실수하는 분들이 많은데"], rotate=False)
         must = next(c for c in C2 if c["pid"] == "must")
         self.assertEqual((must["l2"], must["emph"]), ("무조건 봐", [1, 0, 5]))
         self.assertIn(tp2[0], must["l1"])
@@ -73,12 +73,12 @@ class RuleTests(unittest.TestCase):
 
     def test_no_misleading_patterns(self):
         """대사·주제와 맞지 않는 틀은 만들지 않음: 슈팅은 '수비를 속이는'이 아님 · 동호인 얘기가 없으면 '국대와 동호인' 없음 · 대사에 N초가 있을 때만 숫자 훅."""
-        C, _ = tc.rule_candidates("슈팅 연습", ["슈팅 이렇게 차면 무조건 들어가요", "골키퍼가 속았어요"])
+        C, _ = tc.rule_candidates("슈팅 연습", ["슈팅 이렇게 차면 무조건 들어가요", "골키퍼가 속았어요"], rotate=False)
         pids = {c["pid"] for c in C}
         self.assertNotIn("deceive", pids)
         self.assertNotIn("gap", pids)
         self.assertNotIn("secs", pids)
-        C, _ = tc.rule_candidates("수비 전환", ["공을 뺏기면 3초 안에 압박하세요", "국가대표와 동호인의 차이예요"])
+        C, _ = tc.rule_candidates("수비 전환", ["공을 뺏기면 3초 안에 압박하세요", "국가대표와 동호인의 차이예요"], rotate=False)
         secs = next(c for c in C if c["pid"] == "secs")
         self.assertEqual((secs["l1"], secs["l2"]), ("3초면 끝나는", "수비 전환"))
         self.assertIn("gap", {c["pid"] for c in C})
