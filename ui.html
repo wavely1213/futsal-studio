@@ -2111,7 +2111,8 @@ function renderThList() {
     </div>`; }).join("");
   document.querySelectorAll("[data-th]").forEach(el => el.onclick = () => { location.href = "/thumb?name=" + encodeURIComponent(el.dataset.th); });
 }
-/* 4-1. 다음 할 일 (D-075): 영상마다 가편집 ✓ · 내보냄 ✓ · 썸네일 – · 올리기 – + 다음 단계 버튼 (서버 /api/progress · 이 화면을 열 때) */
+/* 4-1. 다음 할 일 (D-075): 영상마다 가편집 ✓ · 내보냄 ✓ · 썸네일 – · 키트 – · 유튜브 – + 다음 단계 버튼 (서버 /api/progress · 이 화면을 열 때)
+   키트(편집본으로 만든 올리기 키트)와 유튜브(앱에서 올림)는 따로 — 키트만 만들었는데 '올리기 ✓'로 보여 올린 줄 알지 않게 */
 let edProg = {};
 async function loadProgress() {
   const j = await api("/api/progress").catch(() => null);
@@ -2126,6 +2127,7 @@ function nextStep(n) {
   if (!p.exported) return ["편집실에서 다듬고 내보내기", "edit"];
   if (!p.thumb) return ["썸네일 만들기", "thumb"];
   if (!p.kit && !p.uploaded) return ["올리기 키트 만들기", "upload"];
+  if (!p.uploaded) return ["유튜브에 올리기", "upload"];
   return null;
 }
 function goThumb(n) {  // 썸네일을 저장하고 '← 스튜디오'로 오면 7 올리기 (이 영상 그대로)
@@ -2141,7 +2143,7 @@ function renderEdList() {
   $("edList").dataset.key = key;
   $("edList").innerHTML = list.map(v => {
     const id = ytId(v.name), p = edProg[v.name], nx = nextStep(v.name);
-    const steps = p ? [["가편집", p.rough], ["내보냄", p.exported > 0], ["썸네일", p.thumb], ["올리기", p.kit || p.uploaded]]
+    const steps = p ? [["가편집", p.rough], ["내보냄", p.exported > 0], ["썸네일", p.thumb], ["키트", p.kit], ["유튜브", p.uploaded]]
       .map(([l, ok]) => `<span class="${ok ? "ok" : ""}" title="${ok ? "했어요" : "아직 안 했어요"}">${l} ${ok ? "✓" : "–"}</span>`).join("") : "";
     return `
     <div class="vid" data-ed="${esc(v.name)}">
@@ -2158,14 +2160,18 @@ function renderEdList() {
   });
 }
 /* 3-1. 편집점을 찾은 뒤: 3 편집점에서 그 영상을 보여 주고 다음 할 일 (예전: 3단계를 건너뛰고 4 편집실로 · 사이드바 순서와 다름) */
+let ptNextName = "";
 function showPointsNext(n, msg) {
   toast(msg);
-  go("points");
-  if (n && [...$("tlSel").options].some(o => o.value === n)) { $("tlSel").value = n; loadEvents(); }
+  // 끝난 작업 알림은 poll 이 목록(renderLocal → fillSelect)을 다시 그리기 전에 옴 → 방금 찾은·묶은 영상이 아직 목록에 없음 (state.local 은 이미 새것)
+  fillSelect("tlSel", state.local.filter(v => v.analyzed));
+  if (n && [...$("tlSel").options].some(o => o.value === n)) $("tlSel").value = n;
+  ptNextName = n || $("tlSel").value;
+  go("points");  // 고른 영상의 대사·컷 후보 (loadEvents)
   $("ptNextTx").innerHTML = `<b>${esc(msg)}</b><br>대사·컷 후보를 훑어보고 <b>[편집실에서 열기]</b>로 가편집을 다듬은 뒤 내보내요 · 그다음 썸네일 → 올리기`;
   $("ptNext").hidden = false;
 }
-$("ptNextGo").onclick = () => { $("ptNext").hidden = true; openEditor($("tlSel").value); };
+$("ptNextGo").onclick = () => { $("ptNext").hidden = true; openEditor(ptNextName || $("tlSel").value); };  // 방금 찾은 영상 (위 목록에서 다른 영상을 봐도)
 $("ptNextX").onclick = () => { $("ptNext").hidden = true; };
 /* 1-0. 처음 안내: 보관함이 비어 있고 '다시 안 보기'를 누르지 않았으면 */
 const guideOff = () => { try { return localStorage.getItem("startGuideOff") === "1"; } catch (e) { return false; } };
@@ -2355,6 +2361,11 @@ function runUpdate() {
 $("btnUpdate").onclick = () => $("updPill").classList.contains("show") ? runUpdate() : checkUpdate(true);
 $("updPill").onclick = runUpdate;
 
+try {  // 편집실 '← 스튜디오'로 오면 4 편집실 (영상 카드의 다음 할 일 · 예전: 1 소재 찾기) · 7 올리기로 갈 것(upReturn)이 있으면 그쪽이 이김
+  const r = JSON.parse(sessionStorage.getItem("edReturn") || "null");
+  sessionStorage.removeItem("edReturn");
+  if (r && Date.now() - (r.t || 0) < 6 * 3600e3) { window.landedOn = "cut"; go("cut"); }
+} catch (e) {}
 setInterval(poll, 1000);
 poll().then(() => { renderEvents(); renderEdList(); loadRefs(); });
 checkUpdate();
@@ -2402,7 +2413,8 @@ checkUpdate();
     const n = $("upVid").value;
     up.name = n;
     if (!n) { up.kit = null; $("upSrc").innerHTML = ""; return render(); }
-    if (up.ret) { if (seq === undefined && up.ret.name === n) seq = up.ret.seq; up.ret = null; }  // 썸네일 편집기에서 돌아옴 → 보던 편집본
+    let make = false;  // 편집실 '다 만들었어요' 창의 [올리기 키트 만들기]로 옴 → 키트가 없으면 바로 만듦 (같은 이름 버튼을 또 누르지 않게)
+    if (up.ret) { if (seq === undefined && up.ret.name === n) { seq = up.ret.seq; make = !!up.ret.make; } up.ret = null; }  // 썸네일 편집기에서 돌아옴 → 보던 편집본
     const j = await api(`/api/upload/kit?name=${encodeURIComponent(n)}` + (seq === undefined ? "" : `&seq=${encodeURIComponent(seq)}`));
     if (n !== $("upVid").value) return;  // 그 사이 다른 영상을 고름
     const srcs = j.sources || [];
@@ -2413,6 +2425,7 @@ checkUpdate();
     up.kit = j.kit || null;
     $("upSaved").textContent = "";
     render();
+    if (make && !up.kit && up.name && !$("upMake").disabled) $("upMake").click();
   }
   function meta() {
     const k = up.kit;
@@ -2514,7 +2527,10 @@ checkUpdate();
     const r = JSON.parse(sessionStorage.getItem("upReturn") || "null");
     sessionStorage.removeItem("upReturn");
     // seq 가 없으면(4단계 '다음: 썸네일'에서 감) 가장 최근에 내보낸 편집본으로 (서버가 고름)
-    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) { up.ret = { name: r.name, seq: typeof r.seq === "string" ? r.seq : undefined }; go("upload"); }
+    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) {
+      up.ret = { name: r.name, seq: typeof r.seq === "string" ? r.seq : undefined, make: !!r.make };
+      window.landedOn = "upload"; go("upload");  // 지난번 꺼짐 카드가 보관함으로 끌고 가지 않게
+    }
   } catch (e) {}
   // 창을 닫거나 다른 화면으로 갈 때 고치던 내용 저장
   const prevFlush = window.flushBeforeClose;

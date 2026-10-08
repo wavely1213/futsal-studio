@@ -57,6 +57,18 @@ class ProgressTests(Server):
         (core.OUT / "B_올리기.json").write_text(json.dumps({"name": "C.mp4", "source": {"id": ""}}), encoding="utf-8")
         self.assertEqual(upload.progress(["B.mp4"])["B.mp4"], {"seqs": 0, "rough": False, "exported": 0, "thumb": False, "kit": False})
 
+    def test_kit_of_original_video_is_not_the_upload_kit(self):
+        """검토 재현: '원본 영상 그대로'로 만든 키트도 '올리기 ✓'로 셌다 (올릴 완성본의 키트가 아님) → 편집본으로 만든 키트만."""
+        self.make("E.mp4")
+        self.out("E_롱폼 가편집.mp4")
+        (core.OUT / "E_올리기.json").write_text(json.dumps({"name": "E.mp4", "source": {"id": "", "label": "원본 영상 그대로"}}), encoding="utf-8")
+        self.assertFalse(upload.progress(["E.mp4"])["E.mp4"]["kit"])
+        kit = {"name": "E.mp4", "source": {"id": "s0", "label": "롱폼 가편집", "export": "E_롱폼 가편집.mp4"}}
+        (core.OUT / "E_롱폼 가편집_올리기.json").write_text(json.dumps(kit, ensure_ascii=False), encoding="utf-8")
+        self.assertTrue(upload.progress(["E.mp4"])["E.mp4"]["kit"])
+        (core.OUT / "E_롱폼 가편집_올리기.json").write_text(json.dumps({"name": "E.mp4", "source": {"id": ["s0"]}}), encoding="utf-8")
+        self.assertFalse(upload.progress(["E.mp4"])["E.mp4"]["kit"], "손으로 고쳐 깨진 칸도 오류 없이")
+
     def test_route_adds_youtube_uploads(self):
         self.make("A.mp4")
         self.make("D.mp4")

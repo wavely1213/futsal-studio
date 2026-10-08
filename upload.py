@@ -932,9 +932,15 @@ def files_for(name, seq=None):
 
 # ---------- 스튜디오 4단계 카드의 '다음 할 일' (D-075) ----------
 
+def _edit_kit(kit, name, ids):
+    """이 영상의 편집본(ids)으로 만든 키트인지 (손으로 고쳐 깨진 칸이 있어도 오류 없이)."""
+    who, sid = _owner(kit or {})
+    return who == name and isinstance(sid, str) and sid in ids
+
+
 def progress(names):
     """영상마다 어디까지 했는지 {seqs, rough, exported, thumb, kit}: 편집본 수 · 가편집이 있음 · 내보낸 편집본 수 ·
-    저장한 썸네일 그림 · 만든 올리기 키트 (읽기만 · 완성본 폴더·보관함 목록은 한 번만 읽음 · 이름이 더 긴 다른 영상의 파일은 뺌)."""
+    저장한 썸네일 그림 · 편집본으로 만든 올리기 키트 (읽기만 · 완성본 폴더·보관함 목록은 한 번만 읽음 · 이름이 더 긴 다른 영상의 파일은 뺌)."""
     try:
         out_files = [p for p in core.OUT.iterdir() if p.is_file()]
         lib = [v.name for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)]
@@ -950,7 +956,8 @@ def progress(names):
         mp4 = [p.name for p in mine if p.suffix.lower() == ".mp4"]
         exported = sum(1 for sq in seqs  # latest_export 와 같은 이름 규칙 (구간 내보내기는 뺌)
                        if any(re.fullmatch(rf"{re.escape(pre)}{re.escape(_seq_label(sq))}(?: \(\d+\))*\.mp4", x, re.I) for x in mp4))
-        kit = any(p.suffix == ".json" and _KIT_FILE.search(p.name) and _owner(_read_kit(p) or {})[0] == n for p in mine)
+        ids = {sq.get("id") for sq in seqs if sq.get("id")}  # 편집본으로 만든 키트만 ('원본 영상 그대로' 키트는 올릴 완성본의 키트가 아님)
+        kit = any(p.suffix == ".json" and _KIT_FILE.search(p.name) and _edit_kit(_read_kit(p), n, ids) for p in mine)
         res[n] = {"seqs": len(seqs), "rough": bool(seqs), "exported": exported,
                   "thumb": any(p.suffix.lower() in IMG_EXTS for p in mine), "kit": kit}
     return res
