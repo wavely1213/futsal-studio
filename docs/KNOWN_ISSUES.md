@@ -27,6 +27,41 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
+## I-084 | 2026-10-08 | 계획을 처음 세운 주: '이번 주 할 것' 첫 줄 '올린 영상: 쇼츠 0/5개'는 주 개수 그대로 · 채널 전략 e2e 의 옛 '[4 편집실 열기]' 확인
+- **상태**: 열림
+- **심각도**: 낮음(불편)
+- **증상/내용**: ① 수요일 이후에 계획을 처음 저장하면 올릴 날·'밀렸어요'는 저장한 때부터만 세지만(D-086 검토 고침), 카드 첫 줄 '올린 영상: 롱폼 0/1개 · 쇼츠 0/5개'(`week_view` 의 L·S vs 주당 개수)는 그 주에도 주 개수 그대로다. ② 공유 e2e `$SCRATCH/strat_e2e/strat_ui_test.py` 의 '이번 주: [4 편집실 열기]'(`#sxWeek [data-wgo="cut"]` 1개) 확인은 E11 뒤로 이번 주에 남은 올릴 날·편집 중인 것에 따라 그 단추가 없을 수 있다(다음 행동은 `[data-wact]` 단추 하나). E11 묶음 복사본(`$SCRATCH/e11/strat` · `$SCRATCH/e11fix/strat`)은 '다음 행동 단추 하나'로 바꿔 124개 통과 · 공유 파일은 다른 묶음이 쓰는 중이라 그대로 두었다.
+- **위치**: `strategy.week_view`(L·S·planL·planS) · `ui.html` `renderWeek` 첫 줄, `$SCRATCH/strat_e2e/strat_ui_test.py` 88줄
+- **해결 방향**: ① 첫 줄도 `week.plan.q`(계획을 세운 뒤 개수)를 쓰기 ② E11 을 main 에 합친 뒤 공유 e2e 확인을 `[data-wgo="cut"]` 또는 `[data-wact]` 하나로.
+
+## I-083 | 2026-10-08 | E11(올리기 키트 맞춤·올릴 날·전략 초안): Windows 실기 미검증
+- **상태**: 열림
+- **심각도**: 낮음(불편)
+- **증상/내용**: 개발 PC(Linux · Chromium)에서만 확인했다. Windows 에서 볼 것: ① 전용 창(WebView2)을 닫을 때 '우리 전략' 초안이 남는지(`flushBeforeClose` → `/api/strategy/draft` · 0.7초 안에 닫아도) ② 4단계 카드로 편집실에 다녀올 때 `pagehide` sendBeacon ③ 7단계 '예약 공개' 기본 시각이 다음 올릴 날과 같은지(`datetime-local` 은 PC 시간대 · 서버 계산은 한국 시간 고정) ④ 게스트 칸 한글 입력 중 Enter(IME 조합 중에는 넣지 않음).
+- **위치**: `ui.html` 8단계 `sendDraft`·`dirtyMark` · 7단계 `renderGuests`·`renderSched`·`ytPriv`, `strategy.KST`
+- **해결 방향**: 소유자 PC 에서 위 네 가지를 한 번씩.
+
+## I-082 | 2026-10-08 | '올릴 준비'(만들어 둔 편집본) 판단의 한계: 다른 제목으로 손으로 올린 편집본 · 놓친 자리
+- **상태**: 열림
+- **심각도**: 낮음(불편)
+- **증상/내용**: `upload.stock` 은 유튜브에 바로 올린 기록이나 우리 채널 제목 = 키트 제목일 때만 '올림'으로 본다. 스튜디오에서 제목을 바꿔 손으로 올리면 내보낸 지 60일(`STOCK_DAYS`)까지 '올릴 준비'로 남고, 그만큼 이번 주 카드·키트의 차례가 밀린다(반대로 키트 제목이 우리 옛 영상 제목과 우연히 같으면 그 키트는 '올린 것으로 봤어요 · 아직이면 제목을 바꿔 주세요'). 지난 올리는 날을 놓친 개수는 계획 밖 요일에 자리를 만들지 않고 '밀렸어요' 안내만 한다(D-086). 올린 것이 어느 자리를 채웠는지는 같은 주 안에서 시각으로만 짝짓는다(`_fill_slots` · 쇼츠·롱폼은 따로). 우리 채널 올린 날짜는 RSS 최근 15개·목록 기준이라 새로 고침 전에는 오늘 올린 것이 늦게 보인다.
+- **위치**: `upload.stock`·`STOCK_DAYS`, `strategy.upload_slots`·`week_plan`·`recent_uploads`
+- **해결 방향**: 백로그 '올린 영상 기록'(손으로 올림 표시 · RSS 제목과 비슷한 제목 맞추기)이 들어오면 `stock` 이 그 표시를 읽게.
+
+## I-081 | 2026-10-08 | 개발 PC: 단위 테스트를 한 번에(discover) 돌리면 remote 시험 뒤 스레드의 인증서 읽기에서 Segmentation fault
+- **상태**: 열림 (작업 전 main 에서도 같음)
+- **심각도**: 낮음(개발 환경)
+- **증상/내용**: `python3 -m unittest discover -s tests` 가 `test_remote_api` 정리(rmtree) 중 남아 있던 `remote._loop` 스레드의 `updater._ssl_context` → `ssl.load_default_certs` 에서 죽는다(139 · faulthandler 기록). 파일마다 따로 돌리면 모두 통과한다.
+- **위치**: `tests/test_remote_*.py`(뒤에 남는 알림 스레드), `remote.py` `_post`·`_send_beacon`, `updater._ssl_context`
+- **임시방편**: `for m in tests/test_*.py; do python3 -m unittest tests.$(basename $m .py); done` 로 파일마다 돌린다.
+- **해결 방향**: remote 시험 끝에서 알림 스레드를 멈추고 기다리기(시험 쪽만).
+
+## I-080 | 2026-10-08 | 게스트 이름표가 썸네일에는 아직 안 들어감
+- **상태**: 열림
+- **심각도**: 낮음(불편)
+- **증상/내용**: 7단계 '출연자·게스트'(D-085)는 제목 후보·태그·해시태그·설명에만 들어가고, 썸네일 편집기의 이름표(글자)에는 자동으로 들어가지 않는다. 같은 때 썸네일 합치기(AI 추천 썸네일)가 `thumb.*` 를 크게 바꾸고 있어 이번 묶음에서 건드리지 않았다.
+- **위치**: `thumb_src/parts/*`·`thumb.py`, 게스트 자료는 키트 `guests`·작업 폴더 `guests.json`(`upload.guest_book`)
+- **해결 방향**: 썸네일 합치기 뒤 썸네일 편집기가 그 영상 키트의 `guests` 를 읽어 이름표 글자 칸 기본값으로.
 ## I-074 | 2026-10-08 | [다음: 썸네일 만들기]로 연 썸네일 편집기의 장면 고르기가 작업 자리를 잡아, 그동안 편집실 내보내기·키트는 '다른 작업이 끝난 뒤에'
 - **상태**: 열림 (알려진 한계 · D-075 × D-078)
 - **심각도**: 낮음
@@ -193,6 +228,7 @@
 - **위치**: `hooks.skeleton_info`·`_slot`·`_generic`·`category`·`topic_terms`·`topic_keywords`, `strategy._TOPIC_RES`
 - **임시방편**: 7단계 화면에서 후보를 고르거나 제목 칸을 고쳐 쓴다(고친 제목은 그대로 저장 · BR-007).
 - **해결 방향**: 쓸모없는 틀이 자주 나오면 그 낱말을 `_EVENT`·`_KEEP_LEFT`·`_GENERIC`에, 새 기술 이름은 `SKILLS` 와 `_CATEGORY` 에 더한다. 채널 전략 주제어를 키트와 맞추려면 `strategy._TOPIC_RES` 를 `hooks.topic_terms()`·`_kit_re` 로 바꾸고 `tests.test_strategy*` 기대값을 확인한다.
+- **2026-10-08 (E11)**: 새 설치에서도 채널 전략 자료로 우리 채널 틀을 배우고(D-080), 기술 이름이 없는 쇼츠는 원본 영상 주제·기본 레슨 낱말을 쓰며 풀이말로는 채우지 않는다(D-081). 레슨 낱말(`hooks.LESSON_TERMS`)도 짧은 목록이라, 낯선 낱말만 나오는 구간은 원본 주제나 '풋살'로 남는다.
 
 ## I-051 | 2026-10-07 | studio.log: '갑자기 꺼짐'은 PC 끄기와 구별 못 함 · 같은 작업 폴더 두 앱
 - **상태**: 열림 — (1)·(2)·(a)·(b)·(c)는 합치며 해결(2026-10-07 · D-044: 실행기 줄도 연도 · 네이티브 충돌은 studio-error.log 의 faulthandler · 꺼짐 기록·알림·`trouble.OTHER` 가 studio-error.log 도 가리킴 · 문서는 '두 파일' · webview `private_mode=False` 있음). 남은 것은 (3)·(4)

@@ -694,9 +694,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "영상을 찾지 못했어요 · 목록을 새로 고친 뒤 다시 골라 주세요"})
             seq = parse_qs(u.query, keep_blank_values=True).get("seq", [src["default"]])[0]
             try:
-                kit = upload.load_kit(n, seq)
+                kit = upload.load_kit(n, seq, live=True)
             except LookupError:  # 그 사이 편집실에서 지운 편집본
-                seq, kit = "", upload.load_kit(n, "")
+                seq, kit = "", upload.load_kit(n, "", live=True)
             return self._send(200, dict(src, seq=seq, kit=kit))
         if u.path == "/api/upload/thumb":  # 완성본 폴더의 썸네일 미리보기
             try:
@@ -1183,7 +1183,9 @@ class Handler(BaseHTTPRequestHandler):
                 n = editor.safe_name(b.get("name"))
                 editor.video_path(n)
                 e = b.get("edits")
-                if isinstance(e, dict):
+                if isinstance(b.get("guests"), list):  # 출연자·게스트 칸 → 제목 후보·태그·해시태그·설명 출연 줄 (D-085)
+                    kit = upload.set_guests(n, b.get("seq") or None, b["guests"])
+                elif isinstance(e, dict):
                     kit = upload.save_edits(n, b.get("seq") or None, e.get("title"), e.get("description"), e.get("tags"))
                 else:
                     kit = upload.build_kit(n, b.get("seq") or None)
@@ -1315,6 +1317,11 @@ class Handler(BaseHTTPRequestHandler):
         """채널 전략 바꾸기·작업 시작 (YouTube 를 쓰는 작업은 뒤에서 하던 출처 찾기를 멈추고 시작).
         작업 시작 응답은 다른 작업과 같은 _started (jobId → 화면이 자기가 시킨 작업의 끝만 받음). 휴대폰에서는 시작할 수 없다 (D-028)."""
         try:
+            if path == "/api/strategy/draft":  # 저장 안 한 '우리 전략' 초안 (고칠 때마다 · 떠날 때 sendBeacon · D-087)
+                if b.get("clear"):
+                    strategy.clear_draft()
+                    return self._send(200, {"ok": True})
+                return self._send(200, {"ok": True, "draft": strategy.save_draft(b.get("strategy"))})
             if path == "/api/strategy/save":
                 if b.get("revivedAt") is not None:
                     strategy.set_revived(strategy.parse_day(b["revivedAt"]))
