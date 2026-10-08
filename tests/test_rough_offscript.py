@@ -253,7 +253,12 @@ class ShortsEdgesTest(Work):
         hit = [s for s in r["shorts"] if s["start"] <= 139.38 < s["end"]]
         self.assertTrue(hit)
         self.assertGreaterEqual(hit[0]["end"], 143.6)
-        self.assertLessEqual(hit[0]["end"] - 141.58, editor.SHORT_END_MAX)
+        # 그 문장에서 끝나는 후보는 '다음 방향으로 보내는 거예요.'(143.68)까지 5초 안에서 늘림
+        sents = captions.merge_ghosts(captions.split_sentences(FIX["MSGRAW01"]["transcript"], guess=False))
+        k = next(x for x, t in enumerate(sents) if t["start"] == 139.38)
+        i, j, _ = editor._short_edges(sents, set(), k - 10, k)
+        self.assertEqual(sents[j]["end"], 143.68)
+        self.assertLessEqual(sents[j]["end"] - 141.58, editor.SHORT_END_MAX)
 
     def test_nocond_shorts_start_and_end_on_sentences(self):
         self.put("MSGRAW01_nocond", "MSGRAW01.mp4")
@@ -582,6 +587,20 @@ class DemoKeptTest(RecMixin, unittest.TestCase):
             self.assertGreaterEqual(covered(s["cuts"], a, b), 0.85, key)
             txt = " ".join(text_in(FIX[key]["transcript"], c["in"], c["out"]) for c in s["cuts"])
             self.assertNotIn("구독이랑", txt, key)
+
+    def test_shorts_drop_asides_and_reach_the_payoff(self):
+        """쇼츠는 여담('오늘 진짜 물 좀 마시고 할게요')을 빼고, 구령·시범 바로 앞에서 끊지 않음 (결과 장면까지 · 검토 13·10)."""
+        segs = FIX["MSGRAW01"]["transcript"]
+        r = self._rec("MSGRAW01")
+        for sh in r["shorts"]:
+            self.assertNotIn("마시고", " ".join(text_in(segs, c["in"], c["out"]) for c in sh["cuts"]), sh["title"])
+        self.assertIn("마시고", " ".join(text_in(segs, c["in"], c["out"]) for c in r["tidy"]))  # 롱폼은 그대로 (중간 여담 · 백로그 103)
+        two = next(sh for sh in r["shorts"] if sh["start"] <= 87.6 < sh["end"])  # '자, 두번째 포인트는 …' 쇼츠
+        self.assertGreaterEqual(two["end"], 126.4)  # '하나, 둘, 셋.' → 시범 → '나이스! 깔끔하게 들어갔어요.'까지
+        r3 = self._rec("MSGRAW03")  # '과연 몇 개나 들어갈까요?' 챌린지: 마지막 슛의 '들어갔다. 성공입니다.'가 든 쇼츠가 있음
+        kick = FIX["MSGRAW03"]["demos"][-1][2][0]
+        self.assertTrue(any(c["in"] <= kick <= c["out"] for sh in r3["shorts"] for c in sh["cuts"]), [(sh["start"], sh["end"]) for sh in r3["shorts"]])
+        self.assertTrue(any("성공입니다" in " ".join(text_in(FIX["MSGRAW03"]["transcript"], c["in"], c["out"]) for c in sh["cuts"]) for sh in r3["shorts"]))
 
     def test_retry_call_unit(self):
         segs = [S(60.0, 63.0, "저도 처음엔 이거 잘 못했어요."), S(63.5, 64.5, "다시 해볼게요."), S(71.0, 73.0, "와, 이거죠. 완벽해요.")]

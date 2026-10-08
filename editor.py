@@ -1828,10 +1828,12 @@ LEANS = re.compile(r"^(?:그래야|그래서|그러니까|그니까|왜냐하면
 OPENER = re.compile(r"^(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로)")
 FRESH = re.compile(r"^(?:자[\s,]|오늘은?\s|이제\s|그리고\s|(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로))")  # 새 문장을 여는 첫마디
 REACT_ONLY = 16        # 앞에 시범이 없으면 이 글자 이하의 반응 말 줄은 쇼츠 첫 줄에서 뺌 ('좋아요, 그럼 두 번째는…' 같은 긴 줄은 그대로)
-# 쇼츠 끝에 두면 매달리는 말: 다음 일을 예고하는 말('정리해 볼게요' · '보여 드릴게요' · '첫 번째 갑니다') · 여담('물 좀 마시고' · '바람 많이 부네요')
+# 여담 ('오늘 진짜 물 좀 마시고 할게요' · '아 오늘 바람 진짜 많이 부네요') — 쇼츠에서는 뺌 (롱폼은 그대로 · 짧은 줄만)
+ASIDE = re.compile(r"물\s?(?:좀\s?)?마시고|바람\s?(?:이\s?)?(?:진짜\s?|정말\s?|너무\s?)?(?:많이\s?)?부네|(?:^|\s)(?:진짜\s?|너무\s?)?(?:덥네요|춥네요)|잠깐\s?쉬(?:었다|고\s?(?:할|갈))")
+ASIDE_LEN = 20
+# 쇼츠 끝에 두면 매달리는 말: 다음 일을 예고하는 말('정리해 볼게요' · '보여 드릴게요' · '첫 번째 갑니다') · 여담
 DANGLING = re.compile(r"(?:(?:할|갈|볼|드릴|줄|올)게요|하겠습니다|가겠습니다|보겠습니다|드리겠습니다|(?:^|\s)갑니다|시작(?:할게요|합니다))\W*$|"
-                      r"(?:^|\s)(?:첫|두|세|네|다섯|마지막)\s?번째\W*$|물\s?(?:좀\s?)?마시|바람\s?(?:이\s?)?(?:진짜\s?|정말\s?|너무\s?)?(?:많이\s?)?부|"
-                      r"덥네요|춥네요|잠깐\s?쉬")
+                      r"(?:^|\s)(?:첫|두|세|네|다섯|마지막)\s?번째\W*$|" + ASIDE.pattern)
 TITLE_MIN = 8          # 쇼츠 제목·훅 글은 이 글자 이상인 내용 문장에서 (반응·인사·자기소개 줄은 건너뜀)
 
 
@@ -2002,12 +2004,20 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
     fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
     sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
+    sjunk |= {i for i, s in enumerate(segs) if ASIDE.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
         sc += 0.15 * len(_norm(s["text"]))
         return sc
 
+    # 끝 바로 뒤(남길 문장 둘 안 · 15초 안)가 보여 줄 장면(구령 '하나, 둘, 셋' · 시범 뒤 반응 말 — '다시 한번 갈게요' 를 사이에 둬도)이면
+    # 결과를 못 보고 끝나는 쇼츠 → 점수를 덜 줌 (E12 검토)
+    cliff = []
+    for j in range(len(segs)):
+        nxs = [x for x in range(j + 1, min(len(segs), j + 6)) if x not in sjunk][:2]
+        cliff.append(any(segs[x]["start"] - segs[j]["end"] <= REACT_LOOK
+                         and (takes.is_chant(segs[x]["text"]) or _demo_before(segs, x, peaks, sil) is not None) for x in nxs))
     cands = []
     for i in range(len(segs)):
         start = segs[i]["start"]
@@ -2031,6 +2041,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
                     score -= 3
                 elif OPENER.match(segs[i]["text"]):  # 순서를 여는 첫 문장('자, 두 번째 포인트는 …')은 조금 더
                     score += 2
+                if cliff[j]:  # 시범·구령 바로 앞에서 끝남 (E12 검토)
+                    score -= 3
                 cands.append((score / (dur ** 0.35), start, end, i, j))
             j += 1
     cands.sort(reverse=True)
