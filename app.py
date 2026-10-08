@@ -586,6 +586,17 @@ class Handler(BaseHTTPRequestHandler):
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
                                     "remote": remote.SVC.brief(), "crash": dict(CRASH) or None})
+        if u.path == "/api/progress":  # 4단계 카드: 영상마다 가편집·내보냄·썸네일·올리기 (D-075 · 그 화면을 열 때만)
+            try:
+                names = [v["name"] for v in core.local_videos() if v["analyzed"]]
+                res = upload.progress(names)
+                ups = {x.get("name") for x in youtube_upload._history()}
+            except Exception as e:  # noqa: BLE001 — 안내용 · 못 읽으면 카드는 예전처럼
+                studiolog.trace(e, "진행 단계 읽기 오류 위치")
+                return self._send(200, {"ok": False, "videos": {}})
+            for n, r in res.items():
+                r["uploaded"] = n in ups
+            return self._send(200, {"ok": True, "videos": res})
         if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
             if not remote.SVC.store:
                 return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})

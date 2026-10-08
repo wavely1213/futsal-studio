@@ -155,6 +155,17 @@
   .vid .meta { padding: 10px 12px 12px; }
   .vid .title { font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 42px; }
   .vid .views { color: var(--ink-2); font-size: 12px; margin-top: 4px; }
+  /* 다음 할 일 (D-075): 4단계 카드의 단계 · 처음 안내 · 편집점 찾은 뒤 */
+  .vid .steps { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .vid .steps .ok { color: var(--brand); font-weight: 700; }
+  .vid .nextgo { margin-top: 8px; padding: 5px 10px; font-size: 12px; }
+  .card.guide { padding: 16px 18px; margin-bottom: 16px; }
+  .guide b.h { display: block; font-size: 15px; margin-bottom: 6px; }
+  .guide ol { margin: 6px 0 12px; padding-left: 20px; line-height: 1.75; color: var(--ink-2); }
+  .guide ol b { color: var(--ink); }
+  .guide .acts, .nextbar .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card.nextbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 16px; margin-bottom: 14px; border-left: 4px solid var(--brand); }
+  .nextbar .tx { flex: 1; min-width: 240px; }
   .vid.have { opacity: .55; }
   .vid.have .views::after { content: " · 보관함에 있음"; color: var(--brand); }
   .note { font-size: 13px; color: var(--ink-2); margin: -4px 0 16px; }
@@ -784,6 +795,12 @@
         <button class="btn primary" id="btnDownload" disabled>보관함에 담기</button>
       </div>
       <div class="failslot"></div>
+      <div class="card guide" id="startGuide" hidden><b class="h">처음이세요? 영상 한 편은 이렇게 이어져요</b>
+        <ol><li><b>영상 넣기</b> · 여기서 채널 영상을 보관함에 담거나, 2 보관함의 [촬영 원본 넣기]로 찍은 영상을 넣어요</li>
+          <li><b>2 보관함 → [편집점 찾기]</b> · 대사를 받아쓰고 1차 가편집(롱폼·쇼츠)까지 만들어요</li>
+          <li><b>3 편집점</b>에서 대사·컷 후보를 훑어보고 <b>4 편집실</b>에서 다듬은 뒤 [내보내기]</li>
+          <li><b>5 썸네일</b> 저장 → <b>7 올리기</b>에서 제목·설명·챕터를 만들어 유튜브에 올려요</li></ol>
+        <div class="acts"><button class="btn primary" id="guideFootage">촬영 원본 넣기</button><button class="btn" id="guideLib">보관함 보기</button><button class="btn" id="guideOff">다시 안 보기</button></div></div>
       <details class="note" id="ckNote"><summary>다운로드가 계속 실패하나요?</summary>
         왼쪽 아래 <b>업데이트 확인</b>을 먼저 눌러 보세요. 그래도 안 되면 YouTube에 로그인해 둔 브라우저를 골라 다시 담아 보세요.<br>
         <label>로그인 정보로 받기 <select class="sel" id="cookies" title="고른 브라우저의 YouTube 로그인 정보로 받아요 (내 PC 안에서만 쓰여요)"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select> (내 PC 안에서만 쓰여요)</label>
@@ -833,6 +850,7 @@
         <button class="btn" id="btnCopy">텍스트로 복사</button>
         <button class="btn primary" id="btnEdit">편집실에서 열기</button>
       </div>
+      <div class="card nextbar" id="ptNext" hidden><div class="tx" id="ptNextTx"></div><div class="acts"><button class="btn primary" id="ptNextGo">편집실에서 열기</button><button class="btn" id="ptNextX">닫기</button></div></div>
       <div class="card events" id="events"></div>
     </section>
 
@@ -1271,6 +1289,7 @@ function go(p) {
   if (p === "strategy" && window.sxLoad) window.sxLoad();
   if (p === "thumb" && window.sxTodoBox) window.sxTodoBox("thTodos", ["thumb"]);
   if (p === "upload" && window.sxTodoBox) window.sxTodoBox("upTodos", ["title", "upload"]);
+  if (p === "cut") loadProgress();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
@@ -1504,7 +1523,7 @@ function showCrash(c) {
 function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남 → '몇 개 중 몇 개' 카드 + 그 영상만 고른 채로 (다시 하기도 그 영상만)
   const jb = lastJob || {}, body = jb.body || { names: [] }, total = (body.names || []).length;
   const failed = (res && res.failed) || [];
-  if (!failed.length) { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); return; }
+  if (!failed.length) { showPointsNext((body.names || [])[0], "편집점을 찾고 1차 가편집까지 만들었어요"); return; }
   toast(`${total - failed.length}개는 편집점을 찾았어요 · ${failed.length}개 실패`);
   libSel.clear(); failed.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
   const f = partFail(failed, res.why, total, "편집점을 찾지");
@@ -1551,8 +1570,7 @@ function bundleDone(res) {
     $("drawer").classList.add("open");
     return;
   }
-  toast(`${nm}(으)로 묶고 편집점·1차 가편집까지 만들었어요 · 저장 공간 ${res.added} 더 씀`);
-  go("cut");
+  showPointsNext(res.name, `${nm}(으)로 묶고 편집점·1차 가편집까지 만들었어요 · 저장 공간 ${res.added} 더 씀`);
 }
 function syncBundle(busy) {
   const n = libSel.size;
@@ -2069,19 +2087,68 @@ function renderThList() {
     </div>`; }).join("");
   document.querySelectorAll("[data-th]").forEach(el => el.onclick = () => { location.href = "/thumb?name=" + encodeURIComponent(el.dataset.th); });
 }
+/* 4-1. 다음 할 일 (D-075): 영상마다 가편집 ✓ · 내보냄 ✓ · 썸네일 – · 올리기 – + 다음 단계 버튼 (서버 /api/progress · 이 화면을 열 때) */
+let edProg = {};
+async function loadProgress() {
+  const j = await api("/api/progress").catch(() => null);
+  if (!j || !j.ok) return;
+  edProg = j.videos || {};
+  $("edList").dataset.key = "";
+  renderEdList();
+}
+function nextStep(n) {
+  const p = edProg[n];
+  if (!p) return null;
+  if (!p.exported) return ["편집실에서 다듬고 내보내기", "edit"];
+  if (!p.thumb) return ["썸네일 만들기", "thumb"];
+  if (!p.kit && !p.uploaded) return ["올리기 키트 만들기", "upload"];
+  return null;
+}
+function goThumb(n) {  // 썸네일을 저장하고 '← 스튜디오'로 오면 7 올리기 (이 영상 그대로)
+  try { sessionStorage.setItem("upReturn", JSON.stringify({ name: n, t: Date.now() })); } catch (e) {}
+  location.href = "/thumb?name=" + encodeURIComponent(n);
+}
+async function goUpload(n) { go("upload"); if (window.upOpen && !(await window.upOpen(n))) toast("그 영상을 보관함에서 찾지 못했어요"); }
 function renderEdList() {
   const list = state.local.filter(v => v.analyzed);
   $("edEmpty").style.display = list.length ? "none" : "block";
-  const key = JSON.stringify(list.map(v => [v.name, srcKey(v)]));
+  const key = JSON.stringify(list.map(v => [v.name, srcKey(v), edProg[v.name] || null]));
   if ($("edList").dataset.key === key) return;
   $("edList").dataset.key = key;
-  $("edList").innerHTML = list.map(v => { const id = ytId(v.name); return `
+  $("edList").innerHTML = list.map(v => {
+    const id = ytId(v.name), p = edProg[v.name], nx = nextStep(v.name);
+    const steps = p ? [["가편집", p.rough], ["내보냄", p.exported > 0], ["썸네일", p.thumb], ["올리기", p.kit || p.uploaded]]
+      .map(([l, ok]) => `<span class="${ok ? "ok" : ""}" title="${ok ? "했어요" : "아직 안 했어요"}">${l} ${ok ? "✓" : "–"}</span>`).join("") : "";
+    return `
     <div class="vid" data-ed="${esc(v.name)}">
       <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}${srcBadge(srcOf(v), null, true)}</div>
-      <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">편집실 열기 →</div></div>
+      <div class="meta"><div class="title">${esc(niceName(v.name))}</div>${p ? `<div class="views steps">${steps}</div>` : ""}
+        ${nx ? `<button class="btn sm nextgo${nx[1] === "edit" ? "" : " primary"}" data-next="${nx[1]}" data-n="${esc(v.name)}">다음: ${nx[0]} →</button>`
+          : `<div class="views">${p ? "다 했어요 ✓ · " : ""}편집실 열기 →</div>`}</div>
     </div>`; }).join("");
   document.querySelectorAll("[data-ed]").forEach(el => el.onclick = () => openEditor(el.dataset.ed));
+  document.querySelectorAll("#edList [data-next]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const n = b.dataset.n, k = b.dataset.next;
+    if (k === "thumb") goThumb(n); else if (k === "upload") goUpload(n); else openEditor(n);
+  });
 }
+/* 3-1. 편집점을 찾은 뒤: 3 편집점에서 그 영상을 보여 주고 다음 할 일 (예전: 3단계를 건너뛰고 4 편집실로 · 사이드바 순서와 다름) */
+function showPointsNext(n, msg) {
+  toast(msg);
+  go("points");
+  if (n && [...$("tlSel").options].some(o => o.value === n)) { $("tlSel").value = n; loadEvents(); }
+  $("ptNextTx").innerHTML = `<b>${esc(msg)}</b><br>대사·컷 후보를 훑어보고 <b>[편집실에서 열기]</b>로 가편집을 다듬은 뒤 내보내요 · 그다음 썸네일 → 올리기`;
+  $("ptNext").hidden = false;
+}
+$("ptNextGo").onclick = () => { $("ptNext").hidden = true; openEditor($("tlSel").value); };
+$("ptNextX").onclick = () => { $("ptNext").hidden = true; };
+/* 1-0. 처음 안내: 보관함이 비어 있고 '다시 안 보기'를 누르지 않았으면 */
+const guideOff = () => { try { return localStorage.getItem("startGuideOff") === "1"; } catch (e) { return false; } };
+function renderGuide() { $("startGuide").hidden = guideOff() || !state.loaded || state.local.length > 0; }
+$("guideFootage").onclick = () => { go("library"); $("btnOpenVideos").click(); };
+$("guideLib").onclick = () => go("library");
+$("guideOff").onclick = () => { try { localStorage.setItem("startGuideOff", "1"); } catch (e) {} renderGuide(); };
 $("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
 
 /* 공통: 작업 실행 · 상태 */
@@ -2219,6 +2286,9 @@ async function poll() {
   state.sKey = sKey;
   showBusy();
   renderLocal();
+  state.loaded = true;
+  renderGuide();
+  if (wasBusy && !s.job && $("p-cut").classList.contains("on")) loadProgress();  // 내보내기·썸네일이 끝난 뒤 단계 표시를 새로
   if (state.crash && !s.job) showCrash(state.crash);
   if ($("p-library").classList.contains("on")) checkSources();
   sync();
@@ -2266,6 +2336,7 @@ checkUpdate();
 (() => {
   const up = { kit: null, name: "", seq: "", timer: null, vkey: "", ret: null };
   window.upCtx = () => ({ name: up.name, seq: up.seq, kit: up.kit, flush });  // 7-2 유튜브에 바로 올리기가 읽음
+  window.upOpen = async name => { await flush(); fillVids(); if (![...$("upVid").options].some(o => o.value === name)) return false; $("upVid").value = name; await load(); return up.name === name; };  // 4단계 '다음: 올리기' → 가장 최근에 내보낸 편집본으로
   window.upSelect = async (name, seq) => { await flush(); fillVids(); if (![...$("upVid").options].some(o => o.value === name)) return false; for (let i = 0; i < 3 && (up.name !== name || up.seq !== (seq || "")); i++) { $("upVid").value = name; await load(seq || ""); } return up.name === name; };  // 7-2 가 올리다 멈춘 영상으로 바로 감
   const ulen = s => [...(s || "")].length;
   const tagsOf = t => (t || "").split(/[,\n]/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -2414,7 +2485,8 @@ checkUpdate();
   try {
     const r = JSON.parse(sessionStorage.getItem("upReturn") || "null");
     sessionStorage.removeItem("upReturn");
-    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) { up.ret = { name: r.name, seq: r.seq || "" }; go("upload"); }
+    // seq 가 없으면(4단계 '다음: 썸네일'에서 감) 가장 최근에 내보낸 편집본으로 (서버가 고름)
+    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) { up.ret = { name: r.name, seq: typeof r.seq === "string" ? r.seq : undefined }; go("upload"); }
   } catch (e) {}
   // 창을 닫거나 다른 화면으로 갈 때 고치던 내용 저장
   const prevFlush = window.flushBeforeClose;

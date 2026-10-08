@@ -928,3 +928,29 @@ def files_for(name, seq=None):
     srt = core.adir(name) / "subtitles.srt"
     ok = srt.is_file()
     return {"video": path, "srt": srt if ok else None, "srtWhere": "analysis" if ok else None, "format": None, "export": None}
+
+
+# ---------- 스튜디오 4단계 카드의 '다음 할 일' (D-075) ----------
+
+def progress(names):
+    """영상마다 어디까지 했는지 {seqs, rough, exported, thumb, kit}: 편집본 수 · 가편집이 있음 · 내보낸 편집본 수 ·
+    저장한 썸네일 그림 · 만든 올리기 키트 (읽기만 · 완성본 폴더·보관함 목록은 한 번만 읽음 · 이름이 더 긴 다른 영상의 파일은 뺌)."""
+    try:
+        out_files = [p for p in core.OUT.iterdir() if p.is_file()]
+        lib = [v.name for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)]
+    except OSError:
+        out_files, lib = [], []
+    pres = {n: core.adir(n).name + "_" for n in set(lib) | set(names)}
+    res = {}
+    for n in names:
+        pre = pres[n]
+        longer = [o for o in set(pres.values()) if o != pre and o.startswith(pre)]
+        mine = [p for p in out_files if p.name.startswith(pre) and not any(p.name.startswith(o) for o in longer)]
+        seqs = (read_project(n) or {}).get("sequences") or []
+        mp4 = [p.name for p in mine if p.suffix.lower() == ".mp4"]
+        exported = sum(1 for sq in seqs  # latest_export 와 같은 이름 규칙 (구간 내보내기는 뺌)
+                       if any(re.fullmatch(rf"{re.escape(pre)}{re.escape(_seq_label(sq))}(?: \(\d+\))*\.mp4", x, re.I) for x in mp4))
+        kit = any(p.suffix == ".json" and _KIT_FILE.search(p.name) and _owner(_read_kit(p) or {})[0] == n for p in mine)
+        res[n] = {"seqs": len(seqs), "rough": bool(seqs), "exported": exported,
+                  "thumb": any(p.suffix.lower() in IMG_EXTS for p in mine), "kit": kit}
+    return res

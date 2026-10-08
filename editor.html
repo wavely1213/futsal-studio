@@ -338,6 +338,8 @@
   .qabody .qi[data-qt] { cursor: pointer; } .qabody .qi[data-qt]:hover { background: var(--panel-3); }
   .qabody .qi b { display: block; } .qabody .qi.warn { box-shadow: inset 3px 0 0 #ffb020; } .qabody .qi.bad { box-shadow: inset 3px 0 0 #ff4d4d; } .qabody .qi.ok { box-shadow: inset 3px 0 0 #2ecc71; }
   .qabody .score { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+  .qanext { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--panel-2); border-left: 3px solid var(--accent); line-height: 1.5; }  /* 다음 할 일 (D-075) */
+  .qanext b { display: block; margin-bottom: 2px; }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 45; }
   .modal.show { display: grid; }
   .modal .box { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 18px; width: 460px; max-height: 90vh; overflow: auto; }
@@ -503,9 +505,10 @@
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="cfReload">최신 내용 다시 불러오기</button><button class="btn pri" id="cfForce">이 창 내용으로 저장</button></div>
 </div></div>
 <div class="modal" id="qaModal"><div class="box" style="width:600px">
-  <h3>영상 검수 <span class="hint" id="qaFile"></span></h3>
+  <h3><span id="qaTitle">영상 검수</span> <span class="hint" id="qaFile"></span></h3>
   <div id="qaBody" class="qabody"></div>
-  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" id="qaClose">닫기</button></div>
+  <div class="qanext"><b>다음 할 일</b><span class="hint">썸네일을 저장하고, 올리기 키트에서 제목·설명·챕터를 만들어 유튜브에 올려요</span></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px"><button class="btn" id="qaOut" style="margin-right:auto">완성본 폴더 열기</button><button class="btn" id="qaClose">닫기</button><button class="btn" id="qaKit">올리기 키트 만들기</button><button class="btn pri" id="qaThumb">썸네일 만들기</button></div>
 </div></div>
 <div class="modal" id="spModal"><div class="box" style="width:360px">
   <h3>속도 · 길이</h3><div class="hint" style="margin-bottom:10px">빠르게 하면 짧아지고 느리게 하면 길어져요. 소리는 목소리 높낮이가 그대로 유지돼요.</div>
@@ -3573,11 +3576,12 @@ function watchJob(name, id) {  // id: 이 화면이 시킨 작업 번호 — 그
     if (!d) { $("busyTxt").textContent = (pr.detail || (qaRunning ? "검수 중" : "내보내는 중")) + (pr.eta != null ? " · " + etaTxt(pr.eta) : ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : ""; }
     if (d) {
       clearInterval(iv); $("busy").classList.remove("show"); $("exportBtn").disabled = false;
-      if (d.error && qaRunning) { qaRunning = null; toast(d.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수는 못 했어요 · 완성본 폴더를 열게요 · " + d.error); post("/api/open", { which: "out" }); }
+      // 끝나면 '다음 할 일' 창 (예전: 탐색기 완성본 폴더를 바로 열어 앱 밖으로 나감 · 이제 [완성본 폴더 열기] 버튼으로)
+      if (d.error && qaRunning) { const f = qaRunning; qaRunning = null; showDone(f, null, d.error.includes("멈췄어요") ? "검수는 건너뛰었어요" : "검수는 못 했어요 · " + d.error); }
       else if (d.error) { if (d.error.includes("멈췄어요")) toast("내보내기를 멈췄어요"); else showEdFail(d, "내보내기", LAST_EXPORT && startExport); }
-      else if (qaRunning) { if (d.result && d.result.items) showVideoQA(d.result); else qaRunning = null; }
+      else if (qaRunning) { if (d.result && d.result.items) showVideoQA(d.result); else { const f = qaRunning; qaRunning = null; showDone(f); } }
       else if (Array.isArray(d.result) && /\.mp4$/i.test(d.result[0] || "") && $("exQa").checked) runVideoQA(d.result[0]);
-      else { toast("내보냈어요! 완성본 폴더를 열게요"); post("/api/open", { which: "out" }); }
+      else { toast("내보냈어요!"); showDone(Array.isArray(d.result) ? d.result.find(x => /\.mp4$/i.test(x)) || d.result[0] : ""); }
     }
   }, 700);
 }
@@ -3585,12 +3589,27 @@ let qaRunning = null;
 async function runVideoQA(file) {
   qaRunning = file; toast("내보냈어요! 올리기 전에 자동 검수 중이에요");
   const r = await (await post("/api/edit/qa", { name: NAME, file, format: EXP_JOB.fmt || S.format, master: EXP_JOB.master })).json();
-  if (!r.ok) { qaRunning = null; toast(r.error || "검수를 시작하지 못했어요"); post("/api/open", { which: "out" }); return; }
+  if (!r.ok) { qaRunning = null; showDone(file, null, r.error || "검수를 시작하지 못했어요"); return; }
   watchJob("검수", r.jobId);
 }
+// 다 만든 뒤 창: 검수 결과(있으면) + 다음 할 일 [썸네일 만들기]·[올리기 키트 만들기]·[완성본 폴더 열기] (D-075)
+function showDone(file, rep, note) {
+  $("qaTitle").textContent = rep ? "영상 검수" : "다 만들었어요";
+  $("qaFile").textContent = file ? "· " + file : "";
+  if (!rep) $("qaBody").innerHTML = `<div class="score">완성본을 만들었어요</div>${note ? `<div class="hint">${esc(note)}</div>` : ""}`;
+  $("qaModal").classList.add("show");
+}
+function nextFrom(url) {  // 썸네일·올리기로 가면 돌아올 때(← 스튜디오) 7 올리기가 이 영상·편집본으로 열림
+  $("qaModal").classList.remove("show");
+  try { sessionStorage.setItem("upReturn", JSON.stringify({ name: NAME, seq: EXP_JOB.seq || S.id, t: Date.now() })); } catch (e) {}
+  leaveTo(url);
+}
+$("qaThumb").onclick = () => nextFrom("/thumb?name=" + encodeURIComponent(NAME));
+$("qaKit").onclick = () => nextFrom("/");
+$("qaOut").onclick = () => post("/api/open", { which: "out" });
 function showVideoQA(rep) {
   const file = qaRunning; qaRunning = null;
-  $("qaFile").textContent = "· " + file;
+  showDone(file, rep);
   $("qaBody").innerHTML = `<div class="score">${rep.score}점 · ${rep.bad ? `고칠 것 ${rep.bad}개` : "큰 문제 없어요"}${rep.warn ? ` · 확인할 것 ${rep.warn}개` : ""}</div>`
     + rep.items.map(i => `<div class="qi ${i.lv}" ${i.t != null ? `data-qt="${i.t}" title="누르면 그 시간으로 가요"` : ""}><span>${{ ok: "✅", warn: "⚠️", bad: "⛔" }[i.lv]}</span><span><b>${esc(i.title)}</b>${esc(i.msg)}</span></div>`).join("");
   $("qaBody").querySelectorAll("[data-qt]").forEach(e => (e.onclick = () => {
@@ -3598,7 +3617,6 @@ function showVideoQA(rep) {
     if (EXP_JOB.seq && EXP_JOB.seq !== S.id) { if (!P.sequences.some(q => q.id === EXP_JOB.seq)) return toast("내보낸 편집본이 지워져서 그 자리로 갈 수 없어요"); switchSeq(EXP_JOB.seq); }
     seek(EXP_JOB.t0 + +e.dataset.qt);
   }));
-  $("qaModal").classList.add("show"); post("/api/open", { which: "out" });
 }
 $("qaClose").onclick = () => $("qaModal").classList.remove("show");
 $("busyStop").onclick = () => { if (confirm(qaRunning ? "검수를 건너뛸까요?" : `${JOBNAME || "작업"}을(를) 멈출까요?`)) post("/api/edit/cancel", {}); };
