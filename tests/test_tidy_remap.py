@@ -169,6 +169,31 @@ class TidyRemapTest(unittest.TestCase):
         self.assertAlmostEqual(t["all"]["dur"], 120.0, places=4)  # 끝까지 덮던 제목: 다시 넣은 50~52 만큼 (끝 120~130 은 그 뒤)
         self.assertEqual(len([i for i in res["items"] if i["track"] == "A1"]), 4)
 
+    def test_full_keeps_real_clips_over_late_replay(self):
+        """끝에 앞 장면을 다시 보여 준 클립(골 다시 보기·콜백)이 있어도 진짜 클립을 남기고 그 다시 보기만 뺌.
+        예전에는 끝에서부터 골라 다시 보기 하나만 남기고, 확대한 진짜 클립을 민짜로 다시 깔았음."""
+        zoom = {"scale": {"v": 110, "k": []}}
+        replay = [dict(x, id=x["id"] + "r", link="R") for x in pair(100, 103, 25.0)]
+        shorts = seq(pair(80, 90, 0.0) + pair(90, 105, 10.0, fx=zoom) + replay,
+                     titles=[{"id": "e", "text": "골!", "start": 12.0, "dur": 1.0, "plan": "emphasis"}])
+        callback = [dict(x, id=x["id"] + "c", link="C") for x in pair(5, 6, 30.0)]
+        base = pair(0, 10, 0.0) + pair(10, 20, 10.0, fx=zoom) + pair(20, 30, 20.0) + callback
+        res = self.run_js([{"op": "full", "q": shorts, "lo": None, "hi": None},
+                           {"op": "full", "q": seq(base, format="long"), "lo": 0, "hi": 40.0},
+                           {"op": "full", "q": seq(base), "lo": None, "hi": None}])
+        v = self.main_v(res[0])
+        self.assertEqual([(x["id"], x["in"], x["out"]) for x in v], [("v80", 80, 90), ("v90", 90, 105)])  # 다시 보기만 빠짐 · 103~105 도 그대로
+        self.assertEqual(v[1]["fx"], zoom)
+        self.assertEqual([x["id"] for x in res[0]["titles"]], ["e"])  # 진짜 클립 위 강조 글씨는 남음
+        self.assertAlmostEqual(res[0]["titles"][0]["start"], 12.0, places=4)
+        long_v = self.main_v(res[1])
+        self.assertEqual([(x["in"], x["out"]) for x in long_v], [(0, 10), (10, 20), (20, 30), (30, 40)])
+        self.assertEqual(long_v[1]["id"], "v10")
+        self.assertEqual(long_v[1]["fx"], zoom)  # 진짜 클립의 확대 그대로
+        self.assertAlmostEqual(self.assert_contiguous(long_v), 40.0, places=4)
+        sv = self.main_v(res[2])  # 쇼츠에서도 1초짜리 콜백으로 쪼그라들지 않음
+        self.assertEqual([(x["in"], x["out"]) for x in sv], [(0, 10), (10, 20), (20, 30)])
+
     def test_full_then_tidy_round_trip(self):
         q = self.short()
         full, = self.run_js([{"op": "full", "q": q, "lo": None, "hi": 0}])
@@ -188,6 +213,12 @@ class ButtonWiringTest(unittest.TestCase):
         self.assertNotIn('S.format = "long"', body)  # 쇼츠를 말없이 롱폼으로 바꾸지 않음
         self.assertIn("tidySeq(S, r.tidy)", body)
         self.assertIn('fullSeq(S, S.format === "shorts" ? null : 0', body)
+        i = src.index("const applyRemap")
+        body = src[i:src.index("};", i)]
+        self.assertIn("t.lock", body)  # 잠긴 트랙은 옮기지 않음 (다른 잔물결 편집과 같게)
+        self.assertIn("장면 전환", body)  # 빠진 전환은 알림
+        i = src.index("function afterHist()")
+        self.assertIn("renderRec()", src[i:src.index("\n", i)])  # 되돌리기 뒤 버튼 켬/끔·안내도 다시
 
 
 if __name__ == "__main__":

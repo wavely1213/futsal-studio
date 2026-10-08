@@ -6,9 +6,20 @@ rem 압축 파일 안에서 바로 더블클릭하면 이 파일만 임시 폴�
 if not exist "app.py" goto :not_extracted
 if not exist "requirements.txt" goto :not_extracted
 if not exist "setup_check.py" goto :not_extracted
+rem 반디집·알집·윈도우 탐색기 등이 임시 폴더에 잠깐 푼 곳에서 실행하면 나중에 지워져 앱이 사라짐 → Python 을 고르거나 설치하기 전에 먼저 멈춤
+rem (짧은 이름 C:\Users\HONGGI~1\... 도 같이 비교 · Python 이 정해진 뒤 setup_check.py place 가 한 번 더 자세히)
+set "IN_TEMP="
+set "HERE=%~dp0"
+set "HERES=%~sdp0"
+if defined TEMP call :under "%TEMP%"
+if defined TMP call :under "%TMP%"
+echo "%HERE%"| findstr /i /r /c:"\\Temp[0-9][0-9]*_[^\\]*\.zip\\" /c:"\\Rar\$EX" /c:"\\7zO[0-9A-F]" /c:"\\BNZ\.[0-9A-F]" >nul && set "IN_TEMP=1"
+if defined IN_TEMP goto :in_temp
 rem 쓸 Python 고르기: 3.13 → 3.12 → 3.11 → 3.14 → 3.10 중 64비트(x64) · 'py -3'(가장 새 것)은 휠이 없는 3.15·ARM64 를 고를 수 있음
 rem 새 'Python 설치 관리자'(pymanager)는 없는 버전을 부르면 몰래 설치를 시작할 수 있음 → 고르는 동안은 끔 (설치는 아래에서 보이게)
+rem 처음 쓸 때 묻는 질문이 숨긴 출력(>nul)으로 가서 창이 말없이 멈추지 않게: 묻지 않음 + 아래 확인 호출은 입력도 <nul
 set "PYTHON_MANAGER_AUTOMATIC_INSTALL=false"
+set "PYTHON_MANAGER_CONFIRM=false"
 set "PY="
 set "PYMGR="
 where pymanager >nul 2>nul && set "PYMGR=1"
@@ -31,6 +42,8 @@ echo 구성요소를 확인하는 중...
 ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check --upgrade "pip>=23.3" >nul 2>nul
 rem 설치 기록은 임시 폴더에 남기고, 실패하면 이유를 한국어 한 줄로 (setup_check.py pip)
 set "PIPLOG=%TEMP%\futsal-studio-pip.log"
+rem 한국어 윈도우에서 기록이 cp949 로 남지 않게 (setup_check.py pip 가 UTF-8 로 읽음 · 못 읽으면 cp949 로 한 번 더)
+set "PYTHONUTF8=1"
 ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements.txt > "%PIPLOG%" 2>&1 || goto :pip_fail
 ".venv\Scripts\python.exe" setup_check.py vcredist || call :vcredist
 start "" ".venv\Scripts\pythonw.exe" updater.py --launch
@@ -43,7 +56,7 @@ exit
 where py >nul 2>nul || goto :pick_mgr
 for %%V in (3.13 3.12 3.11 3.14 3.10) do (
   if not defined PY (
-    py -%%V setup_check.py python >nul 2>nul && set "PY=py -%%V"
+    py -%%V setup_check.py python <nul >nul 2>nul && set "PY=py -%%V"
   )
 )
 :pick_mgr
@@ -51,19 +64,38 @@ rem 예전 'Python launcher' 가 함께 깔려 py 가 예전 것이면 설치 �
 if not defined PYMGR goto :pick_path
 for %%V in (3.13 3.12 3.11 3.14 3.10) do (
   if not defined PY (
-    pymanager exec -V:%%V setup_check.py python >nul 2>nul && set "PY=pymanager exec -V:%%V"
+    pymanager exec -V:%%V setup_check.py python <nul >nul 2>nul && set "PY=pymanager exec -V:%%V"
   )
 )
 :pick_path
 if not defined PY (
-  python setup_check.py python >nul 2>nul && set "PY=python"
+  python setup_check.py python <nul >nul 2>nul && set "PY=python"
 )
 exit /b 0
+
+:under
+rem %1(임시 폴더) 아래에 앱 폴더가 있으면 IN_TEMP (긴 이름·짧은 이름 둘 다)
+set "T=%~1"
+if "%T:~-1%"=="\" set "T=%T:~0,-1%"
+call set "R=%%HERE:*%T%\=%%"
+if not "%R%"=="%HERE%" set "IN_TEMP=1"
+call set "R=%%HERES:*%T%\=%%"
+if not "%R%"=="%HERES%" set "IN_TEMP=1"
+exit /b 0
+
+:in_temp
+echo.
+echo [안내] 앱 파일이 임시 폴더에 있어요. 압축 파일 안에서 바로 실행하면 이렇게 돼요 (나중에 저절로 지워져 앱이 사라져요).
+echo        지금 폴더: %~dp0
+echo        1. 받은 압축 파일을 오른쪽 클릭하고 '압축 풀기' 또는 '모두 압축 풀기'를 누르세요.
+echo        2. C:\풋살스튜디오 처럼 짧은 곳에 푸세요.
+echo        3. 푼 폴더 안의 '시작하기 (Windows).bat' 을 더블클릭하세요.
+pause
+exit /b 1
 
 :pymanager_install
 echo.
 echo 새 'Python 설치 관리자'가 있어요. 이 앱에 맞는 Python 3.14 를 설치합니다. 인터넷으로 받아서 몇 분 걸려요...
-set "PYTHON_MANAGER_CONFIRM=false"
 pymanager install -y 3.14
 call :pick_py
 exit /b 0

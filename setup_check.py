@@ -147,7 +147,8 @@ def check_vcredist():
     return 0
 
 
-_TEMP_NAME = re.compile(r"^(temp\d+_.+\.zip|rar\$ex[\w.]*|7zo[0-9a-f]+(\.tmp)?)$", re.I)  # 탐색기(Temp1_x.zip)·WinRAR(Rar$EX…)·7-Zip(7zO…)이 잠깐 푸는 폴더
+_TEMP_NAME = re.compile(r"^(temp\d+_.+\.zip|rar\$ex[\w.]*|7zo[0-9a-f]+(\.tmp)?|bnz\.[0-9a-f]+)$", re.I)
+# 탐색기(Temp1_x.zip)·WinRAR(Rar$EX…)·7-Zip(7zO…)·반디집(BNZ.…)이 잠깐 푸는 폴더 · 알집 등 나머지는 TEMP 아래인지로 잡음
 
 
 def _temp_dirs():
@@ -155,12 +156,16 @@ def _temp_dirs():
     for var in ("TEMP", "TMP"):
         v = os.environ.get(var)
         if v:
-            out.append(os.path.normcase(os.path.abspath(v)).rstrip("\\/"))
+            # realpath: 사용자 이름이 길거나 한글이면 TEMP 가 짧은 이름(C:\Users\HONGGI~1\…)이라 앱 폴더(긴 이름)와 그냥은 안 맞음
+            for x in (os.path.abspath(v), os.path.realpath(v)):
+                x = os.path.normcase(x).rstrip("\\/")
+                if x not in out:
+                    out.append(x)
     return out
 
 
 def _in_temp(path):
-    p = os.path.normcase(os.path.abspath(str(path)))
+    p = os.path.normcase(os.path.realpath(str(path)))
     for t in _temp_dirs():
         if p == t or p.startswith(t + os.sep) or p.startswith(t + "/"):
             return True
@@ -201,6 +206,11 @@ def pip_reason(text, ver=None):
     elif re.search(r"No matching distribution found|Could not find a version that satisfies|Requires-Python|requires a different Python", t):
         why = ("이 Python(%d.%d)에 맞는 구성요소가 아직 없어요. Python 3.14 (64비트)를 설치한 뒤 이 파일을 다시 실행해 주세요: %s"
                % (ver[0], ver[1], PY_DIRECT))
+    elif re.search(r"Failed building wheel|Failed to build|subprocess-exited-with-error|metadata-generation-failed|"
+                   r"Microsoft Visual C\+\+ 14", t):
+        # 이 Python 용 완성본(휠)이 없어 직접 만들려다 실패 — 막 나온 Python 에서 흔함 (인터넷 탓이 아님)
+        why = ("이 Python(%d.%d)에 맞게 미리 만든 구성요소가 없어 설치하지 못했어요. Python 3.14 (64비트)를 설치한 뒤 이 파일을 다시 실행해 주세요: %s"
+               % (ver[0], ver[1], PY_DIRECT))
     elif re.search(r"Could not open requirements file", t):
         why = "압축을 다 풀지 않고 실행했어요. 압축 파일을 '압축 풀기'로 푼 뒤 그 폴더에서 다시 실행해 주세요."
     else:
@@ -210,9 +220,13 @@ def pip_reason(text, ver=None):
 
 def check_pip(log):
     try:
-        text = Path(log).read_text(encoding="utf-8", errors="replace") if log else ""
+        raw = Path(log).read_bytes() if log else b""
     except OSError:
-        text = ""
+        raw = b""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:  # 한국어 윈도우에서 PYTHONUTF8 없이 남은 기록은 cp949
+        text = raw.decode("cp949", errors="replace")
     why, err = pip_reason(text)
     if err:
         say("  (" + err[:300] + ")")

@@ -717,17 +717,18 @@ function tidySeq(q, keep) {
   return cs.length ? remapSeq(q, cs, [], () => []) : null;
 }
 // 원본 전체로: 잘라 낸 원본을 제자리에 다시 넣음 (롱폼은 [lo,hi] = 영상 전체, 쇼츠는 그 쇼츠 구간) · 남아 있던 클립의 확대·빠르기는 그대로
-// 원본 순서가 어긋난 클립(티저처럼 뒤 장면을 앞에 미리 보여 준 것)은 뺌
+// 원본 순서가 어긋난 클립(앞의 티저·끝의 다시 보기·콜백)은 뺌 — 원본 순서대로 이어지는 클립 중 가장 긴 묶음을 남김
+// (끝에서부터 고르면 마지막 다시 보기 하나만 남고 진짜 클립이 모두 빠짐)
 function fullSeq(q, lo, hi) {
   const v = q.items.filter(i => i.track === "V1" && isMainAV(i)).sort((a, b) => a.start - b.start);
-  const keepV = [], cut = [], ins = [];
-  let minIn = Infinity;
-  for (let i = v.length - 1; i >= 0; i--) {
-    if (v[i].out <= minIn + EPS) { keepV.unshift(v[i]); minIn = Math.min(minIn, v[i].in); }
-    else cut.push([v[i].start, iEnd(v[i])]);
-  }
-  if (!keepV.length) return null;
-  if (lo === null) { lo = Math.min(...keepV.map(i => i.in)); hi = Math.max(...keepV.map(i => i.out)); }
+  if (!v.length) return null;
+  const w = v.map(i => i.out - i.in), best = w.slice(), prev = v.map(() => -1);
+  for (let i = 0; i < v.length; i++) for (let j = 0; j < i; j++)
+    if (v[j].out <= v[i].in + EPS && best[j] + w[i] > best[i] + EPS) { best[i] = best[j] + w[i]; prev[i] = j; }
+  let k = 0; for (let i = 1; i < v.length; i++) if (best[i] > best[k] + EPS) k = i;
+  const keep = new Set(); for (; k >= 0; k = prev[k]) keep.add(k);
+  const keepV = v.filter((_, i) => keep.has(i)), cut = v.filter((_, i) => !keep.has(i)).map(i => [i.start, iEnd(i)]), ins = [];
+  if (lo === null) { lo = Math.min(...v.map(i => i.in)); hi = Math.max(...v.map(i => i.out)); } // 쇼츠 구간: 뺀 클립까지 모두 (다시 보기에만 있던 끝부분도)
   let cov = lo;
   for (const o of keepV) {
     if (o.in > cov + 2 / FPS) ins.push({ p: o.start, len: r6(o.in - cov), a: cov, b: o.in, like: o });
@@ -928,7 +929,7 @@ function jumpHist(n) {
     restoreP(cur); afterHist(); toast(`다시 실행 · ${last.label}`);
   }
 }
-function afterHist() { const ok = new Set(S.items.map(i => i.id)); selI = new Set([...selI].filter(id => ok.has(id))); selX = null; changed(); }
+function afterHist() { const ok = new Set(S.items.map(i => i.id)); selI = new Set([...selI].filter(id => ok.has(id))); selX = null; changed(); if (ltab === "rec") renderRec(); } // 정리 버튼 켬/끔·안내도 되돌린 상태로
 function restoreSeq(snap) { const i = P.sequences.indexOf(S); S = JSON.parse(snap); P.sequences[i] = S; ver++; }
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
 
@@ -2554,7 +2555,7 @@ async function renderRec() {
       <button class="btn" id="recRebuild">가편집 다시 만들기</button>
     </div>
     <div class="sec"><h4>지금 편집본에 적용 · 롱폼 군더더기 정리</h4>
-      <div class="hint" style="margin-bottom:8px">추임새("아", "자"), 같은 말 반복, 긴 무음을 빼고 이어붙여요 (V1·A1의 원본 영상만 바뀌어요). 군더더기 ${r.junk || 0}곳 · 컷 ${r.tidy.length}개</div>
+      <div class="hint" style="margin-bottom:8px">추임새("아", "자"), 같은 말 반복, 긴 무음을 빼고 이어붙여요 (원본 영상 클립에서만 빼요). 군더더기 ${r.junk || 0}곳 · 컷 ${r.tidy.length}개</div>
       <button class="btn" id="recTidy" ${r.tidy.length && !noMain ? "" : "disabled"}>전체 영상 군더더기 정리</button>
       <button class="btn" id="recFull" ${noMain ? "disabled" : ""}>원본 전체로 되돌리기</button>
       <div class="hint" id="recWhy" style="margin-top:6px">${noMain ? "이 쇼츠에는 원본 영상 클립이 없어서 정리하거나 되돌릴 수 없어요." : S.format === "shorts" ? "쇼츠는 이 쇼츠 구간 안에서만 정리하거나 되돌리고, 쇼츠(세로) 그대로예요." : ""} 확대·빠르기·제목·표시·위 트랙은 같은 장면에 맞춰 함께 옮겨요.</div>
@@ -2605,8 +2606,16 @@ async function renderRec() {
   const hasMain = () => S.items.some(i => i.track === "V1" && isMainAV(i));
   const applyRemap = (label, res, msg) => {
     if (!res) return toast("이 편집본에서는 바뀔 곳이 없어요");
+    // 잠긴 트랙은 다른 잔물결 편집처럼 건드리지 않음 — 그 트랙만 남기면 장면이 어긋나니 아예 안 함
+    const sig = (its, trs, tid) => JSON.stringify([its.filter(x => x.track === tid).map(x => [x.id, r6(x.start), r6(x.in), r6(x.out)]).sort(),
+      trs.filter(t => t.track === tid).map(t => [t.id, t.a, t.b]).sort()]);
+    const hit = S.tracks.filter(t => t.lock && sig(S.items, S.trans, t.id) !== sig(res.items, res.trans, t.id)).map(t => t.id);
+    if (hit.length) return toast(`${hit.join("·")} 트랙이 잠겨 있어요 · 자물쇠를 풀어야 장면을 맞춰 옮길 수 있어요`);
+    const nTr = res.trans.length;
     commit(label); Object.assign(S, { items: res.items, trans: res.trans, titles: res.titles, shapes: res.shapes, markers: res.markers });
-    selI.clear(); selX = null; changed(); seek(0); toast(msg(res));
+    selI.clear(); selX = null; changed(); seek(0);
+    const gone = nTr - S.trans.length; // 사이에 장면이 다시 들어가 붙어 있지 않게 된 두 클립의 전환은 뺌 (이제 이어진 원본이라)
+    toast(msg(res) + (gone > 0 ? ` · 이어지지 않게 된 장면 전환 ${gone}개는 뺐어요` : ""));
   };
   const layMain = (label, cuts) => { commit(label); S.items = S.items.concat(itemsFromCuts(cuts)); selI.clear(); changed(); seek(0); toast(`원본을 깔았어요 · ${mmss(total())}`); };
   if ($("recTidy")) $("recTidy").onclick = () => {
@@ -3112,7 +3121,7 @@ function renderSeqTab() {
   h += styleEditor("cs_", S.captionStyle, false);
   h += `<div class="pg"><h4><span class="dot" style="background:#3e8a46"></span>도형 추가</h4><div class="presets" style="margin:0">${Object.keys(SHAPES).map(k => `<button class="btn" data-shape="${k}">${k}</button>`).join("")}</div></div>`;
   el.innerHTML = h;
-  $("pFmt").querySelectorAll("button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); });
+  $("pFmt").querySelectorAll("button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); if (ltab === "rec") renderRec(); });
   $("pCapOn").onchange = e => { commit("자막 켜기/끄기"); S.captionsOn = e.target.checked; changed(); };
   if (S.format === "shorts") {
     $("pLay").querySelectorAll("button").forEach(b => b.onclick = () => { commit("화면 구성"); S.layout.mode = b.dataset.v; changed(false); });
@@ -3632,7 +3641,7 @@ $("undo").onclick = undo; $("redo").onclick = redo;
 $("toThumb").onclick = () => leaveTo("/thumb?name=" + encodeURIComponent(NAME));
 $("help").onclick = () => $("helpModal").classList.add("show"); $("helpClose").onclick = () => $("helpModal").classList.remove("show");
 $("back").onclick = () => leaveTo("/");
-document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); });
+document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); if (ltab === "rec") renderRec(); });
 const scrub = $("scrub");
 scrub.onmousedown = e => { pause(); const f = ev => { const r = scrub.getBoundingClientRect(); seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * total()); autoscroll(); }; f(e); dragSeek(f); };
 $("tlscroll").addEventListener("wheel", e => { if (e.ctrlKey || e.altKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), xToT(e)); } }, { passive: false });
