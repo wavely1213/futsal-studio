@@ -37,6 +37,8 @@ import refs
 import source
 import strategy
 import style
+import thumb
+import thumbcopy
 import trouble
 import tunnel
 import updater
@@ -91,7 +93,9 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # 채널 전략 (PC 에서만 시작 · 휴대폰에는 진행·알림·멈추기만 · D-028)
               strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,
               # 유튜브에 바로 올리기 (PC 7단계에서만 시작 · 휴대폰에는 진행('유튜브에 올리는 중')·알림·멈추기만 · D-048)
-              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}
+              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH,
+              # AI 추천 썸네일 (PC 썸네일 편집기에서만 시작 · 휴대폰에는 진행·알림만 · 썸네일 작업은 휴대폰 허용 목록(ACTIONS)에 없음)
+              thumb.JOB_ANALYZE, thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
     "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
@@ -143,6 +147,7 @@ STALE_CANCEL_MSG = "보던 작업은 이미 끝났어요 · 지금 작업은 멈
 STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보기 만들기", "영상 검수", "스타일 배우기", "학습용 스타일 배우기",
              "스타일 일치 점수", "클로드로 더 깊게 보기",
              strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,  # 채널 전략: 모두 editor.CANCEL 을 봄 (PC 8단계 [멈추기]와 같음)
+             thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,  # 클로드 문구·평가: claude_cli.run 이 editor.CANCEL 을 봄 (썸네일 분석은 누끼 중엔 못 멈춤 → 빠짐)
              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}  # 유튜브: 조각마다 editor.CANCEL 을 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]
 # 줄바꿈·제어·방향 바꾸는 글자 + 줄을 나누는 유니코드(NEL·줄/문단 구분)·폭 없는 글자 → 기록에 가짜 줄을 못 만들게
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")

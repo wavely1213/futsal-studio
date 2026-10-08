@@ -34,6 +34,7 @@ import studiolog
 import trouble
 import style
 import thumb
+import thumbcopy
 import updater
 import upload
 import winlink
@@ -57,6 +58,7 @@ PORT_FALLBACK = range(PORT + 1, PORT + 35)  # 8765 를 다른 프로그램이 �
 APP_ID = "futsal-studio"  # /api/ping: 이 포트에서 듣는 게 이 앱인지 (다른 프로그램이면 창을 띄우라고 보내지 않음)
 LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0}
 DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
+FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}  # /fonts/ 응답 종류 (확장자로)
 LOCK = threading.Lock()
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
 RESTARTING = threading.Event()  # 업데이트 다시 시작이 정해짐 → 새 작업(PC·휴대폰)을 받지 않음 (곧 이 프로세스가 끝나 그 작업이 끊기므로)
@@ -455,6 +457,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(d.get("plan"), dict):
                 return self._send(400, {"ok": False, "error": "이 스타일은 아직 기획 분석이 없어요. 먼저 '다시 배우기'를 눌러 주세요"})
             return self._send(200, {"ok": True, "prompt": plan.claude_prompt(d)})
+        if u.path == "/api/thumb/brand":  # 브랜드 키트 (로고·색·글꼴·시리즈 이름)
+            return self._send(200, {"ok": True, "brand": thumb.load_brand(), "fonts": list(thumb.BRAND_FONTS)})
         if u.path == "/api/thumb/open":
             n = q["name"][0]
             rec = editor.recommend(n)
@@ -468,7 +472,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(editor.video_path(q["name"][0]), "video/mp4")
         if u.path.startswith("/fonts/"):
             p = (editor.FONTS / Path(u.path).name).resolve()
-            return self._file(p, "font/otf") if p.exists() else self._send(404, {"error": "not found"})
+            ok = p.is_file() and p.parent == editor.FONTS.resolve()
+            return self._file(p, FONT_TYPES.get(p.suffix.lower(), "application/octet-stream")) if ok else self._send(404, {"error": "not found"})
+        if u.path.startswith("/stickers/"):  # 썸네일 스티커 (저장소 stickers/ · 이름만 받고 폴더 밖은 거절)
+            p = (thumb.STICKERS / Path(u.path).name).resolve()
+            ok = p.is_file() and p.parent == thumb.STICKERS.resolve() and p.suffix.lower() in (".png", ".json")
+            return self._file(p, "image/png" if p.suffix.lower() == ".png" else "application/json") if ok else self._send(404, {"error": "not found"})
         if u.path == "/thumbs.jpg":
             p = core.adir(q["name"][0]) / "thumbs2.jpg"
             return self._file(p, "image/jpeg") if p.exists() else self._send(404, {"error": "not found"})
@@ -740,19 +749,82 @@ class Handler(BaseHTTPRequestHandler):
             ok = start_job("장면 고르기", lambda: thumb.frame_candidates(b["name"]))
             return self._send(200 if ok else 409, _started(ok))
         if path == "/api/thumb/cut":
-            def do_cut():
-                src = b["src"]
+            try:  # 장면 주소의 영상 이름도 파일 이름만 · 올린 그림은 썸네일 그림 폴더 안만 (I-021)
+                src = str(b.get("src") or "")
                 if src.startswith("/frame"):
                     qq = parse_qs(urlparse(src).query)
-                    n = editor.video_path(qq["name"][0]).name  # GET /frame 과 같게: 보관함 안의 파일 이름만 (I-021)
-                    sp = thumb.grab(n, float(qq["t"][0]))
+                    cut_t = float(qq["t"][0])  # 잘못된 시각은 400 (영상 찾기보다 먼저)
+                    cut_name = editor.video_path(qq["name"][0]).name  # GET /frame 과 같게: 보관함 안의 파일 이름만 (I-021)
                 else:
                     sp = (thumb.ASSETS / Path(urlparse(src).path).name).resolve()
-                out = thumb.remove_bg(sp, b.get("kind", "hq"))
+                    if sp.parent != thumb.ASSETS.resolve() or not sp.is_file():
+                        raise FileNotFoundError(src)
+                if b.get("kind", "hq") not in thumb.BG_MODELS:
+                    raise ValueError("kind")
+            except (KeyError, IndexError, ValueError, TypeError):
+                return self._send(400, {"ok": False, "error": "잘못된 그림 주소예요"})
+            except FileNotFoundError:
+                return self._send(404, {"ok": False, "error": "그림을 찾지 못했어요"})
+
+            def do_cut():
+                sp2 = thumb.grab(cut_name, cut_t) if src.startswith("/frame") else sp
+                out = thumb.remove_bg(sp2, b.get("kind", "hq"))
                 log("  누끼 완료")
                 return {"cut": thumb.asset_url(out), "src": src}
             ok = start_job("누끼 따기", do_cut)
             return self._send(200 if ok else 409, _started(ok))
+        # ---- AI 추천 썸네일: 장면·선수 후보 + 자동 누끼 + 문구 (다 돼 있으면 바로) ----
+        if path in ("/api/thumb/analyze", "/api/thumb/copy"):
+            try:
+                n = editor.safe_name(b.get("name"))
+                editor.video_path(n)
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "error": "영상을 찾지 못했어요"})
+            if path == "/api/thumb/analyze":
+                c = thumb.cached_analysis(n)
+                if c is not None:
+                    return self._send(200, dict(c, ok=True))
+                ok = start_job(thumb.JOB_ANALYZE, lambda: thumb.analyze(n, log))
+                return self._send(200 if ok else 409, dict(_started(ok), job=bool(ok)))
+            if not b.get("ai"):
+                return self._send(200, dict(thumbcopy.suggest(n), ok=True))
+            ok = start_job(thumbcopy.JOB_AI, lambda: thumbcopy.run_ai(n, log, editor.CANCEL))
+            return self._send(200 if ok else 409, dict(_started(ok), job=bool(ok)))
+        if path == "/api/thumb/brand":
+            try:
+                return self._send(200, {"ok": True, "brand": thumb.save_brand(b.get("brand"))})
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+        if path == "/api/thumb/ocr":  # 검수: 작게 줄인 썸네일에서 읽히는 글자 (글자 읽기 모델이 있을 때만)
+            data = b.get("data")
+            if not isinstance(data, str) or not data.startswith("data:image/") or len(data) > thumb.OCR_MAX:
+                return self._send(400, {"ok": False, "error": "그림이 너무 크거나 형식이 달라요"})
+            try:
+                lines = thumb.read_text(data)
+            except Exception as e:  # noqa: BLE001 — 검수 보조 기능이라 실패해도 화면은 계속 (원문·위치는 studio.log 에만)
+                studiolog.trace(e)
+                return self._send(200, {"ok": False, "error": f"글자를 읽지 못했어요 · {trouble.explain(e)['msg']}"})
+            if lines is None:
+                return self._send(200, {"ok": False, "error": "글자 읽기 모델이 아직 없어요 (스타일 배우기를 한 번 하면 생겨요)"})
+            return self._send(200, {"ok": True, "lines": lines})
+        if path == "/api/thumb/ab":  # A/B 묶음 (썸네일 2~6장 + 모바일 비교 한 장)
+            try:
+                files = thumb.export_ab(b["name"], b.get("items"), b.get("mobile"))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:  # Windows 잠금·디스크 가득: 연결이 끊기지 않고 안내 (썸네일 저장과 같게)
+                log(f"A/B 썸네일을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": f"저장하지 못했어요. 잠시 뒤 다시 눌러 주세요 · {trouble.explain(e)['msg']}"})
+            log(f"A/B 썸네일 저장 · {', '.join(files)}")
+            return self._send(200, {"ok": True, "files": files})
+        if path == "/api/thumb/judge":  # 검수 창: 내 클로드 계정으로 평가 (선택)
+            sm, fu = b.get("small"), b.get("full")
+            if not all(isinstance(x, str) and x.startswith("data:image/") and len(x) < thumb.AB_MAX for x in (sm, fu)):
+                return self._send(400, {"ok": False, "error": "그림 형식이 달라요"})
+            ok = start_job(thumbcopy.JOB_JUDGE, lambda: thumbcopy.judge(sm, fu, editor.CANCEL))
+            return self._send(200 if ok else 409, dict(_started(ok), job=bool(ok)))
         if path in ("/api/thumb/upload", "/api/thumb/export"):  # Windows 잠금·디스크 가득이면 연결이 끊기지 않고 안내
             try:
                 if path == "/api/thumb/upload":

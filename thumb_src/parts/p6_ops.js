@@ -196,7 +196,8 @@ function addImage(src, asBg, extra = {}) {
 
 /* ---------- 버튼 동작 ---------- */
 const ACT = {
-  cp: () => toggleCP(), ls: () => toggleLS(true), close: b => (b.dataset.v === "cpanel" ? toggleCP(false) : toggleLS(false)),
+  cp: () => toggleCP(), ls: () => toggleLS(true),
+  close: b => (b.dataset.v === "cpanel" ? toggleCP(false) : b.dataset.v === "lspanel" ? toggleLS(false) : $(b.dataset.v) && $(b.dataset.v).classList.remove("show")),
   lsSec: b => { lsSec = b.dataset.v; renderLS(); },
   endEdit: () => endEdit(), brushDone: () => { setTool("move"); renderProps(); }, brushB: () => setTool("brush"),
   xform: () => startXform(), xOk: () => commitXform(), xNo: () => cancelXform(),
@@ -264,7 +265,7 @@ addEventListener("keydown", e => {
   if (e.key === "Escape" && menu) { closeMenu(); return; }
   if (xform && e.key === "Enter") { e.preventDefault(); commitXform(); return; }
   if (xform && e.key === "Escape") { e.preventDefault(); cancelXform(); return; }
-  if (e.key === "Escape") { closeMenu(); return; }
+  if (e.key === "Escape") { closeMenu(); if (tool === "tac") { tacPending = null; setTool("move"); } return; }
   if (e.key === "Enter") { if (!t.closest(".modal")) e.preventDefault(); const l = selL(); if (l && l.type === "text") startEdit(l, true); return; }
   if (e.key === "Tab" && !t.closest(".modal")) { e.preventDefault(); return; }
   const tk = { KeyV: "move", KeyT: "text", KeyU: "rect", KeyI: "eye", KeyB: "brush", KeyE: "eraser", KeyH: "hand" }[code];

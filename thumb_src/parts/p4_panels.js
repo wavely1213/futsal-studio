@@ -13,6 +13,12 @@ const TEXT_PRESETS = [
   ["3D 입체 노랑", { fill: "#FFE14D", fill2: "#FFB800", gradAngle: 90, strokes: [{ color: "#111111", width: 14 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 10, opacity: 0.7 }, glow: { on: false }, outline: { on: false }, box: { on: false }, extrude: { on: true, color: "#8A3B00", depth: 16, angle: 50 } }],
   ["3D 입체 빨강", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#E50914", width: 14 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 14, dx: 0, dy: 8, opacity: 0.7 }, glow: { on: false }, outline: { on: false }, box: { on: false }, extrude: { on: true, color: "#5A0000", depth: 18, angle: 55 } }],
   ["깔끔 흰 글자", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 24, dx: 0, dy: 6, opacity: 0.8 }, glow: { on: false }, outline: { on: false }, box: { on: false } }],
+  // 레퍼런스형 (쪼살·쌈바·해주호·JK) — 획·그림자는 글자 크기 비율
+  ["쪼살 노랑", { fill: "#FFE14D", fill2: "#FFB800", gradAngle: 90, strokes: [{ color: "#111111", width: 24 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 0, dx: 6, dy: 8, opacity: 1 }, glow: { on: false }, outline: { on: false }, box: { on: false } }],
+  ["흰+검 두꺼운", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 0, dx: 6, dy: 8, opacity: 1 }, glow: { on: false }, outline: { on: false }, box: { on: false } }],
+  ["빨강 강조", { fill: "#FF3B30", fill2: "", strokes: [{ color: "#111111", width: 24 }, { color: "#FFFFFF", width: 9 }], shadow: { on: true, color: "#000000", blur: 0, dx: 6, dy: 8, opacity: 1 }, glow: { on: false }, outline: { on: false }, box: { on: false } }],
+  ["시안 네온", { fill: "#EFFFFF", fill2: "", strokes: [{ color: "#00D1FF", width: 9 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#00D1FF", size: 34, opacity: 1 }, outline: { on: false }, box: { on: false } }],
+  ["둥근 박스 서브줄", { fill: "#FFFFFF", fill2: "", strokes: [{ color: "#000000", width: 0 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: false }, outline: { on: false }, box: { on: true, color: "#111111", pad: 16, radius: 18 } }],
 ];
 function applyPreset(l, p) {
   const k = l.size / 110, s = v => Math.round(v * k * 10) / 10, st = JSON.parse(JSON.stringify(p));
@@ -69,17 +75,19 @@ const WARP_OPTS = [["none", "없음"], ["arc", "아치"], ["flag", "깃발"], ["
 const warpHtml = () => F("warp.style", "모양", { t: "seg", opts: WARP_OPTS }) + F("warp.bend", "구부림") + `<div class="hint">구부림을 음수로 하면 반대로 휘어요.</div>`;
 function fadeHtml() {
   return `<div class="row2">${[[0, "→ 오른쪽"], [180, "← 왼쪽"], [90, "↓ 아래"], [270, "↑ 위"]].map(([a, t]) => `<button class="btn sm" data-act="fadeDir" data-v="${a}">${t}으로 사라짐</button>`).join("")}</div>`
-    + F("fade.angle", "방향") + F("fade.start", "사라지기 시작") + F("fade.end", "완전히 사라짐");
+    + F("fade.angle", "방향") + F("fade.start", "사라지기 시작") + F("fade.end", "완전히 사라짐") + F("fade.both", "양쪽 끝 모두", { t: "chk" });
 }
 function imageFieldsHtml(l) {
   return `${F("fit", "맞춤", { t: "seg", opts: [["cover", "꽉 채우기"], ["contain", "전체 보이기"]] })}${F("fx", "가로 초점")}${F("fy", "세로 초점")}${F("slant", "사선 자르기")}
     <div class="row2"><button class="btn pri" id="iCut" data-act="cut">✂ 누끼 따기 (고품질)</button><button class="btn" data-act="cutFast">빠르게</button>${l.orig ? `<button class="btn" data-act="brushB">🖌 다듬기</button>` : ""}</div>
     <div class="hint" style="margin-bottom:8px">${l.orig ? "누끼 레이어예요. B 되살리기 · E 지우개로 가장자리를 다듬어요." : "인물·사물만 남겨요. 처음엔 모델을 내려받아 시간이 걸려요."}</div>
     ${fx("crop", "원본 자르기 (영상 속 옛 자막·로고 가리기)", F("cropB", "아래") + F("cropT", "위") + F("cropL", "왼쪽") + F("cropR", "오른쪽") + `<div class="hint">영상에 박힌 자막이 보이면 '아래'를 25% 정도로 올려 보세요.</div>`)}
+    ${fx("grade", "자동 보정 (레벨·자연 채도·클래리티)", gradeFieldsHtml(), "grade.on")}
     ${fx("adjust", "보정 (밝기·대비·채도·색조·비네팅)", F("bright", "밝기") + F("contrast", "대비") + F("sat", "채도") + F("hue", "색조") + F("blur", "흐림") + F("vignette", "가장자리 어둡게") + `<button class="btn sm" data-act="iReset">보정 초기화</button>`)}`;
 }
-const SHAPES = [["rect", "사각형"], ["ellipse", "원"], ["slant", "사선 패널"], ["burst", "집중선"], ["arrow", "화살표"], ["star", "별"], ["bubble", "말풍선"]];
+const SHAPES = [["rect", "사각형"], ["ellipse", "원"], ["slant", "사선 패널"], ["burst", "집중선"], ["arrow", "화살표"], ["star", "별"], ["bubble", "말풍선"], ...Object.entries(TAC_NAMES)];
 function shapeFieldsHtml(l) {
+  if (TAC_DEF[l.shape]) return F("shape", "모양", { t: "sel", opts: SHAPES }) + tacFieldsHtml(l);
   return `${F("shape", "모양", { t: "sel", opts: SHAPES })}${F("fill", "색", { t: "col" })}${swatches("fill")}
     ${l.shape === "rect" ? F("radius", "둥글기") : ""}${l.shape === "slant" ? F("slant", "기울기") : ""}${l.shape === "burst" ? F("lines", "선 개수") + F("inner", "가운데 빈 곳") : ""}
     ${fx("grad", "그라데이션", F("fill2", "끝 색", { t: "col" }) + F("gradAngle", "방향"), "grad.on")}
@@ -216,7 +224,7 @@ function renderLS() {
     warp: warpHtml(),
     fade: F("fade.on", "사용", { t: "chk" }) + fadeHtml() + `<div class="hint">장면 두 개를 자연스럽게 겹치거나, 사진 끝을 부드럽게 지울 때 써요.</div>`,
     box: F("box.on", "사용", { t: "chk" }) + F("box.color", "상자 색", { t: "col" }) + F("box.pad", "여백") + F("box.radius", "둥글기"),
-    adjust: F("bright", "밝기") + F("contrast", "대비") + F("sat", "채도") + F("hue", "색조") + F("blur", "흐림") + F("vignette", "가장자리 어둡게") + `<button class="btn sm" data-act="iReset">보정 초기화</button>`,
+    adjust: F("grade.on", "자동 보정", { t: "chk" }) + gradeFieldsHtml() + F("bright", "밝기") + F("contrast", "대비") + F("sat", "채도") + F("hue", "색조") + F("blur", "흐림") + F("vignette", "가장자리 어둡게") + `<button class="btn sm" data-act="iReset">보정 초기화</button>`,
   }[lsSec];
   bd.innerHTML = `<div class="lsgrid"><div class="lsnav">${secs.map(([k, t, on]) => `<div class="${k === lsSec ? "on" : ""}" data-act="lsSec" data-v="${k}">${on ? `<input type="checkbox" data-k="${on}">` : `<span style="width:13px;display:inline-block"></span>`}${t}</div>`).join("")}</div>
     <div class="lsbody"><h4 style="margin:0 0 10px">${secs.find(s => s[0] === lsSec)[1]} <span class="hint">· ${esc(lname(l))}</span></h4>${body}</div></div>`;

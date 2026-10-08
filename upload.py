@@ -20,6 +20,7 @@ from pathlib import Path
 import core
 import editor
 import hooks
+import thumb
 
 TITLE_MAX, DESC_MAX, TAGS_MAX, HASHTAG_MAX = 100, 5000, 500, 15
 CH_MIN_VIDEO, CH_MIN_LEN, CH_MIN_COUNT = 180, 10, 3
@@ -501,7 +502,8 @@ def _images_of(name):
     except OSError:
         return []
     longer = {o for o in longer if o != pre and o.startswith(pre)}
-    files = [p for p in files if not any(p.name.startswith(o) for o in longer)]
+    sheet = pre + thumb.AB_SHEET  # A/B 묶음의 '모바일 비교' 한 장은 썸네일이 아님 (가로라서 긴 영상 썸네일로 잡혀 유튜브에 올라갈 뻔함)
+    files = [p for p in files if not any(p.name.startswith(o) for o in longer) and not p.name.startswith(sheet)]
     return sorted(files, key=_mtime, reverse=True)
 
 
