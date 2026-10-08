@@ -311,14 +311,22 @@ def _redirect_to_updater():
         return False
 
 
+CRASH = {}  # 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 → 보관함 카드 '○○ 영상' + [다시 하기]·[빠르게로 다시 하기] (/api/state · D-072)
+CRASH_RETRY = ("/api/analyze", "/api/bundle")  # 보관함에서 같은 영상으로 다시 할 수 있는 작업
+
+
 def _session_start():
     """포트를 잡은 뒤 한 번: 잡히지 않은 오류도 studio.log 에 위치를 남기게 하고, 지난번에 정상적으로 꺼지지 않았으면 기록
-    (작업 중에 꺼졌으면 화면에도 한 번 알림)."""
+    (작업 중에 꺼졌으면 화면에도 한 번 알림 · 보관함에서 다시 할 수 있는 작업이면 그 영상과 [다시 하기]를 보관함 카드로)."""
     studiolog.install_hooks()
     note = studiolog.session_start(core.VERSION)  # 보통 종료(브라우저로 쓰다 Ctrl+C 등)도 표시를 지우게 atexit 에 걸어 둠
     if note:
         log(note["log"])
-        if note["notice"]:
+        crash = note.get("crash") or {}
+        if crash.get("path") in CRASH_RETRY and crash.get("names"):
+            CRASH.clear()
+            CRASH.update(crash)
+        elif note["notice"]:
             updater._NOTICES.append({"text": note["notice"], "warn": True})
 
 
@@ -575,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드 · 내가 시킨 작업은 done.fail)
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
-                                    "remote": remote.SVC.brief()})
+                                    "remote": remote.SVC.brief(), "crash": dict(CRASH) or None})
         if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
             if not remote.SVC.store:
                 return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})
@@ -947,6 +955,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
+        if path == "/api/crash/dismiss":  # 지난번 꺼짐 카드 닫기 (✕)
+            CRASH.clear()
+            return self._send(200, {"ok": True})
         # ---- 받아쓰기 모델: 이 PC 에 맞는 기본값 · 고른 영상의 예상 시간·메모리 (누르기 전에 · D-070) ----
         if path == "/api/whisper/estimate":
             names = b.get("names") or []
@@ -970,6 +981,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": "묶으려면 영상을 2개 이상 골라 주세요"})
 
             def run_bundle():
+                studiolog.target(path="/api/bundle", names=names, model=core.model_of(b.get("model")), title=str(b.get("title") or ""))
                 r = bundle.make_bundle(names, b.get("title"), log)
                 # 이어서 편집점 찾기까지 같은 작업 안에서 (그사이 편집실·썸네일에 다녀와도 끊기지 않게)
                 try:
@@ -982,6 +994,8 @@ class Handler(BaseHTTPRequestHandler):
                     r["analyze_error"] = why
                 return r
             ok = start_job("한 영상으로 묶기", run_bundle)
+            if ok:
+                CRASH.clear()
             return self._send(200 if ok else 409, _started(ok))
         # ---- 올리기 키트 (제목 후보·설명·챕터·태그) ----
         if path == "/api/upload/kit":  # 만들기 · edits 가 있으면 화면에서 고친 내용 저장
@@ -1085,6 +1099,8 @@ class Handler(BaseHTTPRequestHandler):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
             ok = start_job(name, fn, ctx={"browser": ck, "blocked": refs.BLOCKED_MSG if path.startswith("/api/refs/") else None})
+            if ok and path in CRASH_RETRY:
+                CRASH.clear()  # 다시 하는 중 → 지난번 꺼짐 카드는 내림
             return self._send(200 if ok else 409, _started(ok))
         self._send(404, {"error": "not found"})
 
@@ -1329,7 +1345,9 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _analyze(b):
-        out = core.analyze_many(b["names"], log, core.model_of(b.get("model")))  # 안 보냈거나 모르는 값이면 이 PC 사양에 맞는 기본값
+        model = core.model_of(b.get("model"))  # 안 보냈거나 모르는 값이면 이 PC 사양에 맞는 기본값
+        studiolog.target(path="/api/analyze", names=list(b["names"]), model=model)  # 갑자기 꺼지면 다음에 켤 때 이 영상으로 [다시 하기]
+        out = core.analyze_many(b["names"], log, model)
         failed = getattr(out, "failed", None) or {}  # 여러 개 중 그 파일만의 문제(깨짐 등)로 건너뛴 영상 → 쉬운 안내
         # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
         for n in b["names"]:

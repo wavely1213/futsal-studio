@@ -1228,7 +1228,8 @@ function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · 
   const otherKind = jb.body && jb.body.kind === "shorts" ? "videos" : "shorts";
   const label = { retry: "다시 하기", update: "업데이트 확인", folder: "폴더 열기", url: "주소 다시 넣기", log: "작업 기록 보기", logfile: "studio.log 위치 열기",
     nocookies: "로그인 정보 없이 다시 하기", otherkind: otherKind === "shorts" ? "쇼츠로 다시 불러오기" : "긴 영상으로 다시 불러오기",
-    resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기" };
+    resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기",
+    fast: "빠르게로 다시 하기" };
   const btns = acts.map((a, i) => a === "cookies"
     ? `<span class="ckpick">로그인 정보 <select class="sel" data-fck>${list.map(k => `<option value="${k}"${k === ckPick ? " selected" : ""}>${BROWSERS[k]}${BROWSER_NOTE[k] || ""}</option>`).join("")}</select></span><button class="btn${i ? "" : " primary"}" data-fa="cookies">이 브라우저로 다시 받기</button>`
     : `<button class="btn${i ? "" : " primary"}" data-fa="${a}">${label[a]}</button>`).join("");
@@ -1326,7 +1327,7 @@ function downloaded(res) {
 
 /* 2. 보관함 */
 function renderLocal() {
-  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter;
+  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter + JSON.stringify(state.crash || null);
   if (key === lastLocalKey) return;
   lastLocalKey = key;
   const have = new Set(state.local.map(v => v.name));
@@ -1350,7 +1351,7 @@ function renderLocal() {
     return `<div class="row${v.copying ? " copying" : ""}">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${chip}
       ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
         : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
@@ -1465,6 +1466,37 @@ function analyzeNames(names, changedFile) {
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
   if (again && !confirm(`${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
+}
+/* 2-1b. 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (서버 app.CRASH · D-072): 다시 하는 곳(보관함)에 그 영상 이름 +
+   [다시 하기]·[빠르게로 다시 하기] 카드 · 그 영상은 고른 채로 · 줄에도 표시 · ✕ 나 다시 하기를 누르면 서버에서도 내림 */
+let crashShown = "";
+const crashModel = m => m === "small" ? "빠르게" : m === "large-v3-turbo" ? "정확하게" : "";
+function crashOf(name) {
+  const c = state.crash;
+  if (!c || !(c.names || []).includes(name)) return "";
+  return c.path === "/api/bundle" ? "지난번에 묶다가 프로그램이 꺼졌어요" : "지난번에 이 영상의 편집점을 찾다가 프로그램이 꺼졌어요";
+}
+function showCrash(c) {
+  if (!c || crashShown === c.id) return;
+  crashShown = c.id;
+  const have = new Set(state.local.map(v => v.name)), names = (c.names || []).filter(n => have.has(n));
+  const dismiss = () => api("/api/crash/dismiss", {}).catch(() => {});
+  if (!names.length) { dismiss(); return; }  // 그 영상이 보관함에 없음 (지웠거나 이름을 바꿈) → 다시 할 것이 없음
+  const who = `'${cutText(niceName(names[0]), 30)}'${names.length > 1 ? ` 외 ${names.length - 1}개` : ""} 영상`;
+  const how = crashModel(c.model), bund = c.path === "/api/bundle";
+  const msg = `지난번에 ${who}${bund ? "을 한 영상으로 묶다가" : `의 편집점을 찾다가${how ? ` (받아쓰기 '${how}')` : ""}`} 프로그램이 갑자기 꺼졌어요 · `
+    + (c.model === "large-v3-turbo" ? "메모리가 모자랐을 수 있어요. '빠르게'는 메모리를 ⅓쯤만 써요" : "아래에서 바로 다시 할 수 있어요");
+  const body = bund ? { names, title: c.title || "촬영본", model: c.model } : { names, model: c.model };
+  const done = bund ? bundleDone : analyzed;
+  libSel.clear(); names.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
+  if (curPanel() !== "p-library") go("library");
+  showFail({ kind: "crash", msg, actions: ["retry", ...(c.model !== "small" ? ["fast"] : []), "log", "logfile"], job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
+    { path: c.path, body, done, panel: "p-library", on: { fast: () => {
+      setSeg("modelSeg", "small"); try { localStorage.setItem(MODEL_KEY, "small"); } catch (e) {} renderModelHint();
+      job(c.path, { ...body, model: "small" }, done);
+    } } });
+  const card = failSlot("p-library").querySelector(".card.fail");
+  if (card) card.querySelector(".fx").addEventListener("click", dismiss);
 }
 function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남 → '몇 개 중 몇 개' 카드 + 그 영상만 고른 채로 (다시 하기도 그 영상만)
   const jb = lastJob || {}, body = jb.body || { names: [] }, total = (body.names || []).length;
@@ -2138,6 +2170,7 @@ async function poll() {
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
   state.unusable = s.unusable || [];  // 아직 못 쓰는 형식 (.MTS 등)
+  state.crash = s.crash || null;  // 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (보관함 카드 · 줄 표시)
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
   // 내가 시킨 작업(번호)이 끝났을 때만 그 결과·실패로 — 번호가 없으면(예전 흐름) 작업이 비었을 때 (휴대폰이 시킨 작업과 안 섞임)
   const fin = want ? (s.done && s.done.id === want && want === pendingId ? s.done : null) : (wasBusy && !s.job ? s : null);
@@ -2163,6 +2196,7 @@ async function poll() {
   state.sKey = sKey;
   showBusy();
   renderLocal();
+  if (state.crash && !s.job) showCrash(state.crash);
   if ($("p-library").classList.contains("on")) checkSources();
   sync();
 }

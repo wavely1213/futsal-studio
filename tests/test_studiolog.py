@@ -162,6 +162,59 @@ class SessionTests(Base):
         self.assertFalse((self.tmp / studiolog.RUNNING).exists(), "시험 서버·도구는 실행 표시를 쓰지 않음")
 
 
+class CrashTargetTests(Base):
+    """D-072: 작업 중에 갑자기 꺼지면 다음에 켤 때 '어느 영상'·받아쓰기 방식까지 (예전: 작업 이름만 → 어디서 무엇을 다시 할지 모름)."""
+
+    def crash(self, name="편집점 찾기", **what):
+        studiolog.session_start("2.8.0")
+        studiolog.job(name)
+        if what:
+            studiolog.target(**what)
+        studiolog._SESSION.clear()  # oom-kill · kill -9 흉내 (정상 종료 표시 없이)
+        return studiolog.session_start("2.8.0")
+
+    def test_target_saved_and_reported(self):
+        note = self.crash(path="/api/analyze", names=["IMG_4830.mp4", "레슨 [꿀팁].mp4"], model="large-v3-turbo")
+        self.assertIn("'IMG_4830.mp4' 외 1개 영상의 '편집점 찾기' 중에", note["notice"])
+        self.assertIn("대상 IMG_4830.mp4, 레슨 [꿀팁].mp4", note["log"])
+        self.assertIn("받아쓰기 large-v3-turbo", note["log"])
+        c = note["crash"]
+        self.assertEqual((c["job"], c["path"], c["names"], c["model"]), ("편집점 찾기", "/api/analyze", ["IMG_4830.mp4", "레슨 [꿀팁].mp4"], "large-v3-turbo"))
+        self.assertTrue(c["id"])
+
+    def test_without_target_like_before(self):
+        note = self.crash("보관함에 담기")
+        self.assertIn("지난번에 '보관함에 담기' 중에 프로그램이 갑자기 꺼졌어요", note["notice"])
+        self.assertEqual(note["crash"]["job"], "보관함에 담기")
+        self.assertNotIn("names", note["crash"])
+
+    def test_finished_job_forgets_target(self):
+        studiolog.session_start("2.8.0")
+        studiolog.job("편집점 찾기")
+        studiolog.target(path="/api/analyze", names=["a.mp4"])
+        studiolog.job(None)
+        studiolog.job("내보내기")
+        studiolog._SESSION.clear()
+        note = studiolog.session_start("2.8.0")
+        self.assertNotIn("names", note["crash"], "다음 작업은 앞 작업의 대상을 물려받지 않음")
+        self.assertNotIn("a.mp4", note["notice"])
+
+    def test_target_needs_running_job_and_known_fields(self):
+        studiolog.target(path="/api/analyze", names=["a.mp4"])  # 실행 표시 없음 (시험 서버) → 아무것도 안 씀
+        self.assertFalse((self.tmp / studiolog.RUNNING).exists())
+        note = self.crash(path="/api/analyze", names=["a.mp4", 3, ""], model=["x"], cookies="firefox", title="t")
+        c = note["crash"]
+        self.assertEqual(c["names"], ["a.mp4"])
+        self.assertNotIn("model", c, "꼴이 다른 값은 버림")
+        self.assertNotIn("cookies", c, "모르는 칸은 남기지 않음")
+
+    def test_hand_edited_marker(self):
+        (self.tmp / studiolog.RUNNING).write_text(json.dumps({"start": "x", "version": "1", "job": "편집점 찾기",
+                                                              "what": {"names": "a.mp4", "path": 7}}), encoding="utf-8")
+        note = studiolog.session_start("2.8.0")
+        self.assertEqual({k: v for k, v in note["crash"].items() if k not in ("job", "at", "id")}, {})
+
+
 class AppTests(Base):
     """app 과 함께: 작업 실패·요청 오류·켤 때 알림."""
 
@@ -231,6 +284,61 @@ class AppTests(Base):
             except Exception:  # noqa: BLE001 — 끊긴 응답
                 pass
         self.assertNotIn("요청 오류", "\n".join(self.lines()))
+
+    def test_crash_during_analyze_becomes_library_card(self):
+        """편집점 찾기 중 꺼짐 → 다음에 켜면 보관함 카드용(/api/state crash: 영상·받아쓰기 방식·다시 할 주소) · 1단계 알림 카드는 안 띄움 ·
+        ✕ 로 닫거나 같은 작업을 다시 시작하면 내림."""
+        import updater
+        updater.take_notice()
+        (core.VIDEOS / "IMG_4830.mp4").write_bytes(b"\0" * 10)
+        studiolog.session_start("2.8.0")
+        started = threading.Event()
+        gate = threading.Event()
+
+        def fake(names, log, model):  # 받아쓰는 중 (여기서 꺼짐)
+            started.set()
+            gate.wait(10)
+            out = core.Analyzed()
+            out.failed = {n: {"kind": "broken", "msg": "x"} for n in names}
+            return out
+        with mock.patch.object(core, "analyze_many", side_effect=fake), mock.patch.object(core, "pc_spec", return_value={"memGB": 7.8, "cores": 8}):
+            self.app.start_job("편집점 찾기", lambda: self.app.Handler._analyze({"names": ["IMG_4830.mp4"], "model": "large-v3-turbo"}))
+            self.assertTrue(started.wait(10))
+            mark = json.loads((self.tmp / studiolog.RUNNING).read_text(encoding="utf-8"))
+            self.assertEqual(mark["what"], {"path": "/api/analyze", "names": ["IMG_4830.mp4"], "model": "large-v3-turbo"})
+            snap = dict(studiolog._SESSION)
+            gate.set()
+        for _ in range(200):
+            if not self.app.JOB["name"]:
+                break
+            time.sleep(0.05)
+        (self.tmp / studiolog.RUNNING).write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")  # 받아쓰는 중에 꺼졌던 표시
+        studiolog._SESSION.clear()
+        hooked = list(studiolog._HOOKED)
+        prev = threading.excepthook, sys.excepthook
+        try:
+            with mock.patch.object(studiolog.atexit, "register"), mock.patch.dict(self.app.CRASH, {}, clear=True):
+                self.app._session_start()
+                self.assertIsNone(updater.take_notice(), "1단계에 일반 알림 카드를 띄우지 않음 (보관함 카드로)")
+                with urllib.request.urlopen(self.base + "/api/state", timeout=10) as r:
+                    crash = json.loads(r.read())["crash"]
+                self.assertEqual((crash["path"], crash["names"], crash["model"], crash["job"]),
+                                 ("/api/analyze", ["IMG_4830.mp4"], "large-v3-turbo", "편집점 찾기"))
+                self.assertEqual(self.post("/api/crash/dismiss", {}), 200)
+                self.assertEqual(self.app.CRASH, {})
+                self.app.CRASH.update(crash)
+                with mock.patch.object(core, "analyze_many", side_effect=fake):
+                    gate.set()
+                    self.assertEqual(self.post("/api/analyze", {"names": ["IMG_4830.mp4"], "model": "small"}), 200)
+                    self.assertEqual(self.app.CRASH, {}, "다시 하는 중이면 카드를 내림")
+                    for _ in range(200):
+                        if not self.app.JOB["name"]:
+                            break
+                        time.sleep(0.05)
+        finally:
+            threading.excepthook, sys.excepthook = prev
+            studiolog._HOOKED[:] = hooked
+        self.assertIn("대상 IMG_4830.mp4", self.log.read_text(encoding="utf-8"))
 
     def test_session_start_logs_and_notifies_crash_during_job(self):
         import updater
