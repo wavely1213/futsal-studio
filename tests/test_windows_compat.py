@@ -650,7 +650,8 @@ class AnalyzeResults(Work):
         return M()
 
     def run_analyze(self, name):
-        with mock.patch.object(core, "_whisper", return_value=self.fake_model()), mock.patch.object(core, "dict_path", return_value=self.tmp / "dict.json"):
+        with mock.patch.object(core, "_whisper", return_value=self.fake_model()), mock.patch.object(core, "dict_path", return_value=self.tmp / "dict.json"), \
+                mock.patch.object(core, "speech_regions", return_value=[(0.0, 2.0)]):  # 사인파 시험 소리라 실제 말 찾기는 말소리 없음으로 봄 → 말소리 구간을 지정
             return core.analyze(name, lambda *a: None)
 
     def make(self, name):

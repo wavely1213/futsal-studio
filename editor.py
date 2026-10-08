@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -122,6 +123,14 @@ def probe(path):
 def media_info(name):
     i = probe(video_path(name))
     return {k: i[k] for k in ("duration", "width", "height", "fps", "hdr")}
+
+
+def _has_audio(name):
+    """원본 영상에 소리 줄기가 있는지 (화면 녹화·마이크를 끈 휴대폰 영상은 없음 · 못 읽으면 있다고 봄)."""
+    try:
+        return bool(probe(video_path(name))["audio"])
+    except (OSError, ValueError, KeyError, RuntimeError):
+        return True
 
 
 def media_entry(f, src="videos", mid=None):
@@ -1034,7 +1043,7 @@ def _intro_teaser(items, rec, tidy, sec, segs=None, peaks=None):
 def _src_to_tl(items, t):
     """원본 t 초 → 타임라인 시각 (V1 클립 안일 때만, 잘린 곳이면 None)."""
     for it in items:
-        if it.get("track") == "V1" and it.get("media", "main") == "main" and float(it["in"]) <= t < float(it["out"]):
+        if it.get("track") == "V1" and it.get("media", "main") == "main" and not it.get("noCaps") and float(it["in"]) <= t < float(it["out"]):
             return float(it["start"]) + (t - float(it["in"])) / i_sp(it)
     return None
 
@@ -1395,7 +1404,7 @@ def migrate_project(name, proj):
     if not any(m["id"] == "main" for m in media):
         i = proj["info"]
         media.insert(0, {"id": "main", "kind": "video", "src": "videos", "file": name, "dur": i["duration"], "w": i["width"],
-                         "h": i["height"], "fps": i.get("fps", 30.0), "audio": True})
+                         "h": i["height"], "fps": i.get("fps", 30.0), "audio": _has_audio(name)})
     for m in media:  # 미리보기 파일이 있는지 매번 다시 확인
         if m.get("kind") == "video":
             try:
@@ -1766,7 +1775,9 @@ def freeze_frame(src, f, t):
     """정지 화면(프레임 고정): 그 순간을 PNG 로 저장해 가져온 미디어로 (원래 영상과 같은 크기로 보이게 freeze 표시)."""
     p = media_path(f, src)
     tag = hashlib.sha1(f"{src}|{p.name}".encode("utf-8")).hexdigest()[:6]
-    out = ASSETS / f"정지_{Path(f).stem[:30].strip(' .')}_{tag}_{t:.2f}.png"
+    # 이름은 NFC 로 (맥·아이폰에서 온 풀어 쓴 한글이 30자에서 잘려 글자 반쪽이 남지 않게) · '%'는 뺌 (ffmpeg 가 '%d'를 번호 자리로 읽음)
+    stem = unicodedata.normalize("NFC", Path(f).stem).replace("%", "")[:30].strip(" .")
+    out = ASSETS / f"정지_{stem}_{tag}_{t:.2f}.png"
     if not out.exists():  # 임시 파일에 다 만든 뒤에만 제 이름으로 (디스크가 차서 반쪽이 된 그림이 '있는 파일'로 남지 않게)
         info = probe(p)
         vf = ["-vf", ",".join(tonemap_chain(info["hdr"]))] if info.get("hdr") else []
@@ -1979,18 +1990,22 @@ def _covered(ivs, a, b):
     return got
 
 
-def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
-    """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초)."""
+def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None):
+    """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초).
+    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일."""
     if keep_pause:
         kp = max(0.08, float(keep_pause))
         pre, post = min(0.15, kp * 0.4), min(0.25, kp * 0.6)
         gap_s = gap_l = max(0.0, kp - pre - post)
     else:
         pre, post, gap_s, gap_l = 0.15, 0.25, 0.6, 0.8
-    segs = []
-    t = core.adir(name) / "transcript.json"
-    if t.exists():
-        segs = [s for s in json.loads(t.read_text(encoding="utf-8")) if s["text"].strip()]
+    if segs is not None:
+        segs = [s for s in segs if str(s.get("text") or "").strip()]
+    else:
+        segs = []
+        t = core.adir(name) / "transcript.json"
+        if t.exists():
+            segs = [s for s in json.loads(t.read_text(encoding="utf-8")) if s["text"].strip()]
     extra_p = core.adir(name) / "analysis.json"
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
@@ -2260,25 +2275,71 @@ def track_state(seq, track_id, t, trans):
     return None
 
 
+CAP_JOIN = 0.06  # 같은 자막 조각 사이가 이만큼 안이면 이어진 것 (프레임 반올림 여유)
+CAP_MIN = 0.7    # 타임라인 자막 조각은 (다음 자막 전까지) 적어도 이만큼(초) 보임 — 읽을 틈
+CAP_CPS = 14.0   # 자막 1초에 읽을 글자 수 한도 (띄어쓰기 빼고) — 넘으면 다음 자막 전까지 조금 더 보임
+
+
 def timeline_captions(proj):
     """자막을 타임라인 시간으로 (V1 의 원본 클립을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨)."""
     res = []
     total = seq_total(proj)
-    vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev")],
+    # noCaps: 다시 보기·티저처럼 같은 장면을 한 번 더 쓴 클립은 말 자막을 다시 띄우지 않음 (editor.html capsTL 과 같은 규칙)
+    vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev") and not it.get("noCaps")],
                   key=lambda x: x["start"])
     shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
-    for cap0 in proj["captions"]:
+    # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
+    for cap0 in proj.get("msgCaps") or proj["captions"]:
         for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
+            toks = str(cap.get("text") or "").split()
             for it in vids:
                 a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
                 if b - a > 0.05:
                     s, e = i_tl(it, a), min(i_tl(it, b), total)
                     if e - s > 0.04:
-                        c = {"start": s, "end": e, "text": cap["text"]}
+                        # 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말·고쳐 다시 한 말이 자막에 남지 않게 · editor.html capsTL 과 같은 규칙)
+                        keep = [k for k, w in enumerate(ws) if it["in"] <= (float(w["s"]) + float(w["e"])) / 2 < it["out"]] if ws else None
+                        if keep is not None and not keep:
+                            continue
+                        c = {"start": s, "end": e, "text": cap["text"] if keep is None or len(keep) == len(ws) else " ".join(toks[k] for k in keep)}
                         if ws:  # 노래방 자막용 단어 시각도 타임라인으로
-                            c["words"] = [{"w": w.get("w", ""), "s": i_tl(it, float(w["s"])), "e": i_tl(it, float(w["e"]))} for w in ws]
+                            c["words"] = [{"w": ws[k].get("w", ""), "s": i_tl(it, float(ws[k]["s"])), "e": i_tl(it, float(ws[k]["e"]))} for k in keep]
+                            c["_keep"] = keep
+                            c["_n"] = len(ws)
+                            c["_toks"] = toks
+                            c["_full"] = cap["text"]
+                        c["_k"] = id(cap)
                         res.append(c)
-    return sorted(res, key=lambda x: x["start"])
+    # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
+    # (editor.html capsTL 과 같은 규칙)
+    out = []
+    for c in sorted(res, key=lambda x: x["start"]):
+        p = out[-1] if out else None
+        if p is not None and p["_k"] == c["_k"] and abs(c["start"] - p["end"]) <= CAP_JOIN:
+            p["end"] = max(p["end"], c["end"])
+            if "words" in p and "words" in c:
+                p["words"] = p["words"] + c["words"]
+            else:
+                p.pop("words", None)
+            if "_keep" in p and "_keep" in c:
+                p["_keep"] = sorted(set(p["_keep"]) | set(c["_keep"]))
+                p["text"] = " ".join(p["_toks"][k] for k in p["_keep"]) if len(p["_keep"]) < p["_n"] else p["_full"]
+            continue
+        out.append(c)
+    # 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막이 나오기 전까지 CAP_MIN 초는 보이게 (editor.html capsTL 과 같은 규칙)
+    # (바로 이어지는 다음 자막이 넉넉하면 그 시작을 조금 늦춰 자리를 만듦)
+    # 글자가 많으면 1초에 CAP_CPS 글자를 넘지 않게 읽을 시간도 (다음 자막 전까지)
+    for k, c in enumerate(out):
+        need = max(CAP_MIN, len(re.sub(r"\s+", "", c["text"])) / CAP_CPS)
+        if c["end"] - c["start"] < need:
+            n = out[k + 1] if k + 1 < len(out) else None
+            if n is not None and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
+                n["start"] = c["start"] + need
+            c["end"] = max(c["end"], min(c["start"] + need, n["start"] if n is not None else total))
+    for c in out:
+        for k in ("_k", "_keep", "_n", "_toks", "_full"):
+            c.pop(k, None)
+    return out
 
 
 # ---------- 단어 시각 · 쇼츠형 자막 나누기 (#5) ----------
@@ -2386,7 +2447,14 @@ def _ass_time(t):
     return f"{int(h)}:{int(m):02d}:{s:05.2f}"
 
 
-def _effect_tags(effect, x, y, dur):
+def _effect_tags(effect, x, y, dur, rz=0.0):
+    """타이틀·자막 효과 → ASS 명령 (editor.html effect() 와 같은 움직임). rz: ASS 기울기(\\frz, 반시계 방향 +)."""
+    if effect == "stamp":  # 쾅 찍기: 크게(165%) 나타나 0.12초 만에 제자리로
+        return r"{\fscx165\fscy165\t(0,120,\fscx100\fscy100)}"
+    if effect == "shake":  # 흔들기: 살짝 크게 시작 + 좌우로 기울며 흔들림 0.24초
+        r = _num(round(rz, 2))
+        return (rf"{{\fscx125\fscy125\t(0,80,\fscx100\fscy100)\t(0,60,\frz{_num(round(rz + 6, 2))})\t(60,120,\frz{_num(round(rz - 6, 2))})"
+                rf"\t(120,180,\frz{_num(round(rz + 3, 2))})\t(180,240,\frz{r})}}")
     if effect == "fade":
         return r"{\fad(150,120)}"
     if effect == "pop":
@@ -2422,6 +2490,17 @@ def _karaoke(text, dur, words=None, t0=0.0):
 
 # ASS 글자 크기는 줄 높이(위+아래 여백) 기준이라 화면(CSS) 글자보다 작게 나옴 → Pretendard 비율만큼 키워 미리보기와 같게
 FONT_K = 1.194
+# 타이틀 글꼴 (style.font): 이름 → (ASS 글꼴 이름, 크기 비율) · 비율은 글꼴의 줄 높이(win 위+아래)/em — libass 로 그려 재어 확인 (Pretendard 1.19 · 검은고딕 1.02 · 도현 1.0)
+TITLE_FONTS = {"Black Han Sans": ("Black Han Sans", 1.02), "Do Hyeon": ("Do Hyeon", 1.0)}
+
+
+def _rot(s):
+    """타이틀 기울기(도, 시계 방향 +) — 숫자가 아니면 0."""
+    try:
+        r = float(s.get("rot") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(-45.0, min(45.0, r)) if math.isfinite(r) else 0.0
 
 
 def build_ass(proj, W, H):
@@ -2430,13 +2509,17 @@ def build_ass(proj, W, H):
     def style_line(name, s):
         font = "Pretendard Black" if s["weight"] == "Black" else "Pretendard"
         bold = 0 if s["weight"] == "Black" else -1
+        k = FONT_K
+        if s.get("font") in TITLE_FONTS:  # 굵기가 하나뿐인 글꼴 → 굵게 흉내 없이 (미리보기도 font-weight 400)
+            font, k = TITLE_FONTS[s["font"]]
+            bold = 0
         if s.get("bgOn"):
             border, outline, ocol = 3, max(6, s["strokeW"]), _ass_color(s["bg"], 1 - s["bgOpacity"])
         else:
             border, outline, ocol = 1, s["strokeW"], _ass_color(s["stroke"])
         prim = _ass_color(s["highlight"] if s["effect"] == "karaoke" else s["fill"])
         sec = _ass_color(s["fill"])
-        return (f"Style: {name},{font},{round(s['size'] * FONT_K)},{prim},{sec},{ocol},{ocol},{bold},0,0,0,100,100,0,0,"
+        return (f"Style: {name},{font},{round(s['size'] * k)},{prim},{sec},{ocol},{ocol},{bold},0,0,0,100,100,0,0,"
                 f"{border},{outline},0,2,40,40,0,1")
 
     lines = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "WrapStyle: 0",
@@ -2473,9 +2556,11 @@ def build_ass(proj, W, H):
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
         k = cap_fit(text, s, W) if fit else 1.0
         fs = rf"\fs{round(s['size'] * k * FONT_K)}" if k < 1 else ""  # 화면보다 긴 한 줄 자막은 글자만 조금 작게
-        tags = rf"{{\an{an}\pos({x},{y}){fs}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}}}"
+        rz = -_rot(s)  # 화면은 시계 방향 + · ASS \frz 는 반시계 방향 + (기준점은 \pos 자리 = 미리보기 transform-origin)
+        fr = rf"\frz{_num(round(rz, 2))}" if rz else ""
+        tags = rf"{{\an{an}\pos({x},{y}){fs}{fr}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}{fr}}}"
         body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
-        eff = _effect_tags(s["effect"], x, y, end - start)
+        eff = _effect_tags(s["effect"], x, y, end - start, rz)
         lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     if proj.get("captionsOn", True):
@@ -2826,7 +2911,9 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         chain = []
         if md["kind"] == "image":
             # 사진은 1초에 한 번만 읽고(같은 장면) 크기 맞추기도 한 번만 → fps 로 늘림 (예전엔 매 프레임 다시 읽고 줄임)
-            inputs.append(["-loop", "1", "-framerate", "1", "-t", f"{dur + 1.5:.3f}", "-i", str(p)])
+            # (-pattern_type none: 이름의 '%d'·'%['·'*' 를 번호·찾기 무늬로 읽지 않게 · 영상 이름이 든 정지 화면 PNG)
+            pat = ["-f", "image2", "-pattern_type", "none"] if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff") else []
+            inputs.append(["-loop", "1", "-framerate", "1", "-t", f"{dur + 1.5:.3f}", *pat, "-i", str(p)])
             chain += ["setpts=PTS-STARTPTS"] + _color_filters(it)
         else:
             ma, mb = i_mt(it, t_a), i_mt(it, t_b)
@@ -3147,8 +3234,9 @@ def _mem_workers(default, media, W, H, log=None):
     return n
 
 
-def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None):
-    """ffmpeg 실행 (진행률·취소 지원). abort: 이 작업만 멈추는 신호. enc: 그래픽카드 인코더면 그 문제인지 구분."""
+def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None, want_err=False):
+    """ffmpeg 실행 (진행률·취소 지원). abort: 이 작업만 멈추는 신호. enc: 그래픽카드 인코더면 그 문제인지 구분.
+    want_err: 끝나면 ffmpeg 가 남긴 글(측정값 등)을 돌려줌."""
     if CANCEL.is_set() or (abort is not None and abort.is_set()):
         raise Cancelled()
     with tempfile.TemporaryFile(dir=cwd) as errf:
@@ -3182,6 +3270,9 @@ def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=
                 e.session = bool(HW_SESSION.search(msg))
                 raise e
             raise RuntimeError(msg[-600:])
+        if want_err:
+            errf.seek(0)
+            return errf.read().decode("utf-8", "replace")
 
 
 # 그래픽카드 인코더 (있으면 내보내기가 몇 배 빨라짐) — 실제로 짧게 인코딩해 보고 되는 것만 씀
@@ -3265,6 +3356,16 @@ def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress, abort=None):
         raise
 
 
+def voice_filters(voice):
+    """목소리 보정 설정({hp, nr, comp}) → ffmpeg 소리 필터 목록 (대사 트랙들을 섞은 소리에 · 48kHz 스테레오 기준).
+    MSG 가 효과음 크기를 '보정한 말소리'에 맞출 때도 같은 것을 씀 (msg._voice_peak)."""
+    voice = voice or {}
+    D = AFFTDN_DELAY
+    return (["highpass=f=80"] if voice.get("hp") else []) + \
+        ([f"apad=pad_len={D}", f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40", f"atrim=start_sample={D}"] if voice.get("nr") else []) + \
+        (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
+
+
 def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
     """소리 섞기: 트랙별 볼륨·키프레임·페이드·전환·음소거/솔로 → 대사 + 배경음악(말할 때 자동 줄임).
     클립마다 ffmpeg 로 읽는 것은 몇 개씩 동시에 (컷이 많은 롱폼이 훨씬 빨라짐)."""
@@ -3303,7 +3404,14 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         if not p_in.exists():
             raise RuntimeError(f"미디어 파일이 없어요 · {md['file']}")
         jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, tr.get("role", "dialog") != "dialog"))
-    dia = mus = None
+    # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게 — 'voiceFx: false' 트랙(효과음)은 보정 없이 그 뒤에 더함
+    # (효과음이 압축기를 지나면 말과 함께 눌렸다 키워져 정한 크기보다 커지고 말소리도 같이 눌림 · 판정: 띠로리가 말보다 큼)
+    vf = voice_filters(seq.get("voice"))
+    dia = mus = fxb = None
+    # 보정하지 않는 트랙(효과음)은 짧은 소리 조각으로 메모리에 모았다가 보정한 대사에 더함 — 예전처럼 영상 길이만큼의 버퍼(fx.f32)를
+    # 따로 만들면 49분 영상에서 임시 파일이 1GB 더 필요했음 · 조각이 FX_MEM 을 넘으면(긴 소리를 그 트랙에 넣음) 그때만 파일 버퍼로
+    fx_parts, fx_bytes = [], [0]
+    fx_on = bool(vf) and any(not j[-1] and j[1].get("voiceFx") is False for j in jobs)
     try:
         dia = np.memmap(tmp / "dialog.f32", np.float32, "w+", shape=(n, 2))
         mus = np.memmap(tmp / "music.f32", np.float32, "w+", shape=(n, 2)) if any(j[-1] for j in jobs) else None
@@ -3331,7 +3439,8 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                    "-vn", "-af", ",".join(af) or "anull", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"]
             lvl = param(it, "level")
             g_static = 10 ** ((float(it.get("gain") or 0) + float(tr.get("vol") or 0)) / 20)
-            bus = mus if music else dia
+            to_fx = fx_on and not music and tr.get("voiceFx") is False
+            bus = mus if music else None if to_fx else dia
             pos = int(round((tl_start - t_lo) * SR))
             end_i = int(round((a_hi - t_lo) * SR))
             st, en = it["start"], i_end(it)
@@ -3376,7 +3485,13 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                         g = g * ((tau >= a_lo - 1e-6) & (tau < a_hi + 1e-6))
                         y = x * g[:, None].astype(np.float32)
                         with lock:
-                            bus[a0 + lo_i: a0 + hi_i] += y
+                            if to_fx and fxb is None and fx_bytes[0] + y.nbytes > FX_MEM:
+                                fx_spill()
+                            if to_fx and fxb is None:
+                                fx_parts.append((a0 + lo_i, y.copy()))
+                                fx_bytes[0] += y.nbytes
+                            else:
+                                (fxb if to_fx else bus)[a0 + lo_i: a0 + hi_i] += y
                 finally:
                     p.stdout.close()
                     p.wait()
@@ -3388,6 +3503,13 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                 if p.returncode and not got:
                     errf.seek(0)
                     raise RuntimeError(f"소리를 읽지 못했어요 · {md['file']} · {errf.read().decode('utf-8', 'replace')[-200:]}")
+
+        def fx_spill():  # (잠금 안에서) 모은 조각이 많으면 파일 버퍼로 옮김
+            nonlocal fxb
+            fxb = np.memmap(tmp / "fx.f32", np.float32, "w+", shape=(n, 2))
+            for a, y in fx_parts:
+                fxb[a:a + len(y)] += y
+            fx_parts.clear()
 
         workers = max(1, min(4, os.cpu_count() or 2))
         if jobs:
@@ -3408,12 +3530,6 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                     progress((k + 1) / len(futs))
             finally:
                 ex.shutdown(wait=True, cancel_futures=True)
-        # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게
-        voice = seq.get("voice") or {}
-        D = AFFTDN_DELAY
-        vf = (["highpass=f=80"] if voice.get("hp") else []) + \
-             ([f"apad=pad_len={D}", f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40", f"atrim=start_sample={D}"] if voice.get("nr") else []) + \
-             (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
         if vf:
             progress(0.98)
             dia.flush()
@@ -3430,6 +3546,14 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                     e = min(m, b + SR * 10)
                     dia[b:e] = np.asarray(cl[b * 2:e * 2]).reshape(-1, 2)
                 del cl
+        for a, y in fx_parts:  # 보정하지 않는 트랙(효과음)을 보정한 대사에 더함 (배경음악 줄이기는 예전처럼 둘을 합한 소리로 봄)
+            dia[a:a + len(y)] += y
+        fx_parts.clear()
+        if fxb is not None:
+            fxb.flush()
+            for b in range(0, n, SR * 10):
+                e = min(n, b + SR * 10)
+                dia[b:e] = dia[b:e] + fxb[b:e]
         # 말할 때 배경음악 자동 줄이기 (덕킹) → 결과는 대사 버퍼에 그대로 더함 (임시 파일 하나 덜 씀)
         duck = seq.get("duck") or {}
         win = SR // 50  # 20ms
@@ -3473,7 +3597,72 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         return tmp / "dialog.f32", peak
     finally:
         # 메모리 매핑을 바로 놓음: 멈추거나 오류가 나도 (작업 스레드의 흔적이 남아 있어도) Windows 에서 임시 파일이 지워지게
-        dia = mus = None  # noqa: F841
+        dia = mus = fxb = None  # noqa: F841
+
+
+FX_MEM = 256 << 20   # 효과음 조각을 메모리에 모으는 한도 (바이트)
+LOUD_TP_FLOOR = -4.0  # AAC 로 줄인 뒤 다시 맞출 때 최대 크기를 이보다 낮게 잡지 않음
+LOUD_TP = -2.0    # 소리 크기 맞추기의 최대 크기(dBTP) — AAC 로 줄이면 순간 최대가 0.5dB 남짓 커져 -1.5 로 맞춘 소리가 -0.9 dBTP 로 나옴
+#                   (판정: 유튜브 기준 -1 dBTP 넘음) → 여유를 둠
+LOUD_TP_OUT = -1.2  # 다 줄인(AAC) 소리의 순간 최대가 이보다 크면 LOUD_TP 를 그만큼 더 낮춰 다시 만듦
+
+
+def _true_peak(path, tmp, abort=None):
+    """소리 파일의 순간 최대(dBTP · ebur128) — 못 재면 None."""
+    try:
+        r = _run_ff(["-v", "info", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"], tmp, abort=abort, want_err=True)
+    except RuntimeError:
+        return None
+    found = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", r or "")
+    return float(found[-1]) if found else None
+
+
+LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(dBFS) — 공 차는 소리·효과음처럼 순간만 큰 소리가 있으면
+#                   loudnorm 한 번(실시간)으로는 목표까지 못 올림 (최대 크기 제한에 걸려 -17 LUFS 처럼 작게 남음)
+
+
+def _loud_measure(mix, tmp, af, lufs, abort=None):
+    """loudnorm 첫 번째 재기 (print_format=json) → 잰 값 dict 또는 None (못 재면 한 번 재기로)."""
+    try:
+        r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af",
+                     ",".join(list(af) + [f"loudnorm=I={lufs:.1f}:TP={LOUD_TP:.2f}:LRA=11:print_format=json"]), "-f", "null", "-"],
+                    tmp, abort=abort, want_err=True)
+        m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r or "", re.S)
+        d = json.loads(m.group(0)) if m else None
+        keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+        if not d or any(k not in d for k in keys) or any(not re.fullmatch(r"-?[\d.]+", str(d[k]).strip()) for k in keys):
+            return None   # (-inf 같은 값: 조용한 소리 → 한 번 재기)
+        return {k: str(d[k]).strip() for k in keys}
+    except (RuntimeError, ValueError):
+        return None
+
+
+def _loud_pre(mix, tmp, lufs, vol, abort=None):
+    """소리 크기 맞추기 전처리: 섞은 소리를 한 번 재서(ebur128) 목표까지 모자란 만큼 미리 키우고, 그때 넘치는 순간 소리만 리미터로 누름.
+    리미터가 누른 만큼 다시 한 번 재서 더 키움(2번 재기, 소리만이라 빠름). 그다음 loudnorm 은 남은 1dB 안팎만 맞춤 →
+    목표 LUFS·최대 LOUD_TP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
+    def measure(extra):
+        try:
+            r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af",
+                         ",".join([f"volume={vol:.3f}"] + extra + ["ebur128=peak=true"]), "-f", "null", "-"], tmp, abort=abort, want_err=True)
+        except RuntimeError:
+            return None
+        found = re.findall(r"I:\s+(-?[\d.]+) LUFS", r or "")
+        return float(found[-1]) if found else None
+
+    def chain(g):
+        return [f"volume={g:.2f}dB", f"alimiter=limit={10 ** (LOUD_PEAK / 20):.4f}:attack=2:release=80:level=0:asc=1"]
+
+    i_in = measure([])
+    if i_in is None or i_in < -60 or lufs - i_in <= 0.5:  # 조용한 영상 · 이미 충분히 크면 loudnorm 만
+        return []
+    gain = min(lufs - i_in, 24.0)
+    for _ in range(3):  # 리미터가 눌러 모자란 만큼 더 (공 차는 소리가 잦은 짧은 영상은 두 번으로 모자라 -15.7 LUFS · 판정 round6 U3)
+        i2 = measure(chain(gain))
+        if i2 is None or lufs - i2 <= 0.4 or gain >= 30.0:
+            break
+        gain = min(gain + (lufs - i2) * 1.15, 30.0)
+    return chain(gain)
 
 
 PRESETS = {
@@ -3685,6 +3874,28 @@ def _tlabel(t):
     return f"{int(t // 60)}m{int(t % 60):02d}s"
 
 
+def _disk_need(span, W, H, proj):
+    """내보내기에 필요한 임시·결과 디스크 크기 어림(바이트): 소리 버퍼(48kHz 스테레오 float · 대사, 보정한 대사, 배경음악) +
+    화면(구간 파일 + 이어 붙인 결과 · 해상도에 맞춘 넉넉한 비트레이트) + 여유 200MB."""
+    n = span * SR * 2 * 4
+    music = any(t.get("role") == "music" for t in proj.get("tracks") or [] if t.get("k") == "a")
+    bufs = 1 + (1 if voice_filters(proj.get("voice")) else 0) + (1 if music else 0)
+    vbps = 2.2e6 * (W * H) / (1920 * 1080)   # 바이트/초
+    return int(n * bufs + span * vbps * 2 + 200e6)
+
+
+def _check_disk(span, W, H, proj):
+    """디스크가 모자라면 내보내기 전에 쉬운 안내 (예전에는 한참 만들다 '[Errno 28]'·'[WinError 112]'로 실패)."""
+    need = _disk_need(span, W, H, proj)
+    try:
+        free = shutil.disk_usage(core.OUT).free
+    except OSError:
+        return
+    if free < need:
+        raise RuntimeError(f"디스크 공간이 모자라요 · 이 영상을 내보내려면 약 {need / 1e9:.1f}GB 가 필요한데 {free / 1e9:.1f}GB 남았어요 "
+                           "(작업 폴더가 있는 드라이브에서 필요 없는 파일을 지워 주세요)")
+
+
 def export(name, proj, opts, log):
     CANCEL.clear()
     proj = migrate_seq(dict(proj))
@@ -3698,6 +3909,9 @@ def export(name, proj, opts, log):
         i = proj["info"]
         media["main"] = {"id": "main", "kind": "video", "src": "videos", "file": proj.get("source") or name, "dur": i["duration"],
                          "w": i["width"], "h": i["height"], "fps": i.get("fps", 30.0), "audio": True}
+    if media["main"].get("audio") and media["main"].get("src", "videos") == "videos" and not _has_audio(media["main"]["file"]):
+        # 소리 줄기가 없는 원본(화면 녹화 등): 대사 클립을 읽지 않음 — 예전 프로젝트는 늘 '소리 있음'으로 적혀 있어 내보내기가 실패했음
+        media["main"] = dict(media["main"], audio=False)
     proj["media"] = list(media.values())
     bad = [it for it in proj["items"] if it.get("media") not in media or it["out"] - it["in"] <= 1e-3]
     if bad:  # 프로젝트에 없는 미디어·길이가 0인 클립은 빼고 진행
@@ -3750,6 +3964,7 @@ def export(name, proj, opts, log):
         write_side()
     else:
         sweep_temp(0)
+        _check_disk(span, W, H, proj)
         tmp = Path(tempfile.mkdtemp(prefix=".render_", dir=core.OUT))
         t_start = time.time()
         astate = {"frac": 0.0}
@@ -3780,11 +3995,23 @@ def export(name, proj, opts, log):
                 if norm and span < 3.05 and peak < 1e-4:  # 3초 안 되는 무음은 소리 크기 맞추기가 오류 → 건너뜀
                     norm = False
 
-                def enc(nm):
+                pre = {}
+
+                def enc(nm, tp=LOUD_TP):
                     af = [f"volume={float(m.get('volume', 1.0)):.3f}"]
                     if nm:
                         lufs = min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))
-                        af.append(f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11")
+                        if "chain" not in pre:  # (다시 만들 때는 잰 값 그대로)
+                            pre["chain"] = _loud_pre(mix, tmp, lufs, float(m.get("volume", 1.0)), abort_a)
+                        af += pre["chain"]
+                        if pre["chain"] and "meas" not in pre:
+                            pre["meas"] = _loud_measure(mix, tmp, af, lufs, abort_a)
+                        ms = pre.get("meas")
+                        if ms:  # 두 번 재기(선형): 한 번 재기 loudnorm 은 짧은 영상에서 끝까지 덜 키워 -15.9 LUFS (판정 round6 U3 · 쇼츠)
+                            af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11:measured_I={ms['input_i']}:measured_TP={ms['input_tp']}:"
+                                      f"measured_LRA={ms['input_lra']}:measured_thresh={ms['input_thresh']}:offset={ms['target_offset']}:linear=true")
+                        else:
+                            af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11")
                     af += ["aresample=48000", "asetpts=N/SR/TB"]  # 소리 크기 맞추기 뒤 시각을 다시 매겨 끝이 잘리거나 길어지지 않게
                     _run_ff(["-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",
                              "-ar", "48000", "audio.m4a"], tmp, on_time=lambda t: astate.update(frac=0.4 + 0.6 * min(1.0, t / max(0.1, span))),
@@ -3797,6 +4024,22 @@ def export(name, proj, opts, log):
                         raise
                     log("  소리 크기 맞추기를 건너뛰고 다시 만들어요")
                     enc(False)
+                    return tmp / "audio.m4a"
+                if norm:
+                    # AAC 로 줄이면 순간 최대가 커짐 (공 차는 소리·효과음처럼 아주 짧은 소리는 1.5dB 까지 · 판정: -0.4 dBTP) →
+                    # 줄인 소리를 재서 넘으면 그만큼 더 낮춘 최대로 한 번 더 (loudnorm 이 순간만 눌러 평균 크기는 그대로) ·
+                    # 다시 만들기가 실패하면 처음 맞춘 소리를 그대로 씀 (예전에는 소리 크기를 안 맞춘 소리로 덮어씀)
+                    tp = _true_peak(tmp / "audio.m4a", tmp, abort_a)
+                    if tp is not None and tp > LOUD_TP_OUT:
+                        os.replace(tmp / "audio.m4a", tmp / "audio_first.m4a")
+                        try:
+                            enc(norm, max(LOUD_TP_FLOOR, LOUD_TP - (tp - LOUD_TP_OUT) - 0.5))
+                        except RuntimeError:
+                            if CANCEL.is_set() or abort_a.is_set():
+                                raise
+                            os.replace(tmp / "audio_first.m4a", tmp / "audio.m4a")
+                            astate["norm"] = True
+                            log(f"  순간 최대 크기를 한 번 더 낮추지 못해 처음 맞춘 소리를 써요 ({tp:.1f} dBTP)")
                 return tmp / "audio.m4a"
 
             ex_a = ThreadPoolExecutor(1)
@@ -3914,6 +4157,8 @@ def export(name, proj, opts, log):
             m = proj.get("master") or {}  # 검수용: 이 파일을 만들 때의 형식·소리 크기 (편집실을 새로 고쳐도 남음)
             EXPORT_META[out.name] = {"format": fmt, "master": {"normalize": astate.get("norm", False),
                                                                "lufs": min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))}}
+            if isinstance(proj.get("msg"), dict):  # MSG 편집본: 무엇을 넣었는지 (검수·평가가 씀)
+                EXPORT_META[out.name]["msg"] = (proj["msg"].get("summary") or {}).get("text")
             log(f"  영상 길이 {span:.1f}초 · {W}×{H} · {fps}fps · {time.time() - t_start:.0f}초 걸림" + (f" · 그래픽카드({hw})" if hw and (hw, W, H) not in _HW.get("bad", set()) else ""))
         except Cancelled as e:
             traceback.clear_frames(e.__traceback__)

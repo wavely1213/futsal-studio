@@ -8,6 +8,8 @@
 <style>
   @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Bold.otf"); font-weight: 700; }
   @font-face { font-family: "PretendardE"; src: url("/fonts/Pretendard-Black.otf"); font-weight: 900; }
+  @font-face { font-family: "BlackHanSansE"; src: url("/fonts/BlackHanSans-Regular.ttf"); font-weight: 400; }
+  @font-face { font-family: "DoHyeonE"; src: url("/fonts/DoHyeon-Regular.ttf"); font-weight: 400; }
   :root {
     --bg: #161616; --panel: #1f1f1f; --panel-2: #262626; --panel-3: #2e2e2e; --line: #0c0c0c; --line-2: #383838;
     --ink: #e8e8e8; --ink-2: #a3a3a3; --ink-3: #6b6b6b;
@@ -92,6 +94,21 @@
   .rec b { display: block; margin-bottom: 2px; }
   .rec .m { color: var(--ink-2); font-size: 11.5px; margin-bottom: 6px; }
   .rec.on { border-color: var(--accent); background: var(--accent-soft); }
+  .mgrp { font-size: 11px; color: var(--ink-3, #8a8a8a); margin: 6px 0 4px; }
+  .mchip { display: inline-block; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; padding: 3px 10px; margin: 0 4px 5px 0; cursor: pointer; font-size: 12px; }
+  .mchip.on { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+  .mcand { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+  .mcand.cur { border-color: var(--accent); }
+  .mcand b { display: block; margin-bottom: 3px; }
+  .mstrip { position: relative; height: 12px; background: #1e1e1e; border-radius: 3px; margin: 6px 0; overflow: hidden; }
+  .mstrip i { position: absolute; top: 0; bottom: 0; width: 2px; }
+  .mtaste { font-size: 11.5px; color: var(--ink-2); margin-top: 6px; }
+  .mtaste button { margin: 2px 2px 0 0; }
+  .mrow { display: flex; gap: 6px; align-items: center; padding: 3px 0; font-size: 12px; cursor: pointer; }
+  .mrow:hover { background: var(--panel-2); }
+  .mrow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; width: 40px; flex: none; }
+  .mrow .k { flex: none; }
+  .mrow .x { flex: 1; color: var(--ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .kw { display: inline-block; background: #3a2a14; color: #ffb35c; border-radius: 3px; padding: 0 5px; margin-right: 3px; font-size: 11px; }
   .evrow { display: flex; gap: 8px; padding: 4px 10px; cursor: pointer; }
   .evrow:hover { background: var(--panel-2); }
@@ -117,7 +134,7 @@
   .tgrp { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
   .ov { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
   #shp { z-index: 55; }
-  .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; word-break: keep-all; text-wrap: balance; }
+  .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; font-synthesis: none; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; word-break: keep-all; text-wrap: balance; }
   .mbox { position: absolute; z-index: 70; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); display: none; cursor: move; }
   .mbox i { position: absolute; width: 9px; height: 9px; background: #fff; border: 1px solid #000; }
   .mbox i.a { left: -5px; top: -5px; cursor: nwse-resize; } .mbox i.b { right: -5px; top: -5px; cursor: nesw-resize; }
@@ -579,7 +596,7 @@ const fmtDb = d => d <= -59.9 ? "-∞ dB" : (d >= 0 ? "+" : "") + (+d).toFixed(1
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const EPS = 1e-4, HF = 0.5 / FPS;
 
-let P = null, S = null, EVENTS = [], REC = null, STYLES = null;
+let P = null, S = null, EVENTS = [], REC = null, STYLES = null, MSGSRC = null;
 const MED = {}, WAVES = {}, THUMBS = {};
 let T = 0, playing = false, shuttle = 1, clock = null, tool = "select", zoom = 20, markIn = null, markOut = null, snapOn = true, linkOn = true;
 let selI = new Set(), selX = null, primary = null, clipboard = null, selKf = null;
@@ -842,10 +859,12 @@ function capParts(cap) {
 }
 /* 자막 → 타임라인 (V1 원본 클립을 따라감 · 쇼츠 편집본은 쇼츠형으로 나눔) — editor.py timeline_captions 와 같은 규칙 */
 let _caps = { v: -1, list: [] };
+const CAP_MIN = 0.7, CAP_CPS = 14; // 타임라인 자막 조각 최소 보이는 시간(초) · 1초 글자 수 한도 · editor.py CAP_MIN·CAP_CPS
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
-  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev), out = [], tot = total(), shorts = S.format === "shorts";
-  const cs = P.captions.slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
+  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps), out = [], tot = total(), shorts = S.format === "shorts"; // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
+  // msgCaps: MSG 후보가 함께 가져온 자막 (프로젝트 자막에 반영하면 지움 · editor.py timeline_captions 와 같은 규칙)
+  const cs = (S.msgCaps || P.captions).slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
   const parts = new Map();
   for (const it of vids) {
     let lo = 0, hi = cs.length; const from = it.in - maxLen;
@@ -857,12 +876,36 @@ function capsTL() {
         const a = Math.max(q.start, it.in), b = Math.min(q.end, it.out);
         if (b - a <= 0.05) continue;
         const s = tlOf(it, a), e = Math.min(tlOf(it, b), tot);
-        if (e - s > 0.04) out.push({ cap, s, e, text: q.text, kw: q.words ? q.words.map(w => tlOf(it, +w.s) - s) : null });
+        if (e - s <= 0.04) continue;
+        // 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말이 자막에 남지 않게 · editor.py timeline_captions 와 같은 규칙)
+        const ws = q.words, mid = w => (+w.s + +w.e) / 2, keep = ws ? ws.map((w, k) => (it.in <= mid(w) && mid(w) < it.out) ? k : -1).filter(k => k >= 0) : null;
+        if (keep && !keep.length) continue;
+        out.push({ cap, q, s, e, n: ws ? ws.length : 0, kt: keep ? new Map(keep.map(k => [k, tlOf(it, +ws[k].s)])) : null });
       }
     }
   }
   out.sort((a, b) => a.s - b.s);
-  _caps = { v: ver, list: out }; return out;
+  // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · editor.py timeline_captions 와 같은 규칙)
+  const joined = [];
+  for (const c of out) {
+    const p = joined[joined.length - 1];
+    if (p && p.q === c.q && Math.abs(c.s - p.e) <= 0.06) { p.e = Math.max(p.e, c.e); if (p.kt && c.kt) for (const [k, v] of c.kt) p.kt.set(k, v); }
+    else joined.push({ ...c });
+  }
+  for (const c of joined) {
+    const toks = String(c.q.text || "").split(/\s+/).filter(Boolean), ks = c.kt ? [...c.kt.keys()].sort((x, y) => x - y) : null;
+    c.text = ks && ks.length < c.n ? ks.map(k => toks[k]).join(" ") : c.q.text;
+    c.kw = ks ? ks.map(k => c.kt.get(k) - c.s) : null;
+  }
+  // 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막 전까지 CAP_MIN 초는 보이게 (editor.py timeline_captions 와 같은 규칙)
+  // (바로 이어지는 다음 자막이 넉넉하면 그 시작을 조금 늦춰 자리를 만듦)
+  // 글자가 많으면 1초에 CAP_CPS 글자를 넘지 않게 읽을 시간도 (다음 자막 전까지)
+  for (let k = 0; k < joined.length; k++) {
+    const c = joined[k], n = joined[k + 1], need = Math.max(CAP_MIN, String(c.text || "").replace(/\s+/g, "").length / CAP_CPS); if (c.e - c.s >= need) continue;
+    if (n && n.s - c.s < need && n.e - c.s >= need + CAP_MIN) n.s = c.s + need;
+    c.e = Math.max(c.e, Math.min(c.s + need, n ? n.s : tot));
+  }
+  _caps = { v: ver, list: joined }; return joined;
 }
 // 한 줄 자막이 화면 밖으로 넘치지 않게 글자 크기 배율 — editor.py cap_fit 과 같은 규칙 (한글 0.9em 어림 · 0.7배보다 더 줄여야 하면 그대로 두고 줄바꿈)
 const emOf = (ch, black) => ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? (black ? 0.95 : 0.9) : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
@@ -876,7 +919,7 @@ function capFit(text, st, W) {
   const k = Math.floor(avail / need * 100) / 100;
   return k >= 0.7 ? k : 1;
 }
-function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
+function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
 /* ---------- 기록(되돌리기) · 저장 ---------- */
 // 되돌리기 기록: 최대 120단계 (모든 기록이 이 함수를 거쳐 오래된 것부터 지움 → 메모리가 끝없이 늘지 않게)
@@ -1606,7 +1649,7 @@ function renderFrame() {
     const b = bus(tr.id);
     if (b) {
       b.g.gain.value = tr.mute || (solo && !tr.solo) ? 0 : dbLin(tr.vol || 0) * (tr.role === "music" ? duckG : 1);
-      const dlg = tr.role === "dialog";
+      const dlg = tr.role === "dialog" && tr.voiceFx !== false; // editor.py 와 같은 규칙: 'voiceFx: false' 트랙(효과음)은 목소리 보정 없이
       const on = dlg && vo.comp;
       b.hp.frequency.value = dlg && vo.hp ? 80 : 10; b.cp.threshold.value = on ? -22 : 0; b.cp.ratio.value = on ? 3 : 1; b.mk.gain.value = on ? dbLin(-2.3) : 1;
     }
@@ -1711,8 +1754,12 @@ function layoutFrame() {
   frameDirty = true;
 }
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+// 타이틀 글꼴 (editor.py TITLE_FONTS 와 같은 목록) — 굵기가 하나뿐인 글꼴은 굵게 흉내 없이
+const TFONTS = { "Black Han Sans": ["BlackHanSansE", "검은고딕"], "Do Hyeon": ["DoHyeonE", "도현"] };
 function styleText(el, st, scale, fk = 1) {
-  el.style.fontWeight = st.weight === "Black" ? 900 : 700;
+  const tf = TFONTS[st.font];
+  el.style.fontFamily = tf ? tf[0] : "";
+  el.style.fontWeight = tf ? 400 : st.weight === "Black" ? 900 : 700;
   el.style.fontSize = st.size * scale * fk + "px";
   el.style.top = st.y * 100 + "%";
   el.style.left = (st.x ?? 0.5) * 100 + "%";
@@ -1726,15 +1773,18 @@ function styleText(el, st, scale, fk = 1) {
     el.style.webkitTextStroke = `${st.strokeW * 2 * scale}px ${st.stroke}`;
   }
 }
+const lerpT = (pts, e) => { for (let i = 0; i < pts.length - 1; i++) if (e <= pts[i + 1][0]) return pts[i][1] + (pts[i + 1][1] - pts[i][1]) * Math.max(0, (e - pts[i][0]) / (pts[i + 1][0] - pts[i][0])); return pts[pts.length - 1][1]; };
 function effect(el, st, e, r, scale, text, kw) {
-  let op = 1, sc = 1, dy = 0;
+  let op = 1, sc = 1, dy = 0, rot = Math.max(-45, Math.min(45, +st.rot || 0)); // 기울기: 시계 방향 + (editor.py _rot · ASS \frz 는 반대 부호)
   if (st.effect === "fade") op = Math.min(1, e / 0.15, r / 0.12);
+  if (st.effect === "stamp") sc = e < 0.12 ? 1.65 - 0.65 * (e / 0.12) : 1; // 쾅 찍기 (editor.py _effect_tags 와 같은 0.12초 직선)
+  if (st.effect === "shake") { sc = e < 0.08 ? 1.25 - 0.25 * (e / 0.08) : 1; rot += lerpT([[0, 0], [0.06, -6], [0.12, 6], [0.18, -3], [0.24, 0]], e); }
   if (st.effect === "pop") sc = e < 0.11 ? 0.7 + 0.38 * (e / 0.11) : e < 0.19 ? 1.08 - 0.08 * ((e - 0.11) / 0.08) : 1;
   if (st.effect === "slide") { dy = 40 * scale * (1 - Math.min(1, e / 0.18)); op = Math.min(1, e / 0.12); }
   el.style.opacity = op;
   const ax = st.align === "left" ? "0%" : st.align === "right" ? "-100%" : "-50%";
   el.style.transformOrigin = st.align === "left" ? "0 100%" : st.align === "right" ? "100% 100%" : "50% 100%";
-  el.style.transform = `translate(${ax}, -100%) translateY(${dy}px) scale(${sc})`;
+  el.style.transform = `translate(${ax}, -100%) translateY(${dy}px)${rot ? ` rotate(${rot}deg)` : ""} scale(${sc})`;
   if (st.effect === "karaoke") { // editor.py _karaoke 와 같은 규칙: 줄은 그대로, 낱말은 띄어쓰기 몇 개든 나눔 · 단어 시각이 낱말 수와 맞으면 말한 때에 채움
     const rows = String(text).replace(/\r\n/g, "\n").split("\n").map(ln => ln.split(/\s+/).filter(Boolean));
     const len = w => Array.from(w).length, all = rows.flat(), tot = all.reduce((a, w) => a + len(w), 0) || 1, dur = e + r;
@@ -1842,7 +1892,7 @@ function rowList() {
   for (const tr of aTracks()) rows.push({ tk: tr.id, tr });
   return rows;
 }
-const lbl = tr => tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : (tr.role === "dialog" ? "대사 " : "음악 ") + tr.id[1];
+const lbl = tr => tr.name ? `${tr.name} ${tr.id.slice(1)}` : tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : (tr.role === "dialog" ? "대사 " : "음악 ") + tr.id[1];
 function headHTML(tr) {
   const a = tr.k === "a";
   return `<div class="hd"><button class="tb ${tr.target ? "on" : ""}" data-tgt="${tr.id}" title="대상 트랙 켜기/끄기 — Ctrl+K·붙여넣기·Q/W·전환이 이 트랙에 적용돼요">${tr.id}</button>
@@ -2647,8 +2697,11 @@ async function renderRec() {
   const m = t => mmss(t).slice(0, 5);
   const noMain = S.format === "shorts" && !S.items.some(i => i.track === "V1" && isMainAV(i)); // 원본 클립이 없는 쇼츠: 영상 전체를 깔면 쇼츠가 아니게 됨
   if (STYLES === null) { STYLES = []; try { STYLES = (await (await fetch("/api/style/list")).json()).styles || []; } catch (e) {} }
-  $("lt-rec").innerHTML = `
-    <div class="sec"><h4>스타일로 자동 편집 <span class="hint">(배운 유튜버 스타일대로 새 편집본)</span></h4>
+  if (MSGSRC === null) { MSGSRC = { presets: [], learned: [], mixes: [] }; try { MSGSRC = await (await fetch("/api/style/presets")).json(); } catch (e) {} }
+  $("lt-rec").innerHTML = msgSection() + `
+    <details class="sec" id="recMore"${recMoreOpen ? " open" : ""}><summary style="cursor:pointer;font-weight:600">다른 자동 편집 <span class="hint">(배운 스타일대로 가편집 · 쇼츠 추천 구간 · 1차 가편집 · 군더더기 정리)</span></summary>
+    <div class="hint" style="margin:4px 0 8px">위의 '재미있게 자동 편집'은 자막·효과음·배경음악까지 넣은 후보를 만들고, 여기는 컷과 자막 모양만 맞춘 가편집을 만들어요.</div>
+    <div class="sec"><h4>스타일로 자동 편집 <span class="hint">(배운 유튜버 스타일대로 컷·자막 모양만 · 효과음·배경음악 없음)</span></h4>
       ${STYLES.length ? `${STYLES.map((s, i) => `<div class="rec ${i === 0 ? "on" : ""}" data-sty="${i}" style="cursor:pointer"><b>${esc(s.name)}</b><div class="m" style="margin:0">${esc(s.desc || "")}</div></div>`).join("")}
         <div class="seg" id="styKind" style="margin-bottom:8px"><button data-v="long" class="on">롱폼만</button><button data-v="both">롱폼 + 쇼츠</button></div>
         <div><button class="btn pri" id="styGo">이 스타일로 새 편집본 만들기</button></div>
@@ -2671,12 +2724,14 @@ async function renderRec() {
       <button class="btn" id="recFull" ${noMain ? "disabled" : ""}>원본 전체로 되돌리기</button>
       <div class="hint" id="recWhy" style="margin-top:6px">${noMain ? "이 쇼츠에는 원본 영상 클립이 없어서 정리하거나 되돌릴 수 없어요." : S.format === "shorts" ? "쇼츠는 이 쇼츠 구간 안에서만 정리하거나 되돌리고, 쇼츠(세로) 그대로예요." : ""} 확대·빠르기·제목·표시·위 트랙은 같은 장면에 맞춰 함께 옮겨요.</div>
     </div>
+    </details>
     ${(r.offscript || []).length ? `<div class="sec" id="recOff"><h4>영상 밖 말 <span class="hint">(촬영 준비·촬영 끝·구독/홍보 안내)</span></h4>
       <div class="hint" style="margin-bottom:6px">가편집은 첫 인사 앞·마지막 끝인사 뒤를 잘라요. 구독·홍보 안내는 쇼츠와 티저에서만 빼고 롱폼에는 그대로 둬요 (홍보 내용은 올리기 키트 설명의 '레슨 문의'로 들어가요).</div></div>
     ${r.offscript.map(o => `<div class="evrow off" data-t="${o.a}"><span class="tc">${m(o.a)}</span><span class="k">${esc(OFF_KIND[o.kind] || o.why)}</span><span class="hint">${o.cut === "long" ? "가편집에서 잘랐어요" : "쇼츠·티저에서 뺐어요"} · ${esc(cutText(o.text, 40))}</span></div>`).join("")}` : ""}
     <div class="sec"><h4>편집점 표시 <span class="hint">(타임라인 위쪽 눈금에도 표시)</span></h4></div>
     ${EVENTS.filter(e => e.type !== "speech").map(e => `<div class="evrow ${e.type}" data-t="${e.t}"><span class="tc">${m(e.t)}</span><span class="k">${e.type === "peak" ? "▲ 하이라이트" : "── 컷 후보"}</span><span class="hint">${esc(e.text)}</span></div>`).join("")}`;
   let sty = 0, kind = "long";
+  if ($("recMore")) $("recMore").ontoggle = () => { recMoreOpen = $("recMore").open; };
   document.querySelectorAll("[data-sty]").forEach(el => el.onclick = () => { sty = +el.dataset.sty; document.querySelectorAll("[data-sty]").forEach(x => x.classList.toggle("on", x === el)); });
   document.querySelectorAll("#styKind button").forEach(b => b.onclick = () => { kind = b.dataset.v; document.querySelectorAll("#styKind button").forEach(x => x.classList.toggle("on", x === b)); });
   if ($("styGo")) $("styGo").onclick = async () => {
@@ -2741,6 +2796,189 @@ async function renderRec() {
     applyRemap("원본 전체로", fullSeq(S, S.format === "shorts" ? null : 0, P.info.duration), x => `잘라 낸 원본 ${x.added.toFixed(1)}초를 다시 넣었어요 · ${mmss(total())}`);
   };
   document.querySelectorAll(".evrow").forEach(el => el.onclick = () => { const ts = src2tl(+el.dataset.t); if (ts.length) seek(ts[0]); else toast("지금 잘려나간 구간이에요"); });
+  bindMsg();
+}
+
+/* ---------- 재미있게 자동 편집 (MSG · msg.py) ---------- */
+const MSG_KIND = { teaser: "티저", title: "제목 카드", emphasis: "강조 자막", situ: "상황 자막", inner: "속마음 자막", fx: "효과 글자", count: "숫자 세기", sfx: "효과음",
+  punch: "확대", shake: "흔들기", replay: "다시 보기", freeze: "정지 화면", montage: "몽타주", end: "엔드 화면", bgm: "배경음악", chapters: "챕터" };
+const MSG_COL = { teaser: "#e5484d", title: "#0f7a3d", emphasis: "#ffe14d", situ: "#3fa34d", inner: "#9ad7ff", fx: "#ff9f1c", count: "#ffffff", sfx: "#1f8c86",
+  punch: "#2f6fb0", shake: "#8b4fc6", replay: "#e5484d", freeze: "#bbbbbb", montage: "#e5484d", end: "#777777", bgm: "#555555", chapters: "#555555" };
+const MSG_ASPECTS = [["intro", "인트로"], ["rhythm", "컷 리듬"], ["captions", "자막 모양"], ["fun", "재미(개그 글자·효과)"], ["sound", "음악"]];
+let MSGPICK = null, MSGAMT = "보통", MSGFMT = "long", MSGPROOF = false, MSGWRITE = false, recMoreOpen = false;
+try { MSGPROOF = localStorage.getItem("ed_msgProof") === "1"; MSGWRITE = localStorage.getItem("ed_msgWrite") === "1"; } catch (e) {}
+// '좋아요' 를 담을 섞은 스타일: 스튜디오 '스타일 섞기' 카드에서 마지막으로 보던 것 (같은 앱 주소라 브라우저 저장소를 같이 씀)
+const msgMixName = () => { try { return localStorage.getItem("msgMix") || (MSGSRC && MSGSRC.draft) || "풋살사관학교 스타일(초안)"; } catch (e) { return "풋살사관학교 스타일(초안)"; } };
+const msgSrcOf = k => { const [kind, ...n] = k.split("|"), nm = n.join("|"); return [...(MSGSRC.presets || []), ...(MSGSRC.mixes || []), ...(MSGSRC.learned || [])].find(x => x.kind === kind && x.name === nm); };
+const msgCands = () => P.sequences.filter(q => q.auto === "msg" && q.msg);
+const josa = (w, a, b) => { const c = String(w).replace(/[^가-힣A-Za-z0-9]+$/, "").slice(-1), n = c.charCodeAt(0) - 44032; return n >= 0 && n < 11172 ? (n % 28 ? a : b) : b; }; // 받침 있으면 a
+function msgSection() {
+  const all = [...(MSGSRC.presets || []), ...(MSGSRC.mixes || []), ...(MSGSRC.learned || [])];
+  if (MSGPICK === null) MSGPICK = (MSGSRC.presets || []).slice(0, 2).map(x => x.kind + "|" + x.name);
+  // 칩 설명은 지금 고른 양에서 실제로 하는 것 (msg.describe_style) · 섞은 스타일은 저장한 양을 칩에 표시
+  const chip = x => `<span class="mchip ${MSGPICK.includes(x.kind + "|" + x.name) ? "on" : ""}" data-msty="${esc(x.kind + "|" + x.name)}" title="${esc(((x.descs || {})[MSGAMT === "모두" ? "보통" : MSGAMT]) || x.desc || "")}">${esc(x.name)}${x.kind === "mix" && x.intensity ? ` <span class="hint">· ${esc(x.intensity)}</span>` : ""}</span>`;
+  const one = MSGPICK.length === 1 ? msgSrcOf(MSGPICK[0]) : null, d = one && one.descs ? one.descs[MSGAMT === "모두" ? "보통" : MSGAMT] : "";
+  const grp = (t, xs) => xs && xs.length ? `<div class="mgrp">${t}</div>${xs.map(chip).join("")}` : "";
+  const cands = msgCands(), cur = cands.find(q => q.id === S.id);
+  return `<div class="sec" id="msgSec"><h4>재미있게 자동 편집 (MSG) <span class="hint">(예능 자막·효과음·확대·다시 보기·배경음악)</span></h4>
+    <div class="hint">스타일 고르기 (최대 3개) · 같은 원본으로 나란히 비교해요</div>
+    ${grp("기본 스타일", MSGSRC.presets)}${grp("섞은 스타일 (초안)", MSGSRC.mixes)}${grp("배운 스타일", MSGSRC.learned)}
+    ${all.length ? "" : `<div class="hint">스타일 목록을 불러오지 못했어요</div>`}
+    <div class="f" style="margin-top:6px"><label style="width:auto;margin-right:6px">MSG 양</label><div class="seg" id="msgAmt">${["담백", "보통", "듬뿍", "모두"].map(v => `<button data-v="${v}" class="${MSGAMT === v ? "on" : ""}" ${v === "모두" ? `title="스타일 하나를 담백·보통·듬뿍 세 가지로 한 번에"` : ""}>${v === "모두" ? "세 가지 모두" : v}</button>`).join("")}</div></div>
+    <div class="hint" style="margin:3px 0 6px">${MSGAMT === "모두" ? "고른 스타일 하나를 담백·보통·듬뿍으로 한 번에 만들어 나란히 비교해요" : MSGAMT === "담백" ? "담백은 자막·효과를 조금만 넣어요 · 담백에서는 스타일마다 컷이 같고 글자 모양·음악·인트로만 달라요" : "담백은 자막·효과를 조금만, 듬뿍은 예능처럼 많이 넣어요"}</div>
+    ${d ? `<div class="hint" style="margin:-2px 0 6px">이 스타일 · ${esc(MSGAMT === "모두" ? "보통" : MSGAMT)}: ${esc(d)}</div>` : ""}
+    <div class="f"><label style="width:auto;margin-right:6px">형식</label><div class="seg" id="msgFmt"><button data-v="long" class="${MSGFMT === "long" ? "on" : ""}">롱폼만</button><button data-v="both" class="${MSGFMT === "both" ? "on" : ""}">롱폼 + 쇼츠</button></div></div>
+    <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer"><input type="checkbox" id="msgProof" ${MSGPROOF ? "checked" : ""}>클로드로 자막 오타 고치기 (내 클로드 계정으로 대사 글만 보내요 · 영상마다 처음 한 번)</label>
+    <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="msgWrite" ${MSGWRITE ? "checked" : ""}>클로드로 재미 자막 쓰기 (속마음·반응 글자를 영상에 맞게 · 내 클로드 계정으로 대사 글만 보내요 · 끄면 정해 둔 문구)</label>
+    <div class="hint" style="margin-top:4px">배경음악: 앱이 만든 음악을 써요 · 내 음악을 쓰려면 <a href="#" id="msgBgm">'내 배경음악' 폴더</a>에 넣으세요 (분위기 폴더 신남·경쾌·잔잔·감성 · 저작권 걱정 없는 음악만)</div>
+    <div style="margin-top:8px"><button class="btn pri" id="msgGo">MSG 후보 만들기</button></div>
+    <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "MSG 후보 A · 스타일 · 양"을 새로 만들어요 (가편집 다시 만들기로 바뀌지 않아요).</div>
+    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(숫자 키 ${cands.length > 1 ? `1~${Math.min(9, cands.length)}` : "1"}: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
+    ${cur ? msgList(cur) : ""}
+  </div>`;
+}
+function msgCard(q, i) {
+  const m = q.msg, tot = Math.max(1, seqLen(q)), src = m.style || {};
+  const ticks = (m.events || []).filter(e => !["bgm", "chapters"].includes(e.kind)).map(e => `<i style="left:${(e.t / tot * 100).toFixed(2)}%;background:${MSG_COL[e.kind] || "#888"}" title="${mmss(e.t).slice(0, 5)} ${MSG_KIND[e.kind] || e.kind}"></i>`).join("");
+  return `<div class="mcand ${q.id === S.id ? "cur" : ""}" data-mcand="${q.id}"><b>${i < 9 ? `<span class="kw">${i + 1}</span>` : ""}${esc(q.name)}</b>
+    <div class="m hint">${esc((m.summary || {}).text || "")}</div>
+    <div class="mstrip">${ticks}</div>
+    <button class="btn sm" data-mview="${q.id}">보기</button> <button class="btn sm" data-mswap="${q.id}">같은 장면으로 바꿔 보기</button>
+    <div class="mtaste">이 후보의 … 가 좋아요 <span class="hint">(→ '${esc(msgMixName())}'에 담아요)</span>: ${MSG_ASPECTS.map(([a, l]) => `<button class="btn sm" data-mlike="${q.id}|${a}">${l}</button>`).join("")}</div>
+    ${(m.notes || []).length ? `<div class="hint" style="margin-top:4px">${esc(m.notes.join(" · "))}</div>` : ""}</div>`;
+}
+function msgList(q) {
+  const evs = (q.msg.events || []).filter(e => e.kind !== "chapters");
+  return `<h4 style="margin-top:10px">MSG 목록 <span class="hint">· ${esc(q.name)}</span></h4>
+    ${evs.map(e => `<div class="mrow" data-mseek="${e.t}"><span class="tc">${mmss(e.t).slice(0, 5)}</span><span class="k" style="color:${MSG_COL[e.kind] || "#ccc"}">${MSG_KIND[e.kind] || e.kind}</span>
+      <span class="x">${e.text ? "“" + esc(e.text) + "”" : esc(e.why || "")}</span>${e.kind === "bgm" ? "" : `<button class="btn sm" data-mdel="${e.id}">빼기</button>`}</div>`).join("") || `<div class="hint">넣은 MSG가 없어요</div>`}`;
+}
+function bindMsg() {
+  const root = $("msgSec"); if (!root) return;
+  root.querySelectorAll("[data-msty]").forEach(el => el.onclick = () => {
+    const k = el.dataset.msty, i = MSGPICK.indexOf(k);
+    if (i >= 0) MSGPICK.splice(i, 1); else { if (MSGPICK.length >= 3) return toast("스타일은 3개까지 고를 수 있어요"); MSGPICK.push(k); }
+    // 섞은 스타일을 고르면 그 스타일에 저장한 MSG 양으로 (스타일 섞기 카드에서 고른 양 · 판정: 저장한 '듬뿍'이 편집실에서 '보통'으로 만들어짐)
+    const src = i < 0 ? msgSrcOf(k) : null;
+    if (src && src.kind === "mix" && src.intensity && MSGAMT !== "모두" && src.intensity !== MSGAMT) { MSGAMT = src.intensity; toast(`'${src.name}'에 저장한 양(${src.intensity})으로 맞췄어요`); }
+    renderRec();
+  });
+  root.querySelectorAll("#msgAmt button").forEach(b => b.onclick = () => { MSGAMT = b.dataset.v; renderRec(); });
+  root.querySelectorAll("#msgFmt button").forEach(b => b.onclick = () => { MSGFMT = b.dataset.v; root.querySelectorAll("#msgFmt button").forEach(x => x.classList.toggle("on", x === b)); });
+  $("msgProof").onchange = e => { MSGPROOF = e.target.checked; try { localStorage.setItem("ed_msgProof", MSGPROOF ? "1" : "0"); } catch (x) {} };
+  $("msgWrite").onchange = e => { MSGWRITE = e.target.checked; try { localStorage.setItem("ed_msgWrite", MSGWRITE ? "1" : "0"); } catch (x) {} };
+  $("msgGo").onclick = runMsg;
+  $("msgBgm").onclick = e => { e.preventDefault(); post("/api/open", { which: "bgm" }); toast("열린 폴더(분위기별)에 음악 파일을 넣으면 다음 MSG 후보부터 그 음악을 써요"); };
+  root.querySelectorAll("[data-mview]").forEach(b => b.onclick = () => { switchSeq(b.dataset.mview); renderRec(); });
+  root.querySelectorAll("[data-mswap]").forEach(b => b.onclick = () => msgSwap(b.dataset.mswap));
+  root.querySelectorAll("[data-mlike]").forEach(b => b.onclick = () => { const [id, a] = b.dataset.mlike.split("|"); msgLike(id, a); });
+  root.querySelectorAll("[data-mseek]").forEach(r => r.onclick = e => { if (e.target.closest("button")) return; seek(+r.dataset.mseek); });
+  root.querySelectorAll("[data-mdel]").forEach(b => b.onclick = () => msgRemove(b.dataset.mdel));
+}
+async function runMsg() {
+  if (!MSGPICK.length) return toast("스타일을 하나 이상 골라 주세요");
+  if (MSGAMT === "모두" && MSGPICK.length !== 1) return toast("'세 가지 모두'는 스타일을 하나만 골라 주세요");
+  const styles = MSGPICK.map(k => { const [kind, ...n] = k.split("|"); return { kind, name: n.join("|") }; });
+  const r = await (await post("/api/edit/msg", { name: NAME, styles, intensity: MSGAMT, kinds: MSGFMT === "both" ? ["long", "shorts"] : ["long"], proofread: MSGPROOF,
+    writer: MSGWRITE, first: msgCands().length })).json();
+  if (!r.ok) return toast(r.error || "지금은 만들 수 없어요");
+  $("busy").classList.add("show"); JOBNAME = "MSG 후보 만들기";
+  const iv = setInterval(async () => {
+    let s; try { s = await (await fetch("/api/state?since=999999")).json(); } catch (e) { return; }
+    const pr = s.progress || {};
+    $("busyTxt").textContent = (pr.label || "MSG 후보") + " · " + (pr.detail || ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : "";
+    if (s.job) return;
+    clearInterval(iv); $("busy").classList.remove("show");
+    if (s.error) return toast(s.error.includes("멈췄어요") ? "MSG 후보 만들기를 멈췄어요" : "MSG 후보를 만들지 못했어요 · " + s.error.slice(0, 100));
+    if (s.resultBig) { try { s = await (await fetch("/api/state?since=999999&result=1")).json(); } catch (e) { return toast("MSG 후보를 받아 오지 못했어요 · 다시 눌러 주세요"); } } // 큰 결과는 한 번만 받아 옴
+    const res = s.result || {};
+    if (!res.sequences || !res.sequences.length) return toast("MSG 후보를 만들지 못했어요");
+    msgAdd(res);
+  }, 700);
+}
+// MSG 가 받아쓰기를 다시 듣거나(새 방식) 클로드로 다듬었으면 그 자막을 프로젝트 자막으로 (직접 고친 자막이 있으면 물어봄) · 후보의 msgCaps 는 지움
+function msgCaps(res) {
+  const txt = cs => (cs || []).map(c => c.text).join("\n"), neu = res.captions;
+  for (const q of res.sequences) delete q.msgCaps;
+  if (!neu || !neu.length) return "";
+  const cur = txt(P.captions);
+  if (cur === txt(neu)) return "";
+  if (!P.captions.length || (res.captionsOld && cur === txt(res.captionsOld))) { P.captions = neu; return " · 자막도 다시 들은 받아쓰기로 고쳤어요"; }
+  if (res.captionsOld && confirm("MSG가 대사를 다시 듣고 자막을 고쳤어요. 프로젝트 자막을 새 자막으로 바꿀까요?\n(직접 고친 자막도 바뀌어요 · Ctrl+Z로 되돌릴 수 있어요)")) { P.captions = neu; return " · 자막을 새 받아쓰기로 바꿨어요"; }
+  return "";
+}
+function msgAdd(res) {
+  commit("MSG 후보 만들기");
+  for (const md of res.media || []) if (!P.media.some(m => m.id === md.id)) { P.media.push(md); MED[md.id] = md; loadBundle(md); }
+  const capNote = msgCaps(res);
+  for (const q of res.sequences) { ensureSeq(q); q.name = uniqSeqName(q.name); P.sequences.push(q); }
+  ver++; switchSeq(res.sequences[0].id); renderBin(); renderRec(); if (capNote) renderCaps();
+  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote} · 숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
+}
+// 같은 원본 장면으로 다른 후보 보기: 지금 화면의 원본 시각 → 그 후보의 타임라인 시각 (다시 보기·티저 같은 noCaps 클립은 빼고)
+function srcAtT(q, t) { const it = q.items.find(i => i.track === "V1" && i.media === "main" && !i.noCaps && t >= i.start - 1e-6 && t < iEnd(i)); return it ? mt(it, t) : null; }
+function tlOfSrc(q, src) { const it = q.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).sort((a, b) => a.start - b.start)[0]; return it ? tlOf(it, src) : null; }
+function msgSwap(id) {
+  const q = P.sequences.find(x => x.id === id); if (!q) return;
+  let src = srcAtT(S, T);
+  if (src == null) { const nxt = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.noCaps && i.start >= T).sort((a, b) => a.start - b.start)[0]; src = nxt ? nxt.in : null; }
+  switchSeq(id);
+  const t = src == null ? null : tlOfSrc(q, src);
+  if (t != null) seek(t); else toast("이 후보에서는 그 장면이 잘려 나갔어요 · 처음부터 보여 드려요");
+  renderRec();
+}
+async function msgLike(id, aspect) {
+  const q = P.sequences.find(x => x.id === id); if (!q || !q.msg) return;
+  const src = (q.msg.style || {}), nm = (src.sources || {})[aspect] || src.label;
+  const kind = (MSGSRC.presets || []).some(x => x.name === nm) ? "preset" : "style";
+  const draft = msgMixName(), lab = Object.fromEntries(MSG_ASPECTS)[aspect];
+  try {
+    const r = await (await post("/api/style/mix_pick", { name: draft, aspect, source: { kind, name: nm } })).json();
+    if (!r.ok) throw new Error(r.error || "");
+    toast(`'${draft}'에 ${lab}${josa(lab, "을", "를")} '${nm}'${josa(nm, "으로", "로")} 담았어요`);
+    MSGSRC = null; renderRec();
+  } catch (e) { toast("담지 못했어요 · " + e.message); }
+}
+// MSG 하나 빼기 (되돌리기 한 번): 그 사건이 만든 글자·도형·클립·전환·마커만 · 끼워 넣은 장면(다시 보기·정지·티저·엔드)은 빈자리도 당김
+function msgRemove(evId) {
+  const q = S, m = q.msg; if (!m) return;
+  const ev = m.events.find(e => e.id === evId); if (!ev) return;
+  commit(`MSG 빼기 · ${MSG_KIND[ev.kind] || ev.kind}`);
+  const r = ev.refs || {}, ids = new Set([...(r.items || []), ...(r.titles || []), ...(r.shapes || []), ...(r.trans || [])]);
+  if (r.fx) { for (const it of q.items) if (ids.has(it.id)) { it.fx = r.fx === "punch" ? Object.fromEntries(Object.entries(it.fx || {}).filter(([k]) => !["scale", "anchor", "pos"].includes(k))) : {}; } }
+  else {
+    q.items = q.items.filter(it => !ids.has(it.id));
+    q.titles = q.titles.filter(t => !ids.has(t.id)); q.shapes = q.shapes.filter(t => !ids.has(t.id));
+    q.trans = q.trans.filter(t => !ids.has(t.id) && !ids.has(t.a) && !ids.has(t.b));
+    if (r.markers) q.markers = q.markers.filter(mk => !r.markers.some(t => Math.abs(t - mk.t) < 1e-3));
+  }
+  if (r.dim && ev.ins) { // 마무리 인사 위 엔드 화면: 어둡게 한 본편을 원래 밝기로 (msg._end_overlay)
+    for (const it of q.items) if (isV(it) && it.start >= ev.ins.start - 1e-3 && it.color && it.color.exp === r.dim.exp && it.color.sat === r.dim.sat) {
+      const c = { ...it.color }; delete c.exp; delete c.sat; it.color = c;
+    }
+  }
+  if (ev.ins && ev.ins.len > 0 && !ev.ins.overlay) { // 끼워 넣은 장면: 그 뒤를 모두 당김 (다른 MSG 기록도 같이) · 본편 위에 얹은 엔드 화면은 그대로
+    const a = ev.ins.start, d = ev.ins.len, b = a + d, sh = x => x >= a + d - 1e-3 ? x - d : x;
+    // 빼는 장면에 걸친 클립(배경음악·다른 트랙)·글자·도형은 그만큼 줄임 — 그대로 두면 그림이 끝난 뒤에도 배경음악만 5초 남아 끝이 검은 화면 (판정)
+    q.items = q.items.filter(it => !(it.start >= a - 1e-3 && iEnd(it) <= b + 1e-3)); // 빼는 장면 안에만 있던 것 (그 장면의 소리 등)
+    for (const it of q.items) {
+      const e = iEnd(it);
+      if (it.start < a - 1e-3 && e > a + 1e-3) it.out = fr(it.out - Math.min(d, e - a) * sp(it)); // 앞에서 시작해 걸침: 걸친 만큼 뒤를 줄임
+      else if (it.start >= a - 1e-3 && it.start < b - 1e-3 && e > b + 1e-3) { it.in = fr(it.in + (b - it.start) * sp(it)); it.start = b; } // 안에서 시작해 뒤로 나감
+    }
+    for (const t of [...q.titles, ...q.shapes]) {
+      const e = t.start + t.dur;
+      if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
+    }
+    for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
+    for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start));
+    for (const mk of q.markers) mk.t = fr(sh(mk.t));
+    for (const e of m.events) { e.t = sh(e.t); if (e.ins) e.ins.start = sh(e.ins.start); }
+  }
+  m.events = m.events.filter(e => e.id !== evId);
+  const k = {}; for (const e of m.events) k[e.kind] = (k[e.kind] || 0) + 1;
+  if (m.summary) m.summary.text = `MSG ${m.events.filter(e => !["bgm", "chapters"].includes(e.kind)).length}개 · 길이 ${mmss(seqLen(q)).slice(0, 5)} (직접 고침)`;
+  selI.clear(); selX = null; changed(); renderRec(); toast(`${MSG_KIND[ev.kind] || ev.kind}을(를) 뺐어요 (Ctrl+Z로 되돌리기)`);
 }
 
 /* ---------- 효과 · 그래픽 목록 (끌어다 놓기) ---------- */
@@ -2870,7 +3108,9 @@ function styleEditor(prefix, st, title) {
     ${slider(prefix + "bgOpacity", "배경 진하기", st.bgOpacity, 0.1, 1, 0.05, v => Math.round(v * 100) + "%")}
     ${slider(prefix + "y", "세로 위치", st.y, 0.08, 0.95, 0.01, v => Math.round(v * 100) + "%")}
     ${title ? slider(prefix + "x", "가로 위치", st.x ?? 0.5, 0.02, 0.98, 0.01, v => Math.round(v * 100) + "%") + `<div class="f"><label>정렬</label><div class="seg" id="${prefix}align">${[["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]].map(([v, l]) => `<button data-v="${v}" class="${(st.align || "center") === v ? "on" : ""}">${l}</button>`).join("")}</div><span></span></div>` : ""}
-    <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    ${title ? `<div class="f"><label>글꼴</label><select class="s" id="${prefix}font">${[["", "프리텐다드 (기본)"], ...Object.entries(TFONTS).map(([k, v]) => [k, v[1]])].map(([v, l]) => `<option value="${v}" ${(st.font || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    ${slider(prefix + "rot", "기울기", st.rot || 0, -20, 20, 1, v => v + "°")}` : ""}
+    <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"], ["stamp", "쾅 찍기"], ["shake", "흔들기"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
     <div class="f"><label>강조색</label><input type="color" id="${prefix}highlight" value="${st.highlight || "#FFD400"}"><span class="hint">노래방 효과용</span></div>
   </div>`;
 }
@@ -2880,14 +3120,15 @@ function bindStyle(prefix, getSt, root) {
   let before = null;
   const start = () => { if (!before) before = JSON.stringify(P); };
   const end = () => { if (before && before !== JSON.stringify(P)) { pushHist("글자 스타일", before); scheduleSave(); renderTimeline(); } before = null; };
-  for (const k of ["size", "strokeW", "bgOpacity", "y", "x"]) {
+  for (const k of ["size", "strokeW", "bgOpacity", "y", "x", "rot"]) {
     const el = $(prefix + k); if (!el) continue;
-    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : el.value + "px"; live(); };
+    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : k === "rot" ? el.value + "°" : el.value + "px"; live(); };
     el.onchange = end;
   }
   for (const k of ["fill", "stroke", "bg", "highlight"]) { const el = $(prefix + k); el.oninput = () => { start(); getSt()[k] = el.value; live(); }; el.onchange = end; }
   $(prefix + "bgOn").onchange = e => { start(); getSt().bgOn = e.target.checked; live(); end(); };
   $(prefix + "effect").onchange = e => { start(); getSt().effect = e.target.value; live(); end(); };
+  if ($(prefix + "font")) $(prefix + "font").onchange = e => { start(); const st = getSt(); if (e.target.value) st.font = e.target.value; else delete st.font; live(); end(); };
   $(prefix + "weight").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().weight = b.dataset.v; end(); renderPanels(); });
   if ($(prefix + "align")) $(prefix + "align").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().align = b.dataset.v; live(); end(); renderPanels(); });
 }
@@ -3727,6 +3968,7 @@ addEventListener("keydown", e => {
   else if (k === "h") setTool("hand");
   else if (k === "z") setTool("zoom");
   else if (k === "s") toggleSnap();
+  else if (/^[1-9]$/.test(k) && msgCands()[+k - 1]) { const q = msgCands()[+k - 1]; if (q.id !== S.id) msgSwap(q.id); } // 후보 카드의 번호와 같은 차례
   else if (k === "t") addTitle();
   else if (k === "m" && sh) jumpMarker(1);
   else if (k === "m") addMarker();

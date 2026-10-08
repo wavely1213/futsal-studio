@@ -1,0 +1,52 @@
+효과음 출처 · Sound effects in this folder
+==========================================
+
+이 폴더의 .ogg 파일은 Kenney(www.kenney.nl)의 오디오 팩에서 골라 48kHz 로 다시 만든 것이에요
+(앞뒤 무음 자르기 · 최대 크기 -3 dBFS 로 맞추기). 원본은 모두 CC0(퍼블릭 도메인)이라 영상에 써도
+출처 표시 의무가 없어요. 이 폴더에 없는 효과음과 배경음악은 앱(sfxlib.py)이 PC에서 직접 만들어요.
+
+License (copied from each pack's License.txt, checked 2026-10-07):
+  License: (Creative Commons Zero, CC0)
+  http://creativecommons.org/publicdomain/zero/1.0/
+  This content is free to use in personal, educational and commercial projects.
+  Support us by crediting Kenney or www.kenney.nl (this is not mandatory)
+  Created/distributed by Kenney (www.kenney.nl)
+
+Packs (downloaded and verified 2026-10-07):
+  Interface Sounds: https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip
+    zip sha256 f2193d072726d6758a5f7871b2dcc54dcce0d5c35c6f0a62f92549b327c81232
+  Impact Sounds: https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip
+    zip sha256 029d734af1582474edf3a694d1b0cebc97c1c152f2f39fa34d4c2bafc5de77f8
+  Digital Audio: https://kenney.nl/media/pages/assets/digital-audio/216eac4753-1677590265/kenney_digital-audio.zip
+    zip sha256 24e6ce28b76a6d8c89cff4d331e0965ff5c3de8a73c612028e9d363cc64e4f06
+  Music Jingles: https://kenney.nl/media/pages/assets/music-jingles/f37e530b9e-1677590399/kenney_music-jingles.zip
+    zip sha256 b729ba57959bd58793d2c5cafa348aaf2655d354f3da35ec4729e03ec77197b8
+
+Files (this folder <- pack · original file):
+  dingdong_1.ogg         <- Interface Sounds · Audio/confirmation_001.ogg
+  dingdong_2.ogg         <- Interface Sounds · Audio/confirmation_002.ogg
+  pop_1.ogg              <- Interface Sounds · Audio/drop_001.ogg
+  pop_2.ogg              <- Interface Sounds · Audio/pluck_001.ogg
+  tick_1.ogg             <- Interface Sounds · Audio/tick_001.ogg
+  tick_2.ogg             <- Interface Sounds · Audio/tick_002.ogg
+  beep_error.ogg         <- Interface Sounds · Audio/error_001.ogg
+  glitch.ogg             <- Interface Sounds · Audio/glitch_001.ogg
+  scratch.ogg            <- Interface Sounds · Audio/scratch_001.ogg
+  question.ogg           <- Interface Sounds · Audio/question_001.ogg
+  click.ogg              <- Interface Sounds · Audio/switch_001.ogg
+  kick_1.ogg             <- Impact Sounds · Audio/impactPunch_heavy_000.ogg
+  kick_2.ogg             <- Impact Sounds · Audio/impactPunch_heavy_001.ogg
+  thud.ogg               <- Impact Sounds · Audio/impactSoft_heavy_000.ogg
+  bell.ogg               <- Impact Sounds · Audio/impactBell_heavy_000.ogg
+  levelup_1.ogg          <- Digital Audio · Audio/powerUp1.ogg
+  levelup_2.ogg          <- Digital Audio · Audio/powerUp2.ogg
+  phase.ogg              <- Digital Audio · Audio/phaseJump1.ogg
+  sting_hit_1.ogg        <- Music Jingles · Audio/Hit jingles/jingles_HIT00.ogg
+  sting_hit_2.ogg        <- Music Jingles · Audio/Hit jingles/jingles_HIT01.ogg
+  sting_hit_3.ogg        <- Music Jingles · Audio/Hit jingles/jingles_HIT02.ogg
+  sting_pizz_1.ogg       <- Music Jingles · Audio/Pizzicato jingles/jingles_PIZZI00.ogg
+  sting_pizz_2.ogg       <- Music Jingles · Audio/Pizzicato jingles/jingles_PIZZI01.ogg
+  sting_pizz_3.ogg       <- Music Jingles · Audio/Pizzicato jingles/jingles_PIZZI02.ogg
+  sting_steel_1.ogg      <- Music Jingles · Audio/Steel jingles/jingles_STEEL00.ogg
+  sting_steel_2.ogg      <- Music Jingles · Audio/Steel jingles/jingles_STEEL01.ogg
+  sting_steel_3.ogg      <- Music Jingles · Audio/Steel jingles/jingles_STEEL02.ogg

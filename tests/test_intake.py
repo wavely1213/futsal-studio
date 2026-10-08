@@ -298,7 +298,7 @@ class AnalyzeManyTests(Base):
         for n in names:
             self.put(n, 10)
 
-        def fake(name, log, model, step):
+        def fake(name, log, model, step, label=None):
             if name in fail:
                 raise fail[name]
             d = core.adir(name)
@@ -358,7 +358,7 @@ class AnalyzeGuardTests(Base):
         p = self.put("다 들어온 영상.mp4", 4321)
         out = core.adir(p.name)
 
-        def fake(name, log, model, step):
+        def fake(name, log, model, step, label=None):
             out.mkdir(parents=True, exist_ok=True)
             return out
         with mock.patch.object(core, "_analyze", side_effect=fake):
@@ -378,7 +378,7 @@ class AnalyzeGuardTests(Base):
         (out / "rev" / "rev_0.000_1.000_1.0000.wav").write_text("x", encoding="utf-8")
         logs = []
 
-        def fake(name, log, model, step):
+        def fake(name, log, model, step, label=None):
             return out
         with mock.patch.object(core, "_analyze", side_effect=fake):
             core.analyze(p.name, logs.append)  # 그대로인 파일 → 캐시는 그대로

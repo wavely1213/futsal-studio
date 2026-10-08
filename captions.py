@@ -37,13 +37,22 @@ _AUX = ((re.compile(r"야$"), re.compile(r"^[되돼하할한]")), (re.compile(r"
         (re.compile(r"[어아여해워와봐줘]$"), re.compile(r"^(?:주|줘|보|봐|놓|버|있|가|오|와|드리|드릴|드려|야)")))
 # 목적어 뒤 짧은 풀이말 — '집중을 / 해야' 처럼 갈라지지 않게
 _PRED = re.compile(r"^(?:해|하|되|돼|들|보|받|주|줘|치|차|써|쓰|만들|가져|잡|넣|놓)")
+# 뒤 낱말을 꾸미는 말: 자막 끝에 혼자 남으면 어색함 ('패스하고 그' / '자리에 서 있으면' · '항상 두' / '개쯤') → 뒤 낱말과 같은 자막에
+_MODSET = {"그", "이", "저", "이런", "그런", "저런", "어떤", "무슨", "몇", "첫", "각", "모든", "매", "온", "새", "다른", "딴"}
+_NUM = {"한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "스무"}
+_COUNTER = re.compile(r"^(?:번|개|명|걸음|가지|골|바퀴|시간|분|초|살|발|판|세트|회|차|군데|마리|잔|장|줄|칸|박자)")
+# 이음말·말끝 뒤(…인데 / …하고 / …해요)가 조사 뒤(공은 / 항상)보다 끊어 읽기 좋은 곳
+_CLAUSE = re.compile(r"(?:데|고|서|면|며|요|다|죠|까|네|야|지만|니까|거나|든지)[,.?!…~]*$")  # ('정확하게' 같은 -게 는 뒤 움직씨를 꾸밈)
+# 꾸밈을 자주 받는 이름씨: 그 앞의 움직씨 꾸밈꼴('받는 사람'·'하는 거'·'좋은 방법')은 따로 떼면 어색함
+_HEAD_N = ("사람", "것", "거", "게", "때", "곳", "쪽", "방향", "순간", "동작", "선수", "상황", "자리", "방법", "경우", "이유", "부분", "거리",
+           "느낌", "타이밍", "친구", "분들")
 # 사전 고치기: 낱말 뒤에 붙어도 되는 조사 (최대 두 개 · '피버를'은 고치고 '피버트'는 안 고침)
 _JOSA = "(?:이에요|예요|입니다|이랑|에서|에게|한테|으로|부터|까지|처럼|보다|하고|은|는|이|가|을|를|의|에|로|와|과|도|만|랑|씩)"
 # 요·야·죠는 낱말 바로 뒤에 혼자 붙을 때만 ('피버요'는 고치고, '가요'·'가야' 같은 말끝이 붙은 '피버가요'는 그대로)
 _TAIL = "(?:이요|요|이야|야|이죠|죠)"
 
 DEFAULT_TERMS = ["풋살사관학교", "최경진 감독", "피벗", "픽소", "아라", "고레이로", "토킥", "인사이드 패스", "아웃사이드 패스",
-                 "볼 컨트롤", "트래핑", "퍼스트 터치", "2대1 패스", "스위칭", "프레스", "킥인", "코너킥", "골키퍼", "수비 라인",
+                 "볼 컨트롤", "트래핑", "퍼스트 터치", "디딤발", "골대", "2대1 패스", "스위칭", "프레스", "킥인", "코너킥", "골키퍼", "수비 라인",
                  "파라렐라", "디아고날", "오버래핑", "빌드업", "파워플레이", "세트피스", "로테이션", "발바닥 터치", "드리블",
                  "페인팅", "터닝", "슈팅", "리턴 패스"]
 DEFAULT_FIX = {"피버": "피벗", "픽쏘": "픽소", "고레이루": "고레이로", "풋살 사관학교": "풋살사관학교", "퍼스트터치": "퍼스트 터치"}
@@ -137,8 +146,10 @@ def prompt(terms, budget=180, count=len):
 
 
 def hotwords(terms, budget=60, count=len):
-    """매 구간마다 알려 줄 용어 (hotwords) — 길면 받아쓸 자리가 줄어서 짧게."""
-    return _fit(terms, budget, count, " ")
+    """매 구간마다 알려 줄 용어 (hotwords) — 길면 받아쓸 자리가 줄어서 짧게.
+    쉼표·마침표를 붙임: 받아쓰기는 힌트 글의 모양을 따라 써서, 띄어쓰기만으로 이으면 문장 부호 없는 받아쓰기가 나옴."""
+    body = _fit(terms, budget - count("."), count)
+    return body + "." if body else ""
 
 
 def echo(words, terms, run=6):
@@ -279,6 +290,25 @@ def _term_joints(texts, terms):
     return inside
 
 
+def _adnominal(w, nxt):
+    """w 가 뒤 이름씨를 꾸미는 꼴('받는 사람'·'하는 거'·'좋은 방법'·'할 때')인지 — '-는·-은·-을'이나 받침 ㄴ·ㄹ로 끝나고
+    뒤가 꾸밈을 자주 받는 이름씨일 때만 (판정: '그리고 마지막으로 받는 / 사람 발 쪽으로…' 처럼 말 덩어리 가운데서 끊김)."""
+    h = re.sub(r"[^가-힣]", "", w or "")
+    n = re.sub(r"[^가-힣]", "", nxt or "")
+    if not h or not n or re.search(r"[,.?!…~]$", w) or not any(n == x or (n.startswith(x) and len(n) <= len(x) + 2) for x in _HEAD_N):
+        return False
+    jong = (ord(h[-1]) - 0xAC00) % 28 if "가" <= h[-1] <= "힣" else 0
+    return h[-1] in "는은을" or jong in (4, 8)  # 받침 ㄴ(4)·ㄹ(8)
+
+
+def _modifier(w, nxt):
+    """w 가 바로 뒤 낱말 nxt 를 꾸미는 말인지 (지시·수 관형사 · 수는 뒤에 단위가 올 때만 — '네' 대답·'세' 같은 다른 뜻과 가름 ·
+    움직씨·그림씨 꾸밈꼴은 _adnominal)."""
+    if not w or re.search(r"[,.?!…~]$", w):
+        return False
+    return w in _MODSET or (w in _NUM and bool(_COUNTER.match(nxt or ""))) or _adnominal(w, nxt)
+
+
 def chunk(words, fmt="long", breaks=(), terms=()):
     """단어 [{w, s, e}] → 자막 덩어리 [{start, end, text, words}] — 단어 사이에서만 나누고, 언제나 한 줄.
     쇼츠: 13글자(띄어쓰기 빼고)·2.2초까지 / 롱폼: 17글자·3초까지. 한 단어가 혼자 그보다 길면 그 단어만 따로.
@@ -305,12 +335,13 @@ def chunk(words, fmt="long", breaks=(), terms=()):
     for t in texts:
         cum.append(cum[-1] + _chars(t))
     gap = [ws[k + 1]["s"] - ws[k]["e"] for k in range(n - 1)]
+    mod = [_modifier(texts[k], texts[k + 1]) for k in range(n - 1)] + [False]
     join, cut = [0.0], [0.0] * n  # join: k 와 k+1 을 한 자막에 둘 때 · cut: k 뒤에서 나눌 때 (클수록 나쁨)
     for k in range(n - 1):  # 문장 끝(마침표 등)이 가장 강한 끊을 곳 · 받아쓰기 구간 끝은 문장 중간일 때도 있어 그보다 약하게
         t, nx, seg, g = texts[k], texts[k + 1], k in brk, gap[k]
         end, fin = bool(_END.search(t)), bool(_FIN.search(t))
         join.append(join[-1] + (10 if end else 6 if fin else 4 if seg else 3 if t.endswith(",") else 0)
-                    + (1.5 if _CONJ.match(nx) else 0) + 12 * max(0.0, g - 0.25))
+                    + (1.5 if _CONJ.match(nx) else 0) + (0.0 if mod[k] else 12 * max(0.0, g - 0.25)))
         c = (0.0 if end or fin or g >= 0.4 else 0.3 if _CONJ.match(nx) else 0.4 if seg or t.endswith(",") or _EOW.search(t)
              else 1.2 if _NICE.search(t) or g >= 0.2 else 2.5)
         if not (end or g >= 0.4):  # 문장 끝이나 말을 멈춘 곳이 아니면: 기대는 말 앞·꾸미는 말 뒤·목적어와 짧은 풀이말 사이는 피함
@@ -324,20 +355,24 @@ def chunk(words, fmt="long", breaks=(), terms=()):
                 c += 3.0
             if re.search(r"[을를]$", t):
                 c += 3.0 if _PRED.match(nx) and _chars(nx) <= 4 else 0.6
-        cut[k] = c + (1000 if k in inside else 0)
+        cut[k] = c + (1000 if k in inside else 0) + (12 if mod[k] else 0)  # '그'·'두 개' 같은 꾸미는 말 뒤는 끊지 않음
 
     best, prev = [0.0] + [float("inf")] * n, [0] * (n + 1)
     for j in range(1, n + 1):
         for i in range(j - 1, -1, -1):
             chars, dur = cum[j] - cum[i], ws[j - 1]["e"] - ws[i]["s"]
-            if j - i > 1 and (gap[i] >= GAP_MAX or chars > mc or dur > md):
+            if j - i > 1 and (gap[i] >= GAP_MAX and not mod[i] or chars > mc or dur > md):
                 break
             short = max(0.0, 1 - chars / (0.6 * mc))  # 너무 짧은 자막만 조금 피함 (어색한 곳에서 끊느니 짧은 게 나음)
             c = best[i] + 1.5 + join[j - 1] - join[i] + (cut[j - 1] if j < n else 0.0) + 2.5 * short * short
             if j - i == 1 and chars <= ORPHAN and n > 1:  # 낱말 하나짜리 짧은 자막 ('요.'·'그래서')
                 c += 6
             if dur < MIN_DUR:
-                c += 40 + 100 * (MIN_DUR - dur)
+                # 짧은 한 문장('좋습니다.')은 뒤가 비어 있으면 MIN_DUR 까지 늘려 보여 줄 수 있어(from_segments) 혼자 둬도 됨 —
+                # 다음 문장 가운데를 잘라 앞 문장에 붙이는 것('좋습니다. 이렇게 패스와' / '동시에 …')보다 나음
+                room = gap[j - 1] if j < n else MIN_DUR
+                whole = _END.search(texts[j - 1]) and (i == 0 or _END.search(texts[i - 1]) or gap[i - 1] >= 0.4)
+                c += 8 + 30 * (MIN_DUR - dur) if whole and dur + room >= MIN_DUR else 40 + 100 * (MIN_DUR - dur)
             if c < best[j]:
                 best[j], prev[j] = c, i
     spans, j = [], n

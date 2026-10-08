@@ -50,6 +50,7 @@ _STANCE = {"자세", "시선", "중심", "체중", "균형", "무릎", "보폭"}
 BASIC_PHRASES = ("기본 자세", "기본기")  # 도움 낱말만 있을 때 주제 자리에 넣는 말 (D-081)
 _TERM_SET = {re.sub(r"\s+", "", t) for t in TERMS + SKILLS}  # 풋살 용어·기술 이름 (붙여 쓴 꼴) — 이 밖은 용어 사전에만 있는 말
 _TERM_LOWER = {k.lower() for k in _TERM_SET}
+_LESSON_SET = {re.sub(r"\s+", "", t).lower() for t in LESSON_TERMS}  # 기본 레슨 낱말 (붙여 쓴 꼴) — 받아쓰기 용어 사전(DEFAULT_TERMS)에 '디딤발'이 있어도 기술 이름으로 세지 않음
 _SKILL_SET = set(SKILLS)
 # 용어 사전에 있어도 주제어가 아닌 말 (채널·사람·팀·장소 이름 · 기본 사전의 '풋살사관학교'·'최경진 감독')
 _NOT_TOPIC = re.compile(r"사관학교|최경진|(?:감독|선수|코치|님|씨|쌤|선생님)$|(?<![A-Za-z])(?:FC|FS|FK|SC|CF)$"
@@ -265,7 +266,7 @@ def topic_terms():
     for w in words:
         w = re.sub(r"\s+", " ", str(w or "")).strip()
         k = _compact(w)
-        if not k or k in seen or w in STOP or _NOT_TOPIC.search(w) or (_dict_only(w) and _name_like(w)):
+        if not k or k in seen or w in STOP or _NOT_TOPIC.search(w) or (_dict_only(w) and (_name_like(w) or k in _LESSON_SET)):  # 기본 레슨 낱말은 사전에 있어도 약한 주제어 그대로 (D-081)
             continue
         seen.add(k)
         out.append(w)

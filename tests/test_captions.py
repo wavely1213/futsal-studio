@@ -80,6 +80,11 @@ class ChunkTest(unittest.TestCase):
                 self.assertLessEqual(chars, mc, c)
                 self.assertLessEqual(dur, md + 1e-9, c)
                 stuck = not strict and not (k and mergeable(chunks[k - 1], c)) and not (k + 1 < len(chunks) and mergeable(c, chunks[k + 1]))
+                # 짧은 한 문장('좋습니다.')은 뒤가 비어 MIN_DUR 까지 늘려 보여 줄 수 있으면 혼자 둬도 됨
+                room = chunks[k + 1]["start"] - c["end"] if k + 1 < len(chunks) else captions.MIN_DUR
+                whole = re.search(r"[.?!…]$", c["text"]) and (k == 0 or re.search(r"[.?!…]$", chunks[k - 1]["text"])
+                                                              or c["start"] - chunks[k - 1]["end"] >= 0.4)
+                stuck = stuck or bool(whole and dur + room >= captions.MIN_DUR - 1e-9)
                 if not stuck:
                     self.assertGreaterEqual(dur, captions.MIN_DUR - 1e-9, c)
             self.assertNotIn("\n", c["text"])  # 쇼츠·롱폼 모두 언제나 한 줄
@@ -111,6 +116,27 @@ class ChunkTest(unittest.TestCase):
         self.assertEqual(long, ["오늘은 퍼스트 터치를 배워볼게요.", "공이 오면 발 안쪽으로 받아요."])  # 문장마다 한 줄
         self.assertEqual(captions.chunk([], "long"), [])
         self.assertEqual(captions.chunk([W(" ", 0, 1)], "shorts"), [])
+
+    def test_modifier_stays_with_next_word(self):
+        """'그'·'두'(+단위) 같은 꾸미는 말은 자막·줄 끝에 혼자 남지 않음 — 말이 그 뒤에서 1.2초 넘게 쉬어도 (MSG 판정: '패스하고 그' / '자리에 …')."""
+        words = [W("패스하고", 6.87, 7.38), W("그", 7.38, 7.64), W("자리에", 8.91, 8.96), W("서", 8.96, 9.01), W("있으면", 9.01, 9.3),
+                 W("왜", 9.3, 9.45), W("안", 9.45, 9.6), W("될까요?", 9.6, 9.84)]
+        out = captions.chunk(words, "long")
+        self.assertTrue(any("그 자리에" in c["text"].replace("\n", " ") for c in out), out)  # 쉼을 건너 한 자막 (한도 안이면 문장 통째로)
+        self.assertFalse(any(ln.endswith(" 그") or ln == "그" for c in out for ln in c["text"].split("\n")), out)
+        words = [W("공은", 90.34, 91.42), W("항상", 91.42, 91.8), W("두", 91.8, 92.26), W("개쯤", 92.62, 92.7), W("챙겨오세요.", 92.7, 93.36)]
+        out = captions.chunk(words, "long")
+        self.assertFalse(any(c["text"].rstrip().endswith(" 두") or c["text"].split("\n")[0].endswith(" 두") for c in out), out)
+        self.assertFalse(captions._modifier("네,", "그렇죠") or captions._modifier("네", "그렇죠"))  # 대답 '네' 는 꾸미는 말 아님
+        self.assertTrue(captions._modifier("네", "번째"))
+
+    def test_short_sentence_alone_instead_of_splitting_next(self):
+        """짧은 한 문장('좋습니다.') 뒤가 비어 있으면 혼자 두고, 다음 문장은 가운데를 자르지 않음 (예전: '좋습니다. 이렇게 패스와' / '동시에 …')."""
+        words = [W("좋습니다.", 32.37, 32.8), W("이렇게", 33.69, 33.96), W("패스와", 33.96, 34.78), W("동시에", 34.78, 35.2), W("몸이", 35.2, 35.64),
+                 W("나가야", 35.64, 36.02), W("해요.", 36.02, 36.3)]
+        out = captions.from_segments([{"start": 32.37, "end": 36.3, "text": " ".join(w["w"] for w in words), "words": words}], "long")
+        self.assertEqual([c["text"].replace("\n", " ") for c in out], ["좋습니다.", "이렇게 패스와 동시에 몸이 나가야 해요."])
+        self.assertGreaterEqual(out[0]["end"] - out[0]["start"], captions.MIN_DUR - 1e-9)  # 뒤 빈틈으로 늘려 보여 줌
 
     def test_tiny_tail_merged(self):
         # '요.' 하나만 남는 0.2초 자투리는 앞과 합침
@@ -215,7 +241,8 @@ class DictTest(unittest.TestCase):
         p = captions.prompt(terms, 120, lambda s: 2 * len(s))
         self.assertTrue(p.startswith("풋살 강의예요. 풋살사관학교, 최경진 감독"))
         self.assertLessEqual(2 * len(p), 120 + 4)
-        self.assertEqual(captions.hotwords(terms, 1000), " ".join(terms))
+        self.assertEqual(captions.hotwords(terms, 1000), ", ".join(terms) + ".")  # 문장 부호가 있는 힌트 → 문장 부호가 있는 받아쓰기
+        self.assertEqual(captions.hotwords([], 60), "")
         self.assertEqual(captions.prompt([], 120), "")
 
 
@@ -595,7 +622,7 @@ class ReviewFixTest(WorkDir):
         caps = proj["captions"]
         self.assertTrue(any(c.get("sh") for c in caps))
         self.assertFalse(any("\n" in c["text"] for c in caps))  # 프로젝트 자막은 롱폼형 한 줄 (롱폼 편집본·미리보기)
-        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": 15.0, "speed": 1.0}
+        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": max(c["end"] for c in caps) + 0.2, "speed": 1.0}
         base = {"items": [v], "captions": caps, "titles": [], "shapes": [], "captionsOn": True}
         longs = editor.timeline_captions(dict(base, format="long"))
         self.assertEqual([c["text"] for c in longs], [c["text"] for c in caps])

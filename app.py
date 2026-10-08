@@ -25,6 +25,7 @@ import editor
 import hooks
 import idle
 import intake
+import msg
 import plan
 import qa
 import qr
@@ -60,9 +61,10 @@ _utf8_console()
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
 PORT_FALLBACK = range(PORT + 1, PORT + 35)  # 8765 를 다른 프로그램이 쓰거나 Windows(Hyper-V·WSL·Docker)가 예약해 두었으면
 APP_ID = "futsal-studio"  # /api/ping: 이 포트에서 듣는 게 이 앱인지 (다른 프로그램이면 창을 띄우라고 보내지 않음)
-LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0}
+LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0, "big": False}
 DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
 FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}  # /fonts/ 응답 종류 (확장자로)
+BIG_RESULT = 64 << 10   # 이보다 큰 작업 결과(MSG 후보 묶음)는 /api/state?result=1 로 물을 때만 (1초마다 몇 MB 를 다시 보내지 않게)
 LOCK = threading.Lock()
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
 RESTARTING = threading.Event()  # 업데이트 다시 시작이 정해짐 → 새 작업(PC·휴대폰)을 받지 않음 (곧 이 프로세스가 끝나 그 작업이 끊기므로)
@@ -103,7 +105,7 @@ def start_job(name, fn, by=None, ctx=None):
         if JOB["name"] or RESTARTING.is_set():
             return False
         jid = JOB["id"] + 1
-        JOB.update(name=name, result=None, error=None, fail=None, by=by, t0=time.time(), id=jid)
+        JOB.update(name=name, result=None, error=None, fail=None, big=False, by=by, t0=time.time(), id=jid)
 
     def runner():
         studiolog.job(name)  # 실행 표시에 작업 이름 (작업 중에 갑자기 꺼지면 다음에 켤 때 알림)
@@ -111,7 +113,12 @@ def start_job(name, fn, by=None, ctx=None):
         editor.CANCEL.clear()  # 예전 작업에서 누른 멈추기(✕)가 다음 작업에 남지 않게
         try:
             with core.keep_awake():  # 켜 두고 자리를 비워도 Windows 가 절전으로 들어가 작업이 멈추지 않게 (모든 작업)
-                JOB["result"] = fn()
+                res = fn()
+            try:
+                JOB["big"] = len(json.dumps(res, ensure_ascii=False)) > BIG_RESULT
+            except (TypeError, ValueError):
+                JOB["big"] = False
+            JOB["result"] = res
         except Exception as e:
             info = dict(trouble.explain(e, **(ctx or {})), job=name)  # 영어 원문 → 쉬운 한 줄 + 할 일 (원문·위치는 studio.log 에만)
             _fail_extra(info, e)
@@ -363,8 +370,8 @@ def _gui_python():
 def _after_start():
     """앱이 잘 켜진 뒤(포트 확보): 업데이트 표시 정리·결과 알림, 설정 파일 안내, 다운로드 엔진은 뒤에서 확인 (3일마다 최신으로)."""
     try:
-        for msg in updater.finish(core.APP_DIR):
-            log(msg)
+        for line in updater.finish(core.APP_DIR):
+            log(line)
     except Exception as e:
         log(f"업데이트 마무리 중 문제가 생겼어요 · {e}")
     for note in core.CONFIG_NOTES:  # config.json 을 못 읽었거나 작업 폴더를 못 써서 기본값으로 켰음 → 기록 + 화면 알림 한 번
@@ -572,6 +579,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
             return self._send(200, {"ok": True, "view": thumbstyle.editor_view(), "sets": thumbstyle.ab_sets(n)[:3] if n else []})
+        # ---- MSG 자동 편집 스타일 (기본 스타일 · 배운 스타일 · 섞은 스타일 · D-140) ----
+        if u.path == "/api/style/presets":
+            return self._send(200, msg.sources_listing())
+        if u.path == "/api/style/mix":
+            try:
+                return self._send(200, msg.mix_view(q.get("name", [msg.DRAFT_NAME])[0]))
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
         # ---- 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) ----
         if u.path == "/api/refs":
             try:
@@ -687,7 +702,8 @@ class Handler(BaseHTTPRequestHandler):
             intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
             rename.annotate(local)  # 탐색기에서 이름을 바꿔 끊긴 옛 이름 작업 (renamedFrom · [이어 붙이기])
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
-                                    "result": JOB["result"] if not JOB["name"] else None,
+                                    "result": JOB["result"] if not JOB["name"] and (not JOB["big"] or q.get("result") == ["1"]) else None,
+                                    "resultBig": bool(JOB["big"]) and not JOB["name"],
                                     "error": JOB["error"] if not JOB["name"] else None,
                                     "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드 · 내가 시킨 작업은 done.fail)
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
@@ -775,8 +791,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/analyze", "/api/bundle"):  # 아직 복사 중인 영상은 편집점을 찾지 않음 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)
             busy = self._copying(b.get("names"))  # 이름 검사는 그 전(analyze)·뒤(bundle 경로) 그대로 — 잘못된 이름은 복사 중으로 세지 않음
             if busy:
-                msg = intake.copying_msg(busy[0]) + (f" (복사 중인 영상 {len(busy)}개)" if len(busy) > 1 else "")
-                return self._send(409, {"ok": False, "error": msg, "copying": busy, "fail": {"kind": "copying", "msg": msg, "actions": ["retry"]}})
+                why = intake.copying_msg(busy[0]) + (f" (복사 중인 영상 {len(busy)}개)" if len(busy) > 1 else "")  # (msg 는 MSG 모듈 이름이라 쓰지 않음)
+                return self._send(409, {"ok": False, "error": why, "copying": busy, "fail": {"kind": "copying", "msg": why, "actions": ["retry"]}})
         jobs = {
             "/api/list": ("채널 불러오기", lambda: source.annotate_listing(hooks.remember_listing(  # 우리 채널이면 제목 패턴용으로 저장 (올리기 키트)
                 core.list_videos(b.get("kind", "videos"), ck, b.get("url"), log), b.get("kind", "videos"), b.get("url")), b.get("url"))),
@@ -1115,6 +1131,33 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/cancel":
             editor.cancel_export()
             return self._send(200, {"ok": True})
+        if path == "/api/edit/msg":  # MSG 후보 만들기 (작업 · 결과는 새 편집본 후보 + 효과음·배경음악·정지 화면 미디어)
+            try:
+                editor.video_path(b["name"])
+                specs = [x for x in (b.get("styles") or []) if isinstance(x, dict)][:3]
+                kinds = tuple(k for k in (b.get("kinds") or ["long"]) if k in ("long", "shorts")) or ("long",)
+                inten = b.get("intensity") if b.get("intensity") in msg.INTENSITY or b.get("intensity") == "모두" else "보통"
+                if not specs:
+                    raise ValueError("스타일을 하나 이상 골라 주세요")
+                first = max(0, int(b.get("first") or 0))
+            except (KeyError, ValueError, TypeError, FileNotFoundError) as e:
+                return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
+            proof = b.get("proofread") is True  # '클로드로 자막 오타 고치기'를 켰을 때만 (사용자 클로드 계정으로 대사 글만 보냄)
+            writer = b.get("writer") is True   # '클로드로 재미 자막 쓰기'를 켰을 때만 (같은 계정 · 대사 글만)
+            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log, proofread=proof, writer=writer, first=first))
+            return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
+        if path in ("/api/style/mix", "/api/style/mix_pick"):  # 스타일 섞기 저장 · '이 후보의 ○○가 좋아요'
+            try:
+                nm = str(b.get("name") or msg.DRAFT_NAME)
+                if path == "/api/style/mix":
+                    msg.save_mix(nm, b.get("aspects") if isinstance(b.get("aspects"), dict) else None, b.get("intensity"))
+                else:
+                    msg.save_mix(nm, pick=(b.get("aspect"), b.get("source")))
+                return self._send(200, dict(msg.mix_view(nm), ok=True))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
         if path == "/api/edit/autoseq":  # 배운 스타일로 자동 가편집 (새 편집본으로 추가)
             n, sname = b["name"], b.get("style")
             st = next((x for x in style.list_styles() if x["name"] == sname), None)
@@ -1146,7 +1189,10 @@ class Handler(BaseHTTPRequestHandler):
                 if b["which"] == "log":  # studio.log 위치 (관리자에게 보낼 파일 · 탐색기에서 골라 보여 줌)
                     reveal(LOGFILE)
                     return self._send(200, {"ok": True})
-                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root(), "work": core.WORK}[b["which"]])
+                if b["which"] == "bgm":  # MSG '내 배경음악' 폴더 (분위기 이름 폴더도 만들어 둠)
+                    for m in ("신남", "경쾌", "잔잔", "감성"):
+                        (msg.user_bgm_dir() / m).mkdir(parents=True, exist_ok=True)
+                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root(), "work": core.WORK, "bgm": msg.user_bgm_dir()}[b["which"]])
             except Exception as e:
                 log(f"폴더를 열지 못했어요 · {e}")
                 return self._send(200, {"ok": False})
