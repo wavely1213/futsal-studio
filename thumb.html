@@ -2283,8 +2283,12 @@ function watchJob(id) {  // id: 시작 응답의 jobId — 그 작업의 결과�
 
 /* ---------- 영상 장면 ---------- */
 const frameSrc = t => `/frame?name=${encodeURIComponent(NAME)}&t=${t}`;
-let SUBCROP = true;  // 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라냄)
-const subCrop = () => (SUBCROP ? { cropB: 0.26 } : {});
+let SUBCROP = true;  // 영상에 박힌 옛 자막 가리기 — 그 장면에서 글자 띠를 찾았을 때만 그 띠만큼 (E2 · 자막 없는 내 촬영본은 안 자름: 발·공이 잘리고 1.35배 흐려짐)
+const subCrop = t => {  // t: 장면 시각 → { cropB } / { cropT } / {} (AI 추천 bandCrop 과 같은 비율)
+  if (!SUBCROP) return {};
+  const f = FRAMES.find(x => x.t === t) || {};
+  return f.band === "bottom" ? { cropB: clamp(1 - (f.bandY || 0.76) + 0.01, 0.05, 0.3) } : f.band === "top" ? { cropT: clamp((f.bandY || 0.2) + 0.01, 0.05, 0.3) } : {};
+};
 let STRIP_SORT = "time";  // 영상 장면 줄: 시간 순 / 표정 좋은 순 (FRAMES 는 서버가 고른 좋은 순 그대로 — 자동 제작이 앞에서부터 씀)
 const exprOf = f => (f.emo ? Math.min(1, (f.emo.happiness || 0) + (f.emo.surprise || 0)) : -1);
 function faceBadge(f) {  // 😆 웃음 / 😮 놀람 + 얼굴 크기 (화면 높이 대비) — '표정 좋은 순'과 같은 기준(exprOf)
@@ -2329,15 +2333,15 @@ const LW = 1280, LH = 720, SW = 1080, SH = 1920, SB = SH * 0.775, SAFE_W = SW * 
 const TPL = {
   long: {
     "큰 글씨 2줄": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 92, contrast: 112, sat: 115 }, subCrop())),
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 92, contrast: 112, sat: 115 }, subCrop(f[0]))),
         L("shape", { name: "아래 어둡게", x: 0, y: LH * 0.42, w: LW, h: LH * 0.58, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.85 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: LW, h: LH }, CUTFX(12))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: LW, h: LH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 150, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), LW - 60), 0.5, 1, LW / 2, LH - 150));
       if (b) ls.push(place(fitW(txt(b, { size: 120, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - 28));
       return ls;
     },
     "박스 강조": (f, a, b) => [
-      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, contrast: 108 }, subCrop())),
+      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, contrast: 108 }, subCrop(f[0]))),
       L("shape", { name: "사선 그림자", shape: "slant", x: 560, y: 380, w: 760, h: 340, fill: "#000000", slant: -0.55, opacity: 0.9 }),
       place(fitW(txt(a, { size: 118, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: true, color: "#000000", blur: 20, dx: 0, dy: 8, opacity: 0.6 }, box: { on: true, color: "#1F4FE0", pad: 16, radius: 0 } }), 780), 0, 1, 470, LH - 175),
       ...(b ? [place(fitW(txt(b, { size: 118, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false }, box: { on: true, color: "#000000", pad: 16, radius: 0 } }), 780), 0, 1, 470, LH - 40)] : []),
@@ -2345,35 +2349,35 @@ const TPL = {
     "3분할 사선": (f, a, b, cut) => {
       const ls = [0, 1, 2].map(i => L("image", { name: `장면 ${i + 1}`, src: frameSrc(f[i % f.length]), x: i * 410 - 40, y: 0, w: 500, h: LH, slant: 0.22, sat: 120, contrast: 110 }));
       ls.push(L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: LW, h: LH, fill: "#FFFFFF", opacity: 0.35, lines: 60, inner: 0.5 }));
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 240, y: 30, w: 800, h: 450, fit: "contain" }, CUTFX(14))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 240, y: 30, w: 800, h: 450, fit: "contain" }, CUTFX(14))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFE14D", align: "center", skew: -6, strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 14 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - 140));
       if (b) ls.push(place(fitW(txt(b, { size: 110, fill: "#FFFFFF", align: "center", skew: -6, strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(7) }), LW - 60), 0.5, 1, LW / 2, LH - 28));
       return ls;
     },
     "좌우 분할": (f, a, b) => [
-      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 380, y: 0, w: 900, h: LH }, subCrop())),
+      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 380, y: 0, w: 900, h: LH }, subCrop(f[0]))),
       L("shape", { name: "왼쪽 패널", shape: "slant", x: -40, y: 0, w: 660, h: LH, fill: "#0F7A3D", fill2: "#064d26", gradAngle: 90, slant: -0.18 }),
       place(fitW(txt(a + (b ? "\n" + b : ""), { size: 112, fill: "#FFFFFF", lh: 1.1, strokes: [{ color: "#062e17", width: 18 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 12, dx: 0, dy: 6, opacity: 1 } }), 540), 0, 0.5, 56, LH / 2),
     ],
     "네온 강조": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 70, sat: 125, vignette: 70 }, subCrop()))];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: LW, h: LH }, CUTFX(10))));
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 70, sat: 125, vignette: 70 }, subCrop(f[0])))];
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: LW, h: LH }, CUTFX(10))));
       const t = txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 10 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 40, opacity: 1 } });
       ls.push(place(fitW(t, LW - 80), 0.5, 1, LW / 2, LH - (b ? 150 : 50)));
       if (b) ls.push(place(fitW(txt(b, { size: 100, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 18 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(6) }), LW - 80), 0.5, 1, LW / 2, LH - 36));
       return ls;
     },
     "두 장면 겹치기": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, sat: 115, contrast: 108 }, subCrop())),
-        L("image", Object.assign({ name: "장면 2", src: frameSrc(f[Math.min(3, f.length - 1)]), x: 520, y: 0, w: 760, h: LH, sat: 115, contrast: 108, fade: { on: true, angle: 180, start: 0.45, end: 0.95 } }, subCrop())),
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, sat: 115, contrast: 108 }, subCrop(f[0]))),
+        L("image", Object.assign({ name: "장면 2", src: frameSrc(f[Math.min(3, f.length - 1)]), x: 520, y: 0, w: 760, h: LH, sat: 115, contrast: 108, fade: { on: true, angle: 180, start: 0.45, end: 0.95 } }, subCrop(f[Math.min(3, f.length - 1)]))),
         L("shape", { name: "아래 어둡게", x: 0, y: LH * 0.5, w: LW, h: LH * 0.5, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.8 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: -200, y: 0, w: LW, h: LH }, CUTFX(12))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: -200, y: 0, w: LW, h: LH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", fill2: "#FFE14D", gradAngle: 90, strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - (b ? 140 : 40)));
       if (b) ls.push(place(fitW(txt(b, { size: 104, fill: "#FF3B30", align: "center", strokes: [{ color: "#FFFFFF", width: 20 }, { color: "#FFFFFF", width: 0 }], outline: { on: true, color: "#111111", width: 6 }, shadow: HARD(6) }), LW - 60), 0.5, 1, LW / 2, LH - 30));
       return ls;
     },
     "미니멀 하단띠": (f, a, b) => [
-      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 95 }, subCrop())),
+      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 95 }, subCrop(f[0]))),
       L("shape", { name: "하단 띠", x: 0, y: LH - 235, w: LW, h: 235, fill: "#000000", opacity: 0.78 }),
       place(fitW(txt(a, { font: "Pretendard Black", size: 100, fill: "#FFFFFF", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 56, LH - 162),
       ...(b ? [place(fitW(txt(b, { font: "Pretendard Black", size: 80, fill: "#FFE14D", strokes: NOSTROKE, shadow: { on: false } }), LW - 100), 0, 0.5, 60, LH - 58)] : []),
@@ -2381,37 +2385,37 @@ const TPL = {
   },
   short: {
     "쇼츠 · 위아래 큰 글씨": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 92, contrast: 112, sat: 118 }, subCrop())),
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 92, contrast: 112, sat: 118 }, subCrop(f[0]))),
         L("shape", { name: "위 어둡게", x: 0, y: 0, w: SW, h: 760, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.85 }),
         L("shape", { name: "아래 어둡게", x: 0, y: SH - 700, w: SW, h: 700, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.85 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: SW, h: SH }, CUTFX(14))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: SW, h: SH }, CUTFX(14))));
       ls.push(place(fitW(txt(a, { size: 170, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(10) }), SAFE_W), 0.5, 0, SW / 2, 230));
       if (b) ls.push(place(fitW(txt(b, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
     "쇼츠 · 블러 배경 + 가운데 장면": (f, a, b) => [
-      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: 22, bright: 55, sat: 120 }, subCrop())),
+      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: 22, bright: 55, sat: 120 }, subCrop(f[0]))),
       L("image", { name: "가운데 장면", src: frameSrc(f[0]), x: 0, y: (SH - 608) / 2, w: SW, h: 608, contrast: 110, sat: 115, shadow: { on: true, color: "#000000", blur: 40, dx: 0, dy: 12, opacity: 0.9 } }),
       place(fitW(txt(a, { size: 150, fill: "#FFFFFF", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, (SH - 608) / 2 - 60),
       ...(b ? [place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 24 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 0, SW / 2, (SH + 608) / 2 + 70)] : []),
     ],
     "쇼츠 · 상단 제목 띠": (f, a, b) => [
-      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 560, w: SW, h: SH - 560, contrast: 110, sat: 115 }, subCrop())),
+      L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 560, w: SW, h: SH - 560, contrast: 110, sat: 115 }, subCrop(f[0]))),
       L("shape", { name: "상단 띠", x: 0, y: 0, w: SW, h: 600, fill: "#161616", fill2: "#000000", gradAngle: 90 }),
       place(fitW(txt(a, { size: 160, fill: "#FFE14D", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SAFE_W), 0.5, 1, SW / 2, b ? 320 : 380),
       ...(b ? [place(fitW(txt(b, { size: 120, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: false } }), SAFE_W), 0.5, 0, SW / 2, 345)] : []),
     ],
     "쇼츠 · 인물 강조": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: cut ? 10 : 0, bright: cut ? 55 : 80, sat: 120 }, subCrop())),
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: cut ? 10 : 0, bright: cut ? 55 : 80, sat: 120 }, subCrop(f[0]))),
         L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: SW, h: SH, fill: "#FFFFFF", opacity: 0.3, lines: 70, inner: 0.45 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: -540, y: 260, w: SW * 2, h: SH - 260, fit: "cover" }, CUTFX(16))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: -540, y: 260, w: SW * 2, h: SH - 260, fit: "cover" }, CUTFX(16))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 8, opacity: 0.6 }, box: { on: true, color: "#E50914", pad: 20, radius: 8 } }), SAFE_W), 0.5, 0, SW / 2, 170));
       if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
     "쇼츠 · 네온": (f, a, b, cut) => {
-      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 60, sat: 130, vignette: 80 }, subCrop()))];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(), x: 0, y: 0, w: SW, h: SH }, CUTFX(12))));
+      const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 60, sat: 130, vignette: 80 }, subCrop(f[0])))];
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: SW, h: SH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 160, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 12 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 46, opacity: 1 } }), SAFE_W), 0.5, 0, SW / 2, 240));
       if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
@@ -2437,7 +2441,7 @@ function renderAuto() {
       <input class="s" id="aL1" placeholder="첫째 줄"><input class="s" id="aL2" placeholder="둘째 줄" style="margin-top:6px">
       <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(cutText(o.join(" "), 16))}</button>`).join("")}</div>
       <div class="row2"><button class="btn pri" id="aMake">후보 다시 만들기</button><button class="btn" id="aCutMake">${CUT_AUTO ? "누끼 넣은 후보 ✓" : "인물 누끼 넣어서 만들기"}</button></div>
-      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라내기)</label>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (자막 띠가 보이는 장면만 그만큼 잘라내기)</label>
       <div class="hint">영상에서 선명한 장면을 골라 템플릿으로 만들어요. 누르면 편집 화면으로 불러와요.</div></div>
     <div class="designs" id="designs"></div><div class="cands ${AUTO_FMT}" id="cands"></div></details>`;
   $("aL1").value = prev.a ?? t0[0]; $("aL2").value = prev.b ?? (t0[1] || "");

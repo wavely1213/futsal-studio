@@ -1349,8 +1349,38 @@ function placeMedia(md, t, vt, at, mode, a = 0, b = null) {
   const link = vOk && aOk ? nid() : null, made = [];
   if (vOk) { clearRange(vt, s, e); const it = { id: nid(), track: vt, media: md.id, start: s, in: a, out: a + len, speed: 1, rev: false, link, reframe: 0.5, fit: "auto", fx: {}, color: {} }; S.items.push(it); made.push(it); }
   if (aOk) { clearRange(at, s, e); const it = { id: nid(), track: at, media: md.id, start: s, in: a, out: a + len, speed: 1, rev: false, link, fx: {}, gain: 0, fadeIn: 0, fadeOut: 0, mute: false }; S.items.push(it); made.push(it); }
+  // 음악(소리만 있는 파일)이 영상 끝을 넘으면 영상 끝에 맞춰 자르고 2초 서서히 줄임 (E8 · 끝에 검은 화면이 붙지 않게) — 클립 속성에서 반복·음악 길이 그대로
+  const mus = !vOk && aOk && md.kind === "audio" && mode !== "insert" ? made[0] : null, vEnd = videoEnd();
+  const fitted = mus && vEnd > mus.start + 0.5 && iEnd(mus) > vEnd + 0.05 ? musicFit(mus, "fit") : false;
   selI = new Set(made.map(x => x.id)); selX = null; primary = made[0].id; changed();
-  toast(`${niceName(md.file)} 을(를) ${made.map(x => x.track).join("·")} 에 넣었어요`);
+  toast(`${niceName(md.file)} 을(를) ${made.map(x => x.track).join("·")} 에 넣었어요` + (fitted ? ` · 영상 끝(${mmss(vEnd)})에 맞춰 자르고 ${BGM_FADE}초 동안 줄였어요 (클립 속성에서 '반복'·'음악 길이 그대로'로 바꿔요)` : ""));
+}
+/* 배경음악 길이 (E8): fit 영상 끝에 맞추기(자르고 2초 줄이기 · 기본) · loop 반복해서 영상 끝까지(이음매 0.5초 겹쳐 줄이기 없이 이어 붙임) · full 음악 길이 그대로
+   반복으로 붙인 조각은 bgm: 원래 클립 id 표시 — 다시 고르면 지우고 새로 · 영상 클립(V 트랙)의 가장 늦은 끝이 기준 */
+const BGM_FADE = 2;
+function videoEnd() { let e = 0; for (const it of S.items) { const tr = TRK(it.track); if (tr && tr.k === "v") e = Math.max(e, iEnd(it)); } return e; }
+function musicFit(it, how) {
+  const md = mdOf(it), dur = mDur(md), end = videoEnd(), k = sp(it);
+  S.items = S.items.filter(x => x.bgm !== it.id);
+  it.bgmFit = how;
+  const full = () => { if (it.rev) it.in = Math.max(0, it.out - dur); else it.out = Math.min(dur, it.in + (dur - it.in)); };
+  if (how === "full" || end <= it.start + 0.5) { full(); it.fadeOut = 0; return true; }
+  if (how === "fit") {
+    full();
+    if (iEnd(it) > end) trimEnd(it, end);
+    it.fadeOut = Math.min(BGM_FADE, iLen(it) / 2); return true;
+  }
+  // loop
+  full(); it.fadeOut = 0;
+  let last = it, guard = 0;
+  while (iEnd(last) < end - 0.05 && guard++ < 200) {
+    const s0 = iEnd(last), c = { ...JSON.parse(JSON.stringify(it)), id: nid(), start: fr(s0), in: it.rev ? it.in : 0, out: it.rev ? it.out : dur, link: null, fadeIn: 0, fadeOut: 0, bgm: it.id };
+    delete c.bgmFit;
+    clearRange(it.track, c.start, Math.min(end, c.start + iLen(c))); S.items.push(c); last = c;
+  }
+  if (iEnd(last) > end) trimEnd(last, end);
+  last.fadeOut = Math.min(BGM_FADE, iLen(last) / 2);
+  return true;
 }
 const targetOf = k => (S.tracks.find(t => t.k === k && t.target && !t.lock) || S.tracks.find(t => t.k === k && !t.lock) || {}).id;
 
@@ -1601,10 +1631,41 @@ function itemGain(it, t, w) {
 }
 // 말소리 감지 (배경음악 자동 줄이기 미리보기)
 let speechHold = -9, duckG = 1, lastLoopT = 0;
+// editor.py speech_spans 와 같은 규칙 (E2): 대사 트랙 원본 클립 위의 받아쓴 말(자막) 자리 ± 0.2초만 말하는 중 — 말 없는 시범·환호에서는 음악이 살아남
+// 자막이 하나도 없으면 예전처럼 소리 크기로 · 원본이 아닌 대사 클립(다른 영상)은 소리 크기로 · 효과음 트랙(voiceFx false)은 안 봄
+const DUCK_PAD = 0.2;
+let SPEECH = { key: "", spans: null };
+function speechSpans() {
+  const key = ver + "|" + (P.captions || []).length + "|" + S.id;
+  if (SPEECH.key === key) return SPEECH.spans;
+  const caps = (P.captions || []).filter(c => c.end > c.start && String(c.text || "").trim()).map(c => [c.start, c.end]).sort((a, b) => a[0] - b[0]);
+  let spans = null;
+  if (caps.length) {
+    const talk = [];
+    for (const tr of aTracks()) {
+      if (tr.role !== "dialog" || tr.mute || tr.voiceFx === false) continue;
+      for (const it of S.items) {
+        if (it.track !== tr.id || it.mute || (it.media || "main") !== "main") continue;
+        const k = sp(it);
+        for (const [x0, y0] of caps) {
+          const x = Math.max(it.in, x0), y = Math.min(it.out, y0); if (y <= x) continue;
+          const t0 = it.rev ? it.start + (it.out - y) / k : it.start + (x - it.in) / k, t1 = it.rev ? it.start + (it.out - x) / k : it.start + (y - it.in) / k;
+          talk.push([t0 - DUCK_PAD, t1 + DUCK_PAD]);
+        }
+      }
+    }
+    spans = mergeIv(talk, 0);
+  }
+  SPEECH = { key, spans };
+  return spans;
+}
 function speechAt(t) {
+  const spans = speechSpans();
+  if (spans) { let lo = 0, hi = spans.length - 1; while (lo <= hi) { const m = (lo + hi) >> 1; if (spans[m][1] <= t) lo = m + 1; else if (spans[m][0] > t) hi = m - 1; else return true; } }
   for (const tr of aTracks()) {
-    if (tr.role !== "dialog" || tr.mute) continue;
+    if (tr.role !== "dialog" || tr.mute || (spans && tr.voiceFx === false)) continue;
     for (const { it } of audioAt(tr.id, t)) {
+      if (spans && (it.media || "main") === "main") continue;
       const wv = WAVES[it.media]; if (!wv || it.mute) continue;
       const i = Math.floor(mt(it, t) * wv.per_sec), pk = wv.peaks[i] || 0;
       if (pk * (wv.top || 0.5) * dbLin(val(it, "level", t)) > 0.02) return true;
@@ -2752,8 +2813,12 @@ async function renderRec() {
     const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${cutText(s.title, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
       captionStyle: JSON.parse(JSON.stringify(base.captionStyle)), master: { volume: 1, normalize: true, lufs: -14 }, duck: { on: true, amount: -14 },
       layout: JSON.parse(JSON.stringify(base.layout || {})),
-      titles: base.titles.length ? [{ ...JSON.parse(JSON.stringify(base.titles[0])), id: nid(), text: s.keywords[0] ? s.keywords[0] + "!" : cutText(s.title, 16), start: 0, dur: s.length }] : [],
+      titles: base.titles.length ? [{ ...JSON.parse(JSON.stringify(base.titles[0])), id: nid(), text: s.hook || cutText(s.title, 16), start: 0, dur: s.length }] : [],
       items: itemsFromCuts(s.cuts) };
+    // 끝 0.3초 소리 줄이기 · 제목은 서버가 고른 것(editor.short_hooks) — 자동 가편집 쇼츠와 같게 (E2)
+    const lastA = q.items.filter(i => i.track === "A1").pop(); if (lastA) lastA.fadeOut = 0.3;
+    // 위쪽 자막 스타일이면 쇼츠 내내 떠 있는 큰 제목(y 0.22) 아래로 (editor.py auto_sequences 의 _stack_below 와 같은 뜻 · E4③)
+    if (q.titles.length && q.captionStyle && (q.captionStyle.y ?? 0.8) < 0.3) q.captionStyle.y = 0.3;
     ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {
@@ -3202,6 +3267,7 @@ function renderFx() {
       ${slider("pFin", "페이드 인", a.fadeIn || 0, 0, 5, 0.1, x => (+x).toFixed(1) + "초")}
       ${slider("pFout", "페이드 아웃", a.fadeOut || 0, 0, 5, 0.1, x => (+x).toFixed(1) + "초")}
       <div class="f"><label>음소거</label><label class="tog"><input type="checkbox" id="pMute" ${a.mute ? "checked" : ""}> 이 클립 소리 끄기</label><span></span></div>
+      ${mdOf(a).kind === "audio" && !a.bgm ? `<div class="f"><label>음악 길이</label><div class="seg" id="pBgm">${[["fit", "영상 끝에 맞추기"], ["loop", "반복해서 채우기"], ["full", "음악 길이 그대로"]].map(([k2, l]) => `<button data-v="${k2}" class="${(a.bgmFit || "") === k2 ? "on" : ""}">${l}</button>`).join("")}</div><span></span></div>` : ""}
       <button class="btn sm" id="pVolAll">이 볼륨을 같은 트랙 모든 클립에</button></div>`, "vol");
   }
   h += `<div class="pg"><div class="presets" style="margin:0"><button class="btn sm" id="pDel">지우기</button><button class="btn sm" id="pRipDel">잔물결 삭제</button>${main.link ? `<button class="btn sm" id="pUnlink">연결 해제</button>` : ""}<button class="btn sm" id="pDup">복제</button></div></div>`;
@@ -3266,6 +3332,11 @@ function bindFx(v, a, main, its) {
   if (a) {
     bindRange("pGain", x => a.gain = x, fmtDb, "클립 게인"); bindRange("pFin", x => a.fadeIn = x, x => (+x).toFixed(1) + "초", "페이드 인"); bindRange("pFout", x => a.fadeOut = x, x => (+x).toFixed(1) + "초", "페이드 아웃");
     $("pMute").onchange = e => { commit("음소거"); a.mute = e.target.checked; changed(false); };
+    if ($("pBgm")) $("pBgm").querySelectorAll("button").forEach(b => b.onclick = () => {
+      if (!unlocked(a.track)) return toast("잠긴 트랙이에요");
+      commit("음악 길이"); musicFit(a, b.dataset.v); changed();
+      toast(b.dataset.v === "fit" ? `영상 끝에 맞춰 자르고 ${BGM_FADE}초 동안 줄였어요` : b.dataset.v === "loop" ? "영상 끝까지 음악을 반복했어요" : "음악을 원래 길이대로 뒀어요 (영상보다 길면 끝에 검은 화면이 붙어요)");
+    });
     $("pVolAll").onclick = () => { commit("볼륨 모두 적용"); for (const x of itemsOn(a.track).filter(x => x !== a)) { x.fx = x.fx || {}; x.fx.level = remapFx(a, x, { level: prm(a, "level") }).level; x.gain = a.gain || 0; } changed(false); toast("같은 트랙 모든 클립에 적용했어요"); };
   }
   $("pDel").onclick = () => deleteSel(false); $("pRipDel").onclick = () => deleteSel(true);

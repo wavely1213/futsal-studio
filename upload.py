@@ -21,6 +21,7 @@ import webbrowser
 from collections import Counter
 from pathlib import Path
 
+import captions
 import core
 import editor
 import hooks
@@ -774,7 +775,15 @@ def sources(name):
 def _transcript(d):
     tj = d / "transcript.json"
     try:
-        return _segments(json.loads(tj.read_text(encoding="utf-8"))) if tj.exists() else []
+        if not tj.exists():
+            return []
+        segs = json.loads(tj.read_text(encoding="utf-8"))
+        try:  # 받아쓰기 헛것(무음 위 '감사합니다' · 영어 찌꺼기)은 제목·설명에 안 씀 (E2)
+            sil = json.loads((d / "analysis.json").read_text(encoding="utf-8")).get("silences") if (d / "analysis.json").exists() else []
+            segs = captions.drop_hallucinations(segs, sil or [])[0]
+        except Exception:  # noqa: BLE001
+            pass
+        return _segments(segs)
     except (OSError, ValueError):
         return []
 
@@ -864,6 +873,63 @@ def counts(kit):
             "hashtags": len(_HASHTAG.findall(kit.get("description") or ""))}
 
 
+# ---------- 다른 채널 영상 (E2 · BR-097) ----------
+OTHER_ORIGINAL = ("다른 채널 영상이라 '원본 영상 그대로' 올리면 저작권 경고를 받을 수 있어요 (경고 1번이면 1주일 동안 못 올리고, "
+                  "90일 안에 3번이면 채널이 지워져요). 편집실에서 짧게 자르고 감독님 해설을 넣은 편집본으로 키트를 만들어 주세요")
+OTHER_NOTE = "다른 채널 영상이 들어 있어요 · 짧게, 감독님 해설 위주로 쓰고 설명에 출처를 남겼어요 (출처: {})"
+
+
+def other_sources(name, sq=None, proj=None):
+    """키트를 만들 영상에 든 다른 채널 영상 → [{file, channel, url}] (원본 · 편집본에 가져온 보관함 영상 · 출처를 못 읽으면 [])."""
+    try:
+        import source
+        data = source.load()
+    except Exception:  # noqa: BLE001
+        return []
+    files = [name]
+    if sq:
+        media = {m.get("id"): m for m in (proj or {}).get("media") or [] if isinstance(m, dict)}
+        used = {it.get("media", "main") for it in sq.get("items") or () if isinstance(it, dict)}
+        files = [name] if "main" in used or not used else []
+        files += [media[u]["file"] for u in used if u in media and media[u].get("src", "videos") == "videos" and media[u].get("file")]
+    out, seen = [], set()
+    for f in files:
+        try:
+            dsc = source.describe(f, data, running=False)
+        except Exception:  # noqa: BLE001
+            continue
+        if dsc.get("kind") != "other":
+            continue
+        key = dsc.get("channelKey") or dsc.get("channel") or f
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"file": f, "channel": dsc.get("channel") or "다른 채널", "url": dsc.get("channelUrl") or "", "main": f == name})
+    return out
+
+
+def _credit(text, others, main_other):
+    """설명에 '▶ 출처' 줄을 넣고, 원본이 다른 채널 영상이면 감독님 '▶ 출연' 묶음은 뺌."""
+    rows = text.split("\n")
+    if main_other:
+        out, skip = [], False
+        for r in rows:
+            if r.strip().startswith("▶ 출연"):
+                skip = True
+                continue
+            if skip and (not r.strip() or r.strip().startswith("▶")):
+                skip = False
+            if skip and (COACH in r or "풋살사관학교" in r):
+                continue
+            skip = False
+            out.append(r)
+        rows = out
+    block = ["▶ 출처"] + [f"{o['channel']}" + (f" ({o['url']})" if o["url"] else "") for o in others]
+    at = next((i for i, r in enumerate(rows) if r.strip().startswith("#")), len(rows))
+    rows[at:at] = block + [""]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(rows)).strip() + "\n"
+
+
 def build_kit(name, seq=None, save=True):
     """올리기 키트 만들기. seq: 편집실 편집본 id (없으면 원본 영상 그대로)."""
     editor.video_path(name)
@@ -872,6 +938,9 @@ def build_kit(name, seq=None, save=True):
     if seq and proj is None:
         raise LookupError("편집실 프로젝트를 읽지 못했어요 · 편집실을 한 번 연 뒤 다시 해 주세요")
     sq, exp = _target(name, seq, proj)
+    foreign = other_sources(name, sq, proj)
+    if not sq and foreign:  # 다른 채널 영상의 '원본 그대로'는 막음 (이유를 보여 줌)
+        raise ValueError(OTHER_ORIGINAL)
     if sq:
         fmt = "shorts" if sq.get("format") == "shorts" else "long"
         segs = _segments(exp.with_suffix(".srt")) if exp and exp.with_suffix(".srt").exists() else []
@@ -952,6 +1021,10 @@ def build_kit(name, seq=None, save=True):
     kit["prompt"] = claude_prompt(kit, segs)
     kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
     kit["description"] = add_promo(kit["description"], kit["promo"], notes)
+    if foreign:  # 다른 채널 클립이 든 편집본: 설명에 출처 · 원본이 다른 채널이면 '출연' 줄 빼기 · 알림 (E2)
+        kit["description"] = fit_description(_credit(kit["description"], foreign, any(o["main"] for o in foreign)), notes)
+        kit["foreign"] = foreign
+        notes.insert(0, OTHER_NOTE.format(", ".join(o["channel"] for o in foreign)))
     kit["notes"] = notes
     kit["counts"] = counts(kit)
     kit["limits"] = {"title": TITLE_MAX, "description": DESC_MAX, "tags": TAGS_MAX, "hashtags": HASHTAG_MAX}
@@ -1031,6 +1104,8 @@ def load_kit(name, seq=None, live=False):
             alerts.append(f"키트를 만든 뒤 편집본을 {'다시 ' if was else ''}내보냈어요 ({exp.name}) · 고친 제목·설명·태그는 그대로 두었어요. "
                           "길이나 챕터 자리가 바뀌었으면 '다시 만들기'를 눌러 주세요")
             kit["notes"] = [n for n in kit.get("notes") or [] if "아직 내보내지 않았어요" not in n]
+    if not sq and other_sources(name):  # 예전에 만들어 둔 다른 채널 영상의 '원본 그대로' 키트 (E2)
+        alerts.insert(0, OTHER_ORIGINAL)
     kit["alerts"] = alerts
     kit["thumbnail"] = thumbnail_check(name, kit.get("format", "long"))
     kit["counts"] = counts(kit)

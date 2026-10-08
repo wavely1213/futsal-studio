@@ -634,7 +634,7 @@ def split_sentences(segs, gap=SENT_GAP, guess=True):
             a = float(s["start"]) if k == 0 else float(p[0]["s"])
             b = float(s["end"]) if k == len(parts) - 1 else float(p[-1]["e"])
             piece = {"start": round(a, 2), "end": round(max(a, b), 2), "text": " ".join(str(w["w"]).strip() for w in p)}
-            if k:
+            if k or s.get("cont"):  # (첫 문장은 구간 자체가 앞 구간에 이어진 것일 때만 — 가편집이 나눈 문장 줄 · E2)
                 piece["cont"] = True  # 같은 받아쓰기 구간의 뒷 문장 (가편집은 예전처럼 사이를 자르지 않음 — 말 없는 시범이 그 사이에 있을 수 있음)
             if not est:
                 piece["words"] = p
@@ -669,3 +669,127 @@ def merge_ghosts(sents, gap=1.0):
                 continue
         out.append(s)
     return out
+
+
+# ---------- 받아쓰기 헛것 거르기 (E2 · BR-090) ----------
+# 받아쓰기(Whisper)가 소리 없이 지어낸 낱말: 한 점에 몰린 낱말(길이 0) · 같은 낱말 줄줄이 · 한국어 영상 속 영어 찌꺼기 · 조용한 곳 위의 말.
+# 자막·가편집·쇼츠·제목 후보에 쓰기 전에 뺌 (받아쓰기 파일은 그대로 · 빠진 낱말은 '확인 필요'로 추천 탭에 보여 줌).
+HALLU_CPS = 0.05     # 글자당 이보다 짧게 받아쓴 낱말은 시각이 무너진 것 (한 점에 몰림)
+HALLU_P = 0.15       # 무너진 낱말이 이보다 확신이 낮으면 지어낸 말
+HALLU_RUN = 3        # 무너진 낱말이 이만큼 넘게 한 점에 이어지면 — 가까운 곳(HALLU_NEAR 초)에 같은 글이 있으면 겹쳐 쓴 그림자
+HALLU_NEAR = 20.0
+HALLU_COVER = 0.8    # 그림자 낱말 글자의 이만큼이 가까운 말에 (앞뒤 낱말과 이어진 채로) 그대로 있으면 그림자
+HALLU_REPEAT = 4     # 같은 낱말이 이보다 많이 줄줄이 나오면 (구령 '하나, 둘' 은 다른 낱말이라 상관없음) 앞 2개만 남김
+HALLU_KEEP = 2
+HALLU_SIL = 0.95     # 낱말 길이의 이만큼이 조용한 곳(silencedetect) 안이고 (가장자리에 걸친 낱말은 받아쓰기 시각이 조금 어긋난 진짜 말일 수 있음)
+HALLU_SIL_P = 0.6    # 확신이 이보다 낮으면 소리 없이 지어낸 말
+HALLU_LATIN_P = 0.5  # 한글 없는 영어 낱말(3글자 넘게)이 이보다 확신이 낮으면 찌꺼기 ('functioning.' · 'paced...Pacific...')
+HALLU_WHY = "받아쓰기 헛것(확인 필요)"
+
+
+def _wplain(w):
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", str(w or ""))
+
+
+def _collapsed(w):
+    n = len(_wplain(w.get("w")))
+    return n > 0 and float(w["e"]) - float(w["s"]) < HALLU_CPS * n
+
+
+def _covered_by(toks, near):
+    """낱말들 toks 중 앞이나 뒤 낱말과 이어 붙인 채로 near(가까운 말을 이은 글) 안에 그대로 있는 낱말의 글자 비율 0~1."""
+    tot = sum(len(t) for t in toks)
+    if not tot:
+        return 0.0
+    got = 0
+    for k, t in enumerate(toks):
+        pair = [toks[k - 1] + t] if k else []
+        pair += [t + toks[k + 1]] if k + 1 < len(toks) else []
+        if any(x in near for x in pair) or (len(toks) == 1 and t in near):
+            got += len(t)
+    return got / tot
+
+
+def hallucinations(words, silences=()):
+    """낱말 [{w, s, e, p}] (시간 순, 영상 전체) → 지어낸 낱말 번호 집합 (규칙은 위 HALLU_* · 말은 한국어 영상 기준)."""
+    ws = [w for w in words or ()]
+    bad = set()
+    sil = [(float(x["start"]), float(x["end"])) for x in silences or () if isinstance(x, dict) and "start" in x and "end" in x]
+    for i, w in enumerate(ws):
+        try:
+            s, e, p = float(w["s"]), float(w["e"]), float(w.get("p", 1.0))
+        except (KeyError, TypeError, ValueError):
+            continue
+        t = _wplain(w.get("w"))
+        if not t:
+            continue
+        if _collapsed(w) and p < HALLU_P:
+            bad.add(i)
+        elif re.fullmatch(r"[A-Za-z0-9]*[A-Za-z]{3,}[A-Za-z0-9]*", t) and p < HALLU_LATIN_P:
+            bad.add(i)
+        elif sil and p < HALLU_SIL_P:
+            d = max(e - s, 1e-3)
+            inside = sum(max(0.0, min(e, b) - max(s, a)) for a, b in sil)
+            if (e - s < 1e-3 and any(a <= s <= b for a, b in sil)) or inside >= HALLU_SIL * d:
+                bad.add(i)
+    i = 0
+    while i < len(ws):  # 한 점에 몰린 낱말 줄 — 가까운 곳에 같은 글이 있으면 그림자
+        j = i
+        while j < len(ws) and _collapsed(ws[j]) and abs(float(ws[j]["s"]) - float(ws[i]["s"])) <= 0.1:
+            j += 1
+        if j - i >= HALLU_RUN:
+            run = [_wplain(w.get("w")) for w in ws[i:j]]
+            t0 = float(ws[i]["s"])
+            near = "".join(_wplain(w.get("w")) for k, w in enumerate(ws)
+                           if not (i <= k < j) and abs(float(w["s"]) - t0) <= HALLU_NEAR and not _collapsed(w))
+            if _covered_by(run, near) >= HALLU_COVER:
+                bad.update(range(i, j))
+            i = j
+        else:
+            i += 1
+    i = 0
+    while i < len(ws):  # 같은 낱말 줄줄이 ('다섯, 다섯, 다섯, …')
+        j = i
+        while j + 1 < len(ws) and _wplain(ws[j + 1].get("w")) and _wplain(ws[j + 1].get("w")) == _wplain(ws[i].get("w")):
+            j += 1
+        if j - i + 1 > HALLU_REPEAT:
+            bad.update(range(i + HALLU_KEEP, j + 1))
+        i = j + 1
+    return bad
+
+
+def drop_hallucinations(segs, silences=()):
+    """받아쓰기 구간 → (지어낸 낱말을 뺀 구간들, 뺀 것 [(시작, 끝, 글)]).
+    낱말 시각이 있는 구간만 봄 · 남은 낱말로 글을 다시 쓰고 구간 시작·끝을 남은 낱말에 맞춤 · 다 빠지면 그 구간도 뺌.
+    낱말 시각이 없는 예전 받아쓰기 구간은 영어 찌꺼기 한 줄('paced...Pacific...')만 뺌."""
+    segs = [s for s in segs or () if isinstance(s, dict)]
+    flat = [(k, j, w) for k, s in enumerate(segs) for j, w in enumerate(s.get("words") or ()) if isinstance(w, dict) and str(w.get("w") or "").strip()]
+    flat.sort(key=lambda x: (float(x[2].get("s", 0) or 0), x[0], x[1]))
+    bad = hallucinations([w for _, _, w in flat], silences)
+    gone = {(flat[i][0], flat[i][1]) for i in bad}
+    out, flags = [], []
+    for k, s in enumerate(segs):
+        ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]
+        if not ws:
+            t = _wplain(s.get("text"))
+            if t and len(re.findall(r"[A-Za-z]", t)) / len(t) > 0.7 and len(t) - len(re.findall(r"[A-Za-z]", t)) <= 3 and len(t) >= 4:
+                flags.append((float(s["start"]), float(s["end"]), str(s.get("text") or "").strip()))
+                continue
+            out.append(s)
+            continue
+        keep = [w for j, w in enumerate(s.get("words") or ()) if isinstance(w, dict) and str(w.get("w") or "").strip() and (k, j) not in gone]
+        drop = [w for j, w in enumerate(s.get("words") or ()) if (k, j) in gone]
+        if drop:
+            a, b = float(drop[0]["s"]), float(drop[-1]["e"])
+            flags.append((round(a, 2), round(max(a, b), 2), " ".join(str(w["w"]).strip() for w in drop)))
+        if not keep:
+            continue
+        if not drop:
+            out.append(s)
+            continue
+        n = dict(s, words=keep, text=" ".join(str(w["w"]).strip() for w in keep))
+        n["start"] = round(max(float(s["start"]), min(float(w["s"]) for w in keep)) if float(s["start"]) < float(keep[0]["s"]) - 0.5 else float(s["start"]), 2)
+        last = max(float(w["e"]) for w in keep)
+        n["end"] = round(min(float(s["end"]), last + 0.3) if float(s["end"]) > last + 0.5 else float(s["end"]), 2)
+        out.append(n)
+    return out, flags

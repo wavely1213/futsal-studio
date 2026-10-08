@@ -852,7 +852,62 @@ def learn(style_name, names, log=print):
     # 임시 파일 → 바꿔 끼우기 (다시 배우다 꺼져도 예전 스타일은 그대로 · I-003) · Windows 잠금이면 잠깐 뒤 다시
     updater.write_atomic(STYLES / f"{style_name}.json", core.clean_text(json.dumps(prof, ensure_ascii=False, indent=1)))
     log(f"스타일 저장 · {style_name} · {describe(prof)}")
-    return {"name": style_name, "profile": prof, "params": edit_params(prof), "desc": describe(prof)}
+    rough = False
+    if not _rough_file().exists():  # 처음 배운 스타일 → 첫 가편집에 바로 씀 (한 번 정하거나 끈 뒤로는 그대로)
+        try:
+            set_rough_default(style_name)
+            rough = True
+            log(f"  이제 첫 가편집을 '{style_name}' 스타일대로 만들어요 (스타일 카드에서 바꿀 수 있어요)")
+        except (OSError, StyleMissing):
+            pass
+    return {"name": style_name, "profile": prof, "params": edit_params(prof), "desc": describe(prof), "rough": rough}
+
+
+# ---------- 첫 가편집에 쓰는 스타일 (E2 · BR-094) ----------
+# 편집점 찾기 뒤 편집실을 처음 열 때·'가편집 다시 만들기'·'편집점 다시 찾기' 가 이 스타일대로 만듦 (styles/설정/첫 가편집.json · 이름 하나).
+# 처음 배운 스타일은 저절로 이것이 되고(이미 정해 둔 게 없을 때만), 스타일 카드에서 바꾸거나 끔.
+ROUGH_DIR_NAME = "설정"
+
+
+def _rough_file():
+    return STYLES / ROUGH_DIR_NAME / "첫 가편집.json"
+
+
+def rough_default():
+    """첫 가편집에 쓸 스타일 이름 — 정하지 않았거나 그 스타일을 지웠으면 None."""
+    try:
+        d = json.loads(_rough_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    n = d.get("name") if isinstance(d, dict) else None
+    if not isinstance(n, str) or not n:
+        return None
+    try:
+        style_file(n)
+    except StyleMissing:
+        return None
+    return n
+
+
+def set_rough_default(name):
+    """첫 가편집에 쓸 스타일 정하기 (None·'' 이면 끔 — 기본 가편집). 없는 스타일이면 StyleMissing."""
+    if name:
+        name = style_file(name).stem
+    f = _rough_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"name": name or "", "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    return name or None
+
+
+def rough_params():
+    """(이름, edit_params) — 첫 가편집에 쓸 스타일이 없거나 못 읽으면 (None, None)."""
+    n = rough_default()
+    if not n:
+        return None, None
+    try:
+        return n, edit_params(json.loads(style_file(n).read_text(encoding="utf-8")))
+    except Exception:  # noqa: BLE001 — 스타일 파일이 깨졌으면 기본 가편집
+        return None, None
 
 
 def style_file(style_name):

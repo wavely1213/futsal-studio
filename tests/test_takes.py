@@ -497,6 +497,11 @@ class RecommendTest(unittest.TestCase):
                 now = editor.recommend(self.name, **c["kwargs"])
                 junk_list = now.pop("junk_list")
                 off = now.pop("offscript")  # E12: 영상 밖 말 목록이 더해짐
+                self.assertEqual(now.pop("demos"), [])  # E2: 말 없는 틈의 시범 구간 (낱말 시각이 없는 받아쓰기는 없음)
+                for sh in now["shorts"]:  # E2: 쇼츠 위 큰 제목 (editor.short_hooks) · 점수는 한 글자 추임새 줄 감점이 빠져 조금 다름(순서·구간은 그대로)
+                    self.assertTrue(sh.pop("hook"))
+                    sh.pop("score")
+                c = dict(c, before=dict(c["before"], shorts=[{k: v for k, v in sh.items() if k != "score"} for sh in c["before"]["shorts"]]))
                 if c["input"].startswith("코치"):
                     self.assertEqual(junk_list, [])
                     # E12 (BR-060): 끝의 '구독과 좋아요 부탁드립니다'는 영상 밖 안내 말 — 롱폼(정리 컷)은 그대로, 쇼츠에서만 빠짐
@@ -509,7 +514,11 @@ class RecommendTest(unittest.TestCase):
                     for s in now["shorts"]:
                         self.assertFalse(any(x["in"] < 74.5 and x["out"] > 72.0 for x in s["cuts"]), s)
                 else:  # 편집실 테스트 영상: '패스주고 리턴받고' 두 번 — 원래도 빠지던 앞쪽만 목록에 나옴 (컷은 그대로)
-                    self.assertEqual(json.dumps(now, sort_keys=True, ensure_ascii=False), json.dumps(c["before"], sort_keys=True, ensure_ascii=False))
+                    # E2 (BR-092): 끝인사 '감사합니다'(50.5~)는 쇼츠에서 뺌 → 그걸로 끝나던 쇼츠는 짧아져 빠지거나 그 앞에서 끝남 · 나머지는 예전 그대로
+                    bye = [sh for sh in c["before"]["shorts"] if sh["end"] > 50.0]
+                    self.assertEqual(json.dumps(dict(now, shorts=[sh for sh in now["shorts"] if sh in c["before"]["shorts"]]), sort_keys=True, ensure_ascii=False),
+                                     json.dumps(dict(c["before"], shorts=[sh for sh in c["before"]["shorts"] if sh not in bye]), sort_keys=True, ensure_ascii=False))
+                    self.assertFalse([sh for sh in now["shorts"] if any(x["out"] > 50.6 for x in sh["cuts"])])
                     self.assertEqual(junk_list, [{"a": 28.5, "b": 34.0, "why": NG}])
                     self.assertEqual(off, [])
 

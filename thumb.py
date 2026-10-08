@@ -34,12 +34,22 @@ def _frames_dir(name):
     return d
 
 
-def grab(name, t, w=1920):
-    """영상의 t초 장면을 이미지로 (원본 화질, 가로 최대 1920 — 쇼츠 9:16 확대에도 덜 뭉개지게).
+GRAB_MAX = 3840   # 썸네일 배경 장면: 원본 화질 그대로 (4K 까지) — 쇼츠 9:16 로 자르고 키워도 덜 흐리게 (E2 · BR-096)
+WORK_W = 1920     # 점수 매기기·글자 띠 찾기·누끼는 이 크기로 (빠르고 메모리를 덜 씀 · 위치는 비율이라 같음)
+
+
+def grab(name, t, w=None):
+    """영상의 t초 장면을 이미지로. w 를 안 주면 원본 크기(가로 GRAB_MAX 까지 — 썸네일 편집기 배경 /frame),
+    주면 가로 최대 w (점수 매기기 WORK_W 등). 크기마다 다른 파일 (s_<시각>.jpg 원본 · h_<시각>.jpg 1920 · h_<시각>_w<w>.jpg) —
+    예전에는 크기와 상관없이 같은 이름이라 먼저 만든 작은 그림(MSG 얼굴 찾기 640)이 썸네일 배경으로 쓰일 수 있었음.
     임시 파일에 다 만든 뒤에만 제자리로 (디스크가 차거나 꺼져 반쪽이 된 그림이 '있는 파일'로 남아 계속 쓰이지 않게 ·
     같은 장면을 두 요청이 함께 만들어도 반쯤 쓴 파일을 내주지 않게)."""
-    out = _frames_dir(name) / f"h_{t:09.3f}.jpg"
-    src, vf = str(core.VIDEOS / name), f"scale='min({w},iw)':-2"
+    if w is None:
+        out, ww = _frames_dir(name) / f"s_{t:09.3f}.jpg", GRAB_MAX
+    else:
+        ww = int(w)
+        out = _frames_dir(name) / (f"h_{t:09.3f}.jpg" if ww == WORK_W else f"h_{t:09.3f}_w{ww}.jpg")
+    src, vf = str(core.VIDEOS / name), f"scale='min({ww},iw)':-2"
     if out.exists():
         return out
     tmp = out.with_name(f"{out.stem}.{os.getpid()}_{threading.get_ident()}.tmp.jpg")
@@ -539,7 +549,7 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
     from PIL import Image, ImageOps
 
     def one(t):
-        p = grab(name, t)
+        p = grab(name, t, WORK_W)
         if not p.exists():
             return None
         sc, fs = float(_sharpness(p)), None
@@ -734,10 +744,10 @@ def frame_candidates(name, n=TOP_N):
     for k, t in enumerate(sorted(picked, key=lambda x: -scored[x][0])):
         sc, fs, info = scored[t]
         core.set_progress(label="장면 고르는 중", item=name, pct=99, detail=f"글자가 박힌 장면 살피는 중 {k + 1}/{len(picked)}")
-        info["band"], info["bandY"] = _band(grab(name, t))
+        info["band"], info["bandY"] = _band(grab(name, t, WORK_W))
         tb = None
         try:  # 다른 썸네일·타이틀 화면처럼 큰 글자가 이미 있는 장면은 뒤로 (상자는 화면이 피해서 자르거나 가리는 데 씀)
-            with Image.open(grab(name, t)) as im:
+            with Image.open(grab(name, t, WORK_W)) as im:
                 rgb = ImageOps.exif_transpose(im).convert("RGB")
             info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
             info["color"] = colorfulness(rgb)
@@ -1118,7 +1128,7 @@ def cut_auto(name, t, box=None, kind="fast", faces=None, tboxes=None):
             return dst, json.loads(qf.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
-    with Image.open(grab(name, t)) as im:
+    with Image.open(grab(name, t, WORK_W)) as im:  # 누끼는 1920 으로 (메모리 · 원본 4K 는 모델 입력에 줄여 들어가 이득이 없음)
         img = im.convert("RGB")
     W, H = img.size
     if box:
@@ -1311,7 +1321,7 @@ def _frame_sheet(name, items, path):
     from PIL import Image, ImageDraw, ImageFont
     tiles = []
     for it in items:
-        with Image.open(grab(name, it["t"])) as im:
+        with Image.open(grab(name, it["t"], WORK_W)) as im:
             rgb = im.convert("RGB")
         rgb.thumbnail((440, 440))
         tiles.append(rgb)
