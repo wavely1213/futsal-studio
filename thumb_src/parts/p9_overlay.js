@@ -82,7 +82,7 @@ function startPtDrag(e, i) {
 }
 function editMarkerLabel(l) {
   const v = prompt("원 안 글자 (번호·짧은 낱말)", l.label ?? ""); if (v === null) return;
-  commit("칩 글자"); l.label = v.slice(0, 6); changed();
+  commit("칩 글자"); l.label = cutText(v, 6); changed();
 }
 // 속성 칸: 전술 도형
 function tacFieldsHtml(l) {
@@ -187,7 +187,7 @@ function mobileCanvas(doc, w, dark) {  // 유튜브 목록 한 줄 모양
   g.save(); rrect(g, pad, pad, w, th, 6); g.clip(); g.drawImage(t, pad, pad); g.restore();
   if (!short) {
     g.fillStyle = "rgba(0,0,0,.8)"; rrect(g, pad + w - 34, pad + th - 17, 30, 13, 3); g.fill(); g.fillStyle = "#fff"; g.font = "bold 9px sans-serif"; g.fillText(mmss(INFO.duration || 0), pad + w - 31, pad + th - 7);
-    g.fillStyle = dark ? "#F1F1F1" : "#0F0F0F"; g.font = "bold 12px 'Pretendard Bold', sans-serif"; g.fillText(niceName(NAME).slice(0, 14), w + 18, pad + 18);
+    g.fillStyle = dark ? "#F1F1F1" : "#0F0F0F"; g.font = "bold 12px 'Pretendard Bold', sans-serif"; g.fillText(cutText(niceName(NAME), 14), w + 18, pad + 18);
     g.fillStyle = dark ? "#AAAAAA" : "#606060"; g.font = "11px sans-serif"; g.fillText("풋살사관학교", w + 18, pad + 36); g.fillText("조회수 1.2만회", w + 18, pad + 52);
   }
   return c;

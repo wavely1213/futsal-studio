@@ -20,7 +20,6 @@ from pathlib import Path
 import core
 import editor
 import hooks
-import thumb
 
 TITLE_MAX, DESC_MAX, TAGS_MAX, HASHTAG_MAX = 100, 5000, 500, 15
 CH_MIN_VIDEO, CH_MIN_LEN, CH_MIN_COUNT = 180, 10, 3
@@ -494,7 +493,9 @@ def image_size(path):
 
 
 def _images_of(name):
-    """썸네일 편집기가 이 영상 이름으로 저장한 이미지들 (이름이 더 긴 다른 영상의 것은 빼고 · 최근 것부터)."""
+    """썸네일 편집기가 이 영상 이름으로 저장한 이미지들 (이름이 더 긴 다른 영상의 것은 빼고 · 최근 것부터).
+    A/B 묶음('_썸네일_A'·'_B'·… · 같은 ' (2)')은 한 덩어리로 (묶음에서 가장 늦게 쓴 시각) A 부터 — 마지막에 쓴 B·C 가 아니라 첫 고른 A 가 7단계·바로 올리기 썸네일."""
+    import thumb  # 이름(AB_SHEET·AB_TAGS)만 씀 · 지연 import: 올리기 키트(·youtube_upload)를 불러올 때 thumb 의 폴더 만들기가 돌지 않게
     pre = core.adir(name).name + "_"
     try:
         longer = {core.adir(v.name).name + "_" for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)}
@@ -504,11 +505,21 @@ def _images_of(name):
     longer = {o for o in longer if o != pre and o.startswith(pre)}
     sheet = pre + thumb.AB_SHEET  # A/B 묶음의 '모바일 비교' 한 장은 썸네일이 아님 (가로라서 긴 영상 썸네일로 잡혀 유튜브에 올라갈 뻔함)
     files = [p for p in files if not any(p.name.startswith(o) for o in longer) and not p.name.startswith(sheet)]
-    return sorted(files, key=_mtime, reverse=True)
+    ab = re.compile(re.escape(pre) + "썸네일_([" + thumb.AB_TAGS + r"])( \(\d+\))?\.jpg$")  # thumb.export_ab 의 이름
+    sets = {}
+    for p in files:
+        m = ab.match(p.name)
+        if m:
+            sets[m.group(2)] = max(sets.get(m.group(2), 0), _mtime(p))
+
+    def order(p):
+        m = ab.match(p.name)
+        return (sets[m.group(2)], -thumb.AB_TAGS.index(m.group(1))) if m else (_mtime(p), 0)
+    return sorted(files, key=order, reverse=True)
 
 
 def thumbnail_check(name, fmt="long"):
-    """가장 최근에 저장한 썸네일 확인: 2MB 이하 · 1280×720(긴 영상) / 1080×1920(쇼츠)."""
+    """가장 최근에 저장한 썸네일(A/B 묶음이면 그 묶음의 A) 확인: 2MB 이하 · 1280×720(긴 영상) / 1080×1920(쇼츠)."""
     files = _images_of(name)
     if not files:
         return {"ok": False, "file": None, "problems": ["아직 저장한 썸네일이 없어요 · 아래 '썸네일 만들기'를 눌러 편집기에서 '이미지로 저장'을 눌러 주세요"]}

@@ -145,6 +145,38 @@ class SaveTests(unittest.TestCase):
         self.assertNotIn(thumb.AB_SHEET, th["file"])
         self.assertEqual((th["w"], th["h"]), (1280, 720))
 
+    def test_ab_set_picks_A_not_last_written(self):
+        """A/B 묶음을 저장하면 7단계·바로 올리기 썸네일은 마지막에 쓴 B·C 가 아니라 A · 새 묶음 ' (2)' 는 그 A · 그 뒤 따로 저장한 것은 그것."""
+        from io import BytesIO
+        import base64
+        import os
+        from PIL import Image
+        name = "20261007_ABCDEFGHIJK_발바닥 드래그.mp4"
+        (self.tmp / "videos" / name).write_bytes(b"0")
+
+        def url(w, h, c):
+            b = BytesIO()
+            Image.new("RGB", (w, h), c).save(b, "JPEG")
+            return "data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode()
+
+        def age(files, t0):  # 쓴 차례대로 1초씩 (파일 시스템 시각이 거칠어도 B·C 가 A 보다 늦게)
+            for i, f in enumerate(files):
+                os.utime(core.OUT / f, (t0 + i, t0 + i))
+        t0 = time.time()
+        first = thumb.export_ab(name, [url(1280, 720, (200, 30, 30)), url(1280, 720, (30, 200, 30)), url(1280, 720, (30, 30, 200))], url(400, 160, (0, 0, 0)))
+        age(first, t0)
+        self.assertEqual(upload.thumbnail_check(name, "long")["file"], first[0])
+        self.assertTrue(first[0].endswith("_썸네일_A.jpg"), first)
+        second = thumb.export_ab(name, [url(1280, 720, (9, 9, 9)), url(1280, 720, (99, 99, 99))])
+        age(second, t0 + 10)
+        self.assertEqual(upload.thumbnail_check(name, "long")["file"], second[0])
+        self.assertTrue(second[0].endswith("_썸네일_A (2).jpg"), second)
+        one = thumb.export_image(name, url(1280, 720, (1, 2, 3)), "jpg", "썸네일")
+        os.utime(one, (t0 + 20, t0 + 20))
+        self.assertEqual(upload.thumbnail_check(name, "long")["file"], one.name)
+        os.utime(core.OUT / second[1], (t0 + 30, t0 + 30))  # 묶음의 B 를 다시 쓴 것처럼 (가장 늦음) → 그래도 그 묶음의 A
+        self.assertEqual(upload.thumbnail_check(name, "long")["file"], second[0])
+
 
 class LimitTests(unittest.TestCase):
     def test_editor_png_limit_matches_upload_check(self):

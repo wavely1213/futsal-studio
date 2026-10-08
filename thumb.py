@@ -1384,7 +1384,7 @@ def export_image(name, data_url, fmt="jpg", label="썸네일"):
 
 
 AB_TAGS = "ABCDEF"
-AB_SHEET = "모바일 비교"   # A/B 묶음의 비교 한 장 이름 (올리기 키트 썸네일 확인 upload._images_of 가 이 이름은 뺌)
+AB_SHEET = "모바일 비교"   # A/B 묶음의 비교 한 장 이름 (올리기 키트 썸네일 확인 upload._images_of 가 이 이름은 빼고 묶음에선 A 를 먼저 고름)
 AB_MAX = 2_900_000   # 한 장 dataURL 글자 수 상한 (JPG 2MB 안쪽)
 
 

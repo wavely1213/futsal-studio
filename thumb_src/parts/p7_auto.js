@@ -258,7 +258,7 @@ function showTab(t) { document.querySelectorAll(".ph .tab").forEach(x => x.class
 document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.dataset.tab)));
 
 /* ---------- 내보내기 ---------- */
-const PNG_LIMIT = 2 * 1024 * 1024;  // 유튜브 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)과 같은 값
+const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
 async function exportImg() {
   if (!D) return; if (editing) endEdit();
   const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
@@ -269,8 +269,8 @@ async function exportImg() {
   const jpg = () => { let q = 0.93, d; do { d = c.toDataURL("image/jpeg", q); q -= 0.07; } while (d.length * 0.75 > 1.95e6 && q > 0.5); return d; };
   if (fmt === "png") {
     data = c.toDataURL("image/png");
-    // 유튜브 썸네일은 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음)
-    if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 유튜브 썸네일 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
+    // 7단계 썸네일 확인·스튜디오 직접 올리기는 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음 · 바로 올리기는 50MB · I-062)
+    if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
   } else data = jpg();
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
   if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");

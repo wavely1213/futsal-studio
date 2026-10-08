@@ -39,10 +39,10 @@
   4. **기록**: 장면 점수 하나 실패·자동 누끼 실패는 `studiolog.trace`, 분석 중 자동 클로드 문구 실패는 `trace(…, detail=False)`(대답·프롬프트 글 없이 종류·위치만), 선수·공 찾기 모델을 못 쓰면 studio.log 한 줄. `/api/thumb/ocr` 오류는 `trace` + 쉬운 한 줄(`traceback.print_exc` 없앰), A/B 묶음 저장의 디스크·잠금 오류는 500 + 쉬운 한 줄(썸네일 저장과 같게).
   5. **자식 프로세스**: 클로드는 main 의 `claude_cli.run`(Job Object `core.track`) 그대로, ffmpeg 은 `core.run`, 선수·공 모델 받기는 `thumb.fetch_model`(크기·sha256 확인 후 제자리).
   6. **누끼 요청**(`/api/thumb/cut`): 썸네일 쪽 검사(올린 그림은 `thumb.ASSETS` 안 · 모델 이름은 `BG_MODELS` 안)와 main 의 장면 이름 검사(`editor.video_path`)를 합쳐 작업을 시작하기 전에 400·404 (I-021).
-  7. **썸네일 크기 한도 하나**: 편집기 PNG 경고 `PNG_LIMIT` = 올리기 키트 `upload.THUMB_MAX`(2MiB, 7단계 썸네일 확인) — 넘으면 '7단계 썸네일 확인에 걸려요'(예전 '유튜브에 바로 못 올려요'는 바로 올리기 50MB(`youtube_upload.THUMB_API_MAX`)와 맞지 않음 · I-062). A/B 묶음의 '모바일 비교' 한 장(`thumb.AB_SHEET`)은 `upload._images_of` 가 빼서 7단계 확인·유튜브 바로 올리기 썸네일로 잡히지 않는다.
+  7. **썸네일 크기 한도 하나**: 편집기 PNG 경고 `PNG_LIMIT` = 올리기 키트 `upload.THUMB_MAX`(2MiB, 7단계 썸네일 확인) — 넘으면 '7단계 썸네일 확인에 걸려요'(예전 '유튜브에 바로 못 올려요'는 바로 올리기 50MB(`youtube_upload.THUMB_API_MAX`)와 맞지 않음 · I-062). PNG 저장 전 확인 창도 같은 말('7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)'). A/B 묶음의 '모바일 비교' 한 장(`thumb.AB_SHEET`)은 `upload._images_of` 가 빼서 7단계 확인·유튜브 바로 올리기 썸네일로 잡히지 않고, 묶음은 한 덩어리(묶음에서 가장 늦게 쓴 시각)로 A 부터 줄 세워 마지막에 쓴 B·C 가 아니라 첫 고른 A 가 기본 썸네일이 된다(`thumb.export_ab` 는 A→B→… 차례로 씀).
 - **이유**: 썸네일 작업도 다른 작업과 같은 길(jobId·카드·studio.log·write_atomic)로 — 휴대폰 작업과 결과가 섞이지 않고, 실패가 쉬운 한국어로, Windows 에서 저장이 반쪽으로 남지 않게.
 - **버린 대안**: 썸네일 작업을 휴대폰에서도 시작 — 결과(추천 그림)를 보고 고르는 곳이 PC 편집기뿐 / 썸네일 편집기에 편집실 같은 실패 카드 칸을 새로 — 화면 구성을 바꾸게 됨(토스트·분석 줄로 충분) / `remove_bg` 도 이번에 고침 — 성능 묶음과 같은 곳을 두 번 고치게 됨.
-- **영향/제약**: 시험 `tests/test_thumb_merge.py`, `test_windows_compat.Names.test_thumb_cut_checks_frame_name`(이제 작업 전에 400). 썸네일 편집기의 실패 안내는 버튼 없는 한 줄이다.
+- **영향/제약**: 시험 `tests/test_thumb_merge.py`, `test_windows_compat.Names.test_thumb_cut_checks_frame_name`(이제 작업 전에 400). 썸네일 편집기의 실패 안내는 버튼 없는 한 줄이다. `remote` 는 작업 이름 때문에 `thumb`·`thumbcopy` 를 불러온다(`strategy`·`youtube_upload` 와 같은 식 · 불러올 때 `thumb.ASSETS` 폴더를 만듦 — `app` 이 어차피 불러옴). `upload` 는 이름(`AB_SHEET`·`AB_TAGS`)만 쓰므로 함수 안에서 지연 import 한다(올리기 키트·`youtube_upload` 만 불러올 때 폴더 만들기가 돌지 않게).
 
 ## D-066 | 2026-10-07 | AI 추천 썸네일 판정 3회차 검토 반영: 굳은 고르기 규칙 · 부정·질문 문장 거르기 · 쇼츠 두 장면 칸 · 액션 누끼 · 앱 점수 동점 없앰
 - **상태**: 채택 (D-065 의 '상투 꼬리표는 대사 인용이면 괜찮음'·'unknown 이면 클로드 시도'·'colorfulness > 70 ×0.6·제외'를 대체 · D-065 에 '질문 판 3'으로 적힌 것은 실제로 4였고 이번에 5)

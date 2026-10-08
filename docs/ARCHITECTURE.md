@@ -70,7 +70,7 @@
   - `app`은 `updater`(업데이트 마무리·실행기 경유·공통 저장 도구)와 `winlink`(Windows 바로가기·작업 표시줄 아이디)를 직접 import한다. `face`는 `thumb`을 거쳐서만 쓴다.
   - `winlink` → (표준 라이브러리만: ctypes COM). `setup_check.py` 는 앱이 import 하지 않는 설치 확인 스크립트다 (`시작하기 (Windows).bat` 이 실행 · 오래된 Python 문법도 됨).
   - `editor`·`style`·`bundle`·`thumb`·`intake` → `updater` (공통 저장 도구 `write_atomic`·`replace_retry`, D-029). `claude_cli` 는 자식 묶음(`core.track`)만 함수 안에서 지연 import한다.
-  - `upload` → `editor`, `hooks`, `core`
+  - `upload` → `editor`, `hooks`, `core`. `thumb`(A/B 묶음 이름 `AB_SHEET`·`AB_TAGS` — 썸네일 확인에서 '모바일 비교'는 빼고 묶음에선 A 를 먼저)은 함수 안에서 지연 import한다(올리기 키트를 불러올 때 `thumb` 의 폴더 만들기가 돌지 않게 · D-067).
   - `youtube_upload` → `upload`(키트·`files_for`), `editor`(`safe_name`·`probe`), `core`, `updater`(`write_atomic`), `youtube_api`. `app`·`remote`(작업 이름 `JOB_NAME`·`JOB_FINISH` 를 `JOB_LABELS`·`STOPPABLE` 에 · D-048)가 쓴다.
   - `youtube_api` → `updater`(표준 라이브러리만 쓰는 실행기: 비밀 저장 `write_atomic(mode=0o600)` · HTTPS 인증서 설정 `_ssl_context` · D-048)뿐. 그 밖의 앱 모듈은 import 하지 않고, 불러올 때 아무것도 실행하지 않는다(DPAPI `ctypes.WinDLL`·Google opener 도 쓸 때만) — 실행기의 `import app` 확인이 안전하게. 새 두 파일은 `app.py` 의 import 줄과 같은 커밋으로 들어가야 한다(D-021 과 같은 주의).
   - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`
@@ -83,7 +83,6 @@
   - `thumb` → `core`, `studiolog`(오류 위치), `updater`. `face`·`detect`·`avmodels`·`thumbcopy`·`trouble`·`editor`는 함수 안에서 지연 import한다.
   - `face`·`detect` → `core`, `thumb`(모델 받기 `fetch_model`) · `detect` 는 `studiolog`·`updater`(실패 표시 `write_atomic`)도
   - `thumbcopy` → `core`, `hooks`. `editor`·`claude_cli`·`updater`는 함수 안에서 지연 import한다. `app`이 `thumbcopy`를 직접 쓴다(문구·판정 작업). `remote` 는 작업 이름(`JOB_AI`·`JOB_JUDGE`·`thumb.JOB_ANALYZE`)만 쓴다.
-  - `upload` → `thumb`(A/B 묶음의 '모바일 비교' 이름 `AB_SHEET` — 썸네일 확인에서 뺌)
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
   - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
   - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기·`write_atomic`·자기 확인 `urlopen`). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
