@@ -23,6 +23,7 @@ import exportplan
 import hwdec
 import idle
 import studiolog
+import tactic
 import takes
 import updater
 
@@ -2210,6 +2211,7 @@ def seq_total(seq):
     if ends:
         return max(ends)
     g = [t["start"] + t["dur"] for t in seq.get("titles", [])] + [s["start"] + s["dur"] for s in seq.get("shapes", []) if not s.get("full")]
+    g += [tactic.end_of(seq)] if seq.get("tactics") else []
     return max(g) if g else 0.0
 
 
@@ -2503,7 +2505,7 @@ def _rot(s):
     return max(-45.0, min(45.0, r)) if math.isfinite(r) else 0.0
 
 
-def build_ass(proj, W, H):
+def build_ass(proj, W, H, fps=30):
     st = proj["captionStyle"]
 
     def style_line(name, s):
@@ -2531,6 +2533,7 @@ def build_ass(proj, W, H):
     for t in proj["titles"]:
         lines.append(style_line(f"T{t['id']}", t["style"]))
     lines.append("Style: Shape,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1")
+    lines.append(tactic.STYLE_LINE)
     lines += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
     # 도형 (자막·타이틀 아래 층)
     tl_total = seq_total(proj)
@@ -2549,6 +2552,8 @@ def build_ass(proj, W, H):
         col, a = _ass_color(sh["color"]), int((1 - sh.get("opacity", 1.0)) * 255)
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
                      rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
+    # 전술 그림 (도형 위 · 자막·타이틀 아래 · 프레임마다 미리보기와 같은 모양 — tactic.ops_at)
+    lines += tactic.ass_lines(proj.get("tactics") or [], W, H, fps, tl_total, _ass_time)
 
     def event(style, s, start, end, text, words=None, fit=False):
         al = s.get("align", "center")
@@ -3979,7 +3984,7 @@ def export(name, proj, opts, log):
 
         try:
             trans = valid_trans(proj)
-            (tmp / "subs.ass").write_text(build_ass(proj, BW, BH), encoding="utf-8")
+            (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
             shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
             segs = _segments(proj, t_lo, t_hi, fps, trans, media)
             tot_f = sum(b - a for a, b in segs) or 1
