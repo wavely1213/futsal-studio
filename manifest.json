@@ -1,6 +1,8 @@
 {
   "version": "2.9.0",
   "notes": "AI 추천 썸네일 6개 (장면·문구·틀을 섞어 점수로 고름) · 전술 그래픽(형광 화살표·발밑 원·패스 줄·번호 원·스포트라이트) · 브랜드 키트(로고·색·시리즈 이름) · 사진 자동 보정 · 선수·공 찾기 · 영상 대사로 썸네일 문구 · A/B 내보내기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/6afd10682a7cd4c54dc06c01d01ef59db10e9ccc.zip",
+  "commit": "6afd10682a7cd4c54dc06c01d01ef59db10e9ccc",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "5a8907f43e696def6d4d36f160be684f177280f2224cfb0ddaf05f91d2987da1",
