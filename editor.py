@@ -2488,6 +2488,16 @@ def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress, abort=None):
         raise
 
 
+def voice_filters(voice):
+    """목소리 보정 설정({hp, nr, comp}) → ffmpeg 소리 필터 목록 (대사 트랙들을 섞은 소리에 · 48kHz 스테레오 기준).
+    MSG 가 효과음 크기를 '보정한 말소리'에 맞출 때도 같은 것을 씀 (msg._voice_peak)."""
+    voice = voice or {}
+    D = AFFTDN_DELAY
+    return (["highpass=f=80"] if voice.get("hp") else []) + \
+        ([f"apad=pad_len={D}", f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40", f"atrim=start_sample={D}"] if voice.get("nr") else []) + \
+        (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
+
+
 def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
     """소리 섞기: 트랙별 볼륨·키프레임·페이드·전환·음소거/솔로 → 대사 + 배경음악(말할 때 자동 줄임).
     클립마다 ffmpeg 로 읽는 것은 몇 개씩 동시에 (컷이 많은 롱폼이 훨씬 빨라짐)."""
@@ -2526,10 +2536,15 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         if not p_in.exists():
             raise RuntimeError(f"미디어 파일이 없어요 · {md['file']}")
         jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, tr.get("role", "dialog") != "dialog"))
-    dia = mus = None
+    # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게 — 'voiceFx: false' 트랙(효과음)은 보정 없이 그 뒤에 더함
+    # (효과음이 압축기를 지나면 말과 함께 눌렸다 키워져 정한 크기보다 커지고 말소리도 같이 눌림 · 판정: 띠로리가 말보다 큼)
+    vf = voice_filters(seq.get("voice"))
+    dia = mus = fxb = None
     try:
         dia = np.memmap(tmp / "dialog.f32", np.float32, "w+", shape=(n, 2))
         mus = np.memmap(tmp / "music.f32", np.float32, "w+", shape=(n, 2)) if any(j[-1] for j in jobs) else None
+        if vf and any(not j[-1] and j[1].get("voiceFx") is False for j in jobs):
+            fxb = np.memmap(tmp / "fx.f32", np.float32, "w+", shape=(n, 2))
         lock = threading.Lock()
         my = set()
         stop = threading.Event()
@@ -2554,7 +2569,7 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                    "-vn", "-af", ",".join(af) or "anull", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"]
             lvl = param(it, "level")
             g_static = 10 ** ((float(it.get("gain") or 0) + float(tr.get("vol") or 0)) / 20)
-            bus = mus if music else dia
+            bus = mus if music else fxb if fxb is not None and tr.get("voiceFx") is False else dia
             pos = int(round((tl_start - t_lo) * SR))
             end_i = int(round((a_hi - t_lo) * SR))
             st, en = it["start"], i_end(it)
@@ -2631,12 +2646,6 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                     progress((k + 1) / len(futs))
             finally:
                 ex.shutdown(wait=True, cancel_futures=True)
-        # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게
-        voice = seq.get("voice") or {}
-        D = AFFTDN_DELAY
-        vf = (["highpass=f=80"] if voice.get("hp") else []) + \
-             ([f"apad=pad_len={D}", f"afftdn=nr={[0, 8, 14, 20][min(3, int(voice.get('nr') or 0))]}:nf=-40", f"atrim=start_sample={D}"] if voice.get("nr") else []) + \
-             (["acompressor=threshold=0.08:ratio=3:attack=8:release=160:makeup=2"] if voice.get("comp") else [])
         if vf:
             progress(0.98)
             dia.flush()
@@ -2653,6 +2662,11 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                     e = min(m, b + SR * 10)
                     dia[b:e] = np.asarray(cl[b * 2:e * 2]).reshape(-1, 2)
                 del cl
+        if fxb is not None:  # 보정하지 않는 트랙(효과음)을 보정한 대사에 더함 (배경음악 줄이기는 예전처럼 둘을 합한 소리로 봄)
+            fxb.flush()
+            for b in range(0, n, SR * 10):
+                e = min(n, b + SR * 10)
+                dia[b:e] = dia[b:e] + fxb[b:e]
         # 말할 때 배경음악 자동 줄이기 (덕킹) → 결과는 대사 버퍼에 그대로 더함 (임시 파일 하나 덜 씀)
         duck = seq.get("duck") or {}
         win = SR // 50  # 20ms
@@ -2696,7 +2710,22 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         return tmp / "dialog.f32", peak
     finally:
         # 메모리 매핑을 바로 놓음: 멈추거나 오류가 나도 (작업 스레드의 흔적이 남아 있어도) Windows 에서 임시 파일이 지워지게
-        dia = mus = None  # noqa: F841
+        dia = mus = fxb = None  # noqa: F841
+
+
+LOUD_TP = -2.0    # 소리 크기 맞추기의 최대 크기(dBTP) — AAC 로 줄이면 순간 최대가 0.5dB 남짓 커져 -1.5 로 맞춘 소리가 -0.9 dBTP 로 나옴
+#                   (판정: 유튜브 기준 -1 dBTP 넘음) → 여유를 둠
+LOUD_TP_OUT = -1.2  # 다 줄인(AAC) 소리의 순간 최대가 이보다 크면 LOUD_TP 를 그만큼 더 낮춰 다시 만듦
+
+
+def _true_peak(path, tmp, abort=None):
+    """소리 파일의 순간 최대(dBTP · ebur128) — 못 재면 None."""
+    try:
+        r = _run_ff(["-v", "info", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"], tmp, abort=abort, want_err=True)
+    except RuntimeError:
+        return None
+    found = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", r or "")
+    return float(found[-1]) if found else None
 
 
 LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(dBFS) — 공 차는 소리·효과음처럼 순간만 큰 소리가 있으면
@@ -2706,7 +2735,7 @@ LOUD_PEAK = -3.5  # 소리 크기 맞추기 전 미리 누르는 최대 크기(d
 def _loud_pre(mix, tmp, lufs, vol, abort=None):
     """소리 크기 맞추기 전처리: 섞은 소리를 한 번 재서(ebur128) 목표까지 모자란 만큼 미리 키우고, 그때 넘치는 순간 소리만 리미터로 누름.
     리미터가 누른 만큼 다시 한 번 재서 더 키움(2번 재기, 소리만이라 빠름). 그다음 loudnorm 은 남은 1dB 안팎만 맞춤 →
-    목표 LUFS·최대 -1.5 dBTP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
+    목표 LUFS·최대 LOUD_TP 를 함께 지킴. 재지 못하거나 이미 충분하면 [] (예전과 같음)."""
     def measure(extra):
         try:
             r = _run_ff(["-v", "info", "-nostats", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af",
@@ -2893,12 +2922,16 @@ def export(name, proj, opts, log):
                 if norm and span < 3.05 and peak < 1e-4:  # 3초 안 되는 무음은 소리 크기 맞추기가 오류 → 건너뜀
                     norm = False
 
-                def enc(nm):
+                pre = {}
+
+                def enc(nm, tp=LOUD_TP):
                     af = [f"volume={float(m.get('volume', 1.0)):.3f}"]
                     if nm:
                         lufs = min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))
-                        af += _loud_pre(mix, tmp, lufs, float(m.get("volume", 1.0)), abort_a)
-                        af.append(f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11")
+                        if "chain" not in pre:  # (다시 만들 때는 잰 값 그대로)
+                            pre["chain"] = _loud_pre(mix, tmp, lufs, float(m.get("volume", 1.0)), abort_a)
+                        af += pre["chain"]
+                        af.append(f"loudnorm=I={lufs:.1f}:TP={tp:.2f}:LRA=11")
                     af += ["aresample=48000", "asetpts=N/SR/TB"]  # 소리 크기 맞추기 뒤 시각을 다시 매겨 끝이 잘리거나 길어지지 않게
                     _run_ff(["-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", mix.name, "-af", ",".join(af), "-c:a", "aac", "-b:a", "192k",
                              "-ar", "48000", "audio.m4a"], tmp, on_time=lambda t: astate.update(frac=0.4 + 0.6 * min(1.0, t / max(0.1, span))),
@@ -2906,6 +2939,12 @@ def export(name, proj, opts, log):
                     astate["norm"] = bool(nm)  # 실제로 소리 크기를 맞췄는지 (검수가 이 기준으로 봄)
                 try:
                     enc(norm)
+                    if norm:
+                        # AAC 로 줄이면 순간 최대가 커짐 (공 차는 소리·효과음처럼 아주 짧은 소리는 1.5dB 까지 · 판정: -0.4 dBTP) →
+                        # 줄인 소리를 재서 넘으면 그만큼 더 낮춘 최대로 한 번 더 (loudnorm 이 순간만 눌러 평균 크기는 그대로)
+                        tp = _true_peak(tmp / "audio.m4a", tmp, abort_a)
+                        if tp is not None and tp > LOUD_TP_OUT:
+                            enc(norm, LOUD_TP - (tp - LOUD_TP_OUT) - 0.5)
                 except RuntimeError:
                     if not norm or CANCEL.is_set() or abort_a.is_set():
                         raise

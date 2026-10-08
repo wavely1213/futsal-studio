@@ -1323,7 +1323,7 @@ function renderFrame() {
     const b = bus(tr.id);
     if (b) {
       b.g.gain.value = tr.mute || (solo && !tr.solo) ? 0 : dbLin(tr.vol || 0) * (tr.role === "music" ? duckG : 1);
-      const dlg = tr.role === "dialog";
+      const dlg = tr.role === "dialog" && tr.voiceFx !== false; // editor.py 와 같은 규칙: 'voiceFx: false' 트랙(효과음)은 목소리 보정 없이
       const on = dlg && vo.comp;
       b.hp.frequency.value = dlg && vo.hp ? 80 : 10; b.cp.threshold.value = on ? -22 : 0; b.cp.ratio.value = on ? 3 : 1; b.mk.gain.value = on ? dbLin(-2.3) : 1;
     }

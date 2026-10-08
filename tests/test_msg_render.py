@@ -205,7 +205,7 @@ class Loudness(_Render):
         i_out = float(re.findall(r"I:\s+(-?[\d.]+) LUFS", err)[-1])
         tp = float(re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)[-1])
         self.assertLessEqual(abs(i_out + 14.0), 1.0, i_out)
-        self.assertLessEqual(tp, -0.9, tp)
+        self.assertLessEqual(tp, -1.0, tp)  # 유튜브 기준 -1 dBTP (AAC 로 줄인 뒤 · LOUD_TP 여유)
 
 
 if __name__ == "__main__":

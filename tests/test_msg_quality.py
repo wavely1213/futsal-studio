@@ -196,7 +196,7 @@ class SoundAlignTest(unittest.TestCase):
         f = msg.blob_fillers(blobs, words, onsets=[70.1])
         self.assertEqual([(a, b) for a, b, _ in f], [(7.29, 8.45)])  # '어...' 덩어리만 (공 소리 덩어리·'그래서'는 아님)
         cuts = msg.snap_edges([{"in": 58.3, "out": 61.2}], blobs, words, [(56.0, 58.4, "슬레이트 말")])
-        self.assertEqual(cuts[0]["in"], 58.56)
+        self.assertEqual(cuts[0]["in"], 58.62 - msg.SNAP_PRE)  # 첫소리 앞 여유 (round4: 문장 사이 숨)
 
     def test_split_glued_slate(self):
         segs = [{"start": 41.8, "end": 46.9, "text": "두 번째 동작은 패스하고 옆으로, 아니다, 다시 할게요.",
@@ -256,10 +256,12 @@ class SfxLevelTest(unittest.TestCase):
         self.assertAlmostEqual(sfxlib.peak_db(self.tmp / fn), sfxlib.PEAK_DB, delta=0.3)
 
     def test_level_uses_speech_peak_and_file_peak(self):
-        sig = {"speechPk": -10.0, "peakDb": -2.0}
+        # 기준은 목소리 보정을 거친 말소리 크기(voicePk · round4: 효과음은 보정 없이 섞음) · 없으면 원본 말소리에서 어림(_voice_est)
+        sig = {"speechPk": -14.0, "voicePk": -10.0, "peakDb": -2.0}
         self.assertEqual(msg._sfx_level(sig, "휙", "replay", -3.0), -10.0 - msg.SFX_GAP + 3.0)
         self.assertEqual(msg._sfx_level(sig, "짠", "title", -20.0), -10.0 - msg.SFX_SOFT + 20.0)  # 작은 파일은 그만큼 키움
-        self.assertEqual(msg._sfx_level({"peakDb": -4.0}, "휙", "replay", -3.0), -4.0 - 2.0 - msg.SFX_GAP + 3.0)  # 예전 신호
+        self.assertEqual(msg._sfx_level({"speechPk": -14.0}, "휙", "replay", -3.0), round(msg._voice_est(-14.0) - msg.SFX_GAP + 3.0, 1))
+        self.assertEqual(msg._sfx_level({"peakDb": -4.0}, "휙", "replay", -3.0), round(msg._voice_est(-4.0 - 2.0) - msg.SFX_GAP + 3.0, 1))  # 예전 신호
 
 
 class TextLayoutTest(unittest.TestCase):
