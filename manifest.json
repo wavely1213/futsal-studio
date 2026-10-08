@@ -1,6 +1,8 @@
 {
   "version": "2.8.0",
   "notes": "유튜브 바로 올리기: 7단계에서 내 채널로 바로 올림 (제목·설명·챕터·태그·썸네일·자막·재생목록·예약 공개 · 기본 비공개 · 끊겨도 이어 올리기 · 처음 1번 Google 연결 안내) · 올리기 실패도 쉬운 안내 카드 · 휴대폰에서 진행·알림",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/4132acfe0776b09e343711ae048476bc0c41df1e.zip",
+  "commit": "4132acfe0776b09e343711ae048476bc0c41df1e",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "81c4930c1b08a7b5bd8c31dc2192c233181c65ac25f4a1b4fe13d54b1d71e837",
