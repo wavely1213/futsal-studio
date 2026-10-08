@@ -698,17 +698,20 @@ class DownloadCancelled(Exception):
 
 
 def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, timeout=30, cancel=None):
-    """모델 파일을 MODELS 에 (없으면) 내려받아 경로 반환. 주소를 차례로 시도하고, 받은 파일은 크기·지문(sha256)을
-    확인한 뒤에만 제자리로 (중간에 끊겨도 반쪽 파일이 남지 않게). 모두 실패하면 마지막 오류를 냄.
+    """모델 파일을 MODELS 에 (없으면) 내려받아 경로 반환. 주소를 차례로 시도하고, 받은 파일은 크기·지문(sha256)·
+    끝까지 있는지(model_whole)를 확인한 뒤에만 제자리로 (중간에 끊겨도 반쪽 파일이 남지 않게). 모두 실패하면 마지막 오류를 냄.
+    이미 있는 파일도 끝까지 있는지 · 크기를 알면 그 크기인지 보고 아니면 지우고 다시 받음 (지문은 큰 모델을 매번 읽지 않게 받을 때만).
     대답 없이 시간이 다 되면 다른 주소도 마찬가지라서 더 기다리지 않음.
     urls 의 한 항목은 주소 하나이거나 (주소, 크기, sha256) — 서버마다 변환본이 달라 지문이 다를 때 그 주소만의 값으로 확인."""
     MODELS.mkdir(parents=True, exist_ok=True)
     path = MODELS / fname
+    sizes = {e[1] if isinstance(e, (tuple, list)) else size for e in urls}  # 주소마다 크기가 다를 수 있음 (변환본)
     with _DL_LOCK:
         if path.is_file():
-            if model_whole(path):
+            if model_whole(path) and (not sizes or None in sizes or _size(path) in sizes):
                 return path
-            _unlink(path)  # 예전 판이 받다 끊긴 반쪽 모델을 완성본으로 저장해 둠 → 지우고 다시 받음 (그대로 두면 계속 고장)
+            # 예전 판이 받다 끊긴 반쪽 모델을 완성본으로 저장해 둠 · 맨 위 칸 경계에서 끊겨 모양만 맞는 파일(크기를 알면 걸러 냄 · D-078)
+            _unlink(path)  # → 지우고 다시 받음 (그대로 두면 계속 고장)
         tmp, err = path.with_suffix(".part"), None
         _sweep_parts(keep=tmp)
         for entry in urls:

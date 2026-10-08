@@ -38,12 +38,13 @@ const saveBody = () => JSON.stringify({ name: NAME, docs: DOCS }, dropPriv);  //
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
 function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
 let gone = "";  // 이 영상의 이름이 바뀌었거나 보관함에서 빠짐 (서버 404 gone · D-073) → 더 저장하지 않고 알림 · 나가기는 막지 않음
+function markGone(msg) { gone = msg || gone || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); }  // 저장·그림 내보내기·A/B 가 같은 알림 (D-078)
 async function saveNow() {
   clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
   if (gone) { $("saved").textContent = "저장 안 함 · " + gone; return true; }
   let r = null;
   try { r = await postRaw("/api/thumb/save", saveBody()); } catch (e) {}
-  if (r && r.gone) { gone = r.error || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); return true; }
+  if (r && r.gone) { markGone(r.error); return true; }
   if (!r || r.ok === false) {  // 저장 실패(Windows: 백신·OneDrive 가 잠깐 잡음 등) → 알리고 잠시 뒤 다시 (예전: '저장 중…'에 멈춤)
     if (g === saveGen) { $("saved").textContent = "저장 실패 · 잠시 뒤 다시 저장할게요"; saveTimer = setTimeout(saveNow, 3000); }
     return false;

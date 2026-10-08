@@ -924,6 +924,11 @@ class Handler(BaseHTTPRequestHandler):
             if lines is None:
                 return self._send(200, {"ok": False, "error": "글자 읽기 모델이 아직 없어요 (스타일 배우기를 한 번 하면 생겨요)"})
             return self._send(200, {"ok": True, "lines": lines})
+        if path in ("/api/thumb/ab", "/api/thumb/export", "/api/thumb/save"):
+            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름으로 열린 썸네일 창이 저장·내보내기를 못 함 (편집실 저장과 같게 · D-073 · D-078) —
+                editor.video_path(b.get("name"))  # 옛 이름 디자인을 새로 만들거나 새 이름 '썸네일 ✓'에 안 잡히는 옛 이름 그림을 완성본 폴더에 쓰지 않게
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
         if path == "/api/thumb/ab":  # A/B 묶음 (썸네일 2~6장 + 모바일 비교 한 장)
             try:
                 files = thumb.export_ab(b["name"], b.get("items"), b.get("mobile"))
@@ -952,10 +957,6 @@ class Handler(BaseHTTPRequestHandler):
             log(f"썸네일 저장 · {out.name}")
             return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/thumb/save":
-            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 디자인을 새로 만들지 않음 (편집실 저장과 같게 · D-073)
-                editor.video_path(b.get("name"))
-            except (ValueError, TypeError, FileNotFoundError):
-                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
             try:
                 thumb.save_docs(b["name"], b["docs"])
             except (OSError, ValueError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐

@@ -390,6 +390,23 @@ class ReviewFixTests(Base):
         self.assertFalse((thumb.THUMBS / "IMG_4830.json").exists())
         self.assertEqual(self.call("/api/thumb/save", {"name": NEW, "docs": {"designs": [{"layers": []}]}})[0], 200)
 
+    def test_old_name_thumb_export_and_ab_are_gone(self):
+        """검토 재현(합침 뒤): 옛 이름 썸네일 창의 저장은 404 gone 인데 그림 내보내기·A/B 묶음은 200 으로 'IMG_4830_썸네일_A.jpg' 등을
+        완성본 폴더에 썼다 (새 이름 '썸네일 ✓'·7단계 확인에 안 잡힘) → 같은 404 gone · 새 이름은 그대로 저장."""
+        import base64
+        self.make_work()
+        self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        jpg = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0 jpg").decode()
+        for path, body in (("/api/thumb/ab", {"items": [jpg, jpg], "mobile": jpg}), ("/api/thumb/export", {"data": jpg, "fmt": "jpg"})):
+            code, j = self.call(path, dict(body, name=OLD))
+            self.assertEqual((code, j.get("gone")), (404, True), path)
+            self.assertIn("스튜디오에서 다시 열어", j["error"])
+        self.assertEqual([f.name for f in core.OUT.iterdir() if f.name.startswith("IMG_4830")], [], "옛 이름 그림을 만들지 않음")
+        code, j = self.call("/api/thumb/ab", {"name": NEW, "items": [jpg, jpg]})
+        self.assertEqual((code, j["files"]), (200, [f"{NEW_TITLE}_썸네일_A.jpg", f"{NEW_TITLE}_썸네일_B.jpg"]), j)
+        code, j = self.call("/api/thumb/export", {"name": NEW, "data": jpg, "fmt": "jpg"})
+        self.assertEqual((code, j["file"]), (200, f"{NEW_TITLE}_썸네일_1.jpg"), j)
+
     def test_rename_holds_the_job_slot(self):
         """검토 재현: 작업 중인지 확인만 하고 잠금을 놓아 그 틈에 휴대폰이 옛 이름으로 편집점 찾기를 시작할 수 있었다 →
         바꾸는 동안 작업 자리를 잡아 둠 (다른 작업은 409) · 끝나면 놓음 (실패해도)."""
@@ -422,9 +439,10 @@ class ReviewFixTests(Base):
 
 class ThumbAiArtefactTests(Base):
     """합침(D-078): AI 추천 썸네일이 남기는 것도 함께 — 장면 후보 캐시(thumb.CANDIDATES · 지문에 이름이 없어 그대로 맞음 · 장면 주소만 새 이름) ·
-    클로드 장면 점수(분석 폴더 안) · 자동 누끼(thumbnails/assets · 키에 분석 폴더 이름 → 새 키로 옮기고 디자인 안 주소도) ·
-    클로드 문구 캐시(thumbcopy.CACHE · 지문의 제목 → 새 이름). 브랜드 키트는 영상과 상관없는 하나라 그대로.
-    재현(합치기 전 rename.py): 이름을 바꾸면 thumb.cached_analysis 가 None → 'AI 추천'이 누끼를 다시 따고(장면마다 누끼 모델) 클로드 문구를 다시 부름."""
+    클로드 장면 점수(분석 폴더 안) · 자동 누끼(thumbnails/assets · 키에 분석 폴더 이름 → 새 키로 옮기고 디자인 안 주소도).
+    클로드 문구 캐시(thumbcopy.CACHE)는 폴더째 옮기지만 지문 규칙 그대로 — 제목이 바뀌면 안 맞음(클로드에게 제목을 보여 주고 받은 문구) ·
+    날짜·영상 ID 앞머리만 바뀌면 그대로. 브랜드 키트는 영상과 상관없는 하나라 그대로.
+    재현(합치기 전 rename.py): 이름을 바꾸면 thumb.cached_analysis 가 None → 'AI 추천'이 누끼를 다시 땀(장면마다 누끼 모델)."""
     T, BOX = 3.2, [0.3, 0.2, 0.25, 0.6]
     COPY = [{"l1": "패스 비법", "l2": "딱 하나만", "emph": "", "sub": "", "q": "패스"}]
 
@@ -461,8 +479,8 @@ class ThumbAiArtefactTests(Base):
         self.assertEqual(a["cuts"][str(self.T)]["cut"], thumb.asset_url(new_cut))
         self.assertEqual(a["frames"][0]["url"], f"/frame?name={NEW}&t={self.T}")
         self.assertEqual(a["frames"][0]["ai"], 8, "클로드 장면 점수도 그대로")
-        self.assertTrue(a["copy"]["ai"], "클로드 문구도 그대로 (다시 부르지 않음)")
-        self.assertIsNotNone(thumbcopy.load_ai(NEW))
+        self.assertFalse(a["copy"]["ai"], "'IMG_4830' 제목으로 받은 클로드 문구를 새 제목 문구로 쓰지 않음 (규칙 문구 · 새로 받기는 버튼·다음 분석)")
+        self.assertIsNone(thumbcopy.load_ai(NEW))
         self.assertFalse(thumbcopy.failed_recently(NEW))
         for suf in (".json", ".json.bak"):
             doc = json.loads(thumb._doc_path(NEW).with_suffix(suf).read_text(encoding="utf-8"))
@@ -488,18 +506,64 @@ class ThumbAiArtefactTests(Base):
         self.assertEqual((code, j["cuts"]), (200, 1), j)
         self.check_moved(cut, url)
 
-    def test_copy_failure_mark_moves_and_other_titles_stay(self):
-        """실패 기록(1시간 쉬기)도 새 이름으로 · 다른 제목으로 만든 지문(예전 판)은 손대지 않음 (원래대로 다시 받음)."""
+    def ai_ran_under(self, name):
+        """그 이름으로 '✨ AI 추천'만 눌렀을 때 남는 것 (받아쓰기 없이: 장면 후보 · 클로드 장면 점수 · 클로드 문구) → 그 폴더."""
+        d = core.ANALYSIS / core._stem_key(name)
+        (d / "frames").mkdir(parents=True)
+        (d / "frames" / thumb.CANDIDATES).write_text(json.dumps({"sig": [1], "items": []}), encoding="utf-8")
+        (d / "frames" / "h_000003.200.jpg").write_bytes(b"jpg")
+        (d / thumb.AI_FRAMES).write_text(json.dumps({"sig": [1.0], "items": {"1.0": {"score": 2, "why": "새 이름"}}}), encoding="utf-8")
+        (d / thumbcopy.CACHE).write_text(json.dumps({"sig": [0, "새 이름 문구", thumbcopy.PROMPT_VER], "items": self.COPY}, ensure_ascii=False),
+                                         encoding="utf-8")
+        return d
+
+    def test_attach_after_ai_ran_under_new_name(self):
+        """검토 재현(합침 뒤): 탐색기로 바꾼 뒤 5 썸네일에서 새 이름으로 'AI 추천'을 누르면 새 이름 폴더에 thumb_copy.json·thumb_frames_ai.json 이
+        생겨 '캐시만 있는 폴더'가 아니게 됨 → [예전 작업 이어 붙이기]가 '새 이름으로 된 예전 작업이 이미 있어요'(400)로 막혔다 →
+        둘 다 다시 만들 수 있는 캐시 · 붙이면 옛 폴더의 AI 작업(장면 점수·누끼)이 이김."""
+        cut, url = self.make_ai()
+        os.rename(core.VIDEOS / OLD, core.VIDEOS / NEW)  # 탐색기에서 이름 바꾸기
+        core._STEMS["key"] = None
+        self.ai_ran_under(NEW)
+        self.assertEqual(self.local(NEW)["renamedFrom"], {"old": OLD, "seqs": 3})
+        with mock.patch.object(editor, "probe", return_value={"duration": 12.5}):
+            code, j = self.call("/api/rename/attach", {"name": NEW, "old": OLD})
+        self.assertEqual((code, j.get("cuts")), (200, 1), j)
+        self.check_moved(cut, url)
+        self.assertFalse((core.adir(NEW) / "frames" / "h_000003.200.jpg").exists(), "새 이름 캐시는 지우고 옛 작업을 붙임")
+
+    def test_plain_rename_replaces_cache_only_folder(self):
+        """BR-032: 새 이름 자리에 다시 만들 수 있는 캐시만 있으면(지운 같은 이름 영상이 남긴 장면 후보·클로드 기록) 지우고 바꿈 —
+        예전엔 [예전 작업 이어 붙이기]만 그랬고 앱 안 [이름 바꾸기]는 거절 · 받아쓴 폴더면 여전히 거절."""
+        self.make_work()
+        d = self.ai_ran_under(NEW)
+        (d / "transcript.json").write_text("[]", encoding="utf-8")
+        code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual(code, 400)
+        self.assertIn("예전 작업", j["error"])
+        (d / "transcript.json").unlink()
+        self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        self.assertTrue(self.local(NEW)["analyzed"])
+        self.assertFalse((d / "frames" / "h_000003.200.jpg").exists())
+        self.assertEqual(len(editor.load_project(NEW)["sequences"]), 3)
+
+    def test_copy_cache_follows_title(self):
+        """클로드 문구 캐시는 지문 규칙 그대로: 제목이 바뀌면 문구도 실패 기록(1시간 쉬기)도 새 제목엔 안 맞음 ·
+        날짜·영상 ID 앞머리만 바뀌어 제목이 같으면 그대로 (thumbcopy.nice_title)."""
+        import time
         self.make_work()
         d = core.adir(OLD)
-        (d / thumbcopy.CACHE).write_text(json.dumps({"failSig": thumbcopy._sig(OLD), "failAt": int(__import__("time").time())}), encoding="utf-8")
+        (d / thumbcopy.CACHE).write_text(json.dumps({"failSig": thumbcopy._sig(OLD), "failAt": int(time.time())}), encoding="utf-8")
         self.assertTrue(thumbcopy.failed_recently(OLD))
         self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
-        self.assertTrue(thumbcopy.failed_recently(NEW))
-        stale = {"sig": [1, "다른 제목", thumbcopy.PROMPT_VER], "items": self.COPY}
-        (core.adir(NEW) / thumbcopy.CACHE).write_text(json.dumps(stale, ensure_ascii=False), encoding="utf-8")
-        self.assertEqual(self.call("/api/rename", {"name": NEW, "to": "세 번째 이름"})[0], 200)
-        self.assertEqual(json.loads((core.adir("세 번째 이름.mp4") / thumbcopy.CACHE).read_text(encoding="utf-8"))["sig"], stale["sig"])
+        self.assertFalse(thumbcopy.failed_recently(NEW), "새 제목은 바로 클로드에게 물을 수 있음")
+        a, b = "20261001_AbCdEfGhIjK_패스 레슨.mp4", "20261008_AbCdEfGhIjK_패스 레슨.mp4"
+        self.assertEqual(thumbcopy.nice_title(a), thumbcopy.nice_title(b))
+        self.make_work(a)
+        (core.adir(a) / thumbcopy.CACHE).write_text(json.dumps({"sig": thumbcopy._sig(a), "items": self.COPY}, ensure_ascii=False), encoding="utf-8")
+        self.assertIsNotNone(thumbcopy.load_ai(a))
+        self.assertEqual(self.call("/api/rename", {"name": a, "to": b[:-4]})[0], 200)
+        self.assertEqual([x["l1"] for x in thumbcopy.load_ai(b)], ["패스 비법"], "제목이 같으면 클로드 문구 그대로")
 
     def test_locked_cut_keeps_rename_and_design(self):
         """누끼 파일을 못 옮기면(Windows 잠금) 이름 바꾸기는 그대로 · 디자인은 옛 주소 그대로 (그 그림이 옛 자리에 있음) · 다음 분석이 새로 땀."""

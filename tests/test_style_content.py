@@ -1192,12 +1192,19 @@ class TestReviewCacheAndCancel(WorkBase):
         self.assertIn("소리가 없는 영상", p["fun"]["label"])
 
     def test_corrupt_model_file_is_dropped(self):
-        """파일은 있는데 불러오지 못하면(깨진 파일) 지우고 10분 동안 다시 시도하지 않음 → 기록 재사용 판단도 '없음'."""
+        """파일은 있는데 불러오지 못하면(깨진 파일) 지우고 10분 동안 다시 시도하지 않음 → 기록 재사용 판단도 '없음'.
+        깨진 파일은 받을 크기와 같게 (크기가 다르면 thumb.fetch_model 이 먼저 지우고 다시 받음 · D-078 — 인터넷은 막음)."""
         tmp = Path(tempfile.mkdtemp(prefix="깨진 모델 "))
+        fname, urls = avmodels.SPECS["audio"]["yamnet"]
         try:
             with mock.patch.object(thumb, "MODELS", tmp), mock.patch.dict(avmodels._FAIL, {}, clear=True), \
-                    mock.patch.dict(avmodels._SESS, {}, clear=True):
-                (tmp / avmodels.SPECS["audio"]["yamnet"][0]).write_bytes(b"not a model")
+                    mock.patch.dict(avmodels._SESS, {}, clear=True), mock.patch("updater.download", side_effect=OSError("인터넷 막음")):
+                (tmp / fname).write_bytes(b"not a model")  # 크기가 다른 깨진 파일 → 다시 받으려다(인터넷 막음) 실패 · 남기지 않음
+                self.assertFalse(avmodels.ensure("audio"))
+                self.assertFalse((tmp / fname).exists())
+                avmodels._FAIL.clear()
+                avmodels._mark("audio").unlink()
+                (tmp / fname).write_bytes(b"not a model".ljust(urls[0][1], b"\0"))
                 self.assertTrue(avmodels.usable("audio"))
                 self.assertFalse(avmodels.ensure("audio"))
                 self.assertFalse((tmp / avmodels.SPECS["audio"]["yamnet"][0]).exists())

@@ -930,12 +930,13 @@ const saveBody = () => JSON.stringify({ name: NAME, docs: DOCS }, dropPriv);  //
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
 function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
 let gone = "";  // 이 영상의 이름이 바뀌었거나 보관함에서 빠짐 (서버 404 gone · D-073) → 더 저장하지 않고 알림 · 나가기는 막지 않음
+function markGone(msg) { gone = msg || gone || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); }  // 저장·그림 내보내기·A/B 가 같은 알림 (D-078)
 async function saveNow() {
   clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
   if (gone) { $("saved").textContent = "저장 안 함 · " + gone; return true; }
   let r = null;
   try { r = await postRaw("/api/thumb/save", saveBody()); } catch (e) {}
-  if (r && r.gone) { gone = r.error || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); return true; }
+  if (r && r.gone) { markGone(r.error); return true; }
   if (!r || r.ok === false) {  // 저장 실패(Windows: 백신·OneDrive 가 잠깐 잡음 등) → 알리고 잠시 뒤 다시 (예전: '저장 중…'에 멈춤)
     if (g === saveGen) { $("saved").textContent = "저장 실패 · 잠시 뒤 다시 저장할게요"; saveTimer = setTimeout(saveNow, 3000); }
     return false;
@@ -2486,6 +2487,7 @@ document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.
 const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
 async function exportImg() {
   if (!D) return; if (editing) endEdit();
+  if (gone) return markGone();  // 옛 이름으로 열린 창: 완성본 폴더에 옛 이름 그림을 만들지 않음 (서버도 404 gone)
   const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
   if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return;
@@ -2498,6 +2500,7 @@ async function exportImg() {
     if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
   } else data = jpg();
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
+  if (j.gone) return markGone(j.error);
   if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
 $("exportBtn").onclick = exportImg;
@@ -4290,6 +4293,7 @@ async function abSave() {
   const picks = [...AI.ab].sort((a, b) => a - b).map(i => AI.results[i]).filter(Boolean);
   if (picks.length < 2) return toast("A/B 로 비교할 카드를 2개 이상 골라 주세요");
   if (picks.length > 6) return toast("6개까지만 담을 수 있어요");
+  if (gone) return markGone();  // 옛 이름으로 열린 창 (서버도 404 gone)
   setAIStat("A/B 묶음 만드는 중…");
   const items = [];
   for (const x of picks) {
@@ -4303,6 +4307,7 @@ async function abSave() {
   g.fillStyle = "#0F0F0F"; g.fillRect(0, 0, mc.width, mc.height);
   rows.forEach((r, i) => { const x = 20 + i * (mw + 20); g.fillStyle = "#FFD24D"; g.font = "bold 16px sans-serif"; g.fillText(AB_TAGS[i], x, 24); g.drawImage(r, x, 34); });
   const j = await post("/api/thumb/ab", { name: NAME, items, mobile: mc.toDataURL("image/jpeg", 0.9) });
+  if (j.gone) { setAIStat(""); return markGone(j.error); }
   if (!j.ok) { setAIStat(""); return toast(j.error || "저장하지 못했어요"); }
   setAIStat(`A/B 저장: ${j.files.join(", ")}`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
   return j.files;

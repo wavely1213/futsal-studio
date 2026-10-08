@@ -47,6 +47,26 @@ def onnx_like(n=300_000):
     return b"\x08\x07" + b"\x3a" + ln + body
 
 
+OPSET = b"\x42\x04\x0a\x00\x10\x0b"  # 맨 위 8번 칸 opset_import {domain "", version 11} — 진짜 ONNX 처럼 graph 뒤에 오는 작은 칸 (6바이트)
+
+
+def last_field_start(data):
+    """맨 위 protobuf 칸들 중 마지막 칸이 시작하는 자리 (그 앞에서 자르면 칸 경계라 thumb.model_whole 은 모양만 보고 온전으로 봄)."""
+    pos = last = 0
+    while pos < len(data):
+        last = pos
+        key, i = thumb._varint(data, pos)
+        wire = key & 7
+        if wire == 0:
+            pos = thumb._varint(data, i)[1]
+        elif wire == 2:
+            n, i = thumb._varint(data, i)
+            pos = i + n
+        else:
+            pos = i + (8 if wire == 1 else 4)
+    return last
+
+
 class Srv:
     """파일 하나를 주는 가짜 서버. cut: 응답마다 이만큼만 보내고 연결을 끊음 (Content-Length 는 다 보낼 것처럼).
     ranges: Range 를 받아 줌 · etag 가 바뀌면 If-Range 가 안 맞아 처음부터(200).
@@ -319,6 +339,23 @@ class FetchModelTests(Base):
         self.fetch()
         self.assertEqual(sorted(x.name for x in self.models.iterdir()), ["m.onnx", "새.part", "새.part.resume"])
 
+    def test_whole_looking_model_of_wrong_size_is_replaced(self):
+        """검토 재현(합침 D-078): 맨 위 칸 경계에서 끊긴 파일·다른 판은 모양(model_whole)이 맞아 제자리에 있으면 늘 그대로 썼다 →
+        크기를 알면(얼굴·선수·공·글자·소리 모델) 다르면 지우고 다시 받음 · 주소마다 다른 크기(변환본)도 · 모르면(누끼 모델) 모양만 보고 그대로."""
+        self.models.mkdir(parents=True)
+        other = onnx_like(1000)
+        (self.models / "m.onnx").write_bytes(other)
+        self.assertTrue(thumb.model_whole(self.models / "m.onnx"))
+        self.assertEqual(self.fetch().read_bytes(), other, "크기를 모르면 그대로")
+        self.assertEqual(self.srv.log, [])
+        p = self.fetch(size=len(self.PAYLOAD))
+        self.assertEqual(p.read_bytes(), self.PAYLOAD)
+        self.assertEqual(len(self.srv.log), 1)
+        self.assertEqual(self.fetch(size=len(self.PAYLOAD)), p)
+        url = self.srv.url + "/m.onnx"
+        self.assertEqual(thumb.fetch_model("m.onnx", [(url + "?다른", 5, None), (url, len(self.PAYLOAD), None)], "준비 중", "받는 중"), p)
+        self.assertEqual(len(self.srv.log), 1, "맞는 크기면 다시 받지 않음")
+
     def test_legacy_truncated_model_is_replaced(self):
         """예전 판이 남긴 반쪽 모델(끝이 모자란 ONNX): 있으면 바로 쓰던 것을 지우고 다시 받음 → 누끼가 계속 고장 나지 않음."""
         self.models.mkdir(parents=True)
@@ -379,7 +416,7 @@ class DetectModelTests(Base):
 
     def setUp(self):
         real = REAL_YOLOX.is_file() and REAL_YOLOX.stat().st_size == YOLOX_SIZE
-        self.PAYLOAD = REAL_YOLOX.read_bytes() if real else onnx_like(200_000)
+        self.PAYLOAD = REAL_YOLOX.read_bytes() if real else onnx_like(200_000) + OPSET
         super().setUp()
         self.models = self.tmp / "모델 폴더"
         sha = updater.sha256(REAL_YOLOX) if real else __import__("hashlib").sha256(self.PAYLOAD).hexdigest()
@@ -422,6 +459,21 @@ class DetectModelTests(Base):
         self.assertTrue(detect.ensure())
         self.assertEqual((self.models / detect.FILE).read_bytes(), self.PAYLOAD)
         self.assertEqual(len(self.srv.log), 1)
+
+    def test_cut_at_field_boundary_is_not_ready_and_is_replaced(self):
+        """검토 재현(합침 뒤): 맨 위 칸 경계에서 끊긴 YOLOX(진짜는 3,659,407B 중 graph 가 끝나는 3,659,401B · 마지막 opset 칸만 없음)는
+        model_whole 이 모양만 보고 참 → ready 참·fetch_model 도 그대로 써서 onnxruntime 이 거절하고 10분마다 실패만 했다 →
+        크기(SIZE_B)도 봄: ready 거짓 · ensure 가 지우고 다시 받음."""
+        cut = last_field_start(self.PAYLOAD)
+        self.assertGreater(cut, len(self.PAYLOAD) // 2)
+        self.models.mkdir(parents=True)
+        (self.models / detect.FILE).write_bytes(self.PAYLOAD[:cut])
+        self.assertTrue(thumb.model_whole(self.models / detect.FILE), "모양만으로는 못 가림 (그래서 크기도 봄)")
+        self.assertFalse(detect.ready())
+        self.assertTrue(detect.ensure())
+        self.assertEqual((self.models / detect.FILE).read_bytes(), self.PAYLOAD)
+        self.assertEqual(len(self.srv.log), 1)
+        self.assertTrue(detect.ready())
 
     def test_server_sends_wrong_file_is_not_installed(self):
         """서버가 다른 파일(길이는 같고 내용이 다름)을 주면 지문에서 걸려 제자리에 두지 않음 · 조용히 포기(얼굴·피부 어림으로 계속)."""

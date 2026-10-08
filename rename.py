@@ -2,9 +2,11 @@
 
 분석·편집본·썸네일 디자인은 영상 파일 이름으로 찾는다(core.adir · editor._ppath · thumb._doc_path). 그래서 탐색기에서
 'IMG_4830.mp4'를 '패스 앤 무브 레슨.mp4'로 바꾸면 받아쓰기·가편집·손본 편집본이 모두 끊기고 '아직 안 함'으로 돌아갔다.
-- rename: 앱 안 [이름 바꾸기] → 영상 · 분석 폴더(받아쓰기·파형·장면·썸네일 장면 후보·클로드 문구·장면 점수) · 편집본(+자동 백업) ·
+- rename: 앱 안 [이름 바꾸기] → 영상 · 분석 폴더(받아쓰기·파형·장면·썸네일 장면 후보·클로드 장면 점수) · 편집본(+자동 백업) ·
   썸네일 디자인 · 자동 누끼(키에 폴더 이름이 들어 있음 → 새 키로) · 출처 기록을 함께,
-  안의 영상 이름(편집본 미디어·장면 주소·누끼 주소·타임라인 첫 줄·클로드 문구 지문)도 새 이름으로. 앞의 셋 중 하나라도 못 옮기면 모두 되돌림
+  안의 영상 이름(편집본 미디어·장면 주소·누끼 주소·타임라인 첫 줄)도 새 이름으로. 클로드 문구 캐시(thumbcopy.CACHE)는 폴더째 옮기되
+  지문은 고치지 않음 — 클로드에게 제목을 보여 주고 받은 문구라 제목(nice_title)이 바뀌면 지문 규칙대로 안 맞음(새 제목 문구는
+  [🤖 클로드로 더 만들기]·다음 분석 때 · 날짜·영상 ID 앞머리만 바뀌면 그대로 맞음 · D-078). 앞의 셋 중 하나라도 못 옮기면 모두 되돌림
   (Windows 잠금은 잠깐 기다렸다 다시 · 되돌리지도 못하면 반쪽으로 두지 않고 새 이름으로 마저 · 뒤의 곁가지는 어떤 오류든 기록만).
 - orphans·annotate·attach: 탐색기에서 이미 바꿨으면 크기·수정 시각(file_sig)이 같은 옛 이름 작업을 찾아 [이어 붙이기]
   (붙일 때 편집본에 적힌 영상 길이도 확인).
@@ -30,7 +32,8 @@ import updater
 BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}  # Windows 가 못 쓰는 이름
 NAME_MAX = 120  # 확장자 빼고 (작업 폴더 경로가 길어도 Windows 260자 안에 들게)
-CACHE_ONLY = ("frames", "waveform_", "thumbs2.", "poster.jpg", "proxy.mp4", "proxy.part.mp4", "rev_")  # 다시 만들 수 있는 캐시
+# 다시 만들 수 있는 캐시 — 'AI 추천 썸네일'은 받아쓰기 없는 영상도 장면 후보(frames/)·클로드 문구·클로드 장면 점수를 남김 (D-078)
+CACHE_ONLY = ("frames", "waveform_", "thumbs2.", "poster.jpg", "proxy.mp4", "proxy.part.mp4", "rev_", thumbcopy.CACHE, thumb.AI_FRAMES)
 _LOCK = threading.Lock()
 _ORPH = {"key": None, "t": 0.0, "list": []}
 
@@ -172,18 +175,17 @@ def _same_path(a, b):
 
 
 def _only_cache(d):
-    """그 폴더에 다시 만들 수 있는 캐시만 있는지 (장면·파형·띠 그림·미리보기 파일)."""
+    """그 폴더에 다시 만들 수 있는 캐시만 있는지 (장면·파형·띠 그림·미리보기 파일·AI 추천 썸네일의 클로드 기록)."""
     try:
         return all(x.name.startswith(CACHE_ONLY) for x in d.iterdir())
     except OSError:
         return False
 
 
-def _check(pl, attach=False):
-    """새 이름 자리에 다른 작업이 있으면 RenameError (덮어쓰지 않음)."""
-    if pl["new_dir"].exists() and not _same_path(pl["new_dir"], pl["old_dir"]):
-        if not (attach and _only_cache(pl["new_dir"])):
-            raise RenameError("새 이름으로 된 예전 작업(받아쓰기·편집본)이 이미 있어요 · 다른 이름을 골라 주세요")
+def _check(pl):
+    """새 이름 자리에 다른 작업이 있으면 RenameError (덮어쓰지 않음). 다시 만들 수 있는 캐시만 있으면 괜찮음 — _move_main 이 지움 (BR-032)."""
+    if pl["new_dir"].exists() and not _same_path(pl["new_dir"], pl["old_dir"]) and not _only_cache(pl["new_dir"]):
+        raise RenameError("새 이름으로 된 예전 작업(받아쓰기·편집본)이 이미 있어요 · 다른 이름을 골라 주세요")
     # 지운 영상이 남긴 '<이름>_<지문>' 폴더가 있으면 core.library_dir 가 새 이름을 그 폴더로 찾음 (옮긴 작업이 안 보임)
     alt = pl["alt_dir"]
     if alt.is_dir() and not _same_path(alt, pl["old_dir"]) and not _only_cache(alt):
@@ -297,26 +299,6 @@ def _move_cuts(pl, nd, out, log):
     return amap
 
 
-def _fix_copy_cache(nd, old, new):
-    """클로드 문구 캐시(thumbcopy.CACHE · 분석 폴더 안이라 함께 옮겨짐): 지문에 영상 제목(= 이름)이 들어 있어 그대로면 버려지고
-    다음 'AI 추천'이 클로드를 다시 부름(최대 160초 · 내 클로드 사용량) → 옛 이름으로 맞던 지문만 새 이름으로
-    (같은 영상 대사로 만든 문구 · 새 제목으로 더 받고 싶으면 썸네일 편집기 [🤖 클로드로 더 만들기]). 실패 기록(1시간 쉬기)도 같게."""
-    p = nd / thumbcopy.CACHE
-    if not p.is_file():
-        return
-    was, now = thumbcopy.nice_title(old), thumbcopy.nice_title(new)
-    with thumbcopy._LOCK:  # 클로드 문구 저장(thumbcopy._save_cache)과 섞이지 않게
-        data = _read(p)
-        n = 0
-        for k in ("sig", "failSig"):
-            s = data.get(k) if isinstance(data, dict) else None
-            if isinstance(s, list) and len(s) >= 2 and s[1] == was:
-                s[1] = now
-                n += 1
-        if n:
-            updater.write_atomic(p, json.dumps(data, ensure_ascii=False))
-
-
 def _fix_frames(nd, old, new, log):
     for f in (nd / "frames").glob("*.json") if (nd / "frames").is_dir() else []:  # 장면 후보 캐시의 장면 주소
         _side(f"장면 후보 캐시는 고치지 못했어요 · {f.name}", log, _rewrite, f, f, old, new)
@@ -350,13 +332,12 @@ def _fix_other_projects(pl, old, new, out, log):
 
 
 def _move_side(old, new, pl, out, log):
-    """곁가지(실패하면 기록만): 백업 · 자동 누끼 · 썸네일 디자인 · 장면 후보 캐시 · 클로드 문구 캐시 · 타임라인 첫 줄 · 출처 · 다른 편집본."""
+    """곁가지(실패하면 기록만): 백업 · 자동 누끼 · 썸네일 디자인 · 장면 후보 캐시 · 타임라인 첫 줄 · 출처 · 다른 편집본."""
     nd = pl["new_dir"] if pl["new_dir"].exists() or not pl["old_dir"].exists() else pl["old_dir"]
     _side("편집본 백업은 옮기지 못했어요", log, _move_backups, pl, old, new, out, log)
     amap = _side("자동 누끼는 옮기지 못했어요 (다음 분석 때 다시 따요)", log, _move_cuts, pl, nd, out, log)
     _side("썸네일 디자인은 옮기지 못했어요", log, _move_thumbs, pl, old, new, out, amap)
     _fix_frames(nd, old, new, log)
-    _side("클로드 문구 기록은 고치지 못했어요 (다음 'AI 추천' 때 다시 받아요)", log, _fix_copy_cache, nd, old, new)
     _side("타임라인 첫 줄은 고치지 못했어요", log, _fix_timeline, nd, new)
     _side("출처 기록은 옮기지 못했어요 (보관함의 출처 표시를 다시 골라 주세요)", log, source.rename_file, old, new)
     _side("다른 편집본은 고치지 못했어요", log, _fix_other_projects, pl, old, new, out, log)
@@ -523,7 +504,7 @@ def attach(name, old, log=print):
         pl = _plan(old, name, hit["dir"])
         if (pl["new_dir"] / "transcript_timeline.md").exists():
             raise RenameError("이 영상은 이미 편집점을 찾았어요 · 예전 작업을 붙이면 덮어쓰게 돼요")
-        _check(pl, attach=True)
+        _check(pl)
         try:
             out = _move_work(old, name, pl, log)
         except _Stuck as e:  # 분석 폴더는 붙였는데 편집본은 못 붙임 (되돌리지도 못함) → 붙인 것만이라도 곁가지까지

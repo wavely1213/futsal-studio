@@ -223,6 +223,7 @@ async function abSave() {
   const picks = [...AI.ab].sort((a, b) => a - b).map(i => AI.results[i]).filter(Boolean);
   if (picks.length < 2) return toast("A/B 로 비교할 카드를 2개 이상 골라 주세요");
   if (picks.length > 6) return toast("6개까지만 담을 수 있어요");
+  if (gone) return markGone();  // 옛 이름으로 열린 창 (서버도 404 gone)
   setAIStat("A/B 묶음 만드는 중…");
   const items = [];
   for (const x of picks) {
@@ -236,6 +237,7 @@ async function abSave() {
   g.fillStyle = "#0F0F0F"; g.fillRect(0, 0, mc.width, mc.height);
   rows.forEach((r, i) => { const x = 20 + i * (mw + 20); g.fillStyle = "#FFD24D"; g.font = "bold 16px sans-serif"; g.fillText(AB_TAGS[i], x, 24); g.drawImage(r, x, 34); });
   const j = await post("/api/thumb/ab", { name: NAME, items, mobile: mc.toDataURL("image/jpeg", 0.9) });
+  if (j.gone) { setAIStat(""); return markGone(j.error); }
   if (!j.ok) { setAIStat(""); return toast(j.error || "저장하지 못했어요"); }
   setAIStat(`A/B 저장: ${j.files.join(", ")}`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
   return j.files;
