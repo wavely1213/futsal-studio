@@ -20,8 +20,10 @@ import bundle
 import captions
 import claude_cli
 import core
+import cutout_worker
 import editor
 import hooks
+import idle
 import intake
 import plan
 import qa
@@ -748,9 +750,10 @@ class Handler(BaseHTTPRequestHandler):
                     sp = thumb.grab(n, float(qq["t"][0]))
                 else:
                     sp = (thumb.ASSETS / Path(urlparse(src).path).name).resolve()
-                out = thumb.remove_bg(sp, b.get("kind", "hq"))
-                log("  누끼 완료")
-                return {"cut": thumb.asset_url(out), "src": src}
+                # 따로 프로세스에서 (끝나면 메모리 반환 · 죽어도 앱은 그대로 · 메모리가 모자라면 빠른 누끼)
+                out, used, note = cutout_worker.remove_bg(sp, b.get("kind", "hq"), editor.CANCEL, editor._PROCS, log)
+                log(f"  누끼 완료 · {'고품질' if used == 'hq' else '빠른'} 모델{' · ' + note if note else ''}")
+                return {"cut": thumb.asset_url(out), "src": src, "kind": used, "note": note}
             ok = start_job("누끼 따기", do_cut)
             return self._send(200 if ok else 409, _started(ok))
         if path in ("/api/thumb/upload", "/api/thumb/export"):  # Windows 잠금·디스크 가득이면 연결이 끊기지 않고 안내
@@ -1595,6 +1598,8 @@ def main():
     if "--browser" in sys.argv:
         _BROWSER.append(True)  # 서버가 답하기 전에 정해 둠 (그사이 또 켠 실행이 /api/focus 를 물어도 화면을 다시 열게)
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
+    JOB_HOOKS.append(idle.touch)  # 작업이 끝나고 5분 동안 다른 작업이 없으면 불러 둔 모델을 내려놓음 (메모리 반환)
+    idle.start(LOCK, lambda: bool(JOB["name"]))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
         remote.init(_remote_bridge())

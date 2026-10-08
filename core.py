@@ -594,6 +594,15 @@ def vc_runtime_msg(what):
             f"한 번 실행하면 설치돼요 (또는 {VC_REDIST_URL} 를 받아 설치한 뒤 앱을 다시 켜 주세요)")
 
 
+# 말소리 고르기(VAD) 문턱: 기본 0.5 는 공 차는 소리·응원 소리가 섞인 말을 통째로 버림 (MSG 400초 글자 오류: 0.5 10.3% ·
+# 0.35 2.6% · 0.25 3.0% · 0.2 3.0%, CPU 같음 · 빠진 줄 '어? 이것도 들어갔어요. 대박!' 등이 돌아옴). 셋 중 가장 보수적인 0.35.
+# 쉬는 시간·말 앞뒤 여유는 기본값 그대로.
+VAD_PARAMS = {"threshold": 0.35}
+# 말소리 없는 소음에서 whisper 가 지어내는 '자막 만든 사람' 표시 (유튜브 자막 학습 흔적 · 실제 풋살 영상에서 말할 일이 없음).
+# '다음 영상에서 만나요'·'시청해 주셔서 감사합니다' 처럼 실제로 말할 수 있는 끝인사는 일부러 안 거름.
+_CREDIT = re.compile(r"(자막|번역)\s*(by|제공|제작|협찬)|subtitles?\s+by", re.I)
+
+
 def _whisper(model):
     """받아쓰기 모델 — (모델, 스레드 수)마다 한 번만 불러 씀 (여러 영상을 이어서 받아써도). 편집점 찾기가 끝나면 내려놓음."""
     try:
@@ -783,13 +792,16 @@ def _analyze(name, log, model, step):
         n = len(vocab["terms"])
         log(f"  용어 사전의 말 {n}개를 받아쓰기에 알려 줘요" if sent >= n else
             f"  용어 사전의 말 {n}개 중 앞의 {sent}개를 받아쓰기에 알려 줘요 (힌트 길이 한도 · 중요한 말을 앞에 두세요)")
-    segs, info = m.transcribe(audio, language="ko", vad_filter=True, **opts)
+    segs, info = m.transcribe(audio, language="ko", vad_filter=True, vad_parameters=VAD_PARAMS, **opts)
     total = info.duration or 0
-    segments, fixed, echoed = [], 0, 0
+    segments, fixed, echoed, ghost = [], 0, 0, 0
     for s in segs:
         seg, n = _seg_of(s, vocab["fix"])
         if captions.echo(seg.get("words"), vocab["terms"]):  # 말소리가 불분명한 곳에서 용어 목록만 따라 쓴 구간은 버림
             echoed += 1
+            continue
+        if _CREDIT.search(seg["text"]):  # 소음에서 지어낸 '한글자막 by …' 같은 줄
+            ghost += 1
             continue
         segments.append(seg)
         fixed += n
@@ -816,7 +828,8 @@ def _analyze(name, log, model, step):
         pass
     log(f"  완료 · 대사 {len(segments)}줄 · 컷 후보 {len(sil)}곳 · 하이라이트 {len(peaks)}곳"
         + (f" · 용어 사전으로 {fixed}곳을 고쳤어요" if fixed else "")
-        + (f" · 말소리가 불분명해 용어 목록만 잘못 받아쓴 {echoed}곳은 뺐어요" if echoed else ""))
+        + (f" · 말소리가 불분명해 용어 목록만 잘못 받아쓴 {echoed}곳은 뺐어요" if echoed else "")
+        + (f" · 소음에서 잘못 받아쓴 자막 표시 {ghost}곳은 뺐어요" if ghost else ""))
     return outdir
 
 

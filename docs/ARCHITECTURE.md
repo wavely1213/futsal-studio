@@ -57,7 +57,7 @@
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | 원격 경계 | `remote.py` (`RemoteHandler`·`Service`) | 터널로 들어온 요청만: Host 표시·수 제한·CORS·서명/표 확인·허용 동작 목록, 짝짓기·기기 열쇠(`remote.json`)·비콘·알림·자동 끄기·절전 막기. 기능은 app 이 넘긴 `Bridge` 와 기능 모듈 함수를 부르기만 한다 | `app` import. 로컬 `Handler`의 API 를 터널에 내주기. 허용 목록 밖 동작(지우기·설정·업데이트·켜기·임의 경로). 비밀(코드·열쇠·주제·터널 주소·표) 기록 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` · `worker` · `cutout_worker` · `exportplan` · `hwdec` · `idle` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`·`intake`·`trouble`·`studiolog`(모두 표준 라이브러리만 쓰는 도우미, D-019·D-035~D-037)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -78,6 +78,10 @@
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
+  - `worker` → `core`(자식은 `core.popen` · 진행 표시 `set_progress`), `updater`(`py_env` · 파이썬 자식 UTF-8), `studiolog`(자식 오류 출력 끝). 자식은 `worker.py` 를 바로 실행해 `모듈:함수` 를 importlib 로 부른다(인자·결과는 표준 입출력 JSON). `editor`(`_mem_workers`)·`hwdec`(`_mem_ok`)는 남은 메모리 `avail_mb` 만 함수 안에서 지연 import한다 (D-051·D-057).
+  - `cutout_worker` → `worker`, `core`(`_DLL_RE`·`vc_runtime_msg`), `studiolog`. `thumb`·`onnxruntime` 은 자식 안의 함수에서만 import한다. `app`(`/api/thumb/cut`)이 쓴다 (D-051·D-058).
+  - `exportplan` → `core`(`run`·`ffmpeg`) · `hwdec` → `core`(`popen`·`ffmpeg`). 둘 다 `editor`(내보내기)만 쓴다 (D-053·D-054).
+  - `idle` → (표준 라이브러리만). 모델을 쥔 모듈(`face`·`avmodels`·`thumb`·`core`)은 import 하지 않고 `sys.modules` 에 있을 때만 캐시를 비운다. `app` 이 `idle.start(LOCK, …)`·`JOB_HOOKS` 로 쓴다 (D-055).
   - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠), `updater`(RSS 받기 `urlopen`). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
   - `forecast` → (표준 라이브러리 + numpy, numpy 는 함수 안에서). 파일·네트워크가 없는 계산만 한다. `strategy`만 쓴다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
@@ -105,6 +109,11 @@
 | style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
 | plan | `plan.py` | 영상 기획 분석 (D-021). `extract_plan`(1초 한 장 640px 지문·복잡도·잔디·화면 글자 OCR(상한 400장)·소리 종류·화자 수 → `plan_events.json`), `detect`(티저·타이틀·정지·리플레이·삽입·흔들기·몽타주·웃음·효과음·펀치라인 줌·자막 사건 6종), `judge`(인트로·장르·형식·자막·재미 판단 문장 + 확신 + 근거 1~2개 · 채널 공식 한 문장 `headline`), `merge_plans`(길이×확신 투표 · 갈리면 `mixed` 표시), `plan_params`(절반 넘게 같은 판단일 때만 가편집 값), `claude_prompt`·`parse_ai`·`run_ai`(Claude 판단 저장) |
 | avmodels | `avmodels.py` | 기획 분석 모델: PP-OCRv5 글자 찾기·한국어 읽기, YAMNet 소리 종류. `ensure`(처음에 받기 · ✕ 로 멈춤, 실패하면 10분 쉬고 조용히 False · 불러오지 못한 파일은 지워 다시 받게), `usable`(기획 기록 재사용 판단), `ocr`, `tags` |
+| worker | `worker.py` | 무거운 작업을 따로 파이썬 프로세스에서: `call('모듈:함수', …)`(표준 입력·출력 JSON · 자식의 진행 표시를 부모로 · ✕/앱 끄기로 같이 꺼짐 · 죽으면 `WorkerError`), `avail_mb()` 남은 메모리 (D-051) |
+| cutout_worker | `cutout_worker.py` | 누끼를 `worker` 로: 고품질인데 남은 메모리 < 7.5GB 거나 고품질 프로세스가 실패하면 빠른 누끼 + 안내. 자식은 `thumb.remove_bg` 그대로 (D-051) |
+| idle | `idle.py` | 마지막 작업 뒤 5분 동안 작업이 없으면 불러 둔 모델(얼굴·글자·소리·앱 안 누끼·받아쓰기)을 내려놓고 메모리 반환 (D-055) |
+| exportplan | `exportplan.py` | 내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 묶음(구간 그래프 그대로 + trim · split 앞 원본 형식 못박기 · 자막은 끝에 한 번 · 프레임 같음 · HDR·다시 보기는 안 묶음) (D-054) |
+| hwdec | `hwdec.py` | Windows·HDR 영상에서 확인(화소·속도 · 20초 제한 · ✕ 로 끔)이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-064) |
 | claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |

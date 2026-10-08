@@ -230,8 +230,9 @@ class FakeModel:
         FakeModel.made.append((a, k))
         self.hf_tokenizer = None
 
-    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, hotwords=None):
-        FakeModel.calls.append({"word_timestamps": word_timestamps, "initial_prompt": initial_prompt, "hotwords": hotwords})
+    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, hotwords=None, vad_parameters=None):
+        FakeModel.calls.append({"word_timestamps": word_timestamps, "initial_prompt": initial_prompt, "hotwords": hotwords,
+                                "vad_parameters": vad_parameters})
         ws = [Word(0.2, 0.6, " 피버를", 0.81), Word(0.65, 0.9, " 보고", 0.95), Word(0.95, 1.5, " 패스해요.", 0.9)]
         seg = types.SimpleNamespace(start=0.2, end=1.5, text=" 피버를 보고 패스해요.", words=ws if word_timestamps else None)
         return iter([seg]), types.SimpleNamespace(duration=2.0)
@@ -249,6 +250,16 @@ class EchoModel(FakeModel):
         return iter(segs), types.SimpleNamespace(duration=2.0)
 
 
+class CreditModel(FakeModel):
+    """소음 구간에서 지어낸 '한글자막 by …' 줄 + 진짜 말 (끝인사는 실제로 말할 수 있어 남김)."""
+
+    def transcribe(self, audio, **k):
+        FakeModel.calls.append(k)
+        rows = [(0.0, 0.8, "한글자막 by 한효정"), (1.0, 1.9, "다음 영상에서 만나요")]
+        segs = [types.SimpleNamespace(start=a, end=b, text=" " + t, words=[Word(a, b, " " + t, 0.5)]) for a, b, t in rows]
+        return iter(segs), types.SimpleNamespace(duration=2.0)
+
+
 class PositionsModel(FakeModel):
     """코치가 포지션을 늘어놓는 진짜 문장 (외래어라 확신이 낮음)."""
 
@@ -263,8 +274,8 @@ class PositionsModel(FakeModel):
 class OldModel(FakeModel):
     """hotwords 를 모르는 예전 faster-whisper."""
 
-    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None):
-        return FakeModel.transcribe(self, audio, language, vad_filter, word_timestamps, initial_prompt)
+    def transcribe(self, audio, language=None, vad_filter=False, word_timestamps=False, initial_prompt=None, vad_parameters=None):
+        return FakeModel.transcribe(self, audio, language, vad_filter, word_timestamps, initial_prompt, vad_parameters=vad_parameters)
 
 
 class WorkDir(unittest.TestCase):
@@ -322,6 +333,8 @@ class AnalyzeTest(WorkDir):
         self.assertTrue(call["word_timestamps"])
         self.assertIn("풋살사관학교", call["initial_prompt"])
         self.assertIn("최경진 감독", call["hotwords"])  # 설치된 버전이 hotwords 를 받으면
+        self.assertEqual(call["vad_parameters"], core.VAD_PARAMS)
+        self.assertLess(core.VAD_PARAMS["threshold"], 0.5)  # 공·응원 소리 섞인 말도 받아쓰게 (기본 0.5 는 통째로 버림)
         self.assertEqual(FakeModel.made[0][1]["cpu_threads"], min(8, os.cpu_count() or 4))
         self.assertEqual(core._WHISPER, {})  # 끝나면 모델을 내려놓음
 
@@ -346,6 +359,15 @@ class AnalyzeTest(WorkDir):
         self.assertEqual([s["text"] for s in segs], ["피벗이 받아요"])
         self.assertIn("용어 목록만 잘못 받아쓴 1곳은 뺐어요", logs[-1])
         self.assertTrue(all(type(w["s"]) is float for w in segs[0]["words"]))
+
+    def test_subtitle_credit_dropped(self):
+        name = self.video("공 차는 소리만.mp4")
+        logs = []
+        with self.whisper(CreditModel):
+            core.analyze(name, logs.append)
+        segs = json.loads((core.adir(name) / "transcript.json").read_text(encoding="utf-8"))
+        self.assertEqual([s["text"] for s in segs], ["다음 영상에서 만나요"])
+        self.assertIn("자막 표시 1곳은 뺐어요", logs[-1])
 
     def test_positions_sentence_kept(self):
         name = self.video("포지션 설명.mp4")

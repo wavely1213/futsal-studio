@@ -76,6 +76,11 @@ forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정
 intake.py           보관함에 들어오는 영상 살피기 (복사 중·못 쓰는 형식·편집점을 찾은 뒤 바뀐 파일)
 trouble.py          작업 오류 → 쉬운 한 줄 + 할 일 (화면의 실패 카드) · 로그인 정보 브라우저 목록
 studiolog.py        studio.log 쓰기 (연도 붙은 시각·크기 제한·오류 위치·갑자기 꺼짐 표시)
+worker.py           무거운 작업을 따로 파이썬 프로세스에서 (core.popen · 진행 표시 전달 · ✕로 끔) · 남은 메모리 avail_mb (D-051)
+cutout_worker.py    누끼를 따로 프로세스에서 (메모리가 모자라거나 실패하면 빠른 누끼 + 안내) (D-051)
+exportplan.py       내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 (D-054)
+hwdec.py            그래픽카드로 영상 풀기 (Windows·HDR · 확인된 PC 에서만) (D-053)
+idle.py             쉬는 동안(5분) 불러 둔 모델 내려놓기 (D-055)
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027)
 tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
@@ -115,6 +120,7 @@ icon.ico / icon.png 앱 아이콘
   - `FUTSAL_FFMPEG`: ffmpeg 실행 파일을 직접 지정 (기본은 imageio-ffmpeg 번들)
   - `FUTSAL_CLAUDE`: Claude Code 실행 파일을 직접 지정 (기본은 PATH·공식 설치 위치에서 찾음. 시험의 가짜 claude도 이것으로)
   - `FUTSAL_GOOGLE_API`: 유튜브 바로 올리기의 Google 주소를 가짜 Google(`tests/fake_google.py`)로 바꿈. 앱 폴더에 `tests/fake_google.py` 가 있을 때(개발 폴더 · 배포본엔 없음)만 `http://127.0.0.1:<포트>` 를 받고 다른 값은 무시 (시험 전용 · D-046·D-047)
+  - 성능(D-051·D-053): `FUTSAL_HQ_MIN_MB`(고품질 누끼를 할 남은 메모리 문턱 · 시험용), `FUTSAL_HWDEC`(그래픽카드로 영상 풀기 · `0` 이면 끔, `1` 이면 Windows 가 아니어도 확인해 봄 · 시험용)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`, `FUTSAL_OLD_PID`: 내부용. 재시작·실행기 경유·다시 시작 전 앱 프로세스 번호(미룬 구성요소 설치가 그 프로세스가 끝나길 기다림, D-034)를 표시하며 직접 설정하지 않는다.
   - 휴대폰으로 보기(D-027): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의 · 앱 화면 포트 창 8765~8804 안이면 켜지 않음, D-034), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR 이 가리킬 페이지 주소 · 개발 모드만), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
