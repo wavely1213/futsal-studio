@@ -319,6 +319,33 @@ class TestBundleErrors(BundleBase):
         self.assertFalse(stale.exists())
         self.assertTrue((self.videos / res["name"]).is_file())
 
+    def test_kept_even_when_folder_cannot_be_renamed(self):
+        """검토 재현(D-076): 백신이 bundle.mp4 를 잡고 있으면 Windows 는 그 파일이 든 폴더 이름도 못 바꿈 → 예전에는 _keep_tmp 가
+        None 을 돌려 finally 가 임시 폴더째(묶음·옮길 이름 기록까지) 지움. 이제 표시를 넣고 그 자리에 두고(정리에서도 빼고)
+        다음에 켤 때 보관함으로."""
+        import editor
+        ps = [make_clip(self.videos / f"k{k}.mp4", "320x240", 25, dur=1) for k in (1, 2)]
+        real = os.replace
+
+        def locked(src, dst):  # bundle.mp4 를 옮기기 · 그 파일이 든 폴더 이름 바꾸기 모두 막힘
+            if Path(src).name == "bundle.mp4" or Path(src).name.startswith(bundle.TMP_PREFIX):
+                raise PermissionError(13, "다른 프로세스가 파일을 사용 중")
+            return real(src, dst)
+        with mock.patch.object(bundle.updater, "SETTLE_SECS", 0.2), mock.patch.object(os, "replace", locked):
+            with self.assertRaisesRegex(RuntimeError, "다음에 앱을 켜면 보관함에 넣어 드려요"):
+                bundle.make_bundle([p.name for p in ps], "잠김", self.log)
+        left = [d for d in core.OUT.iterdir() if d.name.startswith(bundle.TMP_PREFIX)]
+        self.assertEqual(len(left), 1, "임시 폴더째 지우지 않음")
+        self.assertEqual(sorted(x.name for x in left[0].iterdir()), sorted(["bundle.mp4", bundle.KEEP_INFO, bundle.KEEP_MARK]))
+        editor.sweep_temp(0)
+        bundle._sweep_old()
+        self.assertTrue((left[0] / "bundle.mp4").exists(), "정리(편집실 sweep_temp · 묶기 _sweep_old)에서도 지우지 않음")
+        self.assertEqual(editor.place_kept(lambda *a: None), [], "편집실 쪽은 묶음을 완성본으로 옮기지 않음")
+        moved = bundle.place_kept(lambda *a: None)
+        self.assertEqual(len(moved), 1)
+        self.assertTrue(moved[0].endswith("_잠김.mp4") and (self.videos / moved[0]).stat().st_size > 1000, moved)
+        self.assertFalse(left[0].exists())
+
     def test_needs_two_files(self):
         p = make_clip(self.videos / "하나.mp4", "320x240", 25, dur=1)
         with self.assertRaisesRegex(RuntimeError, "2개 이상"):

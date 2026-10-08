@@ -3226,8 +3226,9 @@ PRESETS = {
 
 
 def _is_render_tmp(d):
-    """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음)."""
-    if not d.is_dir() or (d / KEEP_MARK).exists():
+    """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음).
+    제자리로 못 옮겨 남겨 둔 결과(표시·옮길 이름 기록 · 묶기 '.render_bundle_' 포함)는 아님 → 다음에 켤 때 place_kept 가 옮김."""
+    if not d.is_dir() or any((d / m).exists() for m in (KEEP_MARK, KEEP_INFO, "옮기지 못한 묶음.txt")):  # 마지막 = bundle.KEEP_MARK
         return False
     if d.name.startswith(".render_"):
         return True
@@ -3276,9 +3277,12 @@ def _free_path(p):
 
 
 def kept_dirs(prefix=KEEP_PREFIX):
-    """완성본 폴더 안에서 제자리로 못 옮긴 결과가 든 우리 폴더들 (이름 또는 표시로)."""
+    """완성본 폴더 안에서 제자리로 못 옮긴 결과가 든 우리 폴더들 (이름 또는 표시로 · 표시도 못 썼으면 렌더 임시 폴더의 옮길 이름 기록)."""
+    def ours(d):
+        return d.name.startswith(prefix) or (d / KEEP_MARK).exists() or (
+            d.name.startswith(".render_") and not d.name.startswith(".render_bundle_") and (d / KEEP_INFO).exists())  # 묶기 폴더는 bundle.place_kept
     try:
-        return sorted(d for d in core.OUT.iterdir() if d.is_dir() and (d.name.startswith(prefix) or (d / KEEP_MARK).exists()))
+        return sorted(d for d in core.OUT.iterdir() if d.is_dir() and ours(d))
     except OSError:
         return []
 
