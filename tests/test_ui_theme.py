@@ -55,10 +55,45 @@ class ThemeTokenTests(unittest.TestCase):
         light, dark = _blocks()
         self.assertLess(contrast(light["danger"], dark["surface"]), 3.0)
 
-    def test_danger_icon_keeps_white_mark_visible(self):
-        """실패 카드의 동그란 '!' 아이콘(흰 글자 · var(--danger) 바탕)은 그림 기준 3:1 이상."""
-        for toks in _blocks():
-            self.assertGreaterEqual(contrast("#ffffff", toks["danger"]), 3.0)
+    def test_danger_icon_mark_readable(self):
+        """실패·꺼짐 카드의 동그란 '!' (굵은 13px 글자 · var(--danger) 바탕): 글자색을 카드 바탕색(--surface)으로 → 두 화면 모두 4.5:1 이상.
+        검토 재현: 흰 글자는 어두운 화면 --danger(#f85149) 위 3.35:1."""
+        css = (ROOT / "ui.html").read_text(encoding="utf-8")
+        rule = re.search(r"\.fail \.fic \{([^}]*)\}", css).group(1)
+        self.assertIn("background: var(--danger)", rule)
+        self.assertIn("color: var(--surface)", rule)
+        light, dark = _blocks()
+        self.assertLess(contrast("#ffffff", dark["danger"]), 4.5, "재현: 예전 흰 글자")
+        for toks in (light, dark):
+            self.assertGreaterEqual(contrast(toks["surface"], toks["danger"]), 4.5)
+
+
+def _editor_tokens():
+    css = (ROOT / "editor.html").read_text(encoding="utf-8")
+    body = re.sub(r"/\*.*?\*/", "", re.search(r":root\s*\{(.*?)\}", css, re.S).group(1), flags=re.S)
+    return css, {k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", body)}
+
+
+class EditorTextTests(unittest.TestCase):
+    """편집실(늘 어두운 화면)에 E10 이 더한 글자: 마커 탭 안내·규칙 어긋남 · 내보낸 뒤 '다음 할 일' 설명 — 4.5:1 이상 (검토 재현: 2.84·3.09·4.21)."""
+
+    def color_of(self, css, selector):
+        m = re.search(re.escape(selector) + r"\s*\{[^}]*?color:\s*var\(--([\w-]+)\)", css)
+        self.assertIsNotNone(m, selector)
+        return m.group(1)
+
+    def test_new_editor_text_contrast(self):
+        css, t = _editor_tokens()
+        for sel, bgs in ((".mkrow .prob", ("panel", "panel-2")), ("#lt-mk .hint", ("panel", "panel-2")), (".qanext .hint", ("panel-2",))):
+            tok = self.color_of(css, sel)
+            for bg in bgs:
+                self.assertGreaterEqual(contrast(t[tok], t[bg]), 4.5, f"{sel} (--{tok}) 위 --{bg}")
+        self.assertLess(contrast(t["ink-3"], t["panel-2"]), 4.5, "재현: 예전 --ink-3 안내")
+        self.assertLess(contrast(t["danger"], t["panel"]), 4.5, "재현: 예전 --danger 글자")
+
+    def test_danger_ink_is_the_studio_dark_value(self):
+        """새 색을 만들지 않음: 편집실 --danger-ink = 스튜디오 어두운 화면 --danger."""
+        self.assertEqual(_editor_tokens()[1]["danger-ink"], _blocks()[1]["danger"])
 
 
 if __name__ == "__main__":
