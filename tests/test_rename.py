@@ -218,5 +218,205 @@ class AttachTests(Base):
         self.assertNotIn("renamedFrom", self.local("복사본.mp4"), "옛 영상이 그대로 있으면 이어 붙일 대상이 아님")
 
 
+def held(lock):
+    """다른 스레드에서 lock 을 바로 못 잡으면 참 (지금 스레드가 잡고 있음)."""
+    import threading
+    got = []
+
+    def t():
+        ok = lock.acquire(timeout=0)
+        got.append(ok)
+        if ok:
+            lock.release()
+    th = threading.Thread(target=t)
+    th.start()
+    th.join()
+    return not got[0]
+
+
+class ReviewFixTests(Base):
+    """E10 검토 고침 (D-073): 반쪽으로 남는 경우 · 다른 영상 백업 · 되돌리기 실패 · 지문 폴더 · 대소문자 · 잠금 · 작업 자리 · 완성본 파일 안내."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(rename, "TRIES", 2, create=True)  # 잠금 흉내에서 오래 기다리지 않게
+        p.start()
+        self.addCleanup(p.stop)
+
+    def project_locked(self):
+        """편집본을 새 이름으로 쓰지 못함 (Windows 잠금 흉내)."""
+        real = rename._rewrite
+
+        def rw(src, dst, *a, **k):
+            if Path(dst) == editor.PROJECTS / f"{NEW_TITLE}.json":
+                raise PermissionError(32, "잠김")
+            return real(src, dst, *a, **k)
+        return mock.patch.object(rename, "_rewrite", rw)
+
+    def test_ansi_timeline_line_does_not_split_work(self):
+        """검토 재현: 메모장이 ANSI(cp949)로 저장한 줄이 타임라인에 있으면 예전에는 UnicodeDecodeError 가 빠져나와 영상만 되돌리고
+        분석 폴더·편집본은 새 이름에 남음('이름을 되돌렸어요'). 이제 첫 줄만 바이트로 바꾸고 나머지는 그대로."""
+        self.make_work()
+        tl = core.adir(OLD) / "transcript_timeline.md"
+        tail = "\n[00:05] 메모 · ".encode("utf-8") + "드리블".encode("cp949") + b"\r\n"
+        tl.write_bytes(tl.read_bytes() + tail)
+        code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual((code, j.get("ok"), j.get("project")), (200, True, True), j)
+        raw = (core.adir(NEW) / "transcript_timeline.md").read_bytes()
+        self.assertTrue(raw.startswith(f"# 타임라인: {NEW}\n".encode("utf-8")))
+        self.assertTrue(raw.endswith(tail), "ANSI 줄은 손대지 않음")
+        self.assertTrue(self.local(NEW)["analyzed"])
+
+    def test_any_side_step_error_keeps_rename(self):
+        """곁가지(출처 기록)가 OSError·ValueError 가 아닌 오류를 내도 이름 바꾸기는 그대로 · 기록만 (예전: 영상만 되돌림)."""
+        self.make_work()
+        with mock.patch.object(rename.source, "rename_file", side_effect=RuntimeError("뜻밖의 오류")):
+            code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual((code, j.get("ok")), (200, True), j)
+        self.assertTrue(self.local(NEW)["analyzed"] and (core.VIDEOS / NEW).exists())
+        self.assertTrue(any("출처 기록은 옮기지 못했어요" in m and "RuntimeError" in m for m in app.LOG[-10:]), app.LOG[-10:])
+
+    def test_backups_of_longer_named_video_stay(self):
+        """검토 재현: a.mp4 를 바꾸면 a__b.mp4 의 백업(a__b__<시각>.json)까지 zz__b__… 로 옮겨 a__b 가 백업을 잃었다."""
+        self.make_work("a.mp4")
+        self.make_work("a__b.mp4")
+        self.assertEqual((len(editor.backups("a.mp4")), len(editor.backups("a__b.mp4"))), (1, 1))
+        self.assertEqual(self.call("/api/rename", {"name": "a.mp4", "to": "zz"})[0], 200)
+        self.assertEqual((len(editor.backups("zz.mp4")), len(editor.backups("a__b.mp4"))), (1, 1))
+        self.assertEqual(sorted(f.name for f in (editor.PROJECTS / "backup").iterdir()),
+                         ["a__b__20261007_101010.json", "zz__20261007_101010.json"])
+
+    def test_failed_rollback_rolls_forward(self):
+        """검토 재현: 편집본을 못 옮긴 뒤 분석 폴더 되돌리기도 실패하면 예전에는 그 오류가 원래 오류를 덮고 영상만 되돌려
+        분석 폴더가 새 이름에 숨음(첫 줄이 옛 영상 → 이어 붙이기도 안 뜸). 이제 되돌리지 말고 새 이름으로 마저."""
+        self.make_work()
+        real = os.rename
+
+        def fake(a, b):
+            if Path(a) == core.ANALYSIS / NEW_TITLE and Path(b) == core.ANALYSIS / "IMG_4830":
+                raise PermissionError(32, "다른 프로세스가 사용 중")
+            return real(a, b)
+        with self.project_locked(), mock.patch.object(rename.os, "rename", fake):
+            code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual((code, j.get("ok"), j.get("analysis"), j.get("project")), (200, True, True, True), j)
+        self.assertTrue((core.VIDEOS / NEW).exists() and not (core.VIDEOS / OLD).exists())
+        self.assertTrue(self.local(NEW)["analyzed"])
+        self.assertEqual(core._folder_owner(core.adir(NEW)), NEW, "첫 줄도 새 이름")
+        self.assertEqual(len(editor.load_project(NEW)["sequences"]), 3, "편집본 파일도 새 이름으로 (안은 그대로)")
+
+    def test_video_rollback_failure_is_reported_and_attachable(self):
+        """작업은 되돌렸는데 영상 이름을 못 되돌리면 '되돌렸어요'라고 하지 않고 [예전 작업 이어 붙이기]를 안내 · 실제로 붙음."""
+        self.make_work()
+        real = os.rename
+
+        def fake(a, b):
+            if Path(a) == core.VIDEOS / NEW and Path(b) == core.VIDEOS / OLD:
+                raise PermissionError(32, "플레이어가 열어 둠")
+            return real(a, b)
+        with self.project_locked(), mock.patch.object(rename.os, "rename", fake):
+            code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual(code, 400)
+        self.assertIn("예전 작업 이어 붙이기", j["error"])
+        self.assertNotIn("되돌렸어요", j["error"])
+        row = self.local(NEW)
+        self.assertEqual(row["renamedFrom"]["old"], OLD)
+        with mock.patch.object(editor, "probe", return_value={"duration": 12.5}):
+            self.assertEqual(self.call("/api/rename/attach", {"name": NEW, "old": OLD})[0], 200)
+        self.assertTrue(self.local(NEW)["analyzed"])
+
+    def test_stale_alt_folder(self):
+        """검토 재현: 지운 영상이 남긴 '<새 이름>_<지문>' 폴더가 있으면 core.library_dir 가 새 이름을 그 폴더로 찾아 옮긴 작업이 안 보였다.
+        받아쓴 폴더면 거절(덮어쓰지 않음) · 캐시만 있으면 지우고 바꿈."""
+        self.make_work()
+        alt = core.ANALYSIS / core._alt_key(NEW)
+        alt.mkdir()
+        (alt / "transcript.json").write_text("[]", encoding="utf-8")
+        code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual(code, 400)
+        self.assertIn("예전 작업", j["error"])
+        self.assertTrue((core.VIDEOS / OLD).exists())
+        (alt / "transcript.json").unlink()
+        (alt / "frames").mkdir()
+        self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        self.assertFalse(alt.exists())
+        self.assertEqual(core.adir(NEW), core.ANALYSIS / NEW_TITLE)
+        self.assertTrue(self.local(NEW)["analyzed"])
+
+    def test_case_only_rename_on_case_insensitive_disk(self):
+        """대소문자만 바꾸기(img → IMG): 대소문자를 안 가리는 디스크(macOS)에서 새로 쓴 파일과 옛 이름이 같은 파일이라
+        예전에는 쓰고 나서 옛 이름을 지우며 편집본·백업·썸네일을 지웠다 → samefile 이면 지우지 않음."""
+        self.make_work("img.mp4")
+        same = lambda a, b: str(a).casefold() == str(b).casefold()  # noqa: E731 — 대소문자를 안 가리는 디스크 흉내
+        removed = []
+        real_unlink = Path.unlink
+
+        def unlink(self_, *a, **k):
+            removed.append(self_.name)
+            return real_unlink(self_, *a, **k)
+        with mock.patch.object(rename.os.path, "samefile", side_effect=same), mock.patch.object(Path, "unlink", unlink):
+            code, j = self.call("/api/rename", {"name": "img.mp4", "to": "IMG"})
+        self.assertEqual((code, j.get("name")), (200, "IMG.mp4"), j)
+        self.assertFalse([n for n in removed if n.casefold() in ("img.json", "img__20261007_101010.json")], removed)
+
+    def test_thumb_docs_and_other_projects_under_save_locks(self):
+        """썸네일 디자인은 썸네일 저장 잠금 안에서 · 다른 편집본은 읽기부터 쓰기까지 편집본 저장 잠금 안에서 (그 사이 저장을 덮지 않게)."""
+        self.make_work()
+        other = {"v": 2, "source": "다른 영상.mp4", "media": [{"id": "m2", "kind": "video", "src": "videos", "file": OLD}], "sequences": [], "rev": 2}
+        (editor.PROJECTS / "다른 영상.json").write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
+        seen = {}
+        real_rw, real_read = rename._rewrite, rename._read
+
+        def rw(src, dst, *a, **k):
+            if Path(dst).parent == thumb.THUMBS:
+                seen["thumb"] = held(thumb._SAVE_LOCK)
+            return real_rw(src, dst, *a, **k)
+
+        def rd(p_):
+            if Path(p_).name == "다른 영상.json":
+                seen["other"] = held(editor._SAVE_LOCK)
+            return real_read(p_)
+        with mock.patch.object(rename, "_rewrite", rw), mock.patch.object(rename, "_read", rd):
+            self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        self.assertEqual(seen, {"thumb": True, "other": True})
+
+    def test_old_name_thumb_save_is_gone(self):
+        """옛 이름으로 열린 썸네일 창이 저장해도 옛 이름 디자인을 새로 만들지 않음 (404 gone · 편집실과 같게)."""
+        self.make_work()
+        self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        code, j = self.call("/api/thumb/save", {"name": OLD, "docs": {"designs": [{"layers": []}]}})
+        self.assertEqual((code, j.get("gone")), (404, True))
+        self.assertIn("스튜디오에서 다시 열어", j["error"])
+        self.assertFalse((thumb.THUMBS / "IMG_4830.json").exists())
+        self.assertEqual(self.call("/api/thumb/save", {"name": NEW, "docs": {"designs": [{"layers": []}]}})[0], 200)
+
+    def test_rename_holds_the_job_slot(self):
+        """검토 재현: 작업 중인지 확인만 하고 잠금을 놓아 그 틈에 휴대폰이 옛 이름으로 편집점 찾기를 시작할 수 있었다 →
+        바꾸는 동안 작업 자리를 잡아 둠 (다른 작업은 409) · 끝나면 놓음 (실패해도)."""
+        self.make_work()
+        during = {}
+        real = rename.rename
+
+        def spy(*a, **k):
+            during["job"] = app.JOB["name"]
+            during["start"] = app.start_job("편집점 찾기", lambda: None)
+            return real(*a, **k)
+        with mock.patch.object(rename, "rename", spy):
+            self.assertEqual(self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})[0], 200)
+        self.assertEqual(during, {"job": "이름 바꾸기", "start": False})
+        self.assertIsNone(app.JOB["name"])
+        self.assertEqual(self.call("/api/rename", {"name": "없는.mp4", "to": "x"})[0], 404)
+        self.assertIsNone(app.JOB["name"], "실패해도 자리를 놓음")
+
+    def test_out_files_left_with_old_name_are_counted(self):
+        """완성본 폴더의 내보낸 영상·썸네일 그림은 옛 이름 그대로(I-070) → 몇 개인지 알려 화면이 안내 (이름이 더 긴 다른 영상 것은 빼고)."""
+        self.make_work()
+        self.video("IMG_4830_2.mp4")
+        for n in ("IMG_4830_롱폼 가편집.mp4", "IMG_4830_썸네일_1.jpg", "IMG_4830_2_롱폼 가편집.mp4"):
+            (core.OUT / n).write_bytes(b"x")
+        code, j = self.call("/api/rename", {"name": OLD, "to": NEW_TITLE})
+        self.assertEqual((code, j.get("outKept")), (200, 2), j)
+        self.assertTrue((core.OUT / "IMG_4830_롱폼 가편집.mp4").exists(), "완성본 파일은 그대로")
+
+
 if __name__ == "__main__":
     unittest.main()

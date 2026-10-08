@@ -271,9 +271,9 @@ class AppTests(Base):
 
     def test_request_handler_error_location(self):
         with mock.patch.object(sys, "stderr", None):
-            self.post("/api/thumb/save", {})  # name 없음 → 처리 중 KeyError
+            self.post("/api/thumb/frames", {})  # name 없음 → 처리 중 KeyError (/api/thumb/save 는 이제 이름부터 확인 · 404 gone)
         text = self.log.read_text(encoding="utf-8")
-        self.assertRegex(text, r"요청 오류 · POST /api/thumb/save · KeyError: 'name' · app\.py:\d+ do_POST")
+        self.assertRegex(text, r"요청 오류 · POST /api/thumb/frames · KeyError: 'name' · app\.py:\d+ do_POST")
 
     def test_client_disconnect_not_logged_as_error(self):
         """화면이 먼저 끊은 연결은 studio.log 를 어지럽히지 않음."""

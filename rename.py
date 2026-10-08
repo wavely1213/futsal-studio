@@ -3,7 +3,8 @@
 분석·편집본·썸네일 디자인은 영상 파일 이름으로 찾는다(core.adir · editor._ppath · thumb._doc_path). 그래서 탐색기에서
 'IMG_4830.mp4'를 '패스 앤 무브 레슨.mp4'로 바꾸면 받아쓰기·가편집·손본 편집본이 모두 끊기고 '아직 안 함'으로 돌아갔다.
 - rename: 앱 안 [이름 바꾸기] → 영상 · 분석 폴더(받아쓰기·파형·장면) · 편집본(+자동 백업) · 썸네일 디자인 · 출처 기록을 함께,
-  안의 영상 이름(편집본 미디어·장면 주소·타임라인 첫 줄)도 새 이름으로. 앞의 셋 중 하나라도 못 옮기면 모두 되돌림.
+  안의 영상 이름(편집본 미디어·장면 주소·타임라인 첫 줄)도 새 이름으로. 앞의 셋 중 하나라도 못 옮기면 모두 되돌림
+  (Windows 잠금은 잠깐 기다렸다 다시 · 되돌리지도 못하면 반쪽으로 두지 않고 새 이름으로 마저 · 뒤의 곁가지는 어떤 오류든 기록만).
 - orphans·annotate·attach: 탐색기에서 이미 바꿨으면 크기·수정 시각(file_sig)이 같은 옛 이름 작업을 찾아 [이어 붙이기]
   (붙일 때 편집본에 적힌 영상 길이도 확인).
 완성본 폴더의 내보낸 영상·올리기 키트·썸네일 그림 파일 이름은 그대로 둔다 (KNOWN_ISSUES I-070).
@@ -106,11 +107,29 @@ def _rewrite(src, dst, old, new, bump=False):
     if bump and isinstance(data, dict):
         data["rev"] = int(data.get("rev") or 0) + 1
     updater.write_atomic(dst, json.dumps(data, ensure_ascii=False), fsync=True)
-    if Path(src) != Path(dst):
+    if not _same_file(src, dst):
         try:
             Path(src).unlink()
         except OSError:
             pass
+
+
+def _same_file(a, b):
+    """같은 파일인지 — 대소문자만 바꾸는 이름(img → IMG)은 대소문자를 안 가리는 디스크(Windows·macOS)에서 같은 파일이라
+    새로 쓴 뒤 옛 이름을 지우면 방금 쓴 파일이 지워짐 (경로 비교는 Windows 에서만 대소문자를 무시)."""
+    if Path(a) == Path(b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+TRIES = 6  # 폴더·영상 이름 바꾸기를 몇 번까지 (Windows: 색인·백신·탐색기 미리 보기가 잠깐 잡으면 실패 → 약 1.5초 안에 다시)
+
+
+def _mv(a, b):
+    updater._retry(os.rename, a, b, tries=TRIES)
 
 
 def _seqs(proj_path):
@@ -123,7 +142,7 @@ def _seqs(proj_path):
 def _plan(old, new, old_dir):
     """옮길 곳들 (영상 이름을 바꾸기 전에 정해 미리 겹침 확인) → dict."""
     new_dir = core.ANALYSIS / core._stem_key(new)
-    return {"old_dir": old_dir, "new_dir": new_dir,
+    return {"old_dir": old_dir, "new_dir": new_dir, "alt_dir": core.ANALYSIS / core._alt_key(new),  # core.library_dir 가 먼저 보는 곳
             "old_proj": editor.PROJECTS / f"{old_dir.name}.json", "new_proj": editor.PROJECTS / f"{new_dir.name}.json",
             "old_doc": thumb.THUMBS / f"{old_dir.name}.json", "new_doc": thumb.THUMBS / f"{new_dir.name}.json"}
 
@@ -145,84 +164,148 @@ def _check(pl, attach=False):
     if pl["new_dir"].exists() and not _same_path(pl["new_dir"], pl["old_dir"]):
         if not (attach and _only_cache(pl["new_dir"])):
             raise RenameError("새 이름으로 된 예전 작업(받아쓰기·편집본)이 이미 있어요 · 다른 이름을 골라 주세요")
+    # 지운 영상이 남긴 '<이름>_<지문>' 폴더가 있으면 core.library_dir 가 새 이름을 그 폴더로 찾음 (옮긴 작업이 안 보임)
+    alt = pl["alt_dir"]
+    if alt.is_dir() and not _same_path(alt, pl["old_dir"]) and not _only_cache(alt):
+        raise RenameError("새 이름으로 된 예전 작업(받아쓰기·편집본)이 이미 있어요 · 다른 이름을 골라 주세요")
     for k in ("proj", "doc"):
         if pl["new_" + k].exists() and not _same_path(pl["new_" + k], pl["old_" + k]):
             raise RenameError("새 이름으로 된 예전 편집본·썸네일이 이미 있어요 · 다른 이름을 골라 주세요")
 
 
-def _move_work(old, new, pl, log):
-    """분석 폴더 → 편집본 → (여기까지 실패하면 되돌리고 오류) → 백업·썸네일·타임라인 첫 줄·출처·다른 편집본 (곁가지: 실패하면 기록만).
-    → 옮긴 것 {"analysis", "project", "backups", "thumbs", "refs"}."""
+class _Stuck(Exception):
+    """분석 폴더는 새 이름으로 옮겼는데 편집본을 못 옮겼고 분석 폴더를 되돌리지도 못함 → 되돌리지 말고 앞으로 마저 (out: 옮긴 것)."""
+
+    def __init__(self, out):
+        super().__init__("되돌리지 못함")
+        self.out = out
+
+
+def _move_proj(pl, old, new):
+    """편집본 → 새 이름 (안의 영상 이름도 · 판 번호 올림). 깨진 편집본(JSON 이 아님)은 안을 못 고치니 파일만 그대로 옮김."""
+    with editor._SAVE_LOCK:
+        try:
+            _rewrite(pl["old_proj"], pl["new_proj"], old, new, bump=True)
+        except ValueError:  # UnicodeDecodeError 포함
+            _mv(pl["old_proj"], pl["new_proj"])
+
+
+def _move_main(old, new, pl):
+    """분석 폴더 → 편집본. 편집본에서 실패하면 분석 폴더를 되돌리고 그 오류를 그대로 (되돌리지도 못하면 _Stuck)."""
     out = {"analysis": False, "project": False, "backups": 0, "thumbs": False, "refs": 0}
     od, nd = pl["old_dir"], pl["new_dir"]
+    for d in (nd, pl["alt_dir"]):  # 새 이름 자리에 다시 만들 수 있는 캐시만 있으면 지움 (_check 가 확인함)
+        if d.exists() and not _same_path(d, od) and _only_cache(d):
+            shutil.rmtree(d, ignore_errors=True)
     if od.exists() and not od == nd:
-        if nd.exists() and _only_cache(nd) and not _same_path(nd, od):
-            shutil.rmtree(nd, ignore_errors=True)
-        os.rename(od, nd)
+        _mv(od, nd)
         out["analysis"] = True
     try:
         if pl["old_proj"].exists():
-            with editor._SAVE_LOCK:
-                _rewrite(pl["old_proj"], pl["new_proj"], old, new, bump=True)
+            _move_proj(pl, old, new)
             out["project"] = True
-    except Exception:
+    except Exception as e:
         if out["analysis"]:
-            os.rename(nd, od)
+            try:
+                _mv(nd, od)
+            except OSError:
+                raise _Stuck(out) from e
         raise
-    # ---- 곁가지: 실패해도 이름 바꾸기는 그대로 (기록만) ----
+    return out
+
+
+def _side(what, log, fn, *a):
+    """곁가지 하나: 실패해도(어떤 오류든) 이름 바꾸기는 그대로 · 기록만 (예전: OSError 만 잡아 메모장 ANSI 타임라인 하나에 반쪽으로 남음)."""
+    try:
+        return fn(*a)
+    except Exception as e:  # noqa: BLE001 — 곁가지
+        log(f"  {what} · {type(e).__name__}: {e}")
+        return None
+
+
+def _move_backups(pl, old, new, out, log):
     bdir = editor.PROJECTS / "backup"
     pre, npre = pl["old_proj"].stem + "__", pl["new_proj"].stem + "__"
-    try:
-        for f in sorted(bdir.iterdir()) if bdir.is_dir() and pre != npre else []:
-            if f.name.startswith(pre) and f.name.endswith(".json"):
-                try:
-                    _rewrite(f, bdir / (npre + f.name[len(pre):]), old, new)
-                    out["backups"] += 1
-                except (OSError, ValueError) as e:
-                    log(f"  편집본 백업 하나는 옮기지 못했어요 · {f.name} · {e}")
-    except OSError:
-        pass
-    try:
+    if pre == npre:
+        return
+    for _ts, _tag, f in editor._backup_files(pl["old_proj"].stem):  # 이름이 더 긴 다른 영상(a__b)의 백업은 빼고 (시각 꼴로 정확히)
+        try:
+            _rewrite(f, bdir / (npre + f.name[len(pre):]), old, new)
+            out["backups"] += 1
+        except Exception as e:  # noqa: BLE001 — 백업 하나
+            log(f"  편집본 백업 하나는 옮기지 못했어요 · {f.name} · {e}")
+
+
+def _move_thumbs(pl, old, new, out):
+    with thumb._SAVE_LOCK:  # 썸네일 화면이 그 사이 저장해도 섞이지 않게
         for suf in (".json", ".json.bak"):
             s, d = pl["old_doc"].with_suffix(suf), pl["new_doc"].with_suffix(suf)
             if s.exists():
                 _rewrite(s, d, old, new)
                 out["thumbs"] = True
-        for f in (nd / "frames").glob("*.json") if (nd / "frames").is_dir() else []:  # 장면 후보 캐시의 장면 주소
-            _rewrite(f, f, old, new)
-    except (OSError, ValueError) as e:
-        log(f"  썸네일 디자인은 옮기지 못했어요 · {e}")
-    tl = nd / "transcript_timeline.md"
-    try:  # 첫 줄 '# 타임라인: <이름>' = 이 폴더의 주인 (core._folder_owner)
-        if tl.exists():
-            lines = tl.read_text(encoding="utf-8").split("\n", 1)
-            if lines[0].startswith("# 타임라인: "):
-                updater.write_atomic(tl, f"# 타임라인: {new}" + ("\n" + lines[1] if len(lines) > 1 else ""))
-    except OSError:
-        pass
-    try:
-        source.rename_file(old, new)
-    except (OSError, ValueError) as e:
-        log(f"  출처 기록은 옮기지 못했어요 (보관함의 출처 표시를 다시 골라 주세요) · {e}")
-    try:  # 다른 편집본이 이 영상을 미디어로 쓰면 그 이름도
-        for f in editor.PROJECTS.glob("*.json"):
-            if f == pl["new_proj"]:
-                continue
-            try:
-                if json.dumps(old, ensure_ascii=False)[1:-1] not in f.read_text(encoding="utf-8"):
+
+
+def _fix_frames(nd, old, new, log):
+    for f in (nd / "frames").glob("*.json") if (nd / "frames").is_dir() else []:  # 장면 후보 캐시의 장면 주소
+        _side(f"장면 후보 캐시는 고치지 못했어요 · {f.name}", log, _rewrite, f, f, old, new)
+
+
+def _fix_timeline(nd, new):
+    tl = nd / "transcript_timeline.md"  # 첫 줄 '# 타임라인: <이름>' = 이 폴더의 주인 (core._folder_owner)
+    if tl.exists():  # 바이트 그대로 (메모장이 ANSI 로 저장한 글이 섞여 있어도 첫 줄만 바꾸고 나머지는 손대지 않음)
+        first, sep, rest = tl.read_bytes().partition(b"\n")
+        if first.startswith("# 타임라인: ".encode("utf-8")):
+            updater.write_atomic(tl, f"# 타임라인: {new}".encode("utf-8") + (b"\r" if first.endswith(b"\r") else b"") + sep + rest)
+
+
+def _fix_other_projects(pl, old, new, out, log):
+    """다른 편집본이 이 영상을 미디어로 쓰면 그 이름도 — 읽기·고치기·쓰기를 모두 편집본 저장 잠금 안에서 (그 사이 저장을 덮지 않게)."""
+    needle = json.dumps(old, ensure_ascii=False)[1:-1]
+    for f in editor.PROJECTS.glob("*.json"):
+        if f == pl["new_proj"]:
+            continue
+        try:
+            with editor._SAVE_LOCK:
+                if needle not in f.read_text(encoding="utf-8"):
                     continue
                 data = _read(f)
                 if fix_refs(data, old, new):
                     data["rev"] = int(data.get("rev") or 0) + 1
-                    with editor._SAVE_LOCK:
-                        updater.write_atomic(f, json.dumps(data, ensure_ascii=False), fsync=True)
+                    updater.write_atomic(f, json.dumps(data, ensure_ascii=False), fsync=True)
                     out["refs"] += 1
-            except (OSError, ValueError) as e:
-                log(f"  다른 편집본 하나는 고치지 못했어요 · {f.name} · {e}")
-    except OSError:
-        pass
+        except Exception as e:  # noqa: BLE001 — 다른 편집본 하나
+            log(f"  다른 편집본 하나는 고치지 못했어요 · {f.name} · {e}")
+
+
+def _move_side(old, new, pl, out, log):
+    """곁가지(실패하면 기록만): 백업 · 썸네일 디자인 · 장면 후보 캐시 · 타임라인 첫 줄 · 출처 · 다른 편집본."""
+    nd = pl["new_dir"] if pl["new_dir"].exists() or not pl["old_dir"].exists() else pl["old_dir"]
+    _side("편집본 백업은 옮기지 못했어요", log, _move_backups, pl, old, new, out, log)
+    _side("썸네일 디자인은 옮기지 못했어요", log, _move_thumbs, pl, old, new, out)
+    _fix_frames(nd, old, new, log)
+    _side("타임라인 첫 줄은 고치지 못했어요", log, _fix_timeline, nd, new)
+    _side("출처 기록은 옮기지 못했어요 (보관함의 출처 표시를 다시 골라 주세요)", log, source.rename_file, old, new)
+    _side("다른 편집본은 고치지 못했어요", log, _fix_other_projects, pl, old, new, out, log)
     _ORPH["key"] = None
     return out
+
+
+def _move_work(old, new, pl, log):
+    """분석 폴더 → 편집본 (여기까지 실패하면 되돌리고 오류) → 곁가지 (실패하면 기록만).
+    → 옮긴 것 {"analysis", "project", "backups", "thumbs", "refs"}."""
+    return _move_side(old, new, pl, _move_main(old, new, pl), log)
+
+
+def _out_left(old_dir):
+    """완성본 폴더에서 옛 이름으로 시작하는 파일 수 (내보낸 영상·썸네일 그림·올리기 키트 · 이름이 더 긴 다른 영상 것은 빼고) —
+    이름 바꾸기는 이 파일들을 그대로 두므로(I-070) 화면이 '옛 이름 그대로'라고 알림."""
+    pre = old_dir.name + "_"
+    try:
+        longer = [o for o in {core.adir(v.name).name + "_" for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)}
+                  if o != pre and o.startswith(pre)]
+        return sum(1 for f in core.OUT.iterdir() if f.is_file() and f.name.startswith(pre) and not any(f.name.startswith(o) for o in longer))
+    except OSError:
+        return 0
 
 
 def _say(old, new, out, log, how="이름을 바꿨어요"):
@@ -249,22 +332,43 @@ def rename(old, new, log=print):
             raise RenameError("확장자만 다른 같은 이름 영상이 있어요 · 다른 이름을 골라 주세요")
         pl = _plan(old, new, core.adir(old))
         _check(pl)
+        left = _out_left(pl["old_dir"])
         try:
-            os.rename(src, core.VIDEOS / new)
+            _mv(src, core.VIDEOS / new)
         except OSError as e:
             raise RenameError("다른 프로그램(플레이어·편집 프로그램·탐색기 미리 보기)이 이 영상을 쓰고 있어요 · 닫고 다시 해 주세요") from e
         core._STEMS["key"] = None
+        warn = None
         try:
-            out = _move_work(old, new, pl, log)
+            out = _move_main(old, new, pl)
+        except _Stuck as e:  # 분석 폴더를 되돌리지 못함 → 영상도 새 이름 그대로 두고 앞으로 마저 (반쪽으로 안 보이게)
+            out = e.out
+            log(f"  편집본을 새 이름으로 옮기지 못했어요 · {e.__cause__}")
+            try:  # 안의 이름은 못 고쳐도 파일이라도 새 이름으로 (편집실이 열 수 있게)
+                with editor._SAVE_LOCK:
+                    _mv(pl["old_proj"], pl["new_proj"])
+                out["project"] = True
+            except OSError as e2:
+                log(f"  편집본은 그대로 옮기지도 못했어요 · {e2}")
+                warn = f"편집본은 옮기지 못했어요 · 작업 폴더 projects 안 '{pl['old_proj'].name}' 에 그대로 있어요"
         except Exception as e:
+            core._STEMS["key"] = None
             try:
-                os.rename(core.VIDEOS / new, src)
-            except OSError:
-                pass
+                _mv(core.VIDEOS / new, src)
+            except OSError:  # 영상도 못 되돌림 → 작업은 옛 이름 그대로 · 보관함 줄에 [예전 작업 이어 붙이기]가 뜸
+                _ORPH["key"] = None
+                log(f"이름은 바뀌었지만 받아쓰기·편집본은 옮기지 못했어요 · {old} → {new} · {e}")
+                raise RenameError("영상 이름은 바뀌었지만 받아쓰기·편집본은 옮기지 못했어요 · "
+                                  "보관함 줄의 [예전 작업 이어 붙이기]를 눌러 주세요") from e
             core._STEMS["key"] = None
             raise RenameError("받아쓰기·편집본 폴더를 옮기지 못해서 이름을 되돌렸어요 · 편집실·썸네일 창과 탐색기를 닫고 다시 해 주세요") from e
+        _move_side(old, new, pl, out, log)
     _say(old, new, out, log)
-    return dict(out, name=new)
+    if warn:
+        log(f"  {warn}")
+    if left:
+        log(f"  완성본 폴더의 파일 {left}개는 옛 이름 그대로예요 (다시 내보내면 새 이름으로 만들어져요)")
+    return dict(out, name=new, outKept=left, **({"warn": warn} if warn else {}))
 
 
 # ---------- 탐색기에서 이름을 바꾼 영상: 옛 이름 작업 이어 붙이기 ----------
@@ -346,6 +450,9 @@ def attach(name, old, log=print):
         if (pl["new_dir"] / "transcript_timeline.md").exists():
             raise RenameError("이 영상은 이미 편집점을 찾았어요 · 예전 작업을 붙이면 덮어쓰게 돼요")
         _check(pl, attach=True)
-        out = _move_work(old, name, pl, log)
+        try:
+            out = _move_work(old, name, pl, log)
+        except _Stuck as e:  # 분석 폴더는 붙였는데 편집본은 못 붙임 (되돌리지도 못함) → 붙인 것만이라도 곁가지까지
+            out = _move_side(old, name, pl, e.out, log)
     _say(old, name, out, log, "예전 이름의 작업을 이어 붙였어요")
     return dict(out, name=name)

@@ -807,6 +807,7 @@ class Names(Server):
         self.assertEqual((code, r["ok"]), (500, False))
 
     def test_thumb_save_failure_is_json(self):
+        self.video("a.mp4")  # 보관함에 있는 영상이어야 저장함 (없으면 404 gone · D-073)
         with mock.patch.object(thumb, "save_docs", side_effect=PermissionError(errno.EACCES, "잠김")):
             code, r = self.call("/api/thumb/save", {"name": "a.mp4", "docs": {"designs": [{}]}})
         self.assertEqual((code, r["ok"]), (500, False))

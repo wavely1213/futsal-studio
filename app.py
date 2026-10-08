@@ -312,6 +312,7 @@ def _redirect_to_updater():
         return False
 
 
+GONE_MSG = "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"  # 옛 이름으로 열린 편집실·썸네일의 저장 (404 gone)
 CRASH = {}  # 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 → 보관함 카드 '○○ 영상' + [다시 하기]·[빠르게로 다시 하기] (/api/state · D-072)
 CRASH_RETRY = ("/api/analyze", "/api/bundle")  # 보관함에서 같은 영상으로 다시 할 수 있는 작업
 
@@ -817,6 +818,10 @@ class Handler(BaseHTTPRequestHandler):
             log(f"썸네일 저장 · {out.name}")
             return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/thumb/save":
+            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 디자인을 새로 만들지 않음 (편집실 저장과 같게 · D-073)
+                editor.video_path(b.get("name"))
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
             try:
                 thumb.save_docs(b["name"], b["docs"])
             except (OSError, ValueError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐
@@ -826,8 +831,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/save":
             try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 편집본을 새로 만들지 않음 (이름 바꾸기 D-073)
                 editor.video_path(b.get("name"))
-            except (ValueError, FileNotFoundError):
-                return self._send(404, {"ok": False, "gone": True, "error": "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"})
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
                 rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
             except editor.Conflict as e:
@@ -973,21 +978,27 @@ class Handler(BaseHTTPRequestHandler):
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
         if path in ("/api/rename", "/api/rename/attach"):  # 보관함 영상 이름 바꾸기 · 탐색기에서 바꾼 영상에 옛 작업 이어 붙이기 (D-073)
-            with LOCK:
-                busy = bool(JOB["name"])
+            with LOCK:  # 작업 자리를 잡아 둠 → 바꾸는 동안 휴대폰·다른 창이 옛 이름으로 작업을 시작하지 못하게 (확인만 하고 놓으면 그 틈에 시작됨)
+                busy = bool(JOB["name"]) or RESTARTING.is_set()
+                if not busy:
+                    JOB["name"] = "이름 바꾸기"
             if busy:  # 작업이 그 영상 파일·폴더를 쓰는 중일 수 있음
                 return self._send(409, {"ok": False, "error": BUSY_MSG})
             try:
                 n = editor.safe_name(b.get("name"))
                 r = rename.rename(n, b.get("to"), log) if path == "/api/rename" else rename.attach(n, str(b.get("old") or ""), log)
-                return self._send(200, dict(r, ok=True))
+                code, res = 200, dict(r, ok=True)
             except FileNotFoundError as e:
-                return self._send(404, {"ok": False, "error": str(e)})
+                code, res = 404, {"ok": False, "error": str(e)}
             except (ValueError, TypeError) as e:  # RenameError 포함 · 잘못된 이름
-                return self._send(400, {"ok": False, "error": str(e) or "잘못된 파일 이름이에요"})
+                code, res = 400, {"ok": False, "error": str(e) or "잘못된 파일 이름이에요"}
             except OSError as e:
                 log(f"이름을 바꾸지 못했어요 · {e}")
-                return self._send(500, {"ok": False, "error": "이름을 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+                code, res = 500, {"ok": False, "error": "이름을 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요"}
+            finally:
+                with LOCK:  # 대답 전에 자리를 놓음 (화면이 바로 다음 작업을 시킬 수 있게)
+                    JOB["name"] = None
+            return self._send(code, res)
         if path == "/api/crash/dismiss":  # 지난번 꺼짐 카드 닫기 (✕)
             CRASH.clear()
             return self._send(200, {"ok": True})

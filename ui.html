@@ -1534,13 +1534,17 @@ function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남
 async function renameVideo(name) {
   if (state.job) return toast("다른 작업이 끝난 뒤에 바꿔 주세요");
   const ext = (name.match(/\.[^.]+$/) || [""])[0], cur = name.slice(0, name.length - ext.length);
-  const t = prompt(`새 이름을 적어 주세요 (끝의 ${ext || "확장자"} 는 그대로 붙어요)\n받아쓰기·편집본·썸네일 디자인도 함께 옮겨요 · 이 영상의 편집실·썸네일 창은 먼저 닫아 주세요`, cur);
+  const pg = await api("/api/progress").catch(() => null), p = pg && pg.videos && pg.videos[name];  // 이미 내보냈으면 미리 알림 (I-070)
+  const made = p && (p.exported || p.thumb || p.kit);
+  const t = prompt(`새 이름을 적어 주세요 (끝의 ${ext || "확장자"} 는 그대로 붙어요)\n받아쓰기·편집본·썸네일 디자인도 함께 옮겨요 · 이 영상의 편집실·썸네일 창은 먼저 닫아 주세요`
+    + (made ? `\n이미 만든 완성본·썸네일 그림·올리기 키트 파일은 옛 이름 그대로라서 4·7단계에 '아직 안 내보냄'으로 보여요 (다시 내보내면 돼요)` : ""), cur);
   if (t === null || !t.trim() || t.trim() === cur) return;
   const j = await api("/api/rename", { name, to: t }).catch(() => ({}));
   if (!j.ok) return;  // 안내는 api() 가 토스트로
   if (libSel.delete(name)) libSel.add(j.name);
   lastLocalKey = ""; poll();
-  toast(`'${cutText(j.name, 40)}'(으)로 바꿨어요` + (j.analysis || j.project ? " · 받아쓰기·편집본도 함께 옮겼어요" : ""));
+  toast(`'${cutText(j.name, 40)}'(으)로 바꿨어요` + (j.analysis || j.project ? " · 받아쓰기·편집본도 함께 옮겼어요" : "")
+    + (j.outKept ? " · 완성본 폴더의 파일은 옛 이름 그대로예요 (다시 내보내면 4·7단계에 보여요)" : "") + (j.warn ? ` · ${j.warn}` : ""));
 }
 async function attachOld(name, old) {
   if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요");
