@@ -824,6 +824,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요 · 잠시 뒤 다시 저장할게요"})
             return self._send(200, {"ok": True})
         if path == "/api/edit/save":
+            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 편집본을 새로 만들지 않음 (이름 바꾸기 D-073)
+                editor.video_path(b.get("name"))
+            except (ValueError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"})
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
                 rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
             except editor.Conflict as e:

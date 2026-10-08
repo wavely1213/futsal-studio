@@ -450,7 +450,7 @@ def download(url, dest, progress=None, timeout=30, resume=False):
         else:
             if have and r.status == 206:  # 엉뚱한 구간 → 처음부터 다시 (이어 붙이면 깨진 파일)
                 _drop_resume(dest)
-                return download(url, dest, progress, timeout, False)
+                return download(url, dest, progress, timeout, resume)
             got, total, mode = 0, int(r.headers.get("Content-Length") or 0), "wb"
             if resume and total:
                 try:

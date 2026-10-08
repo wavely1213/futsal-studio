@@ -95,6 +95,11 @@ class RenameTests(Base):
         for p in (core.ANALYSIS / "IMG_4830", editor.PROJECTS / "IMG_4830.json", thumb.THUMBS / "IMG_4830.json"):
             self.assertFalse(p.exists(), p)
         self.assertTrue(any("이름을 바꿨어요 · IMG_4830.mp4 → " in m for m in app.LOG[-5:]), app.LOG[-5:])
+        # 옛 이름으로 열어 둔 편집실이 저장해도 옛 이름 편집본을 새로 만들지 않음 (스튜디오에서 다시 열라고 안내)
+        code, j = self.call("/api/edit/save", {"name": OLD, "project": proj, "rev": 7})
+        self.assertEqual((code, j.get("gone")), (404, True))
+        self.assertIn("이름이 바뀌었거나", j["error"])
+        self.assertFalse((editor.PROJECTS / "IMG_4830.json").exists())
 
     def test_youtube_name_keeps_channel_source(self):
         """유튜브에서 받은 이름 꼴(영상 id)이 사라져도 출처(우리 채널)는 그대로."""
