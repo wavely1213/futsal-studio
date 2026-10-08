@@ -12,7 +12,10 @@ const niceName = n => n.replace(/^\d{8}_[A-Za-z0-9_-]{11}_/, "").replace(/\.[^.]
 // 글자 수로 자르기: .slice() 는 UTF-16 단위라 이모지를 반으로 잘라 디자인 저장이 실패함 (자동 제목 등)
 const cutText = (s, n) => Array.from(String(s)).slice(0, n).join("");
 const mmss = t => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
-const FONTS = { "검은고딕": "Black Han Sans", "프리텐다드 블랙": "Pretendard Black", "프리텐다드 볼드": "Pretendard Bold", "도현": "Do Hyeon" };
+// 글꼴: 화면 이름 → 글꼴 이름, 받을 파일 (모두 OFL · fonts/ 의 라이선스 파일)
+const FONT_FILES = [["검은고딕", "Black Han Sans", "BlackHanSans-Regular.ttf"], ["프리텐다드 블랙", "Pretendard Black", "Pretendard-Black.otf"], ["프리텐다드 볼드", "Pretendard Bold", "Pretendard-Bold.otf"],
+  ["도현", "Do Hyeon", "DoHyeon-Regular.ttf"], ["주아 (둥근 고딕)", "Jua", "Jua-Regular.ttf"], ["독도 (손글씨)", "Dokdo", "Dokdo-Regular.ttf"]];
+const FONTS = Object.fromEntries(FONT_FILES.map(([k, v]) => [k, v]));
 const BLENDS = [["source-over", "표준"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["soft-light", "소프트 라이트"], ["hard-light", "하드 라이트"], ["darken", "어둡게"], ["lighten", "밝게"], ["color-dodge", "색상 닷지"], ["color-burn", "색상 번"], ["difference", "차이"], ["hue", "색조"], ["saturation", "채도"], ["color", "색상"], ["luminosity", "광도"]];
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2800); }
 async function post(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return r.json(); }
@@ -68,7 +71,8 @@ function L(type, o) {
     outline: { on: false, color: "#FFFFFF", width: 10 }, overlay: { on: false, color: "#FF3B30", opacity: 1 },
     fade: { on: false, angle: 0, start: 0.55, end: 1 }, extrude: { on: false, color: "#7A0000", depth: 14, angle: 45 }, warp: { style: "none", bend: 0.3 } };
   const defs = {
-    image: { name: "이미지", src: "", fit: "cover", fx: 0.5, fy: 0.5, cropT: 0, cropB: 0, cropL: 0, cropR: 0, flipX: false, bright: 100, contrast: 100, sat: 100, blur: 0, hue: 0, slant: 0, vignette: 0 },
+    image: { name: "이미지", src: "", fit: "cover", fx: 0.5, fy: 0.5, cropT: 0, cropB: 0, cropL: 0, cropR: 0, flipX: false, bright: 100, contrast: 100, sat: 100, blur: 0, hue: 0, slant: 0, vignette: 0,
+      grade: { on: false, amt: 1, lo: [0, 0, 0], hi: [255, 255, 255], gamma: 1, vib: 0, clarity: 0, temp: 0, sharpen: 0 } },
     text: { lsv: 2, text: "제목을 입력", font: "Black Han Sans", size: 110, fill: "#FFFFFF", fill2: "", gradAngle: 90, align: "left", lh: 1.12, ls: 0, hs: 1, vs: 1, runs: [],
       strokes: [{ color: "#000000", width: 16 }, { color: "#FFFFFF", width: 0 }], shadow: { on: true, color: "#000000", blur: 0, dx: 8, dy: 8, opacity: 1 },
       box: { on: false, color: "#1F5FE0", pad: 18, radius: 0 } },
@@ -85,6 +89,7 @@ function normLayer(l) {
     if (l[k] === undefined || l[k] === null) l[k] = v;
     else if (v && typeof v === "object" && !Array.isArray(v) && typeof l[k] === "object") for (const [kk, vv] of Object.entries(v)) if (l[k][kk] === undefined) l[k][kk] = vv;
   }
+  if (l.type === "shape" && TAC_DEF[l.shape]) for (const [k, v] of Object.entries(TAC_DEF[l.shape])) if (l[k] === undefined) l[k] = JSON.parse(JSON.stringify(v));
   if (l.type === "text" && (!Array.isArray(l.strokes) || l.strokes.length < 2)) l.strokes = [...(l.strokes || []), ...d.strokes].slice(0, 2);
   if (l.type === "text" && l.lsv !== 2) {  // 예전 저장본: 줄 끝 자간이 너비에 들어가 있었음 → 글자 모양이 그대로 보이게 너비 보정
     if (l.ls) { const m = textLayout(ctx, l), k = m.natW / (m.natW + l.ls), ow = l.w; l.w *= k; if (l.align === "center") l.x += (ow - l.w) / 2; else if (l.align === "right") l.x += ow - l.w; }
@@ -139,12 +144,19 @@ function textLayout(c, l) {
   l._tl = { k: memo, m }; return m;
 }
 function fitText(l) { const m = textLayout(ctx, l); l.w = m.natW * (l.hs || 1); l.h = m.natH * (l.vs || 1); }
-function refitKeep(l) {  // 글자 크기가 바뀌어도 정렬 기준점(위쪽 왼/가운데/오른쪽)이 화면에서 그대로 있게
-  const fx = l.align === "center" ? 0.5 : l.align === "right" ? 1 : 0;
+function refitKeep(l, box) {  // 글자 크기가 바뀌어도 정렬 기준점(위쪽 왼/가운데/오른쪽)이 화면에서 그대로 있게
+  const fx = l.align === "center" ? 0.5 : l.align === "right" ? 1 : 0, ay = box && l.fitBox ? clamp(l.fitBox.ay ?? 0, 0, 1) : 0;
   const a = (l.rot || 0) * RAD, c = Math.cos(a), s = Math.sin(a), t = Math.tan((l.skew || 0) * RAD);
-  const world = (L0) => { const lx = (fx - 0.5) * L0.w + t * L0.h / 2, ly = -L0.h / 2; return [L0.x + L0.w / 2 + lx * c - ly * s, L0.y + L0.h / 2 + lx * s + ly * c]; };
-  const [px, py] = world(l); fitText(l);
+  const world = (L0) => { const ly = (ay - 0.5) * L0.h, lx = (fx - 0.5) * L0.w - t * ly; return [L0.x + L0.w / 2 + lx * c - ly * s, L0.y + L0.h / 2 + lx * s + ly * c]; };
+  const [px, py] = world(l); fitText(l); if (box) fitInBox(l);
   const [qx, qy] = world(l); l.x += px - qx; l.y += py - qy;
+}
+// 자동 맞춤 상자(fitBox {w, h, size, ay}): 글자를 고쳐도 상자 안에 들어가게 줄이고, 짧아지면 원래 크기(size)까지 다시 키움
+// (템플릿이 넣은 제목에만 있음 · 사용자가 크기를 직접 바꾸면 지움)
+function fitInBox(l) {
+  const b = l.fitBox; if (!b || !(b.w > 0) || !(b.h > 0)) return;
+  if (b.size && l.size < b.size - 0.05) { scaleTextStyle(l, b.size / l.size); fitText(l); }
+  const k = Math.min(1, b.w / l.w, b.h / l.h); if (k < 0.999) { scaleTextStyle(l, k); fitText(l); }
 }
 
 /* ---------- 그리기 ---------- */
@@ -172,8 +184,9 @@ function drawText(c, l) {
   for (const s of items) { font(s); c.fillStyle = grad && !s.own ? grad : s.st.fill; c.fillText(s.t, s.X, s.Y); }
 }
 function drawImageContent(c, l) {
-  const im = l._edit || img(l.src);
+  let im = l._edit || img(l.src);
   if (!im) { c.fillStyle = "#333"; c.fillRect(0, 0, l.w, l.h); return; }
+  if (l.grade && l.grade.on && !l._edit) { const T0 = c.getTransform(); im = gradedImage(im, l.src, l.grade, l.w * Math.hypot(T0.a, T0.b)); }
   if (l.slant) { slantPath(c, l.w, l.h, l.slant); c.clip(); }
   if (l.flipX) { c.translate(l.w, 0); c.scale(-1, 1); }
   const IW = im.naturalWidth || im.width, IH = im.naturalHeight || im.height;
@@ -184,6 +197,7 @@ function drawImageContent(c, l) {
   const T = c.getTransform(), bs = l.blur ? l.blur * Math.hypot(T.a, T.b) : 0;  // 흐림은 캔버스 배율과 무관하게 문서 px 기준
   const f = `brightness(${l.bright}%) contrast(${l.contrast}%) saturate(${l.sat}%)${l.hue ? ` hue-rotate(${l.hue}deg)` : ""}${bs ? ` blur(${bs}px)` : ""}`;
   if (f !== "brightness(100%) contrast(100%) saturate(100%)") c.filter = f;
+  c.imageSmoothingQuality = "high";  // 작게 줄여 그릴 때(카드·목록 미리보기) 계단 없이
   if (bs) { const p = l.blur * 3; c.save(); c.beginPath(); c.rect(0, 0, l.w, l.h); c.clip(); c.drawImage(im, sx, sy, iw, ih, dx - p, dy - p, dw + 2 * p, dh + 2 * p); c.restore(); }
   else c.drawImage(im, sx, sy, iw, ih, dx, dy, dw, dh);
   c.filter = "none";
@@ -193,6 +207,7 @@ function drawImageContent(c, l) {
   }
 }
 function drawShape(c, l) {
+  if (TAC_DEF[l.shape]) return drawTactic(c, l);
   c.fillStyle = l.fill2 ? linGrad(c, l.w, l.h, l.gradAngle, l.fill, l.fill2) : l.fill;
   c.strokeStyle = l.stroke.color; c.lineWidth = l.stroke.width;
   if (l.shape === "burst") {
@@ -221,6 +236,7 @@ const hasFx = l => (l.warp.style !== "none" && l.warp.bend) || l.shadow.on || l.
 function fxBleed(l) {  // 상자 밖으로 삐져나오는 내용 (행간 좁은 글자, 도형 테두리, 집중선)
   if (l.type === "text") { const sz = Math.max(l.size, ...(l.runs || []).map(r => r.size || 0)), m0 = textLayout(ctx, l); return (Math.max(0, (1 - l.lh) * sz / 2) + sz * 0.06) * (l.h / m0.natH); }
   if (l.type === "shape") {
+    if (TAC_DEF[l.shape]) return tacBleed(l);
     if (l.shape === "burst") return Math.max(0, Math.hypot(l.w, l.h) / 2 * 1.1 - Math.min(l.w, l.h) / 2);
     if (l.stroke.width > 0) return l.stroke.width / 2 * (l.shape === "ellipse" ? 1 : l.shape === "rect" ? 1.5 : 5);
   }
@@ -267,7 +283,10 @@ function layerBitmap(l, sIn) {
       g.setTransform(k, 0, 0, k, mS * k, mS * k);
       const gr = g.createLinearGradient(cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
       const s0 = clamp(Math.min(l.fade.start, l.fade.end), 0, 1), s1 = clamp(Math.max(l.fade.start, l.fade.end), 0, 1);
-      gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(Math.min(s0, 0.999), "rgba(0,0,0,1)"); gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      if (l.fade.both && s0 > 0.5) {  // 양쪽 끝 모두 (가운데 판 장면이 위아래 흐린 배경에 녹아들게): 0~(1-s1) 투명 → (1-s0) 불투명 … s0 → s1 투명
+        gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(1 - s1, "rgba(0,0,0,0)"); gr.addColorStop(Math.min(1 - s0, s0 - 0.001), "rgba(0,0,0,1)"); gr.addColorStop(s0, "rgba(0,0,0,1)");
+        gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      } else { gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(Math.min(s0, 0.999), "rgba(0,0,0,1)"); gr.addColorStop(Math.min(1, Math.max(s1, s0 + 0.001)), "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,0)"); }
       g.globalCompositeOperation = "destination-in"; g.fillStyle = gr; g.fillRect(-mS, -mS, l.w + 2 * mS, l.h + 2 * mS);
       g.globalCompositeOperation = "source-over"; g.setTransform(1, 0, 0, 1, 0, 0);
     }
@@ -336,4 +355,203 @@ function renderDoc(c, doc, sc) {
   c.fillStyle = doc.bg || "#000"; c.fillRect(0, 0, w, h);
   for (const l of doc.layers) { try { drawLayer(c, l, sc); } catch (e) { console.error("레이어 그리기 실패", l.id, e); } }  // 레이어 하나가 깨져도 나머지는 그림
   c.restore();
+}
+
+/* ---------- 자동 보정: 레벨 → 감마 → 색온도 → 자연 채도 → 클래리티(국소 대비) → 샤픈 ---------- */
+// 숫자는 백엔드 thumb.auto_grade 가 정하고(장면마다), 사용자는 '자동 보정' 칸에서 덮어씀. 그림 한 장을 보정해 캐시(최근 8장)
+// gamma: 밝기 x → x^(1/gamma) (1보다 크면 밝게) · vib/clarity/sharpen: 0~100 · temp: -50~50 (+ 따뜻하게) · amt: 전체 강도 0~1
+const GRADE_CACHE = new Map(), GRADE_ID = new WeakMap(); let gradeSeq = 0;
+function gradedImage(im, src, g, drawW) {
+  const IW = im.naturalWidth || im.width, IH = im.naturalHeight || im.height;
+  const tw = drawW > 0 && drawW < 560 && IW > 720 ? 720 : Math.min(IW, 2560), th = Math.max(1, Math.round(IH * tw / IW));  // 작은 미리보기(자동 후보 카드)는 줄인 그림으로
+  let id = GRADE_ID.get(im); if (!id) { id = ++gradeSeq; GRADE_ID.set(im, id); }
+  const key = [id, tw, g.amt, g.lo, g.hi, g.gamma, g.vib, g.clarity, g.temp, g.sharpen].join("|");
+  let c = GRADE_CACHE.get(key);
+  if (c) { GRADE_CACHE.delete(key); GRADE_CACHE.set(key, c); return c; }
+  c = newCanvas(tw, th); const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(im, 0, 0, tw, th);
+  let d; try { d = x.getImageData(0, 0, tw, th); } catch (e) { return im; }  // 읽을 수 없는 그림이면 보정 없이
+  applyGrade(d.data, tw, th, g); x.putImageData(d, 0, 0);
+  GRADE_CACHE.set(key, c); while (GRADE_CACHE.size > 8) GRADE_CACHE.delete(GRADE_CACHE.keys().next().value);
+  return c;
+}
+function boxBlur(src, w, h, r) {  // 상자 흐림 한 번 (가로 → 세로, 가장자리는 늘려서) · 세 번 하면 가우시안에 가까움
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h), k = 1 / (2 * r + 1);
+  for (let y = 0; y < h; y++) {
+    const o = y * w; let acc = src[o] * (r + 1); for (let i = 1; i <= r; i++) acc += src[o + Math.min(w - 1, i)];
+    for (let x = 0; x < w; x++) { tmp[o + x] = acc * k; acc += src[o + Math.min(w - 1, x + r + 1)] - src[o + Math.max(0, x - r)]; }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = tmp[x] * (r + 1); for (let i = 1; i <= r; i++) acc += tmp[Math.min(h - 1, i) * w + x];
+    for (let y = 0; y < h; y++) { out[y * w + x] = acc * k; acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]; }
+  }
+  return out;
+}
+function applyGrade(px, w, h, g) {
+  const a = clamp(g.amt ?? 1, 0, 1.5), n = w * h, lo0 = g.lo || [0, 0, 0], hi0 = g.hi || [255, 255, 255];
+  const lut = [0, 1, 2].map(ch => {  // 채널별 표: 레벨(lo~hi 를 0~255 로) · 색온도(빨강↑ 파랑↓)
+    const lo = lo0[ch] * a, hi = 255 + (hi0[ch] - 255) * a;
+    const tk = 1 + (ch === 0 ? 1 : ch === 2 ? -1 : 0) * (g.temp || 0) * a / 260, t = new Float32Array(256);
+    for (let v = 0; v < 256; v++) t[v] = clamp((v - lo) / Math.max(1, hi - lo), 0, 1) * 255 * tk;
+    return t;
+  });
+  // 감마는 밝기에만 (세 채널을 같은 비율로) — 채널마다 감마를 걸면 밝힐 때 색이 빠짐 (thumb.auto_grade 와 같은 계산)
+  const gm = Math.max(0.2, 1 + ((g.gamma || 1) - 1) * a), GL = new Float32Array(1025);
+  for (let v = 0; v <= 1024; v++) GL[v] = Math.pow(v / 1024, 1 / gm) * 255;
+  const vib = (g.vib || 0) * a / 100, cl = (g.clarity || 0) * a / 100, sh = (g.sharpen || 0) * a / 100, L = cl > 0 || sh > 0 ? new Float32Array(n) : null;
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    let r = lut[0][px[p]], gg = lut[1][px[p + 1]], b = lut[2][px[p + 2]];
+    if (gm !== 1) { const y = 0.299 * r + 0.587 * gg + 0.114 * b, k = GL[Math.min(1024, Math.round(y * 4.0157))] / Math.max(0.5, y); r *= k; gg *= k; b *= k; }
+    if (vib) {
+      const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+      if (mx > mn) {
+        const sat = Math.min(1, (mx - mn) / Math.max(1, mx));
+        let k = vib * (1 - sat);  // 채도 낮은 곳일수록 많이
+        if (r === mx && gg >= b) { const hr = (gg - b) / (r - b); if (hr > 0.3 && hr < 0.85) k *= 0.5; }  // 피부색(색상 18~50°)은 절반만
+        const y = 0.299 * r + 0.587 * gg + 0.114 * b;
+        r = y + (r - y) * (1 + k); gg = y + (gg - y) * (1 + k); b = y + (b - y) * (1 + k);
+      }
+    }
+    px[p] = r; px[p + 1] = gg; px[p + 2] = b;
+    if (L) L[i] = 0.299 * px[p] + 0.587 * px[p + 1] + 0.114 * px[p + 2];
+  }
+  if (!L) return;
+  let add = null;
+  const mid = v => { const m = v / 127.5 - 1, q = Math.max(0, 1 - m * m); return q * Math.sqrt(q); };  // 중간 밝기 1 → 아주 밝은·어두운 곳 0 (하얗게 날아가지 않게)
+  if (cl > 0) {  // 클래리티: 큰 반경(화면 폭 1.2%) 흐림과의 차이를 중간 밝기 위주로 더함
+    const r = Math.max(2, Math.round(w * 0.012)); let B = boxBlur(L, w, h, r); B = boxBlur(B, w, h, r); B = boxBlur(B, w, h, r);
+    add = new Float32Array(n);
+    for (let i = 0; i < n; i++) add[i] = (L[i] - B[i]) * cl * 1.2 * mid(L[i]);
+  }
+  if (sh > 0) {  // 샤픈: 반경 1
+    const B = boxBlur(L, w, h, 1); add = add || new Float32Array(n);
+    for (let i = 0; i < n; i++) add[i] += (L[i] - B[i]) * sh * 1.6 * mid(L[i]);
+  }
+  for (let i = 0, p = 0; i < n; i++, p += 4) { const d = add[i]; px[p] += d; px[p + 1] += d; px[p + 2] += d; }
+}
+
+/* ---------- 전술 그래픽: 곡선 화살표·패스 점선·발밑 원·스포트라이트·X·번호/칩·반짝이·손그림 화살표 ---------- */
+// 모두 도형(shape) 레이어 · pts 는 상자 기준 0~1 좌표(점 핸들로 끌어 고침) · width 선 두께 · head 화살촉 · dash [선, 빈칸](두께 배율) 또는 null
+// core: 가운데 흰 심선 색 ('' 이면 없음) · 네온 느낌은 레이어 '외부 광선(glow)' 효과로 · seed: 손그림 흔들림(문서에 저장 → 늘 같은 모양)
+const TAC_DEF = {
+  arrow2: { pts: [[0.04, 0.8], [0.45, 0.04], [0.94, 0.62]], width: 14, head: 46, dash: null, core: "#FFFFFF" },
+  pass: { pts: [[0.04, 0.8], [0.5, 0.25], [0.95, 0.55]], width: 8, head: 0, dash: [1.4, 1.5], core: "" },
+  ring: { width: 9, fillA: 0.22, back: true, core: "#FFFFFF" },
+  spot: { topW: 0.26, fillA: 0.55 },
+  xmark: { width: 28 },
+  scribble: { pts: [[0.04, 0.3], [0.5, 0.82], [0.93, 0.3]], width: 9, head: 34, seed: 7 },
+  marker: { label: "1", labelColor: "#FFFFFF", font: "Black Han Sans" },
+  sparkle: {},
+};
+const TAC_NAMES = { arrow2: "곡선 화살표", pass: "패스 점선", ring: "발밑 원", spot: "스포트라이트", xmark: "X 표시", scribble: "손그림 화살표", marker: "번호·칩", sparkle: "반짝이" };
+function hexA(c, a) { const h = toHex(c); return `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3, 5), 16)},${parseInt(h.slice(5, 7), 16)},${a})`; }
+const tacPts = l => (Array.isArray(l.pts) ? l.pts : []).map(p => [p[0] * l.w, p[1] * l.h]);
+function bezAt(P, t) {  // 점 2개 = 직선, 3개 = 2차 곡선
+  if (P.length < 3) return [P[0][0] + (P[1][0] - P[0][0]) * t, P[0][1] + (P[1][1] - P[0][1]) * t];
+  const u = 1 - t; return [u * u * P[0][0] + 2 * u * t * P[1][0] + t * t * P[2][0], u * u * P[0][1] + 2 * u * t * P[1][1] + t * t * P[2][1]];
+}
+function bezPath(c, P, t1) {  // 처음부터 t1 까지 (곡선을 잘라서)
+  c.beginPath(); c.moveTo(P[0][0], P[0][1]);
+  const e = bezAt(P, t1);
+  if (P.length < 3) { c.lineTo(e[0], e[1]); return; }
+  c.quadraticCurveTo(P[0][0] + (P[1][0] - P[0][0]) * t1, P[0][1] + (P[1][1] - P[0][1]) * t1, e[0], e[1]);
+}
+function tailT(P, dist) {  // 끝에서 dist 만큼 떨어진 곳의 t (화살촉 자리)
+  const E = bezAt(P, 1);
+  for (let t = 0.995; t > 0.02; t -= 0.005) { const q = bezAt(P, t); if (Math.hypot(q[0] - E[0], q[1] - E[1]) >= dist) return t; }
+  return 0.02;
+}
+function headPoly(P, t1, size, k = 1) {  // 끝점이 꼭짓점인 삼각형 (k: 안쪽 심선용으로 줄임)
+  const E = bezAt(P, 1), B = bezAt(P, t1), dx = E[0] - B[0], dy = E[1] - B[1], d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+  const len = size * k, half = size * 0.58 * k, tip = [E[0] - ux * size * (1 - k) * 0.35, E[1] - uy * size * (1 - k) * 0.35];
+  const bx = tip[0] - ux * len, by = tip[1] - uy * len;
+  return [tip, [bx - uy * half, by + ux * half], [bx + uy * half, by - ux * half]];
+}
+function polyPath(c, ps) { c.beginPath(); ps.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.closePath(); }
+function rng(seed) { let s = (seed | 0) || 1; return () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function drawTactic(c, l) {
+  const w = l.w, h = l.h, col = l.fill || "#FF3B30", sw = (l.stroke && l.stroke.width) || 0, sc = (l.stroke && l.stroke.color) || "#000000";
+  c.lineCap = "round"; c.lineJoin = "round";
+  const P = tacPts(l), lw = Math.max(1, l.width || 8);
+  if ((l.shape === "arrow2" || l.shape === "pass") && P.length >= 2) {
+    const head = l.shape === "arrow2" ? Math.max(lw * 1.6, l.head || 0) : 0, endR = l.shape === "pass" ? lw * 1.25 : 0;
+    const t1 = head ? tailT(P, head * 0.72) : endR ? tailT(P, endR * 1.6) : 1;
+    const dash = l.dash && l.dash.length === 2 ? [l.dash[0] * lw, l.dash[1] * lw] : null;
+    const shaft = (width, color) => { c.setLineDash(dash || []); bezPath(c, P, t1); c.lineWidth = width; c.strokeStyle = color; c.stroke(); c.setLineDash([]); };
+    if (sw > 0) {
+      shaft(lw + sw * 2, sc);
+      if (head) { polyPath(c, headPoly(P, t1, head)); c.lineWidth = sw * 2; c.strokeStyle = sc; c.stroke(); }
+      if (endR) { c.beginPath(); c.arc(...bezAt(P, 1), endR + sw, 0, Math.PI * 2); c.fillStyle = sc; c.fill(); }
+    }
+    shaft(lw, col);
+    c.fillStyle = col;
+    if (head) { polyPath(c, headPoly(P, t1, head)); c.fill(); c.lineWidth = lw * 0.5; c.strokeStyle = col; c.stroke(); }
+    if (endR) { c.beginPath(); c.arc(...bezAt(P, 1), endR, 0, Math.PI * 2); c.fill(); c.beginPath(); c.arc(P[0][0], P[0][1], lw * 0.8, 0, Math.PI * 2); c.fill(); }
+    if (l.core) { shaft(lw * 0.34, l.core); if (head) { c.fillStyle = l.core; polyPath(c, headPoly(P, t1, head, 0.42)); c.fill(); } }
+    return;
+  }
+  if (l.shape === "scribble" && P.length >= 2) {
+    const r = rng(l.seed || 1), N = 28, pts = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, q = bezAt(P, t), q2 = bezAt(P, Math.min(1, t + 0.01)), q1 = bezAt(P, Math.max(0, t - 0.01));
+      const dx = q2[0] - q1[0], dy = q2[1] - q1[1], d = Math.hypot(dx, dy) || 1, j = (r() - 0.5) * lw * 0.9 * Math.sin(Math.PI * t);
+      pts.push([q[0] - dy / d * j, q[1] + dx / d * j]);
+    }
+    const E = pts[N], B = pts[N - 3], a = Math.atan2(E[1] - B[1], E[0] - B[0]), hd = Math.max(lw * 2, l.head || 30);
+    const wings = [-1, 1].map(s => a + Math.PI + s * (0.5 + (r() - 0.5) * 0.12));
+    const draw = (width, color) => {
+      c.beginPath(); pts.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])));
+      for (const b of wings) { c.moveTo(E[0], E[1]); c.lineTo(E[0] + Math.cos(b) * hd, E[1] + Math.sin(b) * hd); }
+      c.lineWidth = width; c.strokeStyle = color; c.stroke();
+    };
+    if (sw > 0) draw(lw + sw * 2, sc);
+    draw(lw, col);
+    return;
+  }
+  if (l.shape === "ring") {
+    const rx = Math.max(1, w / 2 - lw / 2 - sw), ry = Math.max(1, h / 2 - lw / 2 - sw), cx = w / 2, cy = h / 2;
+    c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); c.fillStyle = hexA(col, clamp(l.fillA ?? 0.22, 0, 1)); c.fill();
+    const arc = (a0, a1, width, color, alpha) => { c.save(); c.globalAlpha *= alpha; c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, a0, a1); c.lineWidth = width; c.strokeStyle = color; c.stroke(); c.restore(); };
+    const backA = l.back ? 0.45 : 1;
+    if (sw > 0) { arc(Math.PI, Math.PI * 2, lw + sw * 2, sc, backA); arc(0, Math.PI, lw + sw * 2, sc, 1); }
+    arc(Math.PI, Math.PI * 2, lw, col, backA); arc(0, Math.PI, lw, col, 1);
+    if (l.core) arc(0.08 * Math.PI, 0.92 * Math.PI, lw * 0.3, l.core, 1);
+    return;
+  }
+  if (l.shape === "spot") {
+    const tw = clamp(l.topW ?? 0.26, 0.02, 1) * w, by = h * 0.86, a = clamp(l.fillA ?? 0.55, 0, 1);
+    const g = c.createLinearGradient(0, 0, 0, by); g.addColorStop(0, hexA(col, 0)); g.addColorStop(0.35, hexA(col, a * 0.25)); g.addColorStop(1, hexA(col, a * 0.7));
+    c.beginPath(); c.moveTo((w - tw) / 2, 0); c.lineTo((w + tw) / 2, 0); c.lineTo(w, by); c.ellipse(w / 2, by, w / 2, h - by, 0, 0, Math.PI); c.closePath(); c.fillStyle = g; c.fill();
+    const g2 = c.createRadialGradient(w / 2, by, 0, w / 2, by, w / 2); g2.addColorStop(0, hexA(col, a)); g2.addColorStop(1, hexA(col, a * 0.35));
+    c.beginPath(); c.ellipse(w / 2, by, w / 2, h - by, 0, 0, Math.PI * 2); c.fillStyle = g2; c.fill();
+    return;
+  }
+  if (l.shape === "xmark") {
+    const xw = Math.max(2, l.width || 24), p = xw / 2 + sw;
+    const line = (width, color) => { c.beginPath(); c.moveTo(p, p); c.lineTo(w - p, h - p); c.moveTo(w - p, p); c.lineTo(p, h - p); c.lineWidth = width; c.strokeStyle = color; c.stroke(); };
+    if (sw > 0) line(xw + sw * 2, sc);
+    line(xw, col); return;
+  }
+  if (l.shape === "marker") {
+    const d = Math.max(2, Math.min(w, h) - sw * 2), cx = w / 2, cy = h / 2;
+    c.beginPath(); c.ellipse(cx, cy, (w - sw * 2) / 2, (h - sw * 2) / 2, 0, 0, Math.PI * 2); c.fillStyle = l.fill2 ? linGrad(c, w, h, l.gradAngle, col, l.fill2) : col; c.fill();
+    if (sw > 0) { c.lineWidth = sw; c.strokeStyle = sc; c.stroke(); }
+    const t = String(l.label ?? ""); if (!t) return;
+    let fs = d * (t.length <= 1 ? 0.64 : t.length === 2 ? 0.44 : 0.34);
+    c.font = `${fs}px "${l.font || "Black Han Sans"}"`; const mw = c.measureText(t).width; if (mw > d * 0.82) { fs *= d * 0.82 / mw; c.font = `${fs}px "${l.font || "Black Han Sans"}"`; }
+    c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = l.labelColor || "#FFFFFF"; c.fillText(t, cx, cy + fs * 0.06);
+    return;
+  }
+  if (l.shape === "sparkle") {
+    const cx = w / 2, cy = h / 2, kx = w * 0.07, ky = h * 0.07;
+    c.beginPath(); c.moveTo(cx, 0); c.quadraticCurveTo(cx + kx, cy - ky, w, cy); c.quadraticCurveTo(cx + kx, cy + ky, cx, h); c.quadraticCurveTo(cx - kx, cy + ky, 0, cy); c.quadraticCurveTo(cx - kx, cy - ky, cx, 0); c.closePath();
+    c.fillStyle = col; c.fill(); if (sw > 0) { c.lineWidth = sw; c.strokeStyle = sc; c.stroke(); }
+  }
+}
+function tacBleed(l) {  // 상자 밖으로 나가는 선·화살촉
+  const sw = (l.stroke && l.stroke.width) || 0, lw = l.width || 0;
+  if (l.shape === "arrow2" || l.shape === "pass") return lw / 2 + sw + Math.max(l.head || 0, lw * 1.6) * 0.62 + lw * 1.3 + 2;
+  if (l.shape === "scribble") return lw * 1.5 + sw + (l.head || 30) + 2;
+  if (l.shape === "xmark" || l.shape === "sparkle") return sw + 2;
+  return 2;
 }

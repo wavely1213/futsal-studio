@@ -202,7 +202,7 @@ function drawSel() {
   if (ls.length === 1) {
     const l = ls[0];
     st = { left: l.x * Z + "px", top: l.y * Z + "px", width: l.w * Z + "px", height: l.h * Z + "px", transform: `rotate(${l.rot}deg) skewX(${-(l.skew || 0)}deg)` };
-    inner = l.locked ? "" : HANDLES.map(h => `<div class="h ${h}"></div>`).join("") + '<div class="h rot"></div>';
+    inner = l.locked ? "" : HANDLES.map(h => `<div class="h ${h}"></div>`).join("") + '<div class="h rot"></div>' + ptHandles(l);
     const r = l.type === "text" && curRange(l);
     if (r) inner += charRects(l, r[0], r[1]).map(q => `<i class="csel" style="left:${q.x * Z}px;top:${q.y * Z}px;width:${q.w * Z}px;height:${q.h * Z}px"></i>`).join("");
   } else {

@@ -15,14 +15,15 @@ async function doCut(l0, kind) {
   Object.assign(l, { bright: Math.min(l.bright, 72), blur: Math.max(l.blur, 3) });
   selIds = [cutL.id]; changed(); toast("누끼를 땄어요 · 배경은 살짝 어둡고 흐리게 했어요 (Ctrl+Z로 되돌리기)");
 }
+let LAST_FAIL = null;  // 마지막으로 기다린 작업의 실패 안내 (trouble.explain 의 쉬운 한 줄 · AI 추천 썸네일 분석 줄에 그대로 보여 줌)
 function watchJob(id) {  // id: 시작 응답의 jobId — 그 작업의 결과만 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
-  $("busy").classList.add("show");
+  $("busy").classList.add("show"); LAST_FAIL = null;
   return new Promise(resolve => {
     const iv = setInterval(async () => {
       let s; try { s = await (await fetch("/api/state?since=999999" + (id ? "&job=" + id : ""))).json(); } catch (e) { return; }
       const pr = s.progress || {}, d = id ? s.done : (s.job ? null : s);
       if (!d) { $("busyTxt").textContent = pr.detail || s.job || "작업 중"; $("busyBar").style.width = (pr.pct || 5) + "%"; return; }
-      clearInterval(iv); $("busy").classList.remove("show"); if (d.error) { toast("실패 · " + d.error.slice(0, 80)); resolve(null); } else resolve(d.result);
+      clearInterval(iv); $("busy").classList.remove("show"); if (d.error) { LAST_FAIL = d.fail || { msg: d.error }; toast("실패 · " + d.error.slice(0, 80)); resolve(null); } else resolve(d.result);
     }, 700);
   });
 }
@@ -41,7 +42,7 @@ function faceBadge(f) {  // 😆 웃음 / 😮 놀람 + 얼굴 크기 (화면 �
 }
 function renderStrip() {
   const list = [...FRAMES].sort(STRIP_SORT === "expr" ? (a, b) => exprOf(b) - exprOf(a) || (b.face || 0) - (a.face || 0) || (b.score || 0) - (a.score || 0) : (a, b) => a.t - b.t);
-  $("strip").innerHTML = list.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span>${faceBadge(f)}</div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
+  $("strip").innerHTML = list.map(f => `<div class="fr" data-t="${f.t}"><img src="${frameSrc(f.t)}" loading="lazy"><span>${mmss(f.t)}</span>${faceBadge(f)}${f.kind ? `<i>${frameBadges(f)}</i>` : ""}</div>`).join("") || `<span class="hint" style="padding:10px">장면이 없어요</span>`;
   document.querySelectorAll(".fr").forEach(el => (el.onclick = e => {
     const src = frameSrc(el.dataset.t);
     if (e.shiftKey) return addImage(src, false, W > H ? {} : { w: W, h: W * 9 / 16, x: 0, y: (H - W * 9 / 16) / 2 });
@@ -177,13 +178,15 @@ function renderAuto() {
   const opts = titleOptions(), t0 = opts[0] || ["제목", ""], prev = { a: $("aL1") && $("aL1").value, b: $("aL2") && $("aL2").value };
   $("tab-auto").innerHTML = `<div class="pg"><h4>만들 형식</h4><div class="row2">${Object.entries(FMT).map(([k, f]) => `<button class="btn ${AUTO_FMT === k ? "pri" : ""}" data-act="autoFmt" data-v="${k}">${f.label}</button>`).join("")}</div>
       <div class="hint">쇼츠 썸네일은 쇼츠 화면(9:16, 1080×1920) 그대로 만들어요.</div></div>
+    <div id="aiSec"></div>
+    <details class="oldc" id="oldCands" open><summary>예전 템플릿 후보 <span class="hint">제목 두 줄을 직접 넣어 템플릿 14종으로</span></summary>
     <div class="pg"><h4>제목 문구</h4>
       <input class="s" id="aL1" placeholder="첫째 줄"><input class="s" id="aL2" placeholder="둘째 줄" style="margin-top:6px">
       <div class="row2" style="margin-top:8px">${opts.map((o, i) => `<button class="btn sm" data-ti="${i}">${esc(cutText(o.join(" "), 16))}</button>`).join("")}</div>
       <div class="row2"><button class="btn pri" id="aMake">후보 다시 만들기</button><button class="btn" id="aCutMake">${CUT_AUTO ? "누끼 넣은 후보 ✓" : "인물 누끼 넣어서 만들기"}</button></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="aSub" ${SUBCROP ? "checked" : ""}> 영상에 박힌 옛 자막 가리기 (장면 아래쪽 잘라내기)</label>
       <div class="hint">영상에서 선명한 장면을 골라 템플릿으로 만들어요. 누르면 편집 화면으로 불러와요.</div></div>
-    <div class="designs" id="designs"></div><div class="cands ${AUTO_FMT}" id="cands"></div>`;
+    <div class="designs" id="designs"></div><div class="cands ${AUTO_FMT}" id="cands"></div></details>`;
   $("aL1").value = prev.a ?? t0[0]; $("aL2").value = prev.b ?? (t0[1] || "");
   document.querySelectorAll("[data-ti]").forEach(b => (b.onclick = () => { const o = opts[+b.dataset.ti]; $("aL1").value = o[0]; $("aL2").value = o[1] || ""; makeCands(); }));
   $("aMake").onclick = makeCands; $("aSub").onchange = e => { SUBCROP = e.target.checked; makeCands(); };
@@ -193,7 +196,8 @@ function renderAuto() {
     if (!j.ok) return toast(j.error || "지금은 할 수 없어요");
     const r = await watchJob(j.jobId); if (r) { CUT_AUTO = r; renderAuto(); }
   };
-  renderDesigns(); makeCands();
+  renderDesigns(); makeCands(); renderAI();
+  if (AI.results.length && AI.results[0].doc.h > AI.results[0].doc.w !== (AUTO_FMT === "short")) aiRun(AI.seed);  // 형식을 바꾸면 그 형식으로 다시 추천
 }
 function makeCands() {
   if (!FRAMES.length) { $("cands").innerHTML = `<div class="hint" style="padding:10px">장면을 고르는 중이에요…</div>`; return; }
@@ -254,17 +258,22 @@ function showTab(t) { document.querySelectorAll(".ph .tab").forEach(x => x.class
 document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.dataset.tab)));
 
 /* ---------- 내보내기 ---------- */
+const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
 async function exportImg() {
   if (!D) return; if (editing) endEdit();
   const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
   if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return;
   const c = newCanvas(W, H); renderDoc(c.getContext("2d"), D.doc, 1);
-  const fmt = $("exFmt").value; let data;
-  if (fmt === "png") data = c.toDataURL("image/png");
-  else { let q = 0.93; do { data = c.toDataURL("image/jpeg", q); q -= 0.07; } while (data.length * 0.75 > 1.95e6 && q > 0.5); }
+  let fmt = $("exFmt").value, data;
+  const jpg = () => { let q = 0.93, d; do { d = c.toDataURL("image/jpeg", q); q -= 0.07; } while (d.length * 0.75 > 1.95e6 && q > 0.5); return d; };
+  if (fmt === "png") {
+    data = c.toDataURL("image/png");
+    // 7단계 썸네일 확인·스튜디오 직접 올리기는 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음 · 바로 올리기는 50MB · I-062)
+    if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
+  } else data = jpg();
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
-  if (j.ok) { toast(`저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
+  if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
 $("exportBtn").onclick = exportImg;
 
@@ -318,10 +327,10 @@ function runQA() {
   $("qaBody").innerHTML = `<div class="score">${score}점 · ${bad ? `고칠 것 ${bad}개` : "큰 문제 없어요"}${warn ? ` · 확인할 것 ${warn}개` : ""}</div>`
     + items.sort((a, b) => ["bad", "warn", "ok"].indexOf(a.lv) - ["bad", "warn", "ok"].indexOf(b.lv)).map(i => `<div class="qi ${i.lv}" ${i.id ? `data-ql="${i.id}"` : ""}><span>${{ ok: "✅", warn: "⚠️", bad: "⛔" }[i.lv]}</span><span><b>${esc(i.title)}</b>${esc(i.msg)}</span></div>`).join("");
   $("qaBody").querySelectorAll("[data-ql]").forEach(e => (e.onclick = () => { $("qaModal").classList.remove("show"); select([e.dataset.ql]); }));
-  $("qaModal").classList.add("show");
+  $("qaModal").classList.add("show"); $("judgeRes").innerHTML = ""; qaExtra();
   return { score, bad, warn, items };
 }
-$("qaBtn").onclick = runQA; $("qaClose").onclick = () => $("qaModal").classList.remove("show");
+$("qaBtn").onclick = runQA; $("qaClose").onclick = () => $("qaModal").classList.remove("show"); $("judgeBtn").onclick = judgeAI;
 
 /* ---------- 눈금자 · 안내선 (Ctrl+R / Ctrl+;) ---------- */
 let showRulers = false, showGuidesU = true;
@@ -400,7 +409,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   const openP = fetch("/api/thumb/open?name=" + encodeURIComponent(NAME)).then(r => r.json());
   const framesP = post("/api/thumb/frames", { name: NAME });
   openP.catch(() => {}); framesP.catch(() => {});  // 실패는 아래에서 기다릴 때 그대로 드러남
-  await Promise.all([["BlackHanSans-Regular.ttf", "Black Han Sans"], ["Pretendard-Black.otf", "Pretendard Black"], ["Pretendard-Bold.otf", "Pretendard Bold"], ["DoHyeon-Regular.ttf", "Do Hyeon"]].map(async ([f, w]) => {
+  await Promise.all(FONT_FILES.map(async ([, w, f]) => {
     try { const ff = new FontFace(w, `url(/fonts/${f})`); await ff.load(); document.fonts.add(ff); } catch (e) {}
   }));
   FONT_VER++;
@@ -423,6 +432,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
     await new Promise(r2 => setTimeout(r2, 3000));
   }
   renderStrip(); makeCands();
+  loadBrand(); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
   const d0 = DOCS.designs[0];
   if (d0 && !d0.doc.layers.length && FRAMES.length) {
     if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; refreshUI(); }

@@ -62,8 +62,9 @@
   - 현재 해당 사항: imageio-ffmpeg 자체는 BSD-2지만, 휠에 든 ffmpeg 실행 파일은 `--enable-gpl --enable-version3` 빌드다(개발 PC Linux 휠에서 확인, Windows 휠은 미확인).
   - 앱은 ffmpeg를 저장소·배포 zip에 넣지 않는다. pip로 설치된 것을 별도 프로세스로 실행만 한다.
   - ffmpeg를 앱에 직접 묶는 방식으로 바꾸려면 먼저 보고한다.
-- 함께 배포하는 글꼴(Pretendard·Black Han Sans·Do Hyeon)은 OFL이고, 라이선스 파일을 `fonts/`에 함께 둔다. 글꼴을 추가할 때도 라이선스 파일을 같이 넣는다.
-- 처음 쓸 때 받는 모델도 라이선스를 확인한다. 얼굴·표정 모델(ONNX model zoo UltraFace·FER+)은 MIT다(`face.py` 머리말). <!-- TODO: 누끼 모델(rembg 릴리스 v0.0.0의 BiRefNet-general-bb_swin_v1_tiny·u2net_human_seg)과 Whisper 모델(Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo`)의 라이선스 확인·기록 -->
+- 함께 배포하는 글꼴(Pretendard·Black Han Sans·Do Hyeon·Jua·Dokdo)은 OFL이고, 라이선스 파일을 `fonts/`에 함께 둔다. 글꼴을 추가할 때도 라이선스 파일을 같이 넣는다. 재배포 조건이 문서로 분명하지 않은 글꼴(Gmarket Sans 등)은 넣지 않는다 (D-062).
+- 함께 배포하는 스티커(`stickers/`, Microsoft Fluent UI Emoji 3D PNG 38개)는 MIT다. 원문 `stickers/LICENSE`, 출처·커밋·바꾼 것은 `stickers/NOTICE.md`.
+- 처음 쓸 때 받는 모델도 라이선스를 확인한다. 얼굴·표정 모델(ONNX model zoo UltraFace·FER+)은 MIT다(`face.py` 머리말). 선수·공 찾기 YOLOX-nano 는 Apache-2.0 이다(`detect.py` 머리말, D-061). <!-- TODO: 누끼 모델(rembg 릴리스 v0.0.0의 BiRefNet-general-bb_swin_v1_tiny·u2net_human_seg)과 Whisper 모델(Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo`)의 라이선스 확인·기록 -->
 - 라이선스 불명 패키지는 사용하지 않는다.
 
 ## 5. 보안·정리
@@ -95,9 +96,10 @@
 | Whisper 모델 `large-v3-turbo` | Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo` (faster-whisper 기본 동작) | 받아쓰기 |
 | 누끼 모델 BiRefNet(약 220MB)·u2net_human_seg(약 170MB) | GitHub danielgatis/rembg 릴리스 → `~/.futsal-studio/models` | 썸네일 배경 지우기 |
 | 얼굴 UltraFace RFB-320·표정 FER+ (약 36MB) | ONNX model zoo 고정 커밋 → `~/.futsal-studio/models` | 썸네일 장면 고르기 표정 점수 |
-| PP-OCRv5 mobile 글자 찾기(4.8MB)·한국어 읽기(13.5MB)·글자 목록 (Apache-2.0, RapidOCR ONNX 변환본) | ModelScope RapidAI/RapidOCR `v3.9.2` 태그 (예비: Hugging Face monkt/paddleocr-onnx 고정 커밋, 주소별 크기·sha256) → `~/.futsal-studio/models` | 영상 기획 분석: 레퍼런스 화면 자막 읽기 (`avmodels.ocr`) |
+| 선수·공 찾기 YOLOX-nano (3,659,407 바이트, Apache-2.0) | GitHub Megvii-BaseDetection/YOLOX 릴리스 `0.1.1rc0` 고정 주소·sha256 → `~/.futsal-studio/models` (실패하면 `.detect-download-failed`, 10분 쉼) | 썸네일 장면 고르기 액션 점수·주인공·전술 그래픽 자리 (`detect.py`, D-061) |
+| PP-OCRv5 mobile 글자 찾기(4.8MB)·한국어 읽기(13.5MB)·글자 목록 (Apache-2.0, RapidOCR ONNX 변환본) | ModelScope RapidAI/RapidOCR `v3.9.2` 태그 (예비: Hugging Face monkt/paddleocr-onnx 고정 커밋, 주소별 크기·sha256) → `~/.futsal-studio/models` | 영상 기획 분석: 레퍼런스 화면 자막 읽기 (`avmodels.ocr`) · 썸네일 장면의 박힌 글자 감점·검수 글자 읽기(이미 받아 둔 경우에만, 썸네일 때문에 받지 않음) |
 | YAMNet (16MB, Apache-2.0 표시, tf2onnx 변환본) | Hugging Face zeropointnine/yamnet-onnx 고정 커밋 → `~/.futsal-studio/models` | 영상 기획 분석: 웃음·환호·음악·효과음 (`avmodels.tags`) |
-| Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021). 앱이 직접 받거나 묶지 않음 |
+| Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021) · 썸네일 문구 더 만들기·검수 평가 (D-060). 앱이 직접 받거나 묶지 않음 |
 | Pretendard 웹폰트 CSS (v1.3.9 고정) | jsDelivr CDN (`ui.html`만) | 메인 화면 글꼴. 편집실·썸네일은 로컬 `fonts/` |
 | cloudflared 2026.10.0 (Apache-2.0, Windows amd64 약 55MB / 386 약 38MB) | GitHub cloudflare/cloudflared 릴리스 고정 주소 · 크기·sha256 고정(`tunnel.CF_ASSETS`, 2026-10-07 공식 릴리스 노트와 맞춤) → `~/.futsal-studio/bin/cloudflared.exe` | 휴대폰으로 보기의 빠른 터널 (D-027). 원격 접속을 처음 켤 때만 받음 · 자동 업데이트 끔 · 6개월쯤마다 고정 판을 올린다(`KNOWN_ISSUES.md` I-037) |
 

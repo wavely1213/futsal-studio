@@ -676,14 +676,15 @@ class Names(Server):
         self.assertEqual(style.clean_style_name("슛포러브 스타일"), "슛포러브 스타일")
 
     def test_thumb_cut_checks_frame_name(self):
-        """누끼 요청의 장면 주소(src)에 든 이름도 보관함 안 파일 이름만 (I-021)."""
-        with mock.patch.object(thumb, "grab") as grab, mock.patch.object(thumb, "remove_bg") as rb:
+        """누끼 요청의 장면 주소(src)에 든 이름도 보관함 안 파일 이름만 (I-021) — AI 추천 썸네일과 합친 뒤(D-067)는 작업을 시작하기 전에 400."""
+        with mock.patch.object(thumb, "grab") as grab, mock.patch.object(thumb, "remove_bg") as rb, \
+                mock.patch.object(app, "start_job", wraps=app.start_job) as sj:
             code, r = self.call("/api/thumb/cut", {"src": "/frame?name=..%5C..%5Cother%5Cx.mp4&t=1", "kind": "hq"})
-            self.assertEqual(code, 200)
-            self.wait_job()
+            self.assertEqual((code, r["ok"]), (400, False))
+            self.assertIn("잘못된 그림 주소", r["error"])
+            sj.assert_not_called()
             grab.assert_not_called()
             rb.assert_not_called()
-            self.assertIn("잘못된 파일 이름", app.JOB["error"] or "")
 
     def test_style_delete_locked_answers(self):
         (style.STYLES / "a.json").write_text("{}", encoding="utf-8")

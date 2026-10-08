@@ -20,11 +20,11 @@
         ▼
 [app.py]  ThreadingHTTPServer 127.0.0.1:FUTSAL_PORT(8765)  +  pywebview 창 (실패 시 브라우저)
    ├─ GET  /  /editor  /thumb      → ui.html · editor.html · thumb.html
-   ├─ GET/POST /api/* · /media · /frame · /asset/* · /fonts/*  → Handler (Host·Origin·파일 이름 검사)
+   ├─ GET/POST /api/* · /media · /frame · /asset/* · /fonts/* · /stickers/*  → Handler (Host·Origin·파일 이름 검사)
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · thumb · face · style · plan · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
+[기능 모듈]  core · editor · thumb · face · detect · thumbcopy · style · plan · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy · YouTube 공개 RSS(채널 전략)
    ▼
@@ -57,7 +57,7 @@
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | 원격 경계 | `remote.py` (`RemoteHandler`·`Service`) | 터널로 들어온 요청만: Host 표시·수 제한·CORS·서명/표 확인·허용 동작 목록, 짝짓기·기기 열쇠(`remote.json`)·비콘·알림·자동 끄기·절전 막기. 기능은 app 이 넘긴 `Bridge` 와 기능 모듈 함수를 부르기만 한다 | `app` import. 로컬 `Handler`의 API 를 터널에 내주기. 허용 목록 밖 동작(지우기·설정·업데이트·켜기·임의 경로). 비밀(코드·열쇠·주제·터널 주소·표) 기록 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `detect` · `thumbcopy` · `style` · `plan` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`·`intake`·`trouble`·`studiolog`(모두 표준 라이브러리만 쓰는 도우미, D-019·D-035~D-037)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -70,7 +70,7 @@
   - `app`은 `updater`(업데이트 마무리·실행기 경유·공통 저장 도구)와 `winlink`(Windows 바로가기·작업 표시줄 아이디)를 직접 import한다. `face`는 `thumb`을 거쳐서만 쓴다.
   - `winlink` → (표준 라이브러리만: ctypes COM). `setup_check.py` 는 앱이 import 하지 않는 설치 확인 스크립트다 (`시작하기 (Windows).bat` 이 실행 · 오래된 Python 문법도 됨).
   - `editor`·`style`·`bundle`·`thumb`·`intake` → `updater` (공통 저장 도구 `write_atomic`·`replace_retry`, D-029). `claude_cli` 는 자식 묶음(`core.track`)만 함수 안에서 지연 import한다.
-  - `upload` → `editor`, `hooks`, `core`
+  - `upload` → `editor`, `hooks`, `core`. `thumb`(A/B 묶음 이름 `AB_SHEET`·`AB_TAGS` — 썸네일 확인에서 '모바일 비교'는 빼고 묶음에선 A 를 먼저)은 함수 안에서 지연 import한다(올리기 키트를 불러올 때 `thumb` 의 폴더 만들기가 돌지 않게 · D-067).
   - `youtube_upload` → `upload`(키트·`files_for`), `editor`(`safe_name`·`probe`), `core`, `updater`(`write_atomic`), `youtube_api`. `app`·`remote`(작업 이름 `JOB_NAME`·`JOB_FINISH` 를 `JOB_LABELS`·`STOPPABLE` 에 · D-048)가 쓴다.
   - `youtube_api` → `updater`(표준 라이브러리만 쓰는 실행기: 비밀 저장 `write_atomic(mode=0o600)` · HTTPS 인증서 설정 `_ssl_context` · D-048)뿐. 그 밖의 앱 모듈은 import 하지 않고, 불러올 때 아무것도 실행하지 않는다(DPAPI `ctypes.WinDLL`·Google opener 도 쓸 때만) — 실행기의 `import app` 확인이 안전하게. 새 두 파일은 `app.py` 의 import 줄과 같은 커밋으로 들어가야 한다(D-021 과 같은 주의).
   - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`
@@ -80,10 +80,11 @@
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
   - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠), `updater`(RSS 받기 `urlopen`). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
   - `forecast` → (표준 라이브러리 + numpy, numpy 는 함수 안에서). 파일·네트워크가 없는 계산만 한다. `strategy`만 쓴다.
-  - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.
-  - `face` → `core`, `thumb`
+  - `thumb` → `core`, `studiolog`(오류 위치), `updater`. `face`·`detect`·`avmodels`·`thumbcopy`·`trouble`·`editor`는 함수 안에서 지연 import한다.
+  - `face`·`detect` → `core`, `thumb`(모델 받기 `fetch_model`) · `detect` 는 `studiolog`·`updater`(실패 표시 `write_atomic`)도
+  - `thumbcopy` → `core`, `hooks`. `editor`·`claude_cli`·`updater`는 함수 안에서 지연 import한다. `app`이 `thumbcopy`를 직접 쓴다(문구·판정 작업). `remote` 는 작업 이름(`JOB_AI`·`JOB_JUDGE`·`thumb.JOB_ANALYZE`)만 쓴다.
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
-  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
+  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
   - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기·`write_atomic`·자기 확인 `urlopen`). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
@@ -100,8 +101,10 @@
 | updater | `updater.py` | `--launch`(업데이트 확인 → `run_app`), `install`(zip 검사 → staging → 버전·sha256 → 문법·selftest → 백업 → 교체 → 지울 파일 정리), `rollback`, `check`/`finish`(새 버전 import 확인·알림), `.update_skip` |
 | core | `core.py` | `list_videos`(조회수 순), `download`(받는 폴더·archive·진행 이름·출처 기록 함수를 바꿀 수 있음 · 학습용 영상이 씀), 이름 → 파일·분석 폴더(`video_file`·`adir`: 보관함 먼저, 없으면 학습용 영상 · `kept_sig`), `analyze`(whisper 한국어 → transcript.json·analysis.json·subtitles.srt·timeline.md), 엔진 관리(`update_engine`·`engine_autoupdate` 3일·`ensure_deno`), `check_update`·`update_app`(pip는 요구사항이 바뀔 때만). `render`(컷 목록 → mp4 + EDL)와 `/api/render`는 현재 화면에서 부르지 않는 예전 기능이다 |
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소) |
-| thumb | `thumb.py` | `frame_candidates`(선명도·밝기·인물 × 얼굴·표정, 하이라이트·핵심어 순간, 캐시 `candidates3.json`), `grab`, `remove_bg`(누끼 ONNX), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256 확인 후 제자리에 둠) |
+| thumb | `thumb.py` | `frame_candidates`(v6: 선명도·밝기 × 흔들림 × 얼굴·표정(상한 2.2) × 액션(선수·공) × 머리 잘림 × 장면 표시 `scene_flags`(벤치·관중·뒷모습·끝에 걸림·작음·레슨 액션), 박힌 글자 상자 `text_boxes`·감점, 같은 화면 dHash 3장·클로즈업 6장까지, 후보 16개 · 장면마다 `kind`·`persons`·`ball`·`main`·`flags`·`band`·`tboxes`·자동 보정 `grade`(뽑힌 장면만), 캐시 `candidates6.json`), `analyze`(클로드 문구(동시에) → 장면 → 클로드 장면 고르기 `run_ai_frames`(동시에) → 주인공 자동 누끼 4장(서로 다른 장면) → 문구, `cached_analysis`), `auto_grade`, `grab`, `remove_bg`·`cut_auto`(누끼 ONNX → `clean_mask` 다듬기 → `cut_quality` 품질, 옆 JSON), `read_text`(검수 OCR), 브랜드 키트 `load_brand`·`save_brand`(`thumbnails/brand.json`), `export_ab`(A/B 묶음 + 모바일 비교), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256 확인 후 제자리에 둠) |
 | face | `face.py` | UltraFace 얼굴 + FER+ 표정 점수. `ensure()`가 처음에 모델을 받고, 실패하면 10분 동안 다시 시도하지 않고 조용히 False를 돌려줌 |
+| detect | `detect.py` | YOLOX-nano(D-061)로 사람·공 찾기 `people(rgb)` → {persons[[x,y,w,h,확률]], ball}. `ensure`·`ready`(face 와 같은 실패 규칙), 레터박스·격자 해석·NMS |
+| thumbcopy | `thumbcopy.py` | 썸네일 제목 문구: 주제어(`topics`)·규칙 틀(`rule_candidates` — 무조건 봐·비밀·못하는 진짜 이유·수비를 속이는 X·반전 O/X·대사 핵심 문장 …)·점수(주제가 작은 줄이면 감점)·다양하게 고르기(`suggest`), 사용자 클로드로 더 만들기(`run_ai` → `analysis/<stem>/thumb_copy.json`, 분석 때 자동 · `ai_state`: 로그인 확인됨이면 ready, 확인이 늦으면(unknown) maybe — 한 번 시도하되 20초만 기다림 · 실패는 1시간 기억), 검수 창 평가(`judge`) |
 | style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), `edit_params`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
 | plan | `plan.py` | 영상 기획 분석 (D-021). `extract_plan`(1초 한 장 640px 지문·복잡도·잔디·화면 글자 OCR(상한 400장)·소리 종류·화자 수 → `plan_events.json`), `detect`(티저·타이틀·정지·리플레이·삽입·흔들기·몽타주·웃음·효과음·펀치라인 줌·자막 사건 6종), `judge`(인트로·장르·형식·자막·재미 판단 문장 + 확신 + 근거 1~2개 · 채널 공식 한 문장 `headline`), `merge_plans`(길이×확신 투표 · 갈리면 `mixed` 표시), `plan_params`(절반 넘게 같은 판단일 때만 가편집 값), `claude_prompt`·`parse_ai`·`run_ai`(Claude 판단 저장) |
 | avmodels | `avmodels.py` | 기획 분석 모델: PP-OCRv5 글자 찾기·한국어 읽기, YAMNet 소리 종류. `ensure`(처음에 받기 · ✕ 로 멈춤, 실패하면 10분 쉬고 조용히 False · 불러오지 못한 파일은 지워 다시 받게), `usable`(기획 기록 재사용 판단), `ocr`, `tags` |
@@ -125,7 +128,7 @@
 | studiolog | `studiolog.py` | 오류 기록 하나로 (D-037 · D-044): `write`(studio.log · 연도 붙은 시각 · 2MB 넘으면 studio.old.log · 비밀은 `remote.redact`), `where`·`trace`(오류 위치 한 줄 → studio.log · traceback 전체 → 오류 출력 = pythonw 면 `app._error_log` 의 studio-error.log · 같은 오류는 한 번만), `install_hooks`(스레드·메인의 잡히지 않은 오류 · 파이썬 기본 출력 대신), `session_start`·`job`·`session_end`(실행 표시 `studio.running.json` → 갑자기 꺼짐) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013) |
 | 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://mulgyeol.kr/futsal` 정적 PWA. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
-| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 8단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기·채널 전략 · 5·7단계에 '전략에서 만든 할 일' 상자), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*`, 템플릿 `TPL.long` 7종·`TPL.short` 5종) |
+| 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 8단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기·채널 전략 · 5·7단계에 '전략에서 만든 할 일' 상자), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*` · 원본 `thumb_src/parts/p1~p9` — p1 렌더러(자동 보정·전술 도형·맞춤 상자), p8 'AI 추천 썸네일'(레퍼런스형 템플릿 `T_NEW` 롱폼 11·쇼츠 8 + 예전 `TPL.long` 7·`TPL.short` 5(새 템플릿이 모자랄 때만), 배경 놓기 `frameLayer`(머리 지키기·박힌 글자 피하기)·`topLayouts`·`framesBelow`, 점수 `scoreDoc`(머리 잘림·가림 게이트, 장면 품질 `frameQ`), 고르기 `recommend`, 개발용 `window.__thumbAuto`), p9 전술 그래픽 메뉴·점 핸들·스티커·브랜드 키트·검수(모바일 미리보기·OCR·클로드 평가)·A/B 묶음) |
 
 ## 5. 데이터 모델 요약
 
@@ -134,14 +137,14 @@
 - 영상 1 : 1 분석 폴더 `analysis/<stem>/`
   - `transcript.json` [{start, end, text, words[{w, s, e, p}]}] (예전 받아쓰기는 `words` 없음), `analysis.json` {silences, loud_peaks}
   - `subtitles.srt`, `transcript_timeline.md`, `waveform_50.json`, `thumbs2.jpg/json`
-  - `frames/`(장면 캡처, `candidates3.json`), 묶음 영상이면 `bundle.json`, 편집점을 찾기 시작할 때의 영상 크기 `file_sig.json` {size} (예전 분석에는 없음 · D-035)
+  - `frames/`(장면 캡처, `candidates6.json`), `thumb_copy.json`(클로드 문구, 받아쓰기·제목 지문), `thumb_frames_ai.json`(클로드 장면 점수, 후보 장면 시각 지문), 묶음 영상이면 `bundle.json`, 편집점을 찾기 시작할 때의 영상 크기 `file_sig.json` {size} (예전 분석에는 없음 · D-035)
 - 영상 1 : 1 편집 프로젝트 `projects/<stem>.json` = {source, info, captions[{id, start, end, text, words?}], sequences[], active, media[], v: 2, rev}
   - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
   - 백업: `projects/backup/<stem>__YYYYMMDD_HHMMSS[_태그].json`. 자동 백업은 5분마다 최근 10개, 태그 백업(재분석전·덮어쓰기전·변환전)은 따로 10개
-- 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·올린 그림)
+- 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·자동 누끼 `cut_auto_<키>.png` + 품질 `.json`·올린 그림). 브랜드 키트 하나 `thumbnails/brand.json` {logo, logoPos, colors{hl, hl2, accent, neon, box}, font, series, seriesOn, handle(예전 값 · 화면에서 안 씀), apply, aiCopy(분석 때 클로드 문구·장면 고르기)}
 - 스타일 N : M 레퍼런스 영상: `styles/<이름>.json` = 합친 프로필(cutsPerMin·avgShot·medianShot·zoomCutsPerMin·avgZoom·pauseP75·captionRatio/Pos/Color·lufs·charsPerSec) + `refs[]`(영상별 프로필) + `plan`(영상 기획 분석: intro·genre·format·captions·fun·summary·apply·agree, Claude 판단 `ai`) · `refs[i].plan`(영상마다). `plan`이 없는 예전 파일도 그대로 읽는다
   - 영상마다 `analysis/<stem>/style_events.json`(구조, D-015)과 `plan_events.json`(기획 신호: 판 `v`·파일 `sig`·그때의 모델 상태·지문·OCR 줄·소리 점수·화자 수)을 따로 둔다
-- 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`, 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
+- 결과물 `out/`: `<stem>_<편집본>.mp4/.srt/_premiere.xml`(같은 이름이 있으면 ` (2)`…), 썸네일 `<stem>_<라벨>_<n>.jpg/png`·A/B 묶음 `<stem>_썸네일_A.jpg`…`_모바일 비교.jpg`(같은 이름이 있으면 ` (2)` · 비교 한 장은 올리기 키트 썸네일 확인에서 뺌), 올리기 키트 `<…>_올리기.txt/.json`, 렌더 임시 폴더 `.render_*`(켤 때 정리)
 - 유튜브 바로 올리기 (D-046): 작업 폴더 `youtube/` = `settings.json` {v, madeForKids(null = 아직 안 고름), notify, thumbnail, captions, playlistId, playlistTitle, audited, consentMode, channelOk, preauditAck} (공개 설정은 기억하지 않음 · D-047) · `uploads/<sha1(이름\n편집본)[:16]>.json`(올리던 세션: key, name, seq, file, where(out·videos), size, mtime, quick(크기+앞뒤 1MiB sha1), mime, meta{title, description, tags, categoryId, privacy, publishAt, madeForKids, notify, shorts}, want{thumbnail{file}, captions{file, where}, playlist{id, title}}, channel{id, title}, uri(true = 시작함 · 주소는 사용자 폴더 `sessions/<열쇠>.bin` {v, sid, uri}), sid(짝 번호), createdAt, offset(Google 이 받았다고 한 바이트), state(starting·uploading·paused·failed), error, kind · 끝나면 둘 다 지움) · `history.json` {v, items[≤500]: {at, name, seq, file, title, videoId, privacy, publishAt, shorts, madeForKids, channel, url, studio, quick, size, want, steps{thumbnail·captions·playlist: {state(ok·skip·todo·needs_verify·quota·error), msg}}, locked, preAudit(감사 전에 올림 → 공개 불가), processing, problem(거절·처리 실패 안내), checkedAt, status{uploadStatus, privacyStatus, publishAt, rejectionReason, failureReason, processingStatus}}} · `quota.json` {v, day(태평양 시각 날짜), uploads, units, exhausted{uploads, units}}. 깨진 파일은 쓰기 전에 `.bad` 로 옮김(읽기·GET 은 아무것도 바꾸지 않음). 사용자 폴더 `~/.futsal-studio/youtube/client.bin`(클라이언트 ID·보안 비밀번호·프로젝트) · `token.bin`(refresh·access 토큰·만료·범위·연결 시각·채널 · 끊기면 열쇠를 빼고 relogin 표시) — 머리 `FSY1D`(DPAPI)/`FSY1P`(권한 600)
 - 학습용 영상(스타일 배우기 전용, D-022) `refs/<채널 폴더>/<영상>` · 분석 기록 `refs/<채널 폴더>/_analysis/<stem>/`(style_events·plan_events·옮겨 온 받아쓰기) · 받는 중 `refs/_받는 중/`. 기록 `refs/refs.json` = {channels{채널 열쇠: {name, names, handles, url, color, folder}}, files{파일 이름: {channelKey, folder, videoId, title, how(download·move·found), kind, saved, pruned, sig, original·origin(확인하고 옮긴 원본 · 자동으로 지우지 않음)}}, ids{}, ui{bannerDismissed}}. 채널 열쇠·색 규칙은 `sources.json`과 같다. 같은 이름이 보관함에도 있으면 보관함이 먼저다(`core.video_file`·`adir`). 보관함에 파일이 없으면 옛 `analysis/<stem>`이 남아 있어도 학습용 기록이 먼저다. channels 의 `original`: '풋살사관학교'·'내 촬영본' 칸(원본)
 - 보관함 출처 기록 `videos/sources.json` = {files{파일 이름: 기록}, ids{영상 id: 기록}, channels{채널 열쇠: {name, names, handles, url, color}}, own{ids, handles}(배운 우리 채널), lookup{영상 id: 조회 실패 시각·이유}}. 기록 = 채널 정보(channel·channelId·channelUrl·uploaderId·uploaderUrl)·kind·how(download·lookup·listing·cache·local·bundle)·manual·channelKey·manualChannel. 깨지면 `sources.json.bad`로 남기고 빈 기록으로 계속 (D-020)
@@ -178,7 +181,7 @@
   - 파일을 내줄 때는 `resolve()` 후 허용 폴더 안인지 확인한다.
   - 서버는 `127.0.0.1`에만 bind한다. Windows 에서는 SO_REUSEADDR 를 끈다(`app._Server`·원격 리스너 `remote.RemoteServer` · 켜 두면 두 번째 실행이 같은 포트를 같이 잡음). 8765 를 못 쓰면(다른 프로그램·예약 포트) 8766~8799 중 하나로 켜고 작업 폴더 `.port` 에 남긴다. 두 번째 실행·실행기는 `GET /api/ping` 으로 그 포트가 이 앱인지 확인한 뒤에만 `/api/focus` 를 보낸다(D-030). 원격 리스너는 이 포트 창(`remote.app_ports`: 8765~8804 · `FUTSAL_PORT` 면 그 포트 하나)을 쓰지 않고, `/api/ping` 에는 403 이라 '이 앱'으로 잡히지 않는다(D-034).
 - **동시성**:
-  - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`는 캐시가 있으면 바로 응답한다.
+  - 긴 작업은 `JOB` 하나다. 겹치면 409와 함께 "다른 작업이 끝난 뒤에 다시 눌러 주세요"를 돌려준다. 단 `/api/thumb/frames`·`/api/thumb/analyze`는 캐시가 있으면 바로 응답한다 (분석이 없으면 작업 '썸네일 분석', 클로드 문구·평가도 작업 하나 · 셋 다 `jobId` 응답 · 휴대폰에는 진행·알림 이름만, 시작은 PC 에서만).
   - 휴대폰에서 시킨 작업도 같은 `start_job`(`by`='휴대폰 · <기기>')이라 PC 작업과 겹치지 않는다. 작업이 끝나면 `app.JOB_HOOKS`(지금은 `remote.Service.job_hook`: 휴대폰 알림·검수 결과 기억)를 부르고, 훅이 실패해도 작업 결과는 그대로다.
   - `start_job` 은 작업 번호를 돌려주고, 작업 시작 응답에 `jobId` 가 있다. 끝난 작업의 결과는 `app.DONE`(최근 20개)에 남고 `/api/state?job=<번호>` 의 `done` 으로 받는다. PC 화면(`ui.html`·`editor.html`·`thumb.html`)은 '작업이 비었을 때의 결과'가 아니라 **자기가 시킨 번호의 결과**만 쓴다(휴대폰이 바로 다음 작업을 시켜도 안 섞임). `/api/state` 의 `job_id`·`job_by` 로 지금 작업이 휴대폰에서 시킨 것인지 안다.
   - 휴대폰이 시킨 작업은 `core.no_self_update()` 안에서 돈다(이 스레드에서는 다운로드 엔진 pip·Deno 설치를 안 함).
