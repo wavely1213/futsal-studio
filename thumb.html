@@ -189,6 +189,10 @@
   /* AI 추천 썸네일 */
   .aibox h4 { flex-wrap: wrap; }
   .aigo { font-size: 14px; padding: 8px 14px; background: linear-gradient(90deg, #2d8ceb, #8a4dff); border: 0; }
+  .tsrow { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; } .tsrow .s { flex: 1; }
+  .tsw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid #888; vertical-align: -1px; margin-left: 3px; }
+  .abwin { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: var(--panel-2); }
+  .abwin .hint { flex: 1 1 100%; }
   .aicards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
   .aicards.short { grid-template-columns: 1fr 1fr 1fr; }
   .aicard { border-radius: 6px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line-2); }
@@ -2453,7 +2457,8 @@ function makeCands() {
   const a = $("aL1").value.trim() || "제목", b = $("aL2").value.trim(), fr = FRAMES.map(f => f.t), sets = [fr, [...fr.slice(2), ...fr.slice(0, 2)]];
   const f = FMT[AUTO_FMT]; CANDS = [];
   // 칸마다 얼굴·머리에 맞춰 자름 (anchorTpl · 판정 5회차 D-092: 가운데 자르기로 머리 없는 칸 34%)
-  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]) } });
+  const br = brandOf();  // 썸네일 스타일을 골랐으면 예전 템플릿의 노랑·흰 글자·배경 밝기도 그 버릇으로 (styleLayers · D-130)
+  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: styleLayers(anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]), br, true) } });
   const cw = AUTO_FMT === "short" ? 180 : 320, ch = AUTO_FMT === "short" ? 320 : 180;
   $("cands").innerHTML = CANDS.map((c, i) => `<div class="cand" data-c="${i}"><canvas width="${cw}" height="${ch}"></canvas><div>${c.name}</div></div>`).join("");
   drawCands();
@@ -2684,7 +2689,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
     await new Promise(r2 => setTimeout(r2, 3000));
   }
   renderStrip(); makeCands();
-  loadBrand(); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
+  Promise.all([loadBrand(), loadThumbStyle()]).then(() => { renderTS(); if (TS.view && TS.view.active && FRAMES.length) makeCands(); }); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
   const d0 = DOCS.designs[0];
   if (d0 && !d0.doc.layers.length && FRAMES.length) {
     if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; refreshUI(); }
@@ -2699,7 +2704,20 @@ const BRAND_DEF = { logo: "", logoPos: "tr", colors: { hl: "#FFE14D", hl2: "#FFF
 const AI = { frames: [], cuts: {}, copy: [], topics: [], brand: null, seed: 0, results: [], busy: false, pick: null, ab: new Set(), copySel: null, loaded: false, ai: false, cutFail: "" };
 const TEXTY = 0.05;  // 장면에 박힌 큰 글자 넓이가 이만큼 넘으면 글자를 피해 자르거나 배경을 흐림 (thumb.text_boxes)
 const SAFE = { long: { x0: 0.035, y0: 0.04, x1: 0.965, y1: 0.95, dur: [0.84, 0.86] }, short: { x0: 0.06, y0: 0.07, x1: 0.84, y1: 0.76, x1Top: 0.94, top: 0.42 } };  // 쇼츠: 버튼은 0.42H 아래만 → 위쪽은 0.94W 까지
-const brandOf = () => (AI.brand && AI.brand.apply !== false ? AI.brand : BRAND_DEF);
+// 썸네일 스타일 (스타일 카드의 '썸네일 버릇' → thumbstyle.params · D-130): 강조색 2개·글자 크기·위치·테두리·배경 밝기·누끼·얼굴 크기
+// 브랜드 키트에서 사용자가 직접 바꾼 색(AI.brandCustom)이 늘 먼저 · 'apply' 를 끄면 기본 색 + 스타일
+const TS = { view: null, sets: [] };  // /api/thumb/style 결과 {styles, pick, active, ours} · 이 영상의 A/B 묶음
+const activeStyle = () => (TS.view && TS.view.active ? TS.view.active.params : null);
+// 스타일 색은 역할로 (D-130 검토 · thumbstyle.params): hl = 강조색(강조 낱말·'line' 큰 줄) · hl2 = 바탕 글자색 — 바탕·강조를 뒤바꾸지 않음 (강조 낱말은 늘 hl)
+// big: 'line' 제목 큰 줄을 어느 역할 색으로 ('hl2' = 흰 큰 글자 채널 · 작은 줄이 강조색) · stack: 같은 크기 두 줄에서 먼저 읽히는 줄의 역할 (lcs: 위 흰 · 아래 노랑)
+function styleBrand(base, sp, custom) {  // 브랜드 + 스타일 값 → 이번 추천에 쓸 브랜드 (_st: 템플릿 손잡이 · 스타일이 없으면 브랜드 그대로)
+  if (!sp) return base;
+  const cu = custom || [], own = ["hl", "hl2"].filter(k => sp[k] && !cu.includes(k));
+  const out = Object.assign({}, base, { colors: Object.assign({}, base.colors), _st: Object.assign({}, sp) });
+  for (const k of own) out.colors[k] = sp[k];
+  return out;
+}
+const brandOf = () => { const b = AI.brand && AI.brand.apply !== false ? AI.brand : BRAND_DEF; return styleBrand(b, activeStyle(), b === AI.brand ? AI.brandCustom : []); };
 const mix = (a, b, t) => "#" + [1, 3, 5].map(i => Math.round(parseInt(toHex(a).slice(i, i + 2), 16) * (1 - t) + parseInt(toHex(b).slice(i, i + 2), 16) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
 
 /* ----- 장면 좌표 ↔ 캔버스 좌표 (drawImageContent 와 같은 계산) ----- */
@@ -2908,8 +2926,12 @@ const THIN_SW = 0.09;
 const thinFont = f => THIN_FONTS.has(f);
 function swOf(font, o = {}) { return thinFont(font) ? Math.min(o.sw ?? 0.2, THIN_SW) : (o.sw ?? 0.2); }
 function softShadow(size) { return { on: true, color: "#000000", blur: Math.round(size * 0.16), dx: 0, dy: Math.round(size * 0.04), opacity: 0.75 }; }
+function swFor(ctx, font, o = {}) {  // 바깥 획: 템플릿이 따로 정하지 않았으면 스타일의 테두리 버릇(thumbstyle.SW_OF_TIER) · 없으면 글꼴 기본
+  const s = ctx.brand && ctx.brand._st && ctx.brand._st.sw;
+  return o.sw == null && s != null ? s : swOf(font, o);
+}
 function tStyle(ctx, size, o = {}) {
-  const font = o.font || ctx.brand.font, sw = Math.round(size * swOf(font, o));
+  const font = o.font || ctx.brand.font, sw = Math.round(size * swFor(ctx, font, o));
   return Object.assign({ font, size, fill: o.fill || ctx.brand.colors.hl2, fill2: o.fill2 || "", gradAngle: 90, align: o.align || "center", lh: 1.04,
     strokes: [{ color: o.stroke || "#111111", width: sw }, { color: o.inner || "#FFFFFF", width: o.innerW ? Math.round(size * o.innerW) : 0 }],
     shadow: o.noShadow ? { on: false } : thinFont(font) ? softShadow(size) : { on: true, color: "#000000", blur: 0, dx: Math.round(size * 0.05), dy: Math.round(size * 0.065), opacity: 1 } }, o.extra || {});
@@ -2940,7 +2962,7 @@ function lineLayer(ctx, text, size, o = {}) {  // 한 줄 글자 + 강조 낱말
   const runs = [];
   if (o.emph && o.emph[1] > o.emph[0]) {
     const run = { s: o.emph[0], e: o.emph[1], fill: o.emphFill || ctx.brand.colors.hl };
-    if (o.emphScale && o.emphScale !== 1) { run.size = Math.round(size * o.emphScale); run.s1w = Math.round(run.size * swOf(font, o)); }
+    if (o.emphScale && o.emphScale !== 1) { run.size = Math.round(size * o.emphScale); run.s1w = Math.round(run.size * swFor(ctx, font, o)); }
     runs.push(run);
   }
   l.runs = runs.concat(digitRuns(text, l.font), oxRuns(text.replace(/◯/g, "O")));
@@ -2975,15 +2997,24 @@ function headline(ctx, box, o = {}) {
   const c = ctx.copy, b = ctx.brand.colors, bigI = c.l2 ? (c.emph ? c.emph[0] : 1) : 0, smallI = 1 - bigI;
   const bigT = bigI ? c.l2 : c.l1, smallT = c.l2 ? (smallI ? c.l2 : c.l1) : "";
   const align = o.align || "center", ratio = o.ratioFixed ? o.ratio : lineRatio(c, o.kicker), style = o.style || "line";
+  const st = ctx.brand._st || {}, ts = st.textScale || 1;  // 스타일의 글자 크기 버릇: 작게 쓰는 채널은 늘 작게 · 크게 쓰는 채널은 자리가 있을 때만 크게
   let size = o.size || Math.round(ctx.H * 0.2);
   const em = emphOf(c, bigI);
+  // 색 역할 (D-130 검토): 큰 줄 = st.big 역할 색('line' 제목만 · 기본 hl) · 작은 줄 = 다른 역할 · 'word' 제목은 바탕 hl2 + 강조 낱말 hl
+  // (큰 줄 전체를 강조색으로 쓰는 채널(쌈바 'ALA 움직임')은 'word' 제목도 큰 줄 바탕을 hl — 강조 낱말은 그대로 hl · 크기로 강조)
+  // 같은 크기 두 줄(비율 ≥0.75)이고 stack 버릇이 있으면 먼저 읽히는 줄 = st.stack 역할 · 둘째 줄 = 다른 역할 (lcs: 위 흰 · 아래 노랑)
+  const other = r => (r === "hl" ? "hl2" : "hl");
+  let bigR = style === "line" ? (st.big || "hl") : (st.big === "hl" ? "hl" : "hl2"), smallR = style === "line" ? other(st.big || "hl") : "hl2";
+  if (st.stack && smallT && ratio >= 0.75) { const first = st.stack; if (bigI === 0) { bigR = first; smallR = other(first); } else { smallR = first; bigR = other(first); } }
+  const bigFill = o.bigFill || b[bigR];
   const bigO = style === "line"
-    ? { fill: o.bigFill || b.hl, fill2: o.grad === false ? "" : mix(o.bigFill || b.hl, "#FF8A00", 0.42), emph: o.emphAccent && em ? em : null, emphFill: b.accent, emphScale: 1 }
-    : { fill: b.hl2, emph: em, emphFill: o.emphFill || b.hl, emphScale: o.emphScale || 1.18 };
+    ? { fill: bigFill, fill2: o.grad === false || grayish(bigFill) ? "" : mix(bigFill, "#FF8A00", 0.42), emph: o.emphAccent && em ? em : null, emphFill: b.accent, emphScale: 1 }
+    : { fill: b[bigR], emph: em, emphFill: o.emphFill || b.hl, emphScale: o.emphScale || 1.18 };
+  const smallFill = o.smallFill || b[smallR];
   const subT = o.sub ? (c.sub || "") : "";
   const make = k => {
     const big = lineLayer(ctx, bigT, Math.round(size * k), Object.assign({ align, name: "제목 큰 줄", rot: o.rot, skew: o.skew, sw: o.sw, font: o.font }, bigO));
-    const small = smallT ? lineLayer(ctx, smallT, Math.round(size * ratio * k), { align, name: "제목 작은 줄", fill: o.smallFill || b.hl2, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font,
+    const small = smallT ? lineLayer(ctx, smallT, Math.round(size * ratio * k), { align, name: "제목 작은 줄", fill: smallFill, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font,
       emph: style === "word" ? emphOf(c, smallI) : null, emphFill: b.hl }) : null;
     const sub = subT ? subBox(ctx, subT, Math.round(size * (o.subRatio || 0.36) * k), { align }) : null;
     return { big, small, sub };
@@ -2991,12 +3022,14 @@ function headline(ctx, box, o = {}) {
   let t = make(1);
   const wOf = l => (l ? l.w : 0), gap = () => -Math.round(size * 0.03), subGap = () => Math.round(size * 0.12);
   const totalH = () => t.big.h + (t.small ? t.small.h + gap() : 0) + (t.sub ? t.sub.h + subGap() : 0);
-  const fitK = Math.min(box.w / Math.max(wOf(t.big), wOf(t.small), wOf(t.sub)), box.h / totalH()), k = Math.min(o.grow || 1, fitK);
+  const fitK = Math.min(box.w / Math.max(wOf(t.big), wOf(t.small), wOf(t.sub)), box.h / totalH()), k0 = Math.min((o.grow || 1) * Math.max(1, ts), fitK);
+  // 작게 쓰는 버릇도 '큰 줄이 작음' 게이트(BIG_MIN · 휴대폰 목록에서 읽히는 하한) 밑으로는 줄이지 않음 — 그 밑이면 후보가 모두 빠지고 예전 템플릿만 남음
+  const k = ts < 1 ? Math.max(k0 * ts, Math.min(k0, BIG_MIN[ctx.short ? "short" : "long"] * ctx.H * 1.03 / size)) : k0;
   if (Math.abs(k - 1) > 0.001) { size = Math.round(size * k); t = make(1); }
   for (let i = 0; i < 3 && Math.max(wOf(t.big), wOf(t.small), wOf(t.sub)) > box.w + 1; i++) { size = Math.round(size * 0.97); t = make(1); }  // 반올림으로 넘치면 조금 줄임
   // 휴대폰 목록 크기(롱폼 168px · 쇼츠 110px)에서 작은 줄·보조 문구도 8px 넘게: 모자라면 그 줄만 키움 (상자보다 넓어지면 점수 게이트가 거름)
   const minPx = Math.ceil(8.4 * ctx.W / (ctx.short ? 110 : 168));
-  if (t.small && t.small.size < minPx) t.small = lineLayer(ctx, smallT, minPx, { align, name: "제목 작은 줄", fill: o.smallFill || b.hl2, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font, emph: style === "word" ? emphOf(c, smallI) : null, emphFill: b.hl });
+  if (t.small && t.small.size < minPx) t.small = lineLayer(ctx, smallT, minPx, { align, name: "제목 작은 줄", fill: smallFill, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font, emph: style === "word" ? emphOf(c, smallI) : null, emphFill: b.hl });
   if (t.sub && t.sub.size < minPx) t.sub = subBox(ctx, subT, minPx, { align });
   const order = (bigI === 0 ? [t.big, t.small] : [t.small, t.big]).concat(t.sub ? [t.sub] : []);  // 읽는 순서는 늘 첫째 줄 → 둘째 줄 (크기만 다름) → 보조 문구
   const ax = align === "center" ? 0.5 : align === "right" ? 1 : 0, X = box.x + box.w * ax;
@@ -3010,6 +3043,7 @@ function headline(ctx, box, o = {}) {
   const layers = order.filter(Boolean);
   return { layers, box: bbox(layers), big: t.big, small: t.small, sub: t.sub };
 }
+const grayish = hex => { const v = [1, 3, 5].map(i => parseInt(toHex(hex).slice(i, i + 2), 16)); return Math.max(...v) - Math.min(...v) < 40; };  // 흰색·회색 강조는 주황 그라데이션을 넣지 않음
 // 상자 제목 (자막형): 큰 줄은 강조색 상자에 검은 글자, 작은 줄은 어두운 상자에 흰 글자 · 왼쪽 아래부터 쌓음 → {layers, box, big}
 function boxHead(ctx, x, yBottom, maxW, o = {}) {
   const c = ctx.copy, b = ctx.brand.colors, two = !!c.l2, bigI = two ? (c.emph ? c.emph[0] : 1) : 0;
@@ -3019,8 +3053,9 @@ function boxHead(ctx, x, yBottom, maxW, o = {}) {
     l.runs = digitRuns(t, l.font);
     fitText(l); fitW(l, maxW); return l;
   };
-  const big = mk(two ? (bigI ? c.l2 : c.l1) : c.l1, o.size || ctx.H * 0.19, "#111111", b.hl, "제목 큰 줄");
-  const small = two ? mk(bigI ? c.l1 : c.l2, (o.size || ctx.H * 0.19) * (o.ratio || 0.58), "#FFFFFF", b.box, "제목 작은 줄") : null;
+  const sz0 = o.size || ctx.H * 0.19, sz = Math.max(sz0 * Math.min(1, (ctx.brand._st && ctx.brand._st.textScale) || 1), Math.min(sz0, BIG_MIN[ctx.short ? "short" : "long"] * ctx.H * 1.03));  // 작게 써도 게이트 밑으로는 안 줄임
+  const big = mk(two ? (bigI ? c.l2 : c.l1) : c.l1, sz, "#111111", b.hl, "제목 큰 줄");
+  const small = two ? mk(bigI ? c.l1 : c.l2, sz * (o.ratio || 0.58), "#FFFFFF", b.box, "제목 작은 줄") : null;
   const gap = Math.round(ctx.H * 0.03), order = !small ? [big] : bigI ? [small, big] : [big, small];
   let y = yBottom - order.reduce((a, l) => a + l.h, 0) - gap * (order.length - 1);
   for (const l of order) { l.x = x; l.y = y; y += l.h + gap; if (o.rot) l.rot = o.rot; }
@@ -3813,7 +3848,23 @@ function fits(t, ctx) {
 // 판정 q5 2회차(D-115): 짝 판정 — 채널 엠블럼을 뺀 쪽을 프로로 20%(112짝 · 롱폼 15%) · 롱폼 배경 비네팅 45 를 더한 쪽 61%(102짝, 쇼츠는 51%로 차이 없음)
 // → 엠블럼이 없는 템플릿(쇼츠 대부분·질문 훅 등)에도 글자를 피해 넣고, 롱폼 배경은 가장자리를 조금 어둡게
 const VIGNETTE_LONG = 40;
+// 스타일의 배경 버릇(밝기·채도 배율 · 쌈바형은 어둡게, 밝은 채널은 밝게) · 예전 템플릿은 고정 노랑·흰 글자를 스타일 강조색으로
+function styleLayers(layers, b, legacy) {
+  const sp = b && b._st; if (!sp) return layers;
+  for (const l of layers) {
+    if (l.type === "image" && l.name !== "누끼" && /배경|장면/.test(l.name || "")) {
+      if (sp.bgBright) l.bright = clamp(Math.round((l.bright ?? 100) * sp.bgBright), 25, 130);
+      if (sp.bgSat) l.sat = clamp(Math.round((l.sat ?? 100) * sp.bgSat), 40, 150);
+    }
+    if (legacy && l.type === "text") {
+      const f = toHex(l.fill || "").toUpperCase(), to = f === "#FFE14D" ? b.colors.hl : f === "#FFFFFF" ? b.colors.hl2 : null;
+      if (to && !(l.box && l.box.on && toHex(l.box.color || "").toUpperCase() === toHex(to).toUpperCase())) l.fill = to;  // 상자 색과 같아지면 그대로
+    }
+  }
+  return layers;
+}
 function finishDoc(ctx, t, layers) {
+  styleLayers(layers, ctx.brand, !!t.legacy);
   if (t.legacy || !layers.length) return;
   const bg = layers.find(l => l.type === "image" && l.name === "배경");
   if (bg && !ctx.short && bg.x <= 1 && bg.y <= 1 && bg.x + bg.w >= ctx.W - 1 && bg.y + bg.h >= ctx.H - 1) bg.vignette = Math.max(bg.vignette || 0, VIGNETTE_LONG);
@@ -4278,6 +4329,32 @@ function weakScenes() {
   if (AI.frames.every(f => (f.text || 0) >= TEXTY) && !AI.frames.some(f => (f.ai ?? 0) >= 5)) return true;
   return Math.max(...AI.frames.map(f => frameQ(f, maxS))) < 0.35;
 }
+// 스타일 버릇 가산점 (D-130): 제목 위치(롱폼만 · 레퍼런스 썸네일이 16:9 라서) · 누끼 · 큰 줄 수 · 얼굴 크기 · 글자 높이(롱폼만 · D-132) — 템플릿 가산점(prior)과 같은 단위(점)
+// 글자 크기(D-132): 템플릿은 이미 제목 자리 폭을 채우므로 배율(textScale)만으로는 크게 쓰는 채널이 거의 커지지 않음(같은 장면·문구·틀 72개 모두 1.00배)
+// → 큰 줄 글자 높이가 버릇(textH · 화면 높이 대비)에 가까운 후보(짧은 문구·한 줄 틀)에 가산점 · 롱폼만 (레퍼런스가 16:9)
+const ST_W = { pos: 15, cut: 8, lines: 3, face: 6, size: 6 };
+const GLYPH_H = 0.85;  // 글자 크기(px) → 재기(thumbstyle.measure)의 글자 높이 (프리텐다드 블랙 한글 + 바깥 획 · 우리 결과물 실측)
+function styleBonus(doc, ctx) {
+  const sp = ctx.brand && ctx.brand._st; if (!sp) return 0;
+  const hs = doc.layers.filter(l => !l.hidden && l.type === "text" && /^제목/.test(l.name || "")), H = doc.h;
+  let b = 0;
+  if (sp.posW && hs.length && !ctx.short) { const bb = bbox(hs), cy = (bb.y + bb.h / 2) / H; b += ST_W.pos * ((sp.posW[cy < 0.42 ? "top" : cy > 0.58 ? "bottom" : "middle"] || 0) - 1 / 3); }
+  if (sp.cut != null && doc.layers.some(l => l.name === "누끼" && !l.hidden)) b += ST_W.cut * (sp.cut - 0.3);
+  if (sp.textH && hs.length && !ctx.short) {
+    const px = Math.max(...hs.flatMap(l => [l.size || 0, ...(l.runs || []).map(u => u.size || 0)])), gh = px * GLYPH_H / H;
+    if (gh > 0) b += ST_W.size * (0.5 - Math.min(1, Math.abs(Math.log(gh / sp.textH)) * 2.5));
+  }
+  if (sp.lines && hs.length) { const mx = Math.max(...hs.map(l => l.size || 0)), big = hs.filter(l => (l.size || 0) >= 0.6 * mx).length; b += big === sp.lines ? ST_W.lines : -ST_W.lines / 2; }
+  const fc = mainFace(ctx.frame), bg = doc.layers.find(l => l.type === "image" && l.name === "배경");
+  if (sp.face && fc && bg) { const fh = boxC(bg, fc, ctx.ar).h / H; if (fh > 0) b += ST_W.face * (0.5 - Math.min(1, Math.abs(Math.log(fh / sp.face)))); }
+  return b;
+}
+// 우리 채널 A/B 이긴 틀·문구 틀 가산점 (YouTube '테스트 및 비교' 승자를 한 번 눌러 적어 둔 것 · thumbstyle.ours) — 이긴 횟수만큼, 둘 다 상한
+const AB_W = { tpl: 4, tplMax: 8, pid: 3, pidMax: 6 };
+function abBonus(tpl, copy) {
+  const o = TS.view && TS.view.ours; if (!o || !o.n) return 0;
+  return Math.min(AB_W.tplMax, AB_W.tpl * ((o.tpl || {})[tpl] || 0)) + (copy && copy.pid ? Math.min(AB_W.pidMax, AB_W.pid * ((o.pid || {})[copy.pid] || 0)) : 0);
+}
 function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set(), wide = false) {
   const weak = weakScenes(); AI.weak = weak;
   if (weak) n = Math.min(n, 2);
@@ -4299,7 +4376,7 @@ function recommend(fmt, n = 6, seed = 0, avoidKeys = new Set(), wide = false) {
     // 꽉 찬 쇼츠를 못 만드는 원본(720p 가로)에서는 띠·여러 칸이 남은 길 → 예전 가산점만큼 돌려줌 (판정 5회차: 꽉 찬 장면이 될 때만 낮춤)
     // 판정 q5 1회차(D-096): 여러 칸('두 장면' pro 3.6 · crop 2.87 · '이어 붙인 티')은 돌려주지 않음 — 띠형만
     const canFull = fmt === "short" && fullOk(cx), fallback = fmt === "short" && !canFull && t.band;
-    const meta = { frame: f, copy: c, legacy: !!t.legacy, prior: (t.prior || 0) + (fallback ? 4 : 0), maxFrame, copyMin, copyMax, cutQ: cq, canFull }, sc = scoreDoc(doc, meta);
+    const meta = { frame: f, copy: c, legacy: !!t.legacy, prior: (t.prior || 0) + (fallback ? 4 : 0) + styleBonus(doc, cx) + abBonus(name, c), maxFrame, copyMin, copyMax, cutQ: cq, canFull }, sc = scoreDoc(doc, meta);
     const key = `${name}|${f.t}|${c.l1}/${c.l2}`;
     cands.push(Object.assign({ tpl: name, t: f.t, copy: c, doc, key, legacy: !!t.legacy, ctx: cx, band: !!t.band, once: !!t.once, close: f.kind === "close", expr: isExpr(f),
       tac: doc.layers.some(l => l.shape === "arrow2"), vague: !!c.vague, stock: !!c.stock, concrete: !!c.concrete, foot: srcHeadCut(f) }, sc, { base: sc.raw - (avoidKeys.has(key) ? 25 : 0) }));
@@ -4590,7 +4667,11 @@ function decorate(out, fmt) {
 }
 
 /* ----- 분석 받기 (다 돼 있으면 바로, 아니면 작업으로: 장면·선수 찾기 → 누끼 → 문구) ----- */
-async function loadBrand() { try { const j = await (await fetch("/api/thumb/brand")).json(); if (j.ok) AI.brand = j.brand; } catch (e) {} return AI.brand; }
+async function loadBrand() { try { const j = await (await fetch("/api/thumb/brand")).json(); if (j.ok) { AI.brand = j.brand; AI.brandCustom = j.custom || []; } } catch (e) {} return AI.brand; }
+async function loadThumbStyle() {  // 썸네일 스타일 (고른 것·버릇) + 이 영상의 A/B 묶음
+  try { const j = await (await fetch("/api/thumb/style?name=" + encodeURIComponent(NAME))).json(); if (j.ok) { TS.view = j.view; TS.sets = j.sets || []; } } catch (e) {}
+  return TS.view;
+}
 function setAIStat(t) { const e = $("aiStat"); if (e) e.textContent = t; }
 async function ensureAnalysis(force) {
   if (AI.loaded && !force) return true;
@@ -4613,7 +4694,7 @@ async function aiRun(seed = 0) {
   let done; AI.busy = new Promise(r => (done = r));
   try {
     if (!(await ensureAnalysis())) return null;
-    await loadBrand();
+    await loadBrand(); await loadThumbStyle(); renderTS();
     if (!AI.frames.length) { setAIStat("쓸 만한 장면을 찾지 못했어요"); return null; }
     setAIStat("조합하고 점수 매기는 중…");
     await new Promise(r => setTimeout(r, 0));
@@ -4655,6 +4736,7 @@ function renderAI() {
   const copies = [...AI.copy].sort((a, b) => b.score - a.score).slice(0, 10);
   el.innerHTML = `<div class="pg aibox"><h4>✨ AI 추천 썸네일 <span class="hint">장면·문구·디자인을 골라 레퍼런스 채널처럼 만들어요</span></h4>
     <div class="row2"><button class="btn pri aigo" id="aiGo">✨ AI 추천 썸네일 6개</button><button class="btn" id="aiRe" ${AI.results.length ? "" : "disabled"}>다시 추천</button><button class="btn" id="abSave" ${AI.ab.size ? "" : "disabled"}>A/B 묶음 저장 (${AI.ab.size})</button></div>
+    <div id="tsBox"></div>
     <div class="hint" id="aiStat">${AI.results.length ? "" : "누르면 장면·선수 찾기 → 누끼 → 문구 → 조합·채점 순서로 만들어요 (처음 한 번 1~2분)"}</div>
     <div class="aicards ${AUTO_FMT}" id="aiCards"></div>
     <details class="fx" ${AI.copy.length ? "open" : ""}><summary>▸ 문구 후보 <span class="hint">누르면 그 문구로만 다시 추천</span></summary><div>
@@ -4675,7 +4757,36 @@ function renderAI() {
   $("copyAi").onclick = copyAi;
   el.querySelectorAll(".af").forEach(a => (a.onclick = () => { AI.pick = +a.dataset.t; renderAI(); aiRun(AI.seed); }));
   if ($("pickAll")) $("pickAll").onclick = () => { AI.pick = null; renderAI(); aiRun(AI.seed); };
+  renderTS();
   renderAICards();
+}
+// 썸네일 스타일 고르기 + 이 영상의 A/B 묶음에서 이긴 장 적기 (D-130 · D-131)
+const TS_NONE = "기본 (풋살사관학교)";
+function renderTS() {
+  const el = $("tsBox"); if (!el) return;
+  const v = TS.view, sts = (v && v.styles) || [], o = v && v.ours, act = v && v.active, cur = act ? act.name : "";
+  const opts = [["", TS_NONE]].concat(sts.map(x => [x.name, x.name])).concat(o && o.n ? [["__ours__", `우리 채널 (A/B 이긴 것 ${o.n}번)`]] : []);
+  const custom = (AI.brandCustom || []).filter(k => k === "hl" || k === "hl2").length && AI.brand && AI.brand.apply !== false;
+  const sets = (TS.sets || []).slice(0, 3);
+  el.innerHTML = `<div class="tsrow"><span class="hint">썸네일 스타일</span><select class="s" id="tsPick">${opts.map(([k, t]) => `<option value="${esc(k)}" ${k === cur ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+    <div class="hint" id="tsDesc">${act ? `썸네일 버릇: ${esc(act.desc || "")}${act.params && act.params.hl ? ` <span class="tsw" style="background:${esc(act.params.hl)}"></span><span class="tsw" style="background:${esc(act.params.hl2 || "#FFFFFF")}"></span>` : ""}${custom ? " · 브랜드 키트에서 직접 고른 색이 먼저예요" : ""}`
+      : sts.length ? "스타일을 고르면 그 채널의 글자 색·위치·크기·테두리·배경 밝기를 따라 만들어요" : "스타일 카드에서 '썸네일 버릇 배우기'를 하면 여기서 고를 수 있어요"}${o && o.n && cur !== "__ours__" ? ` · 우리 채널 A/B 에서 이긴 틀·문구에 가산점` : ""}</div>
+    ${sets.map(st => `<div class="abwin" data-set="${esc(st.id)}"><span class="hint">A/B ${esc(st.at || "")} · ${st.winner ? `🏆 ${esc(st.winner)}가 이겼어요` : "YouTube '테스트 및 비교'에서 이긴 썸네일을 눌러 주세요"}</span>
+      ${st.items.map(i => `<button class="btn sm ${st.winner === i.tag ? "pri" : ""}" data-abw="${esc(i.tag)}" title="${esc([i.tpl, i.l1, i.l2].filter(Boolean).join(" · "))}">${esc(i.tag)}${st.winner === i.tag ? " 🏆" : ""}</button>`).join("")}</div>`).join("")}`;
+  $("tsPick").onchange = async e => {
+    const j = await post("/api/thumb/style", { style: e.target.value });
+    if (!j.ok) return toast(j.error || "고르지 못했어요");
+    TS.view = j.view; renderTS(); toast(e.target.value ? "이 스타일의 썸네일 버릇으로 다시 추천해요" : "기본 모양으로 다시 추천해요");
+    if (FRAMES.length) makeCands();  // 예전 템플릿 후보(자동 후보)도 그 버릇으로
+    if (AI.results.length) aiRun(AI.seed);
+  };
+  el.querySelectorAll("[data-abw]").forEach(b => (b.onclick = async () => {
+    const box = b.closest("[data-set]"), st = (TS.sets || []).find(x => x.id === box.dataset.set), tag = st && st.winner === b.dataset.abw ? "" : b.dataset.abw;
+    const j = await post("/api/thumb/ab_win", { id: box.dataset.set, tag, name: NAME });
+    if (!j.ok) return toast(j.error || "적지 못했어요");
+    TS.view = j.view; TS.sets = j.sets || TS.sets; renderTS();
+    toast(tag ? `${tag}가 이겼다고 적어 뒀어요 · 다음 추천부터 이긴 틀·색·문구 틀에 가산점을 줘요` : "이긴 썸네일 표시를 지웠어요");
+  }));
 }
 function chipHtml(c) {  // 강조 낱말을 노랗게 미리 보여 줌
   const ln = [c.l1, c.l2].map((t, i) => { const e = c.emph && c.emph[0] === i ? c.emph : null; return e ? esc(t.slice(0, e[1])) + `<em>${esc(t.slice(e[1], e[2]))}</em>` + esc(t.slice(e[2])) : esc(t); });
@@ -4967,10 +5078,14 @@ async function abSave() {
   const mw = Math.max(...rows.map(r => r.width)), mc = newCanvas(mw * picks.length + 20 * (picks.length + 1), rows[0].height + 46), g = mc.getContext("2d");
   g.fillStyle = "#0F0F0F"; g.fillRect(0, 0, mc.width, mc.height);
   rows.forEach((r, i) => { const x = 20 + i * (mw + 20); g.fillStyle = "#FFD24D"; g.font = "bold 16px sans-serif"; g.fillText(AB_TAGS[i], x, 24); g.drawImage(r, x, 34); });
-  const j = await post("/api/thumb/ab", { name: NAME, items, mobile: mc.toDataURL("image/jpeg", 0.9) });
+  const metas = picks.map(x => ({ tpl: x.tpl, pid: x.copy.pid || "", l1: x.copy.l1 || "", l2: x.copy.l2 || "", colors: { hl: x.ctx.brand.colors.hl, hl2: x.ctx.brand.colors.hl2 },
+    roles: { big: (x.ctx.brand._st || {}).big || "", stack: (x.ctx.brand._st || {}).stack || "" },
+    style: (TS.view && TS.view.active && TS.view.active.name) || "" }));  // 이긴 장을 나중에 한 번 눌러 적으면 이 틀·색·문구 틀에 가산점 (thumbstyle.record_ab)
+  const j = await post("/api/thumb/ab", { name: NAME, items, metas, mobile: mc.toDataURL("image/jpeg", 0.9) });
   if (j.gone) { setAIStat(""); return markGone(j.error); }
   if (!j.ok) { setAIStat(""); return toast(j.error || "저장하지 못했어요"); }
-  setAIStat(`A/B 저장: ${j.files.join(", ")}`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
+  setAIStat(`A/B 저장: ${j.files.join(", ")} · YouTube '테스트 및 비교'가 끝나면 위에서 이긴 썸네일을 눌러 적어 주세요`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
+  loadThumbStyle().then(renderTS);
   return j.files;
 }
 const AB_TAGS = "ABCDEF";

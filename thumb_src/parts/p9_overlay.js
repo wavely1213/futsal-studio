@@ -238,10 +238,14 @@ async function abSave() {
   const mw = Math.max(...rows.map(r => r.width)), mc = newCanvas(mw * picks.length + 20 * (picks.length + 1), rows[0].height + 46), g = mc.getContext("2d");
   g.fillStyle = "#0F0F0F"; g.fillRect(0, 0, mc.width, mc.height);
   rows.forEach((r, i) => { const x = 20 + i * (mw + 20); g.fillStyle = "#FFD24D"; g.font = "bold 16px sans-serif"; g.fillText(AB_TAGS[i], x, 24); g.drawImage(r, x, 34); });
-  const j = await post("/api/thumb/ab", { name: NAME, items, mobile: mc.toDataURL("image/jpeg", 0.9) });
+  const metas = picks.map(x => ({ tpl: x.tpl, pid: x.copy.pid || "", l1: x.copy.l1 || "", l2: x.copy.l2 || "", colors: { hl: x.ctx.brand.colors.hl, hl2: x.ctx.brand.colors.hl2 },
+    roles: { big: (x.ctx.brand._st || {}).big || "", stack: (x.ctx.brand._st || {}).stack || "" },
+    style: (TS.view && TS.view.active && TS.view.active.name) || "" }));  // 이긴 장을 나중에 한 번 눌러 적으면 이 틀·색·문구 틀에 가산점 (thumbstyle.record_ab)
+  const j = await post("/api/thumb/ab", { name: NAME, items, metas, mobile: mc.toDataURL("image/jpeg", 0.9) });
   if (j.gone) { setAIStat(""); return markGone(j.error); }
   if (!j.ok) { setAIStat(""); return toast(j.error || "저장하지 못했어요"); }
-  setAIStat(`A/B 저장: ${j.files.join(", ")}`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
+  setAIStat(`A/B 저장: ${j.files.join(", ")} · YouTube '테스트 및 비교'가 끝나면 위에서 이긴 썸네일을 눌러 적어 주세요`); toast(`A/B 묶음 ${picks.length}장 + 모바일 비교를 저장했어요`); post("/api/open", { which: "out" });
+  loadThumbStyle().then(renderTS);
   return j.files;
 }
 const AB_TAGS = "ABCDEF";

@@ -147,7 +147,7 @@ icon.ico / icon.png 앱 아이콘
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |
 | Hugging Face Hub | faster-whisper가 받아쓰기 모델을 처음 한 번 받음 (라이브러리 기본 동작) | 없음 |
 | jsDelivr CDN | `ui.html`의 Pretendard 웹폰트. 편집실·썸네일은 로컬 `fonts/`를 씀 | 없음 |
-| i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 | 없음 |
+| i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 · 썸네일 버릇 배우기(D-130): 스타일이 배운 영상 + 그 채널 인기 영상 12개의 썸네일을 앱이 받아 `styles/_thumbs/` 에 기억 (maxres → sd → hq · 3MB 까지 · 시간 제한 10초 · 닿지 않으면 남은 장은 받지 않음) | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
 | Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-027)를 켠 동안만: 휴대폰 → 원격 리스너. 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
 | ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |

@@ -39,6 +39,7 @@ import strategy
 import style
 import thumb
 import thumbcopy
+import thumbstyle
 import trouble
 import tunnel
 import updater
@@ -95,7 +96,9 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # 유튜브에 바로 올리기 (PC 7단계에서만 시작 · 휴대폰에는 진행('유튜브에 올리는 중')·알림·멈추기만 · D-048)
               youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH,
               # AI 추천 썸네일 (PC 썸네일 편집기에서만 시작 · 휴대폰에는 진행·알림만 · 썸네일 작업은 휴대폰 허용 목록(ACTIONS)에 없음)
-              thumb.JOB_ANALYZE, thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE}
+              thumb.JOB_ANALYZE, thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,
+              # 썸네일 버릇 배우기 (PC 스타일 카드에서만 시작 · D-130)
+              thumbstyle.JOB}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
     "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",

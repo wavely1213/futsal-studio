@@ -1534,6 +1534,13 @@ def load_brand():
     return json.loads(json.dumps(BRAND_DEFAULT))
 
 
+def brand_custom():
+    """사용자가 브랜드 키트에서 직접 바꾼 것 — 기본값과 다른 색 이름(hl·hl2·…)과 'font'. 썸네일 스타일보다 이것이 먼저 (thumbstyle · D-130)."""
+    b = load_brand()
+    out = [k for k in BRAND_COLORS if b["colors"].get(k) != BRAND_DEFAULT["colors"][k]]
+    return out + (["font"] if b.get("font") != BRAND_DEFAULT["font"] else [])
+
+
 def save_brand(d):
     """검사한 뒤 안전하게 저장 (임시 파일 → 바꿔치기, 바로 전 저장본은 .bak) → 저장한 값."""
     b = check_brand(d)

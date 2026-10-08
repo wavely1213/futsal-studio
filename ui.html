@@ -87,6 +87,12 @@
   .styles .st .psum { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.55; margin: 2px 0 12px; }
   .styles .st .psum.old { font-weight: 500; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .styles .st .fmtnote { font-size: 12.5px; color: var(--ink-2); margin: 0 0 10px; }
+  /* 썸네일 버릇 (D-130) — 배운 썸네일 몇 장 + 버릇 값 · 썸네일에 쓰기 */
+  .styles .st .thb .kv { margin-top: 4px; }
+  .styles .st .thb .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #888; vertical-align: -2px; margin-right: 3px; }
+  .styles .st .thb .thimgs { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+  .styles .st .thb .thimgs img { width: 96px; height: 54px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line, #ddd); }
+  .styles .st .thb .on { color: var(--brand); font-weight: 700; font-size: 12px; }
   .styles .st .ptitle { font-size: 12px; font-weight: 700; color: var(--ink-3); letter-spacing: .2px; margin: 14px 0 6px; display: flex; gap: 6px; align-items: center; }
   .styles .st .plan { display: grid; grid-template-columns: 64px 1fr; gap: 8px 12px; font-size: 13px; line-height: 1.55; }
   .styles .st .plan .pk { color: var(--ink-2); font-weight: 700; }
@@ -1947,12 +1953,52 @@ function planBlock(st) {
       <div class="paste" data-pbox="${esc(st.name)}" hidden><textarea placeholder="claude.ai 의 대답을 그대로 붙여 넣어 주세요"></textarea><div><button class="btn primary" data-psave="${esc(st.name)}">저장</button></div></div>
       ${evs || fix ? `<details class="fold" data-fold="ev"><summary>근거 보기</summary><div class="evs">${evs}${fix}</div></details>` : ""}`;
 }
+// 썸네일 버릇 (thumbstyle.card · D-130): 강조색 2개·글자 줄 수·글자 높이·위/아래·테두리·얼굴 크기·배경 밝기·채도·누끼
+const TH_COLOR = { "#FFFFFF": "흰색", "#FFE14D": "노랑", "#FF8A00": "주황", "#FF3B30": "빨강", "#FF5FA2": "분홍", "#00D1FF": "하늘", "#2F6BFF": "파랑", "#2BD96B": "초록" };
+const pctOf = x => `${Math.round(x * 100)}%`;
+const TH_MODE = { word: "강조 낱말만 강조색", line: "큰 줄 전체를 강조색", plain: "큰 줄은 흰 글자", stack: "두 줄 색을 나눔" };  // thumbstyle.MODE_KO
+function thumbBlock(st, active) {
+  const t = st.thumb, nm = esc(st.name);
+  if (!t) return `<div class="thb"><div class="ptitle">썸네일 버릇</div><p class="fmtnote">아직 없어요 · 배운 영상의 유튜브 썸네일(과 그 채널 인기 썸네일)에서 글자 색·위치·크기·테두리·얼굴 크기·배경 밝기를 배워 AI 추천 썸네일에 써요
+    <button class="btn" data-sthumb="${nm}">썸네일 버릇 배우기</button></p></div>`;
+  const h = t.habits, pos = { top: "위쪽", middle: "가운데", bottom: "아래쪽" }, o = h.outline;
+  const tier = o == null ? (h.textH ? "잴 수 없음 (어두운 배경 위 글자)" : "—") : o < 0.015 ? "없음" : o < 0.045 ? "얇게" : (h.outlineN || 0) < 2 ? "얇게 씀 (테두리를 잰 썸네일이 1장뿐)" : "두껍게";  // thumbstyle.eff_tier 와 같음
+  const br = h.bright < 0.4 ? "어두움" : h.bright > 0.52 ? "밝음" : "보통";
+  const rows = [
+    ["강조색", (h.colors || []).length ? h.colors.map((c, i) => `${"accent" in h ? (c === h.accent ? "강조 " : "바탕 글자 ") : ""}<span class="sw" style="background:${esc(c)}"></span>${esc(TH_COLOR[c] || c)}`).join(" · ")
+      + (TH_MODE[h.mode] ? ` (${TH_MODE[h.mode]})` : "") : "—"],
+    ["글자", h.textH ? `큰 글자 ${h.lines || 1}줄 · 글자 높이 화면의 ${pctOf(h.textH)}` : "글자가 거의 없어요"],
+    ["글자 위치", h.pos ? `${pos[h.pos]} (${Object.entries(h.posShare || {}).filter(([, v]) => v > 0).map(([k, v]) => `${pos[k]} ${pctOf(v)}`).join(" · ")})` : "—"],
+    ["테두리", `${tier}${o != null ? ` (글자 높이의 ${pctOf(o)})` : ""}`],
+    ["얼굴 크기", h.face != null && (h.faceShare || 0) >= 0.34 ? `화면 높이의 ${pctOf(h.face)} (얼굴 나온 썸네일 ${pctOf(h.faceShare)})` : h.face != null ? "얼굴은 잘 안 나와요" : "—"],
+    ["배경", `${br} (밝기 ${pctOf(h.bright)} · 채도 ${pctOf(h.sat)})`],
+    ["누끼", h.cutout >= 0.5 ? `자주 써요 (${pctOf(h.cutout)})` : h.cutout > 0 ? `가끔 (${pctOf(h.cutout)})` : "안 써요"],
+  ];
+  const on = active === st.name;
+  return `<div class="thb"><div class="ptitle">썸네일 버릇 <span class="hint">썸네일 ${t.n}장 · ${esc(t.learned || "")}</span></div>
+    <div class="thimgs">${(t.ids || []).slice(0, 6).map(id => `<img src="/api/style/thumb_img?id=${encodeURIComponent(id)}" loading="lazy" alt="">`).join("")}</div>
+    <div class="kv">${rows.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join("")}</div>
+    <div class="pbtns">${on ? `<span class="on">✓ 썸네일 AI 추천에 쓰는 중</span><button class="btn" data-sthpick="" title="기본 모양(풋살사관학교)으로 돌아가요">그만 쓰기</button>`
+      : `<button class="btn primary" data-sthpick="${nm}" title="썸네일 편집기의 자동 후보·AI 추천이 이 버릇(색·위치·크기·테두리·배경 밝기)을 따라요">썸네일에 이 스타일 쓰기</button>`}
+      <button class="btn" data-sthumb="${nm}">썸네일 버릇 다시 배우기</button></div></div>`;
+}
+function bindThumbHabits() {
+  document.querySelectorAll("[data-sthumb]").forEach(b => (b.onclick = () => job("/api/style/thumbs", { name: b.dataset.sthumb }, r => {
+    if (r && r.ok === false) { toast(r.error || "썸네일 버릇을 배우지 못했어요"); return; }
+    toast(`썸네일 버릇을 배웠어요${r && r.desc ? " · " + r.desc : ""} · 이 스타일로 썸네일을 만들려면 [썸네일에 이 스타일 쓰기]를 눌러 주세요`); loadStyles();
+  })));
+  document.querySelectorAll("[data-sthpick]").forEach(b => (b.onclick = async () => {
+    const r = await api("/api/thumb/style", { style: b.dataset.sthpick }).catch(() => ({}));
+    if (r.ok) toast(b.dataset.sthpick ? `썸네일 AI 추천이 '${b.dataset.sthpick}' 버릇을 따라요` : "썸네일은 기본 모양으로 만들어요");
+    loadStyles();
+  }));
+}
 function relearnable(p) {  // 같은 영상이 보관함이나 학습용 영상에 다 있으면(파일을 지웠어도 배운 기록이 있으면) '다시 배우기'
   const src = Array.isArray(p.source) ? p.source : [p.source];
   return src.length && src.every(n => typeof n === "string" && (state.local.some(v => v.name === n) || refs.videos.some(v => v.name === n && v.usable))) ? src : null;
 }
 async function loadStyles() {
-  const j = await (await fetch("/api/style/list")).json(), list = j.styles || [];
+  const j = await (await fetch("/api/style/list")).json(), list = j.styles || [], thAct = j.thumbActive || "";
   $("styleEmpty").style.display = list.length ? "none" : "block"; state.styles = list.map(s => s.name);
   const pos = { bottom: "아래", middle: "가운데", top: "위" }, open = {};
   document.querySelectorAll(".styles .st details.fold[open]").forEach(d => (open[d.closest(".st").dataset.sname + "|" + d.dataset.fold] = 1));  // 다시 그려도 펼친 칸은 그대로
@@ -1964,6 +2010,7 @@ async function loadStyles() {
       <h3>🎬 ${esc(st.name)}<span class="sp" style="flex:1"></span><button class="linkbtn" data-sdel="${esc(st.name)}">삭제</button></h3>
       ${st.plan ? planBlock(st) : `<p class="psum old">다시 배우면 기획 분석이 생겨요 (인트로 구성·장르·형식·자막·재미 요소)${re ? ` <button class="btn" data-prelearn="${esc(st.name)}">다시 배우기</button>` : ""}</p>`}
       ${fm ? `<p class="fmtnote">배운 영상 ${fm.long.count + fm.shorts.count}개 — 긴 영상 ${fm.long.count}개와 쇼츠 ${fm.shorts.count}개를 따로 배웠어요 · 롱폼 가편집엔 긴 영상 값, 쇼츠 가편집엔 쇼츠 값을 써요${st.plan ? " · 위 기획 분석은 긴 영상 것이에요" : ""}${fm.shorts.headline ? `<br>쇼츠 기획: ${esc(fm.shorts.headline)}` : ""}</p>` : ""}
+      ${thumbBlock(st, thAct)}
       <details class="fold" data-fold="kv"><summary>구조 수치 (편집 엔진용)</summary><p>${esc(st.desc)}</p>
       ${fm ? `<div class="ptitle">롱폼 가편집 · 긴 영상 ${fm.long.count}개</div>${kvRows(st, fm.long.profile, fm.long.params, true, "", true)}<div class="ptitle">쇼츠 가편집 · 쇼츠 ${fm.shorts.count}개</div>${kvRows(st, fm.shorts.profile, fm.shorts.params, false)}`
         : kvRows(st, p, q, true, n)}</details>${scoreBlock(st.name, JSON.stringify([p.analyzed, p.duration, p.source, p.tempoOn !== false, fm ? [fm.long.count, fm.shorts.count, fm.long.profile.avgShot, fm.shorts.profile.avgShot] : 0]))}</div>`; }).join("");
@@ -1971,6 +2018,7 @@ async function loadStyles() {
   document.querySelectorAll("[data-sdel]").forEach(b => (b.onclick = async () => { if (!confirm(`'${b.dataset.sdel}' 스타일을 지울까요?`)) return; await api("/api/style/delete", { name: b.dataset.sdel }); loadStyles(); }));
   bindScores();
   bindPlan();
+  bindThumbHabits();
   document.querySelectorAll("[data-stempo]").forEach(c => (c.onchange = async () => {  // 컷 리듬 맞추기 (#7): 말 빠르기 켜기/끄기
     c.disabled = true;
     const r = await api("/api/style/tempo", { name: c.dataset.stempo, on: c.checked }).catch(() => ({}));

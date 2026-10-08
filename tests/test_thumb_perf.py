@@ -99,6 +99,8 @@ class _Stub(BaseHTTPRequestHandler):
         if u.path == "/api/thumb/brand":  # 브랜드 키트 (편집기가 켤 때 읽음)
             return self._send(200, {"ok": True, "brand": {"logo": "", "logoPos": "tr", "colors": {"hl": "#FFE14D", "hl2": "#FFFFFF", "accent": "#FF3B30", "neon": "#00D1FF", "box": "#111111"},
                                                           "font": "Black Han Sans", "series": "", "seriesOn": False, "handle": "", "apply": True}})
+        if u.path == "/api/thumb/style":  # 썸네일 스타일 (편집기가 켤 때 읽음 · D-130) — 고른 스타일 없음
+            return self._send(200, {"ok": True, "view": {"styles": [], "pick": None, "active": None, "ours": {"n": 0}}, "sets": []})
         if u.path == "/favicon.ico":
             return self._send(200, b"", "image/x-icon")
         return self._send(404, {})
