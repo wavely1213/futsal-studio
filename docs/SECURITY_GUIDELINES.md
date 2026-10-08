@@ -47,6 +47,7 @@
   3. 이름 인자 검사: `editor.safe_name()`/`video_path()`가 경로·드라이브·`\\서버`·`..`·`:`·NUL을 거절한다. 주소 안에 든 이름(`/api/thumb/cut` 의 `src` 안 `/frame?name=`)도 `video_path` 를 거친다 (I-021 해결).
   4. 요청 본문 JSON 의 글자는 `core.clean_json` 이 짝 없는 대리 문자를 '�'로 바꾼 뒤 쓴다 (`KNOWN_ISSUES.md` I-038).
   - `GET /api/ping` 은 이 앱인지(`{"app": "futsal-studio", "version"}`)만 알려 준다 — 두 번째 실행·실행기가 그 포트의 주인을 확인할 때만 쓰고(D-030), 개인 정보는 없다. 같은 Host 검사를 거친다.
+  - 썸네일 버릇(D-130): `/api/style/thumb_img` 은 11자 영상 id 꼴(`thumbstyle.ID_RX`)만 받아 `style.STYLES/_thumbs/<id>.jpg` 하나를 내준다 · `/api/thumb/style`·`/api/thumb/ab_win` 은 스타일 이름을 `style.style_file`(스타일 폴더 안 있는 파일)로, A/B 기록은 색 `#RRGGBB`·글자 길이 상한만 남긴다(`thumbstyle._meta_ok`).
   5. 파일을 읽거나 내주기 전에 `resolve()`한 뒤 허용 폴더 안인지 확인한다. 허용 폴더는 `core.VIDEOS`·`core.ANALYSIS`·`editor.ASSETS`·`core.OUT`·`thumb.ASSETS`·`style.STYLES`·`fonts/`·`refs.root()`(학습용 영상)다. 학습용 영상은 화면에서 받은 파일 이름(`safe_name`)과 `refs.json`의 폴더 이름(`refs._safe_folder`: 경로 문자·`..`·끝 공백/점 거절)으로만 경로를 만든다.
 - **원격 경계(`remote.RemoteHandler`, D-027)**: 터널로 들어온 요청은 로컬 `Handler`가 아니라 이것만 받고, 다음 순서로 막는다. 새 `/r/*` 경로도 같은 순서를 따른다.
   1. Host 가 `remote.futsal.invalid`(cloudflared 가 붙임)인지 — 개발 모드(`FUTSAL_REMOTE_DEV=1`)에서만 `127.0.0.1:<원격 포트>` 도. 브라우저는 `.invalid` Host 를 만들 수 없어 DNS 리바인딩·같은 PC 의 다른 사이트를 막는다. 본문은 `Content-Length` 로만 받는다(`Transfer-Encoding` 이 있으면 읽지 않고 411 · 잠금 횟수에 안 셈).

@@ -204,7 +204,8 @@ function makeCands() {
   const a = $("aL1").value.trim() || "제목", b = $("aL2").value.trim(), fr = FRAMES.map(f => f.t), sets = [fr, [...fr.slice(2), ...fr.slice(0, 2)]];
   const f = FMT[AUTO_FMT]; CANDS = [];
   // 칸마다 얼굴·머리에 맞춰 자름 (anchorTpl · 판정 5회차 D-092: 가운데 자르기로 머리 없는 칸 34%)
-  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]) } });
+  const br = brandOf();  // 썸네일 스타일을 골랐으면 예전 템플릿의 노랑·흰 글자·배경 밝기도 그 버릇으로 (styleLayers · D-130)
+  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: styleLayers(anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]), br, true) } });
   const cw = AUTO_FMT === "short" ? 180 : 320, ch = AUTO_FMT === "short" ? 320 : 180;
   $("cands").innerHTML = CANDS.map((c, i) => `<div class="cand" data-c="${i}"><canvas width="${cw}" height="${ch}"></canvas><div>${c.name}</div></div>`).join("");
   drawCands();
@@ -435,7 +436,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
     await new Promise(r2 => setTimeout(r2, 3000));
   }
   renderStrip(); makeCands();
-  loadBrand(); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
+  Promise.all([loadBrand(), loadThumbStyle()]).then(() => { renderTS(); if (TS.view && TS.view.active && FRAMES.length) makeCands(); }); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
   const d0 = DOCS.designs[0];
   if (d0 && !d0.doc.layers.length && FRAMES.length) {
     if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; refreshUI(); }

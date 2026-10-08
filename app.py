@@ -38,6 +38,7 @@ import trouble
 import style
 import thumb
 import thumbcopy
+import thumbstyle
 import updater
 import upload
 import winlink
@@ -253,6 +254,27 @@ def _fail_extra(info, e):
     if getattr(e, "note", None):
         info["msg"] = f"{info['msg']} · {e.note}"
     return info
+
+
+def _thumb_habits(res):
+    """스타일 배우기 끝에 이어서 썸네일 버릇도 배움 (i.ytimg.com · 실패해도 스타일은 그대로 · D-130). res: style.learn 결과 또는 학습용 작업 결과."""
+    if not isinstance(res, dict):
+        return res
+    if isinstance(res.get("name"), str) and "profile" in res:
+        res["thumb"] = thumbstyle.learn_quiet([res["name"]], log).get(res["name"])
+    for x in res.get("learned") or []:
+        if isinstance(x, dict) and isinstance(x.get("style"), str) and not x.get("error"):
+            x["thumb"] = thumbstyle.learn_quiet([x["style"]], log).get(x["style"])
+    return res
+
+
+def _style_thumbs(name):
+    """스타일 카드 [썸네일 버릇 배우기] 작업 → 결과 (사용자 안내는 ok False + error)."""
+    try:
+        return dict(thumbstyle.learn(str(name or ""), log), ok=True)
+    except (thumbstyle.ThumbStyleError, style.StyleError) as e:
+        log(f"  {e}")
+        return {"ok": False, "error": str(e)}
 
 
 def _refs_job(fn, ck=None):
@@ -538,7 +560,18 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "image/png" if p.suffix == ".png" else "image/jpeg"
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
-            return self._send(200, {"styles": style.list_styles()})
+            act = thumbstyle.editor_view().get("active")
+            return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else ""})
+        if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
+            p = thumbstyle.thumb_path((q.get("id") or [""])[0])
+            return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
+        if u.path == "/api/thumb/style":  # 썸네일 편집기: 고른 썸네일 스타일·버릇 + 이 영상의 A/B 묶음
+            n = (q.get("name") or [""])[0]
+            try:
+                n = editor.safe_name(n) if n else ""
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            return self._send(200, {"ok": True, "view": thumbstyle.editor_view(), "sets": thumbstyle.ab_sets(n)[:3] if n else []})
         # ---- 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) ----
         if u.path == "/api/refs":
             try:
@@ -563,7 +596,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": "이 스타일은 아직 기획 분석이 없어요. 먼저 '다시 배우기'를 눌러 주세요"})
             return self._send(200, {"ok": True, "prompt": plan.claude_prompt(d)})
         if u.path == "/api/thumb/brand":  # 브랜드 키트 (로고·색·글꼴·시리즈 이름)
-            return self._send(200, {"ok": True, "brand": thumb.load_brand(), "fonts": list(thumb.BRAND_FONTS)})
+            return self._send(200, {"ok": True, "brand": thumb.load_brand(), "fonts": list(thumb.BRAND_FONTS), "custom": thumb.brand_custom()})
         if u.path == "/api/thumb/open":
             n = q["name"][0]
             rec = editor.recommend(n)
@@ -747,17 +780,18 @@ class Handler(BaseHTTPRequestHandler):
         jobs = {
             "/api/list": ("채널 불러오기", lambda: source.annotate_listing(hooks.remember_listing(  # 우리 채널이면 제목 패턴용으로 저장 (올리기 키트)
                 core.list_videos(b.get("kind", "videos"), ck, b.get("url"), log), b.get("kind", "videos"), b.get("url")), b.get("url"))),
-            "/api/style/learn": ("스타일 배우기", lambda: style.learn(b.get("name") or "내 스타일", b["names"], log)),
+            "/api/style/learn": ("스타일 배우기", lambda: _thumb_habits(style.learn(b.get("name") or "내 스타일", b["names"], log))),
+            "/api/style/thumbs": (thumbstyle.JOB, lambda: _style_thumbs(b.get("name"))),
             "/api/download": ("보관함에 담기", lambda: self._download(b, ck)),
             "/api/analyze": ("편집점 찾기", lambda: self._analyze(b)),
             "/api/render": ("러프컷 만들기", lambda: str(core.render(b["name"], b["spec"], log))),
             "/api/update": ("업데이트", lambda: self._update(b)),
             # 학습용 영상: 채널 인기 영상 받기 · 추천 방향 한 번에 · 채널 스타일 다시 배우기 · 지우기 · 배운 파일만 지우기 · 보관함에서 옮기기
-            "/api/refs/add": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_channel(b.get("url"), b.get("count") or 5, b.get("kind") or "videos", log, ck,
-                                                                  b.get("learn", True) is not False, bool(b.get("prune")), b.get("style") or None), ck)),
-            "/api/refs/direction": ("학습용 영상 받기", lambda: _refs_job(lambda: refs.add_direction(str(b.get("dir") or ""), log, ck, b.get("learn", True) is not False,
-                                                                        bool(b.get("prune"))), ck)),
-            "/api/refs/learn": ("학습용 스타일 배우기", lambda: _refs_job(lambda: refs.learn_channel(str(b.get("channel") or ""), log, bool(b.get("prune"))))),
+            "/api/refs/add": ("학습용 영상 받기", lambda: _refs_job(lambda: _thumb_habits(refs.add_channel(b.get("url"), b.get("count") or 5, b.get("kind") or "videos", log, ck,
+                                                                  b.get("learn", True) is not False, bool(b.get("prune")), b.get("style") or None)), ck)),
+            "/api/refs/direction": ("학습용 영상 받기", lambda: _refs_job(lambda: _thumb_habits(refs.add_direction(str(b.get("dir") or ""), log, ck, b.get("learn", True) is not False,
+                                                                        bool(b.get("prune")))), ck)),
+            "/api/refs/learn": ("학습용 스타일 배우기", lambda: _refs_job(lambda: _thumb_habits(refs.learn_channel(str(b.get("channel") or ""), log, bool(b.get("prune")))))),
             "/api/refs/delete": ("학습용 영상 지우기", lambda: _refs_job(lambda: refs.delete(b.get("names"), b.get("channel"), log, bool(b.get("confirmOriginal"))))),
             "/api/refs/prune": ("배운 영상 파일 지우기", lambda: _refs_job(lambda: refs.prune(b["names"] if b.get("names") is not None else refs.channel_names(b["channel"]), log))),
             "/api/refs/restore": ("보관함으로 되돌리기", lambda: _refs_job(lambda: refs.restore(b["names"], log))),
@@ -941,7 +975,28 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"A/B 썸네일을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": f"저장하지 못했어요. 잠시 뒤 다시 눌러 주세요 · {trouble.explain(e)['msg']}"})
             log(f"A/B 썸네일 저장 · {', '.join(files)}")
+            try:  # 장마다 틀·색·문구 틀 (나중에 이긴 장을 누르면 가산점 · D-131) — 못 적어도 그림 저장은 그대로
+                thumbstyle.record_ab(b["name"], files[:len(b.get("items") or [])], b.get("metas"))  # 모바일 비교 한 장은 빼고
+            except OSError as e:
+                log(f"A/B 기록을 적지 못했어요 · {e}")
             return self._send(200, {"ok": True, "files": files})
+        if path == "/api/thumb/style":  # 썸네일에 쓸 스타일 고르기 ('' = 기본 · '__ours__' = 우리 채널 A/B 이긴 것)
+            try:
+                thumbstyle.set_pick(b.get("style"))
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, {"ok": True, "view": thumbstyle.editor_view()})
+        if path == "/api/thumb/ab_win":  # YouTube '테스트 및 비교'에서 이긴 장 적기 (한 번 누름 · 같은 것을 다시 누르면 지움)
+            try:
+                thumbstyle.set_winner(b.get("id"), b.get("tag"))
+            except thumbstyle.ThumbStyleError as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            n = b.get("name") if isinstance(b.get("name"), str) else None
+            return self._send(200, {"ok": True, "view": thumbstyle.editor_view(), "sets": thumbstyle.ab_sets(n)[:3] if n else []})
         if path == "/api/thumb/judge":  # 검수 창: 내 클로드 계정으로 평가 (선택)
             sm, fu = b.get("small"), b.get("full")
             if not all(isinstance(x, str) and x.startswith("data:image/") and len(x) < thumb.AB_MAX for x in (sm, fu)):
