@@ -261,6 +261,15 @@ def rule_candidates(title, texts, rotate=True):
         C.append(_cand("'여기' 맞추면", "골 들어가요", 1, "골", X, "hide", 1.1, "숨김형 훅 (답은 영상에)"))
     if len(nospace(X)) <= 6:
         C.append(_cand(f"{X}{josa(X, '이', '가')}", "이렇게 쉬웠어?", 1, "쉬웠어?", "", "easyq", 0.9, "놀람 질문형 훅"))
+    # 판정 q5 2회차(D-107): 규칙 훅 틀 10개가 9영상 중 6영상에 같은 말('고수의 X / 이게 달라요') — 같은 말투의 틀을 4개 더해 영상마다 고르는 묶음이 더 달라지게
+    if act and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 고수들", "다 이렇게 해요", 1, "이렇게", "", "trait", 0.95, "공통점 훅 (고수들이 하는 것 · 답은 영상에)"))
+    if kind in ("dribble", "touch", "shoot") and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 늘려면", "이것부터 하세요", 1, "이것부터", "", "first", 1.0, "순서 훅 (무엇부터 · 답은 영상에)"))
+    if rival and kind == "dribble" and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 한 번에", "수비가 얼어요", 1, "얼어요", "", "freeze", 1.05, "결과 훅 (수비가 못 움직임)"))
+    if rival and kind in ("dribble", "touch") and has("실수", "뺏기", "뺏겨", "안 돼", "많은데") and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 이러면", "무조건 뺏겨요", 1, "뺏겨요", "", "wrong", 1.05, "경고형 훅 (대사에 실수·뺏기는 이야기)"))
     # 대사의 구체 내용 (판정 3회차: 상투 꼬리표 대신 영상에만 있는 낱말 — '수비 전환 / 3초 법칙' 7.1~7.5 · '슛이 뜨는 이유? / 디딤발 위치' 6.5)
     # 판정 5회차(D-094): 낱말 라벨('슈팅 / 디딤발 위치' 3/6/3 '교재 목차 같은 라벨')을 앞세우지 않음 → 라벨은 가산점을 낮추고, 같은 낱말을 훅 문장의 작은 보조 문구로
     # 판정 4회차: 질문은 ① 대사에 있는 질문('왜 다들 첫 터치에서 공을 놓칠까요?') ② 대사에 그 문제 말('막혀요'·'뺏겨요')이 있고 해답 낱말의 기술 종류가 같을 때만 —
@@ -538,9 +547,9 @@ def context_boost(body):
     return out
 
 
-HOOK_PIDS = ("regret", "foryou", "hide", "easyq", "stuck", "diff", "please", "beatit", "practice", "prolook")  # 유튜버 말투 훅 틀
-HOOK_SUB = ("regret", "foryou", "hide", "stuck", "diff", "beatit", "prolook")  # 대사의 구체 낱말을 작은 보조 문구로 붙이는 훅
-HOOK_KEEP = 8  # 영상 하나가 쓰는 훅 틀 수 (모두 10개 · 4개로 줄이면 묶음마다 라벨·흔한 틀이 끼어 판정 appeal −0.18 — 개발 판정 r_d)
+HOOK_PIDS = ("regret", "foryou", "hide", "easyq", "stuck", "diff", "please", "beatit", "practice", "prolook", "trait", "first", "freeze", "wrong")  # 유튜버 말투 훅 틀
+HOOK_SUB = ("regret", "foryou", "hide", "stuck", "diff", "beatit", "prolook", "trait", "first", "freeze")  # 대사의 구체 낱말을 작은 보조 문구로 붙이는 훅
+HOOK_KEEP = 8  # 영상 하나가 쓰는 훅 틀 수 (모두 14개 · D-107 — 4개로 줄이면 묶음마다 라벨·흔한 틀이 끼어 판정 appeal −0.18 — 개발 판정 r_d)
 GENERIC_PIDS = ("must", "secret", "grow", "howto", "only", "levelup", "easy", "why", "reason", "one", "result", "beat", "wow")  # 주제만 바꿔 끼우는 흔한 틀 ('이것만 알면 / X 끝!' 9/9 영상)
 GENERIC_KEEP = 8  # 영상 하나가 쓰는 흔한 틀 수 (모두 13개)
 HOOK_SPIN = 0.6  # 판정 q5 1회차(D-100): 같은 훅 틀이 모든 영상에 ('X가 / 이렇게 쉬웠어?' 18/18 묶음) → 영상 제목마다 훅 틀 앞뒤를 ±0.3 흔들어 돌려 씀 (같은 영상은 늘 같음)
