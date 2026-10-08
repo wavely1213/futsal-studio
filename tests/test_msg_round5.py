@@ -859,3 +859,25 @@ class FinalJudge2Test(unittest.TestCase):
         w = msg._shorts_window(rec, moms, 120.0, [])
         self.assertLessEqual(w[-1]["out"], 44.9)                         # '세 번째 포인트' 앞에서 끝
         self.assertAlmostEqual(w[0]["in"], 10.0)
+
+    def test_low_motion_cutaway_scene_is_a_demo(self):
+        """판정 round6: 선수가 작게 보이는 시범 장면(움직임 중앙값 아래)이 말 없는 틈째로 잘려 '하나, 둘, 셋' → '나이스!'만 남음."""
+        motion = [0.1] * 120
+        motion[34] = motion[44] = 5.0                   # 17초·22초 장면 바뀜 순간만 큼
+        sig = {"name": "x", "duration": 60.0, "tidy": [{"in": 0.0, "out": 60.0}], "junk": [], "motion": motion, "motionStep": 0.5,
+               "onsets": [], "cuts": [17.25, 22.25, 40.0]}
+        words = [(10.0, 18.2, "셋.", 0), (23.9, 24.8, "나이스!", 1)]
+        dw = msg.demo_windows(sig, words)
+        self.assertTrue(any(d[0] <= 18.4 and d[1] >= 22.0 for d in dw), dw)
+        segs = [{"start": 10.0, "end": 18.2, "text": "하나, 둘, 셋.", "words": [{"w": "셋.", "s": 10.0, "e": 18.2}]},
+                {"start": 23.9, "end": 24.8, "text": "나이스!", "words": [{"w": "나이스!", "s": 23.9, "e": 24.8}]}]
+        sig["demo"] = dw
+        plays = [m for m in msg.moments(sig, segs) if m["kind"] == "play"]
+        self.assertEqual(len(plays), 1)
+        self.assertTrue(18.2 < plays[0]["t"] < 22.25, plays[0])          # 장면 바뀜 순간이 아니라 시범 장면 가운데
+
+    def test_words_do_not_overlap_across_segments(self):
+        segs = [{"start": 56.3, "end": 58.0, "text": "아이고, 빗나갔어요.", "words": [{"w": "아이고,", "s": 56.34, "e": 56.64}, {"w": "빗나갔어요.", "s": 57.4, "e": 57.6}]},
+                {"start": 58.12, "end": 59.74, "text": "마지막 다섯 번째,", "words": [{"w": "마지막", "s": 58.12, "e": 58.92}, {"w": "번째,", "s": 58.92, "e": 59.74}]}]
+        out, _ = msg.align_to_sound(segs, [[56.3, 56.7], [57.51, 58.4], [58.5, 59.8]])
+        self.assertLessEqual(out[0]["words"][-1]["e"], out[1]["words"][0]["s"] - 0.02 + 1e-6)   # 말 자막 두 줄이 한꺼번에 뜨지 않게

@@ -27,7 +27,7 @@ import editor
 import sfxlib
 import takes
 
-SIG_VER = 14   # 13: 목소리 보정을 거친 말소리 최대 크기(voicePk) — 효과음 크기 기준 · 14: 소리 크기를 한 번에 조금씩 읽어 잼(48kHz)
+SIG_VER = 15   # 15: 장면 바뀜으로 찾는 시범(_cutaway) · 정리 전 시범 구간으로 시범 예고 · 13: 목소리 보정을 거친 말소리 최대 크기(voicePk) — 효과음 크기 기준 · 14: 소리 크기를 한 번에 조금씩 읽어 잼(48kHz)
 MIX_DIR_NAME = "섞기"           # styles/섞기/<이름>.json — 배운 스타일 목록(list_styles)에 섞이지 않게 따로
 DRAFT_NAME = "풋살사관학교 스타일(초안)"
 ASPECTS = ("intro", "rhythm", "captions", "fun", "sound")
@@ -229,6 +229,12 @@ def align_to_sound(segs, blobs):
             out.append(dict(sg, words=ws, start=round(float(ws[0]["s"]), 2), end=round(max(float(sg["end"]), float(ws[-1]["e"])), 2)))
         else:
             out.append(sg)
+    # 구간 사이도 겹치지 않게 (마지막 낱말을 소리 덩어리 끝까지 늘이면 다음 구간 첫 낱말과 겹쳐 말 자막 두 줄이 한꺼번에 뜸 · 판정 U6)
+    for i in range(len(out) - 1):
+        wa, wb = out[i].get("words") or [], out[i + 1].get("words") or []
+        if wa and wb and float(wa[-1]["e"]) > float(wb[0]["s"]) - 0.02:
+            wa[-1]["e"] = round(max(float(wa[-1]["s"]) + 0.05, float(wb[0]["s"]) - 0.02), 2)
+            out[i]["end"] = round(min(float(out[i]["end"]), max(float(wa[-1]["e"]), float(out[i]["start"]) + 0.05)), 2)
     return out, moved
 
 
@@ -915,7 +921,11 @@ def signals(name, log=print, use_faces=True):
     core.set_progress(label=LABEL, item=name, pct=62, detail="공 차는 소리 찾는 중")
     onsets = [t for t in _onsets(wave, words) if not any(a - 0.2 <= t <= b + 0.2 for a, b in noisy)]  # 웃음·환호 소리는 공 소리가 아님
     _check()
-    rec = _recommend(name, segs, sig={"blobs": blobs, "onsets": onsets, "tags": tags, "tagStep": 0.48})
+    # 말 없는 시범 구간(앞 정리 전 · 정리할 곳 거르기 없이)도 함께 — '다시 한번 해볼게요.' 바로 뒤 말 없는 시범을 시범 예고로 알아보게
+    # (예전에는 시범 구간을 정리 뒤에야 셈 → 그 말이 다시 찍기 신호로 빠짐 · 판정 round6 S1)
+    pre = {"duration": float(info["duration"]), "motion": ev.get("motion") or [], "motionStep": 1.0 / float(ev.get("fps") or 2),
+           "cuts": ev.get("cuts") or [], "onsets": onsets, "tags": tags, "tagStep": 0.48, "junk": []}
+    rec = _recommend(name, segs, sig={"blobs": blobs, "onsets": onsets, "tags": tags, "tagStep": 0.48, "demo": demo_windows(pre, words)})
     sig = {"v": SIG_VER, "sig": fsig, "tsig": tsig, "name": name, "duration": float(info["duration"]),
            "w": info["width"], "h": info["height"], "fps": info.get("fps", 30.0),
            "motion": ev.get("motion") or [], "motionStep": 1.0 / float(ev.get("fps") or 2), "cuts": ev.get("cuts") or [],
@@ -963,8 +973,27 @@ def demo_windows(sig, words):
                             lo = max(lo, sb + 0.1)
                 if hi - lo >= 1.2:
                     out.append([round(float(lo), 2), round(float(hi), 2)])
+            cw = _cutaway(sig, a, b)
+            if cw:   # 다른 장면으로 끼운 시범은 그 장면 전체 (움직임으로 찾은 구간과 겹치면 합침)
+                ov = [o for o in out if min(cw[1], o[1]) - max(cw[0], o[0]) > -0.3]
+                for o in ov:
+                    out.remove(o)
+                out.append([round(min([cw[0]] + [o[0] for o in ov]), 2), round(max([cw[1]] + [o[1] for o in ov]), 2)])
         prev = max(prev, e)
-    return out
+    return sorted(out)
+
+
+def _cutaway(sig, a, b):
+    """말 없는 틈(a~b) 안의 다른 장면(장면 바뀜 둘 사이 2초 넘게) → 그 장면 구간 (a~b 안으로) 또는 None.
+    시범 영상을 끼워 찍은 원본에서 선수가 작게 보이는 시범은 화면 움직임이 작아(중앙값 아래) 움직임만으로는 못 찾고 통째로 잘림
+    (판정 round6: S1 118~122초 시범이 빠짐 · 앞뒤 말 '하나, 둘, 셋' → '나이스!'만 남음)."""
+    cuts = sorted(float(c) for c in sig.get("cuts") or ())
+    for c1, c2 in zip(cuts, cuts[1:]):
+        if a - 1.5 <= c1 < b - 1.0 and c2 - c1 >= 2.0 and c2 <= b + 1.5:
+            lo, hi = max(a, c1 + 0.05), min(b, c2 - 0.05)
+            if hi - lo >= 2.0:
+                return lo, hi
+    return None
 
 
 def keep_cuts(tidy, demo):
@@ -1158,8 +1187,17 @@ def moments(sig, segs=None):
     for a, b in gaps:
         a2, b2 = a + 0.15, b - 0.1
         ons = [t for t in onsets if a2 <= t <= b2]
-        mot = [(t, z) for t, z in mz if a2 <= t <= b2]
+        cuts_ = [float(c) for c in sig.get("cuts") or ()]
+        # (장면 바뀜 순간의 움직임 봉우리는 화면이 바뀐 것이지 움직임이 아님)
+        mot = [(t, z) for t, z in mz if a2 <= t <= b2 and not any(abs(t - c) <= 0.3 for c in cuts_)]
         peak = max(mot, key=lambda x: x[1]) if mot else (None, 0.0)
+        if not ons and sig.get("demo"):  # 공 소리가 없으면 남기는 시범 구간 안의 움직임으로 (그 밖 봉우리는 편집에서 빠지는 곳)
+            mot_in = [(t, z) for t, z in mot if any(float(d[0]) <= t <= float(d[1]) for d in sig["demo"])]
+            if mot_in and max(z for _, z in mot_in) >= 1.5:
+                peak = max(mot_in, key=lambda x: x[1])
+        cw = _cutaway(sig, a, b) if not ons else None
+        if cw and peak[1] < 1.5:
+            peak = ((cw[0] + cw[1]) / 2, 1.5)   # 다른 장면으로 끼운 시범 (움직임이 작아도)
         if not ons and peak[1] < 1.5:
             continue
         if not ons and not any(a - 0.3 <= c <= b + 0.3 for c in sig.get("cuts") or ()):
@@ -3337,7 +3375,16 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
 
     if shorts_hook and B.pos > 3.0:
-        hk = B.title(_short_text(hook, 14), 0.0, SHORTS_HOOK_SEC, dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop"))
+        hlook = dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop")
+        lim = 14   # 쇼츠 한 줄 14자 — 문장 부호·글꼴에 없어 바꾼 '...'까지 셈 (판정 U6: '퍼스트 터치 레슨, 이것만 알면...' 16자)
+        htxt = _short_text(hook, lim)
+        head = re.split(r"[,.?!]", str(hook))[0].strip()
+        if htxt != hook and 4 <= len(head.replace(" ", "")) <= lim and head != str(hook).strip():
+            htxt = head   # 잘라야 하면 앞 구절에서 ('퍼스트 터치 레슨, 이것만…' 대신 '퍼스트 터치 레슨')
+        while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
+            lim -= 1
+            htxt = _short_text(hook, lim)
+        hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
         B.sfx.append((0.0, pal.get("title", "짠"), None, "title"))
         B.event("hook", 0.0, hk["text"], "쇼츠 첫 2.5초 훅 자막", refs={"titles": [hk["id"]], "sfx": [len(B.sfx) - 1]})
 
