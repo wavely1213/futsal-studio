@@ -136,6 +136,27 @@ def start_job(name, fn, by=None, ctx=None):
     return jid
 
 
+_SECS = {}  # 보관함 영상 길이 (이름, 크기, 수정 시각) → 초 · 받아쓰기 예상 시간용 (ffmpeg -i 를 고를 때마다 다시 안 부름)
+
+
+def _video_secs(name):
+    """보관함 영상 길이(초) · 없거나 못 읽으면 0."""
+    p = core.VIDEOS / name
+    try:
+        st = p.stat()
+    except OSError:
+        return 0.0
+    key = (name, st.st_size, st.st_mtime_ns)
+    if key not in _SECS:
+        try:
+            _SECS[key] = float(editor.probe(p)["duration"] or 0)
+        except Exception:  # noqa: BLE001 — 안내용 · 못 읽으면 0
+            _SECS[key] = 0.0
+        if len(_SECS) > 2000:
+            _SECS.clear()
+    return _SECS[key]
+
+
 def _started(ok):
     """작업 시작 응답: jobId 로 화면이 '내가 시킨 작업'의 끝을 기다림 (/api/state?job=<번호> 의 done)."""
     return {"ok": bool(ok), "jobId": ok or None, "error": None if ok else BUSY_MSG}
@@ -926,6 +947,17 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
+        # ---- 받아쓰기 모델: 이 PC 에 맞는 기본값 · 고른 영상의 예상 시간·메모리 (누르기 전에 · D-070) ----
+        if path == "/api/whisper/estimate":
+            names = b.get("names") or []
+            if not isinstance(names, list) or len(names) > 500 or not all(isinstance(n, str) for n in names):
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            try:
+                for n in names:
+                    editor.safe_name(n)
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            return self._send(200, dict(core.whisper_estimate(sum(_video_secs(n) for n in names)), ok=True))
         # ---- 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 (원본은 그대로) ----
         if path == "/api/bundle":
             try:
@@ -941,7 +973,7 @@ class Handler(BaseHTTPRequestHandler):
                 r = bundle.make_bundle(names, b.get("title"), log)
                 # 이어서 편집점 찾기까지 같은 작업 안에서 (그사이 편집실·썸네일에 다녀와도 끊기지 않게)
                 try:
-                    self._analyze({"names": [r["name"]], "model": b.get("model") or "large-v3-turbo"})
+                    self._analyze({"names": [r["name"]], "model": core.model_of(b.get("model"))})
                     r["analyzed"] = True
                 except Exception as e:
                     studiolog.trace(e)
@@ -1297,7 +1329,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _analyze(b):
-        out = core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))
+        out = core.analyze_many(b["names"], log, core.model_of(b.get("model")))  # 안 보냈거나 모르는 값이면 이 PC 사양에 맞는 기본값
         failed = getattr(out, "failed", None) or {}  # 여러 개 중 그 파일만의 문제(깨짐 등)로 건너뛴 영상 → 쉬운 안내
         # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
         for n in b["names"]:

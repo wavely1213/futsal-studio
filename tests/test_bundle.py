@@ -405,7 +405,7 @@ class TestBundleRoute(BundleBase):
             st = wait()
             self.assertIsNone(st["error"])
             self.assertEqual(st["result"]["name"], "묶음_20240701_경기 하이라이트 (2).mp4")
-            self.assertEqual(analyzed[-1]["model"], "large-v3-turbo")
+            self.assertEqual(analyzed[-1]["model"], core.default_model(), "고르지 않았으면 이 PC 사양에 맞는 기본값 (D-070)")
             self.assertIn("받아쓰기 엔진", st["result"]["analyze_error"])
             self.assertTrue(any("편집점 찾기는 하지 못했어요" in m for m in self.logs), self.logs)
 

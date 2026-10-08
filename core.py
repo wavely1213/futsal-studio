@@ -696,6 +696,73 @@ def _seg_of(s, fixmap):
     return dict(seg, text=" ".join(w["w"] for w in ws), words=ws), n
 
 
+# ---------- 받아쓰기 모델 고르기: PC 사양에 맞는 기본값 · 예상 시간·메모리 (D-070) ----------
+# 같은 60초 레슨 실측 (4코어·16GB 개발 PC, CPU int8): '빠르게'(small) 16.3초·최대 765MB · '정확하게'(large-v3-turbo) 47.7초·2,048MB
+# → (받아쓰기 초 / 영상 초, 최대 메모리 MB). 60분 영상이면 약 16분 vs 48분.
+WHISPER_COST = {"small": (0.27, 765), "large-v3-turbo": (0.80, 2048)}
+WHISPER_LABEL = {"small": "빠르게", "large-v3-turbo": "정확하게"}
+WHISPER_CORES_MEASURED = 4  # 위 값을 잰 PC 의 받아쓰기 스레드 수 (_whisper 는 min(8, 코어) 스레드)
+LOW_MEM_GB = 8.5  # 이하면 '빠르게' 기본 (8GB 노트북은 Windows 가 7.7~7.9GB 로 보여 줌 · 정확하게 2GB + 앱·브라우저면 스왑)
+LOW_CORES = 4     # 이하면 '빠르게' 기본 (정확하게는 영상 길이의 약 0.8배가 걸림)
+_SPEC = {}
+
+
+def _mem_total_gb():
+    """이 PC 의 전체 메모리(GB) · 모르면 None (표준 라이브러리만: Windows GlobalMemoryStatusEx · 그 밖 sysconf)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        class MemStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong), ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong), ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong), ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        try:
+            st = MemStatus()
+            st.dwLength = ctypes.sizeof(MemStatus)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return round(st.ullTotalPhys / 1024 ** 3, 1)
+        except (AttributeError, OSError):
+            pass
+        return None
+    try:
+        return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3, 1)
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
+def pc_spec():
+    """{"memGB": 전체 메모리 GB 또는 None, "cores": 논리 코어 수} — 한 번 재서 기억."""
+    if not _SPEC:
+        _SPEC.update(memGB=_mem_total_gb(), cores=os.cpu_count() or 4)
+    return dict(_SPEC)
+
+
+def default_model(spec=None):
+    """이 PC 에 맞는 받아쓰기 기본값: 메모리 8GB 이하이거나 4코어 이하면 '빠르게'(small), 아니면 '정확하게'."""
+    spec = spec or pc_spec()
+    low = (spec.get("memGB") is not None and spec["memGB"] <= LOW_MEM_GB) or (spec.get("cores") or 4) <= LOW_CORES
+    return "small" if low else "large-v3-turbo"
+
+
+def model_of(v):
+    """화면·휴대폰이 보낸 모델 이름 → 아는 모델만 (없거나 모르는 값이면 이 PC 기본값)."""
+    return v if v in WHISPER_COST else default_model()
+
+
+def whisper_estimate(secs, spec=None):
+    """영상 secs 초를 받아쓸 때 모델마다 {secs: 예상 초, perHour: 60분 영상이면, memMB: 최대 메모리, tight: 이 PC 메모리에 빠듯함}
+    + 기본값·사양.
+    코어가 잰 PC 보다 적으면 그만큼 느리게 · 많아도 빨라진다고 보지 않음 (하이퍼스레딩은 거의 안 빨라짐 · 넉넉하게 안내)."""
+    spec = spec or pc_spec()
+    slow = max(1.0, WHISPER_CORES_MEASURED / max(1, min(8, spec.get("cores") or 4)))
+    mem = spec.get("memGB")
+    models = {m: {"secs": round(max(0.0, float(secs or 0)) * rate * slow), "perHour": round(3600 * rate * slow), "memMB": mb,
+                  "label": WHISPER_LABEL[m], "tight": bool(mem) and mb / 1024 > mem * 0.25}
+              for m, (rate, mb) in WHISPER_COST.items()}
+    return {"default": default_model(spec), "memGB": mem, "cores": spec.get("cores"), "dur": round(float(secs or 0), 1), "models": models}
+
+
 class FileProblem(RuntimeError):
     """그 영상 파일 하나의 문제 (깨짐·소리 없음) — 여러 개를 찾을 때는 건너뛰고 나머지를 계속 (analyze_many)."""
 

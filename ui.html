@@ -64,6 +64,9 @@
   .phead .sp { flex: 1; }
   .bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
   .bar .sp { flex: 1; }
+  .bar .mhint { flex-basis: 100%; margin-top: -2px; text-align: right; font-size: 12.5px; color: var(--ink-2); }
+  .bar .mhint:empty { display: none; }
+  .bar .mhint b { color: var(--ink); font-weight: 600; }
   .inp { border: 1px solid var(--line); background: var(--surface); padding: 9px 12px; border-radius: 10px; min-width: 260px; font: inherit; color: inherit; }
   .sh { font-size: 15px; margin: 26px 0 12px; }
   .styles .st { padding: 16px; }
@@ -798,8 +801,9 @@
         <div class="sp"></div>
         <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
         <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
-        <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
+        <div class="seg" id="modelSeg" title="받아쓰기 방식 · 처음엔 이 PC 사양에 맞게 골라 두고, 바꾸면 기억해요"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
+        <div class="mhint" id="modelHint"></div>
       </div>
       <div class="failslot"></div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
@@ -1271,6 +1275,12 @@ document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
   seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
   if (seg.id === "kindSeg" && remote.length) loadRemote();
+}));
+const savedModel = modelSaved();
+if (savedModel) setSeg("modelSeg", savedModel);  // 서버에 묻기 전에도 고른 값으로 (예전 값이 먼저 보였다 바뀌지 않게)
+$("modelSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+  try { localStorage.setItem(MODEL_KEY, b.dataset.v); } catch (e) {}
+  renderModelHint();
 }));
 
 /* 1. 소재 찾기 */
@@ -2020,6 +2030,40 @@ function renderEdList() {
 $("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
 
 /* 공통: 작업 실행 · 상태 */
+/* 2-0. 받아쓰기 모델: 처음엔 이 PC 사양에 맞게(메모리 8GB 이하·4코어 이하면 '빠르게') · 고른 값은 기억 · 누르기 전에 예상 시간·메모리 */
+const MODEL_KEY = "whisperModel", MODELS = ["large-v3-turbo", "small"];
+let modelInfo = null, modelAsk = 0, modelSelKey = null, modelTimer = 0;
+function modelSaved() { try { const v = localStorage.getItem(MODEL_KEY); return MODELS.includes(v) ? v : ""; } catch (e) { return ""; } }
+function longTxt(sec) {  // 예상 시간: 약 16분 · 약 1시간 20분 · 1분 안
+  const m = Math.round(sec / 60);
+  if (m < 1) return "1분 안";
+  return m < 60 ? `약 ${m}분` : `약 ${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
+}
+function renderModelHint() {
+  const el = $("modelHint"), j = modelInfo;
+  if (!el || !j || !j.models) return;
+  const v = segVal("modelSeg"), m = j.models[v], rec = j.models[j.default], n = libSel.size;
+  const spec = j.memGB ? `메모리 ${Math.round(j.memGB)}GB · ${j.cores}코어` : `${j.cores}코어`;
+  const gb = mb => (mb / 1000).toFixed(1).replace(/\.0$/, "");  // 765MB → 0.8GB
+  if (!n) { el.innerHTML = `이 PC(${spec})에는 <b>'${rec.label}'</b>가 알맞아요 · 60분 영상이면 '${m.label}' ${longTxt(m.perHour)} · 메모리 약 ${gb(m.memMB)}GB`; return; }
+  const warn = v !== j.default && m.tight ? ` · 이 PC 메모리로는 느려질 수 있어서 '${rec.label}'를 권해요` : "";
+  el.innerHTML = `고른 영상 ${n}개${j.dur ? ` (${mmss(j.dur)})` : ""} · <b>'${m.label}'</b> ${longTxt(m.secs)} · 메모리 약 ${gb(m.memMB)}GB${warn}`;
+}
+async function loadModelInfo() {
+  const names = [...libSel], k = ++modelAsk;
+  const j = await api("/api/whisper/estimate", { names }).catch(() => null);
+  if (!j || !j.ok || k !== modelAsk) return;
+  modelInfo = j;
+  if (!modelSaved()) setSeg("modelSeg", j.default);  // 고른 적이 없으면 이 PC 에 맞는 값
+  renderModelHint();
+}
+function watchModelSel() {  // 고른 영상이 바뀌면 (조금 뒤 한 번) 예상 시간을 다시
+  const key = [...libSel].sort().join("\n");
+  if (key === modelSelKey) return;
+  modelSelKey = key;
+  clearTimeout(modelTimer);
+  modelTimer = setTimeout(loadModelInfo, 250);
+}
 function sync() {
   const busy = !!state.job;
   $("btnList").disabled = busy;
@@ -2035,6 +2079,7 @@ function sync() {
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
+  watchModelSel();
 }
 function job(path, body, done) {
   const panel = curPanel();
