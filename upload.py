@@ -454,16 +454,15 @@ _PROMO_LEAD = re.compile(r"^(?:(?:아\s*참|아참|참|참고로|그리고|아|�
 
 def promo_lines(segs):
     """받아쓰기 → 영상에서 말한 레슨·수강 홍보 문장들 (설명 '▶ 레슨 문의' 줄 · 나중에 설명 틀 링크 칸의 기본값으로도).
-    takes.find_offscript 가 '영상 밖 안내 말(홍보)'로 본 문장 그대로 — 앞 군말('아 참,')만 떼고 'dm'은 'DM', 끝에 마침표."""
+    takes.notice_kinds 가 홍보로 본 문장 (연락할 곳·'레슨 문의'에 '주세요'·'주시면' 같은 부탁 꼴이 있는 줄과 바로 옆 '주말반 자리 있어요') —
+    촬영 준비 말·끝인사 뒤 촬영 끝 말 안에서 한 홍보도 넣음 (영상에서는 잘려도 설명에는 남게). 앞 군말('아 참,')만 떼고 'dm'은 'DM', 끝에 마침표."""
     import captions
     import takes
-    sents = captions.split_sentences(segs or [])
-    spans = [(o["a"], o["b"]) for o in takes.find_offscript(sents) if o["kind"] == "promo"]
+    sents = takes._clean(captions.split_sentences(segs or []))
+    kinds = takes.notice_kinds(sents)
     out = []
-    for s in sents:
-        if not any(a <= (s["start"] + s["end"]) / 2 <= b for a, b in spans):
-            continue
-        t = _PROMO_LEAD.sub("", re.sub(r"\s+", " ", str(s["text"])).strip())
+    for i in sorted(k for k, v in kinds.items() if v == "promo"):
+        t = _PROMO_LEAD.sub("", re.sub(r"\s+", " ", str(sents[i]["text"])).strip())
         t = re.sub(r"(?<![A-Za-z])dm(?![A-Za-z])", "DM", t, flags=re.I).strip(" ,")
         if len(t) >= 4:
             t = t if re.search(r"[.!?…]$", t) else t + "."
@@ -474,11 +473,14 @@ def promo_lines(segs):
 
 def add_promo(text, lines, notes=None):
     """설명 글에 '▶ 레슨 문의' 묶음을 넣음 — 설명 틀의 {레슨 문의} 자리 (없으면 목차·해시태그 앞, 그것도 없으면 맨 끝).
-    lines 가 비면 {레슨 문의} 자리만 지움."""
+    lines 가 비면 {레슨 문의} 자리만 지움 · 설명 틀에 이미 '▶ 레슨 문의' 묶음(감독님이 직접 쓴 연락처)이나 같은 문장이 있으면 넣지 않음."""
     text = str(text or "")
-    block = (PROMO_HEAD + "\n" + "\n".join(lines)) if lines else ""
+    have = PROMO_HEAD in text.replace(PROMO_SLOT, "") or any(ln.rstrip(".") in text for ln in lines or ())
+    block = (PROMO_HEAD + "\n" + "\n".join(lines)) if lines and not have else ""
+    if lines and have and notes is not None:
+        notes.append("설명 틀에 이미 '▶ 레슨 문의'가 있어서 영상에서 말한 레슨 안내는 따로 넣지 않았어요")
     if PROMO_SLOT in text:
-        text = text.replace(PROMO_SLOT, block)
+        text = re.sub(r"\n{3,}", "\n\n", text.replace(PROMO_SLOT, block))
     elif block:
         ls = text.split("\n")
         at = next((i for i, ln in enumerate(ls) if ln.startswith("▶ 목차")), None)

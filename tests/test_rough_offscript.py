@@ -96,13 +96,13 @@ class FindOffscriptTest(unittest.TestCase):
         off = takes.find_offscript(captions.split_sentences(v["transcript"]), v["duration"])
         by = {o["kind"]: o for o in off}
         self.assertEqual(sorted(by), ["cta", "post", "pre", "promo"])
-        self.assertEqual((by["pre"]["a"], by["pre"]["b"]), (0.0, 10.5))  # 첫 인사 '안녕하세요.'(10.50) 시작까지
+        self.assertEqual((by["pre"]["a"], by["pre"]["b"]), (0.0, 7.94))  # 준비 말 끝('네, 찍히고 있어요.' 7.64 + 0.3)까지 — 그 뒤 빈 곳은 가편집이 판단
         self.assertIn("녹화", by["pre"]["text"])
         self.assertIn("찍히고 있어요", by["pre"]["text"])  # 수강생 대답도 함께
         self.assertTrue(by["post"]["text"].startswith("자 컷 수고했어요"))
         self.assertGreaterEqual(by["post"]["b"], v["duration"])  # 영상 끝까지
         self.assertIn("지금 다음 영상에서 만나요", by["post"]["text"])  # 촬영 뒤 지어낸 끝말도 그 안에
-        self.assertLess(by["post"]["a"], 158.6)
+        self.assertLessEqual(by["post"]["a"], 159.05)  # 끝인사 '감사합니다'(받아쓰기 ~158.50) 뒤 0.5초 · 실제 '자, 컷!'(160.47) 앞
         self.assertIn("인스타그램", by["promo"]["text"])
         self.assertIn("주말판 아직 자리 있어요", by["promo"]["text"])  # 바로 옆 '자리 있어요'도 홍보로
         self.assertEqual(by["cta"]["text"], "구독이랑 좋아요 한 번씩 눌러주시고요")
@@ -111,7 +111,7 @@ class FindOffscriptTest(unittest.TestCase):
         sents = [S(0.5, 3.0, "녹화 됐어?"), S(3.4, 3.8, "네"), S(4.5, 8.0, "여러분 이 기술 하나면 수비 다 뚫습니다"),
                  S(9.0, 11.0, "안녕하세요 풋살사관학교 최경진입니다"), S(12.0, 20.0, "오늘은 턴 동작을 알려 드릴게요")]
         off = takes.find_offscript(sents)
-        self.assertEqual([(o["kind"], o["a"], o["b"]) for o in off], [("pre", 0.0, 4.5)])
+        self.assertEqual([(o["kind"], o["a"], o["b"]) for o in off], [("pre", 0.0, 4.1)])
         self.assertEqual(self.kinds([S(0.5, 3.0, "여러분 이 기술 하나면 수비 다 뚫습니다"), S(4.0, 6.0, "안녕하세요")]), [])
         # 질문형 훅('왜 안 되죠?')은 '됐어?' 같은 준비 말이 아님 · 그 말뿐인 '준비 됐어?'만
         self.assertEqual(self.kinds([S(0.5, 2.0, "이게 왜 안 되죠?"), S(2.5, 4.0, "안녕하세요")]), [])
@@ -150,7 +150,7 @@ class NoCondTranscriptTest(unittest.TestCase):
         self.assertTrue(any(s["end"] - s["start"] > 30 for s in v["transcript"]))
         by = {o["kind"]: o for o in takes.find_offscript(captions.split_sentences(v["transcript"]), v["duration"])}
         self.assertEqual(sorted(by), ["cta", "post", "pre", "promo"])
-        self.assertEqual(by["pre"]["b"], 10.42)
+        self.assertEqual(by["pre"]["b"], 7.96)
         self.assertIn("자 컷 수고했어요", by["post"]["text"])
         self.assertIn("DM", by["promo"]["text"])
 
@@ -188,7 +188,7 @@ class RecommendOffscriptTest(Work):
         segs = FIX["LESSON04"]["transcript"]
         r = editor.recommend(self.name)
         self.assertGreaterEqual(r["tidy"][0]["in"], 10.3)  # '안녕하세요'(10.50) 바로 앞 여유만
-        self.assertLessEqual(r["tidy"][-1]["out"], 158.6)  # 마지막 '감사합니다' 뒤 '자 컷 수고했어요'·'네 좋아요' 없음
+        self.assertLessEqual(r["tidy"][-1]["out"], 159.05)  # 마지막 '감사합니다' 뒤 '자 컷 수고했어요'(실제 160.47~)·'네 좋아요' 없음
         kept = " ".join(text_in(segs, c["in"], c["out"]) for c in r["tidy"])
         for gone in ("녹화되고", "빨간불", "찍히고", "수고했어요", "마시고"):
             self.assertNotIn(gone, kept)
@@ -234,7 +234,7 @@ class RecommendOffscriptTest(Work):
         seq = editor.auto_sequences(self.name, {"duration": 170.14, "width": 1920, "height": 1080}, kinds=("long",))[0]
         v1 = sorted((it for it in seq["items"] if it["track"] == "V1"), key=lambda it: it["start"])
         self.assertGreaterEqual(v1[0]["in"], 10.3)
-        self.assertLessEqual(max(it["out"] for it in v1), 158.6)
+        self.assertLessEqual(max(it["out"] for it in v1), 159.05)
 
 
 class ShortsEdgesTest(Work):
@@ -270,9 +270,9 @@ class ShortsEdgesTest(Work):
     def test_msgraw02_reaction_starts_after_its_demo(self):
         self.put("MSGRAW02", "MSGRAW02.mp4")
         r = editor.recommend("MSGRAW02.mp4")
-        s = next(s for s in r["shorts"] if s["title"].startswith("아이고"))
+        s = next(s for s in r["shorts"] if s["start"] <= 61.21 < s["end"])  # '아이고, 공이 조금 뒤로 갔네요.'로 여는 쇼츠
         demo_a, demo_b, kicks = FIX["MSGRAW02"]["demos"][1]  # 정답 실패 시범 53.97~60.97 · 공 소리 56.63·59.17
-        self.assertLessEqual(s["start"], demo_a + 0.5)
+        self.assertLessEqual(s["start"], kicks[0] - 1.0)  # 공 소리(봉우리 56) 1초 앞부터 — 실패 장면이 반응 말 앞에
         self.assertGreaterEqual(s["start"], 53.34)  # 앞 설명 문장 끝(53.34) 뒤 — 시범부터
         c0 = s["cuts"][0]
         self.assertLessEqual(c0["in"], kicks[0])
@@ -297,8 +297,10 @@ class ShortsEdgesTest(Work):
         quick = [S(0.0, 3.0, "패스하고 바로 뛰세요."), S(3.2, 4.0, "나이스!"), S(4.5, 9.0, "이렇게 하는 거예요.")]
         self.assertEqual(editor._short_edges(quick, set(), 1, 2), (2, 2, None))  # 앞에 시범이 없는 짧은 반응 줄은 뺌
         demo = [S(0.0, 3.0, "한번 보여 드릴게요."), S(9.0, 10.0, "봤죠?"), S(10.5, 14.0, "주고 바로 뛰니까 못 따라와요.")]
-        self.assertEqual(editor._short_edges(demo, set(), 1, 2), (1, 2, 3.1))  # 큰 소리가 없어도 3초 넘게 빈 곳은 시범
-        self.assertEqual(editor._short_edges(demo, set(), 1, 2, peaks=[5.0])[2], 3.1)
+        self.assertEqual(editor._short_edges(demo, set(), 1, 2), (1, 2, (3.1, 9.0)))  # 큰 소리가 없어도 3~15초 빈 곳은 시범 (확실한 반응 말)
+        self.assertEqual(editor._short_edges(demo, set(), 1, 2, peaks=[5.0])[2], (4.0, 9.0))  # 공 소리 1초 앞부터 (빈 곳 앞쪽 1초는 뺌)
+        quiet = [{"start": 3.0, "end": 9.0}]  # 그 빈 곳이 조용하면(무음) 시범이 아님
+        self.assertEqual(editor._short_edges(demo, set(), 1, 2, silences=quiet), (2, 2, None))
 
 
 class KitPromoTest(Work):
@@ -330,6 +332,302 @@ class KitPromoTest(Work):
         kit = upload.build_kit(name, save=False)
         self.assertIn("▶ 레슨 문의\n레슨 문의는 인스타그램 DM으로 주시면 돼요.", kit["description"])
         self.assertEqual(kit["promo"], ["레슨 문의는 인스타그램 DM으로 주시면 돼요.", "주말판 아직 자리 있어요."])
+
+
+# ---------- 검토 고침 (E12 2차): 실제 같은 한국어 레슨 대사로 만든 경우 ----------
+
+def lines(*rows):
+    """(시작, 끝, 대사) … → 문장 구간 (단어 시각은 글자 수대로 나눔)."""
+    out = []
+    for a, b, t in rows:
+        toks = t.split()
+        n = sum(len(x) for x in toks)
+        ws, x = [], a
+        for w in toks:
+            y = x + (b - a) * len(w) / n
+            ws.append({"w": w, "s": round(x, 2), "e": round(y, 2), "p": 0.9})
+            x = y
+        out.append(S(a, b, t, ws))
+    return out
+
+
+TWO_SIGNOFFS = [(0.5, 4.0, "안녕하세요, 풋살사관학교 최경진입니다."), (4.5, 9.0, "오늘은 수비를 벗겨내는 컷백 드리블을 알려 드릴게요."),
+                (10, 15, "자, 첫 번째 포인트는 공을 몸 앞에 두는 거예요."), (15.5, 20, "공이 몸 뒤에 있으면 방향을 바꿀 수가 없어요."),
+                (20.5, 23, "한번 보여 드릴게요."), (30.5, 34, "봤죠? 공이 항상 앞에 있어요."), (35, 40, "두 번째 포인트는 디딤발 위치예요."),
+                (40.5, 46, "디딤발을 공 옆에 딱 붙여야 바로 꺾을 수 있어요."), (46.5, 52, "발목에 힘을 주고 안쪽으로 끌어 주세요."),
+                (52.5, 55, "다시 한번 보여 드릴게요."), (62.5, 65, "나이스! 이거예요."), (66, 72, "세 번째 포인트는 꺾고 나서 바로 속도를 올리는 거예요."),
+                (72.5, 78, "꺾기만 하고 멈추면 수비가 다시 따라와요."), (78.5, 84, "이 세 가지만 기억하면 컷백 무조건 됩니다."),
+                (85, 89, "오늘은 여기까지입니다. 감사합니다."), (91, 94, "아, 그리고 하나 더 알려 드릴게요."), (94.5, 100, "컷 백 할 때 시선은 반대쪽을 보세요."),
+                (100.5, 106, "그러면 수비가 시선 쪽으로 먼저 움직여요."), (106.5, 110, "이게 진짜 마지막 꿀팁이에요."), (111, 114, "진짜 끝! 다음 영상에서 만나요."),
+                (116, 119, "자 컷, 수고했어요."), (119.5, 121, "네, 수고하셨습니다.")]
+
+
+class PostRollReviewTest(unittest.TestCase):
+    """촬영 끝 말은 끝에서 거꾸로: 마지막 내용 문장 뒤 마무리 묶음에서 첫 촬영 끝 말 앞의 마지막 끝인사 뒤만 (BR-060)."""
+
+    def post(self, rows):
+        return [(o["a"], o["text"]) for o in takes.find_offscript(captions.split_sentences(lines(*rows))) if o["kind"] == "post"]
+
+    def test_two_signoffs_keep_the_bonus(self):
+        post = self.post(TWO_SIGNOFFS)
+        self.assertEqual([t for _, t in post], ["자 컷, 수고했어요. 네, 수고하셨습니다."])  # 첫 끝인사 뒤 덤 꿀팁·두 번째 끝인사는 그대로
+        self.assertGreaterEqual(post[0][0], 114.0)
+
+    def test_helper_thanks_after_60_percent(self):
+        rows = [(0.5, 4, "안녕하세요, 풋살사관학교입니다."), (4.5, 9, "오늘은 원터치 패스를 연습해 볼게요."),
+                (10, 15, "원터치 패스는 공이 오기 전에 몸을 열어 두는 게 핵심이에요."), (21.5, 27, "수강생 민수 씨랑 같이 해 볼게요."),
+                (35.5, 39, "좋습니다. 이렇게 하는 거예요."), (40, 46, "두 번째는 받는 순간 무릎을 살짝 굽히는 거예요."),
+                (52.5, 58, "세 번째는 시선이에요. 공만 보지 말고 동료를 보세요."), (64.5, 69, "오늘 시범은 민수 씨가 도와주셨어요."),
+                (69.5, 72, "도와주셔서 감사합니다."), (73, 79, "자, 이제 세 가지를 한 번에 해 볼게요."), (79.5, 85, "몸 열고, 무릎 굽히고, 고개 들고."),
+                (93.5, 97, "완벽해요. 이게 원터치 패스예요."), (98, 104, "이 세 가지만 기억하시면 경기에서 바로 쓸 수 있어요."),
+                (105, 108, "감사합니다."), (110, 111.5, "컷!")]
+        self.assertEqual([t for _, t in self.post(rows)], ["컷!"])
+        # 도움 준 사람에게 한 '감사합니다' 뒤 '준비 운동은 끝났으니까' · 학생에게 '수고했어요'가 있어도 레슨은 그대로 (끝인사가 하나뿐)
+        rows2 = [(1.0, 4.0, "안녕하세요 풋살사관학교 최경진입니다."), (4.5, 8.5, "오늘은 인사이드 패스를 정확하게 차는 법을 알려 드릴게요."),
+                 (9.0, 40.0, "첫 번째 포인트는 디딤발 방향이에요."), (55.0, 57.5, "시범 도와준 민수 씨 감사합니다."),
+                 (58.0, 62.5, "자 이제 기본 동작은 끝났으니까 실전처럼 움직이면서 해 볼게요."), (63.0, 66.0, "민수 씨 수고했어요 패스하고 바로 앞으로 뛰어 나가세요."),
+                 (71.0, 75.0, "좋아요 이렇게 움직이면서도 디딤발은 똑같아요."), (75.5, 78.0, "마지막으로 한 번 더 정리할게요."),
+                 (78.5, 82.0, "이 세 가지만 지키면 패스가 확 달라져요."), (82.5, 85.5, "꼭 연습해 보세요. 감사합니다.")]
+        self.assertEqual(self.post(rows2), [])
+
+    def test_lesson_words_are_not_postroll(self):
+        base = [(0.5, 4, "안녕하세요, 풋살사관학교입니다."), (5, 40, "오늘은 컷 동작을 알려 드릴게요."), (41, 45, "오늘은 여기까지입니다. 감사합니다.")]
+        for tail in ("컷 백 할 때 시선은 반대쪽을 보세요.", "인사이드 컷으로 방향을 바꿔요.", "컷 드리블은 무게중심이 낮아야 해요.",
+                     "끝났다고 멈추지 마세요.", "한 번 더 찍어 차세요."):
+            self.assertEqual(self.post(base + [(46, 50, tail), (50.5, 54, "이게 진짜 마지막 꿀팁이에요.")]), [], tail)
+        # '수고하셨습니다 여러분' 뒤에 끝인사가 또 오면 영상 끝인사 (약한 말은 자르지 않음)
+        self.assertEqual(self.post(base[:2] + [(41, 44, "오늘은 여기까지입니다."), (44.5, 47, "수고하셨습니다 여러분."), (47.5, 50, "다음 영상에서 만나요.")]), [])
+        # 외친 '컷'은 짧은 줄이거나 '컷'으로 시작할 때 (부호 없는 받아쓰기도)
+        self.assertEqual([t for _, t in self.post(base + [(46, 48, "자 컷 수고했어요"), (48.5, 49, "네")])], ["자 컷 수고했어요 네"])
+
+    def test_closing_tail_is_kept(self):
+        # 끝인사 뒤 0.5초까지 남김 (받아쓰기 낱말 끝이 소리보다 이름 · 다음 말이 그 안에 끝나면 거기까지)
+        post = self.post([(0.5, 4, "안녕하세요"), (5, 40, "오늘은 패스 연습이에요."), (41, 43.0, "감사합니다."), (45, 46, "컷!")])
+        self.assertEqual(post[0][0], 43.5)
+        post = self.post([(0.5, 4, "안녕하세요"), (5, 40, "오늘은 패스 연습이에요."), (41, 43.0, "감사합니다."), (43.0, 43.3, "컷!")])
+        self.assertEqual(post[0][0], 43.3)
+
+
+class PreRollReviewTest(unittest.TestCase):
+    def kinds(self, rows):
+        return [o["kind"] for o in takes.find_offscript(captions.split_sentences(lines(*rows)))]
+
+    def test_hook_with_football_words_is_kept(self):
+        greet = [(9, 12, "안녕하세요, 풋살사관학교입니다."), (12.5, 17, "오늘은 페이크 슛을 알려 드릴게요.")]
+        for hook in ("페이크 액션 하나로 수비가 완전히 무너집니다.", "이렇게 차면 슛 들어갑니다.", "슛 들어가는 타이밍만 알면 돼요.",
+                     "공이 찍히는 각도가 중요해요.", "하나 둘 셋 하면 뛰어요.", "준비 됐나요? 오늘 진짜 쉬워요."):
+            self.assertEqual(self.kinds([(0.5, 4.5, hook)] + greet), [], hook)
+        self.assertEqual(self.kinds([(0.5, 4.5, "페이크 액션 하나로 수비가 완전히 무너집니다."), (5, 8, "이렇게 차면 슛 들어갑니다.")] + greet), [])
+        # 짧은 촬영 말은 그대로 준비 말
+        for crew in ("레디 액션!", "슛 들어갈게요.", "자, 슛 들어갑니다.", "마이크 됐어?", "카메라 돌아가요?", "준비 됐어요?", "됐어?"):
+            self.assertEqual(self.kinds([(0.5, 2.5, crew), (3, 3.5, "네")] + greet), ["pre"], crew)
+
+    def test_cold_open_demo_before_greeting_survives(self):
+        """'녹화 되고 있지?' → 시범(공 소리) → '나이스! 이게 오늘 배울 슛이에요.' → 인사: 준비 말만 자르고 시범·훅은 롱폼에 남음."""
+        tmp = Path(tempfile.mkdtemp(prefix="E12 콜드오픈 "))
+        work = tmp / "작업"
+        dirs = {"WORK": work, "VIDEOS": work / "videos", "ANALYSIS": work / "analysis", "OUT": work / "out"}
+        try:
+            with mock.patch.multiple(core, **dirs):
+                d = core.adir("콜드오픈.mp4")
+                d.mkdir(parents=True)
+                rows = [(0.5, 2.5, "녹화 되고 있지?"), (3, 3.6, "네."), (11.5, 15, "나이스! 이게 오늘 배울 슛이에요."),
+                        (16, 19, "안녕하세요, 풋살사관학교 최경진입니다."), (19.5, 24, "오늘은 발등 슈팅을 알려 드릴게요."),
+                        (25, 60, "첫 번째는 디딤발을 공 옆에 두는 거예요."), (61, 65, "오늘은 여기까지. 다음 영상에서 만나요.")]
+                (d / "transcript.json").write_text(json.dumps(lines(*rows), ensure_ascii=False), encoding="utf-8")
+                (d / "analysis.json").write_text(json.dumps({"silences": [], "loud_peaks": [{"time": 6.2}, {"time": 9.1}]}), encoding="utf-8")
+                r = editor.recommend("콜드오픈.mp4")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertEqual([(o["kind"], o["b"]) for o in r["offscript"]], [("pre", 3.9)])
+        first = r["tidy"][0]
+        self.assertLessEqual(first["in"], 5.2)  # 첫 공 소리(6.2) 1초 앞부터
+        self.assertGreater(first["in"], 3.6)  # 준비 말('네.')은 빠짐
+        self.assertGreaterEqual(first["out"], 15.0)  # 시범 → '나이스!'가 한 컷
+
+
+class NoticeReviewTest(unittest.TestCase):
+    """홍보·구독 안내는 부탁 꼴이 있을 때만 — 레슨 설명에 나온 '인스타 DM'·'레슨 받는 친구들'·'좋아요'는 아님 (BR-060 · BR-062)."""
+
+    def test_lesson_lines_are_not_promo_or_cta(self):
+        for t in ("인스타 DM으로 많이 물어보셔서 오늘은 인사이드 킥을 준비했어요.", "레슨 받는 친구들이 제일 많이 하는 실수가 이거예요.",
+                  "카톡으로 영상 보내 주신 분도 이것만 고치면 돼요.", "문의하신 분이 있어서 준비했어요.", "레슨 신청한 친구들이 다 이걸 어려워해요."):
+            self.assertFalse(takes.is_promo(t), t)
+        for t in ("좋아요 한 번 더 해 볼게요", "좋아요 하고 바로 패스", "좋아요, 이렇게 하는 거예요", "구독자 여러분 안녕하세요"):
+            self.assertIsNone(takes.CTA_RX.search(t), t)
+        for t in ("레슨 문의는 인스타그램 DM으로 주세요.", "아참 레슨 문의는 인스타그램 dm으로 주시면 돼요", "수강 신청은 프로필 링크로 해 주세요.",
+                  "문의는 카톡 채널로 주세요."):
+            self.assertTrue(takes.is_promo(t), t)
+        for t in ("구독이랑 좋아요 한 번씩 눌러주시고요", "좋아요 꾹 눌러 주세요", "알림 설정까지 부탁드려요"):
+            self.assertIsNotNone(takes.CTA_RX.search(t), t)
+
+    def test_promolike_lesson_keeps_its_setup_line(self):
+        rows = [(0.5, 4, "안녕하세요, 풋살사관학교입니다."), (4.5, 10, "인스타 DM으로 많이 물어보셔서 오늘은 인사이드 킥을 준비했어요."),
+                (10.5, 16, "레슨 받는 친구들이 제일 많이 하는 실수가 이거예요."), (16.5, 22, "발목에 힘을 빼고 차는 거예요."),
+                (22.5, 28, "발목을 단단하게 고정해야 공이 똑바로 가요."), (28.5, 31, "좋아요, 한 번 더 해 볼게요."),
+                (55.5, 61, "카톡으로 영상 보내 주신 분도 이것만 고치면 돼요."), (68, 72, "오늘은 여기까지입니다. 감사합니다.")]
+        segs = lines(*rows)
+        self.assertEqual(takes.find_offscript(captions.split_sentences(segs)), [])
+        self.assertEqual(upload.promo_lines(segs), [])  # 설명 '▶ 레슨 문의'에도 안 들어감
+
+    def test_promo_after_signoff_goes_to_kit(self):
+        rows = [(0.5, 4, "안녕하세요, 풋살사관학교입니다."), (4.5, 60, "오늘은 볼 컨트롤 기초를 알려 드릴게요."),
+                (65, 69, "오늘은 여기까지입니다. 감사합니다."), (70, 76, "아 참, 레슨 문의는 인스타그램 DM으로 주세요. 주말반 아직 자리 있어요."),
+                (78, 80, "자 컷!")]
+        segs = lines(*rows)
+        off = takes.find_offscript(captions.split_sentences(segs))
+        self.assertEqual([o["kind"] for o in off], ["post"])  # 영상에서는 촬영 끝 말과 함께 잘리고
+        self.assertIn("레슨 문의", off[0]["text"])
+        self.assertEqual(upload.promo_lines(segs), ["레슨 문의는 인스타그램 DM으로 주세요.", "주말반 아직 자리 있어요."])  # 설명에는 남음
+
+    def test_template_with_own_lesson_block(self):
+        tpl = "{훅}\n\n▶ 레슨 문의\n인스타그램 @futsal_academy DM\n\n{해시태그}\n"
+        notes = []
+        out = upload.add_promo(upload.description(["훅"], [], ["#풋살"], template=tpl), ["레슨 문의는 인스타그램 DM으로 주세요."], notes)
+        self.assertEqual(out.count("▶ 레슨 문의"), 1)  # 감독님이 쓴 연락처 묶음 그대로 · 두 번째 머리글 없음
+        self.assertTrue(any("이미" in n for n in notes))
+        slot = "{훅}\n\n▶ 레슨 문의\n인스타그램 @futsal_academy DM\n\n{레슨 문의}\n\n{해시태그}\n"
+        self.assertEqual(upload.add_promo(upload.description(["훅"], [], ["#풋살"], template=slot), ["레슨 문의는 인스타그램 DM으로 주세요."], []).count("▶ 레슨 문의"), 1)
+
+
+class RecMixin:
+    """고정 자료 받아쓰기로 editor.recommend 를 돌림 (임시 작업 폴더)."""
+
+    def _rec(self, key, segs=None):
+        tmp = Path(tempfile.mkdtemp(prefix="E12 검토 "))
+        work = tmp / "작업"
+        dirs = {"WORK": work, "VIDEOS": work / "videos", "ANALYSIS": work / "analysis", "OUT": work / "out"}
+        try:
+            with mock.patch.multiple(core, **dirs):
+                d = core.adir("v.mp4")
+                d.mkdir(parents=True)
+                (d / "transcript.json").write_text(json.dumps(segs or FIX[key]["transcript"], ensure_ascii=False), encoding="utf-8")
+                (d / "analysis.json").write_text(json.dumps(FIX[key]["analysis"], ensure_ascii=False), encoding="utf-8")
+                return editor.recommend("v.mp4")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class GhostAndWordsTest(RecMixin, unittest.TestCase):
+    def test_ghost_duplicate_merges_into_the_real_sentence(self):
+        sents = [S(153.38, 157.44, "오늘은 여기까지 다음 영상에서 만나요"), S(157.44, 158.32, "감사합니다", W(("감사합니다", 157.44, 158.32))),
+                 S(158.32, 158.50, "감사합니다", W(("감사합니다", 158.32, 158.50)))]
+        out = captions.merge_ghosts(sents)
+        self.assertEqual([(s["start"], s["end"], s["text"]) for s in out[1:]], [(157.44, 158.5, "감사합니다")])
+        # 둘 다 제대로 된 길이면 진짜 되풀이 (말더듬 규칙이 판단)
+        two = [S(1.0, 2.0, "빠르게"), S(2.1, 3.0, "빠르게")]
+        self.assertEqual(len(captions.merge_ghosts(two)), 2)
+
+    def test_lesson04_long_cut_ends_on_the_whole_closing(self):
+        for key in ("LESSON04", "LESSON04_nocond", "LESSON04_nocond_vad35"):
+            r = self._rec(key)
+            last = r["tidy"][-1]
+            self.assertGreaterEqual(last["out"], 158.7, key)  # '감사합니다' 소리 끝(≈158.75)까지
+            self.assertLessEqual(last["out"], 159.05, key)  # '자 컷'(160.47) 앞
+            self.assertGreaterEqual(last["out"] - last["in"], 1.0, key)  # 0.3초짜리 잘린 조각으로 끝나지 않음
+            self.assertLessEqual(last["in"], 157.5, key)
+
+    def test_msgraw03_zero_length_word_is_not_a_sentence_end(self):
+        segs = FIX["MSGRAW03"]["transcript"]
+        sents = captions.split_sentences(segs, guess=False)
+        self.assertIn("네번째 빗나갔어요. 오면 세 개예요.", [s["text"] for s in sents])  # 61.23–61.23 '빗나갔어요.'에서 끊지 않음
+        r = self._rec("MSGRAW03")
+        for s in r["shorts"]:
+            self.assertFalse(61.0 <= s["end"] <= 61.5, s)
+
+    def test_old_transcript_without_words_is_judged_per_segment(self):
+        segs = [{k: v for k, v in s.items() if k != "words"} for s in FIX["LESSON04"]["transcript"]]
+        r = self._rec("LESSON04", segs)
+        bounds = sorted({round(x, 2) for s in segs for x in (s["start"], s["end"])})
+        cuts = [c for c in r["tidy"]] + [c for sh in r["shorts"] for c in sh["cuts"]]
+        for c in cuts:  # 어림한 문장 시각으로 구간 안을 자르지 않음: 컷 경계는 받아쓰기 구간 경계(±여유) 근처
+            for t in (c["in"], c["out"]):
+                self.assertLess(min(abs(t - b) for b in bounds), 1.05, (t, c))
+
+
+def covered(cuts, a, b):
+    return sum(max(0.0, min(b, c["out"]) - max(a, c["in"])) for c in cuts) / (b - a)
+
+
+class DemoKeptTest(RecMixin, unittest.TestCase):
+    """시범을 부르는 말('다시 해볼게요')·뺄 문장이 같은 받아쓰기 구간 안에 있어도 그 뒤 시범은 남음 (I-100 · 검토 1·15)."""
+
+    def test_msgraw02_success_demo_in_long(self):
+        for key in ("MSGRAW02", "MSGRAW02_nocond"):
+            r = self._rec(key)
+            a, b, kicks = FIX[key]["demos"][2]  # 성공 시범 71.99–77.49 · 공 소리 74.26 → '와, 이거죠. 완벽해요.'
+            self.assertTrue(any(c["in"] <= kicks[0] <= c["out"] for c in r["tidy"]), key)
+            self.assertGreaterEqual(covered(r["tidy"], a, b), 0.95, key)
+            whys = [j for j in r["junk_list"] if j["why"] == "슬레이트 말" and j["a"] > 70]
+            self.assertEqual(whys, [], key)  # 시범 앞 '다시 해볼게요.'는 슬레이트가 아님
+
+    def test_lesson04_retry_demo_after_merge_with_vad(self):
+        r = self._rec("LESSON04_nocond_vad35")  # 성능 묶음(VAD 0.35)과 합친 뒤 받아쓰기 모양: '…주세요 다시 한번 갈게요 [6초 시범] 나이스 이거예요'
+        a, b, kicks = FIX["LESSON04_nocond_vad35"]["demos"][2]
+        self.assertGreaterEqual(covered(r["tidy"], 94.0, 98.0), 0.99)
+        for k in kicks:
+            self.assertTrue(any(c["in"] <= k <= c["out"] for c in r["tidy"]), k)
+
+    def test_lesson04_long_keeps_demos_before_reactions(self):
+        for key in ("LESSON04", "LESSON04_nocond"):
+            r = self._rec(key)
+            for a, b, kicks in FIX[key]["demos"]:
+                self.assertGreaterEqual(covered(r["tidy"], a, b), 0.85, (key, a, b))
+
+    def test_lesson04_short_keeps_demo_before_cta(self):
+        for key in ("LESSON04", "LESSON04_nocond"):
+            r = self._rec(key)
+            a, b, kicks = FIX[key]["demos"][3]  # 3번 차는 시범 131.73–139.73 ('10번 하면 8번은 성공해요'의 증거) 바로 뒤 '구독이랑 좋아요…'
+            s = next(s for s in r["shorts"] if s["start"] <= a < s["end"])
+            self.assertGreaterEqual(covered(s["cuts"], a, b), 0.85, key)
+            txt = " ".join(text_in(FIX[key]["transcript"], c["in"], c["out"]) for c in s["cuts"])
+            self.assertNotIn("구독이랑", txt, key)
+
+    def test_retry_call_unit(self):
+        segs = [S(60.0, 63.0, "저도 처음엔 이거 잘 못했어요."), S(63.5, 64.5, "다시 해볼게요."), S(71.0, 73.0, "와, 이거죠. 완벽해요.")]
+        self.assertEqual(takes.find_junk(segs, [], [67.0]), [])  # 뒤에 공 소리 → 시범을 부르는 말
+        self.assertEqual([w for *_, w in takes.find_junk(segs[:2] + [S(65.0, 67.0, "와, 이거죠.")], [], [])], ["슬레이트 말"])  # 바로 이어 말하면 슬레이트
+        oops = [S(60.0, 63.0, "두 번째 동작은 패스하고 옆으로"), S(63.5, 64.5, "아니다, 다시 할게요."), S(71.0, 73.0, "두 번째 동작은 패스하고 옆으로 빠져요.")]
+        self.assertTrue(any(a <= 63.5 and 64.5 <= b for a, b, _ in takes.find_junk(oops, [], [67.0])))  # 실수 말이 붙으면 시범이 와도 지움 (다시 찍기)
+        self.assertTrue(takes.find_junk(oops[:2], [], [67.0]))
+
+
+class ReactionReviewTest(unittest.TestCase):
+    def test_reaction_words(self):
+        for t in ("나이스!", "나이스 이거예요", "아이고, 공이 조금 뒤로 갔네요.", "들어갔어요! 이렇게 차는 거예요.", "다시, 또 놓쳤네.", "봤죠? 이렇게 하는 거예요.",
+                  "와, 이거죠. 완벽해요.", "괜찮아요."):
+            self.assertEqual(editor._reaction(t), "strong", t)
+        for t in ("좋아요!", "좋습니다.", "오케이"):
+            self.assertEqual(editor._reaction(t), "weak", t)
+        for t in ("그렇지 않으면 공이 떠요.", "완벽하게 하려면 디딤발이 중요해요.", "깔끔하게 차는 방법은 이거예요.", "좋아요 그럼 시작해 볼게요",
+                  "좋습니다 그럼 두 번째 포인트는 몸의 방향이에요.", "오케이 이제 세 번째는 첫 터치 방향이에요.", "골대 맞았어요."):
+            self.assertIsNone(editor._reaction(t), t)
+
+    def test_demo_lead_follows_the_ball_sounds(self):
+        segs = lines((28.5, 34, "자, 제가 드리블로 세 명을 제쳐 볼게요."), (56.5, 60, "봤죠? 이렇게 하는 거예요."))
+        a, b = editor._demo_before(segs, 1, [36.0, 39.0, 42.0])
+        self.assertEqual(a, 35.5)  # 첫 공 소리 1초 앞(35.0)부터 — 10초까지라 35.5
+        self.assertEqual(b, 45.5)  # 마지막 공 소리 뒤 12초 걸어 돌아온 곳은 자름
+        self.assertIsNone(editor._demo_before(segs, 1, []))  # 공 소리가 없고 22초 빈 곳 → 시범으로 안 봄
+        dead = lines((22.5, 28, "발을 빼면서 받으면 공이 발 앞에 딱 멈춰요."), (36, 42, "좋습니다 그럼 두 번째 포인트는 몸의 방향이에요."))
+        self.assertIsNone(editor._demo_before(dead, 1, []))  # 반응 말이 아님 → 8초 쉼은 그대로 자름
+        weak = lines((10, 14, "패스하고 바로 뛰세요."), (20, 21, "좋아요!"))
+        self.assertIsNone(editor._demo_before(weak, 1, []))  # 약한 반응은 공 소리가 있어야
+        self.assertEqual(editor._demo_before(weak, 1, [16.0]), (15.0, 20.0))
+
+    def test_short_drops_dangling_end_and_titles(self):
+        segs = lines((0, 10, "자, 첫 번째 포인트는 공을 몸 앞에 두는 거예요."), (10.5, 22, "공이 몸 뒤에 있으면 방향을 바꿀 수가 없어요."),
+                     (22.5, 26, "오늘 진짜 물 좀 마시고 할게요."))
+        self.assertEqual(editor._short_edges(segs, set(), 0, 2, min_len=20.0)[:2], (0, 1))
+        self.assertEqual(editor._short_edges(segs, set(), 0, 2, min_len=25.0)[:2], (0, 2))  # 줄이면 너무 짧아지면 그대로
+        heads = lines((0, 1, "괜찮아요."), (1.2, 3, "풋살사관학교 최경진입니다."), (3.5, 8, "패스하고 바로 앞으로 두 걸음 뛰어 나가세요."))
+        self.assertEqual(editor._short_title(heads, set(), 0, 2), "패스하고 바로 앞으로 두 걸음 뛰어 나가세요.")
+
+    def test_reaction_chain_starts_at_the_cause(self):
+        segs = lines((48, 53.3, "두 번째 동작은 패스하고 옆으로 빠지면서 다시 공을 받는 거예요."), (61.2, 64, "아이고, 공이 조금 뒤로 갔네요."),
+                     (64.5, 65.1, "괜찮아요."), (65.5, 67.5, "저도 처음엔 이거 잘 못했어요."))
+        i, j, lead = editor._short_edges(segs, set(), 2, 3, peaks=[56.0])
+        self.assertEqual((i, lead), (1, (55.0, 61.2)))  # '괜찮아요'로 시작하는 쇼츠 → 그 원인 '아이고…'와 실패 시범부터
 
 
 if __name__ == "__main__":
