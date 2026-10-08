@@ -24,7 +24,7 @@
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
+[기능 모듈]  core · editor · tactic · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy · YouTube 공개 RSS(채널 전략)
    ▼
@@ -57,7 +57,7 @@
 | 화면 (Presentation) | `ui.html` · `editor.html` · `thumb.html` | UI·입력, 편집 상태(편집실 프로젝트·썸네일 문서는 화면이 들고 있다가 저장 요청), 실행취소 스냅샷, 썸네일 렌더링·효과 캐시 | 로컬 파일에 직접 접근 (반드시 API 경유). 프레임워크·번들러 도입 |
 | 원격 경계 | `remote.py` (`RemoteHandler`·`Service`) | 터널로 들어온 요청만: Host 표시·수 제한·CORS·서명/표 확인·허용 동작 목록, 짝짓기·기기 열쇠(`remote.json`)·비콘·알림·자동 끄기·절전 막기. 기능은 app 이 넘긴 `Bridge` 와 기능 모듈 함수를 부르기만 한다 | `app` import. 로컬 `Handler`의 API 를 터널에 내주기. 허용 목록 밖 동작(지우기·설정·업데이트·켜기·임의 경로). 비밀(코드·열쇠·주제·터널 주소·표) 기록 |
 | HTTP 경계 | `app.py` (`Handler`) | 라우팅, Host·Origin 검사, 파일 이름 검사(`editor.safe_name`·`video_path`), 작업 시작(`start_job`), 예외를 JSON `{"error": …}`로 변환 | 무거운 처리 직접 구현. 기능 모듈 함수를 부르기만 한다. 지금 있는 얇은 조립(`_analyze`, 스타일 가편집 이름 붙이기)보다 늘리지 않는다 |
-| 기능 모듈 (Service) | `editor` · `thumb` · `face` · `detect` · `thumbcopy` · `style` · `plan` · `msg` · `sfxlib` · `proofread` · `msgwrite` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` · `worker` · `cutout_worker` · `exportplan` · `hwdec` · `idle` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
+| 기능 모듈 (Service) | `editor` · `tactic` · `thumb` · `face` · `detect` · `thumbcopy` · `style` · `plan` · `msg` · `sfxlib` · `proofread` · `msgwrite` · `avmodels` · `claude_cli` · `qa` · `bundle` · `upload` · `youtube_upload` · `youtube_api` · `hooks` · `takes` · `source` · `refs` · `strategy` · `forecast` · `worker` · `cutout_worker` · `exportplan` · `hwdec` · `idle` | 실제 처리, 작업 폴더에 파일 저장, 사용자에게 보일 한국어 오류 메시지 | HTTP 응답 조립. `app` import |
 | 기반 | `core.py` | `config.json`, 경로 상수(WORK·VIDEOS·ANALYSIS·OUT), `ffmpeg()`·`run()`, 진행률, 다운로드 엔진, 받아쓰기·편집점, 업데이트 진입(`check_update`·`update_app`) | `updater`·`captions`·`intake`·`trouble`·`studiolog`(모두 표준 라이브러리만 쓰는 도우미, D-019·D-035~D-037)를 뺀 다른 앱 모듈 import |
 
 ## 3. 의존 방향 규칙
@@ -73,7 +73,8 @@
   - `upload` → `editor`, `hooks`, `core`. `thumb`(A/B 묶음 이름 `AB_SHEET`·`AB_TAGS` — 썸네일 확인에서 '모바일 비교'는 빼고 묶음에선 A 를 먼저)은 함수 안에서 지연 import한다(올리기 키트를 불러올 때 `thumb` 의 폴더 만들기가 돌지 않게 · D-067).
   - `youtube_upload` → `upload`(키트·`files_for`), `editor`(`safe_name`·`probe`), `core`, `updater`(`write_atomic`), `youtube_api`. `app`·`remote`(작업 이름 `JOB_NAME`·`JOB_FINISH` 를 `JOB_LABELS`·`STOPPABLE` 에 · D-048)가 쓴다.
   - `youtube_api` → `updater`(표준 라이브러리만 쓰는 실행기: 비밀 저장 `write_atomic(mode=0o600)` · HTTPS 인증서 설정 `_ssl_context` · D-048)뿐. 그 밖의 앱 모듈은 import 하지 않고, 불러올 때 아무것도 실행하지 않는다(DPAPI `ctypes.WinDLL`·Google opener 도 쓸 때만) — 실행기의 `import app` 확인이 안전하게. 새 두 파일은 `app.py` 의 import 줄과 같은 커밋으로 들어가야 한다(D-021 과 같은 주의).
-  - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`
+  - `editor` → `core`, `takes`(2차 작업 중, 커밋 전), `captions`, `tactic`(전술 그림 ASS · 편집본 길이)
+  - `tactic` → `core`. `editor`(원본 크기 `probe`·키프레임 `kf_at`)·`detect`(선수 찾기)는 함수 안에서 지연 import한다 (`editor`가 `tactic`을 import하므로 순환을 피함 · D-180). `editor`·`msg`·`app`(`/api/edit/track`)이 쓴다.
   - `style` → `core`, `plan` · `qa`·`hooks` → `core`
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
   - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
@@ -87,7 +88,7 @@
   - `thumb` → `core`, `studiolog`(오류 위치), `updater`. `face`·`detect`·`avmodels`·`thumbcopy`·`trouble`·`editor`·`cutout_worker`·`worker`·`idle`는 함수 안에서 지연 import한다 (`cutout_worker` 의 자식이 `thumb` 를 불러오므로 순환을 피함).
   - `face`·`detect` → `core`, `thumb`(모델 받기 `fetch_model`) · `detect` 는 `studiolog`·`updater`(실패 표시 `write_atomic`)도
   - `thumbcopy` → `core`, `hooks`. `editor`·`claude_cli`·`updater`는 함수 안에서 지연 import한다. `app`이 `thumbcopy`를 직접 쓴다(문구·판정 작업). `remote` 는 작업 이름(`JOB_AI`·`JOB_JUDGE`·`thumb.JOB_ANALYZE`)만 쓴다.
-  - `msg` → `core`, `editor`, `sfxlib`. `style`·`plan`·`avmodels`·`face`·`thumb`·`hooks`·`upload`는 함수 안에서 지연 import한다(`style` → `plan` 순환·무거운 모델 import를 피함). `app`이 쓴다.
+  - `msg` → `core`, `editor`, `sfxlib`, `tactic`(전술 그림 자동 배치 · D-182). `style`·`plan`·`avmodels`·`face`·`thumb`·`hooks`·`upload`는 함수 안에서 지연 import한다(`style` → `plan` 순환·무거운 모델 import를 피함). `app`이 쓴다.
   - `sfxlib` → `core` (+ numpy 함수 안). `msg`가 쓴다.
   - `proofread` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다.
   - `msgwrite` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다(D-148).
@@ -111,6 +112,7 @@
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소 · 소리: 목소리 보정 `voice_filters`(트랙 `voiceFx: false` 는 보정 없이 더함) → 덕킹 → `_loud_pre`+loudnorm → AAC 뒤 `_true_peak` 가 넘으면 다시 · D-147) |
 | thumb | `thumb.py` | `frame_candidates`(v6: 선명도·밝기 × 흔들림 × 얼굴·표정(상한 2.2) × 액션(선수·공) × 머리 잘림 × 장면 표시 `scene_flags`(벤치·관중·뒷모습·끝에 걸림·작음·레슨 액션), 박힌 글자 상자 `text_boxes`·감점, 같은 화면 dHash 3장·클로즈업 6장까지, 후보 16개 · 장면마다 `kind`·`persons`·`ball`·`main`·`flags`·`band`·`tboxes`·자동 보정 `grade`(뽑힌 장면만), 캐시 `candidates6.json`), `analyze`(클로드 문구(동시에) → 장면 → 클로드 장면 고르기 `run_ai_frames`(동시에) → 주인공 자동 누끼 4장(서로 다른 장면 · `_auto_cuts` → `cutout_worker` 자식 하나 · 실패는 `cutFail` 한 줄) → 문구, `cached_analysis`), `auto_grade`, `grab`, `remove_bg`·`cut_auto`(누끼 ONNX → `clean_mask` 다듬기 → `cut_quality` 품질, 옆 JSON · 파일 자리 `cut_file`(키 = 분석 폴더 이름·시각·종류·상자·판) · `cutout_worker` 의 자식 프로세스만 부름), `read_text`(검수 OCR · `idle.using()`), 브랜드 키트 `load_brand`·`save_brand`(`thumbnails/brand.json`), `export_ab`(A/B 묶음 + 모바일 비교), 디자인 저장(`.bak`)·이미지 내보내기, `fetch_model`(크기·sha256·`model_whole` 확인 후 제자리에 둠 · 받다 끊기면 `.part`+`.part.resume` 으로 이어받기(`RESUME_TRIES`) · 14일 지난 반쪽은 지움 · 이미 있는 파일도 끝까지·크기(알면) 확인 · D-071·D-078) |
 | face | `face.py` | UltraFace 얼굴 + FER+ 표정 점수. `ensure()`가 처음에 모델을 받고, 실패하면 10분 동안 다시 시도하지 않고 조용히 False를 돌려줌 |
+| tactic | `tactic.py` | 편집실 전술 그림(D-180): `normalize`(저장본 정리) · `ops_at`(그 순간 모양 = 채운 다각형·글자 — `editor.html` `tacOps` 와 짝) · `ass_lines`(내보내기 ASS 그림 · 프레임마다, 같은 모양은 한 줄) · 원본↔화면 자리 `media_rect`·`src_to_frame`·`frame_to_src`(`fitRect`·`motionAt` 와 짝) · 선수 따라가기 `track`(YOLOX `detect.people` · `follow_boxes`·`smooth` · 한 번에 하나 · D-181) |
 | detect | `detect.py` | YOLOX-nano(D-061)로 사람·공 찾기 `people(rgb)` → {persons[[x,y,w,h,확률]], ball}. `ensure`(받기는 `thumb.fetch_model` — 이어받기·크기·sha256·ONNX 끝까지 확인 · D-071·D-078)·`ready`(`thumb.model_whole` + 크기 `SIZE_B` — 받다 끊긴 반쪽·칸 경계에서 끊긴 파일은 없는 것으로)(face 와 같은 실패 규칙), 레터박스·격자 해석·NMS |
 | thumbcopy | `thumbcopy.py` | 썸네일 제목 문구: 주제어(`topics`)·규칙 틀(`rule_candidates` — 무조건 봐·비밀·못하는 진짜 이유·수비를 속이는 X·반전 O/X·대사 핵심 문장 …)·점수(주제가 작은 줄이면 감점)·다양하게 고르기(`suggest`), 사용자 클로드로 더 만들기(`run_ai` → `analysis/<stem>/thumb_copy.json`, 분석 때 자동 · `ai_state`: 로그인 확인됨이면 ready, 확인이 늦으면(unknown) maybe — 한 번 시도하되 20초만 기다림 · 실패는 1시간 기억), 검수 창 평가(`judge`) |
 | style | `style.py` | `analyze_style`(컷·줌·자막 띠·무음·LUFS·말 빠르기), `merge`(여러 레퍼런스 평균), 형식별 스타일(`ref_format`·`split_formats`·`formats_of` → `formats{long, shorts}` · D-102), `edit_params(prof, fmt)`(→ `auto_sequences`의 style 인자, 기획 분석이 있으면 인트로 티저·강조 자막 값도 · 형식별이면 `byFormat`), `learn`(영상마다 `plan.extract_plan`·`judge` → `plan`)·`list_styles`, `style_file`·`update_style`(다른 값은 그대로 두고 바꿔 끼우기) |
@@ -159,7 +161,7 @@
   - `subtitles.srt`, `transcript_timeline.md`, `waveform_50.json`, `thumbs2.jpg/json`
   - `frames/`(장면 캡처, `candidates6.json`), `thumb_copy.json`(클로드 문구, 받아쓰기·제목 지문), `thumb_frames_ai.json`(클로드 장면 점수, 후보 장면 시각 지문), 묶음 영상이면 `bundle.json`, 편집점을 찾기 시작할 때의 영상 크기 `file_sig.json` {size} (예전 분석에는 없음 · D-035)
 - 영상 1 : 1 편집 프로젝트 `projects/<stem>.json` = {source, info, captions[{id, start, end, text, words?}], sequences[], active, media[], v: 2, rev}
-  - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
+  - 프로젝트 1 : N 시퀀스(편집본) = {id, name, format: `long`|`shorts`, tracks[V1~3, A1~3], items[](V/A 클립: media·start·in·out·speed·link·fx 키프레임), trans[], markers[], titles[], shapes[], tactics[](전술 그림 {kind, pts(화면 0~1), start, dur, color, width·size·dim·text, draw, glow, follow[[초, dx, dy]]} · D-180 · 없으면 빈 목록), captionStyle, layout, master{volume, normalize, lufs}, duck, auto: `rough`|`style`}
   - 백업: `projects/backup/<stem>__YYYYMMDD_HHMMSS[_태그].json`. 자동 백업은 5분마다 최근 10개, 태그 백업(재분석전·덮어쓰기전·변환전)은 따로 10개
 - 영상 1 : 1 썸네일 문서 `thumbnails/<stem>.json` {designs[]} (+ `.bak`). 이미지는 `thumbnails/assets/`(캡처·누끼·자동 누끼 `cut_auto_<키>.png` + 품질 `.json`(키 = 분석 폴더 이름·장면 시각·종류·상자·판 → 이름 바꾸기가 새 키로 옮김 · D-078)·올린 그림). 브랜드 키트 하나 `thumbnails/brand.json` {logo, logoPos, colors{hl, hl2, accent, neon, box}, font, series, seriesOn, handle(예전 값 · 화면에서 안 씀), apply, aiCopy(분석 때 클로드 문구·장면 고르기)} · 썸네일에 쓸 스타일 `thumbnails/thumb_style.json` {style ('' 기본 · `__ours__` 우리 채널)} · A/B 기록 `thumbnails/ab_tests.json` {sets[{id, name, at, items[{tag, file, tpl, pid, l1, l2, colors{hl, hl2}, style}], winner}]} (D-131)
 - MSG (D-140): 영상마다 `analysis/<stem>/msg_signals.json`(판 `v`·파일 지문 `sig`·받아쓰기 지문 `tsig`·움직임·공 소리·소리 종류·정리할 곳·시범 구간·얼굴) · 클로드 재미 글자 `analysis/<stem>/msg_ai_lines.json` = {v, sig, model, lines{'<순간 종류>:<초>': {kind, text}}}(켰을 때만 · D-148) · 사용자 배경음악 `<작업 폴더>/내 배경음악/<분위기>/` · 섞은 스타일 `styles/섞기/<이름>.json` = {v, name, aspects{intro·rhythm·captions·fun·sound: {kind: preset|style, name}}, intensity, history[]} · MSG 편집본은 `auto: "msg"` + `msg` = {v, style{label, kind, sources}, intensity, seed, events[{id, kind, t, src, text, why, refs{titles, shapes, items, trans, markers, fx}, ins{start, len}}], thumb[{t_src, why, text}], summary, hook, topic, bgm[], notes} · 타이틀 `style.font`(Black Han Sans·Do Hyeon)·`style.rot` · 클립 `noCaps` · 트랙 `name`. 값이 없는 예전 프로젝트는 그대로 열린다
