@@ -1,6 +1,8 @@
 {
   "version": "2.16.0",
   "notes": "MSG 자동 편집: 편집실 'MSG 넣기'가 영상에서 재미있는 순간(멋진 시범·웃음·놀람·성공·실수)을 찾아 예능 자막·효과음·확대·다시 보기·멈춤·배경음악·티저를 알아서 넣어요 · 기본 스타일 3가지(담백 레슨형·예능 MSG형·쇼츠 하이텐션형)와 세기 담백/보통/듬뿍 · 배운 스타일끼리 섞기 · 지금은 '담백 레슨형'이 가장 자연스러워요 (쇼츠는 아직 다듬는 중)",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/24b9872b6c69e05bfd97ab1155096398567a3df9.zip",
+  "commit": "24b9872b6c69e05bfd97ab1155096398567a3df9",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "3ef30e78261834e01d0dc2cdc005547a132abd8545614aa5b79f15394c26ae9c",
