@@ -408,7 +408,8 @@ def _split_slates(lines):
     return out
 
 
-PRED_END = re.compile(r"(?:요|다|죠|까|네|지|고|서|면|데|며|게|니|라|자|야|어|아|봐|해|돼|줘|군|걸|래|냐|나|구나|거든|는데|지만|은|는|을|를|도)$")
+# (끝이 서술어·이음말·조사면 끊긴 말이 아님 · '건'(것은)·'건데' 는 문장 머리 — '사실 이건' … '발 기술 문제라기보다 …' 는 쉬었다 잇는 한 문장 · 판정 round5)
+PRED_END = re.compile(r"(?:요|다|죠|까|네|지|고|서|면|데|며|게|니|라|자|야|어|아|봐|해|돼|줘|군|걸|건|래|냐|나|구나|거든|는데|지만|은|는|을|를|도)$")
 
 
 def _fragment(text):
@@ -477,6 +478,10 @@ def _recommend(name, segs, keep_pause=None, sig=None):
         if keep_back:
             rec["junk_list"] = [j for j in rec["junk_list"] if j not in keep_back]
             rec["tidy"] = keep_cuts(rec["tidy"] + [{"in": max(0.0, j["a"] - 0.15), "out": j["b"] + 0.25} for j in keep_back], [])
+    back = _demo_calls(extra, _words(segs), [float(x["start"]) for x in kept], (sig or {}).get("onsets") or ())
+    if back:  # 쉼으로 쪼개진 '어, … 다시 해볼게요.' 도 뒤에 공 소리(시범)가 오면 시범 예고 → '다시 해볼게요' 는 남김 ('어'는 그대로 뺌)
+        extra = [x for x in extra if x not in back]
+        rec["tidy"] = keep_cuts(rec["tidy"] + [{"in": max(0.0, a - 0.15), "out": b + 0.25} for a, b, _ in back], [])
     if sig and sig.get("blobs"):
         old = [(j["a"], j["b"]) for j in rec.get("junk_list") or []] + [(a, b) for a, b, _ in extra]
         fill = [f for f in blob_fillers(sig["blobs"], _words(segs), sig.get("onsets") or ())
@@ -486,6 +491,22 @@ def _recommend(name, segs, keep_pause=None, sig=None):
             extra = extra + fill
     rec["junk_list"] = sorted((rec.get("junk_list") or []) + [{"a": a, "b": b, "why": w} for a, b, w in extra], key=lambda j: (j["a"], -j["b"]))
     return rec
+
+
+def _demo_calls(extra, words, starts, onsets):
+    """clean_lines 가 '슬레이트 말'로 뺀 것 중 '다시 …'(다시 해볼게요) 다음 말보다 공 소리가 먼저(6초 안) 오는 것 — 다시 찍기가 아니라
+    시범 예고 (판정 round5: '어, 다시 해볼게요.' 를 빼서 '해볼게요'가 사라짐 · editor.recommend 의 슬레이트 말과 같은 규칙)."""
+    out = []
+    for a, b, why in extra or ():
+        if why != "슬레이트 말":
+            continue
+        txt = " ".join(w[2] for w in words if a - 0.1 <= (w[0] + w[1]) / 2 <= b + 0.1)
+        if "다시" not in txt:
+            continue
+        nxt = min([t for t in starts if t > b + 0.3] or [1e9])
+        if any(b <= o <= min(b + 6.0, nxt) for o in onsets):
+            out.append((a, b, why))
+    return out
 
 
 def _onsets(wave, words, sr=16000):

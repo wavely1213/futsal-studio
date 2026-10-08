@@ -280,6 +280,28 @@ class FinalJudgeTest(unittest.TestCase):
         self.assertAlmostEqual(ln, 1.95, places=2)
 
 
+class FinalJudgeLinesTest(unittest.TestCase):
+    """round5 최종 판정 중간 결과: 쉬었다 잇는 문장 머리('사실 이건' … '발 기술 문제라기보다 …')를 끊긴 말로 보고 뺌 ·
+    쉼으로 쪼개진 '어, … 다시 해볼게요.'(시범 예고)를 슬레이트 말로 보고 빼서 '해볼게요'가 사라짐."""
+
+    def test_sentence_head_before_a_pause_is_not_a_broken_phrase(self):
+        self.assertFalse(msg._fragment("사실 이건"))
+        self.assertTrue(msg._fragment("오늘 진짜"))      # 진짜 끊긴 말은 그대로 (round2)
+        segs = [{"start": 10.0, "end": 11.2, "text": "사실 이건", "words": [{"s": 10.0, "e": 10.4, "w": "사실"}, {"s": 10.4, "e": 11.2, "w": "이건"}]},
+                {"start": 12.0, "end": 15.0, "text": "발 기술 문제라기보다 준비 자세 문제예요.",
+                 "words": [{"s": 12.0 + 0.5 * k, "e": 12.4 + 0.5 * k, "w": w} for k, w in enumerate("발 기술 문제라기보다 준비 자세 문제예요.".split())]}]
+        kept, junk = msg.clean_lines(segs)
+        self.assertEqual(junk, [])
+        self.assertEqual(len(kept), 2)
+
+    def test_split_demo_call_before_a_ball_sound_stays(self):
+        words = [(69.05, 69.62, "어,", 0), (70.38, 70.74, "다시", 1), (70.74, 71.62, "해볼게요.", 1), (77.14, 78.28, "와,", 2)]
+        extra = [(69.05, 69.62, "슬레이트 말"), (70.49, 71.62, "슬레이트 말")]
+        self.assertEqual(msg._demo_calls(extra, words, [60.5, 77.14], [75.37]), [(70.49, 71.62, "슬레이트 말")])   # '어,' 는 그대로 뺌
+        self.assertEqual(msg._demo_calls(extra, words, [60.5, 72.5], [75.37]), [])     # 공 소리보다 말이 먼저 → 다시 찍기 신호
+        self.assertEqual(msg._demo_calls(extra, words, [60.5, 77.14], []), [])
+
+
 def _long_fixture(work, reps=16):
     """make_msg_fixture 원본을 reps 번 이어 붙인 약 9분 원본 (받아쓰기 시각도 옮김)."""
     name, truth = mf.make_msg_fixture(work)
