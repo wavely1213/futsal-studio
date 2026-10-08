@@ -263,6 +263,16 @@ def _after_start():
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=core.engine_autoupdate, args=(log,), daemon=True).start()
     _session_start()
+    threading.Thread(target=_place_kept, daemon=True).start()
+
+
+def _place_kept():
+    """지난번에 백신·OneDrive 잠금으로 제자리에 못 옮긴 완성본·묶음 → 완성본 폴더·보관함으로 (켤 때 한 번 · 실패해도 앱은 그대로)."""
+    for fn in (editor.place_kept, bundle.place_kept):
+        try:
+            fn(log)
+        except Exception as e:  # noqa: BLE001 — 곁가지
+            studiolog.trace(e, "옮기지 못한 결과 옮기기 오류 위치")
 
 
 def _redirect_to_updater():
