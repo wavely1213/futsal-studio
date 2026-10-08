@@ -96,7 +96,7 @@
 |---|---|---|
 | app | `app.py` | HTTP 서버·라우팅, `start_job`(작업 하나씩, 겹치면 409), `log()`, pywebview 창·닫기 전 저장, 이미 켜져 있으면 그 창을 앞으로(`/api/ping` 으로 이 앱인지 확인 → `/api/focus`), 포트 고르기(8765 → 8766~8799, `.port`), 작업 중 창 닫기 확인, pywebview 저장소(비공개 모드 끔), pythonw 오류 기록(`studio-error.log`), 재시작 |
 | winlink | `winlink.py` | Windows 바탕화면·시작 메뉴 바로가기(COM `IShellLinkW`, 안 되면 PowerShell)와 작업 표시줄 아이디(AppUserModelID `FutsalAcademy.Studio`, 바로가기·프로세스 짝). 같은 실행 경로면 다시 만들지 않음(`~/.futsal-studio/shortcut.json`) |
-| setup_check | `setup_check.py` | `시작하기 (Windows).bat` 의 설치 확인: 쓸 Python(3.10~3.14·x64)·`.venv` 다시 만들기·긴 경로·Visual C++ 구성요소 (D-033) |
+| setup_check | `setup_check.py` | `시작하기 (Windows).bat` 의 설치 확인: 쓸 Python(3.10~3.14·x64 · 3.15 는 '너무 새로 나옴')·`.venv` 다시 만들기·긴 경로·Visual C++ 구성요소 (D-033) · 임시 폴더(압축 안에서 실행)·pip 실패 이유 한국어 한 줄 (D-058) |
 | updater | `updater.py` | `--launch`(업데이트 확인 → `run_app`), `install`(zip 검사 → staging → 버전·sha256 → 문법·selftest → 백업 → 교체 → 지울 파일 정리), `rollback`, `check`/`finish`(새 버전 import 확인·알림), `.update_skip` |
 | core | `core.py` | `list_videos`(조회수 순), `download`(받는 폴더·archive·진행 이름·출처 기록 함수를 바꿀 수 있음 · 학습용 영상이 씀), 이름 → 파일·분석 폴더(`video_file`·`adir`: 보관함 먼저, 없으면 학습용 영상 · `kept_sig`), `analyze`(whisper 한국어 → transcript.json·analysis.json·subtitles.srt·timeline.md), 엔진 관리(`update_engine`·`engine_autoupdate` 3일·`ensure_deno`), `check_update`·`update_app`(pip는 요구사항이 바뀔 때만). `render`(컷 목록 → mp4 + EDL)와 `/api/render`는 현재 화면에서 부르지 않는 예전 기능이다 |
 | editor | `editor.py` | `probe`(ffmpeg 출력 파싱), 파형·썸네일 줄·미리보기(proxy), `recommend`(규칙 기반: 추임새·반복·무음 정리 tidy, 쇼츠 구간), `auto_sequences`(롱폼 가편집 + 쇼츠 1~3, 스타일 값 적용), 프로젝트 load/save(rev 충돌 검사·백업·복구·마이그레이션), `reanalyze_project`, `export`(ffmpeg 렌더·HW 인코더·Premiere XML·SRT·취소) |

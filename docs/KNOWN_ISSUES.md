@@ -262,7 +262,7 @@
 - **해결 방향**: 두 모델의 크기·sha256을 확인해 `BG_MODELS`에 고정값으로 넣고 `fetch_model`에 넘긴다.
 
 ## I-022 | 2026-10-06 | 최소 지원 Python 버전이 정해지지 않음
-- **상태**: 열림 (기본값을 넣음 · 소유자 확인 필요) — 2026-10-07 `시작하기 (Windows).bat`·`setup_check.py` 가 3.10~3.14·64비트(x64)만 쓰고(3.13 우선), 맞지 않거나 깨진 `.venv` 는 옮겨 두고 새로 만든다 (D-033). 3.10 은 2026-10 지원 종료라 더 새 Python 이 있으면 bat 이 옮겨 간다. 소유자가 범위를 확정하면 `setup_check.PY_MIN`·`PY_MAX`·README 를 맞춘다.
+- **상태**: 열림 (기본값을 넣음 · 소유자 확인 필요) — 2026-10-07 `시작하기 (Windows).bat`·`setup_check.py` 가 3.10~3.14·64비트(x64)만 쓰고(3.13 우선), 맞지 않거나 깨진 `.venv` 는 옮겨 두고 새로 만든다 (D-033). 3.10 은 2026-10 지원 종료라 더 새 Python 이 있으면 bat 이 옮겨 간다. 소유자가 범위를 확정하면 `setup_check.PY_MIN`·`PY_MAX`·README 를 맞춘다. 2026-10-08 D-058: 3.15(정식판 곧 나옴 · 휠 없음)는 '너무 새로 나옴 → 3.14 함께 설치' 안내와 python-3.14.8-amd64.exe 직접 주소, 새 'Python 설치 관리자'는 3.14 를 보이게 설치, 압축 안·임시 폴더 실행과 pip 실패는 한국어 안내 (Windows 실기 미검증).
 - **심각도**: 중간
 - **증상/내용**: (고치기 전) 사용자는 python.org에서 받은 아무 버전이나 쓴다(`py -3`). 코드는 3.10 이상 기능(`TemporaryDirectory(ignore_cleanup_errors=…)`)을 쓰지만 어디에서도 버전을 확인하지 않는다. 3.9 이하면 업데이트 설치(`updater.download_and_install`·`--selftest`)와 Deno 설치(`core._install_deno`)가 실패하고, 막 나온 Python이면 onnxruntime·ctranslate2 Windows 휠이 아직 없어 첫 설치(pip)가 실패할 수 있다.
 - **위치**: `시작하기 (Windows).bat`, `README.md` 설치 안내, `updater.py`·`core.py`

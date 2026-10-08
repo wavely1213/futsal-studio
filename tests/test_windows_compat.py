@@ -1138,6 +1138,78 @@ class Install(unittest.TestCase):
         with mock.patch.object(setup_check, "APP_DIR", Path("C:/Users/홍길동/Downloads/futsal-studio-main/futsal-studio-main")):
             self.assertEqual(setup_check.check_longpath(), 0)
 
+    def test_too_new_python_message(self):
+        """3.15(휠 없음): '너무 새로 나와서' + 3.14 를 함께 설치 (예전: '쓸 수 없어요'만 · 2026-10 3.15.0rc3)."""
+        why = setup_check._ok_python((3, 15), "win-amd64")
+        self.assertIn("너무 새로", why)
+        self.assertIn("3.14", why)
+        self.assertIn("너무 오래", setup_check._ok_python((3, 9), "win-amd64"))
+        with mock.patch.object(setup_check.sys, "version_info", (3, 15, 0, "final", 0)), mock.patch.object(setup_check, "say") as say:
+            self.assertEqual(setup_check.check_python(), 1)
+        self.assertIn("3.15", say.call_args[0][0])
+
+    def test_place_temp_or_zip(self):
+        """압축 파일 안에서 바로 실행(탐색기가 %TEMP%\\Temp1_x.zip 에 풂)·압축 프로그램이 잠깐 푼 곳 → 멈추고 '압축 풀기' 안내."""
+        tmp = Path(tempfile.mkdtemp(prefix="임시 "))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        cases = ((tmp / "Temp1_futsal-studio-main.zip" / "futsal-studio-main", 1),  # %TEMP% 아래
+                 (tmp / "Rar$EXa1234.5678" / "futsal", 1), (tmp / "7zO8A1B" / "futsal", 1))
+        with mock.patch.dict(os.environ, {"TEMP": str(tmp), "TMP": str(tmp)}):
+            for d, want in cases:
+                with mock.patch.object(setup_check, "APP_DIR", d), mock.patch.object(setup_check, "say"):
+                    self.assertEqual(setup_check.check_place(), want, d)
+        with mock.patch.dict(os.environ, {"TEMP": str(tmp / "없음"), "TMP": ""}):
+            for d, want in ((Path("/home/홍길동/Downloads/Temp1_futsal.zip/futsal"), 1), (Path("/home/홍길동/temp1_backup/futsal"), 0),
+                            (Path("/home/홍길동/Downloads/futsal-studio-main/futsal-studio-main"), 0), (Path("/풋살스튜디오"), 0)):
+                with mock.patch.object(setup_check, "APP_DIR", d), mock.patch.object(setup_check, "say"):
+                    self.assertEqual(setup_check.check_place(), want, d)
+
+    def test_place_and_pip_as_subprocess(self):
+        """bat 과 같은 부름: 임시 폴더에 복사한 setup_check.py → place 1 · 보통 폴더 → 0 · pip <기록> → 한국어 이유 한 줄 (늘 1)."""
+        tmp = Path(tempfile.mkdtemp(prefix="설치 시험 "))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        app = tmp / "Temp2_futsal-studio-main.zip" / "futsal-studio-main"
+        app.mkdir(parents=True)
+        shutil.copy(REPO / "setup_check.py", app)
+        env = dict(os.environ, TEMP=str(tmp), TMP=str(tmp), PYTHONIOENCODING="utf-8")
+
+        def run(*args, cwd=app, env=env):
+            return subprocess.run([sys.executable, "-I", "setup_check.py", *args], cwd=cwd, env=env, capture_output=True,
+                                  text=True, encoding="utf-8", timeout=60)
+        r = run("place")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("압축 풀기", r.stdout)
+        ok = tmp / "풋살스튜디오"
+        ok.mkdir()
+        shutil.copy(REPO / "setup_check.py", ok)
+        self.assertEqual(run("place", cwd=ok, env=dict(env, TEMP=str(tmp / "t"), TMP=str(tmp / "t"))).returncode, 0)
+        log = tmp / "pip.log"
+        log.write_text("ERROR: Could not find a version that satisfies the requirement onnxruntime (from versions: none)\n"
+                       "ERROR: No matching distribution found for onnxruntime\n", encoding="utf-8")
+        r = run("pip", str(log), cwd=ok)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("3.14", r.stdout.splitlines()[-1])
+        self.assertIn("[안내]", r.stdout)
+        self.assertEqual(run("pip", str(tmp / "없는 기록.log"), cwd=ok).returncode, 1)
+
+    def test_pip_reason(self):
+        net = ("WARNING: Retrying (Retry(total=4)) after connection broken by 'NewConnectionError(... getaddrinfo failed)'\n"
+               "ERROR: Could not find a version that satisfies the requirement faster-whisper\nERROR: No matching distribution found for faster-whisper\n")
+        cases = ((net, "인터넷이 끊겼"),  # 인터넷이 끊겨도 'No matching distribution' 이 나옴 → 버전 탓으로 잘못 안내하지 않음
+                 ("ERROR: No matching distribution found for ctranslate2==4.8.2", "Python 3.14"),
+                 ("ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device", "저장 공간"),
+                 ("ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied: 'C:\\a\\.venv\\x.pyd'", "사용 중"),
+                 ("SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed'))", "보안"),
+                 ("ERROR: Could not open requirements file: [Errno 2] No such file or directory: 'requirements.txt'", "압축"),
+                 ("알 수 없는 오류", "인터넷 연결을 확인"))
+        for text, want in cases:
+            why, _ = setup_check.pip_reason(text, (3, 15))
+            self.assertIn(want, why, text)
+        why, err = setup_check.pip_reason(cases[1][0], (3, 15))
+        self.assertIn("3.15", why)
+        self.assertIn(setup_check.PY_DIRECT, why)
+        self.assertTrue(err.startswith("ERROR:"))
+
     def test_bat_is_safe_cmd(self):
         """bat: CRLF · 괄호 블록 안에 %~dp0(폴더 이름의 ')' 로 블록이 깨짐)·괄호 든 echo 없음 · 'py -3' 대신 버전 고르기."""
         raw = (REPO / "시작하기 (Windows).bat").read_bytes()
@@ -1156,6 +1228,19 @@ class Install(unittest.TestCase):
         self.assertNotIn("set PY=py -3)", text)
         self.assertIn("setup_check.py venv", text)
         self.assertIn("setup_check.py vcredist", text)
+        lines = [ln.strip() for ln in text.splitlines()]
+        first_py = next(i for i, ln in enumerate(lines) if "setup_check.py" in ln and not ln.startswith("if not exist"))
+        for f in ("app.py", "requirements.txt", "setup_check.py"):  # 압축 안에서 바로 실행: Python 을 찾기 전에 먼저 확인
+            self.assertLess(lines.index('if not exist "%s" goto :not_extracted' % f), first_py)
+        self.assertLess(lines.index('set "PYTHON_MANAGER_AUTOMATIC_INSTALL=false"'), lines.index("call :pick_py"))  # 고르는 동안 몰래 설치 안 함
+        self.assertIn("pymanager install -y 3.14", text)
+        self.assertIn("%PY% setup_check.py place || goto :stop", text)
+        self.assertLess(lines.index("%PY% setup_check.py place || goto :stop"), lines.index("%PY% -m venv .venv || goto :fail"))
+        self.assertIn('> "%PIPLOG%" 2>&1 || goto :pip_fail', text)
+        self.assertIn('setup_check.py pip "%PIPLOG%"', text)
+        self.assertIn(setup_check.PY_DIRECT, text)  # 맞는 Python 이 없으면 3.14 독립 설치 파일을 바로 받음
+        for label in ("not_extracted", "pip_fail", "stop", "pymanager_install", "pick_mgr", "pick_path", "no_python"):
+            self.assertIn(":" + label, lines)
 
 
 # ---------- 13. 바로가기 · claude 찾기 · NAS 경로 ----------

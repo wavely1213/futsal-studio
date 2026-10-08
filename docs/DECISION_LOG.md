@@ -29,6 +29,18 @@
 
 <!-- 여기서부터 최신 항목을 위에 추가 -->
 
+## D-058 | 2026-10-08 | 설치(bat) 보강: 3.15 는 '너무 새로 나옴' 안내 · 새 'Python 설치 관리자' · 압축 안에서 실행 · pip 실패 한국어 한 줄
+- **상태**: 채택 (D-033 위에 덧붙임 · 지원 범위 자체는 그대로 소유자 확인 필요 — I-022)
+- **맥락**: 2026-10-07 python.org/downloads 의 Windows 첫 버튼은 'Python install manager'(pymanager .msix, PATH 체크 칸 없음)이고 독립 설치 파일 3.14.8 은 '또는' 링크다. 3.15.0rc3 가 올라와 곧 정식판이 나오는데 onnxruntime 1.30.0(cp311~cp314)·ctranslate2 4.8.2(cp39~cp314)는 3.15 휠이 없다. D-033 의 bat 은 맞는 Python 이 없으면 '찾지 못했습니다'와 downloads 페이지만 열었고(3.15 가 왜 안 되는지 모름), 압축 파일 안에서 더블클릭하면 'Could not open requirements file' 영어 오류, pip 실패는 영어 뒤 '설치 실패'뿐이었다.
+- **결정**:
+  1. **압축 안에서 실행**: bat 이 `cd` 직후 `app.py`·`requirements.txt`·`setup_check.py` 가 없으면 Python 을 찾기 전에 '압축 풀기 → 그 폴더에서 실행' 안내로 멈춘다. 파일은 있는데 임시 폴더(`%TEMP%`·`%TMP%` 아래, 또는 `Temp1_….zip`·`Rar$EX…`·`7zO…` 폴더)면 `setup_check.py place` 가 같은 안내로 멈춘다(나중에 지워져 앱이 사라지므로).
+  2. **3.15 이상**: `_ok_python` 이 '너무 새로 나와서 아직 받아쓰기 구성요소가 없어요 · 3.14 를 함께 설치 (지우지 않아도 돼요)'. 맞는 Python 이 없으면 bat 이 가장 새 Python(`py -3`)으로 이 이유를 보여 주고, **독립 설치 파일 `python-3.14.8-amd64.exe` 직접 주소**를 열어(바로 받아짐) 'Add python.exe to PATH 체크 → Install Now → 다시 실행' 세 줄로 안내한다 (`setup_check.PY_DIRECT` 와 bat 이 같은 주소).
+  3. **새 'Python 설치 관리자'(pymanager)**: 고르는 동안 `PYTHON_MANAGER_AUTOMATIC_INSTALL=false` (런타임이 하나도 없을 때 `py -3.13 …` 이 화면에 안 보이게 설치를 시작하지 않게 · 공식 문서의 설정 이름). `pymanager` 명령이 있으면 `py -X.Y` 다음에 `pymanager exec -V:X.Y`(예전 Python launcher 가 `py` 를 차지한 PC)도 같은 순서로 보고, 그래도 없으면 보이는 창에서 `pymanager install -y 3.14`(`PYTHON_MANAGER_CONFIRM=false`) 후 다시 고른다. 고르는 순서(3.13 → 3.12 → 3.11 → 3.14 → 3.10)는 D-033 그대로.
+  4. **pip 실패**: `pip install -r requirements.txt` 출력을 `%TEMP%\futsal-studio-pip.log` 에 남기고, 실패하면 `setup_check.py pip <기록>` 이 원인 영어 한 줄 + 기록 위치 + `[안내]` 한국어 한 줄을 보여 준다(보안 연결 막힘 > 인터넷 끊김 > 저장 공간 > 파일 사용 중 > 이 Python 용 구성요소 없음(3.14 주소) > 압축 > 그 밖). 인터넷이 끊겨도 pip 는 'No matching distribution' 을 내므로 연결 오류가 보이면 버전 탓으로 안내하지 않는다.
+- **이유**: 새 PC·재설치 사용자가 첫 화면을 보기 전에 영어 오류로 막히는 곳을 없앰. 설치 관리자를 막지 않고 쓰면(3.14 자동 설치) 받을 파일을 고를 필요가 없다.
+- **버린 대안**: 3.15 에서 pip 를 시도해 보기 — 휠·sdist 가 없어 몇 분 받다 실패(소유자 결정 전까지 범위 고정) / downloads 페이지 열기(예전) — 첫 버튼이 설치 관리자라 'PATH 체크' 안내와 맞지 않음 / bat 에서 pymanager 첫 실행 설정(`py install --configure -y`)까지 하기 — PATH 를 바꾸는 일이라 사용자 몫.
+- **영향/제약**: Windows 실기 미검증(특히 pymanager 의 `exec -V:`·`install -y` 와 자동 설치 끄기, 탐색기 zip 안 실행). 3.14.8 다음 판이 나오면 `PY_DIRECT`·bat 주소를 함께 바꾼다(이 주소는 python.org 에 계속 남아 있음). 3.15 휠이 나오면 `PY_MAX` 를 올리고 3.15 안내 문구도 그때 바뀐다.
+
 ## D-049 | 2026-10-07 | 유튜브 바로 올리기 × E1(실패 카드·studio.log) 합침: 올리기 실패도 정해진 문장의 카드 · 기록은 studiolog 한 길
 - **상태**: 채택 (유튜브 바로 올리기(v2.5.0 위)를 v2.6.0(E1) 위에 합치며 · 합칠 때 올리기 쪽 번호 D-035~D-037·I-049~I-051·BR-019 를 D-046~D-048·I-060~I-062·BR-023 로 바꿈 · E1 쪽 번호는 그대로 · 처음엔 D-045~D-047·I-055~I-057·BR-022 로 바꿨으나 그 사이 main(E6)이 D-045·I-055~I-059·BR-022 를 써서 다시 뒤로 밂)
 - **맥락**: 두 줄기가 같은 곳을 따로 고쳤다. E1 은 `start_job(name, fn, by=None, ctx=None)` 이 예외를 `trouble.explain` 으로 쉬운 한 줄 + 할 일(`fail`)로 바꾸고 `studiolog.trace` 하나로 기록하게 했고, 올리기 쪽은 `start_job` 안에서 `remote.redact(traceback.format_exc())` 를 직접 쓰고 실패를 결과 글(`error`)·토스트로만 알렸다. 그대로 두면 올리기 예외가 받기 쪽 안내('로그인 정보로 다시 받기'·'주소 다시 넣기')로 보이고, 추적이 두 길로 남는다.
