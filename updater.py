@@ -422,6 +422,14 @@ def _drop_resume(dest):
         pass
 
 
+def _same_file(meta, headers):
+    """이어받는 206 응답이 처음 받던 그 파일인지: ETag(있으면) 또는 Last-Modified 가 기록과 같아야 함
+    (If-Range 를 무시하고 바뀐 파일의 뒷부분을 주는 CDN 이 있음 · 크기가 같으면 길이 확인으로는 못 거름)."""
+    if meta.get("etag"):
+        return headers.get("ETag") == meta["etag"]
+    return bool(meta.get("modified")) and headers.get("Last-Modified") == meta["modified"]
+
+
 def download(url, dest, progress=None, timeout=30, resume=False):
     """url → dest. 서버가 알려 준 길이(Content-Length)만큼 다 받지 못하면 IncompleteRead (반쪽 파일을 완성본으로 쓰지 않게 —
     http.client 는 길이를 정해 읽을 때 연결이 먼저 끊기면 오류 없이 빈 조각을 돌려줌).
@@ -429,11 +437,12 @@ def download(url, dest, progress=None, timeout=30, resume=False):
     서버 파일이 그대로일 때만) — 서버가 206 으로 그 자리부터 주면 이어 붙이고, 200 이면(바뀜·이어받기 안 됨) 처음부터.
     끊기면 dest 와 기록을 남겨 다음에 이어받음 · 다 받으면 기록을 지움. progress(받은 바이트, 전체 바이트)."""
     have, meta = _read_resume(dest, url) if resume else (0, None)
+    if have and not (meta.get("etag") or meta.get("modified")):  # 서버 파일이 그대로인지 확인할 표(ETag·Last-Modified)가 없음 → 처음부터
+        have, meta = 0, None
     headers = dict(UA)
     if have:
         headers["Range"] = f"bytes={have}-"
-        if meta.get("etag") or meta.get("modified"):
-            headers["If-Range"] = meta.get("etag") or meta.get("modified")
+        headers["If-Range"] = meta.get("etag") or meta.get("modified")
     req = urllib.request.Request(url, headers=headers)
     try:
         r = urlopen(req, timeout)
@@ -445,10 +454,10 @@ def download(url, dest, progress=None, timeout=30, resume=False):
         return download(url, dest, progress, timeout, resume)
     with r:
         m = _RANGE.match(r.headers.get("Content-Range") or "")
-        if have and r.status == 206 and m and int(m[1]) == have and int(m[3]) == meta["total"]:
+        if have and r.status == 206 and m and int(m[1]) == have and int(m[3]) == meta["total"] and _same_file(meta, r.headers):
             got, total, mode = have, meta["total"], "ab"
         else:
-            if have and r.status == 206:  # 엉뚱한 구간 → 처음부터 다시 (이어 붙이면 깨진 파일)
+            if have and r.status == 206:  # 엉뚱한 구간·바뀐 파일(If-Range 를 모르는 서버) → 처음부터 다시 (이어 붙이면 두 판이 섞인 깨진 파일)
                 _drop_resume(dest)
                 return download(url, dest, progress, timeout, resume)
             got, total, mode = 0, int(r.headers.get("Content-Length") or 0), "wb"

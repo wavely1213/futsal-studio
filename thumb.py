@@ -1,5 +1,6 @@
 """썸네일 도구: 장면 후보 추출 · 장면 캡처 · 누끼(배경 제거) · 디자인 저장 · 이미지 내보내기."""
 import base64
+import errno
 import io
 import json
 import os
@@ -246,6 +247,7 @@ def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, t
                 return path
             _unlink(path)  # 예전 판이 받다 끊긴 반쪽 모델을 완성본으로 저장해 둠 → 지우고 다시 받음 (그대로 두면 계속 고장)
         tmp, err = path.with_suffix(".part"), None
+        _sweep_parts(keep=tmp)
         for entry in urls:
             url, want_size, want_sha = (entry if isinstance(entry, (tuple, list)) else (entry, size, sha256))
             got = {"n": 0}
@@ -264,20 +266,23 @@ def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, t
                         updater.download(url, tmp, hook, timeout=timeout, resume=True)
                         break
                     except updater.NET_ERRORS as e:
-                        if k + 1 >= RESUME_TRIES or isinstance(e, urllib.error.HTTPError) or got["n"] <= before:
+                        if k + 1 >= RESUME_TRIES or isinstance(e, urllib.error.HTTPError) or got["n"] <= before or _disk_error(e):
                             raise
                 if want_size and tmp.stat().st_size != want_size:
-                    raise OSError("받은 파일 크기가 달라요")
+                    raise _BadModel("받은 파일 크기가 달라요")
                 if want_sha and updater.sha256(tmp) != want_sha:
-                    raise OSError("받은 파일 확인(sha256)에 실패했어요")
+                    raise _BadModel("받은 파일 확인(sha256)에 실패했어요")
+                if not model_whole(tmp, Path(fname).suffix):  # 지문이 없는 누끼 모델도: 끝이 모자라거나 두 판이 섞였으면 제자리에 두지 않음
+                    raise _BadModel("받은 모델 파일이 온전하지 않아요 · 다시 눌러 주세요")
                 updater._replace(tmp, path)
                 updater._drop_resume(tmp)
                 return path
             except Exception as e:
                 err = e
                 # 받다 끊김(이어받기 기록이 있음)이면 받은 데까지 남겨 다음에 이어받음 · 그 밖(멈춤·확인 실패·없는 주소)은 지움
-                resumable = isinstance(e, updater.NET_ERRORS) and not isinstance(e, (urllib.error.HTTPError, DownloadCancelled)) \
-                    and updater._resume_meta(tmp).exists() and _size(tmp) > 0
+                # 디스크가 꽉 찬 것(ENOSPC)도 OSError 지만 끊김이 아님 → 받은 데까지(최대 220MB) 남기지 않고 지움
+                resumable = isinstance(e, updater.NET_ERRORS) and not isinstance(e, (urllib.error.HTTPError, DownloadCancelled, _BadModel)) \
+                    and not _disk_error(e) and updater._resume_meta(tmp).exists() and _size(tmp) > 0
                 if not resumable:
                     _unlink(tmp)
                     updater._drop_resume(tmp)
@@ -289,6 +294,36 @@ def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, t
 
 
 RESUME_TRIES = 3  # 한 번 누를 때 받다 끊기면 이어받기를 몇 번까지 (조금이라도 더 받았을 때만 다시)
+PART_DAYS = 14    # 이만큼 손대지 않은 받다 만 모델(.part + .resume)은 지움 (다시 누르지 않으면 계속 자리를 차지함)
+DISK_ERRNOS = {errno.ENOSPC, errno.EFBIG, errno.EROFS, getattr(errno, "EDQUOT", errno.ENOSPC)}
+
+
+class _BadModel(OSError):
+    """다 받았는데 크기·지문·모양이 틀림 → 이어받지 않고 지움."""
+
+
+def _disk_error(e):
+    """디스크가 꽉 참·쓸 수 없음 (Windows ERROR_DISK_FULL 112 · ERROR_HANDLE_DISK_FULL 39) — 와이파이 끊김이 아님."""
+    return isinstance(e, OSError) and (getattr(e, "errno", None) in DISK_ERRNOS or getattr(e, "winerror", None) in (39, 112))
+
+
+def _sweep_parts(keep=None, days=None):
+    """오래된 받다 만 모델(.part)과 그 이어받기 기록(.part.resume)을 지움 · 지금 받을 파일(keep)은 그대로."""
+    old = time.time() - (PART_DAYS if days is None else days) * 86400
+    try:
+        parts = list(MODELS.glob("*.part")) + [p.with_name(p.name[:-len(updater.RESUME_SUFFIX)]) for p in MODELS.glob("*.part" + updater.RESUME_SUFFIX)]
+    except OSError:
+        return
+    for p in set(parts):
+        if keep is not None and p == keep:
+            continue
+        try:
+            if p.exists() and p.stat().st_mtime > old:
+                continue
+        except OSError:
+            continue
+        _unlink(p)
+        updater._drop_resume(p)
 
 
 def _size(p):

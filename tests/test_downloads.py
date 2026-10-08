@@ -48,10 +48,11 @@ def onnx_like(n=300_000):
 
 class Srv:
     """파일 하나를 주는 가짜 서버. cut: 응답마다 이만큼만 보내고 연결을 끊음 (Content-Length 는 다 보낼 것처럼).
-    ranges: Range 를 받아 줌 · etag 가 바뀌면 If-Range 가 안 맞아 처음부터(200)."""
+    ranges: Range 를 받아 줌 · etag 가 바뀌면 If-Range 가 안 맞아 처음부터(200).
+    ifrange=False: If-Range 를 무시하는 CDN (바뀐 파일이어도 206) · etag=None: ETag 를 안 보냄."""
 
     def __init__(self, payload):
-        self.payload, self.etag, self.cut, self.ranges, self.log = payload, '"v1"', None, True, []
+        self.payload, self.etag, self.cut, self.ranges, self.ifrange, self.log = payload, '"v1"', None, True, True, []
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -62,7 +63,7 @@ class Srv:
                 rng, ifr = self.headers.get("Range"), self.headers.get("If-Range")
                 outer.log.append({"path": self.path, "range": rng, "ifRange": ifr})
                 data, start = outer.payload, 0
-                if rng and outer.ranges and (ifr is None or ifr == outer.etag):
+                if rng and outer.ranges and (ifr is None or ifr == outer.etag or not outer.ifrange):
                     start = int(rng.split("=")[1].split("-")[0])
                     if start >= len(data):
                         self.send_response(416)
@@ -76,7 +77,8 @@ class Srv:
                     self.send_response(200)
                 part = data[start:]
                 self.send_header("Content-Length", str(len(part)))
-                self.send_header("ETag", outer.etag)
+                if outer.etag:
+                    self.send_header("ETag", outer.etag)
                 self.end_headers()
                 send = part if outer.cut is None else part[:outer.cut]
                 outer.log[-1]["sent"] = len(send)
@@ -145,6 +147,32 @@ class UpdaterDownloadTests(Base):
         self.srv.payload = onnx_like(200_000)
         updater.download(self.srv.url + "/m.onnx", dest, resume=True)
         self.assertEqual(dest.read_bytes(), self.srv.payload)
+
+    def test_cdn_ignoring_if_range_does_not_splice(self):
+        """검토 재현: If-Range 를 무시하는 CDN 이 같은 크기의 바뀐 파일 뒷부분을 206 으로 주면 예전에는 두 판을 이어 붙였다
+        (지문 없는 누끼 모델은 그대로 설치) → 이제 응답 ETag 가 기록과 다르면 처음부터 받음."""
+        dest = self.tmp / "m.part"
+        self.srv.cut = 100_000
+        with self.assertRaises(http.client.IncompleteRead):
+            updater.download(self.srv.url + "/m.onnx", dest, resume=True)
+        new = bytes(255 - b for b in self.PAYLOAD)  # 같은 크기 · 다른 내용
+        self.srv.cut, self.srv.etag, self.srv.payload, self.srv.ifrange = None, '"v2"', new, False
+        updater.download(self.srv.url + "/m.onnx", dest, resume=True)
+        self.assertEqual(self.srv.log[1]["range"], "bytes=100000-", "이어받기를 시도했지만")
+        self.assertIsNone(self.srv.log[-1]["range"], "ETag 가 달라 처음부터 다시")
+        self.assertEqual(dest.read_bytes(), new, "섞인 파일이 아님")
+        self.assertFalse(updater._resume_meta(dest).exists())
+
+    def test_no_validator_no_resume(self):
+        """서버가 ETag·Last-Modified 를 주지 않았으면 같은 파일인지 알 수 없음 → Range 없이 처음부터 (섞일 위험이 없게)."""
+        dest = self.tmp / "m.part"
+        self.srv.cut, self.srv.etag = 100_000, None
+        with self.assertRaises(http.client.IncompleteRead):
+            updater.download(self.srv.url + "/m.onnx", dest, resume=True)
+        self.srv.cut = None
+        updater.download(self.srv.url + "/m.onnx", dest, resume=True)
+        self.assertIsNone(self.srv.log[-1]["range"])
+        self.assertEqual(dest.read_bytes(), self.PAYLOAD)
 
     def test_server_without_ranges_restarts(self):
         """이어받기를 모르는 서버(Range 무시 · 200) → 처음부터 다시 써서 같은 파일."""
@@ -244,6 +272,51 @@ class FetchModelTests(Base):
         with self.assertRaises(thumb.DownloadCancelled):
             self.fetch(cancel=lambda: True)
         self.assertEqual(list(self.models.iterdir()), [])
+
+    def test_server_sends_broken_model_not_installed(self):
+        """받은 길이는 맞지만 ONNX 끝이 모자란 파일(서버 쪽 반쪽·섞인 파일 · 누끼 모델은 지문이 없음) → 제자리에 두지 않고 지움."""
+        self.srv.payload = self.PAYLOAD[:-5000]
+        with self.assertRaises(OSError) as cm:
+            self.fetch()
+        self.assertIn("온전하지 않아요", str(cm.exception))
+        self.assertEqual(list(self.models.iterdir()), [], "반쪽 모델·.part·기록 없음")
+
+    def test_disk_full_drops_partial(self):
+        """검토 재현: 디스크가 꽉 차서(Errno 28) 실패 → 예전에는 와이파이 끊김처럼 다시 하고 .part + .resume 를 남김 (최대 220MB) ·
+        이제 다시 하지 않고 지움."""
+        calls = []
+
+        def full(url, dest, progress=None, timeout=30, resume=False):
+            calls.append(url)
+            Path(dest).write_bytes(b"x" * 1000)
+            updater._resume_meta(dest).write_text(json.dumps({"url": url, "total": 10 ** 6, "etag": '"v1"'}), encoding="utf-8")
+            if progress:
+                progress(1000, 10 ** 6)
+            raise OSError(28, "No space left on device")
+        with mock.patch.object(updater, "download", side_effect=full):
+            with self.assertRaises(OSError):
+                self.fetch()
+        self.assertEqual(len(calls), 1, "꽉 찬 디스크는 다시 받아 봐야 소용없음")
+        self.assertEqual(list(self.models.iterdir()), [])
+        e = OSError(0, "x")
+        e.winerror = 112  # Windows ERROR_DISK_FULL
+        self.assertTrue(thumb._disk_error(e))
+        self.assertFalse(thumb._disk_error(http.client.IncompleteRead(b"", 5)))
+
+    def test_old_partials_are_swept(self):
+        """다시 누르지 않아 오래 남은 받다 만 모델(.part + .resume)은 다른 모델을 받을 때 지움 · 최근 것은 그대로 (다음에 이어받게)."""
+        import os
+        import time
+        self.models.mkdir(parents=True)
+        old, new = self.models / "옛.part", self.models / "새.part"
+        for f in (old, new):
+            f.write_bytes(b"x" * 10)
+            updater._resume_meta(f).write_text("{}", encoding="utf-8")
+        ago = time.time() - (thumb.PART_DAYS + 1) * 86400
+        for f in (old, updater._resume_meta(old)):
+            os.utime(f, (ago, ago))
+        self.fetch()
+        self.assertEqual(sorted(x.name for x in self.models.iterdir()), ["m.onnx", "새.part", "새.part.resume"])
 
     def test_legacy_truncated_model_is_replaced(self):
         """예전 판이 남긴 반쪽 모델(끝이 모자란 ONNX): 있으면 바로 쓰던 것을 지우고 다시 받음 → 누끼가 계속 고장 나지 않음."""
