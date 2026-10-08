@@ -272,13 +272,13 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(bs, [[0.1, 0.1, 0.4, 0.1]])
 
 
-JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "LOUD", "loud", "loudMult", "frameQ", "hamming", "sameFace", "sceneGroups", "usableFrame", "srcHeadCut", "footClose", "headlessBad", "isExpr", "aiFrames")
+JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "LOUD", "loud", "loudMult", "tangleOf", "biggerRival", "frameQ", "hamming", "sameFace", "sceneGroups", "usableFrame", "srcHeadCut", "footClose", "headlessBad", "isExpr", "blurQ", "srcW", "srcCap", "SHORT_ZOOM_CAP", "bandCrop", "arEff", "maxZoom", "subjQ", "aiFrames")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }
   let d = 0, i = src.indexOf('{', a); for (; i < src.length; i++) { if (src[i] === '{') d++; if (src[i] === '}' && --d === 0) break; } return src.slice(a, i + 1); };
 const NAMES = JSON.parse(process.argv[2]);
-eval('var clamp = (v, a, b) => Math.min(b, Math.max(a, v)); var TEXTY = 0.05; var DIGIT_FONT = "Pretendard Black"; var AI = { frames: [], cuts: {}, pick: null }; var setAI = o => { Object.assign(AI, o); return null; };' + NAMES.map(pick).join('\n') + '; globalThis.T = {setAI,' + NAMES.join(',') + '};');
+eval('var clamp = (v, a, b) => Math.min(b, Math.max(a, v)); var TEXTY = 0.05; var DIGIT_FONT = "Pretendard Black"; var AI = { frames: [], cuts: {}, pick: null }; var INFO = { width: 1920, height: 1080 }; var frameAspect = () => INFO.width / INFO.height; var setAI = o => { Object.assign(AI, o); return null; };' + NAMES.map(pick).join('\n') + '; globalThis.T = {setAI,' + NAMES.join(',') + '};');
 const cases = JSON.parse(fs.readFileSync(0, 'utf8')); const out = cases.map(([fn, args]) => T[fn](...args));
 process.stdout.write(JSON.stringify(out));
 """

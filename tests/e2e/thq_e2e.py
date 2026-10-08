@@ -40,7 +40,12 @@ def bundle(pg, fmt, name):
     weak = pg.evaluate("!!AI.weak")
     W, H = (1280, 720) if fmt == "long" else (1080, 1920)
     want = 2 if weak else 6
-    check(len(items) >= (1 if weak else 4) and len(items) <= 6, f"{key} {len(items)}개 (쓸 만한 장면 없음={weak})", key)
+    # D-121: 쓸 만한 장면이 없는 영상(약한 영상)은 0~2개 — 0개면 상태 줄에 까닭과 '장면 고르기' 안내 (THUMBTEST01 쇼츠: 흐린 판에 뜬 작은 누끼뿐 · 판정 pro 2.0~2.5 라 내지 않음)
+    if weak and not items:
+        st = pg.evaluate("document.getElementById('aiStat') ? document.getElementById('aiStat').textContent : ''")
+        check("추천을 만들지 못했어요" in st and "장면 고르기" in st, f"{key} 0개 · 상태 줄 '{st[:60]}'", key)
+    else:
+        check(len(items) >= (1 if weak else 4) and len(items) <= (2 if weak else 6), f"{key} {len(items)}개 (쓸 만한 장면 없음={weak})", key)
     if len(items) < want:
         print(f"  NOTE {key}: 굳은 규칙을 지키느라 {len(items)}개만 냄", flush=True)
     check(all((x["doc"]["w"], x["doc"]["h"]) == (W, H) for x in items), f"{key} 크기 {W}×{H}", key)
@@ -54,8 +59,9 @@ def bundle(pg, fmt, name):
     groups = pg.evaluate("(() => { const g = sceneGroups(AI.frames); return Object.fromEntries(Object.entries(g).map(([k, v]) => [k, String(v)])); })()")
     sc = [groups.get(str(x["t"]), str(x["t"])) for x in items]
     ngroups = len(set(groups.values()))
+    pool_sc = pg.evaluate("AI.dbg && AI.dbg.scenes") or ngroups  # 판정 q5 1회차: 흔들린 장면(주인공 0.3 넘게)·머리 잘린 장면을 빼고 남은 후보의 장면 묶음 수
     if not weak and len(items) >= 4:
-        check(len(set(x["t"] for x in items)) >= min(3, ngroups), f"{key} 장면 {len(set(x['t'] for x in items))}장 (≥3)", key)
+        check(len(set(x["t"] for x in items)) >= min(3, ngroups, pool_sc), f"{key} 장면 {len(set(x['t'] for x in items))}장 (≥{min(3, ngroups, pool_sc)} · 후보 장면 묶음 {pool_sc})", key)
     check(max([sc.count(g) for g in sc] or [0]) <= (2 if ngroups >= 3 else 3), f"{key} 같은 장면 묶음 ≤{2 if ngroups >= 3 else 3} {sc}", key)
     l2k = pg.evaluate("items => items.map(c => l2Key(c))", [x["copy"] for x in items])
     check(len(set(l2k)) == len(l2k), f"{key} 같은 둘째 줄 없음 {l2k}", key)

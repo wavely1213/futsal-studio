@@ -8,12 +8,14 @@ import re
 import threading
 import time
 import unicodedata
+import zlib
 
 import core
 import hooks
 
 LINE_MAX = 12        # 한 줄 글자 수(띄어쓰기 빼고) 상한 — 넘으면 버림
-LINE_GOOD = (3, 9)   # 작게 봐도 읽히는 한 줄 길이
+LINE_GOOD = (5, 9)   # 작게 봐도 읽히는 한 줄 길이 (판정 5회차 D-094: 우리 줄 평균 5자 · 레퍼런스 6.75~7.6자 → 5~9자)
+TOTAL_GOOD = (10, 18)  # 두 줄 합 (레퍼런스 12~17자 · 우리 10~11자)
 TOTAL_MAX = 20
 N_OUT = 12  # 판정 4회차: 8 → 12 (줄 길이·같은 둘째 줄·질문 머리 규칙을 지키고도 6개를 채울 만큼)
 AI_N = 10
@@ -34,6 +36,10 @@ EMO = (("놀람", ("대박", "속았", "깜짝", "와 ", "헐", "말도 안")), 
 REF_EXAMPLES = ["수비가 못 막는 / 1가지", "수비 전환 / 3초 법칙", "수비를 속이는 / 발바닥 드래그", "ALA / 움직임", "슛이 뜨는 이유? / 디딤발 위치",
                 "풋살 국가대표가 / 알려주는 드리블", "이거 하나로 / 필살기!!", "풋살 고수가 / 쓰는 기술", "안 배운 게 / 맞아?", "영상에선 / 못해 보이지?",
                 "슛? X / 드래그 O", "떨지 마세요!", "이것만 알면 / 1대1 끝", "프로는 / 이렇게 찹니다", "왜 나만 / 뺏길까?"]
+# 판정 5회차(D-094): 클로드에게 보여 주는 레퍼런스 훅 (쪼살·해주호·쌈바 실제 썸네일 문구 · 말투·길이의 기준)
+REF_HOOKS = ["6대6 풋살 교과서 / 플랩 레벨업 바로 됩니다", "영상만 봐도 실력이 늘어요", "수비를 속이는 / 발바닥드래그", "플랩 세미 가는 기술",
+             "풋살 국가대표가 알려주는 / 드리블 필살기!!", "안 배운게 맞아?", "영상에선 못해 보이지?", "불리한 상황에서 / 공 다 뺏기는 너를 위한 영상",
+             "이것도 모르고 수비를 했네.. / '수비시 거리조절'", "'여기' 봐야 / 뚫립니다", "축구 현역 상대로 / 풋살 기술이 통할까??", "사이드 풀백 위치선정 / 이게 전부입니다"]
 _LOCK = threading.Lock()
 
 
@@ -168,10 +174,11 @@ def split2(t):
 SKILLS = ("드래그", "드리블", "페인트", "턴", "돌파", "개인기", "스텝오버")  # 수비를 속이는 기술 (속이는 틀은 이 기술 + 대사에 '속이' 가 있을 때만)
 
 
-def rule_candidates(title, texts):
+def rule_candidates(title, texts, rotate=True):
     """규칙으로 만든 후보 전부 (점수 전).
     레퍼런스(쪼살·쌈바·해주호·JK)의 '결과·대상이 있는 문구' 틀: 무조건 봐(큰 노란 줄) · ~의 비밀 · 영상만 봐도 늘어요 · 플랩 레벨업 · 수비를 속이는 X ·
-    N초면 끝 · 이렇게 하면 안 돼요 · 못하는 진짜 이유 · 질문형 · 반전 O/X · 대사 핵심 문장."""
+    N초면 끝 · 이렇게 하면 안 돼요 · 못하는 진짜 이유 · 질문형 · 반전 O/X · 대사 핵심 문장.
+    rotate: 영상(제목)마다 훅 틀 HOOK_KEEP 개·흔한 틀 GENERIC_KEEP 개만 고정 흔들림 순으로 남김 (D-111 · 틀 내용을 보는 시험은 False)."""
     title, texts = nfc(title), [nfc(t) for t in texts]
     tp = topics(title, texts)
     X = tp[0] if tp else (title_phrase(title) or "풋살")
@@ -205,7 +212,8 @@ def rule_candidates(title, texts):
     if has("대박", "속았", "들어갔", "와 "):
         C.append(_cand("이게", "된다고?", 1, "된다고?", f"{X} 실전 장면", "wow", 0.85, "놀람 질문형 (대사에 감탄)"))
     if Y != X and has("보다", "차이", "vs", "VS", "대신", "비교"):
-        C.append(_cand(f"{X} vs {Y}", "정답은?", 1, "정답은?", "직접 비교해 봤어요", "versus", 0.7, "두 주제 비교 (대사에 비교)"))
+        if _kind(X) == _kind(Y):  # 판정 5회차(D-094): 비교는 같은 종류 기술끼리만 ('퍼스트 터치 vs 인사이드'는 말이 안 됨)
+            C.append(_cand(f"{X} vs {Y}", "정답은?", 1, "정답은?", "직접 비교해 봤어요", "versus", 0.7, "두 주제 비교 (대사에 비교)"))
     # 구체적인 약속 (판정 2회차: 문구 이유 44/84 '막연함' — 숫자·결과·대상이 있는 약속이 프로 채널 문구) · 숫자는 대사에 있을 때만
     kind = _kind(X) or _kind(body)  # 주제 낱말 먼저 (판정(dev): 오프더볼 영상인데 대사의 '골키퍼' 때문에 슈팅 질문 '왜 안 들어갈까?')
     C.append(_cand(f"{X} 핵심은", "딱 1가지", 1, "딱 1가지", "이것만 기억하세요", "one", 0.95, "구체적 약속 (핵심 1가지)"))
@@ -224,7 +232,46 @@ def rule_candidates(title, texts):
                 C.append(_cand(X, f"{num}{unit}면 끝", 1, f"{num}{unit}", "이것만 기억하세요", "numlist", 1.0, f"숫자 약속 (대사의 {num}{unit})"))
             elif unit == "초":
                 C.append(_cand(X, f"{num}초 법칙", 1, f"{num}초 법칙", "", "numsec", 1.05, f"숫자 약속 (대사의 {num}초)"))
+    # 판정 5회차(D-094): 유튜버 말투의 훅 문장 (대상·결과·자책·숨김) — 레퍼런스 '불리한 상황에서 공 다 뺏기는 너를 위한' · '이것도 모르고 수비를 했네..' ·
+    # ''여기' 봐야 뚫립니다' · '플랩 세미 가는 기술' (규칙 문구가 '낱말 / 낱말' 목차처럼 읽힘: 훅 4.9 · 자연스러움 5.5 · 프로로 고른 비율 5%)
+    act = kind in ("dribble", "touch", "shoot") or any(k in X for k in SKILLS)
+    # 줄이 길면 마지막 낱말만 ('발바닥 드래그' → '드래그') · 판정 q5 1회차(D-111): 띄어 쓴 5자 주제('콘 드리블')도 — '콘 드리블 했네..'(10자)는 쇼츠 한 줄(8자)을 넘어 쇼츠 문구가 모자람
+    xs = X.split()[-1] if (len(nospace(X)) > 4 or (" " in X and len(X) >= 5)) and len(nospace(X.split()[-1])) >= 2 else X
+    if act and len(nospace(xs)) <= 5:
+        C.append(_cand("이것도 모르고", f"{xs} 했네..", 1, xs, "", "regret", 1.2, "자책형 훅 (레퍼런스 '이것도 모르고 수비를 했네..')"))
+    rival = has("수비", "뺏", "막", "압박", "1대1", "상대")  # 상대가 있는 이야기일 때만 '뺏기는'·'뚫립니다' (콘 드리블 연습에 '뚫립니다'는 어색)
+    if kind in ("dribble", "touch") and len(nospace(xs)) <= 4 and rival:
+        C.append(_cand(f"{xs}만 하면", "뺏기는 너에게", 1, "뺏기는", "", "foryou", 1.2, "공감형 훅 (대상이 보임 · 레퍼런스 '공 다 뺏기는 너를 위한')"))
+    # 판정 q5 1회차(D-111): '플랩 세미 가는 / X'(18묶음 중 15)는 풋살해주호 썸네일 제목을 그대로 가져온 것 → 뺌 · 우리 말로 쓴 훅 틀을 더하고 영상마다 돌려 씀(HOOK_PIDS)
+    if has("어려", "막혀", "막히", "놓치", "놓쳐", "실수", "안 돼", "뺏기", "많은데"):  # 대사에 막히는 이야기가 있을 때만
+        C.append(_cand(f"{xs} 할 때", "여기서 막혀요", 1, "막혀요", X if X != xs else "", "stuck", 1.1, "공감형 훅 (다들 막히는 곳 · 답은 영상에)"))
+    if act:  # 기술(드리블·터치·슈팅) 이야기일 때만
+        C.append(_cand(f"고수의 {xs}", "이게 달라요", 1, "달라요", "", "diff", 0.9, "비교 궁금증 훅 (고수와 무엇이 다른지)"))
+    if has("실수", "안 돼", "하지 마", "많은데", "틀려"):
+        C.append(_cand(f"제발 {xs}", "이렇게 하지 마세요", 1, "하지 마세요", "", "please", 1.15, "경고형 훅 (대사에 실수 이야기)"))
+    if rival and has("못 따라", "못 막", "뚫", "제쳐", "따돌"):
+        C.append(_cand(f"{xs} 하나로", "수비가 못 따라와요", 1, "못 따라와요", "", "beatit", 1.1, "결과 약속 훅 (대사에 '못 따라와요'·'못 막아요')"))
+    if has("연습", "훈련", "드릴") and kind in ("dribble", "touch"):
+        C.append(_cand(f"{xs}{josa(xs, '은', '는')}", "이렇게만 연습하세요", 1, "이렇게만", "", "practice", 0.85, "연습법 훅 (훈련 영상)"))
+    if kind == "tactic" or has("시야", "공간", "오프더볼"):
+        C.append(_cand(f"{xs} 할 때", "프로는 여기를 봐요", 1, "여기", "", "prolook", 1.1, "숨김형 훅 (프로가 보는 곳 · 답은 영상에)"))
+    if rival and (kind == "dribble" or any(k in X for k in ("돌파", "드래그", "페인트"))):
+        C.append(_cand("'여기' 봐야", "뚫립니다", 1, "뚫립니다", X, "hide", 1.2, "숨김형 훅 (답은 영상에 · 레퍼런스 ''여기' 봐야 뚫립니다')"))
+    elif kind == "shoot":
+        C.append(_cand("'여기' 맞추면", "골 들어가요", 1, "골", X, "hide", 1.1, "숨김형 훅 (답은 영상에)"))
+    if len(nospace(X)) <= 6:
+        C.append(_cand(f"{X}{josa(X, '이', '가')}", "이렇게 쉬웠어?", 1, "쉬웠어?", "", "easyq", 0.9, "놀람 질문형 훅"))
+    # 판정 q5 2회차(D-118): 규칙 훅 틀 10개가 9영상 중 6영상에 같은 말('고수의 X / 이게 달라요') — 같은 말투의 틀을 4개 더해 영상마다 고르는 묶음이 더 달라지게
+    if act and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 고수들", "다 이렇게 해요", 1, "이렇게", "", "trait", 0.95, "공통점 훅 (고수들이 하는 것 · 답은 영상에)"))
+    if kind in ("dribble", "touch", "shoot") and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 늘려면", "이것부터 하세요", 1, "이것부터", "", "first", 1.0, "순서 훅 (무엇부터 · 답은 영상에)"))
+    if rival and kind == "dribble" and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 한 번에", "수비가 얼어요", 1, "얼어요", "", "freeze", 1.05, "결과 훅 (수비가 못 움직임)"))
+    if rival and kind in ("dribble", "touch") and has("실수", "뺏기", "뺏겨", "안 돼", "많은데") and len(nospace(xs)) <= 5:
+        C.append(_cand(f"{xs} 이러면", "무조건 뺏겨요", 1, "뺏겨요", "", "wrong", 1.05, "경고형 훅 (대사에 실수·뺏기는 이야기)"))
     # 대사의 구체 내용 (판정 3회차: 상투 꼬리표 대신 영상에만 있는 낱말 — '수비 전환 / 3초 법칙' 7.1~7.5 · '슛이 뜨는 이유? / 디딤발 위치' 6.5)
+    # 판정 5회차(D-094): 낱말 라벨('슈팅 / 디딤발 위치' 3/6/3 '교재 목차 같은 라벨')을 앞세우지 않음 → 라벨은 가산점을 낮추고, 같은 낱말을 훅 문장의 작은 보조 문구로
     # 판정 4회차: 질문은 ① 대사에 있는 질문('왜 다들 첫 터치에서 공을 놓칠까요?') ② 대사에 그 문제 말('막혀요'·'뺏겨요')이 있고 해답 낱말의 기술 종류가 같을 때만 —
     # '왜 막힐까?'가 76장 중 12장(수비 없는 콘 드리블에도) · 같은 질문 머리는 화면(묶음)에서 한 번만
     tq = transcript_question(texts, tp)
@@ -240,12 +287,16 @@ def rule_candidates(title, texts):
                 continue
             x1 = " ".join(rest)
         big = d if len(nospace(d)) >= 4 or " " in d else f"핵심은 {d}"
-        C.append(dict(_cand(x1, big, 1, d, "", f"detail{k}", 1.05 - 0.05 * k, "대사의 구체 내용"), detail=True, q=src))
+        C.append(dict(_cand(x1, big, 1, d, "", f"detail{k}", 0.55 - 0.05 * k, "대사의 구체 내용"), detail=True, q=src))
+        if k == 0 and len(nospace(d)) <= 8:  # 훅 문장 + 작은 보조 문구로 구체 낱말 (답을 다 드러내지 않음)
+            for c in C:
+                if c["pid"] in HOOK_SUB and not c["sub"]:
+                    c["sub"], c["q"] = d, src
         if nq >= 2:
             continue
         q, why = (tq, "대사의 질문 + 대사의 해답") if tq else (problem_q(kind, d, body, x1), "문제 질문 + 대사의 해답")
         if q:
-            C.append(dict(_cand(q, d, 1, d, "" if nospace(x1) in nospace(q) else x1, f"detailq{nq}", 1.45 - 0.05 * nq, why), detail=True, q=src))
+            C.append(dict(_cand(q, d, 1, d, "" if nospace(x1) in nospace(q) else x1, f"detailq{nq}", 0.95 - 0.05 * nq, why), detail=True, q=src))
             nq += 1
     # 반전 O/X: 한 문장에 기술어 두 개 + '척·대신·말고' → '슛? X / 드래그 O'
     for sent in texts:
@@ -261,6 +312,8 @@ def rule_candidates(title, texts):
     for w, sent in _sentences(texts):
         if w <= 0 or k >= 2:
             break
+        if re.search(r"(게요|볼까요|봅시다|드릴게요|할게요)[.!?…\s]*$", sent):
+            continue  # 판정 5회차: '같이 연습해 볼게요' 같은 진행 안내는 썸네일 문구가 아님 ('밋밋한 문구')
         parts = [x for x in re.split(r"(?<=요|다|죠)\s+", sent) if len(nospace(x)) >= 5]
         sent = max(parts, key=lambda x: (any(t in x for t in tp), -abs(len(nospace(x)) - 10))) if parts else sent
         sp = _compress(sent)
@@ -272,9 +325,14 @@ def rule_candidates(title, texts):
     tl = split2(title or "")
     if tl and tl[1] and not re.search(r"테스트|세로|영상$", title or ""):
         C.append(_cand(tl[0], tl[1], 0, X if X in tl[0] else "", "", "title", 0.6, "영상 제목"))
+    # 판정 q5 1회차(D-111): 훅 틀을 점수만 흔들면 다들 같은 틀이 남음('고수의 X / 이게 달라요' 18/18) → 영상마다 훅 틀 HOOK_KEEP 개만 (제목 crc32 순 — 채널 목록에서 영상마다 다른 말투)
+    for group, keep in ((HOOK_PIDS, HOOK_KEEP), (GENERIC_PIDS, GENERIC_KEEP)) if rotate else ():
+        hp = sorted({c["pid"] for c in C if c["pid"] in group}, key=lambda pid: -spin(title, pid))
+        if len(hp) > keep:
+            C = [c for c in C if c["pid"] not in hp[keep:]]
     ctx = context_boost(body)
     for c in C:
-        c["prior"] = round(c["prior"] + ctx.get(c["pid"], 0), 3)
+        c["prior"] = round(c["prior"] + ctx.get(c["pid"], 0) + (spin(title, c["pid"]) if rotate and c["pid"] in HOOK_PIDS + GENERIC_PIDS else 0), 3)
     return C, tp
 
 
@@ -489,6 +547,19 @@ def context_boost(body):
     return out
 
 
+HOOK_PIDS = ("regret", "foryou", "hide", "easyq", "stuck", "diff", "please", "beatit", "practice", "prolook", "trait", "first", "freeze", "wrong")  # 유튜버 말투 훅 틀
+HOOK_SUB = ("regret", "foryou", "hide", "stuck", "diff", "beatit", "prolook", "trait", "first", "freeze")  # 대사의 구체 낱말을 작은 보조 문구로 붙이는 훅
+HOOK_KEEP = 8  # 영상 하나가 쓰는 훅 틀 수 (모두 14개 · D-118 — 4개로 줄이면 묶음마다 라벨·흔한 틀이 끼어 판정 appeal −0.18 — 개발 판정 r_d)
+GENERIC_PIDS = ("must", "secret", "grow", "howto", "only", "levelup", "easy", "why", "reason", "one", "result", "beat", "wow")  # 주제만 바꿔 끼우는 흔한 틀 ('이것만 알면 / X 끝!' 9/9 영상)
+GENERIC_KEEP = 8  # 영상 하나가 쓰는 흔한 틀 수 (모두 13개)
+HOOK_SPIN = 0.6  # 판정 q5 1회차(D-111): 같은 훅 틀이 모든 영상에 ('X가 / 이렇게 쉬웠어?' 18/18 묶음) → 영상 제목마다 훅 틀 앞뒤를 ±0.3 흔들어 돌려 씀 (같은 영상은 늘 같음)
+
+
+def spin(title, pid):
+    """영상마다 다른 훅 틀이 앞에 오게 하는 고정 흔들림 −HOOK_SPIN/2 ~ +HOOK_SPIN/2 (제목·틀 이름의 crc32 — 다시 열어도 같음)."""
+    return (zlib.crc32(f"{nfc(title or '')}|{pid}".encode("utf-8")) % 1000 / 999 - 0.5) * HOOK_SPIN
+
+
 def score(c, tp, body=""):
     """후보 점수: 틀의 기본값 + 줄 길이 + 주제 포함 + 강조 낱말 길이 − 금지어 − 상투 꼬리표 + 대사 근거."""
     text = c["l1"] + " " + c["l2"]
@@ -504,20 +575,25 @@ def score(c, tp, body=""):
         s += 1.0 if LINE_GOOD[0] <= n <= LINE_GOOD[1] else 0.3 if n < LINE_GOOD[0] else -0.6
     if sum(lens) > TOTAL_MAX:
         s -= 2
+    elif TOTAL_GOOD[0] <= sum(lens) <= TOTAL_GOOD[1]:
+        s += 0.4
     if not lens[1]:
         s -= 0.5
-    if concrete(c) and not vague(c, body):
-        s += 0.9
+    # 판정 5회차(D-094): 말하듯 서술어로 끝나는 줄(레퍼런스 54% · 우리 32%)은 가산 · '낱말 / 낱말' 라벨(우리 64% · 레퍼런스 43%)은 감산
+    # 구체 낱말·대사 근거 가산(+0.9·+0.4)은 뺌 — 앱이 가장 높게 준 라벨 문구가 판정에서 가장 낮았음 (상관 0.10)
+    if spoken(c):
+        s += 0.8
+    elif label_pair(c):
+        s -= 0.8
+    if stock(c, body):  # 규칙 틀이 찍어 내는 상투 꼬리표는 그대로 크게 깎고, 클로드가 쓴 것은 조금만 (쪼살의 '실력이 늘어요'도 판정 7점) · 묶음에 1개는 화면 recommend
+        s -= 0.3 if c.get("src") == "ai" else 0.9
     elif vague(c, body):
-        s -= 0.6
-    if stock(c, body):
-        s -= 0.9  # 판정 3회차: 상투 꼬리표 76장 중 38장 · 클로드 총점과 상관 −0.33 (가장 큰 감점 요인)
-    if c.get("detail") or (c.get("q") and nospace(c["q"]) in nospace(body)):
-        s += 0.4  # 대사에 근거가 있는 문구
+        s -= 0.2
+    # 판정 5회차(D-094): 주제 낱말이 30장 중 27장에 (같은 묶음 안 되풀이 = 목차 느낌) → 가산을 1.5 → 0.6 (주제는 묶음의 절반 정도에만)
     if tp and any(nospace(t) in nospace(text) for t in tp[:2]):
-        s += 1.5
+        s += 0.6
     elif tp and any(nospace(t) in nospace(c.get("sub", "")) for t in tp[:2]):
-        s += 0.8  # 주제는 작은 줄에
+        s += 0.4  # 주제는 작은 줄에
     if c.get("emph"):
         ln, a, b = c["emph"]
         s += 0.6 if 1 <= len(nospace((c["l1"], c["l2"])[ln][a:b])) <= 5 else 0.2
@@ -526,6 +602,22 @@ def score(c, tp, body=""):
                 and not any(h in big for h in HOOKS):
             s -= 1.5  # 핵심 낱말(주제)이 작은 줄로 가고 큰 줄은 밋밋함 ('디딤발 위치가 / 핵심이에요' — 판정)
     return round(s, 3)
+
+
+_SPOKEN = re.compile(r"(요|니다|다|까|지|네|죠|해|봐|라|자|게|걸|군|나|야)[?!.~]*$|[?!]$|\.\.$")
+
+
+def spoken(c):
+    """한 줄이라도 말하듯 서술어·물음으로 끝나는지 ('~했네..'·'뚫립니다'·'쉬웠어?')."""
+    return any(_SPOKEN.search((t or "").strip()) for t in (c.get("l1"), c.get("l2")) if t)
+
+
+def label_pair(c):
+    """'슈팅 / 디딤발 위치'처럼 두 줄 모두 이름씨 라벨 (서술어도 꾸밈말도 없음)."""
+    l1, l2 = (c.get("l1") or "").strip(), (c.get("l2") or "").strip()
+    if not l1 or not l2 or spoken(c):
+        return False
+    return not re.search(r"(는|은|을|를|면|고|도|만|의|로|에서|에게|한테|할|한|된|될|진|던|하는|되는|가는|안 ?되는)$", l1)
 
 
 def _pick(cands, n=N_OUT):
@@ -571,14 +663,15 @@ def suggest(name, with_ai=True):
     items = [finish(c, tp, body) for c in C]
     ai = load_ai(name) if with_ai else None
     if ai:
-        items += [finish(dict(c, prior=1.05), tp, body) for c in ai]
+        items += [finish(dict(c, prior=1.35), tp, body) for c in ai]  # 판정 5회차(D-094): 클로드 문구가 있으면 앞으로 (훅 6.53 · 규칙 4.9)
     picked = _pick(items, N_OUT + (2 if ai else 0))
     return {"items": picked, "topics": tp, "ai": bool(ai)}
 
 
 # ---------- 클로드 (선택 · 내 클로드 계정) ----------
 
-PROMPT_VER = 5   # 클로드 문구 질문이 바뀌면 올림 → 기억해 둔 클로드 문구를 다시 받음 (2: 구체적 약속·줄 8자 · 3: 대사 근거 인용·상투 꼬리표 금지 · 4: 해답만 두지 말고 궁금증과 함께 ·
+PROMPT_VER = 6   # 클로드 문구 질문이 바뀌면 올림 → 기억해 둔 클로드 문구를 다시 받음 (2: 구체적 약속·줄 8자 · 3: 대사 근거 인용·상투 꼬리표 금지 · 4: 해답만 두지 말고 궁금증과 함께 ·
+#                  6: 유튜버 말투 훅·답 숨기기·대상과 결과·주제 낱말 절반까지 (D-094) ·
 #                  5: 금지 꼬리표가 든 좋은 예시를 뺌·부정 문장 뜻 뒤집기 금지·같은 질문 머리 반복 금지)
 AI_RETRY = 3600  # 클로드 문구가 실패했으면(형식·근거 없음·한도) 1시간 동안 자동으로 다시 부르지 않음 (열 때마다 160초 기다리지 않게 · 버튼은 언제나)
 
@@ -620,35 +713,28 @@ def _save_cache(name, data):
 
 
 def prompt(name):
+    """클로드에게 줄 문구 질문 (판정 5회차 D-094: 유튜버 말투 훅 · 답을 다 말하지 않음 · 대상·결과 · 주제 낱말은 절반까지 — 같은 판정에서 훅 6.53 = 레퍼런스 6.57)."""
     title, texts = nice_title(name), _texts(name)
     tp = topics(title, texts)
     body = " ".join(texts)
-    key = [s for _, s in _sentences(texts)[:8]]
-    L = ["당신은 구독자 수십만 한국 풋살·축구 레슨 채널(쪼살·쌈바 풋살 클래스·풋살해주호·JK 아트사커)의 썸네일 카피라이터예요.",
-         "아래 영상의 썸네일에 크게 들어갈 2줄 헤드라인을 만들어 주세요. 채널: '풋살사관학교'(최경진 감독의 풋살 레슨 채널). 시청자: 풋살 동호인·플랩(FLAB) 참가자.", "",
-         f"[영상 제목] {title}", f"[주제 낱말] {', '.join(tp) or '없음'}", "[대사 요약 (앞부분)]", body[:2500], "[핵심 문장]"] + [f"- {s}" for s in key] + [
-         "", "[잘 되는 문구 — 레퍼런스 채널 실제 예시 (낱말은 이 영상에 맞게 바꾸세요)]"] + [f"- {x}" for x in REF_EXAMPLES] + [
-         "", "[좋은 썸네일 문구의 조건 — 가장 중요]",
-         "- 10개 중 7개 이상은 '구체적인 약속'이어야 해요: 숫자·시간·결과·대상이 들어간 문구. 예: '수비 전환 / 3초 법칙', '수비가 못 막는 / 상체 페인트', "
-         "'디딤발 하나로 / 슛이 낮아져요', '첫 터치 / 수비 반대쪽으로'. 숫자는 대사에 나온 것만 써요.",
-         "- 결과나 대상이 보여야 해요: '수비를 속이는 발바닥 드래그', '슛이 낮게 깔려요'처럼 이 영상에서만 나오는 낱말로 무엇이 좋아지는지·누구를 이기는지.",
-         "- 금지(막연한 낚시 문구): '무조건 봐', '~의 비밀', '이렇게 하세요', '진짜 쉽게', '총정리', '제대로 배웠어?', '이게 진짜 중요해요'. 이런 말은 많아야 1개.",
-         "- 금지(어느 영상에나 붙는 꼬리표 — 대사에 있어도 쓰지 마세요): '이 순서대로!', '플랩 레벨업', '실력이 늘어요', '골이 늘어요', '딱 1가지', '1가지만 바꿔요', "
-         "'확 달라져요', '수비가 속아요', '꿀팁 1가지', '1분만 투자하세요', '바로 됩니다'.",
-         "- 대사가 '~하지 마세요'·'~말고'·'안 돼요'라고 한 낱말을 해답처럼 쓰지 마세요 (뜻이 거꾸로 돼요). '속도를 줄이세요'는 '속도'가 아니라 '속도 줄이기'.",
-         "- 같은 질문 머리('왜 막힐까?')를 두 번 넘게 쓰지 마세요. 질문은 대사가 말한 문제와 해답이 원인-결과로 이어질 때만.",
-         "- 모든 문구에는 대사에 나온 구체적인 낱말(몸의 부분·방향·숫자·동작·상황, 예: '디딤발 위치', '3초 안에 압박', '첫 터치는 반대쪽', '고개 들기')이 적어도 1개 들어가야 해요. "
-         "그 낱말이 나온 대사 한 마디를 q 에 글자 그대로 옮겨 적으세요 (대사에 없는 말이면 그 문구는 버려져요).",
-         "- 구체 낱말만 덩그러니 두면('디딤발 위치') 설명이라 클릭하고 싶지 않아요. 궁금증과 함께: 문제 질문 + 해답('슛이 뜨는 이유? / 디딤발 위치', "
-         "'왜 막힐까? / 상체 페인트'), 대비('공 보기 X / 고개 들기 O'), '못하는 진짜 이유', 결과('뺏기면 3초 / 바로 압박!').",
-         "- 질문형은 답이 궁금한 구체적인 질문만: '수비 전환, 몇 초 걸려?', '슛이 뜨는 이유는?'.",
-         "- 같은 틀 반복은 피하세요. 10개가 서로 다른 틀이어야 해요.",
-         "- 영상 내용과 맞는 말만. 과장·낚시(충격·경악·실화냐·100%·역대급)는 쓰지 마세요. 해요체·반말 질문형 모두 좋아요.",
-         "", "[형식 규칙]", "- 한 줄은 띄어쓰기를 넣고 8자 이내(쇼츠 세로 화면 기준 · 많아야 9자), 두 줄 합쳐 16자 이내. 작은 화면(휴대폰 목록)에서도 읽혀야 해요.",
-         "- emph = 노랗고 가장 크게 칠할 낱말(1~6자). l1 또는 l2 안에 글자 그대로 있어야 하고, 그 줄이 가장 큰 줄이 돼요. 보통 주제 낱말이나 결과·훅 낱말.",
-         "- sub = 어두운 상자 안에 작게 들어갈 보조 문구(선택, 12자 이내, 예: '1분 강좌', '감독이 직접 알려줘요', '실전 시범').",
-         f"- 서로 다른 틀로 {AI_N}개.", "", "[대답 형식] JSON 배열만 (설명 없이):",
-         '[{"l1": "첫 줄", "l2": "둘째 줄", "emph": "강조 낱말", "sub": "보조 문구", "q": "근거 대사 그대로"}]']
+    t0 = tp[0] if tp else (title_phrase(title) or title)
+    L = ["당신은 한국 풋살 레슨 유튜브(쪼살·풋살해주호·쌈바 풋살 클래스·JK 아트사커)의 썸네일 카피라이터예요. "
+         "채널 '풋살사관학교'(최경진 감독)의 이 영상 썸네일에 크게 들어갈 문구 10개를 만들어 주세요.",
+         "시청자: 플랩(FLAB)·동호인 풋살을 하는 20~30대. 그들이 원하는 것: 플랩 레벨 올리기(세미프로·프로), 6대6에서 안 뺏기기, 골 넣기, 팀에서 인정받기.", "",
+         f"[영상 제목] {title}", f"[주제 낱말] {', '.join(tp) or '없음'}", "[대사 (앞부분)]", body[:2500], "",
+         "[실제 잘 되는 채널 썸네일 문구 — 이 말투·길이가 기준이에요]"] + [f"- {x}" for x in REF_HOOKS] + [
+         "", "[조건]",
+         "1. 유튜버가 실제로 말하듯 자연스러운 한국어 한 문장(또는 두 마디)이에요. 적어도 한 줄은 서술어(~요·~니다·~다·~까?·~지?·~네..)로 끝나요. "
+         "'낱말 / 낱말' 라벨 나열(예: '슈팅 / 디딤발 위치', '1대1 돌파 / 속도 줄이기')은 금지.",
+         "2. 답(팁 내용)을 다 말하지 마세요. 결과·대상·궁금증으로 클릭하게 하고, 팁은 '여기'·'이것'·'이 한 가지'처럼 숨기거나 작은 보조 문구(sub)로만.",
+         "3. 누구에게·어떤 결과인지가 보이게: 플랩 레벨·6대6·초보·동호인·수비수·골키퍼 같은 대상이나 '안 뺏겨요'·'뚫립니다'·'세미 갑니다' 같은 결과.",
+         f"4. 10개 중 주제 낱말({t0})이 그대로 들어가는 건 5개 이하. 서로 다른 틀(약속·도발 질문·공감·권위·숨김·자책·감탄)로.",
+         "5. 한 줄은 띄어쓰기 포함 9자 이내(쇼츠 세로 화면에서도 크게 보이게 · 많아야 10자), 두 줄 합쳐 10~18자. 한 줄짜리도 좋아요.",
+         "6. 영상 내용과 맞는 말만(대사 근거). 숫자·이력(국가대표·프로·현역)은 대사에 있을 때만. 과장(충격·경악·100%·역대급) 금지.",
+         "7. 대사가 '~하지 마세요'·'~말고'·'안 돼요'라고 한 낱말을 해답처럼 쓰지 마세요 (뜻이 거꾸로 돼요).",
+         "8. emph = 노랗게 칠할 낱말(1~6자, l1 또는 l2 안에 글자 그대로). sub = 작은 보조 문구(선택, 12자 이내). q = 근거가 된 대사 한 마디를 글자 그대로.",
+         "", "[대답 형식] JSON 배열만 (설명 없이):",
+         '[{"l1": "첫 줄", "l2": "둘째 줄", "emph": "강조", "sub": "", "q": "근거 대사"}]']
     return "\n".join(L)
 
 
@@ -682,19 +768,20 @@ def _plain(t):
     return re.sub(r"[^가-힣A-Za-z0-9]", "", nfc(t))
 
 
+CREDS = ("국가대표", "국대", "프로", "현역", "선출", "감독", "코치", "세미프로")
+
+
 def grounded(l1, l2, q, body, tp=()):
-    """클로드 문구가 대사에 근거가 있는지: 근거(q)가 대사에 그대로 있고(문장 부호·띄어쓰기는 무시), 문구의 세 글자 이상 조각(주제 낱말 말고) 또는
-    구체 낱말(DETAILS)이 근거 안에 있음. 판정 4회차: 두 글자 조각('오늘'·'바로')만 겹쳐도 통과하던 것을 막고, 쉼표 하나 빠진 인용은 받아 줌."""
+    """클로드 문구가 대사에 근거가 있는지: 근거(q)가 대사에 그대로 있고(문장 부호·띄어쓰기는 무시, 4글자 넘게), 문구의 숫자와 이력(국가대표·프로·현역…)이
+    대사에 있음. 판정 5회차(D-094): 예전엔 문구의 세 글자 조각이 근거 안에 있어야 했는데, 훅 문구('이것도 모르고 / 드래그 했네..')는 대사와 낱말이 겹치지
+    않아 65% 가 버려짐 → 겹침 조건을 뺌 (대사와 상관없는 문구는 근거 인용이 대사에 없어서 걸러짐)."""
     nb, nq = _plain(body), _plain(q)
     if len(nq) < 4 or nq not in nb:
         return False
-    filler = set(FILLER_HEAD) | GENERIC | {"오늘", "오늘은", "이것만", "이것", "바로", "정말", "알면", "보세요", "하세요", "해요"}
-    text = _plain(" ".join(w for w in (l1 + " " + l2).split() if _JOSA.sub("", w) not in filler and w not in filler))  # 군말('오늘은')만 겹치면 근거 아님
-    if any(_plain(d) in text and _plain(d) in nq for d in DETAILS):
-        return True
-    for t in tp:
-        text = text.replace(_plain(t), "|")
-    return any(text[i:i + 3] in nq for i in range(len(text) - 2) if "|" not in text[i:i + 3])
+    text = nfc(l1 + " " + l2)
+    if any(n not in body for n in re.findall(r"\d+", text)):
+        return False
+    return not any(c in text and c not in nfc(body) for c in CREDS)
 
 
 def _check_ai(x, body=None, tp=()):

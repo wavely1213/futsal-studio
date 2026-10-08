@@ -119,18 +119,25 @@ def hamming(a, b):
         return 64
 
 
-CAND_VER = 3       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로 · 3: 이름 띠 조건을 좁힘(광고판·바닥 글자 아님))
-GRADE_VER = 5      # 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
+CAND_VER = 5       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로 · 3: 이름 띠 조건을 좁힘(광고판·바닥 글자 아님) ·
+#                    4: 머리 쪽 작은 얼굴 · 주인공 흔들림 · 레슨은 머리가 보일 때만 · 얼굴 없는 장면도 앞뒤 다듬기 (D-092) ·
+#                    5: 주인공이 또렷이 한 명(크고 비슷한 키의 다른 사람이 적음) · 사람 많은 장면 가산 줄임 (D-095))
+GRADE_VER = 8      # (8: 채도를 원본의 0.95배 아래로는 빼지 않음 — D-112) (7: 채도 절대 목표를 끝까지(원본 대비 0.62배까지) · 초록/자주 색 틀어짐(tint) · 어두운 장면 색 얼룩 줄이기(dn) · 감마 상한 3.3 — D-097)
+#                    (6: 채도 절대 목표 SAT_ABS · D-093) 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
-GAMMA_RANGE = (0.8, 2.8)  # 판정 2회차: 아주 어두운 세로 영상(평균 0.15)이 2.2 에 걸려 0.378 → 2.8 · 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
+GRADE_MEAN_DARK = 0.41  # 아주 어두운 원본(평균 밝기 DARK_SRC 아래)의 목표 — 밤 장면 노이즈를 덜 키움 (D-097)
+DARK_SRC = 0.2
+GAMMA_RANGE = (0.8, 3.3)  # 판정 q5 1회차(D-097): 밤 장면(THQSTOCK004)이 2.8 에 걸려 밝기 0.34 → 3.3 · 판정 2회차: 아주 어두운 세로 영상(평균 0.15)이 2.2 에 걸려 0.378 → 2.8 · 어두운 실내·저녁 경기장도 평균 밝기 0.38 이상으로 (1.25·1.8 로는 모자랐음 — 판정 B6 밤 장면 0.31)
 
 
 def auto_grade(src, close=False):
     """장면 한 장의 자동 보정 숫자 (화면 thumb.html 의 applyGrade 와 짝: 레벨 lo/hi·색온도 → 감마(밝기에만) → 자연 채도 → 클래리티 → 샤픈).
     - 레벨: 채널별 0.5%/99.5% 지점 (밝기 기준에서 ±12 안쪽으로 — 잔디 초록에 끌려 색이 틀어지지 않게, 이동량 ≤ MAX_SHIFT)
     - 감마: 보정 뒤 평균 밝기가 0.48 이 되게 (0.8~1.8) · 자연 채도: 보정 뒤 채도가 약 1.2배 되게 · 색온도: 회색 부분이 푸르면(형광등) 따뜻하게
-    - 클래리티 25 (얼굴 클로즈업이면 15) · 샤픈 18"""
+    - 클래리티 25 (얼굴 클로즈업이면 15) · 샤픈 18
+    - tint: 회색 부분이 초록(+)·자주(−)로 치우친 만큼 초록 채널을 고침 · dn: 감마가 크면(어두운 장면을 많이 밝힘) 색 얼룩·노이즈 줄이기 0~1 ·
+      sat: 자연 채도로 못 내린 쨍한 원본의 전체 채도 배율 (D-097)"""
     import numpy as np
     from PIL import Image
     im = src if isinstance(src, Image.Image) else Image.open(src)
@@ -146,14 +153,16 @@ def auto_grade(src, close=False):
         hi.append(int(round(np.clip(np.clip(c_hi, lhi - 12, lhi + 12), 255 - MAX_SHIFT, 255))))
     lv = np.clip((a - np.array(lo, np.float32)) / np.maximum(1, np.array(hi, np.float32) - np.array(lo, np.float32)), 0, 1) @ np.array([0.299, 0.587, 0.114], np.float32)
     g0, g1 = GAMMA_RANGE  # 평균 밝기는 감마에 따라 늘기만 함 → 반으로 나눠 찾기
-    if (lv ** (1 / g1)).mean() < GRADE_MEAN:
+    # 판정 q5 1회차(D-097): 밤 장면을 0.48 까지 밝히면 하늘의 압축 노이즈가 보라·초록 얼룩으로 ('노이즈와 색 번짐이 심해') → 아주 어두운 원본은 0.41 (밤 느낌은 남기고 목표 범위 안)
+    want = GRADE_MEAN_DARK if lum.mean() / 255 < DARK_SRC else GRADE_MEAN
+    if (lv ** (1 / g1)).mean() < want:
         gamma = g1
-    elif (lv ** (1 / g0)).mean() > GRADE_MEAN:
+    elif (lv ** (1 / g0)).mean() > want:
         gamma = g0
     else:
         for _ in range(18):
             gm = (g0 + g1) / 2
-            g0, g1 = (gm, g1) if (lv ** (1 / gm)).mean() < GRADE_MEAN else (g0, gm)
+            g0, g1 = (gm, g1) if (lv ** (1 / gm)).mean() < want else (g0, gm)
         gamma = (g0 + g1) / 2
     mx, mn = a.max(2), a.min(2)
     sat = (mx - mn) / np.maximum(mx, 1)
@@ -165,21 +174,36 @@ def auto_grade(src, close=False):
             temp = int(round(min(30, -d * 1.5)))     # 푸른 형광등 → 따뜻하게
         elif d > 14:
             temp = -int(round(min(20, d - 14)))      # 너무 누런 조명 → 조금 차갑게
-    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
+    tint = 0
+    if neutral.mean() > 0.02:  # 판정 q5 1회차(D-097): 밤 장면의 초록·보라 색 틀어짐 — 회색 부분의 초록이 빨강·파랑 평균에서 벗어난 만큼 (+ 초록을 뺌 · − 자주를 뺌)
+        dg = float((a[..., 1] - (a[..., 0] + a[..., 2]) / 2)[neutral].mean())
+        if abs(dg) > TINT_MIN:
+            tint = int(round(max(-TINT_MAX, min(TINT_MAX, dg * 1.3))))
+    dn = round(float(min(1.0, max(0.0, (gamma - DN_GAMMA[0]) / (DN_GAMMA[1] - DN_GAMMA[0])))), 2)  # 많이 밝히는 어두운 장면만 색 얼룩·노이즈를 줄임
+    g = {"on": True, "amt": 1, "lo": lo, "hi": hi, "gamma": round(float(gamma), 3), "vib": 0, "clarity": 15 if close else 25, "temp": temp, "tint": tint, "dn": dn, "sharpen": 18}  # 판정: '과하게 보정돼 기계로 만든 느낌' → 클래리티·샤픈을 낮춤
     # 자연 채도: 레벨만으로도 채도가 오르므로, 보정 뒤 채도가 원본의 약 1.2배가 되는 값을 고름 (화면 applyGrade 와 같은 계산으로 어림)
     # 판정 2회차: 이미 채도가 높은 원본(낙서 벽 0.48)에 vib 55 → '과한 형광 필터' · 레벨만으로 +46% (vib −40 에 걸림) → 원본 채도가 높으면 목표·상한을 낮추고, 그래도 넘으면 레벨을 덜 늘림
     s0 = float(sat.mean())
     target, vmax = (SAT_GAIN_HI, VIB_HI) if s0 > SAT_HIGH else (SAT_GAIN, 80)
+    # 판정 5회차(D-093): 원본 대비 배율만 보면 이미 쨍한 스톡(0.385)이 0.46 까지 → 보정 뒤 채도를 절대값 SAT_ABS(레퍼런스 0.29~0.33)로 · SAT_ABS_MAX 넘지 않게
+    # 판정 q5 1회차(D-097): 원본 대비 0.92배 아래로는 안 내려 쨍한 스톡(0.41~0.55)이 0.38~0.51 로 남음(93장 중 35장) → 0.62배까지 · 원본이 상한보다 쨍하면 올리지 않음
+    target = min(target, max(SAT_ABS_FLOOR, SAT_ABS / max(1e-6, s0)))
     for shrink in (1.0, 0.6, 0.3, 0.0):
         if shrink < 1:
             g["lo"] = [int(round(v * shrink)) for v in lo]
             g["hi"] = [int(round(255 - (255 - v) * shrink)) for v in hi]
-        rs = [(v, _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)) for v in range(-60, vmax + 1, 5)]
-        ok = [x for x in rs if x[1] <= SAT_MAX]
+        rs = [(v, _sat_after(a, dict(g, vib=v)) / max(1e-6, s0)) for v in range(VIB_MIN, vmax + 1, 5)]
+        ok = [x for x in rs if x[1] <= SAT_MAX and x[1] * s0 <= max(SAT_ABS_MAX, s0)]
         best = min(ok or rs, key=lambda x: abs(x[1] - target))
         if ok:
             break
     g["vib"] = best[0]
+    # 판정 q5 1회차(D-097): 자연 채도는 이미 쨍한 픽셀을 거의 못 내림(채도 낮은 곳일수록 많이) → 그래도 목표보다 쨍하면 전체 채도를 곱해서 (0.6~1)
+    if best[1] > target + 0.03 and not g["dn"]:  # (어두운 장면은 색 얼룩 줄이기(dn)가 채도를 이미 뺌)
+        g["sat"] = round(max(SAT_ABS_FLOOR, min(1.0, target / best[1])), 3)
+        now = _sat_after(a, g) / max(1e-6, s0)  # 레벨·자연 채도와 겹쳐 덜 빠지면 한 번 더
+        if now > target + 0.03:
+            g["sat"] = round(max(SAT_ABS_FLOOR, g["sat"] * target / now), 3)
     if g["gamma"] > 2.0:  # 아주 어두운 장면을 크게 밝히면 노이즈가 커짐 → 선명하게·클래리티를 줄임 (판정: '노이즈가 심하고 흐릿')
         g["sharpen"], g["clarity"] = 0, 8
     return g
@@ -190,13 +214,20 @@ SAT_HIGH = 0.4     # 원본 평균 채도가 이보다 높으면 (이미 쨍한 
 SAT_GAIN_HI = 1.06  # 그때의 채도 목표 (판정: 낙서 벽 '과한 형광')
 VIB_HI = 20        # 그때의 자연 채도 상한
 SAT_MAX = 1.28     # 보정 뒤 채도가 이보다 크면 레벨을 덜 늘려 다시 (화면 보정 뒤 +30% 넘지 않게 · 선명하게가 조금 더 올림)
+SAT_ABS = 0.32     # 보정 뒤 채도 절대 목표 (판정 5회차: 레퍼런스 0.29~0.33 · 우리 0.39~0.46)
+SAT_ABS_MAX = 0.36  # 보정 뒤 채도 절대 상한 (원본이 이미 더 높으면 원본 그대로까지)
+SAT_ABS_FLOOR = 0.95  # 절대 목표 때문에 원본보다 이만큼 넘게 빼지는 않음 (D-097: 0.92 → 0.62 · 판정 q5 2회차 D-112: 짝 판정에서 채도를 덜 뺀 쪽을 프로로 59%(198짝) → 0.95 — 쨍한 원본은 그대로 두고 흐린 원본만 올림)
+VIB_MIN = -100     # 자연 채도 아래 끝 (채도 낮추기 · D-097: −60 으로는 0.62배까지 못 내림)
+TINT_MIN = 5       # 회색 부분 초록 치우침이 이보다 크면 색 틀어짐으로 봄 (0~255)
+TINT_MAX = 24      # 색 틀어짐 고치기 상한
+DN_GAMMA = (1.6, 2.5)  # 감마가 이 사이면 색 얼룩·노이즈 줄이기 0 → 1 (밤 장면을 크게 밝힐 때 보라·초록 얼룩 — 판정 q5 1회차)
 
 
 def _sat_after(a, g):
     """applyGrade(thumb.html)의 레벨·색온도·감마(밝기에만)·자연 채도까지를 numpy 로 어림 → 평균 채도 (자연 채도 값 고르기용)."""
     import numpy as np
     lo, hi = np.array(g["lo"], np.float32), np.array(g["hi"], np.float32)
-    x = np.clip((a - lo) / np.maximum(1, hi - lo), 0, 1) * 255 * (1 + np.array([1, 0, -1], np.float32) * g["temp"] / 260)
+    x = np.clip((a - lo) / np.maximum(1, hi - lo), 0, 1) * 255 * (1 + np.array([1, 0, -1], np.float32) * g["temp"] / 260) * (1 - np.array([0, 1, 0], np.float32) * g.get("tint", 0) / 260)
     y = x @ np.array([0.299, 0.587, 0.114], np.float32)
     x = np.clip(x * ((np.clip(y, 0, 255) / 255) ** (1 / g["gamma"]) * 255 / np.maximum(0.5, y))[..., None], 0, 255)  # 감마는 밝기에만
     if g["vib"]:
@@ -209,6 +240,9 @@ def _sat_after(a, g):
         k = np.where(skin, k * 0.5, k)
         y = x @ np.array([0.299, 0.587, 0.114], np.float32)
         x = np.clip(y[..., None] + (x - y[..., None]) * (1 + k), 0, 255)
+    if g.get("sat", 1) != 1:
+        y = x @ np.array([0.299, 0.587, 0.114], np.float32)
+        x = np.clip(y[..., None] + (x - y[..., None]) * g["sat"], 0, 255)
     mx, mn = x.max(2), x.min(2)
     return float(((mx - mn) / np.maximum(mx, 1)).mean())
 
@@ -256,6 +290,11 @@ def blur_penalty(blur):
     return 0.5 if blur > 0.6 else 1 - 0.3 * max(0.0, blur - 0.35)
 
 
+def subject_blur_mult(blur):
+    """주인공 흔들림 배율 (판정 5회차 D-092: 주인공 선명도가 레퍼런스와 가장 큰 차이 · '흐림/화질' 14번) — 0.15 까지 그대로, 그 위로 가파르게, 0.3 아래로는 안 내림."""
+    return max(0.3, 1 - 1.6 * max(0.0, blur - 0.15))
+
+
 def action_score(persons, ball):
     """선수·공으로 본 '액션 장면' 배율 (약 0.85~1.9): 선수 2~6명 · 화면에 알맞은 크기(높이 15~60%) · 공이 보이고 선수 발 가까이 · 몸싸움(겹침)."""
     if persons is None:
@@ -263,7 +302,8 @@ def action_score(persons, ball):
     n = len(persons)
     if not n:
         return 0.85
-    k = {1: 1.0, 2: 1.12, 3: 1.18, 4: 1.2, 5: 1.18, 6: 1.15}.get(n, 1.05)
+    # 판정 q5 1회차(D-095): 사람이 많을수록 '주인공 불분명'(107번) · 쇼츠 사람 수 ↔ pro −0.56 → 2명이 가장 좋고 4명부터 내림 (예전 4명 1.2)
+    k = {1: 1.06, 2: 1.12, 3: 1.1, 4: 1.04, 5: 0.98, 6: 0.94}.get(n, 0.9)
     hmax = max(p[3] for p in persons)
     k *= 1.15 if 0.15 <= hmax <= 0.6 else 1.05 if hmax > 0.6 else 0.9
     if ball:
@@ -294,14 +334,27 @@ def main_person(persons, ball):
     return max(range(len(persons)), key=lambda i: persons[i][3])
 
 
+def protagonist_mult(persons, mi):
+    """주인공이 또렷이 한 명인지 (판정 q5 1회차 D-095: '작음/멀음' 116번 · '주인공 불분명' 107번 — 쇼츠 주인공 키 ↔ scene +0.49, 두 번째로 큰 사람 비율 ↔ pro −0.47):
+    주인공이 클수록(키 0.3H → 0.7H) 최대 ×1.25 · 주인공 키의 70% 넘는 다른 사람이 있으면 한 명마다 ×0.9 (최소 ×0.75) → 약 0.7~1.25."""
+    if not persons or mi < 0:
+        return 1.0
+    h = persons[mi][3]
+    k = 1 + 0.25 * min(1.0, max(0.0, (h - 0.3) / 0.4))
+    rivals = sum(1 for i, p in enumerate(persons) if i != mi and p[3] >= 0.7 * h)
+    return round(k * max(0.75, 0.9 ** rivals), 4)
+
+
 HEADLESS = 0.7   # 주인공 머리가 화면 위로 잘렸는데 얼굴도 안 보이는 장면(다리·몸통만) 배율
 
 
 def headless(persons, ball, faces):
     """주인공이 위로 잘려 다리·몸통만 보이는지 (얼굴을 찾았으면 아님)."""
-    if faces or not persons:
+    if not persons:
         return False
     m = persons[main_person(persons, ball)]
+    if any(f["box"][1] > 0.01 for f in faces or []):  # 판정 q5 1회차(D-098): 위 끝에 걸린(이마가 잘린) 얼굴만 있으면 머리 잘림으로 봄
+        return False
     return m[1] < 0.01 and m[3] < 0.97
 
 
@@ -312,6 +365,7 @@ EDGE_K = 0.75     # 주인공이 화면 왼쪽·오른쪽 끝에 걸려 몸이 �
 CROWD_K = 0.7     # 상반신 여럿이 나란히(관중석·벤치 뒤) · 공 없음
 SMALL_K = 0.85    # 주인공이 아주 작음(화면 높이 18% 아래) — 목록 크기에서 누가 주인공인지 안 보임
 LESSON_K = 1.3    # 레슨 액션: 공이 주인공 발 가까이 · 주인공 크기 알맞음 (레퍼런스는 거의 다 '공을 다루는 순간')
+BACK_MIN_H = 0.3  # 뒷모습(얼굴 없음)을 보는 주인공 키 하한 — 판정 5회차: 머리 쪽 얼굴 찾기로 작은 얼굴도 찾으니 0.55 → 0.3
 
 
 def _feet_d(p, ball, ar):
@@ -339,13 +393,14 @@ def scene_flags(persons, ball, faces, ar=16 / 9):
             break
     mi = main_person(persons, ball)
     m = persons[mi]
-    if faces is not None and m[3] >= 0.55 and m[1] > 0.02:  # 머리가 화면 안에 있는데 그 얼굴이 없음 (다리만 나온 장면은 headless 가 따로 봄)
+    if faces is not None and m[3] >= BACK_MIN_H and m[1] > 0.02:  # 머리가 화면 안에 있는데 그 얼굴이 없음 (다리만 나온 장면은 headless 가 따로 봄)
         cx = m[0] + m[2] / 2  # 그 사람 얼굴 = 상자 가운데 쪽(±28%) 위 42% 안 (옆에 걸친 다른 사람 얼굴은 아님)
         top = (cx - m[2] * 0.28, m[1] - 0.02, cx + m[2] * 0.28, m[1] + m[3] * 0.42)
         out["back"] = not any(top[0] <= f["box"][0] + f["box"][2] / 2 <= top[2] and top[1] <= f["box"][1] + f["box"][3] / 2 <= top[3] for f in faces)
     out["edge"] = (m[0] < 0.006 or m[0] + m[2] > 0.994) and m[3] < 0.95 and m[2] * ar / max(1e-6, m[3]) < 0.32
     out["small"] = m[3] < 0.18
-    out["lesson"] = bool(ball) and 0.22 <= m[3] <= 0.8 and _feet_d(m, ball, ar) < 0.18
+    # 판정 5회차(D-092): 다리만 나온 장면(머리가 화면 위로 잘림)이 '레슨 액션' ×1.3 을 받아 위로 올라옴 (다리만 16장 중 8장) → 머리가 보일 때만
+    out["lesson"] = bool(ball) and 0.22 <= m[3] <= 0.8 and _feet_d(m, ball, ar) < 0.18 and m[1] > 0.012
     return out
 
 
@@ -477,19 +532,21 @@ def _score_frames(name, ts, use_faces, progress, use_det=False):
                 det = None
         persons = det["persons"] if det else None
         ball = det["ball"] if det else None
-        boxes = (persons or [])[:3]
-        if boxes:  # 선수 몸이 흔들렸는지 (가장 큰 선수 셋 중 가장 또렷한 쪽)
-            blur = min(_blur_of(_gray_crop(rgb, b)) for b in boxes)
+        if persons:  # 주인공 몸이 흔들렸는지 (판정 5회차 D-092: 예전엔 가장 큰 셋 중 가장 또렷한 사람 — 흐린 주인공 장면이 또렷한 옆 사람 덕에 통과)
+            blur = _blur_of(_gray_crop(rgb, persons[main_person(persons, ball)]))
         else:
             blur = _blur_of(_gray_crop(rgb, (0.2, 0.15, 0.6, 0.7), 160))
         if use_faces:
             try:
                 fs = face.faces(rgb) or []
+                if persons:
+                    fs = fs + face.head_faces(rgb, persons, fs)  # 멀리 선 선수의 작은 얼굴 (머리 쪽만 키워서)
             except Exception:
                 fs = []
             sc *= min(face.boost(fs), FACE_CAP)
         fl = scene_flags(persons or [], ball, fs if use_faces else None, rgb.size[0] / max(1, rgb.size[1]))
-        sc *= blur_penalty(blur) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0) * flags_mult(fl)
+        sc *= (subject_blur_mult(blur) if persons else blur_penalty(blur)) * action_score(persons, ball) * (HEADLESS if headless(persons, ball, fs) else 1.0) * flags_mult(fl)
+        sc *= protagonist_mult(persons or [], main_person(persons, ball) if persons else -1)
         m = face.main(fs) if fs else None
         info = {"persons": persons or [], "ball": ball, "blur": round(blur, 3), "hash": dhash(rgb),
                 "kind": scene_kind(m["box"][3] if m else 0, persons or []), "det": det is not None, "flags": [k for k, v in fl.items() if v]}
@@ -609,7 +666,7 @@ def frame_candidates(name, n=TOP_N):
     ts += _keyword_times(name)
     ts += [c + 0.5 for c in _scene_times(name, dur)][:24]
     uniq = sorted(set(round(x, 1) for x in ts if 0 < x < dur))
-    span = 80 if use_faces else 100  # 진행률: 장면 고르기 80% · 표정 다듬기 20%
+    span = 80  # 진행률: 장면 고르기 80% · 좋은 순간 다듬기 20%
 
     def prog(lo, hi, what):
         return lambda i, k: core.set_progress(label="장면 고르는 중", item=name, pct=lo + int(i * (hi - lo) / k), detail=f"{what} {i}/{k}")
@@ -633,12 +690,12 @@ def frame_candidates(name, n=TOP_N):
     picked = pick(scored, [], CLOSE_MAX)
     if len(picked) < n:  # 다른 장면이 모자라면 얼굴 클로즈업으로 채움
         picked = pick(scored, picked)
-    if use_faces and picked:  # 뽑힌 장면 앞뒤 0.2·0.4초 중 표정(점수)이 가장 좋은 순간으로
+    if picked:  # 뽑힌 장면 앞뒤 0.2·0.4초 중 점수(표정·선명도·동작)가 가장 좋은 순간으로
         def near(t):
             return [x for x in (round(t + d, 1) for d in (-0.4, -0.2, 0.2, 0.4)) if 0 < x < dur]
-        faced = [t for t in picked if scored[t][1]][:REFINE_N]  # 얼굴이 있는 좋은 장면만 다듬음 (많아야 REFINE_N 개)
+        faced = picked[:REFINE_N]  # 판정 5회차(D-092): 얼굴 없는 액션 장면(후보 82%)도 앞뒤에서 동작의 정점·또렷한 순간을 찾음 (예전엔 얼굴 장면만)
         todo = sorted({x for t in faced for x in near(t)} - set(scored))
-        scored.update(_score_frames(name, todo, True, prog(span, 100, "표정 좋은 순간 찾는 중"), use_det))
+        scored.update(_score_frames(name, todo, use_faces, prog(span, 100, "좋은 순간 다듬는 중"), use_det))
         best = []
         for k, t in enumerate(picked):  # 옮겨도 다른 장면과 너무 가까워지지 않게 (짧은 영상)
             others = best + picked[k + 1:]
@@ -676,6 +733,9 @@ def frame_candidates(name, n=TOP_N):
             it.update(faces=fs, emo=m["emo"], face=m["box"][3])  # face: 주인공 얼굴 크기 (화면 높이 대비)
         items.append(it)
     items.sort(key=lambda x: -x["score"])
+    if not items and uniq:  # 판정 q5 1회차 개발 중: 장면을 하나도 못 본(뽑기·점수가 다 실패한) 결과를 기억하면 다음 분석도 '쓸 만한 장면을 찾지 못했어요'로 굳음 → 기억하지 않고 다음에 다시
+        studiolog.write(f"  장면 후보 0개 · {name} · 살펴본 장면 {len(scored)}/{len(uniq)} — 기억하지 않고 다음 분석 때 다시 골라요")
+        return items
     cache = _frames_dir(name) / CANDIDATES
     try:  # 임시 파일에 쓴 뒤 바꿔치기 (중간에 꺼져도 깨진 캐시가 남지 않게 · Windows 잠금이면 잠깐 기다렸다 다시)
         updater.write_atomic(cache, json.dumps({"sig": sig, "items": items}, ensure_ascii=False))
@@ -1056,7 +1116,7 @@ def cut_auto(name, t, box=None, kind="fast", faces=None, tboxes=None):
     return dst, q
 
 
-AUTO_CUTS = 4   # 분석할 때 미리 딸 누끼 (좋은 장면 순, 사람·얼굴이 있는 장면) — 추천에 쓰는 장면 6개 중 앞쪽
+AUTO_CUTS = 6   # 분석할 때 미리 딸 누끼 (좋은 장면 순, 사람·얼굴이 있는 장면) — 추천에 쓰는 장면 6개 중 앞쪽 · 판정 q5 2회차(D-117): 4 → 6 (누끼 템플릿이 가장 높게 판정 · 빠른 모델이라 장면당 약 1초)
 CUT_MIN_H = 0.3   # 누끼 딸 주인공은 원본 화면 높이의 30% 이상 (작은 선수 누끼는 깨짐 — 판정)
 CUT_MAX_BLUR = 0.35
 
@@ -1064,14 +1124,23 @@ CUT_MAX_BLUR = 0.35
 def _cut_targets(items):
     """미리 딸 누끼 대상: 주인공이 크고(높이 30% 이상) 또렷한 좋은 장면 3개 (얼굴 클로즈업 포함) → [(장면, 주인공 상자 또는 None)].
     뒷모습·좌우 끝에 걸린 사람·벤치 장면은 뺌."""
-    ok = []
+    ok, spare = [], []
     for it in items:
         box = it["persons"][it["main"]][:4] if it.get("main", -1) >= 0 and it.get("persons") else None
         if box is None and not it.get("faces"):
             continue
-        if (box and box[3] < CUT_MIN_H and not it.get("faces")) or (it.get("blur") or 0) > CUT_MAX_BLUR or set(it.get("flags") or []) & {"back", "edge", "bench"}:
+        fl = set(it.get("flags") or [])
+        if (box and box[3] < CUT_MIN_H and not it.get("faces")) or (it.get("blur") or 0) > CUT_MAX_BLUR or "bench" in fl:
             continue
-        ok.append((it, box))
+        (spare if fl & {"back", "edge"} else ok).append((it, box))
+    # 검토(D-119): 좋은 장면이 한 장면 묶음뿐이면(THUMBTEST01 — 모든 장면에 큰 글자가 박혀 누끼가 있어야 하는데, 그 묶음 누끼가 품질 검사에 떨어져 추천 0개)
+    # 뒷모습·끝에 걸린 장면도 누끼 대상으로 (다른 영상은 그대로 — 서로 다른 좋은 장면이 둘 넘음)
+    groups = []
+    for it, _ in ok:
+        if not any(hamming(it.get("hash"), o.get("hash")) <= SAME_HASH for o in groups):
+            groups.append(it)
+    if len(groups) < 2:
+        ok += spare
     out = []
     for it, box in ok:  # 서로 다른 장면 먼저 (같은 화면 세 장을 따면 추천도 한 장면만 누끼를 씀)
         if not any(hamming(it.get("hash"), o.get("hash")) <= SAME_HASH for o, _ in out):
@@ -1405,7 +1474,9 @@ def read_text(data_url):
 BRAND_COLORS = ("hl", "hl2", "accent", "neon", "box")   # 강조 글자 · 기본 글자 · 포인트(빨강) · 네온(전술) · 상자
 BRAND_FONTS = ("Black Han Sans", "Do Hyeon", "Jua", "Pretendard Black", "Pretendard Bold", "Dokdo")
 BRAND_DEFAULT = {"logo": "", "logoPos": "tr", "colors": {"hl": "#FFE14D", "hl2": "#FFFFFF", "accent": "#FF3B30", "neon": "#00D1FF", "box": "#111111"},
-                 "font": "Black Han Sans", "series": "풋사관 강좌", "seriesOn": False, "handle": "@풋살사관학교", "apply": True, "aiCopy": True}
+                 "font": "Pretendard Black", "series": "풋사관 강좌", "seriesOn": False, "handle": "@풋살사관학교", "apply": True, "aiCopy": True,
+                 "autoLogo": True, "fontV": 2}
+# 판정 5회차(D-090): 기본 글꼴 검은고딕 → 프리텐다드 블랙 (짝 비교 76% 이김 · 168px OCR 0.59 → 0.88) · fontV 가 없는 예전 저장본의 검은고딕은 예전 기본값이라 새 기본으로
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -1439,13 +1510,16 @@ def check_brand(d):
     if d.get("font", out["font"]) not in BRAND_FONTS:
         raise ValueError("고를 수 없는 글꼴이에요")
     out["font"] = d.get("font", out["font"])
+    if not d.get("fontV") and out["font"] == "Black Han Sans":  # 예전 기본값 그대로 저장된 키트 (fontV 2 부터는 고른 대로)
+        out["font"] = BRAND_DEFAULT["font"]
     for k, n in (("series", 20), ("handle", 30)):
         v = d.get(k, out[k])
         if not isinstance(v, str) or len(v) > n or any(c in v for c in "<>\r\n"):
             raise ValueError(f"{'시리즈 이름' if k == 'series' else '채널 이름'}은 {n}자 안쪽으로 써 주세요")
         out[k] = v.strip()
-    for k in ("seriesOn", "apply", "aiCopy"):
+    for k in ("seriesOn", "apply", "aiCopy", "autoLogo"):
         out[k] = bool(d.get(k, out[k]))
+    out["fontV"] = BRAND_DEFAULT["fontV"]
     return out
 
 

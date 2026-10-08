@@ -100,7 +100,7 @@ function tacFieldsHtml(l) {
   return h + `<div class="hint">${l.pts ? "선택하면 보이는 점(동그라미)을 끌어 모양을 바꿔요 · Shift 반듯하게 · " : ""}네온 느낌은 '외부 광선' 효과로 조절해요</div>`;
 }
 Object.assign(FM, { width: { min: 1, max: 120, unit: "px" }, head: { min: 0, max: 240, unit: "px" }, fillA: { min: 0, max: 100, mul: 100, unit: "%" }, topW: { min: 2, max: 100, mul: 100, unit: "%" },
-  "grade.amt": { min: 0, max: 150, mul: 100, unit: "%" }, "grade.clarity": { min: 0, max: 100 }, "grade.vib": { min: -40, max: 140 }, "grade.temp": { min: -50, max: 50 }, "grade.sharpen": { min: 0, max: 100 } });
+  "grade.amt": { min: 0, max: 150, mul: 100, unit: "%" }, "grade.clarity": { min: 0, max: 100 }, "grade.vib": { min: -100, max: 140 }, "grade.temp": { min: -50, max: 50 }, "grade.sharpen": { min: 0, max: 100 } });
 ACT.reseed = () => { const l = selL(); if (!l) return; commit("다시 그리기"); l.seed = Math.floor(Math.random() * 1e6); changed(); };
 ACT.gradeAuto = () => {  // 그 장면의 자동 보정 값 다시 (분석 결과)
   const l = selL(); if (!l || l.type !== "image") return;
@@ -149,17 +149,19 @@ async function openBrand() {
   const b = JSON.parse(JSON.stringify((await loadBrand()) || BRAND_DEF));
   const m = $("brandModal"), body = $("brandBody");
   const draw = () => {
-    body.innerHTML = `<div class="bk"><div><h4>로고</h4><div class="bklogo">${b.logo ? `<img src="${esc(b.logo)}">` : `<span class="hint">없음</span>`}</div>
+    body.innerHTML = `<div class="bk"><div><h4>로고</h4><div class="bklogo">${b.logo ? `<img src="${esc(b.logo)}">` : b.autoLogo !== false ? `<img src="${autoLogo(b)}">` : `<span class="hint">없음</span>`}</div>
         <div class="row2"><button class="btn sm" id="bkLogo">로고 올리기</button>${b.logo ? `<button class="btn sm" id="bkLogoCut">배경 지우기</button><button class="btn sm" id="bkLogoDel">지우기</button>` : ""}</div>
         <div class="seg" id="bkPos">${[["tr", "오른쪽 위"], ["tl", "왼쪽 위"], ["off", "안 넣기"]].map(([v, t]) => `<button data-v="${v}" class="${b.logoPos === v ? "on" : ""}">${t}</button>`).join("")}</div></div>
       <div><h4>색</h4>${BRAND_ROLES.map(([k, t]) => `<div class="f"><label>${t}</label><input type="color" data-bc="${k}" value="${toHex(b.colors[k])}"><span class="hint">${toHex(b.colors[k]).toUpperCase()}</span></div>`).join("")}</div></div>
       <div class="f"><label>기본 글꼴</label><select class="s" id="bkFont">${FONT_OPTS.filter(([v]) => v !== "Dokdo").map(([v, t]) => `<option value="${v}" ${b.font === v ? "selected" : ""}>${t}</option>`).join("")}</select><span></span></div>
       <div class="f"><label>시리즈 이름</label><input class="s" id="bkSeries" maxlength="20" value="${esc(b.series || "")}"><span></span></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSeriesOn" ${b.seriesOn ? "checked" : ""}> 모든 추천에 시리즈 이름 넣기 (강좌 시리즈 템플릿은 늘 넣어요)</label>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkAuto" ${b.autoLogo !== false ? "checked" : ""}> 로고를 안 올렸으면 채널 이름으로 둥근 표시를 만들어 넣기</label>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkApply" ${b.apply !== false ? "checked" : ""}> 새 추천에 적용</label>
       <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="bkAi" ${b.aiCopy !== false ? "checked" : ""}> 분석할 때 클로드로 문구 만들기·장면 고르기 (클로드가 로그인돼 있을 때 · 내 클로드 계정 사용량을 써요)</label>`;
     body.querySelectorAll("[data-bc]").forEach(i => (i.oninput = () => { b.colors[i.dataset.bc] = i.value.toUpperCase(); i.nextElementSibling.textContent = i.value.toUpperCase(); }));
     body.querySelectorAll("#bkPos button").forEach(x => (x.onclick = () => { b.logoPos = x.dataset.v; draw(); }));
+    $("bkAuto").onchange = e => { b.autoLogo = e.target.checked; draw(); };
     $("bkLogo").onclick = () => { const fi = document.createElement("input"); fi.type = "file"; fi.accept = "image/*"; fi.onchange = async () => {
       const f = fi.files[0]; if (!f) return; const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
       const j = await post("/api/thumb/upload", { data }).catch(() => ({}));  // 저장 실패(Windows 잠금·디스크 가득)도 알림 (그림 넣기와 같게)
@@ -169,7 +171,7 @@ async function openBrand() {
   };
   draw(); m.classList.add("show");
   $("brandSave").onclick = async () => {
-    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked, aiCopy: $("bkAi").checked });
+    Object.assign(b, { font: $("bkFont").value, series: $("bkSeries").value.trim(), seriesOn: $("bkSeriesOn").checked, apply: $("bkApply").checked, aiCopy: $("bkAi").checked, autoLogo: $("bkAuto").checked });
     const j = await post("/api/thumb/brand", { brand: b });
     if (!j.ok) return toast(j.error || "저장하지 못했어요");
     AI.brand = j.brand; m.classList.remove("show"); toast("브랜드 키트를 저장했어요 · 새 추천부터 반영돼요");

@@ -177,7 +177,7 @@ class GradeTests(unittest.TestCase):
         for col in ((40, 45, 60), (200, 205, 210), (90, 140, 70)):
             g = thumb.auto_grade(_img(col))
             self.assertTrue(all(0 <= v <= thumb.MAX_SHIFT for v in g["lo"]) and all(255 - thumb.MAX_SHIFT <= v <= 255 for v in g["hi"]), g)
-            self.assertTrue(thumb.GAMMA_RANGE[0] <= g["gamma"] <= thumb.GAMMA_RANGE[1] and -60 <= g["vib"] <= 80 and -20 <= g["temp"] <= 30, g)
+            self.assertTrue(thumb.GAMMA_RANGE[0] <= g["gamma"] <= thumb.GAMMA_RANGE[1] and thumb.VIB_MIN <= g["vib"] <= 80 and -20 <= g["temp"] <= 30, g)
         self.assertGreater(thumb.auto_grade(_img((40, 45, 60)))["gamma"], 1.0, "어두우면 밝게")
         self.assertLess(thumb.auto_grade(_img((215, 215, 215), noise=20))["gamma"], 1.0, "밝으면 어둡게")
         # 얼굴 클로즈업은 클래리티를 덜 (판정 1회차 뒤 전체를 낮춤: '과하게 보정돼 기계로 만든 느낌' → 25 · 클로즈업 15)
@@ -201,7 +201,10 @@ class GradeTests(unittest.TestCase):
             before = self.stats(np.asarray(sc, np.float32))
             after = self.stats(self.run_js(sc, g))
             self.assertTrue(0.38 <= after[0] <= 0.62, (k, g, before, after))
-            self.assertTrue(1.05 <= after[1] / max(1e-6, before[1]) <= 1.35, (k, g, before, after))
+            # 판정 5회차(D-093): 이미 쨍한 원본은 절대 목표(0.32) 쪽으로 — 내릴 수 있음 · q5 1회차(D-097): 0.62배까지 + 노이즈뿐인 색(어두운 장면 dn)은 더 빠짐
+            # q5 2회차(D-112): 원본의 0.95배 아래로는 빼지 않음 — 어두운 장면의 색 얼룩 줄이기(dn)가 빼는 노이즈 색은 따로 (0.55배까지)
+            lo = 1.05 if before[1] * thumb.SAT_GAIN <= thumb.SAT_ABS else thumb.SAT_ABS_FLOOR - 0.08 if not g.get("dn") else 0.55
+            self.assertTrue(lo <= after[1] / max(1e-6, before[1]) <= 1.35, (k, g, before, after))
             self.assertLessEqual(after[2] - before[2], 0.02, (k, g, before, after))  # 보정이 새로 잘라 먹은 픽셀 (원본이 이미 하얗게 날아간 곳은 빼고)
 
     @unittest.skipUnless(HAS_NODE, "node 가 없어요")

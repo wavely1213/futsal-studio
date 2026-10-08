@@ -25,7 +25,7 @@ class StockCopyTests(unittest.TestCase):
     """판정 3회차: '이 순서대로!' 15/76 · '플랩 레벨업' 7 · 상투 꼬리표가 있는 장과 클로드 총점 상관 −0.33."""
 
     def cands(self, title, texts):
-        C, tp = thumbcopy.rule_candidates(title, texts)
+        C, tp = thumbcopy.rule_candidates(title, texts, rotate=False)
         body = " ".join(texts) + " " + title
         return {c["pid"]: thumbcopy.finish(c, tp, body) for c in C}, tp
 
@@ -50,8 +50,10 @@ class StockCopyTests(unittest.TestCase):
     def test_detail_beats_stock_and_generic(self):
         c, tp = self.cands("슈팅 연습 세로 영상", ["슈팅 이렇게 차면 무조건 들어가요", "슛이 자꾸 떠요", "디딤발 위치가 핵심이에요", "골키퍼 반대쪽 구석을 보세요"])
         best = max(c.values(), key=lambda x: x["score"])
-        self.assertTrue(best.get("detail"), (best["l1"], best["l2"]))
+        # 판정 5회차(D-094): 맨 위는 구체 낱말 라벨이 아니라 말하듯 끝나는 훅 (라벨 '슈팅 / 디딤발 위치'는 판정 3/6/3) — 구체 낱말은 훅의 보조 문구로
+        self.assertTrue(thumbcopy.spoken(best), (best["l1"], best["l2"]))
         self.assertIn("디딤발 위치", [x["l2"] for x in c.values() if x.get("detail")])
+        self.assertIn("디딤발 위치", [x["sub"] for x in c.values() if x["pid"] in thumbcopy.HOOK_SUB], "구체 낱말은 훅의 작은 줄로")
         q = [x for x in c.values() if x["pid"].startswith("detailq")]
         self.assertTrue(q and q[0]["l1"].endswith("?"), "문제 질문 + 대사의 해답")
         for k in ("one", "result"):
@@ -79,8 +81,8 @@ class StockCopyTests(unittest.TestCase):
     def test_prompt_v3(self):
         self.assertGreaterEqual(thumbcopy.PROMPT_VER, 3)
         src = inspect.getsource(thumbcopy.prompt)
-        self.assertIn("이 순서대로!", src)
-        self.assertIn('"q"', src)
+        self.assertIn('"q"', src)  # 판정 5회차(D-094): 상투 꼬리표 금지 목록은 질문에서 뺌 (쪼살 자신의 인기 문구 · 묶음에 1개는 화면 recommend 가 지킴)
+        self.assertIn("대사 근거", src)
 
 
 class SceneTests(unittest.TestCase):
@@ -105,7 +107,7 @@ class SceneTests(unittest.TestCase):
         self.assertIn('"color"', inspect.getsource(thumb.frame_candidates))
 
 
-JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "frameQ", "srcHeadCut", "footClose", "headlessBad")
+JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "blurQ", "tangleOf", "biggerRival", "frameQ", "srcHeadCut", "footClose", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }
