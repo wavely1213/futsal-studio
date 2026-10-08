@@ -166,7 +166,7 @@ class TextTest(unittest.TestCase):
 
     def test_laugh_after_goal_is_proud_not_awkward(self):
         moms = [M("play", 33.0, a=30.0, b=34.5), M("success", 35.9, "이것도 들어갔어요.", 35.0, 37.6), M("punchline", 42.0, "매일 이러면 좋겠어요.", 40.9, 42.1)]
-        inner = [c["text"] for c in self._plan(moms, intensity="듬뿍") if c["kind"] == "inner"]
+        inner = [c["text"] for c in self._plan(moms, intensity="듬뿍") if c["kind"] == "inner" and c["src"] == "punchline"]  # (시범·성공의 속마음은 따로)
         self.assertTrue(inner)
         self.assertTrue(all(t in msg.INNER_TEXTS["proud"] for t in inner), inner)
 
@@ -197,8 +197,9 @@ class TextTest(unittest.TestCase):
         self.assertEqual([c["text"] for c in board], ["1/5 · 0골", "2/5 · 1골", "3/5 · 2골", "4/5 · 2골"])
         lab = msg._unsaid_tries(board, [m for m in moms if m["kind"] == "play"])
         self.assertEqual([(p["a"], t) for p, t in lab], [(30.8, "세 번째 도전")])
-        situ = [c for c in self._plan(moms) if c["kind"] == "situ" and "도전" in c["text"]]
-        self.assertTrue(any(c["text"] == "세 번째 도전" and 30.8 <= c["t"] < 32.3 for c in situ), situ)
+        # 시도 묶음은 한 가지 꼴(말한 이름 '슛' + 번호 · round5 · 판정: '첫 번째 도전' → '슛 ②' → '세 번째 도전'처럼 꼴이 바뀌면 실수로 보임)
+        situ = [c for c in self._plan(moms) if c["kind"] == "situ" and "③" in c["text"]]
+        self.assertTrue(any(c["text"] == "슛 ③" and 30.8 <= c["t"] < 32.3 for c in situ), situ)
 
     def test_challenge_music_is_not_sentimental(self):
         moms = [M("section", t, f"{n} 번째 슛.", t, t + 1) for t, n in ((10, "첫"), (20, "두"), (30, "세"), (40, "네"))]
@@ -290,11 +291,15 @@ class CompiledTest(unittest.TestCase):
                 self.assertTrue(moving, (q["name"], it, md.get(it["media"])))
 
     def test_mild_has_no_teaser_clip_or_replay_and_starts_with_text(self):
+        # round5: 담백도 앞 30초 안의 첫 질문이 있으면 그 질문 장면 하나로 시작 (콜드 오픈 · 판정: 인사로 시작해 첫 3초 훅이 약함) · 그 뒤는 원본 순서
         for q in self.res["담백"]["sequences"]:
             kinds = {e["kind"] for e in q["msg"]["events"]}
             self.assertNotIn("replay", kinds, q["name"])
             v1 = sorted([x for x in q["items"] if x["track"] == "V1"], key=lambda x: x["start"])
-            body = [x for x in v1 if x["media"] == "main"]
+            opened = {i for e in q["msg"]["events"] if e["kind"] == "teaser" for i in (e["refs"].get("items") or [])}
+            body = [x for x in v1 if x["media"] == "main" and x["id"] not in opened]
+            cold = [x for x in v1 if x["id"] in opened]
+            self.assertLessEqual(len(cold), 1, q["name"])  # 질문 장면 하나뿐 (티저 명장면 없음)
             self.assertTrue(all(float(a["in"]) <= float(b["in"]) for a, b in zip(body, body[1:]) if editor.i_end(b) < editor.seq_total(q) - 9),
                             q["name"])  # 원본 순서 그대로 (앞에 끼운 장면 없음)
             self.assertTrue(any(t["start"] <= 0.05 for t in q["titles"]), q["name"])

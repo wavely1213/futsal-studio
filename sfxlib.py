@@ -518,8 +518,11 @@ def _reverb(x, rng, mix=0.18, sec=1.4):
     return x + mix * out
 
 
-def bgm_render(mood, seed=1, bars=16):
-    """배경음악 한 묶음 (bars 마디 · 처음과 끝이 이어지게) → float [n, 2]."""
+BGM_VARIANTS = 3   # 같은 분위기·같은 조(키)로 화음 진행·아르페지오·악기를 바꾼 묶음 수 (긴 영상에서 같은 30~50초가 되풀이되지 않게 차례로 씀)
+
+
+def bgm_render(mood, seed=1, bars=16, variant=0):
+    """배경음악 한 묶음 (bars 마디 · 처음과 끝이 이어지게) → float [n, 2]. variant: 같은 조·빠르기로 진행·무늬·악기를 바꾼 판 (0 은 예전 그대로)."""
     np = _np()
     bpm, mode, _ = MOODS[mood]
     rng = np.random.default_rng(seed * 1009 + sum(map(ord, mood)))
@@ -529,11 +532,13 @@ def bgm_render(mood, seed=1, bars=16):
     bar = 4 * beat
     n = int(round(bars * bar * SR))
     key = 48 + int(rng.integers(0, 7)) * (1 if mode == "major" else 1) % 12 + (2 if mood == "감성" else 0)
-    prog = PROGS[mode][int(rng.integers(0, len(PROGS[mode])))]
-    prog_b = PROGS[mode][int(rng.integers(0, len(PROGS[mode])))]
+    v = int(variant or 0)
+    npg = len(PROGS[mode])
+    prog = PROGS[mode][(int(rng.integers(0, npg)) + v) % npg]          # 바꾼 판은 진행을 한 칸씩 옮김 (같은 조 · 다른 곡처럼)
+    prog_b = PROGS[mode][(int(rng.integers(0, npg)) + 2 * v) % npg]
     L, R = np.zeros(n), np.zeros(n)
     pad, bass, lead, drums = np.zeros(n), np.zeros(n), np.zeros((n, 2)), np.zeros(n)
-    arp_pat = [[0, 1, 2, 3, 2, 1, 0, 1], [0, 2, 1, 3, 0, 2, 1, 3], [0, 1, 2, 1, 3, 2, 1, 2]][int(rng.integers(0, 3))]
+    arp_pat = [[0, 1, 2, 3, 2, 1, 0, 1], [0, 2, 1, 3, 0, 2, 1, 3], [0, 1, 2, 1, 3, 2, 1, 2]][(int(rng.integers(0, 3)) + v) % 3]
     for b in range(bars):
         part_b = (b // 8) % 2 == 1  # 앞 8마디 / 뒤 8마디는 진행을 바꿔 덜 반복적으로
         deg = (prog_b if part_b else prog)[b % 4]
@@ -558,6 +563,8 @@ def bgm_render(mood, seed=1, bars=16):
             _add(bass, a, _note(root, bar * 0.95, "bass", 0.3))
         # 멜로디 악기 (아르페지오)
         inst = {"신남": "pluck", "잔잔": "pluck", "경쾌": "marimba", "감성": "piano"}[mood]
+        if variant % 2 == 1:  # 바꾼 판은 멜로디 악기도 바꿔 다른 곡처럼
+            inst = {"pluck": "marimba", "marimba": "pluck", "piano": "bell"}[inst]
         steps = {"신남": 16, "잔잔": 8, "경쾌": 8, "감성": 4}[mood]
         for k in range(steps):
             if mood == "잔잔" and k % 4 == 3 and rng.random() < 0.5:
@@ -624,20 +631,20 @@ def _comic(rng):
     return x
 
 
-def bgm_file_name(mood, seed):
-    return f"배경음악_{mood}_{int(seed)}.wav"
+def bgm_file_name(mood, seed, variant=0):
+    return f"배경음악_{mood}_{int(seed)}.wav" if not variant else f"배경음악_{mood}_{int(seed)}_{int(variant)}.wav"
 
 
-def ensure_bgm(mood, seed, assets, bars=16):
-    """배경음악 한 묶음을 미디어 폴더에 → (파일 이름, 길이 초). 같은 분위기·시드면 한 번만 만듦."""
+def ensure_bgm(mood, seed, assets, bars=16, variant=0):
+    """배경음악 한 묶음을 미디어 폴더에 → (파일 이름, 길이 초). 같은 분위기·시드·판이면 한 번만 만듦."""
     if mood not in MOODS:
         raise KeyError(f"모르는 분위기예요 · {mood}")
     assets = Path(assets)
     assets.mkdir(parents=True, exist_ok=True)
-    out = assets / bgm_file_name(mood, seed)
+    out = assets / bgm_file_name(mood, seed, variant)
     with _LOCK:
         if not (out.exists() and out.stat().st_size > 44):
-            _write_atomic(out, _wav_bytes(bgm_render(mood, seed, bars)))
+            _write_atomic(out, _wav_bytes(bgm_render(mood, seed, bars, variant)))
     with wave.open(str(out), "rb") as w:
         return out.name, w.getnframes() / float(w.getframerate())
 

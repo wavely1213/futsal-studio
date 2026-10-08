@@ -9,7 +9,7 @@
 ## 1. 테스트 도구와 실행
 
 - 테스트 프레임워크: 표준 `unittest` (+ `unittest.mock`). pytest 는 쓰지 않는다. 화면 e2e 는 Playwright(Python, Chromium).
-- 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 450개, 개발 환경에서 4분 남짓. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
+- 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 660개, 개발 환경에서 9분 남짓. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
 - 단일 파일 실행: `python3 -m unittest tests.test_update` / 하나만: `python3 -m unittest tests.test_update.InstallTests.test_hash_mismatch_leaves_app_unchanged`
 - 테스트 파일 위치·네이밍: `tests/test_<영역>.py` (평평한 구조), 고정 자료는 `tests/fixtures/`. `tests/` 는 배포 목록에서 빠진다.
 
@@ -31,6 +31,7 @@
 | `test_msg_round2.py` | MSG round2 판정 회귀: 엔드 화면(마무리 인사 위·원본 이어 붙이기·없으면 움직이는 장면, 정지 사진·빈 상자 없음) · 담백(티저·다시 보기 없음, 첫 장면 위 글자) · 다큐 제목 바로 · 낱말 시각(뭉개진 낱말·몰아 적은 묶음·추임새 뒤·잡음 덩어리) · 가짜 쉼 안 자름 · 뭉개진 낱말로 시작하는 컷 · 끊긴 말 · 시범 가장자리 목소리 · 짧은 조각 · 강조 구절 · 숫자 세기 · 시범 예고 · 개그 글자 되풀이 없음 · 뿌듯 · 정지 화면 글자 · 다시 보기와 티저 · 놓친 시도 알림 · 챌린지 음악 · 스타일별 말 자막 · 얼굴 피하기 |
 | `test_msg_round3.py` | MSG round3 판정 회귀: 0초 글자 효과 없음 · 상자 위 글자는 상자와 함께 · 인트로 스타일별 작은 제목 · 엔드 글자는 말 자막이 끝난 뒤(마무리 말과 안 겹치는 글 · 마지막 말 뒤 끝 시간 · 모자라면 구석 표시) · 구간 첫머리에 몰아 적은 '하나, 둘, 셋에'(컷·구간 넘어 펼치기) · 공 소리 앞 준비 동작 · 반응 말 다 끝난 뒤 다시 보기 · 확대와 원본 장면 바뀜 · 108% 뒤 쾅 확대 · 몰린 곳부터 빼기 · '한 번 더!'·실패 다시 보기·명장면 · 최종 결과 · 말 그대로 옮긴 강조 · 영상 끝 글자·넓은 글자 · 말 자막 바로 바뀜 · 자막 나누는 자리 · 다큐 검은 띠 · 효과음 겹침 |
 | `test_msg_round4.py` | MSG round4 판정 회귀: 효과음 트랙은 목소리 보정(압축기) 없이(실제 섞기) · 보정한 말소리 크기(`_voice_peak` = 섞은 대사) · 효과음 크기 기준 · 긴 효과음 꼬리 줄이기 · 최대 dBTP 여유(AAC 로 줄인 뒤 넘으면 다시 만듦) · 다시 보기는 반응이 아닌 말 앞·이미 컷인 자리 · 쉼으로 잘린 첫 질문 문장 · 훅 두 줄 · 말 자막과 같은 강조·상황 자막 · 첫 낱말 시각 · NG 자리 문장 사이 숨 · 붙은 확대 덜기 · 머리가 잘리지 않는 확대 기준점 · 하나뿐인 재미 순간은 나중에 빼기 · (시험 원본) 효과음 트랙 표시 · 첫 질문 한 번 · 다큐 듬뿍 첫 장면 |
+| `test_msg_round5.py` | MSG round5 검토 회귀: 글자 양(`perMin`)은 '재미' 부분 · 예전 섞은 스타일 옮기기 · 엔진 값으로 만든 스타일 설명 · 스타일마다 컷 리듬·인트로 구조 · 정해 둔 재미 문구(시범·딴소리·정리 목록) · 같은 때 말 자막 속 글자 · 번호 이름표 한 꼴 · 글꼴에 없는 글자 · 클로드 재미 글 거르기·캐시·NG 말 빼기(`msgwrite`, 가짜 run) · 재시도가 구성을 지킴 · 약 9분 원본(1분 글자 수·확대보다 글자) · 멈추기·짧은/말 없는 원본·소리 크기 한 번에 재기 · 다시 보기 자리 · 배경음악 변주·내 배경음악 · 파일 이름(NFD·'%')·소리 없는 원본 내보내기 · 큰 작업 결과 `/api/state` |
 | `test_msg_integration.py` | 썸네일 장면 후보의 MSG 추천 장면 · 올리기 키트 제목 후보의 MSG 훅 · MSG 마커 이름 챕터 |
 | `test_captions.py` (2차 작업 중, 커밋 전) | `captions` 자막 나누기·용어 사전·낱말 경계 고치기 · `core.analyze`(단어 시각·힌트·모델 한 번만·절전 막기, 가짜 faster_whisper) · 노래방 `\kf` · 단어 추임새 컷 · `/api/dict` |
 
@@ -45,9 +46,10 @@
 
 | `refs_e2e/refs_ui_test.py` | 학습용 영상 화면 (`ui.html` 보관함 옮기기 제안·확인 흐름, 스타일 배우기의 학습용 영상: 채널 칸·고르기·배우기·배운 파일 지우기·다시 배우기·지우기, 채널 추가·추천 채널·방향 요청, 보관함 영상도 보기, 편집 목록 분리, [취소]는 아무것도 안 옮김, 편집실 프로젝트에서 쓰는 영상 안내, 막힘 → 이 화면 크롬 설정, 원본 지우기 재확인·보관함으로 되돌리기 · 53개 확인) | `bash $SCRATCH/refs_e2e/run.sh` (저장소 클론을 `refs_e2e/app` 으로 복사해 8931 에 띄우고 보관함에 다른 채널 4개·우리 영상·촬영본을 넣음 · `REFS_REPO`·`REFS_PORT` 로 바꿈) → `python3 $SCRATCH/refs_e2e/refs_ui_test.py <스크린샷 폴더>` (받기 요청은 가로채서 인터넷을 쓰지 않음) |
 
-| `msg_fix/ui/msg_ui_test.py` | MSG 화면 (`editor.html` '재미있게 자동 편집'·`ui.html` 기본 스타일·스타일 섞기 · 26개 확인) | `bash $SCRATCH/msg_fix/ui/serve.sh 8942 fresh` (저장소 작업 트리를 `msg_fix/ui/app` 에 복사 · 작업 폴더에 MSG 시험 원본 3개) → `python3 $SCRATCH/msg_fix/ui/msg_ui_test.py 8942` |
+| `msg_ui/msg_ui_test.py` | MSG 화면 (`editor.html` '재미있게 자동 편집'·`ui.html` 기본 스타일·스타일 섞기 · 38개 확인: 접힌 다른 자동 편집 · 클로드 재미 자막 체크 칸 · '세 가지 모두'와 이어지는 후보 글자 · 1~9 키 · 다시 보기 빼기 · 섞은 스타일 고르기·저장한 양 · 좋아요는 지금 고른 섞은 스타일) | `bash $SCRATCH/msg_ui/serve.sh 8942 fresh` (저장소 작업 트리(기본 `$SCRATCH/feat_msg`, `REPO` 로 바꿈)를 `msg_ui/app` 에 복사 · 작업 폴더에 round5 시험 원본 3개) → `python3 $SCRATCH/msg_ui/msg_ui_test.py 8942` |
 
-- MSG 품질 평가·샘플(저장소 밖, 개발용): 시험 원본 만들기 `bash $SCRATCH/msg_fix/rebuild.sh`(TTS·NASA PD·CC0 소리 → `msg_fix/fixwork` + large-v3-turbo 받아쓰기) → `python3 $SCRATCH/msg_eval/run.py <라운드> [--judge]` → `$SCRATCH/msg_out/<라운드>/` 영상·시트·`report.html`(검수·LUFS·사건/분·무음/분 · `--judge` 는 사용자 클로드 계정으로 원본↔편집본 비교 판정, 라운드당 25번 안).
+- MSG 판정(round5~, 저장소 밖, 개발용): 시험 원본 `python3 -I $SCRATCH/msg_judge5/build5.py $SCRATCH/msg_judge5/fixwork`(Supertonic-2 TTS 가상 코치 대사 + Mixkit 무료 라이선스 축구·풋살 영상 + CC0 웃음·공 소리 · 출처는 파일 머리말) → 받아쓰기 `msg_judge5/tools/asr.py` → 후보 렌더 `python3 $SCRATCH/msg_judge5/export_run.py <A|B|C> <S1|S2|S3>`(1080p 롱폼 15개 + 보통 쇼츠) → `jm.py`(사건/분·멈춘 화면·U1~U12·F1~F7·글자/분) → `judge.py`(사용자 클로드 계정 판정) → `report.py` → `$SCRATCH/msg_out/<라운드>/SCORES.md`.
+- MSG 품질 평가·샘플(round4 까지): 시험 원본 만들기 `bash $SCRATCH/msg_fix/rebuild.sh`(TTS·NASA PD·CC0 소리 → `msg_fix/fixwork` + large-v3-turbo 받아쓰기) → `python3 $SCRATCH/msg_eval/run.py <라운드> [--judge]` → `$SCRATCH/msg_out/<라운드>/` 영상·시트·`report.html`(검수·LUFS·사건/분·무음/분 · `--judge` 는 사용자 클로드 계정으로 원본↔편집본 비교 판정, 라운드당 25번 안).
 - `th_run.sh`·`style_test.py` 는 8765 를 쓰므로, 개발용으로 띄운 앱(기본 8765)과 동시에 돌리지 않는다.
 
 ## 2. 테스트 전략 (우선순위)

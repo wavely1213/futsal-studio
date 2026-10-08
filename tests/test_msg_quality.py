@@ -258,8 +258,8 @@ class SfxLevelTest(unittest.TestCase):
     def test_level_uses_speech_peak_and_file_peak(self):
         # 기준은 목소리 보정을 거친 말소리 크기(voicePk · round4: 효과음은 보정 없이 섞음) · 없으면 원본 말소리에서 어림(_voice_est)
         sig = {"speechPk": -14.0, "voicePk": -10.0, "peakDb": -2.0}
-        self.assertEqual(msg._sfx_level(sig, "휙", "replay", -3.0), -10.0 - msg.SFX_GAP + 3.0)
-        self.assertEqual(msg._sfx_level(sig, "짠", "title", -20.0), -10.0 - msg.SFX_SOFT + 20.0)  # 작은 파일은 그만큼 키움
+        self.assertEqual(msg._sfx_level(sig, "휙", "replay", -3.0), round(-10.0 - msg.SFX_GAP + 3.0, 1))
+        self.assertEqual(msg._sfx_level(sig, "짠", "title", -20.0), round(-10.0 - msg.SFX_SOFT + 20.0, 1))  # 작은 파일은 그만큼 키움
         self.assertEqual(msg._sfx_level({"speechPk": -14.0}, "휙", "replay", -3.0), round(msg._voice_est(-14.0) - msg.SFX_GAP + 3.0, 1))
         self.assertEqual(msg._sfx_level({"peakDb": -4.0}, "휙", "replay", -3.0), round(msg._voice_est(-4.0 - 2.0) - msg.SFX_GAP + 3.0, 1))  # 예전 신호
 
@@ -416,8 +416,8 @@ class BuildTest(unittest.TestCase):
         r = self.res["보통"]
         self.assertTrue(r["captions"])
         self.assertIsNone(r["captionsOld"])  # 다시 듣지 않은 받아쓰기
-        for q in r["sequences"]:
-            self.assertEqual(q["msgCaps"], r["captions"])
+        for q in r["sequences"]:  # 자막은 결과에 한 번만 (후보마다 같은 자막을 붙이면 긴 원본에서 결과가 몇 MB · round5)
+            self.assertNotIn("msgCaps", q)
 
 
 if __name__ == "__main__":

@@ -234,13 +234,13 @@ class CaptionDupTest(unittest.TestCase):
                 {"start": 30.0, "end": 33.0, "text": "이 차이가 정말\n중요해요."}]
         self.assertTrue(msg._cap_dup("완전히 달라져요!", 10.5, 12.0, caps))
         self.assertTrue(msg._cap_dup("첫 번째 동작", 20.0, 22.0, caps))
-        self.assertFalse(msg._cap_dup("정말 중요!", 30.0, 32.0, caps))       # 핵심 낱말만 뽑은 강조는 괜찮음
+        self.assertTrue(msg._cap_dup("정말 중요!", 30.0, 32.0, caps))        # round5: 말 자막 안에 그대로 든 낱말도 되풀이 (판정)
         self.assertFalse(msg._cap_dup("완전히 달라져요!", 40.0, 42.0, caps))  # 다른 때
         self.assertEqual(msg._situ_badge("첫 번째 동작"), "동작 ①")
         self.assertEqual(msg._situ_badge("마지막! 세 번째 포인트"), "마지막! 포인트 ③")
         self.assertIsNone(msg._situ_badge("시범 들어갑니다"))
-        alt = msg._emph_short("완전히 달라져요!", "완전히 달라져요.")
-        self.assertFalse(msg._cap_dup(alt, 10.5, 12.0, caps), alt)
+        self.assertIsNone(msg._dedupe_text("emphasis", "완전히 달라져요!", 10.5, 1.0, caps))  # round5: 새 정보가 없으면 안 띄움 (확대가 맡음)
+        self.assertEqual(msg._dedupe_text("emphasis", "완전히 달라져요!", 10.5, 1.0, caps, term="디딤발"), ("디딤발 체크!", 10.5))
 
 
 class AlignTest(unittest.TestCase):

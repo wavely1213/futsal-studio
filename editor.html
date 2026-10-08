@@ -2334,7 +2334,9 @@ async function renderRec() {
   if (STYLES === null) { STYLES = []; try { STYLES = (await (await fetch("/api/style/list")).json()).styles || []; } catch (e) {} }
   if (MSGSRC === null) { MSGSRC = { presets: [], learned: [], mixes: [] }; try { MSGSRC = await (await fetch("/api/style/presets")).json(); } catch (e) {} }
   $("lt-rec").innerHTML = msgSection() + `
-    <div class="sec"><h4>스타일로 자동 편집 <span class="hint">(배운 유튜버 스타일대로 새 편집본)</span></h4>
+    <details class="sec" id="recMore"${recMoreOpen ? " open" : ""}><summary style="cursor:pointer;font-weight:600">다른 자동 편집 <span class="hint">(배운 스타일대로 가편집 · 쇼츠 추천 구간 · 1차 가편집 · 군더더기 정리)</span></summary>
+    <div class="hint" style="margin:4px 0 8px">위의 '재미있게 자동 편집'은 자막·효과음·배경음악까지 넣은 후보를 만들고, 여기는 컷과 자막 모양만 맞춘 가편집을 만들어요.</div>
+    <div class="sec"><h4>스타일로 자동 편집 <span class="hint">(배운 유튜버 스타일대로 컷·자막 모양만 · 효과음·배경음악 없음)</span></h4>
       ${STYLES.length ? `${STYLES.map((s, i) => `<div class="rec ${i === 0 ? "on" : ""}" data-sty="${i}" style="cursor:pointer"><b>${esc(s.name)}</b><div class="m" style="margin:0">${esc(s.desc || "")}</div></div>`).join("")}
         <div class="seg" id="styKind" style="margin-bottom:8px"><button data-v="long" class="on">롱폼만</button><button data-v="both">롱폼 + 쇼츠</button></div>
         <div><button class="btn pri" id="styGo">이 스타일로 새 편집본 만들기</button></div>
@@ -2356,9 +2358,11 @@ async function renderRec() {
       <button class="btn" id="recTidy" ${r.tidy.length ? "" : "disabled"}>전체 영상 군더더기 정리</button>
       <button class="btn" id="recFull">원본 전체로 되돌리기</button>
     </div>
+    </details>
     <div class="sec"><h4>편집점 표시 <span class="hint">(타임라인 위쪽 눈금에도 표시)</span></h4></div>
     ${EVENTS.filter(e => e.type !== "speech").map(e => `<div class="evrow ${e.type}" data-t="${e.t}"><span class="tc">${m(e.t)}</span><span class="k">${e.type === "peak" ? "▲ 하이라이트" : "── 컷 후보"}</span><span class="hint">${esc(e.text)}</span></div>`).join("")}`;
   let sty = 0, kind = "long";
+  if ($("recMore")) $("recMore").ontoggle = () => { recMoreOpen = $("recMore").open; };
   document.querySelectorAll("[data-sty]").forEach(el => el.onclick = () => { sty = +el.dataset.sty; document.querySelectorAll("[data-sty]").forEach(x => x.classList.toggle("on", x === el)); });
   document.querySelectorAll("#styKind button").forEach(b => b.onclick = () => { kind = b.dataset.v; document.querySelectorAll("#styKind button").forEach(x => x.classList.toggle("on", x === b)); });
   if ($("styGo")) $("styGo").onclick = async () => {
@@ -2413,28 +2417,36 @@ const MSG_KIND = { teaser: "티저", title: "제목 카드", emphasis: "강조 �
   punch: "확대", shake: "흔들기", replay: "다시 보기", freeze: "정지 화면", montage: "몽타주", end: "엔드 화면", bgm: "배경음악", chapters: "챕터" };
 const MSG_COL = { teaser: "#e5484d", title: "#0f7a3d", emphasis: "#ffe14d", situ: "#3fa34d", inner: "#9ad7ff", fx: "#ff9f1c", count: "#ffffff", sfx: "#1f8c86",
   punch: "#2f6fb0", shake: "#8b4fc6", replay: "#e5484d", freeze: "#bbbbbb", montage: "#e5484d", end: "#777777", bgm: "#555555", chapters: "#555555" };
-const MSG_ASPECTS = [["intro", "인트로"], ["captions", "자막"], ["fun", "재미"], ["sound", "음악"]];
-let MSGPICK = null, MSGAMT = "보통", MSGFMT = "long", MSGPROOF = false;
-try { MSGPROOF = localStorage.getItem("ed_msgProof") === "1"; } catch (e) {}
+const MSG_ASPECTS = [["intro", "인트로"], ["rhythm", "컷 리듬"], ["captions", "자막 모양"], ["fun", "재미(개그 글자·효과)"], ["sound", "음악"]];
+let MSGPICK = null, MSGAMT = "보통", MSGFMT = "long", MSGPROOF = false, MSGWRITE = false, recMoreOpen = false;
+try { MSGPROOF = localStorage.getItem("ed_msgProof") === "1"; MSGWRITE = localStorage.getItem("ed_msgWrite") === "1"; } catch (e) {}
+// '좋아요' 를 담을 섞은 스타일: 스튜디오 '스타일 섞기' 카드에서 마지막으로 보던 것 (같은 앱 주소라 브라우저 저장소를 같이 씀)
+const msgMixName = () => { try { return localStorage.getItem("msgMix") || (MSGSRC && MSGSRC.draft) || "풋살사관학교 스타일(초안)"; } catch (e) { return "풋살사관학교 스타일(초안)"; } };
+const msgSrcOf = k => { const [kind, ...n] = k.split("|"), nm = n.join("|"); return [...(MSGSRC.presets || []), ...(MSGSRC.mixes || []), ...(MSGSRC.learned || [])].find(x => x.kind === kind && x.name === nm); };
 const msgCands = () => P.sequences.filter(q => q.auto === "msg" && q.msg);
 const josa = (w, a, b) => { const c = String(w).replace(/[^가-힣A-Za-z0-9]+$/, "").slice(-1), n = c.charCodeAt(0) - 44032; return n >= 0 && n < 11172 ? (n % 28 ? a : b) : b; }; // 받침 있으면 a
 function msgSection() {
   const all = [...(MSGSRC.presets || []), ...(MSGSRC.mixes || []), ...(MSGSRC.learned || [])];
   if (MSGPICK === null) MSGPICK = (MSGSRC.presets || []).slice(0, 2).map(x => x.kind + "|" + x.name);
-  const chip = x => `<span class="mchip ${MSGPICK.includes(x.kind + "|" + x.name) ? "on" : ""}" data-msty="${esc(x.kind + "|" + x.name)}" title="${esc(x.desc || "")}">${esc(x.name)}</span>`;
+  // 칩 설명은 지금 고른 양에서 실제로 하는 것 (msg.describe_style) · 섞은 스타일은 저장한 양을 칩에 표시
+  const chip = x => `<span class="mchip ${MSGPICK.includes(x.kind + "|" + x.name) ? "on" : ""}" data-msty="${esc(x.kind + "|" + x.name)}" title="${esc(((x.descs || {})[MSGAMT === "모두" ? "보통" : MSGAMT]) || x.desc || "")}">${esc(x.name)}${x.kind === "mix" && x.intensity ? ` <span class="hint">· ${esc(x.intensity)}</span>` : ""}</span>`;
+  const one = MSGPICK.length === 1 ? msgSrcOf(MSGPICK[0]) : null, d = one && one.descs ? one.descs[MSGAMT === "모두" ? "보통" : MSGAMT] : "";
   const grp = (t, xs) => xs && xs.length ? `<div class="mgrp">${t}</div>${xs.map(chip).join("")}` : "";
   const cands = msgCands(), cur = cands.find(q => q.id === S.id);
   return `<div class="sec" id="msgSec"><h4>재미있게 자동 편집 (MSG) <span class="hint">(예능 자막·효과음·확대·다시 보기·배경음악)</span></h4>
     <div class="hint">스타일 고르기 (최대 3개) · 같은 원본으로 나란히 비교해요</div>
     ${grp("기본 스타일", MSGSRC.presets)}${grp("섞은 스타일 (초안)", MSGSRC.mixes)}${grp("배운 스타일", MSGSRC.learned)}
     ${all.length ? "" : `<div class="hint">스타일 목록을 불러오지 못했어요</div>`}
-    <div class="f" style="margin-top:6px"><label style="width:auto;margin-right:6px">MSG 양</label><div class="seg" id="msgAmt">${["담백", "보통", "듬뿍"].map(v => `<button data-v="${v}" class="${MSGAMT === v ? "on" : ""}">${v}</button>`).join("")}</div></div>
-    <div class="hint" style="margin:3px 0 6px">담백은 자막·효과를 조금만, 듬뿍은 예능처럼 많이 넣어요</div>
+    <div class="f" style="margin-top:6px"><label style="width:auto;margin-right:6px">MSG 양</label><div class="seg" id="msgAmt">${["담백", "보통", "듬뿍", "모두"].map(v => `<button data-v="${v}" class="${MSGAMT === v ? "on" : ""}" ${v === "모두" ? `title="스타일 하나를 담백·보통·듬뿍 세 가지로 한 번에"` : ""}>${v === "모두" ? "세 가지 모두" : v}</button>`).join("")}</div></div>
+    <div class="hint" style="margin:3px 0 6px">${MSGAMT === "모두" ? "고른 스타일 하나를 담백·보통·듬뿍으로 한 번에 만들어 나란히 비교해요" : MSGAMT === "담백" ? "담백은 자막·효과를 조금만 넣어요 · 담백에서는 스타일마다 컷이 같고 글자 모양·음악·인트로만 달라요" : "담백은 자막·효과를 조금만, 듬뿍은 예능처럼 많이 넣어요"}</div>
+    ${d ? `<div class="hint" style="margin:-2px 0 6px">이 스타일 · ${esc(MSGAMT === "모두" ? "보통" : MSGAMT)}: ${esc(d)}</div>` : ""}
     <div class="f"><label style="width:auto;margin-right:6px">형식</label><div class="seg" id="msgFmt"><button data-v="long" class="${MSGFMT === "long" ? "on" : ""}">롱폼만</button><button data-v="both" class="${MSGFMT === "both" ? "on" : ""}">롱폼 + 쇼츠</button></div></div>
     <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer"><input type="checkbox" id="msgProof" ${MSGPROOF ? "checked" : ""}>클로드로 자막 오타 고치기 (내 클로드 계정으로 대사 글만 보내요 · 영상마다 처음 한 번)</label>
+    <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" id="msgWrite" ${MSGWRITE ? "checked" : ""}>클로드로 재미 자막 쓰기 (속마음·반응 글자를 영상에 맞게 · 내 클로드 계정으로 대사 글만 보내요 · 끄면 정해 둔 문구)</label>
+    <div class="hint" style="margin-top:4px">배경음악: 앱이 만든 음악을 써요 · 내 음악을 쓰려면 <a href="#" id="msgBgm">'내 배경음악' 폴더</a>에 넣으세요 (분위기 폴더 신남·경쾌·잔잔·감성 · 저작권 걱정 없는 음악만)</div>
     <div style="margin-top:8px"><button class="btn pri" id="msgGo">MSG 후보 만들기</button></div>
     <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "MSG 후보 A · 스타일 · 양"을 새로 만들어요 (가편집 다시 만들기로 바뀌지 않아요).</div>
-    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(1·2·3 키: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
+    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(숫자 키 ${cands.length > 1 ? `1~${Math.min(9, cands.length)}` : "1"}: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
     ${cur ? msgList(cur) : ""}
   </div>`;
 }
@@ -2445,7 +2457,7 @@ function msgCard(q, i) {
     <div class="m hint">${esc((m.summary || {}).text || "")}</div>
     <div class="mstrip">${ticks}</div>
     <button class="btn sm" data-mview="${q.id}">보기</button> <button class="btn sm" data-mswap="${q.id}">같은 장면으로 바꿔 보기</button>
-    <div class="mtaste">이 후보의 … 가 좋아요: ${MSG_ASPECTS.map(([a, l]) => `<button class="btn sm" data-mlike="${q.id}|${a}">${l}</button>`).join("")}</div>
+    <div class="mtaste">이 후보의 … 가 좋아요 <span class="hint">(→ '${esc(msgMixName())}'에 담아요)</span>: ${MSG_ASPECTS.map(([a, l]) => `<button class="btn sm" data-mlike="${q.id}|${a}">${l}</button>`).join("")}</div>
     ${(m.notes || []).length ? `<div class="hint" style="margin-top:4px">${esc(m.notes.join(" · "))}</div>` : ""}</div>`;
 }
 function msgList(q) {
@@ -2459,12 +2471,17 @@ function bindMsg() {
   root.querySelectorAll("[data-msty]").forEach(el => el.onclick = () => {
     const k = el.dataset.msty, i = MSGPICK.indexOf(k);
     if (i >= 0) MSGPICK.splice(i, 1); else { if (MSGPICK.length >= 3) return toast("스타일은 3개까지 고를 수 있어요"); MSGPICK.push(k); }
-    el.classList.toggle("on", MSGPICK.includes(k));
+    // 섞은 스타일을 고르면 그 스타일에 저장한 MSG 양으로 (스타일 섞기 카드에서 고른 양 · 판정: 저장한 '듬뿍'이 편집실에서 '보통'으로 만들어짐)
+    const src = i < 0 ? msgSrcOf(k) : null;
+    if (src && src.kind === "mix" && src.intensity && MSGAMT !== "모두" && src.intensity !== MSGAMT) { MSGAMT = src.intensity; toast(`'${src.name}'에 저장한 양(${src.intensity})으로 맞췄어요`); }
+    renderRec();
   });
-  root.querySelectorAll("#msgAmt button").forEach(b => b.onclick = () => { MSGAMT = b.dataset.v; root.querySelectorAll("#msgAmt button").forEach(x => x.classList.toggle("on", x === b)); });
+  root.querySelectorAll("#msgAmt button").forEach(b => b.onclick = () => { MSGAMT = b.dataset.v; renderRec(); });
   root.querySelectorAll("#msgFmt button").forEach(b => b.onclick = () => { MSGFMT = b.dataset.v; root.querySelectorAll("#msgFmt button").forEach(x => x.classList.toggle("on", x === b)); });
   $("msgProof").onchange = e => { MSGPROOF = e.target.checked; try { localStorage.setItem("ed_msgProof", MSGPROOF ? "1" : "0"); } catch (x) {} };
+  $("msgWrite").onchange = e => { MSGWRITE = e.target.checked; try { localStorage.setItem("ed_msgWrite", MSGWRITE ? "1" : "0"); } catch (x) {} };
   $("msgGo").onclick = runMsg;
+  $("msgBgm").onclick = e => { e.preventDefault(); post("/api/open", { which: "bgm" }); toast("열린 폴더(분위기별)에 음악 파일을 넣으면 다음 MSG 후보부터 그 음악을 써요"); };
   root.querySelectorAll("[data-mview]").forEach(b => b.onclick = () => { switchSeq(b.dataset.mview); renderRec(); });
   root.querySelectorAll("[data-mswap]").forEach(b => b.onclick = () => msgSwap(b.dataset.mswap));
   root.querySelectorAll("[data-mlike]").forEach(b => b.onclick = () => { const [id, a] = b.dataset.mlike.split("|"); msgLike(id, a); });
@@ -2473,8 +2490,10 @@ function bindMsg() {
 }
 async function runMsg() {
   if (!MSGPICK.length) return toast("스타일을 하나 이상 골라 주세요");
+  if (MSGAMT === "모두" && MSGPICK.length !== 1) return toast("'세 가지 모두'는 스타일을 하나만 골라 주세요");
   const styles = MSGPICK.map(k => { const [kind, ...n] = k.split("|"); return { kind, name: n.join("|") }; });
-  const r = await (await post("/api/edit/msg", { name: NAME, styles, intensity: MSGAMT, kinds: MSGFMT === "both" ? ["long", "shorts"] : ["long"], proofread: MSGPROOF })).json();
+  const r = await (await post("/api/edit/msg", { name: NAME, styles, intensity: MSGAMT, kinds: MSGFMT === "both" ? ["long", "shorts"] : ["long"], proofread: MSGPROOF,
+    writer: MSGWRITE, first: msgCands().length })).json();
   if (!r.ok) return toast(r.error || "지금은 만들 수 없어요");
   $("busy").classList.add("show"); JOBNAME = "MSG 후보 만들기";
   const iv = setInterval(async () => {
@@ -2484,6 +2503,7 @@ async function runMsg() {
     if (s.job) return;
     clearInterval(iv); $("busy").classList.remove("show");
     if (s.error) return toast(s.error.includes("멈췄어요") ? "MSG 후보 만들기를 멈췄어요" : "MSG 후보를 만들지 못했어요 · " + s.error.slice(0, 100));
+    if (s.resultBig) { try { s = await (await fetch("/api/state?since=999999&result=1")).json(); } catch (e) { return toast("MSG 후보를 받아 오지 못했어요 · 다시 눌러 주세요"); } } // 큰 결과는 한 번만 받아 옴
     const res = s.result || {};
     if (!res.sequences || !res.sequences.length) return toast("MSG 후보를 만들지 못했어요");
     msgAdd(res);
@@ -2506,7 +2526,7 @@ function msgAdd(res) {
   const capNote = msgCaps(res);
   for (const q of res.sequences) { ensureSeq(q); q.name = uniqSeqName(q.name); P.sequences.push(q); }
   ver++; switchSeq(res.sequences[0].id); renderBin(); renderRec(); if (capNote) renderCaps();
-  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote} · 1·2·3 키로 같은 장면에서 바꿔 볼 수 있어요`);
+  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote} · 숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
 }
 // 같은 원본 장면으로 다른 후보 보기: 지금 화면의 원본 시각 → 그 후보의 타임라인 시각 (다시 보기·티저 같은 noCaps 클립은 빼고)
 function srcAtT(q, t) { const it = q.items.find(i => i.track === "V1" && i.media === "main" && !i.noCaps && t >= i.start - 1e-6 && t < iEnd(i)); return it ? mt(it, t) : null; }
@@ -2524,7 +2544,7 @@ async function msgLike(id, aspect) {
   const q = P.sequences.find(x => x.id === id); if (!q || !q.msg) return;
   const src = (q.msg.style || {}), nm = (src.sources || {})[aspect] || src.label;
   const kind = (MSGSRC.presets || []).some(x => x.name === nm) ? "preset" : "style";
-  const draft = MSGSRC.draft || "풋살사관학교 스타일(초안)", lab = Object.fromEntries(MSG_ASPECTS)[aspect];
+  const draft = msgMixName(), lab = Object.fromEntries(MSG_ASPECTS)[aspect];
   try {
     const r = await (await post("/api/style/mix_pick", { name: draft, aspect, source: { kind, name: nm } })).json();
     if (!r.ok) throw new Error(r.error || "");
@@ -2551,7 +2571,18 @@ function msgRemove(evId) {
     }
   }
   if (ev.ins && ev.ins.len > 0 && !ev.ins.overlay) { // 끼워 넣은 장면: 그 뒤를 모두 당김 (다른 MSG 기록도 같이) · 본편 위에 얹은 엔드 화면은 그대로
-    const a = ev.ins.start, d = ev.ins.len, sh = x => x >= a + d - 1e-3 ? x - d : x;
+    const a = ev.ins.start, d = ev.ins.len, b = a + d, sh = x => x >= a + d - 1e-3 ? x - d : x;
+    // 빼는 장면에 걸친 클립(배경음악·다른 트랙)·글자·도형은 그만큼 줄임 — 그대로 두면 그림이 끝난 뒤에도 배경음악만 5초 남아 끝이 검은 화면 (판정)
+    q.items = q.items.filter(it => !(it.start >= a - 1e-3 && iEnd(it) <= b + 1e-3)); // 빼는 장면 안에만 있던 것 (그 장면의 소리 등)
+    for (const it of q.items) {
+      const e = iEnd(it);
+      if (it.start < a - 1e-3 && e > a + 1e-3) it.out = fr(it.out - Math.min(d, e - a) * sp(it)); // 앞에서 시작해 걸침: 걸친 만큼 뒤를 줄임
+      else if (it.start >= a - 1e-3 && it.start < b - 1e-3 && e > b + 1e-3) { it.in = fr(it.in + (b - it.start) * sp(it)); it.start = b; } // 안에서 시작해 뒤로 나감
+    }
+    for (const t of [...q.titles, ...q.shapes]) {
+      const e = t.start + t.dur;
+      if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
+    }
     for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
     for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start));
     for (const mk of q.markers) mk.t = fr(sh(mk.t));
@@ -3503,7 +3534,7 @@ addEventListener("keydown", e => {
   else if (k === "h") setTool("hand");
   else if (k === "z") setTool("zoom");
   else if (k === "s") toggleSnap();
-  else if ((k === "1" || k === "2" || k === "3") && msgCands()[+k - 1]) { const q = msgCands()[+k - 1]; if (q.id !== S.id) msgSwap(q.id); }
+  else if (/^[1-9]$/.test(k) && msgCands()[+k - 1]) { const q = msgCands()[+k - 1]; if (q.id !== S.id) msgSwap(q.id); } // 후보 카드의 번호와 같은 차례
   else if (k === "t") addTitle();
   else if (k === "m" && sh) jumpMarker(1);
   else if (k === "m") addMarker();

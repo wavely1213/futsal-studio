@@ -61,7 +61,7 @@ class Presets(Base):
         self.assertEqual(a["rhythm"]["zoomEvery"], 0)          # 0.5초마다 확대 → 너무 잦음 → 안 함
         self.assertLessEqual(a["rhythm"]["zoomScale"], 1.3)
         self.assertLessEqual(a["rhythm"]["splitShot"], 12.0)
-        self.assertTrue(all(v <= 3.0 for v in a["captions"]["perMin"].values()), a["captions"]["perMin"])
+        self.assertTrue(all(v <= 3.0 for v in a["fun"]["perMin"].values()), a["fun"]["perMin"])  # 글자 양은 재미 부분 (D-031)
         self.assertTrue(all(v <= 1.6 for k, v in a["fun"].items() if isinstance(v, float)), a["fun"])
         self.assertTrue(-16 <= a["sound"]["lufs"] <= -12)
         self.assertEqual(a["intro"]["type"], "teaser")

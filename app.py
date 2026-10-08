@@ -42,7 +42,8 @@ def _utf8_console():
 _utf8_console()
 
 PORT = int(os.environ.get("FUTSAL_PORT", "8765"))
-LOG, JOB = [], {"name": None, "result": None, "error": None}
+LOG, JOB = [], {"name": None, "result": None, "error": None, "big": False}
+BIG_RESULT = 64 << 10   # 이보다 큰 작업 결과(MSG 후보 묶음)는 /api/state?result=1 로 물을 때만 (1초마다 몇 MB 를 다시 보내지 않게)
 LOCK = threading.Lock()
 
 
@@ -68,13 +69,18 @@ def start_job(name, fn):
     with LOCK:
         if JOB["name"]:
             return False
-        JOB.update(name=name, result=None, error=None)
+        JOB.update(name=name, result=None, error=None, big=False)
 
     def runner():
         core.set_progress()
         editor.CANCEL.clear()  # 예전 작업에서 누른 멈추기(✕)가 다음 작업에 남지 않게
         try:
-            JOB["result"] = fn()
+            res = fn()
+            try:
+                JOB["big"] = len(json.dumps(res, ensure_ascii=False)) > BIG_RESULT
+            except (TypeError, ValueError):
+                JOB["big"] = False
+            JOB["result"] = res
         except Exception as e:
             JOB["error"] = str(e)
             log(f"문제가 생겼어요 · {e}")
@@ -410,7 +416,8 @@ class Handler(BaseHTTPRequestHandler):
                 total = len(LOG)
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"],
-                                    "result": JOB["result"] if not JOB["name"] else None,
+                                    "result": JOB["result"] if not JOB["name"] and (not JOB["big"] or q.get("result") == ["1"]) else None,
+                                    "resultBig": bool(JOB["big"]) and not JOB["name"],
                                     "error": JOB["error"] if not JOB["name"] else None,
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local)})
         if u.path == "/api/timeline":
@@ -684,13 +691,15 @@ class Handler(BaseHTTPRequestHandler):
                 editor.video_path(b["name"])
                 specs = [x for x in (b.get("styles") or []) if isinstance(x, dict)][:3]
                 kinds = tuple(k for k in (b.get("kinds") or ["long"]) if k in ("long", "shorts")) or ("long",)
-                inten = b.get("intensity") if b.get("intensity") in msg.INTENSITY else "보통"
+                inten = b.get("intensity") if b.get("intensity") in msg.INTENSITY or b.get("intensity") == "모두" else "보통"
                 if not specs:
                     raise ValueError("스타일을 하나 이상 골라 주세요")
-            except (KeyError, ValueError, FileNotFoundError) as e:
+                first = max(0, int(b.get("first") or 0))
+            except (KeyError, ValueError, TypeError, FileNotFoundError) as e:
                 return self._send(400, {"ok": False, "error": str(e) or "잘못된 요청이에요"})
             proof = b.get("proofread") is True  # '클로드로 자막 오타 고치기'를 켰을 때만 (사용자 클로드 계정으로 대사 글만 보냄)
-            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log, proofread=proof))
+            writer = b.get("writer") is True   # '클로드로 재미 자막 쓰기'를 켰을 때만 (같은 계정 · 대사 글만)
+            ok = start_job("MSG 후보 만들기", lambda: msg.build_variants(b["name"], specs, inten, kinds, log, proofread=proof, writer=writer, first=first))
             return self._send(200 if ok else 409, {"ok": ok, "error": None if ok else "다른 작업이 끝난 뒤에 다시 눌러 주세요"})
         if path in ("/api/style/mix", "/api/style/mix_pick"):  # 스타일 섞기 저장 · '이 후보의 ○○가 좋아요'
             try:
@@ -729,7 +738,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if b["which"] == "refs":
                     refs.root().mkdir(parents=True, exist_ok=True)
-                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root()}[b["which"]])
+                if b["which"] == "bgm":  # MSG '내 배경음악' 폴더 (분위기 이름 폴더도 만들어 둠)
+                    for m in ("신남", "경쾌", "잔잔", "감성"):
+                        (msg.user_bgm_dir() / m).mkdir(parents=True, exist_ok=True)
+                open_folder({"videos": core.VIDEOS, "analysis": core.ANALYSIS, "out": core.OUT, "refs": refs.root(), "bgm": msg.user_bgm_dir()}[b["which"]])
             except Exception as e:
                 log(f"폴더를 열지 못했어요 · {e}")
                 return self._send(200, {"ok": False})
