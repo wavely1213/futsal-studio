@@ -107,6 +107,7 @@
   - 폴더·파일·주소 열기는 정해진 목록에서만 한다.
     - `/api/open`: `videos`·`analysis`·`out`·`refs`·`work`(작업 폴더) 중 하나, 또는 `log`(작업 폴더의 studio.log 를 탐색기에서 골라 보여 줌 · `app.reveal`)
     - `/api/convert`(MP4로 바꾸기): 보관함 폴더의 못 쓰는 형식 목록(`intake.unusable`)에 있는 파일 이름만 · 결과는 같은 폴더에 새 이름, 원본은 그 안 `바꾸기 전 원본` 폴더로 (덮어쓰지 않음)
+    - `/api/rename`·`/api/rename/attach`(D-073): 보관함에 있는 파일 이름만(`safe_name` + 있는지) · 새 이름은 `rename.clean_new`(못 쓰는 글자·예약 이름·길이 · 확장자는 원래 것)로 만들고 보관함 폴더 안에서만 바꿈 · 분석 폴더·편집본·썸네일은 `core.ANALYSIS`·`editor.PROJECTS`·`thumb.THUMBS` 안 정해진 이름으로만 옮기고(자동 누끼는 `thumb.ASSETS` 안 `cut_auto_<키>` 끼리 · 키는 서버가 장면 후보 캐시로 다시 셈 · 새 키 파일이 있으면 그대로 · D-078), 그 자리에 다른 작업이 있으면 덮어쓰지 않고 거절 · 이어 붙이기는 서버가 찾은 옛 작업 목록(`rename.orphans`) 안 이름만 · 바꾸는 동안 작업 자리(`JOB`)를 잡아 다른 작업(휴대폰 포함)이 옛 이름으로 시작하지 못함 · 옛 이름의 `/api/edit/save`·`/api/thumb/save` 는 404 gone(그 이름으로 파일을 새로 만들지 않음)
     - `upload.reveal`: `core.OUT` 안 파일 이름
     - `upload.open_studio`: 고정 주소 `STUDIO_URL`
     - `youtube_upload.open_link`: 영상 번호(`^[A-Za-z0-9_-]{11}$`)로 만든 youtu.be·/shorts/·스튜디오 주소, 또는 안내용 고정 주소 목록 `GUIDE_URLS` 의 열쇠만 (화면이 보낸 주소는 쓰지 않음)

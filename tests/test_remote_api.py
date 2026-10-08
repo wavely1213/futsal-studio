@@ -433,7 +433,7 @@ class ActionTests(Base):
         st, _, b = self.act("analyze", {"names": [NAME]})
         self.assertEqual(st, 200)
         self.fb.wait_idle()
-        self.assertEqual(self.fb.analyzed, [{"names": [NAME], "model": "large-v3-turbo"}])
+        self.assertEqual(self.fb.analyzed, [{"names": [NAME], "model": core.default_model()}])  # 이 PC 사양에 맞는 기본값 (D-070)
 
     def test_analyze_confirm_token_flow(self):
         self.make_project()

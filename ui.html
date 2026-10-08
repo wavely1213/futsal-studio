@@ -19,6 +19,7 @@
       --ink: #e6edf3; --ink-2: #a8b3bf; --ink-3: #6e7781;
       --brand: #2fbf6b; --brand-ink: #06210f; --brand-soft: #12301f;
       --peak: #ff9a5a; --peak-soft: #3a2416; --cut: #a8b3bf; --cut-soft: #232a34;
+      --danger: #f85149; /* 밝은 화면 값(#b42318)은 어두운 카드 위 2.6:1 이라 경고·오류 글자가 안 읽힘 → 4.5:1 넘게 (카드 5.2 · 바탕 5.7) */
       --shadow: 0 1px 2px rgba(0,0,0,.4);
     }
   }
@@ -63,6 +64,9 @@
   .phead .sp { flex: 1; }
   .bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
   .bar .sp { flex: 1; }
+  .bar .mhint { flex-basis: 100%; margin-top: -2px; text-align: right; font-size: 12.5px; color: var(--ink-2); }
+  .bar .mhint:empty { display: none; }
+  .bar .mhint b { color: var(--ink); font-weight: 600; }
   .inp { border: 1px solid var(--line); background: var(--surface); padding: 9px 12px; border-radius: 10px; min-width: 260px; font: inherit; color: inherit; }
   .sh { font-size: 15px; margin: 26px 0 12px; }
   .styles .st { padding: 16px; }
@@ -151,6 +155,17 @@
   .vid .meta { padding: 10px 12px 12px; }
   .vid .title { font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 42px; }
   .vid .views { color: var(--ink-2); font-size: 12px; margin-top: 4px; }
+  /* 다음 할 일 (D-075): 4단계 카드의 단계 · 처음 안내 · 편집점 찾은 뒤 */
+  .vid .steps { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .vid .steps .ok { color: var(--brand); font-weight: 700; }
+  .vid .nextgo { margin-top: 8px; padding: 5px 10px; font-size: 12px; }
+  .card.guide { padding: 16px 18px; margin-bottom: 16px; }
+  .guide b.h { display: block; font-size: 15px; margin-bottom: 6px; }
+  .guide ol { margin: 6px 0 12px; padding-left: 20px; line-height: 1.75; color: var(--ink-2); }
+  .guide ol b { color: var(--ink); }
+  .guide .acts, .nextbar .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card.nextbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 16px; margin-bottom: 14px; border-left: 4px solid var(--brand); }
+  .nextbar .tx { flex: 1; min-width: 240px; }
   .vid.have { opacity: .55; }
   .vid.have .views::after { content: " · 보관함에 있음"; color: var(--brand); }
   .note { font-size: 13px; color: var(--ink-2); margin: -4px 0 16px; }
@@ -257,7 +272,7 @@
   .failslot:empty { display: none; }
   .fail { padding: 14px 16px; margin: -4px 0 16px; display: grid; gap: 10px; border-left: 4px solid var(--danger); }
   .fail .ftop { display: flex; gap: 10px; align-items: flex-start; }
-  .fail .fic { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+  .fail .fic { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: var(--surface); display: grid; place-items: center; font-weight: 800; font-size: 13px; }  /* 흰 글자는 어두운 화면 --danger 위 3.35:1 → 카드 바탕색(밝은 6.57 · 어두운 5.16) */
   .fail .ftx { flex: 1; min-width: 0; line-height: 1.55; }
   .fail .ftx b { display: block; color: var(--ink); overflow-wrap: anywhere; }
   .fail .ftx small { color: var(--ink-3); font-size: 12px; }
@@ -780,6 +795,12 @@
         <button class="btn primary" id="btnDownload" disabled>보관함에 담기</button>
       </div>
       <div class="failslot"></div>
+      <div class="card guide" id="startGuide" hidden><b class="h">처음이세요? 영상 한 편은 이렇게 이어져요</b>
+        <ol><li><b>영상 넣기</b> · 여기서 채널 영상을 보관함에 담거나, 2 보관함의 [촬영 원본 넣기]로 찍은 영상을 넣어요</li>
+          <li><b>2 보관함 → [편집점 찾기]</b> · 대사를 받아쓰고 1차 가편집(롱폼·쇼츠)까지 만들어요</li>
+          <li><b>3 편집점</b>에서 대사·컷 후보를 훑어보고 <b>4 편집실</b>에서 다듬은 뒤 [내보내기]</li>
+          <li><b>5 썸네일</b> 저장 → <b>7 올리기</b>에서 제목·설명·챕터를 만들어 유튜브에 올려요</li></ol>
+        <div class="acts"><button class="btn primary" id="guideFootage">촬영 원본 넣기</button><button class="btn" id="guideLib">보관함 보기</button><button class="btn" id="guideOff">다시 안 보기</button></div></div>
       <details class="note" id="ckNote"><summary>다운로드가 계속 실패하나요?</summary>
         왼쪽 아래 <b>업데이트 확인</b>을 먼저 눌러 보세요. 그래도 안 되면 YouTube에 로그인해 둔 브라우저를 골라 다시 담아 보세요.<br>
         <label>로그인 정보로 받기 <select class="sel" id="cookies" title="고른 브라우저의 YouTube 로그인 정보로 받아요 (내 PC 안에서만 쓰여요)"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select> (내 PC 안에서만 쓰여요)</label>
@@ -797,8 +818,9 @@
         <div class="sp"></div>
         <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
         <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
-        <div class="seg" id="modelSeg"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
+        <div class="seg" id="modelSeg" title="받아쓰기 방식 · 처음엔 이 PC 사양에 맞게 골라 두고, 바꾸면 기억해요"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
+        <div class="mhint" id="modelHint"></div>
       </div>
       <div class="failslot"></div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
@@ -828,6 +850,7 @@
         <button class="btn" id="btnCopy">텍스트로 복사</button>
         <button class="btn primary" id="btnEdit">편집실에서 열기</button>
       </div>
+      <div class="card nextbar" id="ptNext" hidden><div class="tx" id="ptNextTx"></div><div class="acts"><button class="btn primary" id="ptNextGo">편집실에서 열기</button><button class="btn" id="ptNextX">닫기</button></div></div>
       <div class="card events" id="events"></div>
     </section>
 
@@ -1223,13 +1246,15 @@ function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · 
   const otherKind = jb.body && jb.body.kind === "shorts" ? "videos" : "shorts";
   const label = { retry: "다시 하기", update: "업데이트 확인", folder: "폴더 열기", url: "주소 다시 넣기", log: "작업 기록 보기", logfile: "studio.log 위치 열기",
     nocookies: "로그인 정보 없이 다시 하기", otherkind: otherKind === "shorts" ? "쇼츠로 다시 불러오기" : "긴 영상으로 다시 불러오기",
-    resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기" };
+    resume: "이어 올리기", relogin: "다시 연결하기", verify: "채널 인증하러 가기", thumb: "썸네일 다시 올리기", finish: "마저 하기",
+    fast: "빠르게로 다시 하기" };
+  Object.assign(label, f.labels || {});  // 그 카드만의 버튼 이름 (예: 꺼짐 카드의 '정확하게로 다시 하기')
   const btns = acts.map((a, i) => a === "cookies"
     ? `<span class="ckpick">로그인 정보 <select class="sel" data-fck>${list.map(k => `<option value="${k}"${k === ckPick ? " selected" : ""}>${BROWSERS[k]}${BROWSER_NOTE[k] || ""}</option>`).join("")}</select></span><button class="btn${i ? "" : " primary"}" data-fa="cookies">이 브라우저로 다시 받기</button>`
     : `<button class="btn${i ? "" : " primary"}" data-fa="${a}">${label[a]}</button>`).join("");
   const msg = acts.includes("cookies") && f.card ? f.card : f.msg;  // 카드 안에 브라우저 고르기가 있으면 '아래에서 고르고…' (화면 설정 칸을 또 가리키지 않게)
   const slot = failSlot(panel);
-  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")} · ${hm}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
+  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")}${f.kind === "crash" ? "" : ` · ${hm}`}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
   const card = slot.firstElementChild;
   card.querySelector(".fx").onclick = () => { slot.innerHTML = ""; };
   if (/^cookie_/.test(f.kind || "") && ckCur && $("cookies").value === ckCur) useCookies(null);  // 그 브라우저 로그인 정보를 못 읽음 → 화면 설정은 '안 씀'으로 (다음 작업까지 같은 오류가 나지 않게 · 카드의 고르기는 그대로)
@@ -1265,11 +1290,18 @@ function go(p) {
   if (p === "strategy" && window.sxLoad) window.sxLoad();
   if (p === "thumb" && window.sxTodoBox) window.sxTodoBox("thTodos", ["thumb"]);
   if (p === "upload" && window.sxTodoBox) window.sxTodoBox("upTodos", ["title", "upload"]);
+  if (p === "cut") loadProgress();
 }
 document.querySelectorAll(".step").forEach(s => s.onclick = () => go(s.dataset.p));
 document.querySelectorAll(".seg").forEach(seg => seg.querySelectorAll("button").forEach(b => b.onclick = () => {
   seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
   if (seg.id === "kindSeg" && remote.length) loadRemote();
+}));
+const savedModel = modelSaved();
+if (savedModel) setSeg("modelSeg", savedModel);  // 서버에 묻기 전에도 고른 값으로 (예전 값이 먼저 보였다 바뀌지 않게)
+$("modelSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+  try { localStorage.setItem(MODEL_KEY, b.dataset.v); } catch (e) {}
+  renderModelHint();
 }));
 
 /* 1. 소재 찾기 */
@@ -1315,7 +1347,7 @@ function downloaded(res) {
 
 /* 2. 보관함 */
 function renderLocal() {
-  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter;
+  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter + JSON.stringify(state.crash || null);
   if (key === lastLocalKey) return;
   lastLocalKey = key;
   const have = new Set(state.local.map(v => v.name));
@@ -1339,10 +1371,11 @@ function renderLocal() {
     return `<div class="row${v.copying ? " copying" : ""}">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${chip}
       ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
-        : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
+        : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>`
+        : v.renamedFrom ? `<button class="btn primary" data-attach="${esc(v.name)}" data-old="${esc(v.renamedFrom.old)}" title="예전 이름의 받아쓰기·편집본·썸네일을 이 영상에 이어 붙여요 (다시 받아쓰지 않아요)">예전 작업 이어 붙이기</button>` : `<span></span>`}
     </div>`;
   }).join("") + badRows : state.local.length ? `<div class="empty"><b>${esc(filterName())} 영상이 없어요</b>위에서 '전체'를 누르면 모든 영상이 보여요. 영상 이름 아래 출처 표시를 눌러 바꿀 수도 있어요.</div>`
     : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
@@ -1352,6 +1385,8 @@ function renderLocal() {
   document.querySelectorAll("#local [data-toref]").forEach(b => b.onclick = () => moveToRefs([b.dataset.toref]));
   document.querySelectorAll("#local [data-reana]").forEach(b => b.onclick = () => analyzeNames([b.dataset.reana], true));
   document.querySelectorAll("#local [data-conv]").forEach(b => b.onclick = () => convertMp4(b.dataset.conv));
+  document.querySelectorAll("#local [data-ren]").forEach(b => b.onclick = () => renameVideo(b.dataset.ren));
+  document.querySelectorAll("#local [data-attach]").forEach(b => b.onclick = () => attachOld(b.dataset.attach, b.dataset.old));
   renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
@@ -1452,18 +1487,92 @@ $("btnAnalyze").onclick = () => analyzeNames(libChecked());
 function analyzeNames(names, changedFile) {
   if (state.job || !names.length) return;
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
-  if (again && !confirm(`${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`)) return;
+  if (again && !confirm(againMsg(again, changedFile))) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
+}
+function againMsg(again, changedFile) {  // 이미 편집점을 찾은 영상을 다시 찾을 때 확인 (보관함 버튼 · 꺼짐 카드의 다시 하기)
+  return `${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`;
+}
+/* 2-1b. 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (서버 app.CRASH · D-072): 다시 하는 곳(보관함)에 그 영상 이름 +
+   [다시 하기]·[빠르게로 다시 하기] 카드 · 줄에도 표시 · ✕ 나 다시 하기를 누르면 서버에서도 내림.
+   처음 한 번만(꺼짐 id 기억) 그 영상을 고르고 보관함으로 데려감 — 카드를 그냥 두고 편집실·썸네일에 다녀올 때마다 끌려오거나
+   고른 영상이 바뀌지 않게 · 썸네일·편집실에서 돌아와 갈 화면(7 올리기·4 편집실)이 있으면 그 화면 그대로 */
+let crashShown = "";
+const CRASH_SEEN = "crashSeen";
+const crashModel = m => m === "small" ? "빠르게" : m === "large-v3-turbo" ? "정확하게" : "";
+function crashOf(name) {
+  const c = state.crash;
+  if (!c || !(c.names || []).includes(name)) return "";
+  return c.path === "/api/bundle" ? "지난번에 묶다가 프로그램이 꺼졌어요" : "지난번에 이 영상의 편집점을 찾다가 프로그램이 꺼졌어요";
+}
+function showCrash(c) {
+  if (!c || crashShown === c.id) return;
+  crashShown = c.id;
+  const have = new Set(state.local.map(v => v.name)), names = (c.names || []).filter(n => have.has(n));
+  const dismiss = () => api("/api/crash/dismiss", {}).catch(() => {});
+  if (!names.length) { dismiss(); return; }  // 그 영상이 보관함에 없음 (지웠거나 이름을 바꿈) → 다시 할 것이 없음
+  const nm = n => cutText(niceName(n).replace(/\.[^.]+$/, ""), 30);  // 확장자 없이 ('…mp4' 영상의 → '…' 영상의)
+  const who = `'${nm(names[0])}'${names.length > 1 ? ` 외 ${names.length - 1}개` : ""} 영상`;
+  const how = crashModel(c.model), bund = c.path === "/api/bundle", heavy = c.model !== "small";
+  const msg = `지난번에 ${who}${bund ? "을 한 영상으로 묶다가" : `의 편집점을 찾다가${how ? ` (받아쓰기 '${how}')` : ""}`} 프로그램이 갑자기 꺼졌어요 · `
+    + (c.model === "large-v3-turbo" ? "메모리가 모자랐을 수 있어요. '빠르게'는 메모리를 3분의 1쯤만 써요" : "아래에서 바로 다시 할 수 있어요");
+  const body = bund ? { names, title: c.title || "촬영본", model: c.model } : { names, model: c.model };
+  const done = bund ? bundleDone : analyzed;
+  const rerun = model => {  // 보관함 [편집점 찾기]처럼: 이미 찾은 영상이면 한 번 확인
+    const again = bund ? 0 : state.local.filter(v => v.analyzed && names.includes(v.name)).length;
+    if (again && !confirm(againMsg(again))) return;
+    job(c.path, { ...body, model }, done);
+  };
+  let seen = "";
+  try { seen = localStorage.getItem(CRASH_SEEN) || ""; } catch (e) {}
+  if (seen !== String(c.id)) {
+    try { localStorage.setItem(CRASH_SEEN, String(c.id)); } catch (e) {}
+    libSel.clear(); names.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
+    if (!window.landedOn && curPanel() !== "p-library") go("library");
+  }
+  // '정확하게'로 꺼졌으면 [빠르게로 다시 하기]가 먼저(눈에 띄는 버튼) · 다른 버튼은 무엇으로 다시 하는지 이름에 (받아쓰기 고르기와 헷갈리지 않게)
+  showFail({ kind: "crash", msg, actions: [...(heavy ? ["fast"] : []), "retry", "log", "logfile"],
+    labels: c.model === "large-v3-turbo" ? { retry: "정확하게로 다시 하기" } : {}, job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
+    { path: c.path, body, done, panel: "p-library", on: { retry: () => rerun(c.model), fast: () => {
+      setSeg("modelSeg", "small"); try { localStorage.setItem(MODEL_KEY, "small"); } catch (e) {} renderModelHint();
+      rerun("small");
+    } } });
+  const card = failSlot("p-library").querySelector(".card.fail");
+  if (card) card.querySelector(".fx").addEventListener("click", dismiss);
 }
 function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남 → '몇 개 중 몇 개' 카드 + 그 영상만 고른 채로 (다시 하기도 그 영상만)
   const jb = lastJob || {}, body = jb.body || { names: [] }, total = (body.names || []).length;
   const failed = (res && res.failed) || [];
-  if (!failed.length) { toast("편집점을 찾고 1차 가편집까지 만들었어요"); go("cut"); return; }
+  if (!failed.length) { showPointsNext((body.names || [])[0], "편집점을 찾고 1차 가편집까지 만들었어요"); return; }
   toast(`${total - failed.length}개는 편집점을 찾았어요 · ${failed.length}개 실패`);
   libSel.clear(); failed.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
   const f = partFail(failed, res.why, total, "편집점을 찾지");
   showFail({ ...f, msg: f.msg.replace("개를 편집점을 찾지 못했어요", "개는 편집점을 찾지 못했어요"), job: "편집점 찾기" },
     { path: "/api/analyze", body: { ...body, names: failed }, done: analyzed, panel: jb.panel || "p-library" });
+}
+/* 2-1c. 이름 바꾸기 (D-073): 영상과 받아쓰기·편집본·썸네일 디자인·출처를 함께 · 탐색기에서 바꿨으면 옛 이름 작업 이어 붙이기 */
+async function renameVideo(name) {
+  if (state.job) return toast("다른 작업이 끝난 뒤에 바꿔 주세요");
+  const ext = (name.match(/\.[^.]+$/) || [""])[0], cur = name.slice(0, name.length - ext.length);
+  const pg = await api("/api/progress").catch(() => null), p = pg && pg.videos && pg.videos[name];  // 이미 내보냈으면 미리 알림 (I-070)
+  const made = p && (p.exported || p.thumb || p.kit);
+  const t = prompt(`새 이름을 적어 주세요 (끝의 ${ext || "확장자"} 는 그대로 붙어요)\n받아쓰기·편집본·썸네일 디자인도 함께 옮겨요 · 이 영상의 편집실·썸네일 창은 먼저 닫아 주세요`
+    + (made ? `\n이미 만든 완성본·썸네일 그림·올리기 키트 파일은 옛 이름 그대로라서 4·7단계에 '아직 안 내보냄'으로 보여요 (다시 내보내면 돼요)` : ""), cur);
+  if (t === null || !t.trim() || t.trim() === cur) return;
+  const j = await api("/api/rename", { name, to: t }).catch(() => ({}));
+  if (!j.ok) return;  // 안내는 api() 가 토스트로
+  if (libSel.delete(name)) libSel.add(j.name);
+  lastLocalKey = ""; poll();
+  toast(`'${cutText(j.name, 40)}'(으)로 바꿨어요` + (j.analysis || j.project ? " · 받아쓰기·편집본도 함께 옮겼어요" : "")
+    + (j.outKept ? " · 완성본 폴더의 파일은 옛 이름 그대로예요 (다시 내보내면 4·7단계에 보여요)" : "") + (j.warn ? ` · ${j.warn}` : ""));
+}
+async function attachOld(name, old) {
+  if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요");
+  if (!confirm(`예전 이름 '${old}'의 받아쓰기·편집본·썸네일 디자인을 '${name}'에 이어 붙일까요?\n다시 받아쓰지 않고 바로 편집실을 열 수 있어요.`)) return;
+  const j = await api("/api/rename/attach", { name, old }).catch(() => ({}));
+  if (!j.ok) return;
+  lastLocalKey = ""; poll();
+  toast(`예전 작업을 이어 붙였어요 · '${cutText(name, 40)}'` + (j.project ? " · 편집본 그대로예요" : ""));
 }
 function convertMp4(name) {  // 못 쓰는 형식(.MTS 등) → MP4 (원본은 보관함 안 '바꾸기 전 원본' 폴더로)
   if (state.job || !confirm(`'${name}' 파일을 편집할 수 있는 MP4로 바꿔 보관함에 넣을까요?\n원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요. 영상 길이에 따라 몇 분 걸릴 수 있어요.`)) return;
@@ -1485,8 +1594,7 @@ function bundleDone(res) {
     $("drawer").classList.add("open");
     return;
   }
-  toast(`${nm}(으)로 묶고 편집점·1차 가편집까지 만들었어요 · 저장 공간 ${res.added} 더 씀`);
-  go("cut");
+  showPointsNext(res.name, `${nm}(으)로 묶고 편집점·1차 가편집까지 만들었어요 · 저장 공간 ${res.added} 더 씀`);
 }
 function syncBundle(busy) {
   const n = libSel.size;
@@ -2003,22 +2111,115 @@ function renderThList() {
     </div>`; }).join("");
   document.querySelectorAll("[data-th]").forEach(el => el.onclick = () => { location.href = "/thumb?name=" + encodeURIComponent(el.dataset.th); });
 }
+/* 4-1. 다음 할 일 (D-075): 영상마다 가편집 ✓ · 내보냄 ✓ · 썸네일 – · 키트 – · 유튜브 – + 다음 단계 버튼 (서버 /api/progress · 이 화면을 열 때)
+   키트(편집본으로 만든 올리기 키트)와 유튜브(앱에서 올림)는 따로 — 키트만 만들었는데 '올리기 ✓'로 보여 올린 줄 알지 않게 */
+let edProg = {};
+async function loadProgress() {
+  const j = await api("/api/progress").catch(() => null);
+  if (!j || !j.ok) return;
+  edProg = j.videos || {};
+  $("edList").dataset.key = "";
+  renderEdList();
+}
+function nextStep(n) {
+  const p = edProg[n];
+  if (!p) return null;
+  if (!p.exported) return ["편집실에서 다듬고 내보내기", "edit"];
+  if (!p.thumb) return ["썸네일 만들기", "thumb"];
+  if (!p.kit && !p.uploaded) return ["올리기 키트 만들기", "upload"];
+  if (!p.uploaded) return ["유튜브에 올리기", "upload"];
+  return null;
+}
+function goThumb(n) {  // 썸네일을 저장하고 '← 스튜디오'로 오면 7 올리기 (이 영상 그대로)
+  try { sessionStorage.setItem("upReturn", JSON.stringify({ name: n, t: Date.now() })); } catch (e) {}
+  location.href = "/thumb?name=" + encodeURIComponent(n);
+}
+async function goUpload(n) { go("upload"); if (window.upOpen && !(await window.upOpen(n))) toast("그 영상을 보관함에서 찾지 못했어요"); }
 function renderEdList() {
   const list = state.local.filter(v => v.analyzed);
   $("edEmpty").style.display = list.length ? "none" : "block";
-  const key = JSON.stringify(list.map(v => [v.name, srcKey(v)]));
+  const key = JSON.stringify(list.map(v => [v.name, srcKey(v), edProg[v.name] || null]));
   if ($("edList").dataset.key === key) return;
   $("edList").dataset.key = key;
-  $("edList").innerHTML = list.map(v => { const id = ytId(v.name); return `
+  $("edList").innerHTML = list.map(v => {
+    const id = ytId(v.name), p = edProg[v.name], nx = nextStep(v.name);
+    const steps = p ? [["가편집", p.rough], ["내보냄", p.exported > 0], ["썸네일", p.thumb], ["키트", p.kit], ["유튜브", p.uploaded]]
+      .map(([l, ok]) => `<span class="${ok ? "ok" : ""}" title="${ok ? "했어요" : "아직 안 했어요"}">${l} ${ok ? "✓" : "–"}</span>`).join("") : "";
+    return `
     <div class="vid" data-ed="${esc(v.name)}">
       <div class="thumb"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}${srcBadge(srcOf(v), null, true)}</div>
-      <div class="meta"><div class="title">${esc(niceName(v.name))}</div><div class="views">편집실 열기 →</div></div>
+      <div class="meta"><div class="title">${esc(niceName(v.name))}</div>${p ? `<div class="views steps">${steps}</div>` : ""}
+        ${nx ? `<button class="btn sm nextgo${nx[1] === "edit" ? "" : " primary"}" data-next="${nx[1]}" data-n="${esc(v.name)}">다음: ${nx[0]} →</button>`
+          : `<div class="views">${p ? "다 했어요 ✓ · " : ""}편집실 열기 →</div>`}</div>
     </div>`; }).join("");
   document.querySelectorAll("[data-ed]").forEach(el => el.onclick = () => openEditor(el.dataset.ed));
+  document.querySelectorAll("#edList [data-next]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const n = b.dataset.n, k = b.dataset.next;
+    if (k === "thumb") goThumb(n); else if (k === "upload") goUpload(n); else openEditor(n);
+  });
 }
+/* 3-1. 편집점을 찾은 뒤: 3 편집점에서 그 영상을 보여 주고 다음 할 일 (예전: 3단계를 건너뛰고 4 편집실로 · 사이드바 순서와 다름) */
+let ptNextName = "";
+function showPointsNext(n, msg) {
+  toast(msg);
+  // 끝난 작업 알림은 poll 이 목록(renderLocal → fillSelect)을 다시 그리기 전에 옴 → 방금 찾은·묶은 영상이 아직 목록에 없음 (state.local 은 이미 새것)
+  fillSelect("tlSel", state.local.filter(v => v.analyzed));
+  if (n && [...$("tlSel").options].some(o => o.value === n)) $("tlSel").value = n;
+  ptNextName = n || $("tlSel").value;
+  go("points");  // 고른 영상의 대사·컷 후보 (loadEvents)
+  $("ptNextTx").innerHTML = `<b>${esc(msg)}</b><br>대사·컷 후보를 훑어보고 <b>[편집실에서 열기]</b>로 가편집을 다듬은 뒤 내보내요 · 그다음 썸네일 → 올리기`;
+  $("ptNext").hidden = false;
+}
+$("ptNextGo").onclick = () => { $("ptNext").hidden = true; openEditor(ptNextName || $("tlSel").value); };  // 방금 찾은 영상 (위 목록에서 다른 영상을 봐도)
+$("ptNextX").onclick = () => { $("ptNext").hidden = true; };
+/* 1-0. 처음 안내: 보관함이 비어 있고 '다시 안 보기'를 누르지 않았으면 */
+const guideOff = () => { try { return localStorage.getItem("startGuideOff") === "1"; } catch (e) { return false; } };
+function renderGuide() { $("startGuide").hidden = guideOff() || !state.loaded || state.local.length > 0; }
+$("guideFootage").onclick = () => { go("library"); $("btnOpenVideos").click(); };
+$("guideLib").onclick = () => go("library");
+$("guideOff").onclick = () => { try { localStorage.setItem("startGuideOff", "1"); } catch (e) {} renderGuide(); };
 $("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
 
 /* 공통: 작업 실행 · 상태 */
+/* 2-0. 받아쓰기 모델: 처음엔 이 PC 사양에 맞게(메모리 8GB 이하·4코어 이하면 '빠르게') · 고른 값은 기억 · 누르기 전에 예상 시간·메모리 */
+const MODEL_KEY = "whisperModel", MODELS = ["large-v3-turbo", "small"];
+let modelInfo = null, modelAsk = 0, modelSelKey = null, modelTimer = 0;
+function modelSaved() { try { const v = localStorage.getItem(MODEL_KEY); return MODELS.includes(v) ? v : ""; } catch (e) { return ""; } }
+function longTxt(sec) {  // 예상 시간: 약 16분 · 약 1시간 20분 · 1분도 안 걸려요
+  const m = Math.round(sec / 60);
+  if (m < 1) return "1분도 안 걸려요";
+  return m < 60 ? `약 ${m}분` : `약 ${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
+}
+function renderModelHint() {
+  const el = $("modelHint"), j = modelInfo;
+  if (!el || !j || !j.models) return;
+  const v = segVal("modelSeg"), m = j.models[v], rec = j.models[j.default], n = libSel.size;
+  const spec = j.memGB ? `메모리 ${Math.round(j.memGB)}GB · ${j.cores}코어` : `${j.cores}코어`;
+  const gb = mb => (mb / 1000).toFixed(1).replace(/\.0$/, "");  // 765MB → 0.8GB
+  const acc = j.models["large-v3-turbo"];  // 왜 '빠르게'가 알맞은지 (메모리가 넉넉한데 덜 정확한 쪽을 고른 까닭이 궁금하지 않게)
+  const why = j.default !== "small" ? "" : j.why === "mem" ? ` (메모리가 ${Math.round(j.memGB)}GB라 '정확하게'는 느려지거나 멈출 수 있어요)`
+    : j.why === "cores" ? ` (코어가 ${j.cores}개라 '정확하게'는 60분 영상에 ${longTxt(acc.perHour)} 걸려요)` : "";
+  if (!n) { el.innerHTML = `이 PC(${spec})에는 <b>'${rec.label}'</b>가 알맞아요${why} · 60분 영상이면 '${m.label}' ${longTxt(m.perHour)} · 메모리 약 ${gb(m.memMB)}GB`; return; }
+  const warn = v !== j.default && m.tight ? ` · 이 PC 메모리로는 느려질 수 있어서 '${rec.label}'를 권해요` : "";
+  el.innerHTML = `고른 영상 ${n}개${j.dur ? ` (${j.guess ? "약 " : ""}${mmss(j.dur)})` : ""} · <b>'${m.label}'</b> ${longTxt(m.secs)} · 메모리 약 ${gb(m.memMB)}GB${warn}`;
+}
+async function loadModelInfo() {
+  const names = [...libSel], k = ++modelAsk;
+  const j = await api("/api/whisper/estimate", { names }).catch(() => null);
+  if (!j || !j.ok || k !== modelAsk) return;
+  modelInfo = j;
+  if (!modelSaved()) setSeg("modelSeg", j.default);  // 고른 적이 없으면 이 PC 에 맞는 값
+  renderModelHint();
+  if (j.guess) setTimeout(() => { if (k === modelAsk) loadModelInfo(); }, 3000);  // 많이 골라 일부는 크기로 어림함 → 서버가 뒤에서 길이를 읽는 동안 조금 뒤 다시
+}
+function watchModelSel() {  // 고른 영상이 바뀌면 (조금 뒤 한 번) 예상 시간을 다시
+  const key = [...libSel].sort().join("\n");
+  if (key === modelSelKey) return;
+  modelSelKey = key;
+  clearTimeout(modelTimer);
+  modelTimer = setTimeout(loadModelInfo, 250);
+}
 function sync() {
   const busy = !!state.job;
   $("btnList").disabled = busy;
@@ -2030,10 +2231,11 @@ function sync() {
   $("btnAnalyze").disabled = busy || !nl;
   $("btnToRefs").disabled = busy || !nl;
   $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
-  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana]").forEach(b => (b.disabled = busy));
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren]").forEach(b => (b.disabled = busy));
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
+  watchModelSel();
 }
 function job(path, body, done) {
   const panel = curPanel();
@@ -2092,6 +2294,7 @@ async function poll() {
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
   state.unusable = s.unusable || [];  // 아직 못 쓰는 형식 (.MTS 등)
+  state.crash = s.crash || null;  // 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (보관함 카드 · 줄 표시)
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
   // 내가 시킨 작업(번호)이 끝났을 때만 그 결과·실패로 — 번호가 없으면(예전 흐름) 작업이 비었을 때 (휴대폰이 시킨 작업과 안 섞임)
   const fin = want ? (s.done && s.done.id === want && want === pendingId ? s.done : null) : (wasBusy && !s.job ? s : null);
@@ -2117,6 +2320,10 @@ async function poll() {
   state.sKey = sKey;
   showBusy();
   renderLocal();
+  state.loaded = true;
+  renderGuide();
+  if (wasBusy && !s.job && $("p-cut").classList.contains("on")) loadProgress();  // 내보내기·썸네일이 끝난 뒤 단계 표시를 새로
+  if (state.crash && !s.job) showCrash(state.crash);
   if ($("p-library").classList.contains("on")) checkSources();
   sync();
 }
@@ -2154,6 +2361,11 @@ function runUpdate() {
 $("btnUpdate").onclick = () => $("updPill").classList.contains("show") ? runUpdate() : checkUpdate(true);
 $("updPill").onclick = runUpdate;
 
+try {  // 편집실 '← 스튜디오'로 오면 4 편집실 (영상 카드의 다음 할 일 · 예전: 1 소재 찾기) · 7 올리기로 갈 것(upReturn)이 있으면 그쪽이 이김
+  const r = JSON.parse(sessionStorage.getItem("edReturn") || "null");
+  sessionStorage.removeItem("edReturn");
+  if (r && Date.now() - (r.t || 0) < 6 * 3600e3) { window.landedOn = "cut"; go("cut"); }
+} catch (e) {}
 setInterval(poll, 1000);
 poll().then(() => { renderEvents(); renderEdList(); loadRefs(); });
 checkUpdate();
@@ -2163,6 +2375,7 @@ checkUpdate();
 (() => {
   const up = { kit: null, name: "", seq: "", timer: null, vkey: "", ret: null };
   window.upCtx = () => ({ name: up.name, seq: up.seq, kit: up.kit, flush });  // 7-2 유튜브에 바로 올리기가 읽음
+  window.upOpen = async name => { await flush(); fillVids(); if (![...$("upVid").options].some(o => o.value === name)) return false; $("upVid").value = name; await load(); return up.name === name; };  // 4단계 '다음: 올리기' → 가장 최근에 내보낸 편집본으로
   window.upSelect = async (name, seq) => { await flush(); fillVids(); if (![...$("upVid").options].some(o => o.value === name)) return false; for (let i = 0; i < 3 && (up.name !== name || up.seq !== (seq || "")); i++) { $("upVid").value = name; await load(seq || ""); } return up.name === name; };  // 7-2 가 올리다 멈춘 영상으로 바로 감
   const ulen = s => [...(s || "")].length;
   const tagsOf = t => (t || "").split(/[,\n]/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -2200,7 +2413,8 @@ checkUpdate();
     const n = $("upVid").value;
     up.name = n;
     if (!n) { up.kit = null; $("upSrc").innerHTML = ""; return render(); }
-    if (up.ret) { if (seq === undefined && up.ret.name === n) seq = up.ret.seq; up.ret = null; }  // 썸네일 편집기에서 돌아옴 → 보던 편집본
+    let make = false;  // 편집실 '다 만들었어요' 창의 [올리기 키트 만들기]로 옴 → 키트가 없으면 바로 만듦 (같은 이름 버튼을 또 누르지 않게)
+    if (up.ret) { if (seq === undefined && up.ret.name === n) { seq = up.ret.seq; make = !!up.ret.make; } up.ret = null; }  // 썸네일 편집기에서 돌아옴 → 보던 편집본
     const j = await api(`/api/upload/kit?name=${encodeURIComponent(n)}` + (seq === undefined ? "" : `&seq=${encodeURIComponent(seq)}`));
     if (n !== $("upVid").value) return;  // 그 사이 다른 영상을 고름
     const srcs = j.sources || [];
@@ -2211,6 +2425,7 @@ checkUpdate();
     up.kit = j.kit || null;
     $("upSaved").textContent = "";
     render();
+    if (make && !up.kit && up.name && !$("upMake").disabled) $("upMake").click();
   }
   function meta() {
     const k = up.kit;
@@ -2311,7 +2526,11 @@ checkUpdate();
   try {
     const r = JSON.parse(sessionStorage.getItem("upReturn") || "null");
     sessionStorage.removeItem("upReturn");
-    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) { up.ret = { name: r.name, seq: r.seq || "" }; go("upload"); }
+    // seq 가 없으면(4단계 '다음: 썸네일'에서 감) 가장 최근에 내보낸 편집본으로 (서버가 고름)
+    if (r && r.name && Date.now() - (r.t || 0) < 6 * 3600e3) {
+      up.ret = { name: r.name, seq: typeof r.seq === "string" ? r.seq : undefined, make: !!r.make };
+      window.landedOn = "upload"; go("upload");  // 지난번 꺼짐 카드가 보관함으로 끌고 가지 않게
+    }
   } catch (e) {}
   // 창을 닫거나 다른 화면으로 갈 때 고치던 내용 저장
   const prevFlush = window.flushBeforeClose;

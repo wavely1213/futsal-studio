@@ -28,6 +28,7 @@ import qa
 import qr
 import refs
 import remote
+import rename
 import source
 import strategy
 import studiolog
@@ -136,6 +137,89 @@ def start_job(name, fn, by=None, ctx=None):
 
     threading.Thread(target=runner, daemon=True).start()
     return jid
+
+
+_SECS = {}  # 보관함 영상 길이 (이름, 크기, 수정 시각) → 초 · 받아쓰기 예상 시간용 (ffmpeg -i 를 고를 때마다 다시 안 부름)
+_SECS_RUN = set()  # 지금 길이를 읽는 중인 영상 (같은 영상을 두 요청이 동시에 읽지 않게)
+_SECS_LOCK = threading.Lock()
+_SECS_FILL = {"q": [], "on": False}  # 뒤에서 하나씩 읽을 영상 (마지막으로 고른 것만)
+PROBE_MAX = 6  # 한 번 물을 때 그 자리에서 길이를 읽는 영상 수 · 나머지는 크기로 어림하고 뒤에서 하나씩 (100개를 골라도 요청이 안 막히게)
+
+
+def _secs_key(name):
+    try:
+        st = (core.VIDEOS / name).stat()
+    except OSError:
+        return None, 0
+    return (name, st.st_size, st.st_mtime_ns), st.st_size
+
+
+def _probe_secs(key):
+    """영상 하나의 길이(초)를 읽어 기억 → 초 (못 읽으면 0) · 다른 요청이 읽는 중이면 None (기다리지 않음)."""
+    with _SECS_LOCK:
+        if key in _SECS:
+            return _SECS[key]
+        if key in _SECS_RUN:
+            return None
+        _SECS_RUN.add(key)
+    try:
+        try:
+            v = float(editor.probe(core.VIDEOS / key[0])["duration"] or 0)
+        except Exception:  # noqa: BLE001 — 안내용 · 못 읽으면 0
+            v = 0.0
+        with _SECS_LOCK:
+            if len(_SECS) > 2000:
+                _SECS.clear()
+            _SECS[key] = v
+        return v
+    finally:
+        with _SECS_LOCK:
+            _SECS_RUN.discard(key)
+
+
+def _fill_secs_later(keys):
+    """어림한 영상들의 길이는 뒤에서 한 번에 하나씩 읽어 둠 (다음에 물으면 정확히) · 새로 고르면 그 목록으로 바꿈."""
+    with _SECS_LOCK:
+        _SECS_FILL["q"] = list(keys)
+        if _SECS_FILL["on"]:
+            return
+        _SECS_FILL["on"] = True
+
+    def run():
+        while True:
+            with _SECS_LOCK:
+                if not _SECS_FILL["q"]:
+                    _SECS_FILL["on"] = False
+                    return
+                k = _SECS_FILL["q"].pop(0)
+            _probe_secs(k)
+    threading.Thread(target=run, daemon=True, name="영상 길이 읽기").start()
+
+
+def _selected_secs(names):
+    """고른 영상들의 길이 합 → (초, 크기로 어림한 영상 수). 기억한 길이 + 이번에 PROBE_MAX 개까지 읽고, 나머지는
+    읽은 영상들의 초당 바이트(모르면 초당 1MB)로 어림 · 뒤에서 하나씩 읽어 둠."""
+    total, rest, probed, known_b, known_s = 0.0, [], 0, 0, 0.0
+    for n in names:
+        key, size = _secs_key(n)
+        if key is None:
+            continue
+        with _SECS_LOCK:
+            v = _SECS.get(key)
+        if v is None and probed < PROBE_MAX:
+            v = _probe_secs(key)  # 뒤에서 읽는 중이면 None (기다리지 않고 어림 · 읽은 수에도 안 셈)
+            probed += v is not None
+        if v is None:
+            rest.append((key, size))
+            continue
+        total += v
+        if v > 0:
+            known_b, known_s = known_b + size, known_s + v
+    if rest:
+        bps = known_b / known_s if known_s else 1e6
+        total += sum(size / bps for _, size in rest)
+        _fill_secs_later([k for k, _ in rest])
+    return total, len(rest)
 
 
 def _started(ok):
@@ -265,6 +349,16 @@ def _after_start():
     if sys.platform in ("win32", "darwin"):
         threading.Thread(target=core.engine_autoupdate, args=(log,), daemon=True).start()
     _session_start()
+    threading.Thread(target=_place_kept, daemon=True).start()
+
+
+def _place_kept():
+    """지난번에 백신·OneDrive 잠금으로 제자리에 못 옮긴 완성본·묶음 → 완성본 폴더·보관함으로 (켤 때 한 번 · 실패해도 앱은 그대로)."""
+    for fn in (editor.place_kept, bundle.place_kept):
+        try:
+            fn(log)
+        except Exception as e:  # noqa: BLE001 — 곁가지
+            studiolog.trace(e, "옮기지 못한 결과 옮기기 오류 위치")
 
 
 def _redirect_to_updater():
@@ -282,14 +376,23 @@ def _redirect_to_updater():
         return False
 
 
+GONE_MSG = "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"  # 옛 이름으로 열린 편집실·썸네일의 저장 (404 gone)
+CRASH = {}  # 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 → 보관함 카드 '○○ 영상' + [다시 하기]·[빠르게로 다시 하기] (/api/state · D-072)
+CRASH_RETRY = ("/api/analyze", "/api/bundle")  # 보관함에서 같은 영상으로 다시 할 수 있는 작업
+
+
 def _session_start():
     """포트를 잡은 뒤 한 번: 잡히지 않은 오류도 studio.log 에 위치를 남기게 하고, 지난번에 정상적으로 꺼지지 않았으면 기록
-    (작업 중에 꺼졌으면 화면에도 한 번 알림)."""
+    (작업 중에 꺼졌으면 화면에도 한 번 알림 · 보관함에서 다시 할 수 있는 작업이면 그 영상과 [다시 하기]를 보관함 카드로)."""
     studiolog.install_hooks()
     note = studiolog.session_start(core.VERSION)  # 보통 종료(브라우저로 쓰다 Ctrl+C 등)도 표시를 지우게 atexit 에 걸어 둠
     if note:
         log(note["log"])
-        if note["notice"]:
+        crash = note.get("crash") or {}
+        if crash.get("path") in CRASH_RETRY and crash.get("names"):
+            CRASH.clear()
+            CRASH.update(crash)
+        elif note["notice"]:
             updater._NOTICES.append({"text": note["notice"], "warn": True})
 
 
@@ -547,13 +650,25 @@ class Handler(BaseHTTPRequestHandler):
                          "done": dict(DONE[want], id=want) if want in DONE else None}  # ?job=<번호>: 그 작업이 끝났으면 결과
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
+            rename.annotate(local)  # 탐색기에서 이름을 바꿔 끊긴 옛 이름 작업 (renamedFrom · [이어 붙이기])
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
                                     "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드 · 내가 시킨 작업은 done.fail)
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
-                                    "remote": remote.SVC.brief()})
+                                    "remote": remote.SVC.brief(), "crash": dict(CRASH) or None})
+        if u.path == "/api/progress":  # 4단계 카드: 영상마다 가편집·내보냄·썸네일·올리기 (D-075 · 그 화면을 열 때만)
+            try:
+                names = [v["name"] for v in core.local_videos() if v["analyzed"]]
+                res = upload.progress(names)
+                ups = {x.get("name") for x in youtube_upload._history()}
+            except Exception as e:  # noqa: BLE001 — 안내용 · 못 읽으면 카드는 예전처럼
+                studiolog.trace(e, "진행 단계 읽기 오류 위치")
+                return self._send(200, {"ok": False, "videos": {}})
+            for n, r in res.items():
+                r["uploaded"] = n in ups
+            return self._send(200, {"ok": True, "videos": res})
         if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
             if not remote.SVC.store:
                 return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})
@@ -837,6 +952,10 @@ class Handler(BaseHTTPRequestHandler):
             log(f"썸네일 저장 · {out.name}")
             return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/thumb/save":
+            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 디자인을 새로 만들지 않음 (편집실 저장과 같게 · D-073)
+                editor.video_path(b.get("name"))
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
             try:
                 thumb.save_docs(b["name"], b["docs"])
             except (OSError, ValueError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐
@@ -844,6 +963,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요 · 잠시 뒤 다시 저장할게요"})
             return self._send(200, {"ok": True})
         if path == "/api/edit/save":
+            try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 편집본을 새로 만들지 않음 (이름 바꾸기 D-073)
+                editor.video_path(b.get("name"))
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
                 rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
             except editor.Conflict as e:
@@ -988,6 +1111,43 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
+        if path in ("/api/rename", "/api/rename/attach"):  # 보관함 영상 이름 바꾸기 · 탐색기에서 바꾼 영상에 옛 작업 이어 붙이기 (D-073)
+            with LOCK:  # 작업 자리를 잡아 둠 → 바꾸는 동안 휴대폰·다른 창이 옛 이름으로 작업을 시작하지 못하게 (확인만 하고 놓으면 그 틈에 시작됨)
+                busy = bool(JOB["name"]) or RESTARTING.is_set()
+                if not busy:
+                    JOB["name"] = "이름 바꾸기"
+            if busy:  # 작업이 그 영상 파일·폴더를 쓰는 중일 수 있음
+                return self._send(409, {"ok": False, "error": BUSY_MSG})
+            try:
+                n = editor.safe_name(b.get("name"))
+                r = rename.rename(n, b.get("to"), log) if path == "/api/rename" else rename.attach(n, str(b.get("old") or ""), log)
+                code, res = 200, dict(r, ok=True)
+            except FileNotFoundError as e:
+                code, res = 404, {"ok": False, "error": str(e)}
+            except (ValueError, TypeError) as e:  # RenameError 포함 · 잘못된 이름
+                code, res = 400, {"ok": False, "error": str(e) or "잘못된 파일 이름이에요"}
+            except OSError as e:
+                log(f"이름을 바꾸지 못했어요 · {e}")
+                code, res = 500, {"ok": False, "error": "이름을 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요"}
+            finally:
+                with LOCK:  # 대답 전에 자리를 놓음 (화면이 바로 다음 작업을 시킬 수 있게)
+                    JOB["name"] = None
+            return self._send(code, res)
+        if path == "/api/crash/dismiss":  # 지난번 꺼짐 카드 닫기 (✕)
+            CRASH.clear()
+            return self._send(200, {"ok": True})
+        # ---- 받아쓰기 모델: 이 PC 에 맞는 기본값 · 고른 영상의 예상 시간·메모리 (누르기 전에 · D-070) ----
+        if path == "/api/whisper/estimate":
+            names = b.get("names") or []
+            if not isinstance(names, list) or len(names) > 500 or not all(isinstance(n, str) for n in names):
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            try:
+                for n in names:
+                    editor.safe_name(n)
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            secs, guess = _selected_secs(names)
+            return self._send(200, dict(core.whisper_estimate(secs), ok=True, guess=guess))
         # ---- 촬영본 묶음: 여러 파일을 찍은 순서대로 한 영상으로 (원본은 그대로) ----
         if path == "/api/bundle":
             try:
@@ -1000,10 +1160,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": "묶으려면 영상을 2개 이상 골라 주세요"})
 
             def run_bundle():
+                studiolog.target(path="/api/bundle", names=names, model=core.model_of(b.get("model")), title=str(b.get("title") or ""))
                 r = bundle.make_bundle(names, b.get("title"), log)
                 # 이어서 편집점 찾기까지 같은 작업 안에서 (그사이 편집실·썸네일에 다녀와도 끊기지 않게)
                 try:
-                    self._analyze({"names": [r["name"]], "model": b.get("model") or "large-v3-turbo"})
+                    self._analyze({"names": [r["name"]], "model": core.model_of(b.get("model"))})
                     r["analyzed"] = True
                 except Exception as e:
                     studiolog.trace(e)
@@ -1012,6 +1173,8 @@ class Handler(BaseHTTPRequestHandler):
                     r["analyze_error"] = why
                 return r
             ok = start_job("한 영상으로 묶기", run_bundle)
+            if ok:
+                CRASH.clear()
             return self._send(200 if ok else 409, _started(ok))
         # ---- 올리기 키트 (제목 후보·설명·챕터·태그) ----
         if path == "/api/upload/kit":  # 만들기 · edits 가 있으면 화면에서 고친 내용 저장
@@ -1115,6 +1278,8 @@ class Handler(BaseHTTPRequestHandler):
                 source.stop_backfill()  # 뒤에서 하던 출처 찾기는 멈춤 (YouTube 에 한꺼번에 묻지 않게 · 다음에 보관함을 열면 이어서)
             name, fn = jobs[path]
             ok = start_job(name, fn, ctx={"browser": ck, "blocked": refs.BLOCKED_MSG if path.startswith("/api/refs/") else None})
+            if ok and path in CRASH_RETRY:
+                CRASH.clear()  # 다시 하는 중 → 지난번 꺼짐 카드는 내림
             return self._send(200 if ok else 409, _started(ok))
         self._send(404, {"error": "not found"})
 
@@ -1359,7 +1524,9 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _analyze(b):
-        out = core.analyze_many(b["names"], log, b.get("model", "large-v3-turbo"))
+        model = core.model_of(b.get("model"))  # 안 보냈거나 모르는 값이면 이 PC 사양에 맞는 기본값
+        studiolog.target(path="/api/analyze", names=list(b["names"]), model=model)  # 갑자기 꺼지면 다음에 켤 때 이 영상으로 [다시 하기]
+        out = core.analyze_many(b["names"], log, model)
         failed = getattr(out, "failed", None) or {}  # 여러 개 중 그 파일만의 문제(깨짐 등)로 건너뛴 영상 → 쉬운 안내
         # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
         for n in b["names"]:

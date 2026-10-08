@@ -1210,7 +1210,7 @@ class TestReviewCacheAndCancel(WorkBase):
         """처음 내려받는 중에 ✕ → 바로 멈춤 (반쪽 파일·실패 표시 없음) · 기획 분석은 PlanCancelled."""
         tmp = Path(tempfile.mkdtemp(prefix="받기 멈춤 "))
 
-        def slow_download(url, dest, progress=None, timeout=30):
+        def slow_download(url, dest, progress=None, timeout=30, **kw):  # resume: 모델 받기는 이어받기를 켬
             Path(dest).write_bytes(b"x" * 10)
             for k in range(100):
                 progress(k, 100)

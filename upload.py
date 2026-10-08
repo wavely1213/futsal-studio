@@ -492,10 +492,18 @@ def image_size(path):
         return None
 
 
+def _thumb_images(pre, files):
+    """그 영상(pre = '<분석 폴더 이름>_')의 썸네일 그림만: 그림 파일 중 A/B 묶음의 '모바일 비교' 한 장은 썸네일이 아님
+    (가로라서 긴 영상 썸네일로 잡혀 유튜브에 올라갈 뻔함) — 7단계 썸네일 확인(_images_of)과 4단계 '썸네일 ✓'(progress)가 같은 규칙."""
+    import thumb  # 이름(AB_SHEET)만 씀 · 지연 import: 올리기 키트(·youtube_upload)를 불러올 때 thumb 의 폴더 만들기가 돌지 않게
+    sheet = pre + thumb.AB_SHEET
+    return [p for p in files if p.suffix.lower() in IMG_EXTS and not p.name.startswith(sheet)]
+
+
 def _images_of(name):
     """썸네일 편집기가 이 영상 이름으로 저장한 이미지들 (이름이 더 긴 다른 영상의 것은 빼고 · 최근 것부터).
     A/B 묶음('_썸네일_A'·'_B'·… · 같은 ' (2)')은 한 덩어리로 (묶음에서 가장 늦게 쓴 시각) A 부터 — 마지막에 쓴 B·C 가 아니라 첫 고른 A 가 7단계·바로 올리기 썸네일."""
-    import thumb  # 이름(AB_SHEET·AB_TAGS)만 씀 · 지연 import: 올리기 키트(·youtube_upload)를 불러올 때 thumb 의 폴더 만들기가 돌지 않게
+    import thumb  # 이름(AB_TAGS)만 씀 · 지연 import (위와 같은 까닭)
     pre = core.adir(name).name + "_"
     try:
         longer = {core.adir(v.name).name + "_" for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)}
@@ -503,8 +511,7 @@ def _images_of(name):
     except OSError:
         return []
     longer = {o for o in longer if o != pre and o.startswith(pre)}
-    sheet = pre + thumb.AB_SHEET  # A/B 묶음의 '모바일 비교' 한 장은 썸네일이 아님 (가로라서 긴 영상 썸네일로 잡혀 유튜브에 올라갈 뻔함)
-    files = [p for p in files if not any(p.name.startswith(o) for o in longer) and not p.name.startswith(sheet)]
+    files = _thumb_images(pre, [p for p in files if not any(p.name.startswith(o) for o in longer)])
     ab = re.compile(re.escape(pre) + "썸네일_([" + thumb.AB_TAGS + r"])( \(\d+\))?\.jpg$")  # thumb.export_ab 의 이름
     sets = {}
     for p in files:
@@ -941,3 +948,36 @@ def files_for(name, seq=None):
     srt = core.adir(name) / "subtitles.srt"
     ok = srt.is_file()
     return {"video": path, "srt": srt if ok else None, "srtWhere": "analysis" if ok else None, "format": None, "export": None}
+
+
+# ---------- 스튜디오 4단계 카드의 '다음 할 일' (D-075) ----------
+
+def _edit_kit(kit, name, ids):
+    """이 영상의 편집본(ids)으로 만든 키트인지 (손으로 고쳐 깨진 칸이 있어도 오류 없이)."""
+    who, sid = _owner(kit or {})
+    return who == name and isinstance(sid, str) and sid in ids
+
+
+def progress(names):
+    """영상마다 어디까지 했는지 {seqs, rough, exported, thumb, kit}: 편집본 수 · 가편집이 있음 · 내보낸 편집본 수 ·
+    저장한 썸네일 그림 · 편집본으로 만든 올리기 키트 (읽기만 · 완성본 폴더·보관함 목록은 한 번만 읽음 · 이름이 더 긴 다른 영상의 파일은 뺌)."""
+    try:
+        out_files = [p for p in core.OUT.iterdir() if p.is_file()]
+        lib = [v.name for v in core.VIDEOS.iterdir() if core.is_video_file(v.name)]
+    except OSError:
+        out_files, lib = [], []
+    pres = {n: core.adir(n).name + "_" for n in set(lib) | set(names)}
+    res = {}
+    for n in names:
+        pre = pres[n]
+        longer = [o for o in set(pres.values()) if o != pre and o.startswith(pre)]
+        mine = [p for p in out_files if p.name.startswith(pre) and not any(p.name.startswith(o) for o in longer)]
+        seqs = (read_project(n) or {}).get("sequences") or []
+        mp4 = [p.name for p in mine if p.suffix.lower() == ".mp4"]
+        exported = sum(1 for sq in seqs  # latest_export 와 같은 이름 규칙 (구간 내보내기는 뺌)
+                       if any(re.fullmatch(rf"{re.escape(pre)}{re.escape(_seq_label(sq))}(?: \(\d+\))*\.mp4", x, re.I) for x in mp4))
+        ids = {sq.get("id") for sq in seqs if sq.get("id")}  # 편집본으로 만든 키트만 ('원본 영상 그대로' 키트는 올릴 완성본의 키트가 아님)
+        kit = any(p.suffix == ".json" and _KIT_FILE.search(p.name) and _edit_kit(_read_kit(p), n, ids) for p in mine)
+        res[n] = {"seqs": len(seqs), "rough": bool(seqs), "exported": exported,  # 썸네일: 저장한 그림·A/B 묶음 (모바일 비교 한 장은 빼고)
+                  "thumb": bool(_thumb_images(pre, mine)), "kit": kit}
+    return res

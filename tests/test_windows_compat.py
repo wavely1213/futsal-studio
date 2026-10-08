@@ -452,6 +452,121 @@ class Locks(Work):
         bundle._sweep_old()
         self.assertTrue((kept / "bundle.mp4").exists())
 
+    def render_dir(self, name=".render_abc"):
+        """내보내기 임시 폴더 흉내: 완성본 + 구간 영상·소리 버퍼·필터·자막·글꼴."""
+        d = core.OUT / name
+        (d / "fonts").mkdir(parents=True)
+        (d / "final.mp4").write_bytes(b"MP4" * 10)
+        for f in ("seg0000.mp4", "seg0001.mp4", "dialog.f32", "music.f32", "audio.m4a", "fc0.txt", "list.txt", "subs.ass", "fonts/Pretendard.ttf"):
+            (d / f).write_bytes(b"x" * 1000)
+        return d
+
+    def keep_final(self, d, out="완성.mp4"):
+        real = os.replace
+
+        def fake(src, dst):
+            if Path(src).name == "final.mp4":
+                raise PermissionError(errno.EACCES, "잠김")
+            return real(src, dst)
+        with mock.patch.object(updater, "SETTLE_SECS", 0.2), mock.patch.object(updater.os, "replace", fake):
+            with self.assertRaises(editor.KeptFinal) as cm:
+                editor._place_final(d / "final.mp4", core.OUT / out, lambda *a: None)
+        kept = [x for x in core.OUT.iterdir() if x.name.startswith(editor.KEEP_PREFIX)]
+        self.assertEqual(len(kept), 1)
+        return kept[0], str(cm.exception)
+
+    def test_kept_final_keeps_only_the_final(self):
+        """재현(v2.5.0): 옮기지 못하면 구간 영상·소리 버퍼·자막·글꼴까지 통째로 남아 2.7배 → 이제 완성본과 옮길 이름 기록만."""
+        kept, msg = self.keep_final(self.render_dir())
+        self.assertEqual(sorted(x.name for x in kept.iterdir()), sorted(["final.mp4", editor.KEEP_INFO]))
+        self.assertEqual((kept / "final.mp4").read_bytes(), b"MP4" * 10, "완성본은 그대로")
+        self.assertIn("다음에 앱을 켜면 완성본 폴더로 옮겨 드려요", msg)
+        self.assertIn(str(kept / "final.mp4"), msg)
+
+    def test_kept_final_moves_on_next_start(self):
+        """다음에 켤 때 (백신 검사가 끝난 뒤) 완성본 폴더로 원래 이름으로 옮기고 그 폴더를 지움 · 그사이 같은 이름이 생겼으면 (2)."""
+        kept, _ = self.keep_final(self.render_dir())
+        logs = []
+        self.assertEqual(editor.place_kept(logs.append), ["완성.mp4"])
+        self.assertEqual((core.OUT / "완성.mp4").read_bytes(), b"MP4" * 10)
+        self.assertFalse(kept.exists())
+        self.assertIn("완성.mp4", logs[-1])
+        self.assertEqual(editor.place_kept(logs.append), [], "두 번 옮기지 않음")
+        # 다시 실패 → 그사이 같은 이름으로 새로 내보냈으면 덮어쓰지 않음
+        kept, _ = self.keep_final(self.render_dir(".render_def"))
+        self.assertEqual(editor.place_kept(logs.append), ["완성 (2).mp4"])
+        self.assertEqual((core.OUT / "완성.mp4").read_bytes(), b"MP4" * 10)
+
+    def test_kept_final_still_locked_waits_for_next_time(self):
+        kept, _ = self.keep_final(self.render_dir())
+        logs = []
+        with mock.patch.object(updater, "REPLACE_SECS", 0.2), \
+                mock.patch.object(updater.os, "replace", locked(lambda p: p.name == "final.mp4", 99)):
+            self.assertEqual(editor.place_kept(logs.append), [])
+        self.assertTrue((kept / "final.mp4").exists(), "못 옮기면 그대로 (지우지 않음)")
+        self.assertIn("아직 옮기지 못했어요", logs[-1])
+        self.assertEqual(editor.place_kept(logs.append), ["완성.mp4"])
+
+    def test_old_version_kept_folder_is_cleaned_and_moved(self):
+        """예전 판이 남긴 폴더(기록 없음 · 구간 영상까지): 완성본은 '내보낸 영상_<그때 시각>.mp4' 로 옮기고 나머지는 지움.
+        폴더 이름도 못 바꿔 표시만 남긴 .render_ 폴더도 같음 · 그 밖의 렌더 임시 폴더는 건드리지 않음."""
+        d = self.render_dir(editor.KEEP_PREFIX + "20261007_201512")
+        m = self.render_dir(".render_mark")
+        (m / editor.KEEP_MARK).write_text("완성본을 옮기지 못했어요.", encoding="utf-8")
+        other = self.render_dir(".render_now")  # 지금 내보내는 중일 수 있는 폴더
+        moved = editor.place_kept(lambda *a: None)
+        self.assertIn("내보낸 영상_20261007_201512.mp4", moved)
+        self.assertEqual(len(moved), 2)
+        self.assertFalse(d.exists())
+        self.assertFalse(m.exists())
+        self.assertTrue((other / "seg0000.mp4").exists())
+
+    def test_final_already_taken_out(self):
+        """사용자가 완성본을 이미 꺼내 갔으면: 남은 임시 파일만 지우고 비면 폴더도 · 사용자가 둔 다른 mp4 는 그대로."""
+        d = self.render_dir(editor.KEEP_PREFIX + "20261007_201512")
+        (d / "final.mp4").unlink()
+        e = self.render_dir(editor.KEEP_PREFIX + "20261007_201600")
+        (e / "final.mp4").rename(e / "내가 고친 완성본.mp4")
+        self.assertEqual(editor.place_kept(lambda *a: None), [])
+        self.assertFalse(d.exists())
+        self.assertEqual([x.name for x in e.iterdir()], ["내가 고친 완성본.mp4"])
+
+    def test_bundle_kept_then_placed_next_start(self):
+        """묶기도 같음: 조각·목록은 지우고 묶음만 · 다음에 켤 때 그때 정한 이름으로 보관함에 (클립 표·출처 '묶음')."""
+        tmp = core.OUT / f"{bundle.TMP_PREFIX}x"
+        tmp.mkdir()
+        (tmp / "bundle.mp4").write_bytes(b"B" * 10)
+        for f in ("c0000.mov", "c0001.mov", "list.txt", "audio.txt", "prog_copy.txt"):
+            (tmp / f).write_bytes(b"x" * 1000)
+        meta = [{"file": "a.mp4", "start": 0.0, "dur": 5.0}, {"file": "b.mp4", "start": 5.0, "dur": 5.0}]
+        kept = bundle._keep_tmp(tmp, tmp / "bundle.mp4", {"name": "묶음_20240701_경기.mp4", "ymd": "20240701", "title": "경기", "meta": meta})
+        self.assertEqual(sorted(x.name for x in kept.iterdir()), sorted(["bundle.mp4", bundle.KEEP_INFO]))
+        self.assertEqual(editor.place_kept(lambda *a: None), [], "편집실 쪽은 묶음 폴더를 건드리지 않음")
+        logs = []
+        self.assertEqual(bundle.place_kept(logs.append), ["묶음_20240701_경기.mp4"])
+        self.assertEqual((core.VIDEOS / "묶음_20240701_경기.mp4").read_bytes(), b"B" * 10)
+        self.assertEqual(json.loads((core.adir("묶음_20240701_경기.mp4") / "bundle.json").read_text(encoding="utf-8")), meta)
+        self.assertEqual(source.describe("묶음_20240701_경기.mp4")["kind"], "footage")
+        self.assertFalse(kept.exists())
+        self.assertIn("보관함에 넣었어요", logs[-1])
+
+    def test_bundle_name_taken_meanwhile(self):
+        tmp = core.OUT / f"{bundle.TMP_PREFIX}y"
+        tmp.mkdir()
+        (tmp / "bundle.mp4").write_bytes(b"B")
+        bundle._keep_tmp(tmp, tmp / "bundle.mp4", {"name": "묶음_20240701_경기.mp4", "ymd": "20240701", "title": "경기"})
+        self.video("묶음_20240701_경기.mp4")
+        self.assertEqual(bundle.place_kept(lambda *a: None), ["묶음_20240701_경기 (2).mp4"])
+
+    def test_app_start_places_kept_results(self):
+        """앱을 켤 때(_after_start) 뒤에서 한 번: 완성본·묶음 모두 · 하나가 실패해도 다른 것은 계속."""
+        kept, _ = self.keep_final(self.render_dir())
+        with mock.patch.object(bundle, "place_kept", side_effect=OSError("잠김")), mock.patch.object(app.studiolog, "trace") as tr:
+            app._place_kept()
+        self.assertEqual(tr.call_count, 1, "실패는 studio.log 에 위치만")
+        self.assertTrue((core.OUT / "완성.mp4").exists())
+        self.assertFalse(kept.exists())
+
     def test_thumb_save_lock_keeps_current_and_answers(self):
         """썸네일 디자인 저장 중 잠김: 지금 파일은 그대로(예전: .bak 으로 옮겨진 채 사라짐) · 화면에는 500 JSON (예전: 연결 끊김)."""
         self.video(f"{JAMO}.mp4")
@@ -693,6 +808,7 @@ class Names(Server):
         self.assertEqual((code, r["ok"]), (500, False))
 
     def test_thumb_save_failure_is_json(self):
+        self.video("a.mp4")  # 보관함에 있는 영상이어야 저장함 (없으면 404 gone · D-073)
         with mock.patch.object(thumb, "save_docs", side_effect=PermissionError(errno.EACCES, "잠김")):
             code, r = self.call("/api/thumb/save", {"name": "a.mp4", "docs": {"designs": [{}]}})
         self.assertEqual((code, r["ok"]), (500, False))

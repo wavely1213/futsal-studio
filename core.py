@@ -282,6 +282,19 @@ def list_videos(kind="videos", cookies_browser=None, url=None, log=None):
     return sorted(rows, key=lambda r: r["views"], reverse=True)
 
 
+# 같은 해상도·fps 면 H.264(avc1) 화면을 먼저 (yt-dlp 기본은 AV1 > VP9 > H.264 라 '399+140' AV1 을 고름).
+# 편집실은 같은 원본을 미리보기·파형·장면 고르기·내보내기·검수에서 여러 번 다시 푸는데, AV1 은 풀기가 1.3~1.4배 무겁고
+# 하드웨어 풀기가 없는 구형 노트북·Premiere 에서 끊기거나 안 열림. H.264 가 없거나 해상도가 낮으면 지금 규칙(해상도·fps 먼저) 그대로.
+# 'res'·'fps' 를 앞에 둬서 1080p AV1 대신 720p H.264 로 떨어지지 않게 · HDR 은 그 뒤라 같은 해상도면 SDR H.264 (편집·내보내기용)
+FORMAT_SORT = ["res", "fps", "vcodec:h264"]
+
+
+def format_opts(max_height=1080):
+    """yt-dlp 형식 고르기: mp4 화면 + m4a 소리 (없으면 합쳐진 것) · 같은 해상도면 H.264 먼저."""
+    return {"format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
+            "format_sort": list(FORMAT_SORT)}
+
+
 def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive=None, label="보관함에 담는 중", remember=None,
              why=None, blocked_msg=None):
     """영상 받기 → 받지 못한 영상 id 목록. 기본은 편집용 보관함(VIDEOS · archive.txt · 출처는 sources.json).
@@ -312,7 +325,7 @@ def download(ids, log, cookies_browser=None, max_height=1080, dest=None, archive
             set_progress(label=label, item=cur["vid"], step=f"{cur['i']}/{cur['n']}", pct=99, detail="영상과 소리를 합치는 중")
 
     opts = {
-        "format": f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}]/b",
+        **format_opts(max_height),
         "merge_output_format": "mp4",
         # 폴더는 paths 로 따로: trim_file_name 은 outtmpl 전체(폴더 포함)를 자르므로 긴 작업 폴더면 제목이 사라지거나
         # 받은 파일이 다른 폴더로 나감 (yt-dlp _prepare_filename)
@@ -681,6 +694,75 @@ def _seg_of(s, fixmap):
         return dict(seg, text=t), int(t != seg["text"])
     ws, n = captions.fix_words(ws, fixmap)
     return dict(seg, text=" ".join(w["w"] for w in ws), words=ws), n
+
+
+# ---------- 받아쓰기 모델 고르기: PC 사양에 맞는 기본값 · 예상 시간·메모리 (D-070) ----------
+# 같은 60초 레슨 실측 (4코어·16GB 개발 PC, CPU int8): '빠르게'(small) 16.3초·최대 765MB · '정확하게'(large-v3-turbo) 47.7초·2,048MB
+# → (받아쓰기 초 / 영상 초, 최대 메모리 MB). 60분 영상이면 약 16분 vs 48분.
+WHISPER_COST = {"small": (0.27, 765), "large-v3-turbo": (0.80, 2048)}
+WHISPER_LABEL = {"small": "빠르게", "large-v3-turbo": "정확하게"}
+WHISPER_CORES_MEASURED = 4  # 위 값을 잰 PC 의 받아쓰기 스레드 수 (_whisper 는 min(8, 코어) 스레드)
+LOW_MEM_GB = 8.5  # 이하면 '빠르게' 기본 (8GB 노트북은 Windows 가 7.7~7.9GB 로 보여 줌 · 정확하게 2GB + 앱·브라우저면 스왑)
+LOW_CORES = 4     # 이하면 '빠르게' 기본 (정확하게는 영상 길이의 약 0.8배가 걸림)
+_SPEC = {}
+
+
+def _mem_total_gb():
+    """이 PC 의 전체 메모리(GB) · 모르면 None (표준 라이브러리만: Windows GlobalMemoryStatusEx · 그 밖 sysconf)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        class MemStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong), ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong), ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong), ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong), ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        try:
+            st = MemStatus()
+            st.dwLength = ctypes.sizeof(MemStatus)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return round(st.ullTotalPhys / 1024 ** 3, 1)
+        except (AttributeError, OSError):
+            pass
+        return None
+    try:
+        return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3, 1)
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
+def pc_spec():
+    """{"memGB": 전체 메모리 GB 또는 None, "cores": 논리 코어 수} — 한 번 재서 기억."""
+    if not _SPEC:
+        _SPEC.update(memGB=_mem_total_gb(), cores=os.cpu_count() or 4)
+    return dict(_SPEC)
+
+
+def default_model(spec=None):
+    """이 PC 에 맞는 받아쓰기 기본값: 메모리 8GB 이하이거나 4코어 이하면 '빠르게'(small), 아니면 '정확하게'."""
+    spec = spec or pc_spec()
+    low = (spec.get("memGB") is not None and spec["memGB"] <= LOW_MEM_GB) or (spec.get("cores") or 4) <= LOW_CORES
+    return "small" if low else "large-v3-turbo"
+
+
+def model_of(v):
+    """화면·휴대폰이 보낸 모델 이름 → 아는 모델만 (없거나 모르는 값이면 이 PC 기본값)."""
+    return v if isinstance(v, str) and v in WHISPER_COST else default_model()  # 목록·객체가 오면 `in` 이 TypeError
+
+
+def whisper_estimate(secs, spec=None):
+    """영상 secs 초를 받아쓸 때 모델마다 {secs: 예상 초, perHour: 60분 영상이면, memMB: 최대 메모리, tight: 이 PC 메모리에 빠듯함}
+    + 기본값·사양.
+    코어가 잰 PC 보다 적으면 그만큼 느리게 · 많아도 빨라진다고 보지 않음 (하이퍼스레딩은 거의 안 빨라짐 · 넉넉하게 안내)."""
+    spec = spec or pc_spec()
+    slow = max(1.0, WHISPER_CORES_MEASURED / max(1, min(8, spec.get("cores") or 4)))
+    mem = spec.get("memGB")
+    models = {m: {"secs": round(max(0.0, float(secs or 0)) * rate * slow), "perHour": round(3600 * rate * slow), "memMB": mb,
+                  "label": WHISPER_LABEL[m], "tight": bool(mem) and mb / 1024 > mem * 0.25}
+              for m, (rate, mb) in WHISPER_COST.items()}
+    why = "mem" if mem is not None and mem <= LOW_MEM_GB else "cores" if (spec.get("cores") or 4) <= LOW_CORES else None  # 기본값이 '빠르게'인 까닭
+    return {"default": default_model(spec), "why": why, "memGB": mem, "cores": spec.get("cores"), "dur": round(float(secs or 0), 1),
+            "models": models}
 
 
 class FileProblem(RuntimeError):
