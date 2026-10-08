@@ -13,7 +13,7 @@ async function doCut(l0, kind) {
     outline: { on: true, color: "#FFFFFF", width: Math.round(12 * W / 1280) }, shadow: { on: true, color: "#000000", blur: 24, dx: 0, dy: 10, opacity: 0.85 } });
   D.doc.layers.splice(D.doc.layers.indexOf(l) + 1, 0, cutL);
   Object.assign(l, { bright: Math.min(l.bright, 72), blur: Math.max(l.blur, 3) });
-  selIds = [cutL.id]; changed(); toast("누끼를 땄어요 · 배경은 살짝 어둡고 흐리게 했어요 (Ctrl+Z로 되돌리기)");
+  selIds = [cutL.id]; changed(); toast((res.note ? res.note + " · " : "") + "누끼를 땄어요 · 배경은 살짝 어둡고 흐리게 했어요 (Ctrl+Z로 되돌리기)");
 }
 let LAST_FAIL = null;  // 마지막으로 기다린 작업의 실패 안내 (trouble.explain 의 쉬운 한 줄 · AI 추천 썸네일 분석 줄에 그대로 보여 줌)
 function watchJob(id) {  // id: 시작 응답의 jobId — 그 작업의 결과만 (휴대폰이 바로 다음 작업을 시켜도 안 섞임)
@@ -194,7 +194,7 @@ function renderAuto() {
     if (!FRAMES.length) return toast("장면을 고르는 중이에요");
     const j = await post("/api/thumb/cut", { src: frameSrc(FRAMES[0].t), kind: "hq" });
     if (!j.ok) return toast(j.error || "지금은 할 수 없어요");
-    const r = await watchJob(j.jobId); if (r) { CUT_AUTO = r; renderAuto(); }
+    const r = await watchJob(j.jobId); if (r) { CUT_AUTO = r; renderAuto(); if (r.note) toast(r.note); }
   };
   renderDesigns(); makeCands(); renderAI();
   if (AI.results.length && AI.results[0].doc.h > AI.results[0].doc.w !== (AUTO_FMT === "short")) aiRun(AI.seed);  // 형식을 바꾸면 그 형식으로 다시 추천

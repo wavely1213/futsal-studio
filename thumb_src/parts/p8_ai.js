@@ -2,7 +2,7 @@
 /* ---------- AI 추천 썸네일: 분석(장면·선수·공·표정·누끼·문구) × 레퍼런스형 템플릿 → 점수 → 서로 다른 6개 ---------- */
 // 픽셀은 언제나 이 화면의 renderDoc 하나로 그림 (편집기·카드·내보내기·개발용 판정 모두 같은 그림). 백엔드는 숫자만 줌 (thumb.analyze).
 const BRAND_DEF = { logo: "", logoPos: "tr", colors: { hl: "#FFE14D", hl2: "#FFFFFF", accent: "#FF3B30", neon: "#00D1FF", box: "#111111" }, font: "Black Han Sans", series: "풋사관 강좌", seriesOn: false, handle: "@풋살사관학교", apply: true, aiCopy: true };
-const AI = { frames: [], cuts: {}, copy: [], topics: [], brand: null, seed: 0, results: [], busy: false, pick: null, ab: new Set(), copySel: null, loaded: false, ai: false };
+const AI = { frames: [], cuts: {}, copy: [], topics: [], brand: null, seed: 0, results: [], busy: false, pick: null, ab: new Set(), copySel: null, loaded: false, ai: false, cutFail: "" };
 const TEXTY = 0.05;  // 장면에 박힌 큰 글자 넓이가 이만큼 넘으면 글자를 피해 자르거나 배경을 흐림 (thumb.text_boxes)
 const SAFE = { long: { x0: 0.035, y0: 0.04, x1: 0.965, y1: 0.95, dur: [0.84, 0.86] }, short: { x0: 0.06, y0: 0.07, x1: 0.84, y1: 0.76 } };
 const brandOf = () => (AI.brand && AI.brand.apply !== false ? AI.brand : BRAND_DEF);
@@ -1293,6 +1293,7 @@ async function ensureAnalysis(force) {
     else if (!j.ok) { setAIStat("다른 작업(장면 추출 등)이 끝나면 저절로 이어서 만들어요… 기다려 주세요"); await new Promise(res => setTimeout(res, 3000)); continue; }  // 409: 다시 누를 필요 없음
     if (!r || !r.frames) { setAIStat("분석하지 못했어요 · " + ((LAST_FAIL && LAST_FAIL.msg) || "작업 기록을 확인해 주세요")); return false; }  // 실패 안내(trouble)의 쉬운 한 줄
     AI.frames = r.frames; AI.cuts = r.cuts || {}; AI.copy = (r.copy && r.copy.items) || []; AI.topics = (r.copy && r.copy.topics) || []; AI.ai = !!(r.copy && r.copy.ai);
+    AI.cutFail = r.cutFail || "";  // 자동 누끼 실패(따로 프로세스 · trouble 의 쉬운 한 줄) — 추천은 누끼 없이 계속, 분석 줄에 보여 줌
     if (!FRAMES.length || !FRAMES[0].kind) { FRAMES = r.frames; renderStrip(); }
     AI.loaded = true; return true;
   }
@@ -1311,10 +1312,17 @@ async function aiRun(seed = 0) {
     AI.results = recommend(AUTO_FMT, 6, seed, prev); AI.seed = seed; AI.ab = new Set();
     for (const x of AI.results) for (const l of x.doc.layers) if (l.type === "image" && l.src) img(l.src);
     renderAI();
-    setAIStat(AI.weak ? `쓸 만한 장면이 없어요 — 아래 '장면 고르기'에서 직접 골라 주세요 (지금은 ${AI.results.length}개만 만들었어요)`
-      : `${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`);
+    setAIStat((AI.weak ? `쓸 만한 장면이 없어요 — 아래 '장면 고르기'에서 직접 골라 주세요 (지금은 ${AI.results.length}개만 만들었어요)`
+      : `${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`) + (AI.cutFail ? ` · ${AI.cutFail}` : ""));
+    if (AI.cutFail) cutRetry();
     return AI.results;
   } finally { AI.busy = false; done(); }
+}
+function cutRetry() {  // 자동 누끼 실패 줄 끝에 [누끼 다시 하기] — '다시 해 주세요' 를 이 화면에서 (못 딴 장면만 다시 · 장면 후보·딴 누끼는 그대로 씀)
+  const e = $("aiStat"); if (!e) return;
+  const b = document.createElement("button"); b.className = "btn sm"; b.id = "cutRetry"; b.textContent = "누끼 다시 하기";
+  b.onclick = () => { b.disabled = true; AI.loaded = false; aiRun(AI.seed); };
+  e.append(" ", b);
 }
 /* ----- 화면: '자동' 탭 맨 위 ----- */
 function frameBadges(f) {

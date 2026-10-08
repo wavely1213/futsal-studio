@@ -451,7 +451,7 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
     q = th = None
     if use_ocr:
         q = queue.Queue(maxsize=6)  # 화면 풀기와 글자 읽기를 겹쳐서 (꽉 차면 풀기가 기다림 → 메모리 적게)
-        th = threading.Thread(target=_ocr_worker, args=(q, ocr_out, stat), daemon=True)
+        th = threading.Thread(target=_ocr_worker, args=(q, ocr_out, stat), daemon=True, name="model-ocr")
         th.start()
     cap, sent, last_th, last_t, ext = OCR_CAP, 0, None, None, {}
     import face

@@ -147,7 +147,7 @@ STALE_CANCEL_MSG = "보던 작업은 이미 끝났어요 · 지금 작업은 멈
 STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보기 만들기", "영상 검수", "스타일 배우기", "학습용 스타일 배우기",
              "스타일 일치 점수", "클로드로 더 깊게 보기",
              strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,  # 채널 전략: 모두 editor.CANCEL 을 봄 (PC 8단계 [멈추기]와 같음)
-             thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,  # 클로드 문구·평가: claude_cli.run 이 editor.CANCEL 을 봄 (썸네일 분석은 누끼 중엔 못 멈춤 → 빠짐)
+             thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,  # 클로드 문구·평가: claude_cli.run 이 editor.CANCEL 을 봄 (썸네일 분석은 장면·선수 살피기(frame_candidates)가 멈추기 신호를 안 봄 → 빠짐 · 자동 누끼 자식은 ✕ 로 꺼짐 · D-069)
              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}  # 유튜브: 조각마다 editor.CANCEL 을 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]
 # 줄바꿈·제어·방향 바꾸는 글자 + 줄을 나누는 유니코드(NEL·줄/문단 구분)·폭 없는 글자 → 기록에 가짜 줄을 못 만들게
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")

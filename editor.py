@@ -18,6 +18,9 @@ from urllib.parse import quote
 
 import captions
 import core
+import exportplan
+import hwdec
+import idle
 import studiolog
 import takes
 import updater
@@ -171,7 +174,9 @@ def _encode_540p(p, tmp, label, item):
     """540p H.264 가벼운 파일 (편집실 미리보기 파일·휴대폰 '작은 미리보기'가 같이 씀) → ffmpeg 종료 코드. 멈추기(✕)로 끌 수 있음."""
     info = probe(p)
     dur = info["duration"] or 1
-    vf = (tonemap_chain(info["hdr"], 1920) if info.get("hdr") else []) + ["scale=-2:540", "fps=30"]
+    # fps 를 먼저 (60fps 의 버릴 프레임은 색 바꾸기를 안 함 · 남는 프레임 그림은 예전과 같음)
+    # (960 으로 더 줄이면 CPU 가 조금 더 줄지만 예전과 SSIM 0.9797 이라 예전 크기 1920 그대로)
+    vf = (["fps=30"] + tonemap_chain(info["hdr"], 1920) + ["scale=-2:540"]) if info.get("hdr") else ["scale=-2:540", "fps=30"]
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
@@ -1182,7 +1187,7 @@ def _faces_at(name, srcs, cache):
         except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
             fs = None
         return t, None if fs is None else [list(f["box"]) for f in fs]
-    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4) as ex:
+    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4, thread_name_prefix="model-face") as ex:
         for t, fs in ex.map(lambda x: one(x, folder), todo):
             cache[t] = fs
     return cache
@@ -1222,14 +1227,20 @@ def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=Non
         avoid.append((hb[1], hb[3]))
     state = {"cache": {}, "one": False}
 
+    # 스타일 가편집(/api/edit/autoseq)은 작업이 아니라 바로 답하는 요청 → 얼굴 모델을 부르고(ensure) 쓰는(faces) 동안
+    # 쉬는 동안 내려놓기(idle)가 지우지 않게 idle.using() 으로 감쌈 (지워지면 조용히 흔한 얼굴 자리로 돌아감 · D-068)
     def prefetch(spans):
         spans = list(spans)
         state["one"] = 2 * len(spans) > FACE_FRAMES_MAX
-        if spans and _face_ready(name):
-            _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
+        if not spans:
+            return
+        with idle.using():
+            if _face_ready(name):
+                _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
 
     def place(text, st, a, b):
-        fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
+        with idle.using():
+            fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
         return emphasis_spot(text, st, W, H, FACE_GUESS if fs is None else fs, avoid)
     place.prefetch = prefetch
     return place
@@ -2396,6 +2407,7 @@ def cancel_export():
             p.kill()
         except OSError:
             pass
+    hwdec.kill_all()  # 그래픽카드 풀기 확인 중인 ffmpeg 도
 
 
 class Cancelled(Exception):
@@ -2454,6 +2466,19 @@ def _fit(it, md, seq, W, H):
         scw, sch = max(scw, W), max(sch, H)
         return {"chain": f"scale={scw}:{sch},crop={W}:{H}:{(scw - W) * rf:.1f}:{(sch - H) / 2:.1f}", "bw": W, "bh": H, "bx": 0, "by": 0, "bg": None}
     return {"chain": f"scale={scw}:{sch}", "bw": scw, "bh": sch, "bx": (W - scw) / 2, "by": (H - sch) / 2, "bg": None}
+
+
+def _hdr_pre_w(it, md, seq, W, H):
+    """HDR 영상을 일반 색으로 바꾸기 전에 줄일 가로 크기: 화면에 놓일 크기(맞춤 확대 포함)까지만, 최대 2W (예전 값).
+    고정 확대(E6 점프 컷 펀치인 108% 등 · 키프레임 없음)는 놓일 크기 × 배율까지 — 가편집 클립의 절반쯤이 이것이라 2W 로 두면
+    줄이는 이득을 거의 못 봄. 확대·이동 키프레임이 있으면 예전처럼 2W (확대해도 흐려지지 않게)."""
+    ps = param(it, "scale")
+    if ps.get("k") or param(it, "pos").get("k"):
+        return 2 * W
+    m = re.search(r"scale=(\d+):", _fit(it, md, seq, W, H)["chain"])
+    need = int(m.group(1)) if m else 2 * W
+    z = max(1.0, float(ps.get("v", 100)) / 100)
+    return min(2 * W, max(W, math.ceil(need * z - 1e-6)))
 
 
 def _num(v):
@@ -2603,16 +2628,19 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             # 반 프레임 일찍 찾아가야 가장 가까운 원본 프레임이 첫 장면이 됨 (소리와 싱크)
             ss = min(max(0.0, lo - 0.5 / sfps), max(0.0, mdur - 0.05))
             pre_pad = max(0.0, -lo) / sp if not it.get("rev") else max(0.0, hi - mdur) / sp
-            inputs.append(["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
+            inputs.append(hwdec.input_opts(media_hdr(md), p, ss) + ["-ss", f"{ss:.6f}", "-t", f"{max(0.05, hi - ss) + 0.3:.3f}", "-i", str(p)])
             chain.append("setpts=PTS-STARTPTS")
             hdr = media_hdr(md)
-            if hdr:
-                chain += tonemap_chain(hdr, 2 * W)
+            # HDR → 일반 색: 쓸 크기로 먼저 줄이고, fps 로 버릴 프레임은 바꾸지 않게 fps 뒤에서 (60fps 4K 가 3배쯤 빠름)
+            # 거꾸로 재생은 모든 프레임을 메모리에 쌓으니 예전처럼 앞에서 바꿔 8비트로 쌓음
+            tm = tonemap_chain(hdr, _hdr_pre_w(it, md, seq, W, H)) if hdr else []
             if it.get("rev"):
-                chain += [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
+                chain += tm + [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
+                tm = []
             if abs(sp - 1) > 1e-6:
                 chain.append(f"setpts=PTS/{sp:.5f}")
             chain.append(f"fps={fps}")
+            chain += tm
             if pre_pad > 1e-3:
                 chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
         # fps 뒤에는 setpts 를 두지 않음: 시각은 이미 0부터이고, ffmpeg 7 은 setpts 가 프레임 수(30fps)를 지워서
@@ -2869,8 +2897,9 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
     if comp is None:
         comp = base()
     final = lab("v")
-    # 자막·타이틀·도형 (구간 시작 시각만큼 밀어서 같은 ASS 사용)
-    fc.append(f"[{comp}]format=yuv420p,setsar=1,setpts=PTS+{t0:.4f}/TB,subtitles=subs.ass:fontsdir=fonts,setpts=PTS-STARTPTS[{final}]")
+    # 자막·타이틀·도형 (구간 시작 프레임만큼 밀어서 같은 ASS 사용) — 시각 단위를 1/fps 로 맞추고 정수 프레임만큼 밂
+    # (예전 'PTS+시작초/TB' 는 7.3333*30=219.999 를 버림해 자막이 한 프레임 일찍 나오는 구간이 있었음)
+    fc.append(f"[{comp}]format=yuv420p,setsar=1,settb=1/{fps},setpts=PTS+{int(f0)},subtitles=subs.ass:fontsdir=fonts,setpts=PTS-STARTPTS[{final}]")
     (tmp / f"fc{k_seg}.txt").write_text(";\n".join(fc), encoding="utf-8")
     args = []
     for a in inputs:
@@ -2887,6 +2916,27 @@ def _fc_opt():
         h = core.run([core.ffmpeg(), "-hide_banner", "-h", "long"]).stdout
         _FC["o"] = "-filter_complex_script" if "filter_complex_script" in h else "-/filter_complex"
     return _FC["o"]
+
+
+RESERVE_MB = 1500  # 내보내기 동안 앱·브라우저·소리 만들기 몫으로 남겨 둘 메모리
+
+
+def _mem_workers(default, media, W, H, log=None):
+    """구간을 동시에 몇 개 만들지: 남은 메모리 ÷ ffmpeg 하나 예상 메모리 (모자라면 줄임 · 적어도 1).
+    예상: 아이폰 HDR·출력의 2배보다 큰 원본(4K → 1080p 등) 약 1.1GB · 출력이 1080p 보다 크면 0.9GB · 그 밖 0.5GB (측정값 기준)."""
+    if default <= 1:
+        return default
+    import worker
+    free = worker.avail_mb()
+    if free is None:
+        return default
+    vids = [m for m in media.values() if m.get("kind") == "video"]
+    big = any(media_hdr(m) or (m.get("w") or 0) * (m.get("h") or 0) > 2 * W * H for m in vids)
+    est = 1100 if big else (900 if W * H > 1920 * 1080 else 500)
+    n = max(1, min(default, (free - RESERVE_MB) // est))
+    if n < default and log:
+        log(f"  메모리가 넉넉하지 않아 {'한 번에 하나씩' if n == 1 else f'한 번에 {n}개씩'} 만들어요 (남은 메모리 {free}MB)")
+    return n
 
 
 def _run_ff(args, cwd, on_frame=None, on_time=None, procs=None, abort=None, enc=None):
@@ -3548,31 +3598,50 @@ def export(name, proj, opts, log):
             if hw and (hw, W, H) in _HW.get("bad", set()):
                 hw = None
 
+            # 같은 원본에서 이어지는 짧은 구간들은 ffmpeg 하나로 (exportplan · 그림은 구간마다 만든 것과 같음)
+            if hwdec.will_probe() and any(media_hdr(m) for m in media.values()):
+                prog(2, "준비 중 · 그래픽카드로 영상 풀기 확인 중")
+            builds = [_build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k) for k, (f0, f1) in enumerate(segs)]
+            units = exportplan.units(builds, tmp, fps)
+
             def render(k, enc, abort, procs):
                 if abort.is_set():
                     return
-                f0, f1 = segs[k]
-                args, final, n = _build_segment(proj, media, W, H, fps, f0, f1, trans, tmp, k)
+                args, final, n, fcf = exportplan.unit_args(units[k], builds, tmp, fps)
 
                 def on_frame(fr):
                     with lock:
                         done[k] = min(n, fr)
-                        prog(2 + 85 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(segs)}" + (" · 그래픽카드" if enc else ""))
+                        prog(2 + 85 * sum(done.values()) / tot_f, f"화면 만드는 중 · 구간 {k + 1}/{len(units)}" + (" · 그래픽카드" if enc else ""))
 
-                _run_ff(["-y", "-v", "error"] + args + [_fc_opt(), f"fc{k}.txt", "-map", f"[{final}]", "-an", "-frames:v", str(n)] + _venc(enc, pr, W, H, fps)
-                        + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame,
-                        procs=procs, abort=abort, enc=enc)
+                def go(a):
+                    _run_ff(["-y", "-v", "error"] + a + [_fc_opt(), fcf, "-map", f"[{final}]", "-an", "-frames:v", str(n)] + _venc(enc, pr, W, H, fps)
+                            + ["-r", str(fps), "-video_track_timescale", str(fps * 1000), f"seg{k:04d}.mp4"], tmp, on_frame,
+                            procs=procs, abort=abort, enc=enc)
+                if hwdec.is_bad():  # 앞 구간에서 그래픽카드 풀기가 실패했으면 처음부터 일반 방식
+                    args = hwdec.strip(args)
+                try:
+                    go(args)
+                except HwEncError:  # 그래픽카드 '인코더' 문제는 풀기 탓이 아님 → 원래 처리(하나씩·일반 인코딩)로
+                    raise
+                except RuntimeError:
+                    if "-hwaccel" not in args or CANCEL.is_set() or abort.is_set():
+                        raise
+                    hwdec.mark_bad()  # 그래픽카드로 풀기가 안 됨 → 이번 실행 동안은 일반 방식 (이 구간도 다시)
+                    log("  그래픽카드로 영상 풀기가 안 돼서 일반 방식으로 다시 만들어요")
+                    go(hwdec.strip(args))
                 on_frame(n)
 
             def render_all(enc, workers=None):
                 """구간들을 동시에 만들고, 하나라도 실패하면 나머지를 바로 멈춤 (다 기다리지 않음)."""
                 done.clear()
                 if workers is None:
-                    workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(segs) > 1 else 1
+                    workers = (3 if enc else 2) if (os.cpu_count() or 2) >= 4 and len(units) > 1 else 1
+                    workers = _mem_workers(workers, media, W, H, log)
                 abort, procs = threading.Event(), set()
                 ex = ThreadPoolExecutor(workers)
                 try:
-                    futs = [ex.submit(render, k, enc, abort, procs) for k in range(len(segs))]
+                    futs = [ex.submit(render, k, enc, abort, procs) for k in range(len(units))]
                     wait(futs, return_when=FIRST_EXCEPTION)
                     errs = [f.exception() for f in futs if f.done() and f.exception() is not None]
                     if errs:
@@ -3606,7 +3675,7 @@ def export(name, proj, opts, log):
             except HwEncError as e:
                 if CANCEL.is_set():
                     raise Cancelled()
-                if getattr(e, "session", False) and len(segs) > 1:  # 동시에 여는 개수 제한 → 하나씩 다시
+                if getattr(e, "session", False) and len(units) > 1:  # 동시에 여는 개수 제한 → 하나씩 다시
                     log(f"  그래픽카드({hw})로 한 번에 하나씩 다시 만들어요")
                     try:
                         render_all(hw, 1)
@@ -3619,7 +3688,7 @@ def export(name, proj, opts, log):
                 if not hw or CANCEL.is_set() or _hw_works(hw, pr, W, H, fps):
                     raise
                 to_cpu()
-            (tmp / "list.txt").write_text("".join(f"file 'seg{k:04d}.mp4'\n" for k in range(len(segs))), encoding="utf-8")
+            (tmp / "list.txt").write_text("".join(f"file 'seg{k:04d}.mp4'\n" for k in range(len(units))), encoding="utf-8")
             # 영상 화면이 다 되면 소리 마무리를 기다림 (wait 로 확인 → 파이썬 3.9·3.10 에서도 시간 초과 예외가 안 남)
             while not wait([fut], timeout=0.4).done:
                 prog(87 + 11 * astate["frac"], "소리 마무리 중 · 소리 크기 맞추는 중")

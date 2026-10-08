@@ -359,12 +359,20 @@ class TestThumbPerf(unittest.TestCase):
 
     def _rename_open(self, name, typed):
         lid = self.js(f"D.doc.layers.find(x => lname(x) === {json.dumps(name)}).id")
-        self.page.wait_for_timeout(500)  # 두 번 누르기 판정이 앞 동작과 섞이지 않게
-        nm = self.page.locator(f'#layers [data-l="{lid}"] .nm')
-        nm.click()
-        self.page.wait_for_timeout(60)
-        nm.click()
-        self.page.wait_for_selector("#layers input.s", timeout=3000)
+        for attempt in range(3):  # 바쁜 PC(load 40+): 두 번 누르기 사이가 화면의 450ms 를 넘으면 한 번씩 누른 것 → 다시 두 번
+            self.page.wait_for_timeout(500)  # 두 번 누르기 판정이 앞 동작과 섞이지 않게
+            nm = self.page.locator(f'#layers [data-l="{lid}"] .nm')
+            nm.click()
+            self.page.wait_for_timeout(60)
+            nm.click()
+            try:
+                self.page.wait_for_selector("#layers input.s", timeout=5000)
+                break
+            except Exception:  # playwright TimeoutError
+                if self.page.query_selector("#layers input.s"):  # 늦게라도 열렸으면 그대로
+                    break
+                if attempt == 2:
+                    raise
         self.page.keyboard.type(typed)  # 열릴 때 이름 전체가 골라져 있음
         return lid
 

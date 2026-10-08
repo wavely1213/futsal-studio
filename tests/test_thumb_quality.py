@@ -180,8 +180,13 @@ class AnalyzeTests(unittest.TestCase):
         p.with_suffix(".json").write_text(json.dumps(q), encoding="utf-8")
         return p, q
 
+    def fake_worker_cut(self, name, jobs, **kw):
+        """cutout_worker.cut_auto 자리 (분석의 자동 누끼는 따로 프로세스 — D-069): 자식이 하듯 장면마다 thumb.cut_auto 꼴로."""
+        return [(t, *self.fake_cut(name, t, box, faces=f, tboxes=tb)) for t, box, f, tb in jobs]
+
     def test_analyze_returns_quality_and_cache_needs_it(self):
-        with mock.patch.object(thumb, "frame_candidates", return_value=self.items), mock.patch.object(thumb, "cut_auto", side_effect=self.fake_cut), \
+        import cutout_worker
+        with mock.patch.object(thumb, "frame_candidates", return_value=self.items), mock.patch.object(cutout_worker, "cut_auto", side_effect=self.fake_worker_cut), \
                 mock.patch.object(thumb, "_start_ai_copy", return_value=None), mock.patch.object(thumb, "_ai_on", return_value=False), \
                 mock.patch.object(thumb, "cached_candidates", return_value=self.items):
             r = thumb.analyze(self.NAME, log=lambda m: None)

@@ -895,7 +895,8 @@ def _bg_mask(img, kind):
 
 
 def remove_bg(src_path, kind="hq"):
-    """배경을 지운 PNG 경로 반환 (원본과 같은 크기 — 브러시로 복원할 때 위치가 맞도록)."""
+    """배경을 지운 PNG 경로 반환 (원본과 같은 크기 — 브러시로 복원할 때 위치가 맞도록).
+    누끼 모델(고품질 최대 6.5GB)을 불러오므로 앱 프로세스에서는 부르지 않음 — /api/thumb/cut 은 cutout_worker.remove_bg(따로 프로세스)가 이걸 부름."""
     from PIL import Image, ImageOps
     core.set_progress(label="누끼 따는 중", pct=None, detail="인물·사물만 남기는 중 (20~40초)")
     img = ImageOps.exif_transpose(Image.open(src_path)).convert("RGB")  # 휴대폰 사진 회전 정보 반영 (브라우저와 같은 방향)
@@ -1017,7 +1018,8 @@ def cut_quality(mask, box=None, faces=None):
 
 def cut_auto(name, t, box=None, kind="fast", faces=None, tboxes=None):
     """자동 추천용 누끼: 장면 t 에서 주인공 상자(0~1) 주변만 잘라 배경을 지우고, 다듬어(clean_mask) 원본 크기 투명 PNG 에 다시 붙임.
-    상자가 없으면 장면 전체. 품질(cut_quality)은 옆 JSON 에 기억. (영상, 시각, 종류, 상자, 판)이 같으면 만들어 둔 파일을 그대로 씀 → (PNG 경로, 품질)."""
+    상자가 없으면 장면 전체. 품질(cut_quality)은 옆 JSON 에 기억. (영상, 시각, 종류, 상자, 판)이 같으면 만들어 둔 파일을 그대로 씀 → (PNG 경로, 품질).
+    누끼 모델을 불러오므로 앱 프로세스에서는 부르지 않음 — 분석은 cutout_worker.cut_auto(따로 프로세스)가 이걸 부름 (remove_bg 도 같음)."""
     from PIL import Image
     dst = _cut_path(name, t, box, kind)
     box = [round(float(v), 3) for v in box[:4]] if box else None
@@ -1311,8 +1313,8 @@ def _wait(threads, name, what):
 
 
 def analyze(name, log=print):
-    """'AI 추천 썸네일' 분석 작업: (클로드 문구 · 동시에) 장면·선수 후보(v6) → (클로드 장면 고르기 · 동시에) 주인공 누끼 4장(빠른 모델, 다듬기·품질 검사) → 문구 후보.
-    누끼·클로드를 못 써도 나머지는 그대로."""
+    """'AI 추천 썸네일' 분석 작업: (클로드 문구 · 동시에) 장면·선수 후보(v6) → (클로드 장면 고르기 · 동시에) 주인공 누끼 4장(빠른 모델, 다듬기·품질 검사 ·
+    따로 프로세스 `_auto_cuts`) → 문구 후보. 누끼·클로드를 못 써도 나머지는 그대로 (누끼 실패는 결과의 cutFail 한 줄)."""
     ai = _start_ai_copy(name, log)
     items = frame_candidates(name)
     af = None
@@ -1320,22 +1322,58 @@ def analyze(name, log=print):
         import editor  # 멈추기(✕)
         af = threading.Thread(target=lambda: run_ai_frames(name, items, log, editor.CANCEL), daemon=True)
         af.start()
-    cuts = {}
-    todo = _cut_targets(items)
-    for i, (it, box) in enumerate(todo):
-        core.set_progress(label="썸네일 분석", item=name, pct=int(i * 100 / max(1, len(todo))), detail=f"주인공 누끼 따는 중 {i + 1}/{len(todo)}")
-        try:
-            p, q = cut_auto(name, it["t"], box, faces=it.get("faces"), tboxes=it.get("tboxes"))
-        except Exception as e:  # 모델을 못 받는 등 — 누끼 없는 추천으로 계속
-            import trouble
-            log(f"  자동 누끼를 따지 못했어요 · {trouble.explain(e)['msg']}")  # 쉬운 한 줄 (원문·위치는 studio.log 에만)
-            studiolog.trace(e, "자동 누끼 오류 위치")
-            break
-        cuts[str(it["t"])] = {"cut": asset_url(p), "src": it["url"], "box": box, "q": q}
+    cuts, cut_fail = _auto_cuts(name, _cut_targets(items), log)
     import thumbcopy
     _wait([ai, af], name, "제목 문구·장면을 고르는 중…")
     core.set_progress(label="썸네일 분석", item=name, pct=99, detail="제목 문구 만드는 중")
-    return {"frames": _with_ai_frames(name, items), "cuts": cuts, "copy": thumbcopy.suggest(name)}
+    out = {"frames": _with_ai_frames(name, items), "cuts": cuts, "copy": thumbcopy.suggest(name)}
+    if cut_fail:
+        out["cutFail"] = cut_fail  # 썸네일 화면 분석 줄에 쉬운 한 줄 (trouble.explain)
+    return out
+
+
+def _cut_done(name, it, box):
+    """이미 딴 자동 누끼 (PNG + 품질 JSON) → (경로, 품질) 또는 None."""
+    p = _cut_path(name, it["t"], box)
+    q = _cut_q(p)
+    return (p, q) if p.is_file() and q is not None else None
+
+
+def _auto_cuts(name, todo, log=print):
+    """분석의 주인공 자동 누끼: 이미 딴 것은 그대로, 나머지는 따로 프로세스 하나에서 (cutout_worker.cut_auto → 자식이 cut_auto) —
+    앱 프로세스는 누끼 모델을 불러오지 않음 (끝나면 메모리 반환 · 메모리 부족으로 죽어도 앱은 그대로 · D-069).
+    → ({시각: {cut, src, box, q}}, 실패 안내 한 줄 또는 None). 실패해도 그 앞에서 딴 누끼는 쓰고 누끼 없는 추천으로 계속.
+    자식이 돌려준 (PNG, 품질)도 씀 — 품질 JSON 쓰기만 실패한 장면도 이번 분석엔 들어감 (검토 고침).
+    멈추기(✕)는 자식을 끄고 작업도 멈춤 (worker.Cancelled)."""
+    need = [(it, box) for it, box in todo if _cut_done(name, it, box) is None]
+    fail, got = None, {}
+    if need:
+        import cutout_worker
+        import editor  # 멈추기(✕)·앱 끄기 때 자식도 같이 꺼지게 (편집실과 같은 신호·프로세스 목록)
+        import worker
+        core.set_progress(label="썸네일 분석", item=name, pct=0, detail=f"주인공 누끼 준비 중 (0/{len(need)})")
+        try:
+            # 자식이 돌려준 (시각, PNG, 품질) — 품질 JSON 쓰기만 실패해도(Windows 잠금·백신) 이번 분석엔 그 누끼를 씀 (예전 앱 안 분석과 같음)
+            got = {float(t): (Path(p), q) for t, p, q in
+                   cutout_worker.cut_auto(name, [(it["t"], box, it.get("faces"), it.get("tboxes")) for it, box in need],
+                                          cancel=editor.CANCEL, procs=editor._PROCS, log=log)}
+        except worker.Cancelled:
+            raise
+        except Exception as e:  # 모델을 못 받음·메모리 부족으로 자식이 죽음 등 — 누끼 없는 추천으로 계속
+            import trouble
+            msg = trouble.explain(e)["msg"]  # 쉬운 한 줄 (원문·위치는 studio.log 에만)
+            fail = msg if msg.startswith(cutout_worker.AUTO_FAIL_MSG) else f"{cutout_worker.AUTO_FAIL_MSG} · {msg}"
+            log(f"  {fail}")
+            studiolog.trace(e, "자동 누끼 오류 위치")
+    cuts = {}
+    for it, box in todo:
+        d = _cut_done(name, it, box)
+        if d is None and float(it["t"]) in got:
+            p, q = got[float(it["t"])]
+            d = (p, q) if p == _cut_path(name, it["t"], box) and p.is_file() and q is not None else None  # 이 장면·상자의 그 파일일 때만
+        if d:
+            cuts[str(it["t"])] = {"cut": asset_url(d[0]), "src": it["url"], "box": box, "q": d[1]}
+    return cuts, fail
 
 
 JOB_ANALYZE = "썸네일 분석"  # 작업 이름 (휴대폰 진행·알림 이름 remote.JOB_LABELS · 시작은 PC 썸네일 편집기에서만)
@@ -1343,18 +1381,22 @@ OCR_MAX = 400_000   # 검수용 글자 읽기에 받는 그림 크기 상한 (da
 
 
 def read_text(data_url):
-    """검수: 작게 줄인 썸네일 그림 → 읽힌 글자 줄 [{text, conf}] · 글자 읽기 모델이 아직 없으면 None (여기서는 내려받지 않음)."""
+    """검수: 작게 줄인 썸네일 그림 → 읽힌 글자 줄 [{text, conf}] · 글자 읽기 모델이 아직 없으면 None (여기서는 내려받지 않음).
+    작업(start_job)이 아니라 바로 답하는 요청(/api/thumb/ocr)에서 부르므로 글자 읽기 모델을 쓰는 동안은 idle.using()
+    (쉬는 동안 내려놓기가 그 사이에 모델을 지우지 않게 · D-069)."""
     import numpy as np
     from PIL import Image
     import avmodels  # 지연 import: avmodels → thumb
-    if not (avmodels.available("ocr") or (avmodels.ready("ocr") and avmodels.ensure("ocr", label="썸네일 검수"))):
-        return None
-    raw = base64.b64decode(str(data_url).split(",", 1)[1])
-    with Image.open(io.BytesIO(raw)) as im:
-        rgb = im.convert("RGB")
-    if rgb.size[0] < 640:  # 휴대폰 목록 크기(168px) 그대로 → 4배로 키워 읽기 (모델 입력 폭에 맞춤)
-        rgb = rgb.resize((rgb.size[0] * 4, rgb.size[1] * 4), Image.BICUBIC)
-    lines = avmodels.ocr(np.asarray(rgb)) or []
+    import idle
+    with idle.using():
+        if not (avmodels.available("ocr") or (avmodels.ready("ocr") and avmodels.ensure("ocr", label="썸네일 검수"))):
+            return None
+        raw = base64.b64decode(str(data_url).split(",", 1)[1])
+        with Image.open(io.BytesIO(raw)) as im:
+            rgb = im.convert("RGB")
+        if rgb.size[0] < 640:  # 휴대폰 목록 크기(168px) 그대로 → 4배로 키워 읽기 (모델 입력 폭에 맞춤)
+            rgb = rgb.resize((rgb.size[0] * 4, rgb.size[1] * 4), Image.BICUBIC)
+        lines = avmodels.ocr(np.asarray(rgb)) or []
     return [{"text": x["text"], "conf": x["conf"], "box": x["box"]} for x in lines]
 
 

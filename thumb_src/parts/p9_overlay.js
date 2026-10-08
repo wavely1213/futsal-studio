@@ -165,7 +165,7 @@ async function openBrand() {
       const j = await post("/api/thumb/upload", { data }).catch(() => ({}));  // 저장 실패(Windows 잠금·디스크 가득)도 알림 (그림 넣기와 같게)
       if (j.url) { b.logo = j.url; draw(); } else toast(j.error || "로고를 넣지 못했어요. 잠시 뒤 다시 해 주세요"); }; fi.click(); };
     if ($("bkLogoDel")) $("bkLogoDel").onclick = () => { b.logo = ""; draw(); };
-    if ($("bkLogoCut")) $("bkLogoCut").onclick = async () => { const j = await post("/api/thumb/cut", { src: b.logo, kind: "hq" }); if (!j.ok) return toast(j.error || "지금은 할 수 없어요"); const r = await watchJob(j.jobId); if (r && r.cut) { b.logo = r.cut; draw(); } };
+    if ($("bkLogoCut")) $("bkLogoCut").onclick = async () => { const j = await post("/api/thumb/cut", { src: b.logo, kind: "hq" }); if (!j.ok) return toast(j.error || "지금은 할 수 없어요"); const r = await watchJob(j.jobId); if (r && r.cut) { b.logo = r.cut; draw(); if (r.note) toast(r.note); } };
   };
   draw(); m.classList.add("show");
   $("brandSave").onclick = async () => {
