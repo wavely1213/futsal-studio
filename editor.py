@@ -171,8 +171,9 @@ def _encode_540p(p, tmp, label, item):
     """540p H.264 가벼운 파일 (편집실 미리보기 파일·휴대폰 '작은 미리보기'가 같이 씀) → ffmpeg 종료 코드. 멈추기(✕)로 끌 수 있음."""
     info = probe(p)
     dur = info["duration"] or 1
-    # fps 를 먼저 (60fps 의 버릴 프레임은 색 바꾸기를 안 함) · HDR 은 960 으로 줄인 뒤 바꿈 (540p 미리보기라 충분)
-    vf = (["fps=30"] + tonemap_chain(info["hdr"], 960) + ["scale=-2:540"]) if info.get("hdr") else ["scale=-2:540", "fps=30"]
+    # fps 를 먼저 (60fps 의 버릴 프레임은 색 바꾸기를 안 함 · 남는 프레임 그림은 예전과 같음)
+    # (960 으로 더 줄이면 CPU 가 조금 더 줄지만 예전과 SSIM 0.9797 이라 예전 크기 1920 그대로)
+    vf = (["fps=30"] + tonemap_chain(info["hdr"], 1920) + ["scale=-2:540"]) if info.get("hdr") else ["scale=-2:540", "fps=30"]
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
