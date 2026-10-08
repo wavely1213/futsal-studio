@@ -14,6 +14,7 @@
     --accent: #2d8ceb; --accent-soft: rgba(45,140,235,.18);
     --cap: #d97a1e; --title: #8b4fc6; --video: #2f6fb0; --audio: #1f8c86; --play: #2d8ceb;
     --cut: #8a96a8; --peak: #ff9a3c; --danger: #e5484d; --kf: #f5c542; --trn: #6a5acd;
+    --danger-ink: #f85149; /* 빨간 '글자' (스튜디오 어두운 화면 --danger 와 같은 값) · --danger 는 패널 위 4.2:1 이라 글자로는 흐림 → 4.9:1 */
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -74,6 +75,18 @@
 
   /* 추천 · 효과 · 그래픽 목록 */
   .sec { padding: 10px; border-bottom: 1px solid var(--line); }
+  /* 마커 · 챕터 목록 (D-074) */
+  .mkrule { margin: 0 0 8px; padding: 7px 9px; border-radius: 5px; background: var(--panel-2); line-height: 1.45; }
+  .mkrule.bad { border-left: 3px solid var(--danger); } .mkrule.ok { border-left: 3px solid var(--accent); }
+  .mkrow { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto 22px; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .mkrow .tm { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-align: left; font-variant-numeric: tabular-nums; }
+  .mkrow input { min-width: 0; width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; padding: 3px 6px; -webkit-user-select: text; user-select: text; }
+  .mkrow .kind { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: var(--panel-3); color: var(--ink-2); white-space: nowrap; }
+  .mkrow .kind.ch { background: var(--accent-soft); color: var(--ink); }
+  .mkrow .x { border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0; }
+  .mkrow .x:hover { color: var(--danger); }
+  .mkrow .prob { grid-column: 2 / -1; color: var(--danger-ink); font-size: 11.5px; }
+  #lt-mk .hint { color: var(--ink-2); }  /* 마커 탭 안내 (--ink-3 은 패널 위 3.1:1) */
   .sec h4 { margin: 0 0 8px; font-size: 12px; color: var(--ink-2); font-weight: 700; }
   .rec { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
   .rec b { display: block; margin-bottom: 2px; }
@@ -327,6 +340,9 @@
   .qabody .qi[data-qt] { cursor: pointer; } .qabody .qi[data-qt]:hover { background: var(--panel-3); }
   .qabody .qi b { display: block; } .qabody .qi.warn { box-shadow: inset 3px 0 0 #ffb020; } .qabody .qi.bad { box-shadow: inset 3px 0 0 #ff4d4d; } .qabody .qi.ok { box-shadow: inset 3px 0 0 #2ecc71; }
   .qabody .score { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+  .qanext { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--panel-2); border-left: 3px solid var(--accent); line-height: 1.5; }  /* 다음 할 일 (D-075) */
+  .qanext b { display: block; margin-bottom: 2px; }
+  .qanext .hint { color: var(--ink-2); }  /* 다음 할 일 설명 (--ink-3 은 2.8:1) */
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 45; }
   .modal.show { display: grid; }
   .modal .box { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 18px; width: 460px; max-height: 90vh; overflow: auto; }
@@ -379,7 +395,7 @@
 
   <!-- 왼쪽 위 -->
   <div class="panel lp" style="grid-column:1;grid-row:2">
-    <div class="ph" id="ltabs"><button class="tab on" data-lt="caps">자막</button><button class="tab" data-lt="rec">추천 · 자동 편집</button><button class="tab" data-lt="fxl">효과</button><button class="tab" data-lt="gfx">그래픽</button></div>
+    <div class="ph" id="ltabs"><button class="tab on" data-lt="caps">자막</button><button class="tab" data-lt="rec">추천 · 자동 편집</button><button class="tab" data-lt="fxl">효과</button><button class="tab" data-lt="gfx">그래픽</button><button class="tab" data-lt="mk" title="마커 · 챕터 (올리기 키트의 유튜브 챕터)">마커</button></div>
     <div class="body" id="lt-caps">
       <div class="search"><input id="capSearch" placeholder="자막 검색"><button class="btn" id="capAdd" title="현재 위치에 자막 추가">＋</button></div>
       <div class="captools"><button class="btn" id="capOneLine" title="여러 줄로 길게 뭉친 자막을 한 줄씩 짧게 나눠요 (고친 글 그대로 · Ctrl+Z 로 되돌려요)">자막 한 줄씩 나누기</button></div>
@@ -389,6 +405,7 @@
     <div class="body" id="lt-rec" style="display:none"></div>
     <div class="body" id="lt-fxl" style="display:none"></div>
     <div class="body" id="lt-gfx" style="display:none"></div>
+    <div class="body" id="lt-mk" style="display:none"></div>
   </div>
 
   <!-- 가운데 위: 프로그램 모니터 -->
@@ -491,9 +508,10 @@
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="cfReload">최신 내용 다시 불러오기</button><button class="btn pri" id="cfForce">이 창 내용으로 저장</button></div>
 </div></div>
 <div class="modal" id="qaModal"><div class="box" style="width:600px">
-  <h3>영상 검수 <span class="hint" id="qaFile"></span></h3>
+  <h3><span id="qaTitle">영상 검수</span> <span class="hint" id="qaFile"></span></h3>
   <div id="qaBody" class="qabody"></div>
-  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" id="qaClose">닫기</button></div>
+  <div class="qanext"><b>다음 할 일</b><span class="hint">썸네일을 저장하고, 올리기 키트에서 제목·설명·챕터를 만들어 유튜브에 올려요</span></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px"><button class="btn" id="qaOut" style="margin-right:auto">완성본 폴더 열기</button><button class="btn" id="qaClose">닫기</button><button class="btn" id="qaKit">올리기 키트 만들기</button><button class="btn pri" id="qaThumb">썸네일 만들기</button></div>
 </div></div>
 <div class="modal" id="spModal"><div class="box" style="width:360px">
   <h3>속도 · 길이</h3><div class="hint" style="margin-bottom:10px">빠르게 하면 짧아지고 느리게 하면 길어져요. 소리는 목소리 높낮이가 그대로 유지돼요.</div>
@@ -875,9 +893,10 @@ function changed(full = true) {
   ver++; fixTrans(); scheduleSave(); frameDirty = true;
   renderTimeline(); renderPanels();
   if (full) { renderCaps(); renderBin(); }
+  if (ltab === "mk") renderMarkers();
 }
 // 저장: 한 번에 하나씩 차례로 · 판 번호(REV)로 다른 창이 그 사이 저장했는지 확인 (몰래 덮어쓰지 않게)
-let REV = 0, dirty = false, editSeq = 0, saving = Promise.resolve(true), conflict = false;
+let REV = 0, dirty = false, editSeq = 0, saving = Promise.resolve(true), conflict = false, goneMsg = "";
 const CID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); // 이 창 id (저장 응답 전에 닫아도 같은 창의 저장은 이어서 받게)
 function scheduleSave() {
   dirty = true; editSeq++;
@@ -893,11 +912,18 @@ function saveNow(force) {
 }
 async function doSave(force) {
   if (!P || (conflict && !force)) return false;
+  if (goneMsg) { $("saved").textContent = "저장 안 함 · " + goneMsg; return true; }  // 영상 이름이 바뀜 → 스튜디오에서 다시 열어야 함 (나가기는 됨)
   const seq = editSeq, body = JSON.stringify({ name: NAME, project: P, rev: REV, force: !!force, client: CID, seq });
   try {
     const r = await fetch("/api/edit/save", { method: "POST", headers: { "Content-Type": "application/json" }, body });
     const j = await r.json().catch(() => ({}));
     if (r.status === 409 && j.conflict) { conflict = true; $("saved").textContent = "저장 멈춤 · 다른 창에서 바뀌었어요"; $("cfModal").classList.add("show"); return false; }
+    if (r.status === 404 && j.gone) {  // 이 영상 이름이 바뀌었거나 보관함에서 빠짐 (예전: '저장 실패'를 3초마다 되풀이 · 나가지도 못함)
+      goneMsg = j.error || "이 영상의 이름이 바뀌었어요 · 스튜디오에서 다시 열어 주세요";
+      clearTimeout(saveTimer); saveTimer = null; dirty = false;
+      $("saved").textContent = "저장 안 함 · " + goneMsg; toast(goneMsg);
+      return true;
+    }
     if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
     if (j.rev != null) REV = j.rev;
     conflict = false; if (seq === editSeq) dirty = false;
@@ -912,7 +938,12 @@ async function doSave(force) {
 // 앱 창을 닫기 전에 (app.py 가 부름): 저장 안 된 것이 있으면 저장
 window.flushBeforeClose = async () => { if (!P || conflict) return true; if (dirty) return await saveNow(); await saving; return true; };
 // 저장한 뒤에만 다른 화면으로 (저장이 안 되면 머무름)
-function leaveTo(url) { saveNow().then(ok => { if (ok) { dirty = false; location.href = url; } else if (!conflict) toast("저장하지 못해서 이 화면에 머물러요 · 잠시 뒤 다시 눌러 주세요"); }); }
+function leaveTo(url, back) {  // back: 스튜디오에서 열 화면 (sessionStorage edReturn · 저장이 된 뒤에만)
+  saveNow().then(ok => {
+    if (ok) { dirty = false; if (back) try { sessionStorage.setItem("edReturn", JSON.stringify({ p: back, t: Date.now() })); } catch (e) {} location.href = url; }
+    else if (!conflict) toast("저장하지 못해서 이 화면에 머물러요 · 잠시 뒤 다시 눌러 주세요");
+  });
+}
 function restoreP(snap) { P = JSON.parse(snap); P.sequences.forEach(ensureSeq); bindS(); P.media.forEach(m => { MED[m.id] = m; }); }
 function undo() { if (!hist.length) return; const h = hist.pop(); redoS.push({ label: h.label, snap: JSON.stringify(P), at: h.at }); restoreP(h.snap); afterHist(); toast(`되돌림 · ${h.label}`); }
 function redo() { if (!redoS.length) return; const h = redoS.pop(); hist.push({ label: h.label, snap: JSON.stringify(P), at: h.at || Date.now() }); if (hist.length > HIST_MAX) hist.splice(0, hist.length - HIST_MAX); restoreP(h.snap); afterHist(); toast(`다시 실행 · ${h.label}`); }
@@ -1021,6 +1052,82 @@ function maxLeft(t0, ignore = new Set()) {
   }
   return Math.max(0, lim);
 }
+/* ---------- 마커 · 챕터 (D-074) ---------- */
+// 잘라 낸 구간 [a, b) 안의 마커: 그 장면이 사라졌는데 그 자리에 두면 원래 b 뒤 장면을 가리킴 (예전: 3·9초 마커가 2~10초를 잘라도
+// 그대로 남아 9초 마커가 원래 17초 장면을 가리킴). 구간 뒤로 이어지는 장(구간 안 가장 늦은 마커)만 잘린 자리 a 로 옮기고
+// 나머지(내용이 다 잘린 장)는 지움 · b 에 마커가 있으면 그 장이 이어지므로 구간 안 마커는 모두 지움. 뒤 마커 당기기는 shiftAfter.
+// 순수 함수 (node 시험): 마커 목록 → { markers, moved, removed }
+function cutMarkers(ms, a, b) {
+  const inside = ms.filter(m => m.t >= a - EPS && m.t < b - EPS).sort((x, y) => x.t - y.t);
+  if (!inside.length) return { markers: ms, moved: 0, removed: 0 };
+  const keep = ms.some(m => Math.abs(m.t - b) <= EPS) ? null : inside[inside.length - 1];
+  const out = ms.filter(m => !inside.includes(m) || m === keep);
+  const moved = keep && Math.abs(keep.t - a) > EPS ? 1 : 0;
+  if (moved) keep.t = fr(a);
+  return { markers: out, moved, removed: inside.length - (keep ? 1 : 0) };
+}
+function markCut(a, b) { const r = cutMarkers(S.markers, a, b); S.markers = r.markers; return r; }
+const addMk = (acc, r) => { acc.moved += r.moved; acc.removed += r.removed; return acc; };
+function markNote(r) {
+  if (!r || (!r.moved && !r.removed)) return "";
+  return " · 잘린 구간 안 마커" + (r.moved && r.removed ? `는 ${r.moved}개를 잘린 자리로 옮기고 ${r.removed}개를 지웠어요` : r.moved ? ` ${r.moved}개를 잘린 자리로 옮겼어요` : ` ${r.removed}개를 지웠어요`)
+    + (r.removed ? " (Ctrl+Z 로 되돌려요)" : "");
+}
+// 유튜브 챕터 규칙 (upload.py 와 같은 규칙: CH_MIN_VIDEO 180초 · CH_MIN_LEN 10초 · CH_MIN_COUNT 3개 · _MEMO 편집 메모 이름 · 정수 초)
+const CH_MIN_VIDEO = 180, CH_MIN_LEN = 10, CH_MIN_COUNT = 3;
+const CH_MEMO = /TODO|FIXME|BGM|효과음|싱크|메모|삭제|지우기|자막\s?(?:수정|확인)|(?:수정|확인|체크)\s?(?:필요|요망)|(?:확인|체크)$|다시\s?(?:확인|찍|녹음)|^(?:여기|이\s?부분|요기)(?:\s|$)|\?\?|^[^\p{L}\p{N}_]*$/iu;
+// 마커 목록 → 줄마다 { m, kind: "chapter"|"memo"|"plain", prob } + 전체 안내 notes [{ok, text}] (순수 함수 · node 시험)
+function chapterCheck(ms, dur, fmt) {
+  const rows = ms.map(m => ({ m, name: String(m.name || "").replace(/\s+/g, " ").trim() })).sort((x, y) => x.m.t - y.m.t);
+  const notes = [], noCh = fmt === "shorts" ? "쇼츠에는 챕터가 안 들어가요 · 마커는 메모로만 써요"
+    : dur < CH_MIN_VIDEO ? `3분이 안 되는 편집본(${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초)이라 챕터는 안 들어가요` : "";
+  for (const r of rows) {
+    r.kind = !r.name ? "plain" : CH_MEMO.test(r.name) ? "memo" : "chapter";
+    r.prob = r.kind === "plain" ? "" : r.kind === "memo" ? "편집 메모처럼 보여 챕터에서 빠져요" : "";
+    if (r.kind === "chapter" && r.m.t >= dur) r.prob = "편집본 끝보다 뒤에 있어요";
+  }
+  if (noCh) { notes.push({ ok: false, text: noCh }); return { rows, notes, chapters: 0 }; }
+  const ch = rows.filter(r => r.kind === "chapter" && !r.prob);
+  let prev = null;
+  for (const r of ch) {
+    const t = Math.floor(r.m.t);
+    if (dur - t < CH_MIN_LEN) r.prob = `끝나기 ${CH_MIN_LEN}초 안이라 챕터로 못 써요`;
+    else if (prev !== null && t - prev < CH_MIN_LEN) r.prob = `앞 챕터와 ${CH_MIN_LEN}초 이상 떨어져야 해요 (지금 ${t - prev}초) · 키트에서 빠져요`;
+    else prev = t;
+  }
+  const good = ch.filter(r => !r.prob);
+  if (!good.length) notes.push({ ok: false, text: "이름 붙인 마커가 챕터가 돼요 · 이름이 없으면 올리기 키트가 쉬는 곳에서 나눠요" });
+  else {
+    if (good.length < CH_MIN_COUNT) notes.push({ ok: false, text: `챕터 마커가 ${good.length}개예요 · 유튜브 챕터는 ${CH_MIN_COUNT}개 이상이어야 해요 (모자라면 올리기 키트가 쉬는 곳에서 더 나눠요)` });
+    const first = Math.floor(good[0].m.t);
+    notes.push(first < CH_MIN_LEN ? { ok: true, text: first ? `첫 챕터(${mmss(good[0].m.t)})는 00:00 으로 당겨져요 · 유튜브는 첫 챕터가 00:00 이어야 해요` : "첫 챕터가 00:00 에서 시작해요" }
+      : { ok: false, text: `첫 챕터가 ${mmss(good[0].m.t)}예요 · 유튜브 규칙(첫 챕터 00:00)에 맞게 00:00 에 '시작' 챕터가 붙어요` });
+    if (good.length >= CH_MIN_COUNT) notes.push({ ok: true, text: `챕터 ${good.length}개 · 각 ${CH_MIN_LEN}초 이상 · 유튜브 규칙에 맞아요` });
+  }
+  return { rows, notes, chapters: good.length };
+}
+function renderMarkers() {
+  const box = $("lt-mk"); if (!box || !S) return;
+  const res = chapterCheck(S.markers, total(), S.format);
+  box.innerHTML = `<div class="sec"><h4>마커 · 챕터 <span class="hint">이름 붙인 마커가 올리기 키트의 유튜브 챕터가 돼요</span></h4>
+    ${res.notes.map(n => `<div class="mkrule ${n.ok ? "ok" : "bad"}">${esc(n.text)}</div>`).join("")}
+    <div id="mkList">${res.rows.length ? res.rows.map(r => `<div class="mkrow" data-mi="${S.markers.indexOf(r.m)}">
+      <button class="tm" data-mt title="그 자리로 가기">${mmss(r.m.t)}</button>
+      <input value="${esc(r.name)}" placeholder="이름 (예: 퍼스트 터치)" maxlength="60" data-mn>
+      <span class="kind ${r.kind === "chapter" && !r.prob ? "ch" : ""}">${r.kind === "chapter" ? (r.prob ? "챕터 안 됨" : "챕터") : r.kind === "memo" ? "메모" : "이름 없음"}</span>
+      <button class="x" data-mx title="마커 지우기">✕</button>${r.prob ? `<div class="prob">${esc(r.prob)}</div>` : ""}</div>`).join("")
+      : `<div class="hint">아직 마커가 없어요 · 재생 위치에서 M 을 누르거나 아래 버튼으로 넣어요</div>`}</div>
+    <div class="presets" style="margin-top:8px"><button class="btn" id="mkAdd">재생 위치에 마커 넣기 (M)</button></div></div>`;
+  $("mkAdd").onclick = addMarker;
+  box.querySelectorAll(".mkrow").forEach(row => {
+    const m = S.markers[+row.dataset.mi];
+    row.querySelector("[data-mt]").onclick = () => { pause(); seek(m.t); autoscroll(); };
+    const inp = row.querySelector("[data-mn]");
+    inp.onkeydown = e => { if (e.key === "Enter") inp.blur(); if (e.key === "Escape") { inp.value = m.name || ""; inp.blur(); } };
+    inp.onchange = () => { const n = inp.value.trim(); if (n === (m.name || "")) return; commit("마커 이름"); m.name = n; changed(false); };
+    row.querySelector("[data-mx]").onclick = () => { commit("마커 지우기"); S.markers.splice(S.markers.indexOf(m), 1); changed(false); };
+  });
+}
 function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기
   for (const g of [...S.titles, ...S.shapes.filter(x => !x.full)]) {
     const s = g.start, e = g.start + g.dur;
@@ -1047,9 +1154,10 @@ function extractRange(a, b, label = "잘라내고 당기기", base) {
   commit(label);
   for (const tid of clear) clearRange(tid, a, b);
   gfxCut(a, b);
+  const mk = markCut(a, b);
   const mv = shiftAfter(b, -(b - a), new Set(), skip);
   sanitizeGfx(); markIn = markOut = null; changed(); seek(Math.min(a, Math.max(0, total() - 0.01)));
-  toast(`${(b - a).toFixed(1)}초를 잘라내고 뒤를 당겼어요` + (skip.size ? ` · ${[...skip].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "") + followNote(mv));
+  toast(`${(b - a).toFixed(1)}초를 잘라내고 뒤를 당겼어요` + (skip.size ? ` · ${[...skip].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "") + followNote(mv) + markNote(mk));
 }
 function liftRange(a, b) {
   a = fr(a); b = fr(b); if (!(b - a > HF)) return;
@@ -1077,12 +1185,12 @@ function extractSource(a, b) {
   if (!unlocked("V1")) return toast("V1 트랙이 잠겨 있어요 · 자물쇠를 풀어 주세요");
   commit("대사 잘라내기");
   rngs.sort((p, q) => q[0] - p[0]);
-  let removed = 0; const mv = [];
+  let removed = 0; const mv = [], mk = { moved: 0, removed: 0 };
   for (const [s, e] of rngs) {
     const s1 = fr(s), e1 = fr(e), { clear, skip } = rangeTracks(s1, e1, ["V1"], true);
-    for (const tid of clear) clearRange(tid, s1, e1); gfxCut(s1, e1); mv.push(...shiftAfter(e1, -(e1 - s1), new Set(), skip)); removed += e1 - s1;
+    for (const tid of clear) clearRange(tid, s1, e1); gfxCut(s1, e1); addMk(mk, markCut(s1, e1)); mv.push(...shiftAfter(e1, -(e1 - s1), new Set(), skip)); removed += e1 - s1;
   }
-  selI.clear(); changed(); toast(`대사 구간 ${removed.toFixed(1)}초를 잘라냈어요` + followNote(mv));
+  selI.clear(); changed(); toast(`대사 구간 ${removed.toFixed(1)}초를 잘라냈어요` + followNote(mv) + markNote(mk));
 }
 function splitAt(t, all) {
   t = fr(t);
@@ -1111,11 +1219,11 @@ function deleteSel(ripple) {
   if (ripple) {
     const merged = [];
     for (const r of rng) { const l = merged[merged.length - 1]; if (l && r[0] <= l[1] + EPS) l[1] = Math.max(l[1], r[1]); else merged.push([...r]); }
-    const kept = new Set(), mv = [];
+    const kept = new Set(), mv = [], mk = { moved: 0, removed: 0 };
     for (const [s, e] of merged.reverse()) {
-      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
+      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
     }
-    toast((kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv));
+    toast((kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv) + markNote(mk));
   } else toast("지웠어요 · 빈자리를 당기려면 빈 곳을 누르고 Delete (또는 Shift+Delete)");
   changed();
 }
@@ -1127,8 +1235,8 @@ function deleteGap(g) {
     selX = null; renderTimeline(); renderPanels(); return toast("빈 곳이 바뀌었어요 · 빈 곳을 다시 눌러 주세요");
   }
   const sk = spanning(g.s, g.e); sk.delete(g.track);
-  commit("빈 곳 지우기"); const mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
-  toast((sk.size ? `빈 곳을 당겼어요 · ${[...sk].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "빈 곳을 당겼어요") + followNote(mv));
+  commit("빈 곳 지우기"); const mk = markCut(g.s, g.e), mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
+  toast((sk.size ? `빈 곳을 당겼어요 · ${[...sk].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "빈 곳을 당겼어요") + followNote(mv) + markNote(mk));
 }
 function deleteGfx() {
   if (!selX) return;
@@ -2133,6 +2241,7 @@ function edgeOp(mode, ids, edge, d) {
     if (shrink > 0) { const ml = maxLeft(pivot, ign); if (edge === "l") hi = Math.min(hi, ml); else lo = Math.max(lo, -ml); }
     d = clamp(d, lo, hi);
     const delta = edge === "l" ? -d : d;
+    if (edge === "r" && delta < 0) markCut(pivot + delta, pivot);  // 끝을 줄여 사라진 장면 위 마커 (잘라내기와 같은 규칙 · 앞을 줄이면 사라지는 곳이 클립 머리라 따로 안 함)
     shiftAfter(pivot, delta, ign);
     for (const x of its) { if (edge === "l") { const s0 = x.start; trimStart(x, fr(s0 + d)); x.start = s0; } else trimEnd(x, fr(iEnd(x) + d)); }
   } else if (mode === "roll") {
@@ -3409,8 +3518,8 @@ document.querySelectorAll("#btabs .tab").forEach(b => b.onclick = () => {
 });
 document.querySelectorAll("#ltabs .tab").forEach(b => b.onclick = () => {
   ltab = b.dataset.lt; document.querySelectorAll("#ltabs .tab").forEach(x => x.classList.toggle("on", x === b));
-  for (const k of ["caps", "rec", "fxl", "gfx"]) $("lt-" + k).style.display = k === ltab ? "" : "none";
-  if (ltab === "rec") renderRec(); if (ltab === "fxl") renderFxList(); if (ltab === "gfx") renderGfxList();
+  for (const k of ["caps", "rec", "fxl", "gfx", "mk"]) $("lt-" + k).style.display = k === ltab ? "" : "none";
+  if (ltab === "rec") renderRec(); if (ltab === "fxl") renderFxList(); if (ltab === "gfx") renderGfxList(); if (ltab === "mk") renderMarkers();
 });
 
 /* ---------- 내보내기 ---------- */
@@ -3482,11 +3591,12 @@ function watchJob(name, id) {  // id: 이 화면이 시킨 작업 번호 — 그
     if (!d) { $("busyTxt").textContent = (pr.detail || (qaRunning ? "검수 중" : "내보내는 중")) + (pr.eta != null ? " · " + etaTxt(pr.eta) : ""); $("busyBar").style.width = (pr.pct || 3) + "%"; $("busyPct").textContent = pr.pct != null ? pr.pct + "%" : ""; }
     if (d) {
       clearInterval(iv); $("busy").classList.remove("show"); $("exportBtn").disabled = false;
-      if (d.error && qaRunning) { qaRunning = null; toast(d.error.includes("멈췄어요") ? "검수를 건너뛰었어요 · 완성본 폴더를 열게요" : "검수는 못 했어요 · 완성본 폴더를 열게요 · " + d.error); post("/api/open", { which: "out" }); }
+      // 끝나면 '다음 할 일' 창 (예전: 탐색기 완성본 폴더를 바로 열어 앱 밖으로 나감 · 이제 [완성본 폴더 열기] 버튼으로)
+      if (d.error && qaRunning) { const f = qaRunning; qaRunning = null; showDone(f, null, d.error.includes("멈췄어요") ? "검수는 건너뛰었어요" : "검수는 못 했어요 · " + d.error); }
       else if (d.error) { if (d.error.includes("멈췄어요")) toast("내보내기를 멈췄어요"); else showEdFail(d, "내보내기", LAST_EXPORT && startExport); }
-      else if (qaRunning) { if (d.result && d.result.items) showVideoQA(d.result); else qaRunning = null; }
+      else if (qaRunning) { if (d.result && d.result.items) showVideoQA(d.result); else { const f = qaRunning; qaRunning = null; showDone(f); } }
       else if (Array.isArray(d.result) && /\.mp4$/i.test(d.result[0] || "") && $("exQa").checked) runVideoQA(d.result[0]);
-      else { toast("내보냈어요! 완성본 폴더를 열게요"); post("/api/open", { which: "out" }); }
+      else { toast("내보냈어요!"); showDone(Array.isArray(d.result) ? d.result.find(x => /\.mp4$/i.test(x)) || d.result.find(x => /\.xml$/i.test(x)) || d.result[0] : ""); }
     }
   }, 700);
 }
@@ -3494,12 +3604,31 @@ let qaRunning = null;
 async function runVideoQA(file) {
   qaRunning = file; toast("내보냈어요! 올리기 전에 자동 검수 중이에요");
   const r = await (await post("/api/edit/qa", { name: NAME, file, format: EXP_JOB.fmt || S.format, master: EXP_JOB.master })).json();
-  if (!r.ok) { qaRunning = null; toast(r.error || "검수를 시작하지 못했어요"); post("/api/open", { which: "out" }); return; }
+  if (!r.ok) { qaRunning = null; showDone(file, null, r.error || "검수를 시작하지 못했어요"); return; }
   watchJob("검수", r.jobId);
 }
+// 다 만든 뒤 창: 검수 결과(있으면) + 다음 할 일 [썸네일 만들기]·[올리기 키트 만들기]·[완성본 폴더 열기] (D-075)
+function showDone(file, rep, note) {
+  const hand = !rep && !!file && !/\.mp4$/i.test(file);  // 영상 없이 프리미어(XML)·자막만 → 다른 프로그램으로 넘길 파일 (썸네일·올리기는 아직)
+  $("qaTitle").textContent = rep ? "영상 검수" : hand ? (/\.xml$/i.test(file) ? "프리미어로 넘길 파일을 만들었어요" : "자막 파일을 만들었어요") : "다 만들었어요";
+  $("qaFile").textContent = file ? "· " + file : "";
+  if (!rep) $("qaBody").innerHTML = `<div class="score">${hand ? "완성본 폴더에 있어요" : "완성본을 만들었어요"}</div>${note ? `<div class="hint">${esc(note)}</div>` : ""}`;
+  $("qaModal").querySelector(".qanext").style.display = hand ? "none" : "";
+  $("qaThumb").style.display = $("qaKit").style.display = hand ? "none" : "";
+  $("qaOut").classList.toggle("pri", hand);
+  $("qaModal").classList.add("show");
+}
+function nextFrom(url, make) {  // 썸네일·올리기로 가면 돌아올 때(← 스튜디오) 7 올리기가 이 영상·편집본으로 열림 · make: 키트가 없으면 바로 만듦
+  $("qaModal").classList.remove("show");
+  try { sessionStorage.setItem("upReturn", JSON.stringify({ name: NAME, seq: EXP_JOB.seq || S.id, t: Date.now(), make: !!make })); } catch (e) {}
+  leaveTo(url);
+}
+$("qaThumb").onclick = () => nextFrom("/thumb?name=" + encodeURIComponent(NAME));
+$("qaKit").onclick = () => nextFrom("/", true);
+$("qaOut").onclick = () => post("/api/open", { which: "out" });
 function showVideoQA(rep) {
   const file = qaRunning; qaRunning = null;
-  $("qaFile").textContent = "· " + file;
+  showDone(file, rep);
   $("qaBody").innerHTML = `<div class="score">${rep.score}점 · ${rep.bad ? `고칠 것 ${rep.bad}개` : "큰 문제 없어요"}${rep.warn ? ` · 확인할 것 ${rep.warn}개` : ""}</div>`
     + rep.items.map(i => `<div class="qi ${i.lv}" ${i.t != null ? `data-qt="${i.t}" title="누르면 그 시간으로 가요"` : ""}><span>${{ ok: "✅", warn: "⚠️", bad: "⛔" }[i.lv]}</span><span><b>${esc(i.title)}</b>${esc(i.msg)}</span></div>`).join("");
   $("qaBody").querySelectorAll("[data-qt]").forEach(e => (e.onclick = () => {
@@ -3507,7 +3636,6 @@ function showVideoQA(rep) {
     if (EXP_JOB.seq && EXP_JOB.seq !== S.id) { if (!P.sequences.some(q => q.id === EXP_JOB.seq)) return toast("내보낸 편집본이 지워져서 그 자리로 갈 수 없어요"); switchSeq(EXP_JOB.seq); }
     seek(EXP_JOB.t0 + +e.dataset.qt);
   }));
-  $("qaModal").classList.add("show"); post("/api/open", { which: "out" });
 }
 $("qaClose").onclick = () => $("qaModal").classList.remove("show");
 $("busyStop").onclick = () => { if (confirm(qaRunning ? "검수를 건너뛸까요?" : `${JOBNAME || "작업"}을(를) 멈출까요?`)) post("/api/edit/cancel", {}); };
@@ -3640,7 +3768,7 @@ $("bNextEdit").onclick = () => { const n = edits().find(t => t > T + HF); if (n 
 $("undo").onclick = undo; $("redo").onclick = redo;
 $("toThumb").onclick = () => leaveTo("/thumb?name=" + encodeURIComponent(NAME));
 $("help").onclick = () => $("helpModal").classList.add("show"); $("helpClose").onclick = () => $("helpModal").classList.remove("show");
-$("back").onclick = () => leaveTo("/");
+$("back").onclick = () => leaveTo("/", "cut");  // 스튜디오 4 편집실 (영상 카드의 다음 할 일 · 예전: 1 소재 찾기)
 document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); if (ltab === "rec") renderRec(); });
 const scrub = $("scrub");
 scrub.onmousedown = e => { pause(); const f = ev => { const r = scrub.getBoundingClientRect(); seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * total()); autoscroll(); }; f(e); dragSeek(f); };

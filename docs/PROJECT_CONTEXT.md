@@ -135,13 +135,13 @@ icon.ico / icon.png 앱 아이콘
 
 | 서비스 | 용도 | 키 관리 위치 |
 |---|---|---|
-| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) | 키 없음. 쿠키는 사용자가 '로그인 정보로 받기'에서 브라우저(크롬·엣지·웨일·파이어폭스)를 고를 때만 그 브라우저에서 읽음 (`cookiesfrombrowser` · D-036) |
+| YouTube (yt-dlp) | 채널·영상 목록, 영상 받기(편집용 보관함 · 학습용 영상 `refs.add_channel`·`add_direction`), 출처를 모르는 예전 영상의 정보만 조회(`source._lookup`, 보관함을 열 때 뒤에서 2초 간격·한 번에 40개까지, 실패한 영상은 하루 뒤에) · 영상은 같은 해상도·fps 면 H.264 화면 먼저(`core.format_opts` · D-077) | 키 없음. 쿠키는 사용자가 '로그인 정보로 받기'에서 브라우저(크롬·엣지·웨일·파이어폭스)를 고를 때만 그 브라우저에서 읽음 (`cookiesfrombrowser` · D-036) |
 | YouTube 공개 RSS (`www.youtube.com/feeds/videos.xml?channel_id=UC…`) | 채널 전략: 채널마다 최근 15개 영상의 정확한 날짜·조회수·좋아요·원제. 사용자가 [새로 고침]·[지금 점검하기]를 누를 때와 8단계를 열 때 우리 채널 하루 한 번만 (D-024 · BR-016) · 시간 제한 20초 · 응답 2MB 까지 · DOCTYPE/ENTITY 가 든 응답은 거절 · 429·5xx 는 5초 뒤 한 번만 다시 | 키 없음. 쿠키 없음 (User-Agent `futsal-studio/<버전>`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치(켜진 앱이 쓰는 파일 때문에 못 하면 다음 실행 때 실행기가). Python 지원이 끝날 무렵(3.N 은 2016+N 년 7월부터)에만 `pypi.org/pypi/yt-dlp/json` 으로 최신 yt-dlp 가 받는 Python 을 확인 (`core._engine_needs_newer_python`) | 없음 |
 | Microsoft (aka.ms) | `시작하기 (Windows).bat` 이 Visual C++ 구성요소(msvcp140)가 없을 때만 `vc_redist.x64.exe` 를 받아 설치 (D-033) | 없음 |
 | GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
-| GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` | 없음 |
+| GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` · 받다 끊기면 그 자리부터 이어받음(`Range`·`If-Range` · 응답 ETag·Last-Modified 가 같을 때만 이어 붙임 · 모델 받기 모두 · D-071) | 없음 |
 | ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
 | Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). 채널 전략의 [클로드로 더 깊게 보기]를 누를 때만: 공개 채널 숫자·가져올 점·우리 전략 글·가능성 요약(약 6000자 · 영상·대사 없음, D-024). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |

@@ -29,8 +29,11 @@ _FAIL = {"t": 0.0}
 
 
 def ready():
-    """모델 파일이 있는지 (내려받지 않음 — 장면 캐시 확인용)."""
-    return (thumb.MODELS / FILE).is_file()
+    """모델 파일이 온전히 있는지 (내려받지 않음 — 장면 캐시 확인용). 받다 끊긴 반쪽 ONNX 는 없는 것으로 (thumb.model_whole · D-071) ·
+    크기도 SIZE_B 와 같아야 (맨 위 칸 경계에서 끊겨 모양만 맞는 파일 — model_whole 은 모양만 봄 · D-078)
+    → 다음 ensure 의 thumb.fetch_model 이 지우고 다시 받음 (받다 끊기면 .part 로 남겨 이어받기)."""
+    p = thumb.MODELS / FILE
+    return thumb._size(p) == SIZE_B and thumb.model_whole(p)
 
 
 def _recent(t):

@@ -458,6 +458,20 @@ def mark_footage(name, how="local"):
         pass
 
 
+def rename_file(old, new):
+    """보관함 영상 이름을 바꿈 → 출처 기록도 새 이름으로 (유튜브에서 받은 이름 꼴이 아니게 바뀌어도 영상 id 기록을 옮겨 둠 ·
+    직접 고른 출처 그대로). 기록이 없으면 아무것도 안 함. 못 쓰면 OSError·StoreBusy (이름 바꾸기는 계속 · 부르는 쪽이 알림)."""
+    def fix(data):
+        vid, rec = _record(old, data)
+        data["files"].pop(old, None)
+        if rec:
+            data["files"][new] = rec
+            if vid and video_id(new) != vid:
+                data["files"][new].setdefault("videoId", vid)
+        return bool(rec)
+    return _update(fix)
+
+
 def _merge(rec, meta, kind, how):
     rec.update(meta)
     if how != "guess" and rec.get("how") == "guess" and not kind:

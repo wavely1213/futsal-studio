@@ -261,6 +261,7 @@ document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.
 const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
 async function exportImg() {
   if (!D) return; if (editing) endEdit();
+  if (gone) return markGone();  // 옛 이름으로 열린 창: 완성본 폴더에 옛 이름 그림을 만들지 않음 (서버도 404 gone)
   const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
   if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return;
@@ -273,6 +274,7 @@ async function exportImg() {
     if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
   } else data = jpg();
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
+  if (j.gone) return markGone(j.error);
   if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
 $("exportBtn").onclick = exportImg;

@@ -206,9 +206,13 @@ def _save_running():
         return
     tmp = r.with_name(RUNNING + ".tmp")
     try:
-        tmp.write_text(json.dumps(_SESSION, ensure_ascii=False), encoding="utf-8")
+        try:
+            text = json.dumps(_SESSION, ensure_ascii=False).encode("utf-8")
+        except ValueError:  # 짝 없는 반쪽 글자가 든 이름(요청 본문에서 옴) → \u 꼴로 (작업을 막지 않게)
+            text = json.dumps(_SESSION).encode("ascii")
+        tmp.write_bytes(text)
         os.replace(tmp, r)
-    except OSError:  # 잠김(백신 등) → 다음 기회에
+    except (OSError, ValueError):  # 잠김(백신 등) → 다음 기회에
         pass
 
 
@@ -238,18 +242,44 @@ def session_start(version):
     if not job:
         return {"log": f"지난번 실행({started})이 정상적으로 끝나지 않았어요 (PC를 껐거나 프로그램이 갑자기 꺼졌을 수 있어요 · "
                        "남은 위치가 있으면 studio-error.log)",
-                "notice": None}
-    return {"log": f"지난번 실행({started})이 '{job}' 중에 갑자기 꺼졌어요 ({old.get('jobAt') or '?'}에 시작한 작업 · "
-                   "남은 위치가 있으면 studio-error.log)",
-            "notice": f"지난번에 '{job}' 중에 프로그램이 갑자기 꺼졌어요. 그 작업을 다시 해 주세요. "
-                      "계속 꺼지면 작업 폴더의 studio.log 파일을 관리자에게 보내 주세요 (같은 폴더에 studio-error.log 가 있으면 그것도요)."}
+                "notice": None, "crash": None}
+    what = _clean_what(old.get("what"))
+    names = what.get("names") or []
+    on = f"'{names[0]}'" + (f" 외 {len(names) - 1}개" if len(names) > 1 else "") + " 영상의 " if names else ""
+    return {"log": f"지난번 실행({started})이 '{job}' 중에 갑자기 꺼졌어요 ({old.get('jobAt') or '?'}에 시작한 작업"
+                   + (f" · 대상 {', '.join(names[:3])}{' 외' if len(names) > 3 else ''}" if names else "")
+                   + (f" · 받아쓰기 {what['model']}" if what.get("model") else "") + " · 남은 위치가 있으면 studio-error.log)",
+            "notice": f"지난번에 {on}'{job}' 중에 프로그램이 갑자기 꺼졌어요. 그 작업을 다시 해 주세요. "
+                      "계속 꺼지면 작업 폴더의 studio.log 파일을 관리자에게 보내 주세요 (같은 폴더에 studio-error.log 가 있으면 그것도요).",
+            "crash": dict(what, job=job, at=old.get("jobAt") or None, id=str(old.get("start") or "") + "|" + str(old.get("jobAt") or ""))}
+
+
+WHAT_KEYS = {"path": str, "names": list, "model": str, "title": str}  # 실행 표시에 남기는 작업 대상 (다시 하기에 쓸 것만 · 비밀 없음)
+
+
+def _clean_what(w):
+    """실행 표시의 작업 대상 → 아는 칸·꼴만 (손으로 고친·깨진 표시가 화면에 엉뚱한 값을 넣지 않게)."""
+    if not isinstance(w, dict):
+        return {}
+    out = {k: w[k] for k, tp in WHAT_KEYS.items() if isinstance(w.get(k), tp)}
+    if "names" in out:
+        out["names"] = [n for n in out["names"] if isinstance(n, str) and n][:50]
+    return out
 
 
 def job(name):
     """작업 시작(name)·끝(None)을 실행 표시에 (session_start 를 부른 프로세스만 · 시험에서 띄운 서버는 쓰지 않음)."""
     if not _SESSION:
         return
-    _SESSION.update(job=name, jobAt=stamp().strip() if name else None)
+    _SESSION.update(job=name, jobAt=stamp().strip() if name else None, what=None)
+    _save_running()
+
+
+def target(**what):
+    """지금 작업의 대상(영상 이름·받아쓰기 모델·다시 할 주소)을 실행 표시에 → 갑자기 꺼지면 다음에 켤 때 '○○ 영상' + [다시 하기]."""
+    if not _SESSION or not _SESSION.get("job"):
+        return
+    _SESSION["what"] = _clean_what(what)
     _save_running()
 
 

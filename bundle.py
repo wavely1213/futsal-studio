@@ -547,14 +547,85 @@ def _replace_retry(src, dst, secs=None):
 KEEP_PREFIX = "묶은 영상_옮기지 못함_"  # 다 묶었는데 보관함으로 못 옮기면 임시 폴더를 이 이름으로 (정리 대상 아님 · 지우지 않음)
 
 
-def _keep_tmp(tmp):
-    """옮기지 못한 묶음 파일이 든 임시 폴더를 보이는 이름으로 바꿈 → 바뀐 폴더 (못 바꾸면 None)."""
+KEEP_INFO = ".옮길 이름.json"  # 그 폴더 안: 묶은 파일·보관함 이름·클립 표 → 다음에 켤 때 보관함으로 (place_kept)
+KEEP_MARK = "옮기지 못한 묶음.txt"  # 폴더 이름도 못 바꿨으면(Windows: 안의 파일이 잠겨 있으면 폴더도 못 바꿈) 이 표시 → 정리에서 빼고 지우지 않음
+
+
+def _kept(d):
+    """다 묶었는데 보관함으로 못 옮겨 남겨 둔 폴더인지 (이름 · 표시 · 옮길 이름 기록) — 정리(_sweep_old·editor.sweep_temp)가 지우지 않게."""
+    return d.name.startswith(KEEP_PREFIX) or (d / KEEP_MARK).exists() or (d / KEEP_INFO).exists()
+
+
+def _keep_tmp(tmp, part=None, info=None):
+    """옮기지 못한 묶음 파일이 든 임시 폴더를 보이는 이름으로 바꿈 → 바뀐 폴더 (못 바꾸면 None).
+    part 말고는 지우고(조각·목록 — 묶음만 남김) info 를 남겨 다음에 켤 때 보관함으로 옮김."""
+    if part is not None:
+        import editor
+        editor._strip_dir(tmp, keep=(part.name,))
+        try:
+            updater.write_atomic(tmp / KEEP_INFO, json.dumps(dict(info or {}, file=part.name), ensure_ascii=False))
+        except OSError:
+            pass
     keep = tmp.with_name(KEEP_PREFIX + time.strftime("%Y%m%d_%H%M%S"))
     try:
         os.replace(tmp, keep)
         return keep
+    except OSError:  # 백신이 묶음을 잡고 있으면 폴더 이름도 못 바꿈 → 표시를 넣고 그 자리에 둠 (편집실 _place_final 과 같게)
+        pass
+    try:
+        (tmp / KEEP_MARK).write_text(f"묶은 영상을 보관함으로 옮기지 못했어요. 이 폴더의 {(part or tmp / 'bundle.mp4').name} 이 묶은 영상이에요. "
+                                     "다음에 앱을 켜면 보관함에 넣어 드려요.", encoding="utf-8")
     except OSError:
-        return None
+        if not (tmp / KEEP_INFO).exists():
+            return None
+    return tmp
+
+
+def place_kept(log=print):
+    """지난번에 보관함으로 못 옮긴 묶음 → 보관함으로 옮기고(클립 표·출처 '묶음'도) 그 임시 폴더를 지움 (앱을 켤 때 한 번).
+    이름은 그때 정한 이름 (그사이 같은 이름이 생겼으면 다시 정함) · 예전 판이 남긴 폴더(기록 없음)는 '묶음_<날짜>_촬영본'.
+    그래도 못 옮기면 그대로 두고 다음에 다시. → 옮긴 이름 목록."""
+    import editor
+    moved = []
+    try:  # 이름을 바꾼 폴더 + 이름도 못 바꿔 임시 폴더 이름 그대로 표시만 넣은 폴더
+        dirs = sorted(d for d in core.OUT.iterdir() if d.is_dir() and (d.name.startswith(KEEP_PREFIX) or (d.name.startswith(TMP_PREFIX) and _kept(d))))
+    except OSError:
+        dirs = []
+    for d in dirs:
+        info = editor._keep_info(d)
+        src = d / Path(str(info.get("file") or "bundle.mp4")).name
+        if not src.is_file():  # 사용자가 이미 꺼내 감 → 남은 조각만 지우고 비었으면 폴더도
+            editor._strip_dir(d, keep={x.name for x in d.glob("*.mp4")})
+            editor._rmdir(d)
+            continue
+        ymd = str(info.get("ymd") or d.name[len(KEEP_PREFIX):][:8])
+        ymd = ymd if re.fullmatch(r"\d{8}", ymd) else time.strftime("%Y%m%d")
+        name = Path(str(info.get("name") or "")).name
+        if not name.lower().endswith(".mp4") or (core.VIDEOS / name).exists() or core.adir(name).exists():
+            name = _unique_name(ymd, clean_title(info.get("title")))
+        dest = core.VIDEOS / name
+        try:
+            _replace_retry(src, dest, updater.REPLACE_SECS)
+        except OSError as e:
+            log(f"지난번에 옮기지 못한 묶음을 아직 보관함으로 옮기지 못했어요 · '{src}' · {e}")
+            continue
+        meta = info.get("meta")
+        if isinstance(meta, list) and meta:
+            try:
+                ad = core.adir(name)
+                ad.mkdir(parents=True, exist_ok=True)
+                (ad / "bundle.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+            except OSError:
+                pass
+        try:
+            source.mark_footage(name, "bundle")
+        except Exception:  # noqa: BLE001 — 출처 표시는 곁가지
+            pass
+        editor._strip_dir(d)
+        editor._rmdir(d)
+        moved.append(name)
+        log(f"지난번에 보관함으로 옮기지 못한 묶음을 보관함에 넣었어요 · {name}")
+    return moved
 
 
 def _rmtree(d):
@@ -569,7 +640,7 @@ def _sweep_old():
     """앱이 묶는 도중 꺼져 남은 임시 폴더 정리 (작업은 한 번에 하나라 지금 남은 것은 모두 예전 것)."""
     try:
         for d in core.OUT.iterdir():
-            if d.is_dir() and d.name.startswith(TMP_PREFIX):
+            if d.is_dir() and d.name.startswith(TMP_PREFIX) and not _kept(d):  # 못 옮겨 남겨 둔 묶음은 다음에 켤 때 보관함으로 (지우지 않음)
                 _rmtree(d)
     except OSError:
         pass
@@ -642,15 +713,16 @@ def make_bundle(names, title, log):
             _replace_retry(part, dest)
         except OSError as e:
             _rmtree(adir)
-            kept = _keep_tmp(tmp)  # 몇 분 걸려 만든 묶음을 지우지 않음 (예전: 10초 뒤 포기하고 임시 폴더째 지움)
+            # 몇 분 걸려 만든 묶음을 지우지 않음 (예전: 10초 뒤 포기하고 임시 폴더째 지움) · 조각은 지우고 묶음만 · 다음에 켤 때 보관함으로
+            kept = _keep_tmp(tmp, part, {"name": name, "ymd": ymd, "title": title, "meta": meta})
             if kept is None:
                 raise
             tmp = kept
             log(f"  묶은 영상을 보관함으로 옮기지 못했어요 · {e}")
             raise RuntimeError(f"묶은 영상은 만들었지만 보관함으로 옮기지 못했어요 (백신이 검사 중일 수 있어요). "
-                               f"'{kept / part.name}' 에 그대로 있어요") from None
+                               f"'{kept / part.name}' 에 그대로 있어요 · 다음에 앱을 켜면 보관함에 넣어 드려요") from None
     finally:
-        if not tmp.name.startswith(KEEP_PREFIX):
+        if not _kept(tmp):
             _rmtree(tmp)
     source.mark_footage(name, "bundle")
     size = dest.stat().st_size

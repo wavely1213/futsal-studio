@@ -1,5 +1,6 @@
 """썸네일 도구: 장면 후보 추출 · 장면 캡처 · 누끼(배경 제거) · 디자인 저장 · 이미지 내보내기."""
 import base64
+import errno
 import io
 import json
 import os
@@ -7,6 +8,7 @@ import re
 import socket
 import threading
 import time
+import urllib.error
 from pathlib import Path
 
 import core
@@ -696,44 +698,168 @@ class DownloadCancelled(Exception):
 
 
 def fetch_model(fname, urls, label, detail, size=None, sha256=None, item=None, timeout=30, cancel=None):
-    """모델 파일을 MODELS 에 (없으면) 내려받아 경로 반환. 주소를 차례로 시도하고, 받은 파일은 크기·지문(sha256)을
-    확인한 뒤에만 제자리로 (중간에 끊겨도 반쪽 파일이 남지 않게). 모두 실패하면 마지막 오류를 냄.
+    """모델 파일을 MODELS 에 (없으면) 내려받아 경로 반환. 주소를 차례로 시도하고, 받은 파일은 크기·지문(sha256)·
+    끝까지 있는지(model_whole)를 확인한 뒤에만 제자리로 (중간에 끊겨도 반쪽 파일이 남지 않게). 모두 실패하면 마지막 오류를 냄.
+    이미 있는 파일도 끝까지 있는지 · 크기를 알면 그 크기인지 보고 아니면 지우고 다시 받음 (지문은 큰 모델을 매번 읽지 않게 받을 때만).
     대답 없이 시간이 다 되면 다른 주소도 마찬가지라서 더 기다리지 않음.
     urls 의 한 항목은 주소 하나이거나 (주소, 크기, sha256) — 서버마다 변환본이 달라 지문이 다를 때 그 주소만의 값으로 확인."""
     MODELS.mkdir(parents=True, exist_ok=True)
     path = MODELS / fname
+    sizes = {e[1] if isinstance(e, (tuple, list)) else size for e in urls}  # 주소마다 크기가 다를 수 있음 (변환본)
     with _DL_LOCK:
         if path.is_file():
-            return path
+            if model_whole(path) and (not sizes or None in sizes or _size(path) in sizes):
+                return path
+            # 예전 판이 받다 끊긴 반쪽 모델을 완성본으로 저장해 둠 · 맨 위 칸 경계에서 끊겨 모양만 맞는 파일(크기를 알면 걸러 냄 · D-078)
+            _unlink(path)  # → 지우고 다시 받음 (그대로 두면 계속 고장)
         tmp, err = path.with_suffix(".part"), None
+        _sweep_parts(keep=tmp)
         for entry in urls:
             url, want_size, want_sha = (entry if isinstance(entry, (tuple, list)) else (entry, size, sha256))
+            got = {"n": 0}
 
-            def hook(got, total, want_size=want_size):
+            def hook(n, total, want_size=want_size):
                 if cancel is not None and cancel():
                     raise DownloadCancelled()
+                got["n"] = n
                 total = total or want_size or 0
                 if total > 0:
-                    core.set_progress(label=label, item=item, pct=min(99, int(got * 100 / total)), detail=detail)
+                    core.set_progress(label=label, item=item, pct=min(99, int(n * 100 / total)), detail=detail)
             try:
-                updater.download(url, tmp, hook, timeout=timeout)
+                for k in range(RESUME_TRIES):  # 와이파이가 끊겨도 받은 데까지는 두고 그 자리부터 다시 (220MB 를 처음부터 받지 않게)
+                    before = _size(tmp)
+                    try:
+                        updater.download(url, tmp, hook, timeout=timeout, resume=True)
+                        break
+                    except updater.NET_ERRORS as e:
+                        if k + 1 >= RESUME_TRIES or isinstance(e, urllib.error.HTTPError) or got["n"] <= before or _disk_error(e):
+                            raise
                 if want_size and tmp.stat().st_size != want_size:
-                    raise OSError("받은 파일 크기가 달라요")
+                    raise _BadModel("받은 파일 크기가 달라요")
                 if want_sha and updater.sha256(tmp) != want_sha:
-                    raise OSError("받은 파일 확인(sha256)에 실패했어요")
+                    raise _BadModel("받은 파일 확인(sha256)에 실패했어요")
+                if not model_whole(tmp, Path(fname).suffix):  # 지문이 없는 누끼 모델도: 끝이 모자라거나 두 판이 섞였으면 제자리에 두지 않음
+                    raise _BadModel("받은 모델 파일이 온전하지 않아요 · 다시 눌러 주세요")
                 updater._replace(tmp, path)
+                updater._drop_resume(tmp)
                 return path
             except Exception as e:
                 err = e
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
+                # 받다 끊김(이어받기 기록이 있음)이면 받은 데까지 남겨 다음에 이어받음 · 그 밖(멈춤·확인 실패·없는 주소)은 지움
+                # 디스크가 꽉 찬 것(ENOSPC)도 OSError 지만 끊김이 아님 → 받은 데까지(최대 220MB) 남기지 않고 지움
+                resumable = isinstance(e, updater.NET_ERRORS) and not isinstance(e, (urllib.error.HTTPError, DownloadCancelled, _BadModel)) \
+                    and not _disk_error(e) and updater._resume_meta(tmp).exists() and _size(tmp) > 0
+                if not resumable:
+                    _unlink(tmp)
+                    updater._drop_resume(tmp)
                 if isinstance(e, DownloadCancelled):
                     raise
                 if _timed_out(e):
                     break
         raise err or OSError("내려받을 주소가 없어요")
+
+
+RESUME_TRIES = 3  # 한 번 누를 때 받다 끊기면 이어받기를 몇 번까지 (조금이라도 더 받았을 때만 다시)
+PART_DAYS = 14    # 이만큼 손대지 않은 받다 만 모델(.part + .resume)은 지움 (다시 누르지 않으면 계속 자리를 차지함)
+DISK_ERRNOS = {errno.ENOSPC, errno.EFBIG, errno.EROFS, getattr(errno, "EDQUOT", errno.ENOSPC)}
+
+
+class _BadModel(OSError):
+    """다 받았는데 크기·지문·모양이 틀림 → 이어받지 않고 지움."""
+
+
+def _disk_error(e):
+    """디스크가 꽉 참·쓸 수 없음 (Windows ERROR_DISK_FULL 112 · ERROR_HANDLE_DISK_FULL 39) — 와이파이 끊김이 아님."""
+    return isinstance(e, OSError) and (getattr(e, "errno", None) in DISK_ERRNOS or getattr(e, "winerror", None) in (39, 112))
+
+
+def _sweep_parts(keep=None, days=None):
+    """오래된 받다 만 모델(.part)과 그 이어받기 기록(.part.resume)을 지움 · 지금 받을 파일(keep)은 그대로."""
+    old = time.time() - (PART_DAYS if days is None else days) * 86400
+    try:
+        parts = list(MODELS.glob("*.part")) + [p.with_name(p.name[:-len(updater.RESUME_SUFFIX)]) for p in MODELS.glob("*.part" + updater.RESUME_SUFFIX)]
+    except OSError:
+        return
+    for p in set(parts):
+        if keep is not None and p == keep:
+            continue
+        try:
+            if p.exists() and p.stat().st_mtime > old:
+                continue
+        except OSError:
+            continue
+        _unlink(p)
+        updater._drop_resume(p)
+
+
+def _size(p):
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+def _unlink(p):
+    try:
+        p.unlink()
+    except OSError:
+        pass
+
+
+def _varint(buf, i):
+    """protobuf 정수 하나 → (값, 다음 위치) · 모자라면 (None, i)."""
+    v = shift = 0
+    while i < len(buf):
+        b = buf[i]
+        v |= (b & 0x7F) << shift
+        i += 1
+        if not b & 0x80:
+            return v, i
+        shift += 7
+        if shift > 63:
+            break
+    return None, i
+
+
+def model_whole(path, suffix=None):
+    """모델 파일이 끝까지 있는지 (받다 끊긴 반쪽이 아닌지). ONNX(protobuf)는 맨 위 칸의 길이를 따라가 파일 끝과 딱 맞는지
+    (몇 바이트씩만 읽음 · 220MB 도 바로) — 끝이 모자라거나 모델 본체(graph, 7번 칸)가 없으면 반쪽.
+    모르는 꼴·ONNX 가 아닌 파일은 판단하지 않음(참). 빈 파일은 반쪽."""
+    path = Path(path)
+    size = _size(path)
+    if size <= 0:
+        return False
+    if (suffix or path.suffix).lower() != ".onnx":
+        return True
+    try:
+        with open(path, "rb") as f:
+            pos, graph = 0, False
+            while pos < size:
+                f.seek(pos)
+                head = f.read(24)
+                key, i = _varint(head, 0)
+                if key is None:
+                    return False
+                wire, graph = key & 7, graph or key >> 3 == 7
+                if wire == 0:
+                    v, i = _varint(head, i)
+                    if v is None:
+                        return False
+                    pos += i
+                elif wire == 1:
+                    pos += i + 8
+                elif wire == 5:
+                    pos += i + 4
+                elif wire == 2:
+                    n, i = _varint(head, i)
+                    if n is None:
+                        return False
+                    pos += i + n
+                else:  # 그룹 등 쓰지 않는 꼴 → 판단하지 않음 (멀쩡한 파일을 지우지 않게)
+                    return True
+            return pos == size and graph
+    except OSError:  # 잠깐 못 읽음 → 판단하지 않음
+        return True
 
 
 def _model(kind):
@@ -955,9 +1081,15 @@ def _cut_targets(items):
 
 
 def _cut_path(name, t, box, kind="fast"):
+    return cut_file(core.adir(name).name, t, box, kind)
+
+
+def cut_file(stem, t, box, kind="fast"):
+    """자동 누끼 파일 자리 — 키 = (분석 폴더 이름, 시각, 종류, 상자, 판). 영상 이름을 바꾸면 키도 바뀌므로
+    이름 바꾸기(rename._move_cuts)가 옛·새 폴더 이름으로 키를 다시 세어 파일을 옮김."""
     import hashlib
     box = [round(float(v), 3) for v in box[:4]] if box else None
-    key = hashlib.sha1(f"{core.adir(name).name}|{float(t):.3f}|{kind}|{box}|v{CUT_VER}".encode("utf-8")).hexdigest()[:16]
+    key = hashlib.sha1(f"{stem}|{float(t):.3f}|{kind}|{box}|v{CUT_VER}".encode("utf-8")).hexdigest()[:16]
     return ASSETS / f"cut_auto_{key}.png"
 
 

@@ -3276,8 +3276,9 @@ PRESETS = {
 
 
 def _is_render_tmp(d):
-    """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음)."""
-    if not d.is_dir() or (d / KEEP_MARK).exists():
+    """내보내기·러프컷이 쓰던 임시 폴더인지 (이름 + 안의 파일로 확인 → 사용자 폴더는 건드리지 않음).
+    제자리로 못 옮겨 남겨 둔 결과(표시·옮길 이름 기록 · 묶기 '.render_bundle_' 포함)는 아님 → 다음에 켤 때 place_kept 가 옮김."""
+    if not d.is_dir() or any((d / m).exists() for m in (KEEP_MARK, KEEP_INFO, "옮기지 못한 묶음.txt")):  # 마지막 = bundle.KEEP_MARK
         return False
     if d.name.startswith(".render_"):
         return True
@@ -3292,6 +3293,95 @@ def _is_render_tmp(d):
 
 KEEP_PREFIX = "내보낸 영상_옮기지 못함_"  # 완성본을 제자리로 못 옮기면 임시 폴더를 이 이름으로 (정리 대상 아님 · 사용자에게 보임)
 KEEP_MARK = "옮기지 못한 완성본.txt"  # 폴더 이름도 못 바꿨으면 이 표시를 넣음 → 정리(sweep_temp)에서 빼고 지우지 않음
+KEEP_INFO = ".옮길 이름.json"  # 그 폴더 안: 완성본 파일 이름·옮길 이름 → 다음에 켤 때 완성본 폴더로 옮김 (place_kept)
+
+
+def _strip_dir(d, keep=()):
+    """우리 임시 폴더(렌더·묶기)에서 keep 말고 모두 지움 (구간 영상·소리 버퍼·자막·글꼴 — 실패 한 번에 GB 단위가 남지 않게).
+    잠겨서 못 지운 것은 그대로 (다음에 켤 때 place_kept 가 다시)."""
+    try:
+        items = list(d.iterdir())
+    except OSError:
+        return
+    for x in items:
+        if x.name in keep:
+            continue
+        try:
+            if x.is_dir() and not x.is_symlink():
+                shutil.rmtree(x, ignore_errors=True)
+            else:
+                x.unlink()
+        except OSError:
+            pass
+
+
+def _free_path(p):
+    """같은 이름 파일이 있으면 ' (2)'·' (3)'… (덮어쓰지 않게)."""
+    if not p.exists():
+        return p
+    for i in range(2, 1000):
+        alt = p.with_name(f"{p.stem} ({i}){p.suffix}")
+        if not alt.exists():
+            return alt
+    return p.with_name(f"{p.stem}_{uuid.uuid4().hex[:6]}{p.suffix}")
+
+
+def kept_dirs(prefix=KEEP_PREFIX):
+    """완성본 폴더 안에서 제자리로 못 옮긴 결과가 든 우리 폴더들 (이름 또는 표시로 · 표시도 못 썼으면 렌더 임시 폴더의 옮길 이름 기록)."""
+    def ours(d):
+        return d.name.startswith(prefix) or (d / KEEP_MARK).exists() or (
+            d.name.startswith(".render_") and not d.name.startswith(".render_bundle_") and (d / KEEP_INFO).exists())  # 묶기 폴더는 bundle.place_kept
+    try:
+        return sorted(d for d in core.OUT.iterdir() if d.is_dir() and ours(d))
+    except OSError:
+        return []
+
+
+def _keep_info(d):
+    try:
+        info = json.loads((d / KEEP_INFO).read_text(encoding="utf-8"))
+        return info if isinstance(info, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def place_kept(log=print):
+    """지난번에 제자리로 못 옮긴 완성본 → 완성본 폴더로 옮기고 그 임시 폴더를 지움 (앱을 켤 때 한 번 · 백신 검사는 끝났을 때).
+    옮길 이름은 그때 기록(KEEP_INFO) · 예전 판이 남긴 폴더(기록 없음)는 '내보낸 영상_<그때 시각>.mp4'. 같은 이름이 있으면 (2)…
+    그래도 못 옮기면 그대로 두고 다음에 다시. → 옮긴 파일 이름 목록."""
+    moved = []
+    for d in kept_dirs():
+        info = _keep_info(d)
+        src = d / Path(str(info.get("file") or "final.mp4")).name
+        if not src.is_file():  # 사용자가 이미 꺼내 감 → 우리 임시 파일만 지우고(다른 mp4 는 그대로) 비었으면 폴더도
+            _strip_dir(d, keep={x.name for x in d.glob("*.mp4") if not _RENDER_PART.fullmatch(x.name)})
+            _rmdir(d)
+            continue
+        stamp = d.name[len(KEEP_PREFIX):] if d.name.startswith(KEEP_PREFIX) else time.strftime("%Y%m%d_%H%M%S", time.localtime(src.stat().st_mtime))
+        want = Path(str(info.get("out") or "")).name
+        if not want.lower().endswith(".mp4") or re.search(r'[\\/:*?"<>|\x00-\x1f]', want):
+            want = f"내보낸 영상_{stamp}.mp4"
+        dst = _free_path(core.OUT / want)
+        try:
+            updater.replace_retry(src, dst, updater.REPLACE_SECS)
+        except OSError as e:
+            log(f"지난번에 옮기지 못한 완성본을 아직 옮기지 못했어요 · '{src}' · {e}")
+            continue
+        _strip_dir(d)
+        _rmdir(d)
+        moved.append(dst.name)
+        log(f"지난번에 옮기지 못한 완성본을 완성본 폴더로 옮겼어요 · {dst.name}")
+    return moved
+
+
+def _rmdir(d):
+    try:
+        d.rmdir()
+    except OSError:
+        pass
+
+
+_RENDER_PART = re.compile(r"(seg\d{4}|p\d{3}|part\d*)\.mp4", re.I)  # 렌더·묶기 중간 영상 (완성본 아님)
 
 
 class KeptFinal(RuntimeError):
@@ -3322,6 +3412,11 @@ def _place_final(src, out, log):
             return alt
     log(f"  완성본을 옮기지 못했어요 · {err}")
     d = src.parent
+    _strip_dir(d, keep=(src.name,))  # 완성본만 남김 (예전: 구간 영상·소리 버퍼까지 통째로 남아 2.7배 · 50분 편집본이면 약 3.5GB)
+    try:  # 다음에 켤 때 이 이름으로 완성본 폴더에 옮김 (place_kept)
+        updater.write_atomic(d / KEEP_INFO, json.dumps({"file": src.name, "out": out.name}, ensure_ascii=False))
+    except OSError:
+        pass
     keep = d.with_name(KEEP_PREFIX + time.strftime("%Y%m%d_%H%M%S"))
     try:
         os.replace(d, keep)
@@ -3331,7 +3426,8 @@ def _place_final(src, out, log):
             (d / KEEP_MARK).write_text("완성본을 옮기지 못했어요. 이 폴더의 final.mp4 가 완성본이에요.", encoding="utf-8")
         except OSError:
             pass
-    raise KeptFinal(f"완성본은 만들었지만 제자리로 옮기지 못했어요 (백신이 검사 중일 수 있어요). '{d / src.name}' 에 그대로 있어요")
+    raise KeptFinal(f"완성본은 만들었지만 제자리로 옮기지 못했어요 (백신이 검사 중일 수 있어요). '{d / src.name}' 에 그대로 있어요 · "
+                    f"다음에 앱을 켜면 완성본 폴더로 옮겨 드려요")
 
 
 def sweep_temp(min_age=600):

@@ -1702,7 +1702,7 @@ def _a_analyze(svc, dev, a, tok):
         return svc._confirm(dev, "analyze", {"names": names},
                             f"이미 편집점을 찾은 영상이 {again}개 있어요. 다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 옆에 추가해요. "
                             "자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요). 계속할까요?")
-    return svc._go(dev, "편집점 찾기", lambda: svc.bridge.analyze({"names": names, "model": "large-v3-turbo"}),
+    return svc._go(dev, "편집점 찾기", lambda: svc.bridge.analyze({"names": names, "model": core.default_model()}),
                    names[0] + (f" 외 {len(names) - 1}개" if len(names) > 1 else ""))
 
 
