@@ -1351,10 +1351,11 @@ function renderLocal() {
     return `<div class="row${v.copying ? " copying" : ""}">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${chip}
       ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
-        : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>` : `<span></span>`}
+        : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>`
+        : v.renamedFrom ? `<button class="btn primary" data-attach="${esc(v.name)}" data-old="${esc(v.renamedFrom.old)}" title="예전 이름의 받아쓰기·편집본·썸네일을 이 영상에 이어 붙여요 (다시 받아쓰지 않아요)">예전 작업 이어 붙이기</button>` : `<span></span>`}
     </div>`;
   }).join("") + badRows : state.local.length ? `<div class="empty"><b>${esc(filterName())} 영상이 없어요</b>위에서 '전체'를 누르면 모든 영상이 보여요. 영상 이름 아래 출처 표시를 눌러 바꿀 수도 있어요.</div>`
     : `<div class="empty"><b>보관함이 비어 있어요</b>소재 찾기에서 영상을 담거나, "촬영 원본 넣기"로 연 폴더에 영상 파일을 넣어 주세요.</div>`;
@@ -1364,6 +1365,8 @@ function renderLocal() {
   document.querySelectorAll("#local [data-toref]").forEach(b => b.onclick = () => moveToRefs([b.dataset.toref]));
   document.querySelectorAll("#local [data-reana]").forEach(b => b.onclick = () => analyzeNames([b.dataset.reana], true));
   document.querySelectorAll("#local [data-conv]").forEach(b => b.onclick = () => convertMp4(b.dataset.conv));
+  document.querySelectorAll("#local [data-ren]").forEach(b => b.onclick = () => renameVideo(b.dataset.ren));
+  document.querySelectorAll("#local [data-attach]").forEach(b => b.onclick = () => attachOld(b.dataset.attach, b.dataset.old));
   renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
@@ -1507,6 +1510,26 @@ function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남
   const f = partFail(failed, res.why, total, "편집점을 찾지");
   showFail({ ...f, msg: f.msg.replace("개를 편집점을 찾지 못했어요", "개는 편집점을 찾지 못했어요"), job: "편집점 찾기" },
     { path: "/api/analyze", body: { ...body, names: failed }, done: analyzed, panel: jb.panel || "p-library" });
+}
+/* 2-1c. 이름 바꾸기 (D-073): 영상과 받아쓰기·편집본·썸네일 디자인·출처를 함께 · 탐색기에서 바꿨으면 옛 이름 작업 이어 붙이기 */
+async function renameVideo(name) {
+  if (state.job) return toast("다른 작업이 끝난 뒤에 바꿔 주세요");
+  const ext = (name.match(/\.[^.]+$/) || [""])[0], cur = name.slice(0, name.length - ext.length);
+  const t = prompt(`새 이름을 적어 주세요 (끝의 ${ext || "확장자"} 는 그대로 붙어요)\n받아쓰기·편집본·썸네일 디자인도 함께 옮겨요 · 이 영상의 편집실·썸네일 창은 먼저 닫아 주세요`, cur);
+  if (t === null || !t.trim() || t.trim() === cur) return;
+  const j = await api("/api/rename", { name, to: t }).catch(() => ({}));
+  if (!j.ok) return;  // 안내는 api() 가 토스트로
+  if (libSel.delete(name)) libSel.add(j.name);
+  lastLocalKey = ""; poll();
+  toast(`'${cutText(j.name, 40)}'(으)로 바꿨어요` + (j.analysis || j.project ? " · 받아쓰기·편집본도 함께 옮겼어요" : ""));
+}
+async function attachOld(name, old) {
+  if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요");
+  if (!confirm(`예전 이름 '${old}'의 받아쓰기·편집본·썸네일 디자인을 '${name}'에 이어 붙일까요?\n다시 받아쓰지 않고 바로 편집실을 열 수 있어요.`)) return;
+  const j = await api("/api/rename/attach", { name, old }).catch(() => ({}));
+  if (!j.ok) return;
+  lastLocalKey = ""; poll();
+  toast(`예전 작업을 이어 붙였어요 · '${cutText(name, 40)}'` + (j.project ? " · 편집본 그대로예요" : ""));
 }
 function convertMp4(name) {  // 못 쓰는 형식(.MTS 등) → MP4 (원본은 보관함 안 '바꾸기 전 원본' 폴더로)
   if (state.job || !confirm(`'${name}' 파일을 편집할 수 있는 MP4로 바꿔 보관함에 넣을까요?\n원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요. 영상 길이에 따라 몇 분 걸릴 수 있어요.`)) return;
@@ -2107,7 +2130,7 @@ function sync() {
   $("btnAnalyze").disabled = busy || !nl;
   $("btnToRefs").disabled = busy || !nl;
   $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
-  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana]").forEach(b => (b.disabled = busy));
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren]").forEach(b => (b.disabled = busy));
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";

@@ -28,6 +28,7 @@ import qa
 import qr
 import refs
 import remote
+import rename
 import source
 import strategy
 import studiolog
@@ -577,6 +578,7 @@ class Handler(BaseHTTPRequestHandler):
                          "done": dict(DONE[want], id=want) if want in DONE else None}  # ?job=<번호>: 그 작업이 끝났으면 결과
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
+            rename.annotate(local)  # 탐색기에서 이름을 바꿔 끊긴 옛 이름 작업 (renamedFrom · [이어 붙이기])
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
                                     "result": JOB["result"] if not JOB["name"] else None,
                                     "error": JOB["error"] if not JOB["name"] else None,
@@ -955,6 +957,22 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
+        if path in ("/api/rename", "/api/rename/attach"):  # 보관함 영상 이름 바꾸기 · 탐색기에서 바꾼 영상에 옛 작업 이어 붙이기 (D-073)
+            with LOCK:
+                busy = bool(JOB["name"])
+            if busy:  # 작업이 그 영상 파일·폴더를 쓰는 중일 수 있음
+                return self._send(409, {"ok": False, "error": BUSY_MSG})
+            try:
+                n = editor.safe_name(b.get("name"))
+                r = rename.rename(n, b.get("to"), log) if path == "/api/rename" else rename.attach(n, str(b.get("old") or ""), log)
+                return self._send(200, dict(r, ok=True))
+            except FileNotFoundError as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except (ValueError, TypeError) as e:  # RenameError 포함 · 잘못된 이름
+                return self._send(400, {"ok": False, "error": str(e) or "잘못된 파일 이름이에요"})
+            except OSError as e:
+                log(f"이름을 바꾸지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "이름을 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요"})
         if path == "/api/crash/dismiss":  # 지난번 꺼짐 카드 닫기 (✕)
             CRASH.clear()
             return self._send(200, {"ok": True})
