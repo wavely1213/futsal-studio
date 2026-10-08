@@ -116,7 +116,9 @@ class TextTest(unittest.TestCase):
         self.assertEqual(msg.glyph_safe("아깝다…", "Black Han Sans"), "아깝다...")
         self.assertEqual(msg.glyph_safe("2/5 · 1골", "Black Han Sans"), "2/5, 1골")
         self.assertEqual(msg.glyph_safe("포인트 ③", "Black Han Sans"), "포인트 3")
-        self.assertEqual(msg.glyph_safe("포인트 ③", "Do Hyeon"), "포인트 ③")   # 도현에는 있음
+        self.assertEqual(msg.glyph_safe("포인트 ③", "Do Hyeon"), "포인트 3")   # 도현에는 있지만 작게 뭉개짐 (판정 round5 최종)
+        self.assertEqual(msg.glyph_safe("포인트 ③", None), "포인트 3")
+        self.assertEqual(msg.glyph_safe("① 고개 들기\n② 디딤발 거리", None), "1. 고개 들기\n2. 디딤발 거리")
         self.assertEqual(msg.glyph_safe("(생각 중…)", "Do Hyeon"), "(생각 중...)")
         b = msg._Build("x.mp4", {"duration": 60}, "long")
         t = b.title("(아까비…)", 1.0, 1.0, {"font": "Do Hyeon", "y": 0.5})
@@ -477,6 +479,20 @@ class LongSourceTest(unittest.TestCase):
         self.assertGreaterEqual(len(jokes) / mins, 3.0, (len(jokes), mins))
         self.assertLess(len(zooms), len(jokes), (len(zooms), len(jokes)))
 
+    def test_text_does_not_run_into_an_inserted_scene(self):
+        """판정 round5 최종: 앞 장면의 '나이스!!'가 다시 보기 장면 위까지 남음."""
+        n = 0
+        for r in self.res.values():
+            for q in r["sequences"]:
+                ins = [float(e["ins"]["start"]) for e in q["msg"]["events"] if e.get("ins") and e["kind"] in ("replay", "freeze", "montage")]
+                ids = {i for e in q["msg"]["events"] if e["kind"] in ("inner", "fx", "situ", "emphasis") for i in (e.get("refs") or {}).get("titles", [])}
+                for t in q["titles"]:
+                    if t["id"] in ids:
+                        n += 1
+                        for s0 in ins:
+                            self.assertFalse(t["start"] < s0 - 0.03 and t["start"] + t["dur"] > s0 + 0.03, (q["name"], t["text"], t["start"], s0))
+        self.assertGreater(n, 10)
+
     def test_single_final_closing(self):
         q = next(q for q in self.res["듬뿍"]["sequences"] if "예능" in q["name"])
         mont = [e for e in q["msg"]["events"] if e["kind"] == "montage"]
@@ -753,3 +769,30 @@ class StateRouteTest(TmpWork):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FinalJudge2Test(unittest.TestCase):
+    """round5 최종 판정(b169a15) 지적: '다시 보기 ▶'가 감독님이 말하는 장면(물 마시기) 위 · 앞 장면 글자가 다시 보기 위에 남음 ·
+    속마음이 너무 작고 흐림 · '포인트 ③'이 뭉개짐."""
+
+    def _sig(self, cuts):
+        motion = [0.1] * 120
+        for i in range(64, 70):   # 32~35초: 움직임만 (공 소리 없음)
+            motion[i] = 3.0
+        return {"name": "x", "duration": 60.0, "tidy": [{"in": 0.0, "out": 60.0}], "junk": [], "motion": motion, "motionStep": 0.5,
+                "onsets": [], "cuts": cuts}
+
+    def test_motion_only_gap_in_the_talking_shot_is_not_a_play(self):
+        segs = [{"start": 26.0, "end": 31.0, "text": "아 근데 오늘 진짜 덥네요. 물 좀 마시고 할게요.",
+                 "words": [{"w": "덥네요.", "s": 26.0, "e": 31.0}]},
+                {"start": 37.0, "end": 40.0, "text": "세 번째 포인트로 갈게요.", "words": [{"w": "포인트로", "s": 37.0, "e": 40.0}]}]
+        plays = [m for m in msg.moments(self._sig([20.0, 45.0]), segs) if m["kind"] == "play"]
+        self.assertEqual(plays, [])                                  # 같은 장면(바뀜 없음) 안의 몸짓 = 시범 아님
+        plays = [m for m in msg.moments(self._sig([31.5, 36.5]), segs) if m["kind"] == "play"]
+        self.assertEqual(len(plays), 1)                              # 장면이 바뀐 곳(다른 영상)이면 시범
+
+    def test_inner_text_stays_long_enough(self):
+        self.assertGreaterEqual(msg.INNER_MIN, 2.0)
+        lk = msg.text_looks(msg.PRESETS["예능 MSG형"], "long", 0.86)["inner"]
+        self.assertEqual(lk["effect"], "pop")
+        self.assertGreaterEqual(lk["size"], 70)

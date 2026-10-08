@@ -1153,6 +1153,10 @@ def moments(sig, segs=None):
         peak = max(mot, key=lambda x: x[1]) if mot else (None, 0.0)
         if not ons and peak[1] < 1.5:
             continue
+        if not ons and not any(a - 0.3 <= c <= b + 0.3 for c in sig.get("cuts") or ()):
+            # 공 소리 없이 움직이기만 하고 앞뒤 말과 같은 장면(장면 바뀜 없음)이면 말하는 사람이 움직인 것(물 마시기·몸짓) — 시범이 아님
+            # (판정 round5: '다시 보기 ▶'가 감독님이 말하는 장면 위에 떠서 무엇을 다시 보는지 모름 · S1 물 마시는 장면 · S2 22초)
+            continue
         t = ons[0] if ons else peak[0]
         if ons:  # 공 소리가 여러 번이면 화면이 가장 크게 움직이는 때의 소리
             zat = lambda o: max([z for tm, z in mot if abs(tm - o) <= 0.75] or [0.0])  # noqa: E731
@@ -1638,6 +1642,7 @@ SFX_PALETTE = {  # 사건 → 효과음 (없으면 소리 없음)
 }
 CLEAN_ONLY = {"휙", "딩동", "짠", "틱", "딸깍", "팡", "맑은 짧은 음악", "찰칵", "물음표"}   # 담백: 이 소리들만
 TEXT_KINDS = ("emphasis", "situ", "inner", "fx", "count", "score")
+INNER_MIN = 2.0   # 속마음 글자가 떠 있는 최소 시간(초)
 ORD = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7}
 TOTAL = re.compile(r"(다섯|열|세|네|여섯|일곱|여덟|아홉|[3-9]|10) ?(?:번|개|회) ?(?:차|도전|던지|해 ?보|시도|슛|슈팅)")
 
@@ -1872,8 +1877,9 @@ def text_looks(st, fmt, cap_y):
     else:
         situ = dict(T, weight="Bold", size=58 if sh else 54, fill="#FFFFFF", stroke="#000000", strokeW=10, bgOn=True, bg="#0F7A3D", bgOpacity=0.9,
                     x=0.06, y=(0.86 if low else 0.14) if not sh else 0.18, align="left", effect="slide")
-    inner = dict(T, font="Do Hyeon", weight="Bold", size=70 if sh else 62, fill="#9AD7FF", stroke="#000000", strokeW=6, x=0.74 if not sh else 0.7,
-                 y=0.45 if not low else 0.6, align="center", effect="fade", rot=-4)
+    # 속마음: 1.4초 동안 흐려지며 나오면 반쯤 흐린 채로 지나가 '너무 작고 흐려 거의 안 읽힘' (판정 round5 최종) → 조금 크게·굵은 테두리·바로 나타남
+    inner = dict(T, font="Do Hyeon", weight="Bold", size=70 if sh else 72, fill="#9AD7FF", stroke="#000000", strokeW=8, x=0.74 if not sh else 0.7,
+                 y=0.45 if not low else 0.6, align="center", effect="pop", rot=-4)
     fx = dict(T, font="Black Han Sans", weight="Black", size=150 if sh else 132, fill="#FF9F1C", stroke="#111111", strokeW=10, x=0.5,
               y=(0.5 if not low else 0.6) if not sh else 0.48, align="center", effect="shake", rot=0)
     # 점수판은 휴대폰에서도 읽히게 크게 (판정: 점수판 글씨가 작아 휴대폰에서 읽기 어려움)
@@ -2460,6 +2466,8 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
 
     def cand(kind, m, pri, **kw):
         t = kw.pop("t", m["t"])
+        if kind == "inner":
+            kw["dur"] = max(float(kw.get("dur") or 0), INNER_MIN)  # (괄호 속마음 6~11글자 · 1.4초로는 다 못 읽음)
         if kw.get("text") and kind in ("emphasis", "situ", "fx", "inner") and caps:
             alts = next((g for g in FX_TEXTS.values() if kw["text"] in g), ()) if kind == "fx" else ()
             r = _dedupe_text(kind, kw["text"], t, float(kw.get("dur") or 1.0), caps, [o for o in alts if not used_txt.get(o)],
@@ -2697,8 +2705,14 @@ _NO_GLYPH = {"Black Han Sans": {"…": "...", "·": ", ", "▶": "", "►": "", 
 
 def glyph_safe(text, font):
     """화면 글자를 그 글꼴에 있는 글자로 ('아깝다…' → '아깝다...' · 검은고딕의 '①' → '1') — 미리보기·내보내기가 같은 글을 씀."""
+    if not text:
+        return text
+    # 동그라미 숫자는 어느 글꼴에서도 한글보다 작고 가늘게 그려져 작은 화면에서 '⊙'처럼 뭉개짐 (판정 round5: '포인트 ③') →
+    # 목록 머리는 '1.', 나머지는 '3'
+    text = re.sub(r"(^|\n)([①-⑦]) ", lambda m: f"{m[1]}{CIRCLED.index(m[2]) + 1}. ", str(text))
+    text = "".join(str(CIRCLED.index(ch) + 1) if ch in CIRCLED else ch for ch in text)
     rep = _NO_GLYPH.get(font)
-    if not rep or not text:
+    if not rep:
         return text
     out = "".join(rep.get(ch, ch) for ch in str(text))
     return re.sub(r"[ ]+,", ",", re.sub(r"[ ]{2,}", " ", out)).strip()
@@ -3291,6 +3305,13 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
                     refs["sfx"] = [len(B.sfx) - 1]
                     B.event("count", tl, "하나 둘 셋", c["why"], src=c["t"], refs=refs)
                 continue
+            # 끼워 넣은 장면(다시 보기·정지·몽타주) 앞에서 끝냄 — 앞 장면의 글자가 다시 보기 위에 남으면 다른 화면 위에 겹침 (판정 round5: '나이스!!')
+            nxt = min([float(e["ins"]["start"]) for e in B.events if e.get("ins") and e["kind"] in ("replay", "freeze", "montage")
+                       and float(e["ins"]["start"]) > tl + 0.05] or [1e9])
+            if tl + d > nxt - 0.02:
+                d = nxt - 0.02 - tl
+                if d < 0.5:  # 너무 짧으면 조금 앞당겨 0.5초
+                    tl, d = max(0.0, nxt - 0.52), 0.5
             tt = B.title(text, max(0.0, tl), d, look)
             refs["titles"].append(tt["id"])
         if c.get("sfx"):
