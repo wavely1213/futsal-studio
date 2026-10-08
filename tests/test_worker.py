@@ -40,6 +40,11 @@ def _sleep(s):
     return "다 잤어요"
 
 
+def _paths():
+    import thumb
+    return [str(core.WORK), str(thumb.ASSETS)]
+
+
 class WorkerTest(unittest.TestCase):
     def test_result_and_progress(self):
         got = []
@@ -111,6 +116,18 @@ class WorkerTest(unittest.TestCase):
             worker.call("tests.test_worker:_sleep", 30, cancel=ev, procs=procs)
         self.assertLess(time.time() - t, 10)
         self.assertEqual(procs, set())
+
+    def test_child_uses_parent_workspace(self):
+        """자식은 config.json 을 다시 읽지 않고 부모 앱이 연 작업 폴더 그대로 — 앱이 켜질 때 외장 드라이브가 빠져 기본 폴더로 열었는데
+        그 뒤 꽂으면, 예전엔 자식이 설정 폴더에 누끼를 써서 앱이 못 찾았음 (자동 누끼는 조용히 빠지고 손 누끼 주소는 404 · D-069 검토 고침)."""
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory(prefix="풋살 작업 ") as d:
+            w = Path(d) / "앱이 연 작업 폴더"
+            with mock.patch.object(core, "WORK", w):
+                got = worker.call("tests.test_worker:_paths")
+        self.assertEqual(got, [str(w), str(w / "thumbnails" / "assets")])
+        self.assertIsNone(os.environ.get(core.WORKER_WORKSPACE), "앱 자신의 환경엔 넣지 않음 (자식에게만)")
 
     def test_avail_mb(self):
         v = worker.avail_mb()

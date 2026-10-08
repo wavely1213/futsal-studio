@@ -26,6 +26,7 @@ import idle  # noqa: E402
 import thumb  # noqa: E402
 import trouble  # noqa: E402
 import worker  # noqa: E402
+from tests.test_idle import _end_loop  # noqa: E402
 
 NAME = "20261008_ABCDEFGHIJK_발바닥 드래그 기본기.mp4"
 
@@ -141,6 +142,25 @@ class AutoCutTests(WorkBase):
         self.assertIn("  " + line, logs)
         self.assertEqual(tr.call_args[0][1], "자동 누끼 오류 위치")
         self.assertIsNone(thumb.cached_analysis(NAME), "못 딴 장면이 있으면 다음에 다시 분석")
+
+    def test_quality_file_not_written_still_used(self):
+        """자식이 PNG 는 썼는데 품질 JSON 쓰기만 실패(Windows 잠금·백신 — thumb.cut_auto 가 삼킴) → 돌려받은 품질로 이번 분석엔 씀 (예전 앱 안 분석과 같음).
+        다음 분석은 JSON 이 없어 다시 (cached_analysis 는 None — 예전과 같음). 다른 곳의 경로(다른 작업 폴더 등)는 쓰지 않음."""
+        box = self.items[0]["persons"][0][:4]
+
+        def f(name, jobs, **kw):
+            out = []
+            for t, b, faces, tboxes in jobs:
+                p = thumb._cut_path(NAME, t, b)
+                p.write_bytes(b"\x89PNG")  # JSON 은 못 씀
+                out.append((t, p if t == 3.0 else self.tmp / "다른 작업 폴더" / p.name, {"ok": True, "q": t / 10}))
+            return out
+        with mock.patch.object(cutout_worker, "cut_auto", side_effect=f):
+            r = thumb.analyze(NAME, log=lambda m: None)
+        self.assertEqual(sorted(r["cuts"]), ["3.0"], "돌려받은 그 장면의 파일만")
+        self.assertEqual(r["cuts"]["3.0"], {"cut": thumb.asset_url(thumb._cut_path(NAME, 3.0, box)), "src": "/frame?x", "box": box, "q": {"ok": True, "q": 0.3}})
+        self.assertNotIn("cutFail", r)
+        self.assertIsNone(thumb.cached_analysis(NAME))
 
     def test_other_error_gets_head(self):
         """자식을 띄우지도 못함(백신 차단 등) — 그래도 '자동 누끼를 따지 못했어요 · …' 한 줄."""
@@ -303,7 +323,7 @@ class IdleThumbTests(WorkBase):
 
     def _start(self, busy, idle_sec, lock):
         ended = {"v": False}  # 시험이 끝나면 이 루프는 늘 '작업 중' (다른 시험의 진짜 모델을 지우지 않게 — test_idle 과 같은 방법)
-        self.addCleanup(ended.__setitem__, "v", True)
+        self.addCleanup(_end_loop, ended)  # + 하던 내려놓기가 끝날 때까지 기다림 (다음 시험의 dirty 를 덮어쓰지 않게)
         idle.start(lock, lambda: ended["v"] or busy(), idle_sec=idle_sec)
 
     def test_release_clears_detect(self):
@@ -364,9 +384,8 @@ class IdleThumbTests(WorkBase):
                 while app.JOB["name"] and time.time() < end:
                     time.sleep(0.02)
                 self.assertTrue(kept.get(n), f"'{n}' 작업 중에 모델이 지워짐")
-                for _ in range(100):  # 끝나면 내려놓음 = 루프가 내내 살아 있었음 (시험이 헛돌지 않았음)
-                    if not face._SESS and not detect._SESS:
-                        break
+                end = time.time() + 10  # 끝나면 내려놓음 = 루프가 내내 살아 있었음 (시험이 헛돌지 않았음 · 바쁜 PC 라 넉넉히)
+                while (face._SESS or detect._SESS) and time.time() < end:
                     time.sleep(0.02)
                 self.assertEqual((face._SESS, detect._SESS), ({}, {}), f"'{n}' 끝난 뒤 내려놓기")
 

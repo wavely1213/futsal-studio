@@ -1211,17 +1211,20 @@ def _auto_cuts(name, todo, log=print):
     """분석의 주인공 자동 누끼: 이미 딴 것은 그대로, 나머지는 따로 프로세스 하나에서 (cutout_worker.cut_auto → 자식이 cut_auto) —
     앱 프로세스는 누끼 모델을 불러오지 않음 (끝나면 메모리 반환 · 메모리 부족으로 죽어도 앱은 그대로 · D-069).
     → ({시각: {cut, src, box, q}}, 실패 안내 한 줄 또는 None). 실패해도 그 앞에서 딴 누끼는 쓰고 누끼 없는 추천으로 계속.
+    자식이 돌려준 (PNG, 품질)도 씀 — 품질 JSON 쓰기만 실패한 장면도 이번 분석엔 들어감 (검토 고침).
     멈추기(✕)는 자식을 끄고 작업도 멈춤 (worker.Cancelled)."""
     need = [(it, box) for it, box in todo if _cut_done(name, it, box) is None]
-    fail = None
+    fail, got = None, {}
     if need:
         import cutout_worker
         import editor  # 멈추기(✕)·앱 끄기 때 자식도 같이 꺼지게 (편집실과 같은 신호·프로세스 목록)
         import worker
         core.set_progress(label="썸네일 분석", item=name, pct=0, detail=f"주인공 누끼 준비 중 (0/{len(need)})")
         try:
-            cutout_worker.cut_auto(name, [(it["t"], box, it.get("faces"), it.get("tboxes")) for it, box in need],
-                                   cancel=editor.CANCEL, procs=editor._PROCS, log=log)
+            # 자식이 돌려준 (시각, PNG, 품질) — 품질 JSON 쓰기만 실패해도(Windows 잠금·백신) 이번 분석엔 그 누끼를 씀 (예전 앱 안 분석과 같음)
+            got = {float(t): (Path(p), q) for t, p, q in
+                   cutout_worker.cut_auto(name, [(it["t"], box, it.get("faces"), it.get("tboxes")) for it, box in need],
+                                          cancel=editor.CANCEL, procs=editor._PROCS, log=log)}
         except worker.Cancelled:
             raise
         except Exception as e:  # 모델을 못 받음·메모리 부족으로 자식이 죽음 등 — 누끼 없는 추천으로 계속
@@ -1233,6 +1236,9 @@ def _auto_cuts(name, todo, log=print):
     cuts = {}
     for it, box in todo:
         d = _cut_done(name, it, box)
+        if d is None and float(it["t"]) in got:
+            p, q = got[float(it["t"])]
+            d = (p, q) if p == _cut_path(name, it["t"], box) and p.is_file() and q is not None else None  # 이 장면·상자의 그 파일일 때만
         if d:
             cuts[str(it["t"])] = {"cut": asset_url(d[0]), "src": it["url"], "box": box, "q": d[1]}
     return cuts, fail

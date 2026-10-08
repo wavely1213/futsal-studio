@@ -677,7 +677,8 @@ class Names(Server):
 
     def test_thumb_cut_checks_frame_name(self):
         """누끼 요청의 장면 주소(src)에 든 이름도 보관함 안 파일 이름만 (I-021) — AI 추천 썸네일과 합친 뒤(D-067)는 작업을 시작하기 전에 400."""
-        with mock.patch.object(thumb, "grab") as grab, mock.patch.object(thumb, "remove_bg") as rb, \
+        # 작업 안의 누끼는 cutout_worker.remove_bg(따로 프로세스 · D-069) — 그 길이 불리지 않았는지 봄
+        with mock.patch.object(thumb, "grab") as grab, mock.patch.object(app.cutout_worker, "remove_bg") as rb, \
                 mock.patch.object(app, "start_job", wraps=app.start_job) as sj:
             code, r = self.call("/api/thumb/cut", {"src": "/frame?name=..%5C..%5Cother%5Cx.mp4&t=1", "kind": "hq"})
             self.assertEqual((code, r["ok"]), (400, False))

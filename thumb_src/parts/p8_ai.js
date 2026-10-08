@@ -1314,8 +1314,15 @@ async function aiRun(seed = 0) {
     renderAI();
     setAIStat((AI.weak ? `쓸 만한 장면이 없어요 — 아래 '장면 고르기'에서 직접 골라 주세요 (지금은 ${AI.results.length}개만 만들었어요)`
       : `${AI.results.length}개 · ${((performance.now() - t0) / 1000).toFixed(1)}초 · 눌러서 편집하거나 A/B 에 담아 보세요`) + (AI.cutFail ? ` · ${AI.cutFail}` : ""));
+    if (AI.cutFail) cutRetry();
     return AI.results;
   } finally { AI.busy = false; done(); }
+}
+function cutRetry() {  // 자동 누끼 실패 줄 끝에 [누끼 다시 하기] — '다시 해 주세요' 를 이 화면에서 (못 딴 장면만 다시 · 장면 후보·딴 누끼는 그대로 씀)
+  const e = $("aiStat"); if (!e) return;
+  const b = document.createElement("button"); b.className = "btn sm"; b.id = "cutRetry"; b.textContent = "누끼 다시 하기";
+  b.onclick = () => { b.disabled = true; AI.loaded = false; aiRun(AI.seed); };
+  e.append(" ", b);
 }
 /* ----- 화면: '자동' 탭 맨 위 ----- */
 function frameBadges(f) {

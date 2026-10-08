@@ -28,9 +28,17 @@ DEFAULT_MANIFEST = "https://raw.githubusercontent.com/wavely1213/futsal-studio/m
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
 
 
+WORKER_WORKSPACE = "FUTSAL_WORKER_WORKSPACE"  # worker.call 이 따로 프로세스(자식)에 넘기는 부모 앱의 작업 폴더
+
+
 def _open_workspace():
     """작업 폴더와 videos·analysis·out 을 만듦. 설정한 폴더를 쓸 수 없으면(빠진 외장 드라이브·잘못된 경로) 기본 작업 폴더로
-    열고 안내 (예전에는 import 오류로 앱이 아예 안 켜지고, 남길 기록도 없었음)."""
+    열고 안내 (예전에는 import 오류로 앱이 아예 안 켜지고, 남길 기록도 없었음).
+    따로 프로세스(worker.py 자식)는 config.json 을 다시 읽지 않고 부모 앱이 연 폴더 그대로 — 앱이 켜질 때 외장 드라이브가 빠져
+    기본 폴더로 열었는데 그 뒤 꽂으면, 자식이 설정 폴더에 누끼를 써서 앱이 못 찾았음 (D-069 검토 고침)."""
+    forced = os.environ.get(WORKER_WORKSPACE)
+    if forced:
+        return Path(forced)
     want = updater.configured_workspace(APP_DIR)
     try:
         for d in (want / "videos", want / "analysis", want / "out"):

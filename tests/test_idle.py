@@ -15,13 +15,33 @@ def _fake(name):
     return m
 
 
+def _end_loop(ended):
+    """시험이 남긴 루프를 '늘 작업 중' 으로 + 그 루프가 하던 내려놓기가 끝날 때까지 기다림 (release 는 _USE_LOCK 을 쥐고 돎).
+    안 기다리면 바쁜 PC 에서 앞 시험의 release(끝의 gc.collect 가 느림)가 다음 시험의 touch() 뒤에 dirty=False 를 써서
+    그 시험의 루프가 영영 안 내려놓았음 (test_using_blocks_release → test_waits_for_leftover_model_thread 에서 실제로 잡힘)."""
+    ended["v"] = True
+    with idle._USE_LOCK:
+        pass
+
+
 class IdleTest(unittest.TestCase):
     def _start(self, busy, idle_sec, lock=None):
         """idle.start 를 부르되, 시험이 끝나면 그 루프는 늘 '작업 중' 으로 봄 — 끝나지 않는 루프 스레드가 남아 같은 프로세스의
         다른 시험(진짜 face·thumb 모델 · 편집실 시험의 using() 이 부르는 touch)을 내려놓지 않게."""
         ended = {"v": False}
-        self.addCleanup(ended.__setitem__, "v", True)
+        self.addCleanup(_end_loop, ended)
         idle.start(lock or threading.Lock(), lambda: ended["v"] or busy(), idle_sec=idle_sec)
+
+    def _wait_released(self, sess, what="", secs=10):
+        """루프가 내려놓을 때까지 기다림 (바쁜 PC — load 40+·남은 메모리 2GB 에서 2초로는 모자란 적이 있음).
+        끝내 안 비면 그때의 상태(쓰는 중 수 · 모델 스레드 · 마지막 작업 뒤 시간 · 살아 있는 스레드)를 실패 글에 남김."""
+        end = time.time() + secs
+        while sess and time.time() < end:
+            time.sleep(0.02)
+        if sess:
+            ths = sorted(t.name for t in threading.enumerate() if t.is_alive())
+            self.fail(f"{what} {secs}초 안에 안 내려놓음 · 남은 {sorted(sess)} · models_in_use={idle.models_in_use()} · "
+                      f"_USE={dict(idle._USE)} · dirty={idle._ST['dirty']} · last={time.time() - idle._ST['last']:.2f}초 전 · 스레드 {ths}")
 
     def test_release_clears_sessions(self):
         mods = {"face": _fake("face"), "detect": _fake("detect"), "avmodels": _fake("avmodels"), "thumb": _fake("thumb")}  # detect: 선수·공 찾기 (D-069)
@@ -52,11 +72,7 @@ class IdleTest(unittest.TestCase):
             time.sleep(0.6)
             self.assertEqual(len(f._SESS), 2)  # 작업 중이면 그대로
             busy["v"] = False
-            for _ in range(40):
-                if not f._SESS:
-                    break
-                time.sleep(0.05)
-            self.assertEqual(len(f._SESS), 0)
+            self._wait_released(f._SESS, "작업이 끝났는데")
 
     def test_waits_for_leftover_model_thread(self):
         """멈춘 작업이 남긴 글자 읽기 스레드(model-ocr)가 아직 돌면 작업이 없어도 안 내려놓음."""
@@ -75,11 +91,7 @@ class IdleTest(unittest.TestCase):
                 stop.set()
                 th.join(2)
                 self.assertFalse(idle.models_in_use())
-                for _ in range(40):
-                    if not f._SESS:
-                        break
-                    time.sleep(0.05)
-                self.assertEqual(len(f._SESS), 0)
+                self._wait_released(f._SESS, "모델 스레드가 끝났는데")
         finally:
             stop.set()
 
@@ -97,11 +109,7 @@ class IdleTest(unittest.TestCase):
                 self.assertTrue(idle.models_in_use())
                 self.assertEqual(len(f._SESS), 2)
             self.assertEqual(idle._USE["n"], 0)
-            for _ in range(60):
-                if not f._SESS:
-                    break
-                time.sleep(0.02)
-            self.assertEqual(len(f._SESS), 0, "끝나면 다시 내려놓음 (루프가 살아 있었음)")
+            self._wait_released(f._SESS, "using 이 끝났는데 (끝나면 다시 내려놓음 = 루프가 살아 있었음)")
 
     def test_out_of_job_rough_cut_face_pass_keeps_model(self):
         """스타일 가편집(/api/edit/autoseq)은 작업이 아니라 바로 답하는 요청 — 강조 글씨 자리 찾기가 얼굴 모델을 쓰는 동안
@@ -144,11 +152,7 @@ class IdleTest(unittest.TestCase):
                 place("인사이드!", dict(editor.TITLE_STYLE, size=88, y=0.3), a, b)
             self.assertEqual(len(seen), 40)
             self.assertTrue(all(seen), "얼굴 찾는 동안 모델이 지워짐")
-            for _ in range(60):  # 끝나면 내려놓음 = 루프가 내내 살아 있었음 (시험이 헛돌지 않았음)
-                if not face._SESS:
-                    break
-                time.sleep(0.02)
-            self.assertFalse(face._SESS)
+            self._wait_released(face._SESS, "가편집이 끝났는데")  # 끝나면 내려놓음 = 루프가 내내 살아 있었음 (시험이 헛돌지 않았음)
 
 
 if __name__ == "__main__":

@@ -133,6 +133,7 @@ def call(target, *args, cancel=None, procs=None, timeout=None, env=None, **kwarg
     실패하면 WorkerError(자식 오류 문장 · 종료 코드) · cancel 이 켜지면 자식을 끄고 Cancelled."""
     py, py_env = _python()
     e = updater.py_env(PYTHONDONTWRITEBYTECODE="1", **py_env)  # 파이썬 자식: 출력을 UTF-8 로 (core.run 과 같은 규칙)
+    e[core.WORKER_WORKSPACE] = str(core.WORK)  # 자식도 앱이 연 작업 폴더 그대로 (config.json 을 다시 읽어 다른 폴더를 쓰지 않게)
     e.update(env or {})
     cmd = [py, "-X", "utf8", str(HERE / "worker.py")]
     p = core.popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(HERE), env=e)
