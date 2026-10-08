@@ -101,8 +101,8 @@
 | worker | `worker.py` | 무거운 작업을 따로 파이썬 프로세스에서: `call('모듈:함수', …)`(표준 입력·출력 JSON · 자식의 진행 표시를 부모로 · ✕/앱 끄기로 같이 꺼짐 · 죽으면 `WorkerError`), `avail_mb()` 남은 메모리 (D-051) |
 | cutout_worker | `cutout_worker.py` | 누끼를 `worker` 로: 고품질인데 남은 메모리 < 7.5GB 거나 고품질 프로세스가 실패하면 빠른 누끼 + 안내. 자식은 `thumb.remove_bg` 그대로 (D-051) |
 | idle | `idle.py` | 마지막 작업 뒤 5분 동안 작업이 없으면 불러 둔 모델(얼굴·글자·소리·앱 안 누끼·받아쓰기)을 내려놓고 메모리 반환 (D-055) |
-| exportplan | `exportplan.py` | 내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 묶음(구간 그래프 그대로 + trim · 자막은 끝에 한 번 · 프레임 같음) (D-054) |
-| hwdec | `hwdec.py` | Windows·HDR 영상에서 확인이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-062) |
+| exportplan | `exportplan.py` | 내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 묶음(구간 그래프 그대로 + trim · split 앞 원본 형식 못박기 · 자막은 끝에 한 번 · 프레임 같음 · HDR·다시 보기는 안 묶음) (D-054) |
+| hwdec | `hwdec.py` | Windows·HDR 영상에서 확인(화소·속도 · 20초 제한 · ✕ 로 끔)이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-062) |
 | claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |
