@@ -1,6 +1,8 @@
 {
   "version": "2.10.0",
   "notes": "받아쓰기 기본값을 PC 사양에 맞춤(8GB 이하는 '빠르게')·예상 시간 안내 · 모델 받다 끊기면 이어받기 · 유튜브는 같은 화질이면 H.264 먼저 · 못 옮긴 완성본은 다음에 켤 때 옮김 · 어두운 화면 빨간 글자 · 갑자기 꺼진 뒤 어느 영상인지와 [다시 하기] · 보관함 이름 바꾸기 · 내보낸 뒤 '다음 할 일' · 마커→챕터 탭",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/8cbce4da00f3c7f02f842f2f5388ce3386e21c83.zip",
+  "commit": "8cbce4da00f3c7f02f842f2f5388ce3386e21c83",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "4f5030b4512dfc0c5af82ae727ef973e7bdb44daf234371c04e64ee858e34800",
