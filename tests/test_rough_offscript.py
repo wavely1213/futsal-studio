@@ -113,6 +113,9 @@ class FindOffscriptTest(unittest.TestCase):
         off = takes.find_offscript(sents)
         self.assertEqual([(o["kind"], o["a"], o["b"]) for o in off], [("pre", 0.0, 4.5)])
         self.assertEqual(self.kinds([S(0.5, 3.0, "여러분 이 기술 하나면 수비 다 뚫습니다"), S(4.0, 6.0, "안녕하세요")]), [])
+        # 질문형 훅('왜 안 되죠?')은 '됐어?' 같은 준비 말이 아님 · 그 말뿐인 '준비 됐어?'만
+        self.assertEqual(self.kinds([S(0.5, 2.0, "이게 왜 안 되죠?"), S(2.5, 4.0, "안녕하세요")]), [])
+        self.assertEqual([k for k, _ in self.kinds([S(0.5, 1.5, "준비 됐어?"), S(1.8, 2.2, "네"), S(3.0, 5.0, "안녕하세요")])], ["pre"])
 
     def test_no_greeting_needs_setup_words(self):
         sents = [S(0.5, 2.0, "네"), S(2.5, 6.0, "자 오늘은 패스 연습이에요"), S(7.0, 9.0, "공을 멈추지 마세요")]
