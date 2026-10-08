@@ -20,6 +20,7 @@ import captions
 import core
 import exportplan
 import hwdec
+import idle
 import studiolog
 import takes
 import updater
@@ -1186,7 +1187,7 @@ def _faces_at(name, srcs, cache):
         except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
             fs = None
         return t, None if fs is None else [list(f["box"]) for f in fs]
-    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4) as ex:
+    with tempfile.TemporaryDirectory(prefix="emph_faces_") as folder, ThreadPoolExecutor(4, thread_name_prefix="model-face") as ex:
         for t, fs in ex.map(lambda x: one(x, folder), todo):
             cache[t] = fs
     return cache
@@ -1226,14 +1227,20 @@ def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=Non
         avoid.append((hb[1], hb[3]))
     state = {"cache": {}, "one": False}
 
+    # 스타일 가편집(/api/edit/autoseq)은 작업이 아니라 바로 답하는 요청 → 얼굴 모델을 부르고(ensure) 쓰는(faces) 동안
+    # 쉬는 동안 내려놓기(idle)가 지우지 않게 idle.using() 으로 감쌈 (지워지면 조용히 흔한 얼굴 자리로 돌아감 · D-058)
     def prefetch(spans):
         spans = list(spans)
         state["one"] = 2 * len(spans) > FACE_FRAMES_MAX
-        if spans and _face_ready(name):
-            _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
+        if not spans:
+            return
+        with idle.using():
+            if _face_ready(name):
+                _faces_at(name, [t for a, b in spans for t, _ in _face_samples(items, a, b, state["one"])], state["cache"])
 
     def place(text, st, a, b):
-        fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
+        with idle.using():
+            fs = _faces_on_screen(name, items, a, b, cache=state["cache"], one=state["one"])
         return emphasis_spot(text, st, W, H, FACE_GUESS if fs is None else fs, avoid)
     place.prefetch = prefetch
     return place
@@ -2463,13 +2470,15 @@ def _fit(it, md, seq, W, H):
 
 def _hdr_pre_w(it, md, seq, W, H):
     """HDR 영상을 일반 색으로 바꾸기 전에 줄일 가로 크기: 화면에 놓일 크기(맞춤 확대 포함)까지만, 최대 2W (예전 값).
-    확대·이동 키프레임이 있으면 예전처럼 2W (확대해도 흐려지지 않게)."""
+    고정 확대(E6 점프 컷 펀치인 108% 등 · 키프레임 없음)는 놓일 크기 × 배율까지 — 가편집 클립의 절반쯤이 이것이라 2W 로 두면
+    줄이는 이득을 거의 못 봄. 확대·이동 키프레임이 있으면 예전처럼 2W (확대해도 흐려지지 않게)."""
     ps = param(it, "scale")
-    if ps.get("k") or abs(float(ps.get("v", 100)) - 100) > 1e-6:
+    if ps.get("k") or param(it, "pos").get("k"):
         return 2 * W
     m = re.search(r"scale=(\d+):", _fit(it, md, seq, W, H)["chain"])
     need = int(m.group(1)) if m else 2 * W
-    return min(2 * W, max(W, need))
+    z = max(1.0, float(ps.get("v", 100)) / 100)
+    return min(2 * W, max(W, math.ceil(need * z - 1e-6)))
 
 
 def _num(v):

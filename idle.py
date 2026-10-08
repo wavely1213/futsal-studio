@@ -1,11 +1,14 @@
 """쉬는 동안 메모리 돌려주기: 작업이 끝나고 IDLE_SEC(5분) 동안 새 작업이 없으면 불러 둔 모델(얼굴·표정 · 글자 읽기 ·
 소리 듣기 · 앱 안 누끼 · 받아쓰기)을 내려놓고 메모리를 OS 에 돌려줌. 다음에 쓸 때 다시 불러옴 (얼굴·글자·소리 0.1~0.3초).
 
-모델은 작업(app.start_job) 안에서 쓰므로, 작업이 없을 때만(app 의 LOCK 을 잡고 확인) 내려놓음 → 쓰는 도중에 사라지지 않음.
+모델은 거의 작업(app.start_job) 안에서 쓰므로, 작업이 없을 때만(app 의 LOCK 을 잡고 확인) 내려놓음 → 쓰는 도중에 사라지지 않음.
 작업이 멈춰도 잠깐 더 사는 모델 스레드(plan 의 글자 읽기 'model-ocr')가 있으면 그것도 끝날 때까지 기다림.
-(합칠 때: 작업 밖에서 face·avmodels·thumb 세션을 쓰는 곳이 생기면 start_job 안으로 넣거나 스레드 이름을 'model-' 로)
+작업 밖에서 모델을 쓰는 곳은 `with idle.using():` 로 감쌈 — 지금은 스타일 가편집(/api/edit/autoseq · 바로 답하는 요청)의
+강조 글씨 얼굴 찾기(editor.emphasis_placer). 새로 생기면 start_job 안으로 넣거나 using() 으로 (스레드 이름 'model-' 만으로는
+ensure() 와 스레드 시작 사이가 비어 모자람).
 app.py 에서: idle.start(LOCK, lambda: bool(JOB["name"])) + JOB_HOOKS 에 idle.touch.
 """
+import contextlib
 import ctypes
 import gc
 import sys
@@ -16,12 +19,29 @@ IDLE_SEC = 300
 MODEL_THREAD = "model-"  # 이 이름으로 시작하는 스레드(plan 의 글자 읽기 등)가 살아 있으면 안 내려놓음 (멈춘 작업이 남긴 것 포함)
 CHECK_SEC = 30
 _ST = {"last": time.time(), "dirty": False, "thread": None}
+_USE = {"n": 0}                # 작업 밖에서 모델을 쓰는 중인 곳 수 (using)
+_USE_LOCK = threading.Lock()   # using() 들어가기 ↔ '쓰는 곳 없음' 확인 + 내려놓기 를 서로 막음 (확인한 뒤 바로 쓰기 시작해 지워지는 틈이 없게)
 
 
 def touch(*_a, **_kw):
     """작업이 끝날 때마다 (JOB_HOOKS) → 여기서부터 IDLE_SEC 를 셈."""
     _ST["last"] = time.time()
     _ST["dirty"] = True
+
+
+@contextlib.contextmanager
+def using():
+    """작업(start_job) 밖에서 모델을 쓰는 동안 감쌈 → 그동안은 내려놓지 않음 (여러 곳이 겹쳐도 됨).
+    내려놓는 중이면 끝날 때까지(0.1초쯤) 기다렸다 들어감 → 안에서 부르는 ensure() 가 다시 불러옴.
+    끝나면 touch(): 작업 밖에서 불러 둔 모델도 여기서부터 IDLE_SEC 뒤에 내려놓음."""
+    with _USE_LOCK:
+        _USE["n"] += 1
+    try:
+        yield
+    finally:
+        with _USE_LOCK:
+            _USE["n"] -= 1
+        touch()
 
 
 def _clear(mod_name, attr="_SESS", lock="_LOCK"):
@@ -53,8 +73,8 @@ def trim():
 
 
 def models_in_use():
-    """작업 밖에서도 모델을 쓰는 스레드가 아직 살아 있는지 (멈춘 작업이 남긴 글자 읽기 스레드 등)."""
-    return any(t.is_alive() and t.name.startswith(MODEL_THREAD) for t in threading.enumerate())
+    """작업 밖에서 모델을 쓰는 중인지: using() 안에 있는 곳이 있거나, 모델 스레드가 아직 살아 있음 (멈춘 작업이 남긴 글자 읽기 스레드 등)."""
+    return _USE["n"] > 0 or any(t.is_alive() and t.name.startswith(MODEL_THREAD) for t in threading.enumerate())
 
 
 def release():
@@ -77,7 +97,7 @@ def start(lock, busy, idle_sec=None, log=None):
             try:
                 if not _ST["dirty"] or time.time() - _ST["last"] < (idle_sec or IDLE_SEC):
                     continue
-                with lock:  # 이 사이엔 새 작업이 시작되지 않음
+                with lock, _USE_LOCK:  # 이 사이엔 새 작업이 시작되지 않고, 작업 밖 모델 쓰기(using)도 들어오지 않음
                     if busy() or models_in_use():
                         continue
                     n = release()

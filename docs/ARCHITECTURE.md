@@ -81,7 +81,7 @@
   - `worker` → `core`(자식은 `core.popen` · 진행 표시 `set_progress`), `updater`(`py_env` · 파이썬 자식 UTF-8), `studiolog`(자식 오류 출력 끝). 자식은 `worker.py` 를 바로 실행해 `모듈:함수` 를 importlib 로 부른다(인자·결과는 표준 입출력 JSON). `editor`(`_mem_workers`)·`hwdec`(`_mem_ok`)는 남은 메모리 `avail_mb` 만 함수 안에서 지연 import한다 (D-051·D-057).
   - `cutout_worker` → `worker`, `core`(`_DLL_RE`·`vc_runtime_msg`), `studiolog`. `thumb`·`onnxruntime` 은 자식 안의 함수에서만 import한다. `app`(`/api/thumb/cut`)이 쓴다 (D-051·D-058).
   - `exportplan` → `core`(`run`·`ffmpeg`) · `hwdec` → `core`(`popen`·`ffmpeg`). 둘 다 `editor`(내보내기)만 쓴다 (D-053·D-054).
-  - `idle` → (표준 라이브러리만). 모델을 쥔 모듈(`face`·`avmodels`·`thumb`·`core`)은 import 하지 않고 `sys.modules` 에 있을 때만 캐시를 비운다. `app` 이 `idle.start(LOCK, …)`·`JOB_HOOKS` 로 쓴다 (D-055).
+  - `idle` → (표준 라이브러리만). 모델을 쥔 모듈(`face`·`avmodels`·`thumb`·`core`)은 import 하지 않고 `sys.modules` 에 있을 때만 캐시를 비운다. `app` 이 `idle.start(LOCK, …)`·`JOB_HOOKS` 로, `editor` 가 작업 밖(스타일 가편집 · 바로 답하는 요청)의 얼굴 모델 쓰기를 `idle.using()` 으로 감싸 쓴다 (D-055·D-058).
   - `strategy` → `core`, `forecast`, `hooks`(TERMS·조사 떼기·STOP), `refs`(추천 채널·학습용 기록의 채널 열쇠), `source`(채널 주소 → 열쇠), `updater`(RSS 받기 `urlopen`). `style`(배운 스타일 연결)·`claude_cli`(클로드 판단)는 함수 안에서 지연 import한다 (`style` → `plan` → `core` 순환을 피하고 앱 시작을 가볍게). `app`이 쓴다.
   - `forecast` → (표준 라이브러리 + numpy, numpy 는 함수 안에서). 파일·네트워크가 없는 계산만 한다. `strategy`만 쓴다.
   - `thumb` → `core`, `updater`. `face`·`editor`는 함수 안에서 지연 import한다.

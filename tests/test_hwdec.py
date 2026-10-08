@@ -158,5 +158,28 @@ class MemWorkers(unittest.TestCase):
             self.assertEqual(editor._mem_workers(2, hdr, 1920, 1080), 2)
 
 
+class HdrPreWidth(unittest.TestCase):
+    """HDR 색 바꾸기 전에 줄일 가로 크기 (D-052 · D-058): 놓일 크기까지 · E6 펀치인(고정 확대)은 × 배율 · 키프레임은 예전 2W."""
+    def test_pre_width(self):
+        import editor
+        md = {"kind": "video", "w": 3840, "h": 2160, "hdr": "hlg"}
+        seq = {"format": "long", "layout": {"mode": "fill"}}
+        W, H = 1920, 1080
+
+        def it(**fx):
+            return {"track": "V1", "fx": fx}
+        self.assertEqual(editor._hdr_pre_w(it(), md, seq, W, H), 1920)
+        self.assertEqual(editor._hdr_pre_w(it(scale={"v": 108.0, "k": []}), md, seq, W, H), 2074)  # 가편집 점프 컷 확대
+        self.assertEqual(editor._hdr_pre_w(it(scale={"v": 120.0, "k": []}), md, seq, W, H), 2304)
+        self.assertEqual(editor._hdr_pre_w(it(scale={"v": 300.0, "k": []}), md, seq, W, H), 3840)  # 2W 까지만
+        self.assertEqual(editor._hdr_pre_w(it(scale={"v": 80.0, "k": []}), md, seq, W, H), 1920)   # 줄이면 놓일 크기 그대로
+        kf = [{"t": 0.0, "v": 100.0}, {"t": 2.0, "v": 120.0}]
+        self.assertEqual(editor._hdr_pre_w(it(scale={"v": 100.0, "k": kf}), md, seq, W, H), 3840)
+        pk = [{"t": 0.0, "v": [0.5, 0.5]}, {"t": 2.0, "v": [0.6, 0.5]}]
+        self.assertEqual(editor._hdr_pre_w(it(pos={"v": [0.5, 0.5], "k": pk}), md, seq, W, H), 3840)
+        items = editor._items_from_cuts([{"in": 0.0, "out": 2.0}, {"in": 2.5, "out": 4.0, "zoom": True}], zoom=editor.SOFT_ZOOM)
+        self.assertEqual([editor._hdr_pre_w(x, md, seq, W, H) for x in items if x["track"] == "V1"], [1920, 2074])
+
+
 if __name__ == "__main__":
     unittest.main()
