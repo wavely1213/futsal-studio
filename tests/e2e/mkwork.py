@@ -1,4 +1,7 @@
-"""썸네일 퀄리티 시험 작업 폴더 만들기 (개발용 · 배포 안 됨): python3 tests/e2e/mkwork.py <작업폴더> <시험 영상 폴더> [--with-thumbtest <THUMBTEST01 작업폴더>]
+"""썸네일 퀄리티 시험 작업 폴더 만들기 (개발용 · 배포 안 됨): python3 tests/e2e/mkwork.py <작업폴더> <시험 영상 폴더> [--with-thumbtest <THUMBTEST01 작업폴더>] [--with-asr]
+시험 영상은 tests/e2e/mkstock.py 로 다시 만들 수 있음 (원본 목록·라이선스는 그 파일 머리말).
+--with-asr (판정 4회차): 지어낸 대사 대신 실제 받아쓰기(tests/fixtures/thumb_asr — Whisper 로 받아쓴 레슨 말, 문구 규칙을 만든 사람이 쓰지 않은 글)를
+  스톡 영상에 붙인 묶음 THQASR00001~3 을 더함 (장면은 스톡과 같고 문구만 다름 — 실제 받아쓰기에서 문구 품질을 따로 봄).
 시험 영상(THQSTOCK001~006)은 라이선스가 허락된 스톡 클립을 이어 붙인 것 — Mixkit 무료 라이선스 축구·풋살 클립, Wikimedia Commons
 'cienfuegos.webm'(CC BY 3.0), 'codigo_part.webm'(퍼블릭 도메인 180~300초). 저장소에는 영상을 넣지 않는다(용량) — 이름만 맞추면 됨:
   20261007_THQSTOCK001_풋살 경기 하이라이트 해설.mp4 (1280×720) · 002_1대1 돌파 이렇게 하세요 · 003_유소년 드리블 훈련 (720p) ·
@@ -28,13 +31,29 @@ for d in ("videos", "analysis", "out", "thumbnails"):
 for f in sorted(V.glob("*.mp4")):
     dst = work / "videos" / f.name
     if not dst.exists():
-        os.symlink(f, dst)
+        os.symlink(f.resolve(), dst)
     vid = f.name.split("_")[1]
     a = work / "analysis" / f.stem
     a.mkdir(parents=True, exist_ok=True)
     segs = [{"start": t, "end": t + 3.5, "text": s} for t, s in LINES.get(vid, [])]
     (a / "transcript.json").write_text(json.dumps(segs, ensure_ascii=False), encoding="utf-8")
     (a / "analysis.json").write_text(json.dumps({"silences": [], "loud_peaks": [{"time": t, "rms_db": -4} for t in PEAKS.get(vid, [])]}), encoding="utf-8")
+ASR = {"THQASR00001": ("퍼스트 터치 레슨", "MSGRAW01_퍼스트 터치 레슨", "THQSTOCK003"), "THQASR00002": ("패스 앤 무브 드릴", "MSGRAW02_패스 앤 무브 드릴", "THQSTOCK001"),
+       "THQASR00003": ("퍼스트 터치 강의", "CAPTEST001_퍼스트 터치 강의", "THQSTOCK002")}
+if "--with-asr" in sys.argv:
+    fx = Path(__file__).resolve().parents[1] / "fixtures" / "thumb_asr"
+    for vid, (title, fixture, base) in ASR.items():
+        src = next(iter(sorted(V.glob(f"*_{base}_*.mp4"))), None)
+        if not src:
+            continue
+        n = f"20261007_{vid}_{title}"
+        dst = work / "videos" / (n + ".mp4")
+        if not dst.exists():
+            os.symlink(src.resolve(), dst)
+        a = work / "analysis" / n
+        a.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(fx / f"{fixture}.json", a / "transcript.json")
+        (a / "analysis.json").write_text(json.dumps({"silences": [], "loud_peaks": []}), encoding="utf-8")
 if "--with-thumbtest" in sys.argv:
     src = Path(sys.argv[sys.argv.index("--with-thumbtest") + 1])
     n = "20200320_THUMBTEST01_썸네일 테스트"

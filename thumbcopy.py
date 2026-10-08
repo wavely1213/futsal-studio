@@ -7,6 +7,7 @@ import json
 import re
 import threading
 import time
+import unicodedata
 
 import core
 import hooks
@@ -14,7 +15,7 @@ import hooks
 LINE_MAX = 12        # 한 줄 글자 수(띄어쓰기 빼고) 상한 — 넘으면 버림
 LINE_GOOD = (3, 9)   # 작게 봐도 읽히는 한 줄 길이
 TOTAL_MAX = 20
-N_OUT = 8
+N_OUT = 12  # 판정 4회차: 8 → 12 (줄 길이·같은 둘째 줄·질문 머리 규칙을 지키고도 6개를 채울 만큼)
 AI_N = 10
 AI_TIMEOUT = 150
 CACHE = "thumb_copy.json"
@@ -23,18 +24,28 @@ TERMS = sorted(set(hooks.TERMS) | {"발바닥 드래그", "오프더볼", "체�
                                    "ALA", "세트피스", "킥인", "1대1 돌파", "개인기", "볼 키핑", "턴 동작", "마무리 슈팅", "공간", "드래그"}, key=lambda t: (-len(t), t))
 GENERIC = {"풋살", "축구", "영상", "오늘", "기술", "선수", "감독", "코치", "경기", "훈련", "연습", "레슨", "강좌"}
 BANNED = ("충격", "경악", "실화냐", "미쳤", "사망", "폭로", "인생 역전", "100%", "역대급", "사기캐", "참교육", "개꿀", "ㅋㅋ")
-FILLER_HEAD = ("진짜", "이거", "자", "그리고", "오늘은", "여기서", "이게", "그래서", "근데", "그냥", "여러분", "제가", "저는", "이제", "자 ", "또")
+FILLER_HEAD = ("진짜", "이거", "자", "그리고", "오늘은", "여기서", "이게", "그래서", "근데", "그냥", "여러분", "제가", "저는", "이제", "자 ", "또",
+               "그렇죠", "좋아요", "네", "음", "어", "아", "자,", "음...", "어...", "아,")
 EMO = (("놀람", ("대박", "속았", "깜짝", "와 ", "헐", "말도 안")), ("보기", ("봐", "보세요", "보면", "주목")), ("오답", ("하지 마", "실수", "안 돼", "틀린", "금지")),
        ("정답", ("정답", "이렇게", "제대로")), ("불", ("무조건", "레벨업", "필살기", "확", "바로")), ("질문", ("?", "왜", "어떻게")))
 # 레퍼런스 채널(쪼살·쌈바·해주호·JK 등)에서 자주 보이는 짧은 문구 형식 — 클로드에게 보여 주는 예시 (낱말은 바꿔 씀)
-REF_EXAMPLES = ["영상만 봐도 / 실력이 늘어요", "수비가 못 막는 / 1가지", "수비 전환 / 3초 법칙", "플랩 레벨업 / 바로 됩니다", "수비를 속이는 / 발바닥 드래그", "ALA / 움직임",
-                "풋살 국가대표가 / 알려주는 드리블", "이거 하나로 / 필살기!!", "풋살 고수가 / 쓰는 기술", "기본기 / 총정리!", "안 배운 게 / 맞아?", "영상에선 / 못해 보이지?",
-                "슛? X / 드래그 O", "1분만 / 투자하세요", "떨지 마세요!", "이것만 알면 / 1대1 끝", "프로는 / 이렇게 찹니다", "왜 나만 / 뺏길까?", "3가지 / 총정리", "진짜 쉽게 / 알려줄게요"]
+# 판정 4회차: 상투 꼬리표('실력이 늘어요'·'플랩 레벨업')는 예시에서 뺌 — 금지 목록과 예시가 서로 어긋나면 클로드가 그 꼬리표를 씀
+REF_EXAMPLES = ["수비가 못 막는 / 1가지", "수비 전환 / 3초 법칙", "수비를 속이는 / 발바닥 드래그", "ALA / 움직임", "슛이 뜨는 이유? / 디딤발 위치",
+                "풋살 국가대표가 / 알려주는 드리블", "이거 하나로 / 필살기!!", "풋살 고수가 / 쓰는 기술", "안 배운 게 / 맞아?", "영상에선 / 못해 보이지?",
+                "슛? X / 드래그 O", "떨지 마세요!", "이것만 알면 / 1대1 끝", "프로는 / 이렇게 찹니다", "왜 나만 / 뺏길까?"]
 _LOCK = threading.Lock()
 
 
 def nospace(t):
     return re.sub(r"\s+", "", t or "")
+
+
+def nfc(t):
+    """한글을 붙은 글자(NFC)로 — 맥 파일 이름·일부 내려받은 글은 자모가 풀린 NFD 라 [가-힣] 찾기가 조용히 안 됨 (판정 4회차)."""
+    return unicodedata.normalize("NFC", str(t or ""))
+
+
+_JAMO_ONLY = re.compile(r"^[\u1100-\u11FF\u3130-\u318F\s]+$")
 
 
 def _term_rx(term):
@@ -45,6 +56,7 @@ def _term_rx(term):
 
 def topics(title, texts, n=4):
     """주제(기술어) — 제목에 있는 기술어 먼저, 다음은 대사에 많이 나온 것. 짧은 낱말이 긴 낱말 안에 있으면 긴 것만."""
+    title, texts = nfc(title), [nfc(t) for t in texts]
     body = " ".join(texts)
     scored = []
     for t in TERMS:
@@ -59,12 +71,12 @@ def topics(title, texts, n=4):
             continue
         out = [o for o in out if nospace(o) not in nospace(t)] + [t]
     for t in hooks.topic_keywords([title or ""] + list(texts), n=6):
-        if t not in GENERIC and not any(nospace(t) in nospace(o) or nospace(o) in nospace(t) for o in out):
+        if t not in GENERIC and not _JAMO_ONLY.match(t) and not any(nospace(t) in nospace(o) or nospace(o) in nospace(t) for o in out):
             out.append(t)
     phrase = title_phrase(title)
     if phrase and not any(nospace(phrase) == nospace(o) for o in out):
         out.insert(0 if any(nospace(o) in nospace(phrase) for o in out[:1]) else min(1, len(out)), phrase)
-    return [o for o in out if 1 <= len(nospace(o)) <= 7][:n]
+    return [o for o in out if 1 <= len(nospace(o)) <= 7 and not _JAMO_ONLY.match(o)][:n]
 
 
 _VERB = re.compile(r"(하세요|해요|합니다|됩니다|이에요|예요|이다|하기|하는|이렇게|저렇게|제대로|진짜|무조건|법|방법|꿀팁|팁|해설|영상|세로|테스트)$")
@@ -123,8 +135,9 @@ def _sentences(texts):
 
 
 def _compress(sent):
-    """대사 한 문장 → 썸네일 두 줄 (앞 군말 빼고 띄어쓰기에서 반으로) · 안 되면 None."""
-    t = sent
+    """대사 한 문장 → 썸네일 두 줄 (앞 군말 빼고 띄어쓰기에서 반으로) · 안 되면 None. 받아쓰기의 문장 부호(. ,)는 뺌 (판정 4회차: 실제 받아쓰기)."""
+    t = re.sub(r"[.,…]+", " ", sent)
+    t = re.sub(r"\s+", " ", t).strip()
     changed = True
     while changed:
         changed = False
@@ -158,6 +171,7 @@ def rule_candidates(title, texts):
     """규칙으로 만든 후보 전부 (점수 전).
     레퍼런스(쪼살·쌈바·해주호·JK)의 '결과·대상이 있는 문구' 틀: 무조건 봐(큰 노란 줄) · ~의 비밀 · 영상만 봐도 늘어요 · 플랩 레벨업 · 수비를 속이는 X ·
     N초면 끝 · 이렇게 하면 안 돼요 · 못하는 진짜 이유 · 질문형 · 반전 O/X · 대사 핵심 문장."""
+    title, texts = nfc(title), [nfc(t) for t in texts]
     tp = topics(title, texts)
     X = tp[0] if tp else (title_phrase(title) or "풋살")
     Y = tp[1] if len(tp) > 1 else X
@@ -170,7 +184,7 @@ def rule_candidates(title, texts):
     C.append(_cand("고수만 아는", f"{X}의 비밀", 1, X, "실전에서 바로 써먹는", "secret", 0.95, "'~의 비밀' 궁금증"))
     C.append(_cand("영상만 봐도", "실력이 늘어요", 1, "실력이 늘어요", f"{X} 1분 강좌", "grow", 0.9, "쪼살형 약속 문구"))
     C.append(_cand(X, "이렇게 하세요", 0, X, "감독이 직접 알려줘요", "howto", 0.75, "주제 + 해결"))
-    C.append(_cand("이것만 알면", f"{X} 끝!", 1, X, "1분만 투자하세요", "only", 0.8, "'이것만 알면' 단순화"))
+    C.append(_cand("이것만 알면", f"{X} 끝!", 1, X, "", "only", 0.8, "'이것만 알면' 단순화"))
     C.append(_cand(f"{X} 하나로", "플랩 레벨업", 1, "레벨업", "바로 됩니다", "levelup", 0.75, "쪼살형 결과 약속 (플랩 레벨업)"))
     C.append(_cand(X, "진짜 쉽게", 0, X, "초보도 바로 따라 해요", "easy", 0.65, "쉬움 강조 (주제를 크게)"))
     C.append(_cand("왜 나만", f"{X} 안 될까?", 1, X, "이유는 딱 하나예요", "why", 0.8, "질문형 훅"))
@@ -210,18 +224,28 @@ def rule_candidates(title, texts):
             elif unit == "초":
                 C.append(_cand(X, f"{num}초 법칙", 1, f"{num}초 법칙", "", "numsec", 1.05, f"숫자 약속 (대사의 {num}초)"))
     # 대사의 구체 내용 (판정 3회차: 상투 꼬리표 대신 영상에만 있는 낱말 — '수비 전환 / 3초 법칙' 7.1~7.5 · '슛이 뜨는 이유? / 디딤발 위치' 6.5)
+    # 판정 4회차: 질문은 ① 대사에 있는 질문('왜 다들 첫 터치에서 공을 놓칠까요?') ② 대사에 그 문제 말('막혀요'·'뺏겨요')이 있고 해답 낱말의 기술 종류가 같을 때만 —
+    # '왜 막힐까?'가 76장 중 12장(수비 없는 콘 드리블에도) · 같은 질문 머리는 화면(묶음)에서 한 번만
+    tq = transcript_question(texts, tp)
+    nq = 0
     for k, (d, src) in enumerate(details(texts, [X])[:3]):  # 둘째 주제('시야')도 구체 낱말이 될 수 있음
         if nospace(X) in nospace(d) or nospace(d) in nospace(X):
             continue
+        x1 = X
+        shared = [w for w in X.split() if len(w) >= 2 and w in d]
+        if shared:  # 판정 4회차: '슈팅 디딤발 / 디딤발 위치' — 같은 낱말이 두 줄에 → 남는 주제 낱말만 첫 줄에
+            rest = [w for w in X.split() if w not in shared]
+            if not rest or len(nospace(" ".join(rest))) < 2:
+                continue
+            x1 = " ".join(rest)
         big = d if len(nospace(d)) >= 4 or " " in d else f"핵심은 {d}"
-        C.append(dict(_cand(X, big, 1, d, "", f"detail{k}", 1.05 - 0.05 * k, "대사의 구체 내용"), detail=True, q=src))
-        pq = PROBLEM.get(kind)
-        if pq and len(pq.format(X=X)) > 8:
-            pq = PROBLEM_SHORT.get(kind)  # 쇼츠 한 줄 8자 (띄어쓰기 포함) — 넘으면 화면이 낱말을 다시 나눠 '막히면? 속도'처럼 깨짐
-        if pq and k < 2:
-            l1 = pq.format(X=X)
-            # 판정(dev): 해답 낱말만 크게 두면 '설명형 — 호기심 약함' → 문제 질문 + 해답 (레퍼런스 '슛이 뜨는 이유? / 디딤발 위치') · 주제가 질문에 없으면 보조 줄에
-            C.append(dict(_cand(l1, d, 1, d, "" if nospace(X) in nospace(l1) else X, f"detailq{k}", 1.45 - 0.05 * k, "문제 질문 + 대사의 해답"), detail=True, q=src))
+        C.append(dict(_cand(x1, big, 1, d, "", f"detail{k}", 1.05 - 0.05 * k, "대사의 구체 내용"), detail=True, q=src))
+        if nq >= 2:
+            continue
+        q, why = (tq, "대사의 질문 + 대사의 해답") if tq else (problem_q(kind, d, body, x1), "문제 질문 + 대사의 해답")
+        if q:
+            C.append(dict(_cand(q, d, 1, d, "" if nospace(x1) in nospace(q) else x1, f"detailq{nq}", 1.45 - 0.05 * nq, why), detail=True, q=src))
+            nq += 1
     # 반전 O/X: 한 문장에 기술어 두 개 + '척·대신·말고' → '슛? X / 드래그 O'
     for sent in texts:
         if re.search(r"척|대신|말고|아니라", sent or ""):
@@ -259,9 +283,17 @@ DETAILS = sorted({"디딤발", "발등", "무게중심", "중심", "고개", "�
 NEXT_NOUN = {"위치", "방향", "각도", "타이밍", "높이", "습관", "속도", "거리", "자세", "모양", "안쪽", "바깥쪽", "반대쪽", "구석", "중심", "페인트", "체크", "스텝"}
 DIRS = ("반대쪽", "앞쪽", "바깥쪽", "안쪽", "구석", "뒤쪽")
 _JOSA = re.compile(r"(이|가|을|를|은|는|도|만|의|에|에서|으로|로|와|과|이랑|랑)$")
-# 기술 종류 → 문제 질문 (큰 줄은 대사의 해답 낱말)
-PROBLEM = {"shoot": "{X} 안 들어가면?", "dribble": "{X} 막히면?", "touch": "자꾸 뺏기면?", "tactic": "{X} 안 되면?"}
-PROBLEM_SHORT = {"shoot": "왜 안 들어갈까?", "dribble": "왜 막힐까?", "touch": "왜 뺏길까?", "tactic": "왜 못 받을까?"}
+# 판정 4회차: '구석을 노리지 마세요' → '핵심은 구석'처럼 거꾸로 된 문구 — 낱말 뒤 같은 마디에 이런 말이 있으면 쓰지 않음
+NEG = re.compile(r"지\s?마|지\s?말|말고|않|안\s?[돼되하]|면\s?안\b|금지|하지\s?마")
+# 마디 끝: 쉼표·마침표 · '-고 '·'-다가 '·'-면서 '·'-는데 '·'-지만 ' (방향 낱말은 같은 마디에 있을 때만 붙임)
+CLAUSE_END = re.compile(r"[,.!?·]|(?<=[가-힣])(?:고|다가|면서|는데|지만|니까)\s")
+# 낱말을 바꾸는 움직씨 ('속도를 줄이고' → '속도 줄이기' · 낱말만 두면 '핵심은 속도' — 대사와 반대 뜻)
+CHANGE = ((("줄이", "줄여", "줄였"), "줄이기"), (("낮추", "낮춰", "낮췄"), "낮추기"), (("높이", "높여", "높였"), "높이기"), (("늦추", "늦춰"), "늦추기"),
+          (("멈추", "멈춰"), "멈추기"), (("올리", "올려"), "올리기"), (("내리", "내려"), "내리기"), (("들어", "들고", "들기"), "들기"), (("열어", "열고", "열기"), "열기"),
+          (("바꾸", "바꿔"), "바꾸기"), (("굽히", "굽혀"), "굽히기"), (("숙이", "숙여"), "숙이기"))
+SYN = {"퍼스트 터치": "첫 터치", "첫 터치": "퍼스트 터치", "슈팅": "슛", "슛": "슈팅"}  # 같은 뜻 (주제와 같은 해답은 뺌)
+KEYFRAME = re.compile(r"핵심|중요|비밀|포인트|생명|기본|제일|가장")
+_PUNCT = re.compile(r"[^\w\s?]")
 
 
 def josa(word, a, b):
@@ -270,16 +302,37 @@ def josa(word, a, b):
     return a if "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 else b
 
 
+def _clause(sent, start):
+    """start 부터 마디 끝까지 (쉼표·'-고 '·'-다가 ' …)."""
+    m = CLAUSE_END.search(sent, start)
+    return sent[start:m.start() + 1 if m else len(sent)]
+
+
+def _negated(sent, start):
+    return bool(NEG.search(_clause(sent, start)))
+
+
 def details(texts, tp=()):
     """대사의 구체 낱말 구 → [(구, 근거 문장)] (자주 나온 순·처음 나온 순). 예: '디딤발 위치가 핵심' → '디딤발 위치' · '고개 들고 드리블' → '고개 들고' ·
-    '첫 터치를 수비 반대쪽으로' → '첫 터치는 반대쪽' · '3초 안에 압박하세요' → '3초 안에 압박'. 주제 낱말과 같으면 뺌. 9자(띄어쓰기 빼고) 넘으면 뺌."""
+    '첫 터치를 수비 반대쪽으로' → '첫 터치는 반대쪽' · '3초 안에 압박하세요' → '3초 안에 압박' · '속도를 줄였다가' → '속도 줄이기'.
+    판정 4회차: 부정('~지 마세요'·'말고'·'안 돼요') 마디는 버림 · 방향 낱말은 같은 마디에서만 · 조사가 붙은 낱말('공을')은 'N초 안에' 뒤에 못 옴 ·
+    낱말 하나만은 '핵심·중요·비밀' 같은 말이 있거나 '~예요'로 끝날 때만. 주제 낱말과 같으면 뺌. 9자(띄어쓰기 빼고) 넘으면 뺌."""
     out = []
     for sent in texts:
-        sent = re.sub(r"\s+", " ", str(sent or "")).strip()
-        m = re.search(r"(\d{1,2})\s*(초|번|걸음|미터)\s*(안에|만에)\s+([가-힣]{2,4}?)(하세요|해요|합니다|하기|해야|하면|해)?(?=\s|$|[.!?])", sent)
-        if m:
+        sent = re.sub(r"\s+", " ", nfc(sent)).strip()
+        sent = " ".join(x.strip() for x in re.findall(r"[^.!?]+[.!?]?", sent) if not x.strip().endswith("?"))  # 질문 문장은 해답이 아님
+        if not sent:
+            continue
+        m = re.search(r"(\d{1,2})\s*(초|번|걸음|미터)\s*(안에|만에)\s+([가-힣]{2,4}?)(하세요|해요|합니다|하기|해야|하면|해|하고)(?=\s|$|[.,!?])", sent)
+        if m and not _JOSA.search(m[4]) and not _negated(sent, m.start()):
             out.append((f"{m[1]}{m[2]} {m[3]} {m[4]}", sent))
-        w = sent.split()
+        raw = sent.split()
+        w = [_PUNCT.sub("", x) for x in raw]
+        pos, at = [], 0
+        for x in raw:  # 낱말마다 문장 안 시작 자리 (마디·부정 찾기)
+            at = sent.find(x, at)
+            pos.append(at)
+            at += len(x)
         for d in DETAILS:
             dw = d.split()
             for i in range(len(w) - len(dw) + 1):
@@ -289,33 +342,85 @@ def details(texts, tp=()):
                     continue  # '발 안쪽' 의 '안쪽' 만 따로 잡지 않음
                 last = w[i + len(dw) - 1]
                 tail = last[len(dw[-1]):]
-                tail = re.sub(r"(이에요|예요|이죠|죠|입니다|이다)$", "", tail)  # '비밀은 시야예요'
+                cop = re.search(r"(이에요|예요|이죠|죠|입니다|이다)$", tail)
+                tail = tail[:cop.start()] if cop else tail  # '비밀은 시야예요'
                 if tail and not _JOSA.fullmatch(tail):
                     continue  # '고개를'은 되고 '구석구석'·'속도감'은 아님
+                at = pos[i]
+                if _negated(sent, at):
+                    break  # 판정 4회차: '구석을 노리지 마세요' · '고개를 숙이지 마세요'
                 nxt = w[i + len(dw)] if i + len(dw) < len(w) else ""
                 stem = _JOSA.sub("", nxt) if nxt else ""
+                cl = _clause(sent, at)
+                chg = next((v for ks, v in CHANGE if nxt.startswith(ks)), None) if tail in ("를", "을", "") and nxt else None
                 if not tail and stem in NEXT_NOUN:
                     ph = f"{d} {stem}"
-                elif not tail and re.fullmatch(r"[가-힣]{1,2}고", nxt or ""):
+                elif not tail and re.fullmatch(r"[가-힣]{1,2}고", nxt or "") and not chg:
                     ph = f"{d} {nxt}"
-                elif tail in ("를", "을") and not any(x in d for x in DIRS) and any(x in sent[sent.find(last):] for x in DIRS):
-                    dr = next(x for x in DIRS if x in sent[sent.find(last):])
+                elif chg:
+                    ph = f"{d} {chg}"
+                elif tail in ("를", "을") and not any(x in d for x in DIRS) and any(x in cl[len(raw[i]):] for x in DIRS):
+                    dr = next(x for x in DIRS if x in cl[len(raw[i]):])
                     ph = f"{d}{josa(d, '은', '는')} {dr}"
+                elif cop or KEYFRAME.search(sent) or len(dw) > 1:
+                    ph = d  # '비밀은 시야예요' · '디딤발이 핵심이에요' · 두 낱말 구('반대쪽 구석')는 그 자체로 구체적
                 else:
-                    ph = d
+                    break  # 낱말만 덩그러니 (뜻이 뒤에 있음: '속도를 …') — 쓰지 않음
                 out.append((ph, sent))
                 break
             else:
                 continue
             break  # 한 문장에서 낱말 하나 (가장 긴 것)
     seen, res = set(), []
+    tps = {nospace(t) for t in tp} | {nospace(SYN[t]) for t in tp if t in SYN}
     for ph, sent in out:
         k = nospace(ph)
-        if k in seen or len(k) > 9 or len(k) < 2 or any(nospace(t) == k for t in tp):
+        if k in seen or len(k) > 9 or len(k) < 2 or k in tps:
             continue
         seen.add(k)
         res.append((ph, sent))
     return res
+
+
+# 문제 질문: (질문, 대사에 있어야 하는 문제 말, 해답 낱말에 맞는 것) — 기술 종류마다 · 대사에 문제 말이 없으면 질문을 만들지 않음 (판정 4회차)
+PROBLEM_Q = {
+    "shoot": (("슛이 뜨는 이유?", r"뜨|떠요|높이 ?가|하늘", None), ("왜 안 들어갈까?", r"안 ?들어|빗나|막혀|놓쳐", None)),
+    "dribble": (("왜 막힐까?", r"막혀|막히|뺏겨|뺏기|걸려", r"페인트|상체|속도|드래그|스텝|방향|무게|중심"), ("왜 뺏길까?", r"뺏겨|뺏기", None)),
+    "touch": (("왜 놓칠까?", r"놓치|놓쳐|튀어|길어", None), ("왜 뺏길까?", r"뺏겨|뺏기", None)),
+    "tactic": (("왜 늦을까?", r"늦어|늦게|늦으", r"압박|전환|시야|고개|타이밍"), ("왜 못 받을까?", r"못 ?받|패스가 ?안", r"시야|고개|공간|각도|체크")),
+}
+
+
+def problem_q(kind, d, body, x=""):
+    """해답 낱말 d 에 맞는 문제 질문 (대사에 그 문제 말이 있고, 해답의 기술 종류가 질문과 같을 때만) · 없으면 ''."""
+    dk = _kind(d)
+    if not kind or (dk and dk != kind):
+        return ""
+    for q, ev, fit in PROBLEM_Q.get(kind, ()):
+        if re.search(ev, body) and (fit is None or re.search(fit, d)) and (dk == kind or fit):
+            return q
+    return ""
+
+
+def transcript_question(texts, tp=()):
+    """대사에 있는 질문 문장 → 썸네일 한 줄 질문 (8자 안) — '왜 다들 첫 터치에서 공을 놓칠까요?' → '왜 공을 놓칠까?' · 없으면 ''."""
+    for sent in texts:
+        sent = re.sub(r"\s+", " ", nfc(sent)).strip()
+        for part in re.findall(r"[^.!?]*\?", sent):
+            m = re.search(r"(왜|어떻게|몇)\s.*\?", part)
+            if not m:
+                continue
+            q = m[0][:-1]
+            for t in sorted(set(tp) | set(TERMS) | set(DETAILS) | set(SYN), key=lambda t: -len(t)):  # 주제·기술어는 빼고 (그 낱말은 다른 줄·보조 문구에)
+                if len(nospace(t)) >= 2:
+                    q = _term_rx(t).sub(" ", q)
+            words = [x for x in q.split() if x not in ("다들", "여러분", "진짜", "항상", "그냥", "정말", "과연") and not _JOSA.fullmatch(x)]
+            q = re.sub(r"(까|나|죠|지)요$", r"\1", " ".join(words)) + "?"
+            if len(q) > 8:  # '왜 공을 놓칠까?'(9자) → '왜 공 놓칠까?' (말할 때처럼 을·를을 뺌)
+                q = re.sub(r"(?<=[가-힣])[을를](?=\s)", "", q)
+            if 3 <= len(nospace(q)) and len(q) <= 8 and len(words) >= 2:
+                return q
+    return ""
 
 
 NUMS = {"한": "1", "두": "2", "세": "3", "네": "4", "다섯": "5"}
@@ -337,7 +442,7 @@ CONCRETE = re.compile(r"\d|한 가지|1가지|가지|단계|법칙|순서|늘어
 VAGUE_PIDS = {"must", "secret", "howto", "easy", "only", "title"}  # '못하는 진짜 이유'는 판정에서 가장 잘 읽히는 궁금증 (7.2~7.4)
 VAGUE = re.compile(r"무조건 봐|의 비밀|이렇게 하세요|진짜 쉽게|총정리|기본기|제대로 배웠|중요해요")
 # 판정 3회차: 2회차 뒤 새로 판에 박힌 꼬리표 — 어느 영상에나 붙어 '무엇을 알려 주는지 없음'. 대사에 그 말이 그대로 있으면(인용) 괜찮음
-STOCK = re.compile(r"이 ?순서대로|플랩 ?레벨업|실력이 ?늘어요|골이 ?늘어요|딱 ?1가지|핵심은 딱|수비가 ?속아요|패스가 ?보여요|공 ?안 ?뺏겨요|드리블 ?늘어요|확 ?달라져요|1가지 ?습관|1가지만 ?바꿔요|핵심 ?1가지")
+STOCK = re.compile(r"이 ?순서대로|플랩 ?레벨업|실력이 ?늘어요|골이 ?늘어요|딱 ?1가지|핵심은 딱|수비가 ?속아요|패스가 ?보여요|공 ?안 ?뺏겨요|드리블 ?늘어요|확 ?달라져요|1가지 ?습관|1가지만 ?바꿔요|핵심 ?1가지|꿀팁 ?1가지|1분만 ?투자|바로 ?됩니다")
 STOCK_PIDS = {"one", "levelup", "grow", "result"}
 
 
@@ -349,14 +454,10 @@ def concrete(c):
 
 
 def stock(c, body=""):
-    """판에 박힌 꼬리표('이 순서대로!'·'플랩 레벨업'·'~늘어요'·'딱 1가지')인지 — 대사에 그 말이 그대로 있으면 아님."""
+    """판에 박힌 꼬리표('플랩 레벨업'·'~늘어요'·'딱 1가지'·'확 달라져요')인지.
+    판정 4회차: 대사에 그 말이 있어도 상투 — 말하는 사람도 습관처럼 쓰는 말이라 썸네일에선 '흔한 광고 말투'(인용 예외를 없앰). body 는 예전 호출 호환."""
     text = (c.get("l1") or "") + " " + (c.get("l2") or "")
-    m = STOCK.search(text)
-    if not m and c.get("pid") not in STOCK_PIDS:
-        return False
-    if m and body and nospace(m[0]) in nospace(body):
-        return False
-    return True
+    return bool(STOCK.search(text)) or c.get("pid") in STOCK_PIDS
 
 
 def vague(c, body=""):
@@ -443,14 +544,14 @@ def _pick(cands, n=N_OUT):
 def _texts(name):
     try:
         segs = json.loads((core.adir(name) / "transcript.json").read_text(encoding="utf-8"))
-        return [str(s.get("text") or "") for s in segs if isinstance(s, dict)]
+        return [nfc(s.get("text") or "") for s in segs if isinstance(s, dict)]
     except (OSError, ValueError):
         return []
 
 
 def nice_title(name):
     """보관함 이름 'YYYYMMDD_영상ID_제목.mp4' → 제목 (화면 niceName 과 같은 규칙)."""
-    return re.sub(r"\.[^.]+$", "", re.sub(r"^\d{8}_[A-Za-z0-9_-]{11}_", "", name or ""))
+    return nfc(re.sub(r"\.[^.]+$", "", re.sub(r"^\d{8}_[A-Za-z0-9_-]{11}_", "", nfc(name))))
 
 
 def finish(c, tp, body=""):
@@ -476,7 +577,9 @@ def suggest(name, with_ai=True):
 
 # ---------- 클로드 (선택 · 내 클로드 계정) ----------
 
-PROMPT_VER = 4   # 클로드 문구 질문이 바뀌면 올림 → 기억해 둔 클로드 문구를 다시 받음 (2: 구체적 약속·줄 8자 · 3: 대사 근거 인용·상투 꼬리표 금지 · 4: 해답만 두지 말고 궁금증과 함께)
+PROMPT_VER = 5   # 클로드 문구 질문이 바뀌면 올림 → 기억해 둔 클로드 문구를 다시 받음 (2: 구체적 약속·줄 8자 · 3: 대사 근거 인용·상투 꼬리표 금지 · 4: 해답만 두지 말고 궁금증과 함께 ·
+#                  5: 금지 꼬리표가 든 좋은 예시를 뺌·부정 문장 뜻 뒤집기 금지·같은 질문 머리 반복 금지)
+AI_RETRY = 3600  # 클로드 문구가 실패했으면(형식·근거 없음·한도) 1시간 동안 자동으로 다시 부르지 않음 (열 때마다 160초 기다리지 않게 · 버튼은 언제나)
 
 
 def _sig(name):
@@ -498,6 +601,25 @@ def load_ai(name):
     return None
 
 
+def failed_recently(name):
+    """자동 클로드 문구가 최근(AI_RETRY 안)에 같은 받아쓰기로 실패했는지 — 그동안은 분석이 클로드를 다시 부르지 않음."""
+    try:
+        d = json.loads((core.adir(name) / CACHE).read_text(encoding="utf-8"))
+        return d.get("failSig") == _sig(name) and 0 <= time.time() - float(d.get("failAt") or 0) < AI_RETRY
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
+def _save_cache(name, data):
+    p = core.adir(name) / CACHE
+    with _LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        import updater
+        updater._replace(tmp, p)
+
+
 def prompt(name):
     title, texts = nice_title(name), _texts(name)
     tp = topics(title, texts)
@@ -508,13 +630,15 @@ def prompt(name):
          f"[영상 제목] {title}", f"[주제 낱말] {', '.join(tp) or '없음'}", "[대사 요약 (앞부분)]", body[:2500], "[핵심 문장]"] + [f"- {s}" for s in key] + [
          "", "[잘 되는 문구 — 레퍼런스 채널 실제 예시 (낱말은 이 영상에 맞게 바꾸세요)]"] + [f"- {x}" for x in REF_EXAMPLES] + [
          "", "[좋은 썸네일 문구의 조건 — 가장 중요]",
-         "- 10개 중 7개 이상은 '구체적인 약속'이어야 해요: 숫자·시간·결과·대상이 들어간 문구. 예: '수비 전환 / 3초 법칙', '수비가 못 막는 / 1가지', "
-         "'이 순서만 지키면 / 슈팅이 낮아져요', '디딤발 하나로 / 골이 늘어요', '첫 터치 / 수비 반대쪽으로'. 숫자는 대사에 나온 것만 쓰고, 없으면 '1가지'·결과로.",
-         "- 결과나 대상이 보여야 해요: '실력이 늘어요', '플랩 레벨업 바로 됩니다', '수비를 속이는 발바닥 드래그'처럼 보면 무엇이 좋아지는지·누구를 이기는지.",
+         "- 10개 중 7개 이상은 '구체적인 약속'이어야 해요: 숫자·시간·결과·대상이 들어간 문구. 예: '수비 전환 / 3초 법칙', '수비가 못 막는 / 상체 페인트', "
+         "'디딤발 하나로 / 슛이 낮아져요', '첫 터치 / 수비 반대쪽으로'. 숫자는 대사에 나온 것만 써요.",
+         "- 결과나 대상이 보여야 해요: '수비를 속이는 발바닥 드래그', '슛이 낮게 깔려요'처럼 이 영상에서만 나오는 낱말로 무엇이 좋아지는지·누구를 이기는지.",
          "- 금지(막연한 낚시 문구): '무조건 봐', '~의 비밀', '이렇게 하세요', '진짜 쉽게', '총정리', '제대로 배웠어?', '이게 진짜 중요해요'. 이런 말은 많아야 1개.",
-         "- 금지(어느 영상에나 붙는 꼬리표): '이 순서대로!', '플랩 레벨업', '실력이 늘어요', '골이 늘어요', '딱 1가지', '1가지만 바꿔요', '확 달라져요', '수비가 속아요'. "
-         "대사에 그 말이 그대로 있을 때만 써도 돼요.",
-         "- 모든 문구에는 대사에 나온 구체적인 낱말(몸의 부분·방향·숫자·동작·상황, 예: '디딤발 위치', '3초 안에 압박', '첫 터치는 반대쪽', '고개 들고')이 적어도 1개 들어가야 해요. "
+         "- 금지(어느 영상에나 붙는 꼬리표 — 대사에 있어도 쓰지 마세요): '이 순서대로!', '플랩 레벨업', '실력이 늘어요', '골이 늘어요', '딱 1가지', '1가지만 바꿔요', "
+         "'확 달라져요', '수비가 속아요', '꿀팁 1가지', '1분만 투자하세요', '바로 됩니다'.",
+         "- 대사가 '~하지 마세요'·'~말고'·'안 돼요'라고 한 낱말을 해답처럼 쓰지 마세요 (뜻이 거꾸로 돼요). '속도를 줄이세요'는 '속도'가 아니라 '속도 줄이기'.",
+         "- 같은 질문 머리('왜 막힐까?')를 두 번 넘게 쓰지 마세요. 질문은 대사가 말한 문제와 해답이 원인-결과로 이어질 때만.",
+         "- 모든 문구에는 대사에 나온 구체적인 낱말(몸의 부분·방향·숫자·동작·상황, 예: '디딤발 위치', '3초 안에 압박', '첫 터치는 반대쪽', '고개 들기')이 적어도 1개 들어가야 해요. "
          "그 낱말이 나온 대사 한 마디를 q 에 글자 그대로 옮겨 적으세요 (대사에 없는 말이면 그 문구는 버려져요).",
          "- 구체 낱말만 덩그러니 두면('디딤발 위치') 설명이라 클릭하고 싶지 않아요. 궁금증과 함께: 문제 질문 + 해답('슛이 뜨는 이유? / 디딤발 위치', "
          "'왜 막힐까? / 상체 페인트'), 대비('공 보기 X / 고개 들기 O'), '못하는 진짜 이유', 결과('뺏기면 3초 / 바로 압박!').",
@@ -523,30 +647,55 @@ def prompt(name):
          "- 영상 내용과 맞는 말만. 과장·낚시(충격·경악·실화냐·100%·역대급)는 쓰지 마세요. 해요체·반말 질문형 모두 좋아요.",
          "", "[형식 규칙]", "- 한 줄은 띄어쓰기를 넣고 8자 이내(쇼츠 세로 화면 기준 · 많아야 9자), 두 줄 합쳐 16자 이내. 작은 화면(휴대폰 목록)에서도 읽혀야 해요.",
          "- emph = 노랗고 가장 크게 칠할 낱말(1~6자). l1 또는 l2 안에 글자 그대로 있어야 하고, 그 줄이 가장 큰 줄이 돼요. 보통 주제 낱말이나 결과·훅 낱말.",
-         "- sub = 어두운 상자 안에 작게 들어갈 보조 문구(선택, 12자 이내, 예: '1분만 투자하세요', '1분 강좌', '감독이 직접 알려줘요').",
+         "- sub = 어두운 상자 안에 작게 들어갈 보조 문구(선택, 12자 이내, 예: '1분 강좌', '감독이 직접 알려줘요', '실전 시범').",
          f"- 서로 다른 틀로 {AI_N}개.", "", "[대답 형식] JSON 배열만 (설명 없이):",
          '[{"l1": "첫 줄", "l2": "둘째 줄", "emph": "강조 낱말", "sub": "보조 문구", "q": "근거 대사 그대로"}]']
     return "\n".join(L)
 
 
 def ai_ready():
-    """클로드 프로그램이 이 PC에 있고 로그인돼 있는지 (상태는 60초 기억 · 실패하면 False)."""
+    """클로드 프로그램이 이 PC에 있고 로그인돼 있는지 확실할 때만 True (상태는 60초 기억 · 실패하면 False)."""
+    return ai_state() == "ready"
+
+
+_PROVEN = {"ok": False}  # 이 앱 실행에서 클로드가 한 번이라도 대답했으면 True — 그 뒤의 '확인이 늦음(unknown)'은 로그인돼 있는 것으로 봄
+
+
+def ai_state():
+    """'ready' (로그인 확인됨 · 또는 확인이 늦지만 이번 실행에서 이미 대답한 적 있음) · 'maybe' (확인이 늦거나 못 읽음 — 한 번 시도는 하되 짧게만 기다림) · ''.
+    판정 4회차: unknown 을 그냥 ready 로 보면 멈춘 CLI(첫 실행 질문·프록시)에서 분석마다 160초씩 기다림."""
     try:
         import claude_cli
-        return bool(claude_cli.find_exe()) and claude_cli.status().get("state") in ("ready", "unknown")  # unknown: 확인이 늦음(바쁜 PC) — 해 보고 안 되면 규칙 문구로
+        if not claude_cli.find_exe():
+            return ""
+        st = claude_cli.status().get("state")
     except Exception:
-        return False
+        return ""
+    if st == "ready":
+        return "ready"
+    if st == "unknown":
+        return "ready" if _PROVEN["ok"] else "maybe"
+    return ""
+
+
+def _plain(t):
+    """맞춰 보기용: 한글·영문·숫자만 (띄어쓰기·문장 부호·따옴표를 뺌 · NFC)."""
+    return re.sub(r"[^가-힣A-Za-z0-9]", "", nfc(t))
 
 
 def grounded(l1, l2, q, body, tp=()):
-    """클로드 문구가 대사에 근거가 있는지: 근거(q)가 대사에 글자 그대로 있고, 문구의 두 글자 이상 낱말 조각(주제 낱말 말고)이 근거 안에 있음."""
-    nb, nq = nospace(body), nospace(q)
+    """클로드 문구가 대사에 근거가 있는지: 근거(q)가 대사에 그대로 있고(문장 부호·띄어쓰기는 무시), 문구의 세 글자 이상 조각(주제 낱말 말고) 또는
+    구체 낱말(DETAILS)이 근거 안에 있음. 판정 4회차: 두 글자 조각('오늘'·'바로')만 겹쳐도 통과하던 것을 막고, 쉼표 하나 빠진 인용은 받아 줌."""
+    nb, nq = _plain(body), _plain(q)
     if len(nq) < 4 or nq not in nb:
         return False
-    text = nospace(l1 + l2)
+    filler = set(FILLER_HEAD) | GENERIC | {"오늘", "오늘은", "이것만", "이것", "바로", "정말", "알면", "보세요", "하세요", "해요"}
+    text = _plain(" ".join(w for w in (l1 + " " + l2).split() if _JOSA.sub("", w) not in filler and w not in filler))  # 군말('오늘은')만 겹치면 근거 아님
+    if any(_plain(d) in text and _plain(d) in nq for d in DETAILS):
+        return True
     for t in tp:
-        text = text.replace(nospace(t), "|")
-    return any(text[i:i + 2] in nq for i in range(len(text) - 1) if re.fullmatch(r"[가-힣0-9A-Za-z]{2}", text[i:i + 2]))
+        text = text.replace(_plain(t), "|")
+    return any(text[i:i + 3] in nq for i in range(len(text) - 2) if "|" not in text[i:i + 3])
 
 
 def _check_ai(x, body=None, tp=()):
@@ -556,7 +705,7 @@ def _check_ai(x, body=None, tp=()):
     l1, l2, em, sub, q = (x.get(k, "") for k in ("l1", "l2", "emph", "sub", "q"))
     if not all(isinstance(v, str) for v in (l1, l2, em, sub, q)):
         return None
-    l1, l2, em, sub, q = (re.sub(r"\s+", " ", v).strip() for v in (l1, l2, em, sub, q))
+    l1, l2, em, sub, q = (re.sub(r"\s+", " ", nfc(v)).strip() for v in (l1, l2, em, sub, q))
     if not l1 or len(nospace(l1)) > LINE_MAX or len(nospace(l2)) > LINE_MAX or len(sub) > 16 or any(c in l1 + l2 + sub for c in "<>{}\\"):
         return None
     if body and nospace(body).strip() and not grounded(l1, l2, q, body, tp):
@@ -569,9 +718,13 @@ def _check_ai(x, body=None, tp=()):
     return c
 
 
+class Ungrounded(ValueError):
+    """클로드 문구가 모두 대사에 근거가 없음 (형식은 맞음)."""
+
+
 def parse_ai(text, body=None, tp=()):
-    """클로드 대답 → 검사한 후보 목록 (body: 대사 — 있으면 근거 없는 문구를 버림). 형식이 아니면 ValueError(한국어)."""
-    s = str(text or "")
+    """클로드 대답 → 검사한 후보 목록 (body: 대사 — 있으면 근거 없는 문구를 버림). 형식이 아니면 ValueError(한국어) · 모두 근거가 없으면 Ungrounded."""
+    s = nfc(text)
     m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", s, re.S)
     if m:
         s = m[1]
@@ -588,6 +741,8 @@ def parse_ai(text, body=None, tp=()):
         raise ValueError("클로드 대답 형식이 달라요")
     out = [c for c in (_check_ai(x, body, tp) for x in d[:20]) if c]
     if not out:
+        if body and any(_check_ai(x) for x in d[:20]):
+            raise Ungrounded("클로드 문구가 모두 대사와 맞지 않았어요")
         raise ValueError("쓸 수 있는 문구가 없었어요")
     return out
 
@@ -602,28 +757,33 @@ def run_ai(name, log=print, cancel=None, progress=True):
     def tick(sec):
         if progress:
             core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail=f"클로드가 썸네일 문구를 만드는 중… (내 클로드 계정 사용 · {sec}초)")
+    fail = {"failSig": _sig(name), "failAt": int(time.time())}
     try:
         res = claude_cli.run(prompt(name), cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT)
     except claude_cli.ClaudeError as e:
         log(f"클로드 문구 · {e.kind}")  # 종류만 (대답·프롬프트는 남기지 않음)
+        if e.kind != "cancel" and load_ai(name) is None:
+            _save_cache(name, fail)  # 판정 4회차: 실패도 기억 (1시간 동안 분석이 다시 부르지 않음)
         return {"ok": False, "error": str(e), "kind": e.kind}
+    _PROVEN["ok"] = True
     try:
         texts = _texts(name)
         items = parse_ai(res.get("text"), " ".join(texts), topics(nice_title(name), texts))
+    except Ungrounded as e:
+        log("클로드 문구 · 대사 근거 없음")
+        if load_ai(name) is None:
+            _save_cache(name, fail)
+        return {"ok": False, "error": f"{e}. 다시 눌러 주세요 (규칙 문구는 그대로 있어요)", "kind": "ungrounded"}
     except ValueError as e:
         log("클로드 문구 · 형식 다름")
+        if load_ai(name) is None:
+            _save_cache(name, fail)
         return {"ok": False, "error": f"{e}. 다시 눌러 주세요 (규칙 문구는 그대로 있어요)", "kind": "format"}
     def plain(c):  # 기억할 때는 클로드가 준 모양 그대로 (강조는 낱말로)
         e = c["emph"]
         return {"l1": c["l1"], "l2": c["l2"], "sub": c["sub"], "emph": (c["l1"], c["l2"])[e[0]][e[1]:e[2]] if e else "", "q": c.get("q", "")}
     data = {"sig": _sig(name), "items": [plain(c) for c in items], "model": res.get("model"), "at": time.strftime("%Y-%m-%d %H:%M")}
-    p = core.adir(name) / CACHE
-    with _LOCK:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        import updater
-        updater._replace(tmp, p)
+    _save_cache(name, data)
     log(f"클로드 문구 · {len(items)}개 저장했어요")
     return {"ok": True, "items": suggest(name)["items"]}
 

@@ -102,7 +102,7 @@ def hamming(a, b):
         return 64
 
 
-CAND_VER = 2       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로)
+CAND_VER = 3       # 장면 후보 항목이 바뀌면 올림 (2: 색 요란함 color · 아래 이름 띠(로워서드)를 띠로 · 3: 이름 띠 조건을 좁힘(광고판·바닥 글자 아님))
 GRADE_VER = 5      # 자동 보정 계산이 바뀌면 올림 → 장면 후보를 다시 골라 새 보정 값으로 (2: 채도 높은 장면·레벨 줄이기·감마 범위 · 3~4: 채도 높은 장면 목표 1.06 · 5: 아주 어두운 장면은 선명하게 끔)
 MAX_SHIFT = 40     # 자동 보정: 레벨로 한 채널을 많아야 이만큼만 늘림 (클리핑·색 틀어짐 막기)
 GRADE_MEAN = 0.48  # 보정 뒤 평균 밝기 목표
@@ -506,15 +506,26 @@ def ocr_lines(rgb):
     return avmodels.ocr(np.asarray(rgb)) or []
 
 
-def name_bar(lines):
+def name_bar(lines, persons=None):
     """방송 화면 아래의 이름 띠(로워서드: 'Edwin José Pinzón' 같은 작은 글자 줄) → 띠가 시작하는 높이 0~1 · 없으면 None.
-    판정 3회차: 큰 글자만 보는 text_boxes 가 아래 20% 의 작은 이름 띠를 못 잡아 쇼츠에 방송 이름 띠가 그대로 남음."""
+    판정 3회차: 큰 글자만 보는 text_boxes 가 아래 20% 의 작은 이름 띠를 못 잡아 쇼츠에 방송 이름 띠가 그대로 남음.
+    판정 4회차: 실내 풋살장의 광고판·바닥 글자·전광판·등번호 이름도 아래 25% 에 있어 장면 30% 가 잘릴 수 있음 → 이름 띠 모양만:
+    글자 높이 0.02~0.06H · 왼쪽이나 가운데에서 시작 · 이름 같은 글자(숫자 적음) · 그런 줄이 1~2개 · 띠 아래로 발이 보이는 사람이 없음(persons: [x,y,w,h,…])."""
     ys = []
     for x in lines or []:
         x0, y0, x1, y1 = x["box"]
-        if (y0 + y1) / 2 > 0.75 and y1 - y0 >= 0.02 and x1 - x0 >= 0.1:
+        txt = str(x.get("text") or "")
+        letters = len(re.findall(r"[A-Za-z가-힣]", txt))
+        if (y0 + y1) / 2 > 0.75 and 0.02 <= y1 - y0 <= 0.06 and x1 - x0 >= 0.1 and x0 < 0.5 and letters >= 3 and sum(c.isdigit() for c in txt) <= max(1, letters // 3):
             ys.append(y0)
-    return round(max(0.7, min(ys) - 0.015), 3) if ys else None
+    if not ys or len(ys) > 2:
+        return None
+    y = max(0.7, min(ys) - 0.015)
+    for p in persons or []:
+        bot = p[1] + p[3]
+        if y + 0.02 < bot < 0.97:
+            return None  # 띠 아래에 발이 보이는 선수 → 경기장 안의 글자(광고판·바닥)라 잘라 내면 발이 잘림
+    return round(y, 3)
 
 
 def colorfulness(rgb):
@@ -630,7 +641,7 @@ def frame_candidates(name, n=TOP_N):
             info["grade"] = auto_grade(rgb, close=info["kind"] == "close")
             info["color"] = colorfulness(rgb)
             lines = ocr_lines(rgb)
-            nb = name_bar(lines)
+            nb = name_bar(lines, info["persons"])
             if nb and info["band"] is None:
                 info["band"], info["bandY"] = "bottom", nb  # 아래 이름 띠는 자막 띠처럼 잘라 냄
             tb = text_boxes(rgb, info["band"], info["bandY"], lines)
@@ -957,22 +968,29 @@ def cached_analysis(name):
 
 
 AI_COPY_WAIT = 160   # 분석 끝에 클로드 문구를 기다리는 최대 시간(초) — 장면·누끼와 동시에 시작함
+AI_MAYBE_WAIT = 20   # 로그인 확인이 늦을 때(unknown)는 한 번 해 보되 이만큼만 기다림 (판정 4회차: 멈춘 CLI 에서 분석마다 160초)
+_AI_WAIT = {}        # 영상 이름 → 이번 분석이 클로드를 기다릴 최대 시간
 
 
 def _ai_on(name):
-    """클로드 자동 (문구·장면 고르기): 브랜드 키트에서 켜져 있고 클로드 프로그램이 로그인돼 있을 때만."""
+    """클로드 자동 (문구·장면 고르기): 브랜드 키트에서 켜져 있고 클로드 프로그램이 로그인돼 있을 때만 → 'ready' · 'maybe'(확인이 늦음) · ''."""
     import thumbcopy
     try:
-        return bool(load_brand().get("aiCopy", True)) and thumbcopy.ai_ready()
+        if not load_brand().get("aiCopy", True):
+            return ""
+        st = thumbcopy.ai_state()
     except Exception:
-        return False
+        return ""
+    if st:
+        _AI_WAIT[name] = AI_COPY_WAIT if st == "ready" else AI_MAYBE_WAIT
+    return st
 
 
 def _start_ai_copy(name, log):
     """클로드 문구를 장면 분석과 동시에 (브랜드 키트 '클로드 자동'이 켜져 있고, 클로드 프로그램이 로그인돼 있고, 기억한 문구가 없을 때만) → 스레드 또는 None."""
     import thumbcopy
     try:
-        if thumbcopy.load_ai(name) is not None or not _ai_on(name):
+        if thumbcopy.load_ai(name) is not None or thumbcopy.failed_recently(name) or not _ai_on(name):
             return None
     except Exception:
         return None
@@ -1111,6 +1129,7 @@ def run_ai_frames(name, items, log=print, cancel=None):
             if e.kind != "cancel":
                 _save_ai_frames(name, {"failSig": _frames_sig(items), "failAt": int(time.time())})
             return None
+    thumbcopy._PROVEN["ok"] = True  # 클로드가 대답함 → 이번 실행의 '확인 늦음'은 로그인된 것으로
     try:
         sc = parse_ai_frames(res.get("text"), len(items))
     except ValueError:
@@ -1137,9 +1156,9 @@ def _with_ai_frames(name, items):
 
 
 def _wait(threads, name, what):
-    t0 = time.time()
+    t0, cap = time.time(), _AI_WAIT.get(name, AI_COPY_WAIT)
     for th in threads:
-        while th is not None and th.is_alive() and time.time() - t0 < AI_COPY_WAIT:
+        while th is not None and th.is_alive() and time.time() - t0 < cap:
             core.set_progress(label="썸네일 분석", item=name, pct=99, detail=f"클로드가 {what} (내 클로드 계정 사용 · {int(time.time() - t0)}초)")
             th.join(0.5)
 

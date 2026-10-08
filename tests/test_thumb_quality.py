@@ -195,20 +195,20 @@ class AnalyzeTests(unittest.TestCase):
 
     def test_ai_copy_runs_only_when_ready_and_enabled(self):
         ran = threading.Event()
-        with mock.patch.object(thumbcopy, "ai_ready", return_value=True), mock.patch.object(thumbcopy, "run_ai", side_effect=lambda *a, **k: ran.set()) as ra:
+        with mock.patch.object(thumbcopy, "ai_state", return_value="ready"), mock.patch.object(thumbcopy, "run_ai", side_effect=lambda *a, **k: ran.set()) as ra:
             th = thumb._start_ai_copy(self.NAME, lambda m: None)
             self.assertIsNotNone(th)
             th.join(5)
             self.assertTrue(ran.is_set())
             self.assertEqual(ra.call_args.kwargs.get("progress"), False, "분석 진행 표시를 덮지 않음")
-        with mock.patch.object(thumbcopy, "ai_ready", return_value=False):
+        with mock.patch.object(thumbcopy, "ai_state", return_value=""):
             self.assertIsNone(thumb._start_ai_copy(self.NAME, lambda m: None), "로그인 안 됨 → 규칙 문구만")
         thumb.save_brand({"aiCopy": False})
-        with mock.patch.object(thumbcopy, "ai_ready", return_value=True):
+        with mock.patch.object(thumbcopy, "ai_state", return_value="ready"):
             self.assertIsNone(thumb._start_ai_copy(self.NAME, lambda m: None), "브랜드 키트에서 끔")
         thumb.save_brand({"aiCopy": True})
         (core.adir(self.NAME) / thumbcopy.CACHE).write_text(json.dumps({"sig": thumbcopy._sig(self.NAME), "items": [{"l1": "수비를 속이는", "l2": "드래그", "emph": "드래그", "sub": ""}]}, ensure_ascii=False), encoding="utf-8")
-        with mock.patch.object(thumbcopy, "ai_ready", return_value=True):
+        with mock.patch.object(thumbcopy, "ai_state", return_value="ready"):
             self.assertIsNone(thumb._start_ai_copy(self.NAME, lambda m: None), "기억한 클로드 문구가 있으면 다시 안 부름")
 
     def test_ai_frames_rated_saved_and_attached(self):
@@ -267,7 +267,7 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(bs, [[0.1, 0.1, 0.4, 0.1]])
 
 
-JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "loud", "frameQ", "hamming", "sameFace", "sceneGroups", "usableFrame", "srcHeadCut", "footClose", "headlessBad", "isExpr", "aiFrames")
+JS_PURE = ("clipTo", "areaOf", "interArea", "imgRect", "f2c", "boxC", "mainBox", "mainFace", "headBox", "visibleText", "digitRuns", "joinCopy", "LOUD", "loud", "loudMult", "frameQ", "hamming", "sameFace", "sceneGroups", "usableFrame", "srcHeadCut", "footClose", "headlessBad", "isExpr", "aiFrames")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }

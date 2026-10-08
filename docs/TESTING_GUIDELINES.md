@@ -12,7 +12,7 @@
 - 전체 실행 (저장소 폴더에서): `python3 -m unittest discover -s tests` — 약 450개, 개발 환경에서 4분 남짓. 실제 ffmpeg(imageio-ffmpeg)로 짧은 시험 영상을 만들어 돌린다.
 - 단일 파일 실행: `python3 -m unittest tests.test_update` / 하나만: `python3 -m unittest tests.test_update.InstallTests.test_hash_mismatch_leaves_app_unchanged`
 - 테스트 파일 위치·네이밍: `tests/test_<영역>.py` (평평한 구조), 고정 자료는 `tests/fixtures/`. `tests/` 는 배포 목록에서 빠진다.
-- 썸네일 AI 추천 e2e(개발용, unittest 가 줍지 않음): `tests/e2e/mkwork.py <작업폴더> <시험 영상 폴더>` 로 시험 작업 폴더를 만들고 격리 서버를 띄운 뒤 `TH_PORT=<포트> python3 tests/e2e/thq_e2e.py <스크린샷 폴더>` → `FAILS: 0`. 시험 영상은 저장소에 넣지 않는다(출처·이름은 mkwork.py 머리말).
+- 썸네일 AI 추천 e2e(개발용, unittest 가 줍지 않음): `tests/e2e/mkwork.py <작업폴더> <시험 영상 폴더>` 로 시험 작업 폴더를 만들고 격리 서버를 띄운 뒤 `TH_PORT=<포트> python3 tests/e2e/thq_e2e.py <스크린샷 폴더>` → `FAILS: 0`. 시험 영상은 저장소에 넣지 않는다(출처·이름은 mkwork.py 머리말). 판정 4회차(D-030): 넘긴 영상 모두 × 롱폼·쇼츠를 묶음마다 굳은 규칙으로 셈(`thq_e2e.py <스크린샷> <영상 이름…>` · 마지막에 영상별 위반 수) · 시험 영상이 지워지면 `tests/e2e/mkstock.py <내려받기 폴더> <시험 영상 폴더>`(Mixkit·Commons 원본 목록·라이선스) · `mkwork.py … --with-asr` 는 실제 받아쓰기(`tests/fixtures/thumb_asr`)를 스톡 영상에 붙인 THQASR 묶음을 더함(문구 규칙을 만든 사람이 쓰지 않은 대사로 문구 품질을 따로 봄).
 
 | 파일 | 대상 |
 |---|---|
@@ -23,6 +23,7 @@
 | `test_faces.py` | `face.py` 얼굴·표정 점수 · `thumb.frame_candidates` 장면 고르기 |
 | `test_thumb_pro.py` | AI 추천 썸네일 백엔드: 동봉 글꼴·스티커(라이선스·목록) · `detect`(가짜 세션: 레터박스·격자 해석·NMS·공 다시 찾기·실패 표시) · 자동 보정(`auto_grade` 목표 밝기·채도·클리핑 + p1 `applyGrade` 를 node 로 돌려 비교, 사진 `fixtures/futsal_*_pd.jpg`) · 장면 정보(dHash·흔들림·액션 배율·주인공·머리 잘림·박힌 글자 감점·자막 띠·종류) · 브랜드 키트 · `/fonts`·`/stickers` · `/api/thumb/brand·analyze·copy·cut(I-021)·ocr·ab·judge` |
 | `test_thumb_quality.py` | 썸네일 판정 1회차 반영: 장면 표시(`scene_flags` 벤치·관중·뒷모습·끝·작음·레슨 액션)·배율 · 자동 누끼 다듬기(`clean_mask` 번짐·조각·박힌 글자 지우기)·품질(`cut_quality`)·누끼 딸 장면(서로 다른 장면) · 분석이 품질을 돌려주고 캐시에 필요 · 클로드 자동(문구: 로그인·브랜드 키트·기억 조건 / 장면 고르기: 시트 그림·번호 점수·기억·후보가 바뀌면 다시·실패해도 계속, 가짜 `claude_cli.run`) · `text_boxes` · 화면 순수 계산(`p8_ai.js` 숫자 글꼴·한 줄 합치기·장면 품질·같은 사람 클로즈업 묶음·주인공 얼굴·머리 상자·보이는 박힌 글자·쓸 수 있는 장면(누끼 없는 글자 장면은 뒤로)·클로드가 무관하다 한 장면 빼기)을 node 로 |
+| `test_thumb_quality4.py` | 썸네일 판정 4회차(D-030): 구체 낱말 뽑기(부정 마디·'N초 안에 공을'·다른 마디 방향·'속도 줄이기'·낱말 하나·질문 문장·주제 동의어) · 대사의 질문·문제 질문(문제 말 + 같은 기술 종류) · 실제 받아쓰기 고정 자료(`fixtures/thumb_asr`)에서 위 5개에 상투 없음·마침표 없음 · 상투는 인용이어도 상투 · 클로드 근거(문장 부호 무시·세 글자 조각)·`Ungrounded`·실패 기억 1시간·'unknown' → maybe/20초 · NFD 제목 · 이름 띠 모양(광고판·바닥 글자·점수판·발 보이는 선수 아님) · 기다림 상한 · 화면 순수 계산(`l2Key`·`shownScore` 100 동점 없음·요란한 색 부드러운 감점·O/X 기호·`blurFill`)을 node 로 |
 | `test_thumb_pro_copy.py` | `thumbcopy` 제목 문구: 주제어·두 줄 나누기·점수·다양성·주제를 큰 줄로·영상 성격 가산 · 클로드 문구(가짜 `claude_cli.run`: 응답 검사·캐시·실패해도 규칙 문구 유지) |
 | `test_takes.py` (2차 작업 중, 커밋 전) | `takes.find_junk` NG 테이크·슬레이트·말더듬 + `editor.recommend` 회귀 (`fixtures/takes_before.json`) |
 | `test_style_content.py` | 영상 기획 분석 `plan.py`: 자막 6종 분류·색 이름·인트로 유형 5가지·장르·재미 정도·여러 영상 합치기·화자 군집 · 정답 영상(`make_fixture.make_plan_fixture`)으로 티저·타이틀·정지·슬로 리플레이·자막 종류(OCR 모델이 있을 때) · 모델 없을 때 어림 표시·캐시·멈추기 · 가편집 인트로 티저·강조 자막(꺼지면 예전과 같음) · `avmodels` 실패 표시 · `claude_cli`(가짜 claude: 성공·로그인·한도·시간 초과·멈추기·예전 판 옵션·환경 변수·임시 폴더) · `/api/claude/*`·`/api/style/plan_*` · 검토 회귀(`TestReview*`): 긴 장면·처음/끝 같은 자리는 티저 아님, 대사를 따라 크게 띄운 강조 자막, 레슨 대사의 흔한 낱말, 강조 자막 낱말 조각 금지, 인사 뒤 진행 질문, 갈린 판단 요약·가편집 끔, 대결 형식·잔디 구장, 티저 장면 고르기, Claude 프롬프트 본편 표본, `--help` 실패 시 안전 옵션 유지·예전 판 안내·표준 오류 폭주, 소리 없는 영상 기록 재사용·깨진 모델·내려받기 멈춤, 일치 점수에서 기획 값 제외, 작업 중 붙여 넣기 거절 |

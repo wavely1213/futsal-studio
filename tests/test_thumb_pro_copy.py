@@ -145,7 +145,8 @@ class AiTests(unittest.TestCase):
         self.assertIn("발바닥 드래그 기본기", p)
         self.assertIn("발바닥 드래그로 수비를 속이세요", p)
         self.assertIn("JSON 배열", p)
-        self.assertIn("영상만 봐도 / 실력이 늘어요", p)
+        self.assertIn("수비 전환 / 3초 법칙", p)
+        self.assertNotIn("영상만 봐도 / 실력이 늘어요", p, "판정 4회차: 금지한 상투 꼬리표는 예시에서도 뺌")
 
     def test_run_ai_caches_and_invalidates(self):
         reply = json.dumps([{"l1": "수비를 속이는", "l2": "발바닥 드래그", "emph": "드래그", "sub": "1분 강좌", "q": "발바닥 드래그로 수비를 속이세요"},

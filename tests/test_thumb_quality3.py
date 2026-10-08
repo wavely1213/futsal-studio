@@ -37,18 +37,18 @@ class StockCopyTests(unittest.TestCase):
         self.assertFalse(c["detail0"]["stock"] or c["detail0"]["vague"])
         self.assertTrue(c["detail0"]["concrete"])
 
-    def test_quoted_stock_is_ok(self):
+    def test_quoted_stock_is_still_stock(self):
         c, _ = self.cands("패스 앤 무브", ["패스 앤 무브 이것만 알면 플랩 레벨업 바로 됩니다"])
-        self.assertFalse(c["levelup"]["stock"], "대사에 그 말이 그대로 있으면 상투가 아님")
+        self.assertTrue(c["levelup"]["stock"], "판정 4회차: 대사에 그 말이 있어도 상투 (인용 예외 없앰)")
 
     def test_detail_phrases_from_transcript(self):
         d = dict(thumbcopy.details(["디딤발 위치가 핵심이에요", "공을 뺏기면 3초 안에 압박하세요", "이거 진짜 중요해요 첫 터치를 수비 반대쪽으로",
                                     "고개 들고 드리블하는 습관이 제일 중요해요", "오프더볼의 비밀은 시야예요", "골키퍼 반대쪽 구석을 보세요", "구석구석 다 봐요"]))
-        self.assertEqual(list(d), ["디딤발 위치", "3초 안에 압박", "첫 터치는 반대쪽", "고개 들고", "시야", "반대쪽 구석"])
+        self.assertEqual(list(d), ["디딤발 위치", "3초 안에 압박", "첫 터치는 반대쪽", "고개 들기", "시야", "반대쪽 구석"])
         self.assertEqual(thumbcopy.details(["슈팅 연습해요"], ["슈팅"]), [])
 
     def test_detail_beats_stock_and_generic(self):
-        c, tp = self.cands("슈팅 연습 세로 영상", ["슈팅 이렇게 차면 무조건 들어가요", "디딤발 위치가 핵심이에요", "골키퍼 반대쪽 구석을 보세요"])
+        c, tp = self.cands("슈팅 연습 세로 영상", ["슈팅 이렇게 차면 무조건 들어가요", "슛이 자꾸 떠요", "디딤발 위치가 핵심이에요", "골키퍼 반대쪽 구석을 보세요"])
         best = max(c.values(), key=lambda x: x["score"])
         self.assertTrue(best.get("detail"), (best["l1"], best["l2"]))
         self.assertIn("디딤발 위치", [x["l2"] for x in c.values() if x.get("detail")])
@@ -58,7 +58,7 @@ class StockCopyTests(unittest.TestCase):
             self.assertLess(c[k]["score"], best["score"] - 1)
 
     def test_question_follows_topic_kind(self):
-        c, _ = self.cands("오프더볼 움직임", ["골키퍼가 완전히 속았어요", "오프더볼의 비밀은 시야예요"])
+        c, _ = self.cands("오프더볼 움직임", ["골키퍼가 완전히 속았어요", "오프더볼의 비밀은 시야예요", "패스를 못 받아요"])
         q = [x for x in c.values() if x["pid"].startswith("detailq")]
         self.assertTrue(q)
         self.assertNotIn("들어갈", q[0]["l1"], "주제(오프더볼)가 전술이면 대사의 '골키퍼'로 슈팅 질문을 만들지 않음")
@@ -105,13 +105,13 @@ class SceneTests(unittest.TestCase):
         self.assertIn('"color"', inspect.getsource(thumb.frame_candidates))
 
 
-JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "frameQ", "srcHeadCut", "footClose", "headlessBad")
+JS = ("clamp", "clipTo", "areaOf", "interArea", "mainBox", "mainFace", "hamming", "tipClear", "sameFace", "sceneGroups", "loud", "loudMult", "frameQ", "srcHeadCut", "footClose", "headlessBad")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => { let a = src.indexOf('function ' + n + '('); if (a < 0) { a = src.indexOf('const ' + n + ' ='); const e = src.indexOf(';\n', a); return src.slice(a, e + 1); }
   let d = 0, i = src.indexOf('{', a); for (; i < src.length; i++) { if (src[i] === '{') d++; if (src[i] === '}' && --d === 0) break; } return src.slice(a, i + 1); };
 const NAMES = JSON.parse(process.argv[2]).filter(n => n !== 'clamp');
-eval('var clamp = (v, a, b) => Math.min(b, Math.max(a, v)); var TEXTY = 0.05;' + NAMES.map(pick).join('\n') + '; globalThis.T = {' + NAMES.join(',') + '};');
+eval('var clamp = (v, a, b) => Math.min(b, Math.max(a, v)); var TEXTY = 0.05; var LOUD = 85;' + NAMES.map(pick).join('\n') + '; globalThis.T = {' + NAMES.join(',') + '};');
 const cases = JSON.parse(fs.readFileSync(0, 'utf8')); const out = cases.map(([fn, args]) => T[fn](...args));
 process.stdout.write(JSON.stringify(out));
 """
@@ -139,7 +139,7 @@ class ScreenMath3Tests(unittest.TestCase):
     def test_loud_colour_scene_penalized(self):
         base = {"score": 10, "kind": "mid", "persons": [[0.3, 0.2, 0.3, 0.7, 0.9]], "main": 0, "flags": [], "blur": 0, "text": 0}
         out = self.run_js([["frameQ", [dict(base, color=30), 10]], ["frameQ", [dict(base, color=95), 10]], ["frameQ", [dict(base, color=95, kind="close"), 10]]])
-        self.assertAlmostEqual(out[1], out[0] * 0.6, places=4)
+        self.assertAlmostEqual(out[1], out[0] * 5 / 6, places=4)  # 판정 4회차: 85 넘는 만큼만 부드럽게 (95 → ×0.833)
         self.assertNotAlmostEqual(out[2], out[1], places=4)
 
 
