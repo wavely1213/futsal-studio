@@ -1,6 +1,8 @@
 {
   "version": "2.12.0",
   "notes": "빨라짐: 아이폰 4K HDR 내보내기 CPU 약 65% 줄임(화질 그대로) · 컷 많은 롱폼 내보내기 묶어 만들기 · 남은 메모리 보고 동시 구간 수 · 누끼(고품질·자동)는 따로 프로세스라 앱이 안 멈추고 끝나면 메모리 돌려줌(모자라면 빠른 누끼로) · 쉬는 동안 모델 내려놓기 · 받아쓰기가 소음에서 지어낸 자막 줄 거름",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/c5c5f0b1eea5974ddaa457ad84e829c1664e3ade.zip",
+  "commit": "c5c5f0b1eea5974ddaa457ad84e829c1664e3ade",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "66d0496afbf75df5029866eb317be95f251a4a365b67138b0bfa8238b1786236",
