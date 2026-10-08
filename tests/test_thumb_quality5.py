@@ -196,7 +196,7 @@ class Copy5Tests(unittest.TestCase):
     def test_hook_templates(self):
         it = self.items()
         self.assertEqual((it["regret"]["l1"], it["regret"]["l2"]), ("이것도 모르고", "드래그 했네.."), "줄이 길면 주제의 마지막 낱말")
-        self.assertNotIn("semi", it, "판정 q5 1회차(D-100): 풋살해주호 제목('플랩 세미 가는 기술')을 그대로 가져온 틀은 뺌")
+        self.assertNotIn("semi", it, "판정 q5 1회차(D-111): 풋살해주호 제목('플랩 세미 가는 기술')을 그대로 가져온 틀은 뺌")
         self.assertFalse(any("플랩 세미" in c["l1"] + c["l2"] for c in it.values()))
         self.assertIn("hide", it)
         for pid in ("stuck", "diff", "please", "beatit"):  # 우리 말로 쓴 새 훅 틀 (대사에 실수·'못 따라와요'가 있음)
@@ -204,7 +204,7 @@ class Copy5Tests(unittest.TestCase):
         self.assertTrue(all(len(x) <= 10 for c in it.values() if c["pid"] in tc.HOOK_SUB for x in (c["l1"], c["l2"])))
 
     def test_hooks_rotate_per_video(self):
-        """판정 q5 1회차(D-100): 'X가 / 이렇게 쉬웠어?' 18/18 묶음 · '이것만 알면 / X 끝!' 9/9 영상 → 영상(제목)마다 훅 틀 4개·흔한 틀 4개만, 늘 같게."""
+        """판정 q5 1회차(D-111): 'X가 / 이렇게 쉬웠어?' 18/18 묶음 · '이것만 알면 / X 끝!' 9/9 영상 → 영상(제목)마다 훅 틀 4개·흔한 틀 4개만, 늘 같게."""
         C, _ = tc.rule_candidates("발바닥 드래그 기본기", self.TEXTS)
         C2, _ = tc.rule_candidates("발바닥 드래그 기본기", self.TEXTS)
         hooks = [c["pid"] for c in C if c["pid"] in tc.HOOK_PIDS]

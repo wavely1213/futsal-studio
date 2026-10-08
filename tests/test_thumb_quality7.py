@@ -1,10 +1,10 @@
 """썸네일 퀄리티 판정 q5 2회차 반영 테스트 — 저장소 폴더에서 python3 -m unittest tests.test_thumb_quality7
 
-- 보정(thumb): 채도를 원본의 0.95배 아래로는 빼지 않음 (D-101)
-- 장면(p8_ai.js, node): 사람·얼굴이 없는 장면은 사람 장면이 3장 넘으면 안 씀 · 사람끼리 엉킨 장면·저녁/밤 장면 감점 (D-102)
-- 그래픽(p8_ai.js, node): 그래픽이 있는 장인지(hasGfx) · 장마다 돌려 넣는 그래픽 종류 (D-103)
-- 자르기(p8_ai.js, node): 옆 끝에서 반쯤 잘린 사람 · 위 끝에서 잘린 머리 · 발 가까이 공이 잘림 · 제목 아래 머리 자리 (D-105)
-- 문구(thumbcopy): 같은 말투 훅 틀 4개 더 (D-107)
+- 보정(thumb): 채도를 원본의 0.95배 아래로는 빼지 않음 (D-112)
+- 장면(p8_ai.js, node): 사람·얼굴이 없는 장면은 사람 장면이 3장 넘으면 안 씀 · 사람끼리 엉킨 장면·저녁/밤 장면 감점 (D-113)
+- 그래픽(p8_ai.js, node): 그래픽이 있는 장인지(hasGfx) · 장마다 돌려 넣는 그래픽 종류 (D-114)
+- 자르기(p8_ai.js, node): 옆 끝에서 반쯤 잘린 사람 · 위 끝에서 잘린 머리 · 발 가까이 공이 잘림 · 제목 아래 머리 자리 (D-116)
+- 문구(thumbcopy): 같은 말투 훅 틀 4개 더 (D-118)
 인터넷·진짜 클로드·모델은 쓰지 않음."""
 import json
 import shutil
@@ -45,7 +45,7 @@ process.stdout.write(JSON.stringify(out));
 
 class GradeSatTests(unittest.TestCase):
     def test_saturated_scene_not_desaturated(self):
-        """판정 q5 2회차(D-101): 짝 판정에서 채도를 덜 뺀 쪽이 프로 59% → 쨍한 원본도 0.95배 아래로는 안 뺌 (예전 0.62배)."""
+        """판정 q5 2회차(D-112): 짝 판정에서 채도를 덜 뺀 쪽이 프로 59% → 쨍한 원본도 0.95배 아래로는 안 뺌 (예전 0.62배)."""
         import numpy as np
         from PIL import Image
         rng = np.random.default_rng(5)
@@ -63,7 +63,7 @@ class GradeSatTests(unittest.TestCase):
         self.assertGreaterEqual(thumb.GRADE_VER, 8, "보정 계산이 바뀌면 장면 후보를 다시 고름")
 
     def test_more_auto_cuts(self):
-        self.assertGreaterEqual(thumb.AUTO_CUTS, 6, "누끼 템플릿(액션 누끼·쇼츠 누끼 크게)이 쓸 장면을 넉넉히 (D-106)")
+        self.assertGreaterEqual(thumb.AUTO_CUTS, 6, "누끼 템플릿(액션 누끼·쇼츠 누끼 크게)이 쓸 장면을 넉넉히 (D-117)")
 
 
 @unittest.skipUnless(HAS_NODE, "node 가 없어 화면 계산 확인을 건너뜀")

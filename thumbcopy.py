@@ -178,7 +178,7 @@ def rule_candidates(title, texts, rotate=True):
     """규칙으로 만든 후보 전부 (점수 전).
     레퍼런스(쪼살·쌈바·해주호·JK)의 '결과·대상이 있는 문구' 틀: 무조건 봐(큰 노란 줄) · ~의 비밀 · 영상만 봐도 늘어요 · 플랩 레벨업 · 수비를 속이는 X ·
     N초면 끝 · 이렇게 하면 안 돼요 · 못하는 진짜 이유 · 질문형 · 반전 O/X · 대사 핵심 문장.
-    rotate: 영상(제목)마다 훅 틀 HOOK_KEEP 개·흔한 틀 GENERIC_KEEP 개만 고정 흔들림 순으로 남김 (D-100 · 틀 내용을 보는 시험은 False)."""
+    rotate: 영상(제목)마다 훅 틀 HOOK_KEEP 개·흔한 틀 GENERIC_KEEP 개만 고정 흔들림 순으로 남김 (D-111 · 틀 내용을 보는 시험은 False)."""
     title, texts = nfc(title), [nfc(t) for t in texts]
     tp = topics(title, texts)
     X = tp[0] if tp else (title_phrase(title) or "풋살")
@@ -235,14 +235,14 @@ def rule_candidates(title, texts, rotate=True):
     # 판정 5회차(D-094): 유튜버 말투의 훅 문장 (대상·결과·자책·숨김) — 레퍼런스 '불리한 상황에서 공 다 뺏기는 너를 위한' · '이것도 모르고 수비를 했네..' ·
     # ''여기' 봐야 뚫립니다' · '플랩 세미 가는 기술' (규칙 문구가 '낱말 / 낱말' 목차처럼 읽힘: 훅 4.9 · 자연스러움 5.5 · 프로로 고른 비율 5%)
     act = kind in ("dribble", "touch", "shoot") or any(k in X for k in SKILLS)
-    # 줄이 길면 마지막 낱말만 ('발바닥 드래그' → '드래그') · 판정 q5 1회차(D-100): 띄어 쓴 5자 주제('콘 드리블')도 — '콘 드리블 했네..'(10자)는 쇼츠 한 줄(8자)을 넘어 쇼츠 문구가 모자람
+    # 줄이 길면 마지막 낱말만 ('발바닥 드래그' → '드래그') · 판정 q5 1회차(D-111): 띄어 쓴 5자 주제('콘 드리블')도 — '콘 드리블 했네..'(10자)는 쇼츠 한 줄(8자)을 넘어 쇼츠 문구가 모자람
     xs = X.split()[-1] if (len(nospace(X)) > 4 or (" " in X and len(X) >= 5)) and len(nospace(X.split()[-1])) >= 2 else X
     if act and len(nospace(xs)) <= 5:
         C.append(_cand("이것도 모르고", f"{xs} 했네..", 1, xs, "", "regret", 1.2, "자책형 훅 (레퍼런스 '이것도 모르고 수비를 했네..')"))
     rival = has("수비", "뺏", "막", "압박", "1대1", "상대")  # 상대가 있는 이야기일 때만 '뺏기는'·'뚫립니다' (콘 드리블 연습에 '뚫립니다'는 어색)
     if kind in ("dribble", "touch") and len(nospace(xs)) <= 4 and rival:
         C.append(_cand(f"{xs}만 하면", "뺏기는 너에게", 1, "뺏기는", "", "foryou", 1.2, "공감형 훅 (대상이 보임 · 레퍼런스 '공 다 뺏기는 너를 위한')"))
-    # 판정 q5 1회차(D-100): '플랩 세미 가는 / X'(18묶음 중 15)는 풋살해주호 썸네일 제목을 그대로 가져온 것 → 뺌 · 우리 말로 쓴 훅 틀을 더하고 영상마다 돌려 씀(HOOK_PIDS)
+    # 판정 q5 1회차(D-111): '플랩 세미 가는 / X'(18묶음 중 15)는 풋살해주호 썸네일 제목을 그대로 가져온 것 → 뺌 · 우리 말로 쓴 훅 틀을 더하고 영상마다 돌려 씀(HOOK_PIDS)
     if has("어려", "막혀", "막히", "놓치", "놓쳐", "실수", "안 돼", "뺏기", "많은데"):  # 대사에 막히는 이야기가 있을 때만
         C.append(_cand(f"{xs} 할 때", "여기서 막혀요", 1, "막혀요", X if X != xs else "", "stuck", 1.1, "공감형 훅 (다들 막히는 곳 · 답은 영상에)"))
     if act:  # 기술(드리블·터치·슈팅) 이야기일 때만
@@ -261,7 +261,7 @@ def rule_candidates(title, texts, rotate=True):
         C.append(_cand("'여기' 맞추면", "골 들어가요", 1, "골", X, "hide", 1.1, "숨김형 훅 (답은 영상에)"))
     if len(nospace(X)) <= 6:
         C.append(_cand(f"{X}{josa(X, '이', '가')}", "이렇게 쉬웠어?", 1, "쉬웠어?", "", "easyq", 0.9, "놀람 질문형 훅"))
-    # 판정 q5 2회차(D-107): 규칙 훅 틀 10개가 9영상 중 6영상에 같은 말('고수의 X / 이게 달라요') — 같은 말투의 틀을 4개 더해 영상마다 고르는 묶음이 더 달라지게
+    # 판정 q5 2회차(D-118): 규칙 훅 틀 10개가 9영상 중 6영상에 같은 말('고수의 X / 이게 달라요') — 같은 말투의 틀을 4개 더해 영상마다 고르는 묶음이 더 달라지게
     if act and len(nospace(xs)) <= 5:
         C.append(_cand(f"{xs} 고수들", "다 이렇게 해요", 1, "이렇게", "", "trait", 0.95, "공통점 훅 (고수들이 하는 것 · 답은 영상에)"))
     if kind in ("dribble", "touch", "shoot") and len(nospace(xs)) <= 5:
@@ -325,7 +325,7 @@ def rule_candidates(title, texts, rotate=True):
     tl = split2(title or "")
     if tl and tl[1] and not re.search(r"테스트|세로|영상$", title or ""):
         C.append(_cand(tl[0], tl[1], 0, X if X in tl[0] else "", "", "title", 0.6, "영상 제목"))
-    # 판정 q5 1회차(D-100): 훅 틀을 점수만 흔들면 다들 같은 틀이 남음('고수의 X / 이게 달라요' 18/18) → 영상마다 훅 틀 HOOK_KEEP 개만 (제목 crc32 순 — 채널 목록에서 영상마다 다른 말투)
+    # 판정 q5 1회차(D-111): 훅 틀을 점수만 흔들면 다들 같은 틀이 남음('고수의 X / 이게 달라요' 18/18) → 영상마다 훅 틀 HOOK_KEEP 개만 (제목 crc32 순 — 채널 목록에서 영상마다 다른 말투)
     for group, keep in ((HOOK_PIDS, HOOK_KEEP), (GENERIC_PIDS, GENERIC_KEEP)) if rotate else ():
         hp = sorted({c["pid"] for c in C if c["pid"] in group}, key=lambda pid: -spin(title, pid))
         if len(hp) > keep:
@@ -549,10 +549,10 @@ def context_boost(body):
 
 HOOK_PIDS = ("regret", "foryou", "hide", "easyq", "stuck", "diff", "please", "beatit", "practice", "prolook", "trait", "first", "freeze", "wrong")  # 유튜버 말투 훅 틀
 HOOK_SUB = ("regret", "foryou", "hide", "stuck", "diff", "beatit", "prolook", "trait", "first", "freeze")  # 대사의 구체 낱말을 작은 보조 문구로 붙이는 훅
-HOOK_KEEP = 8  # 영상 하나가 쓰는 훅 틀 수 (모두 14개 · D-107 — 4개로 줄이면 묶음마다 라벨·흔한 틀이 끼어 판정 appeal −0.18 — 개발 판정 r_d)
+HOOK_KEEP = 8  # 영상 하나가 쓰는 훅 틀 수 (모두 14개 · D-118 — 4개로 줄이면 묶음마다 라벨·흔한 틀이 끼어 판정 appeal −0.18 — 개발 판정 r_d)
 GENERIC_PIDS = ("must", "secret", "grow", "howto", "only", "levelup", "easy", "why", "reason", "one", "result", "beat", "wow")  # 주제만 바꿔 끼우는 흔한 틀 ('이것만 알면 / X 끝!' 9/9 영상)
 GENERIC_KEEP = 8  # 영상 하나가 쓰는 흔한 틀 수 (모두 13개)
-HOOK_SPIN = 0.6  # 판정 q5 1회차(D-100): 같은 훅 틀이 모든 영상에 ('X가 / 이렇게 쉬웠어?' 18/18 묶음) → 영상 제목마다 훅 틀 앞뒤를 ±0.3 흔들어 돌려 씀 (같은 영상은 늘 같음)
+HOOK_SPIN = 0.6  # 판정 q5 1회차(D-111): 같은 훅 틀이 모든 영상에 ('X가 / 이렇게 쉬웠어?' 18/18 묶음) → 영상 제목마다 훅 틀 앞뒤를 ±0.3 흔들어 돌려 씀 (같은 영상은 늘 같음)
 
 
 def spin(title, pid):
