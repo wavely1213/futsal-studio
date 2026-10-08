@@ -135,7 +135,7 @@ icon.ico / icon.png 앱 아이콘
 | Microsoft (aka.ms) | `시작하기 (Windows).bat` 이 Visual C++ 구성요소(msvcp140)가 없을 때만 `vc_redist.x64.exe` 를 받아 설치 (D-033) | 없음 |
 | GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
-| GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` · 받다 끊기면 그 자리부터 이어받음(`Range`·`If-Range` · 모델 받기 모두 · D-071) | 없음 |
+| GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` · 받다 끊기면 그 자리부터 이어받음(`Range`·`If-Range` · 응답 ETag·Last-Modified 가 같을 때만 이어 붙임 · 모델 받기 모두 · D-071) | 없음 |
 | ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
 | Anthropic (사용자 PC의 Claude Code CLI 경유) | 스타일 카드의 [클로드로 더 깊게 보기]를 누를 때만: 기획 판단·레퍼런스 대사 발췌(최대 약 6000자)·장면 그림 최대 8장을 사용자 본인 클로드 계정으로 보냄 (D-021). 채널 전략의 [클로드로 더 깊게 보기]를 누를 때만: 공개 채널 숫자·가져올 점·우리 전략 글·가능성 요약(약 6000자 · 영상·대사 없음, D-024). [설치하기]는 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`)을 보이는 창에서 실행 | 키 없음. 로그인은 사용자가 Claude Code 창에서 직접. 선택한 로그인 코드는 `~/.futsal-studio/claude_token` |
 | ONNX model zoo (github.com/onnx/models, 고정 커밋) | 얼굴(UltraFace RFB-320)·표정(FER+) 모델. 크기·sha256을 확인하고, 실패하면 조용히 예전 점수로 계속 | 없음 |
