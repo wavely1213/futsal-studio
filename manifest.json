@@ -1,6 +1,8 @@
 {
   "version": "2.15.0",
   "notes": "썸네일 스타일 배우기: 고른 유튜버 썸네일의 강조색·글자 위치·크기·테두리·배경 밝기를 배워 AI 추천 썸네일에 써요 (스타일 카드 '썸네일 버릇' · 썸네일 편집기 '썸네일 스타일' 고르기) · 유튜브 A/B 에서 이긴 썸네일을 한 번 눌러 적으면 다음 추천에 반영돼요 · 브랜드 키트에서 직접 정한 색이 우선이에요",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/62b3e2edb8d7f9112e48cf0e064ae38b41bca245.zip",
+  "commit": "62b3e2edb8d7f9112e48cf0e064ae38b41bca245",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "03bd2c07932dd4900ff36860d37b288342ad44fd0abf5b053146ce28e40d27d9",
