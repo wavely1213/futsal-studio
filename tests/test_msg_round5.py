@@ -302,6 +302,49 @@ class FinalJudgeLinesTest(unittest.TestCase):
         self.assertEqual(msg._demo_calls(extra, words, [60.5, 77.14], []), [])
 
 
+class FinalJudgeReplayTest(unittest.TestCase):
+    """round5 최종 판정 중간 결과: 다시 보기가 시범 뒤 원본 장면 바뀜(스튜디오)까지 느리게 나와 '다시 보기 ▶'가 말하는 장면 위에 남음 ·
+    딴소리 조각('자, 공 좀 가져올게요')을 짧은 조각으로 보고 빼서 '빠진 말'."""
+
+    def test_replay_stays_inside_the_source_shot(self):
+        self.assertEqual(msg._replay_span(31.65, 34.15, 32.85, [29.25, 33.25, 39.75]), (31.65, 33.2))   # 33.25 장면 바뀜 앞에서 끝
+        self.assertEqual(msg._replay_span(31.65, 34.15, 32.85, [32.7]), (31.65, 34.15))                 # 공 차는 순간 0.3초 안 → 그대로
+        self.assertEqual(msg._replay_span(30.0, 32.5, 31.8, [30.4]), (30.45, 32.5))                     # 앞쪽 장면 바뀜 뒤에서 시작
+        self.assertEqual(msg._replay_span(31.65, 33.3, 32.85, [32.4]), (31.65, 33.3))                   # 남는 길이가 1초보다 짧아지면 그대로
+
+    def test_aside_piece_is_kept(self):
+        cuts = [{"in": 30.0, "out": 42.17}, {"in": 44.8, "out": 46.11}, {"in": 50.11, "out": 80.0}]
+        self.assertEqual(len(msg.drop_slivers(cuts, [{"kind": "aside", "t": 45.66}])), 3)
+        self.assertEqual(len(msg.drop_slivers(cuts, [])), 2)   # 재미 순간이 없는 짧은 조각은 그대로 뺌
+
+
+class FinalJudgeAlignTest(unittest.TestCase):
+    """round5 최종 판정 중간 결과: '아, 아깝다.'를 받아쓰기가 '아,'(긴 소리) + '아깝다.'(다음 소리 앞 0.05초)로 적어 실패 반응이 추임새와 함께 잘림 ·
+    '다시 한번 해볼게요.' 뒤에 공 소리 없이 말 없는 시범이 바로 오면 시범 예고."""
+
+    def test_collapsed_word_after_interjection_takes_the_long_blob(self):
+        segs = [{"start": 15.8, "end": 19.32, "text": "아, 아깝다. 골대 맞았어요.",
+                 "words": [{"s": 15.8, "e": 16.96, "w": "아,"}, {"s": 18.52, "e": 18.57, "w": "아깝다."}, {"s": 18.57, "e": 18.78, "w": "골대"},
+                           {"s": 18.78, "e": 19.32, "w": "맞았어요."}]}]
+        blobs = [[14.29, 14.78], [16.8, 17.84], [18.52, 19.41]]
+        out, n = msg.align_to_sound(segs, blobs)
+        ws = out[0]["words"]
+        self.assertGreaterEqual(n, 1)
+        self.assertTrue(16.9 <= ws[1]["s"] <= 17.3 and ws[1]["e"] >= 17.8, ws[1])     # '아깝다' 는 '아' 소리 덩어리 뒷부분
+        self.assertLessEqual(ws[0]["e"], ws[1]["s"])                                  # '아,' 는 그 앞까지 (추임새로 잘려도 '아깝다'는 남음)
+        self.assertAlmostEqual(ws[2]["s"], 18.57, places=2)                           # 나머지는 그대로
+        self.assertGreaterEqual(msg.ALIGN_VER, 4)
+        # 추임새 덩어리가 짧으면(진짜 '아' 하나) 그대로
+        short = [[16.8, 17.2], [18.52, 19.41]]
+        out2, _ = msg.align_to_sound(segs, short)
+        self.assertGreaterEqual(out2[0]["words"][1]["s"], 18.4)
+
+    def test_demo_call_before_a_silent_demo(self):
+        self.assertTrue(msg._demo_call_ok(166.84, [173.53], [], [[166.94, 171.54]]))     # 공 소리를 못 잡아도 시범이 바로 뒤
+        self.assertFalse(msg._demo_call_ok(166.84, [167.5], [], [[168.0, 171.54]]))      # 다음 말이 먼저 → 다시 찍기 신호
+        self.assertFalse(msg._demo_call_ok(166.84, [173.53], [], [[170.0, 171.54]]))     # 시범이 2초 넘게 뒤
+
+
 def _long_fixture(work, reps=16):
     """make_msg_fixture 원본을 reps 번 이어 붙인 약 9분 원본 (받아쓰기 시각도 옮김)."""
     name, truth = mf.make_msg_fixture(work)

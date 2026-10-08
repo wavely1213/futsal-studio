@@ -102,8 +102,9 @@ def mmss(t):
 
 # ---------- 0. 받아쓰기 다시 듣기·다듬기 ----------
 RELISTEN_LABEL = "말 다시 듣는 중"
-ALIGN_VER = 3   # 단어 시각을 소리에 맞추는 규칙 판 (asr.json 'aligned' · 규칙을 고치면 올림 · 2: 뭉개진 낱말·잡음 덩어리까지 늘여 적은 낱말 ·
-#                 3: 조용한 틈에서 시작해 제 시각 안에서 소리가 시작하는 낱말(영상 첫 낱말 '안녕하세요'를 0초부터 적음)은 그 소리부터)
+ALIGN_VER = 4   # 단어 시각을 소리에 맞추는 규칙 판 (asr.json 'aligned' · 규칙을 고치면 올림 · 2: 뭉개진 낱말·잡음 덩어리까지 늘여 적은 낱말 ·
+#                 3: 조용한 틈에서 시작해 제 시각 안에서 소리가 시작하는 낱말(영상 첫 낱말 '안녕하세요'를 0초부터 적음)은 그 소리부터 ·
+#                 4: 추임새('아,') 뒤 뭉개진 낱말('아깝다.' 0.05초)을 추임새가 든 긴 소리 덩어리 뒷부분으로 — '아 아깝다' 소리를 추임새로 잘라 반응이 빠짐)
 ORIG_TRANSCRIPT = "transcript.원본.json"   # MSG 가 다시 듣기 전 받아쓰기 (한 번만 남김)
 
 
@@ -160,6 +161,19 @@ def align_to_sound(segs, blobs):
             if INTERJ.match(str(w["w"]).strip()):
                 filler_blob = max((b for b in blobs if min(b[1], e0) - max(b[0], s0) > 0), key=lambda b: min(b[1], e0) - max(b[0], s0), default=None)
                 prev_s, prev_e = s0, e0
+                continue
+            syl0 = len(re.findall(r"[가-힣]", str(w["w"]))) or 1
+            fb = filler_blob
+            if fb is not None and k > 0 and e0 - s0 < 0.06 * syl0 and fb[1] - fb[0] >= 0.6 and s0 >= fb[1] + 0.3 \
+                    and all(float(x["e"]) <= fb[0] + 0.1 for x in ws[:k - 1]):   # (추임새가 그 덩어리의 첫 말일 때만 · '패스하고 그 자리에…'는 아님)
+                # 추임새 뒤 뭉개진 낱말: 받아쓰기가 '아 아깝다' 소리를 '아,' 하나로 적고 '아깝다'를 다음 소리 앞 0.05초에 몰아 적음
+                # (판정 round5: '아깝다'가 추임새와 함께 잘려 실패 반응이 빠짐) → 추임새 소리 덩어리의 뒷부분으로
+                cut = fb[0] + min(0.35, 0.4 * (fb[1] - fb[0]))
+                ws[k - 1]["e"] = round(max(float(ws[k - 1]["s"]) + 0.05, cut), 2)
+                w["s"], w["e"] = round(cut + 0.02, 2), round(fb[1], 2)
+                moved += 1
+                prev_s, prev_e = float(w["s"]), float(w["e"])
+                filler_blob = None
                 continue
             new_s = s0
             bl = _blob_at(blobs, s0)
@@ -465,20 +479,19 @@ def _recommend(name, segs, keep_pause=None, sig=None):
     sig 에 소리 덩어리(blobs)가 있으면 받아쓰기가 다음 낱말에 붙여 버린 추임새('음…' 뒤 '이 세 가지만')도 뺌."""
     kept, extra = clean_lines(segs, (sig or {}).get("blobs"))
     rec = editor.recommend(name, keep_pause=keep_pause, segs=kept if segs else None)
-    if sig and sig.get("onsets") and kept:
-        # '다시 해 볼게요' 뒤에 말보다 공 소리(시범)가 먼저 오면 다시 찍기 신호가 아니라 '한 번 더 보여 줄게요' 안내 → 남김
+    if sig and (sig.get("onsets") or sig.get("demo")) and kept:
+        # '다시 해 볼게요' 뒤에 말보다 공 소리(시범)·말 없는 시범이 먼저 오면 다시 찍기 신호가 아니라 '한 번 더 보여 줄게요' 안내 → 남김
         starts = sorted(float(x["start"]) for x in kept)
         keep_back = []
         for j in rec.get("junk_list") or []:
             if j["why"] != "슬레이트 말":
                 continue
-            nxt_talk = next((t for t in starts if t > j["b"] + 0.3), 1e9)
-            if any(j["b"] <= o <= min(j["b"] + 6.0, nxt_talk) for o in sig["onsets"]):
+            if _demo_call_ok(j["b"], starts, sig.get("onsets") or (), sig.get("demo") or ()):
                 keep_back.append(j)
         if keep_back:
             rec["junk_list"] = [j for j in rec["junk_list"] if j not in keep_back]
             rec["tidy"] = keep_cuts(rec["tidy"] + [{"in": max(0.0, j["a"] - 0.15), "out": j["b"] + 0.25} for j in keep_back], [])
-    back = _demo_calls(extra, _words(segs), [float(x["start"]) for x in kept], (sig or {}).get("onsets") or ())
+    back = _demo_calls(extra, _words(segs), [float(x["start"]) for x in kept], (sig or {}).get("onsets") or (), (sig or {}).get("demo") or ())
     if back:  # 쉼으로 쪼개진 '어, … 다시 해볼게요.' 도 뒤에 공 소리(시범)가 오면 시범 예고 → '다시 해볼게요' 는 남김 ('어'는 그대로 뺌)
         extra = [x for x in extra if x not in back]
         rec["tidy"] = keep_cuts(rec["tidy"] + [{"in": max(0.0, a - 0.15), "out": b + 0.25} for a, b, _ in back], [])
@@ -493,7 +506,13 @@ def _recommend(name, segs, keep_pause=None, sig=None):
     return rec
 
 
-def _demo_calls(extra, words, starts, onsets):
+def _demo_call_ok(b, starts, onsets, demos=()):
+    """'다시 해볼게요' 같은 말(끝 b) 뒤에 다음 말보다 공 소리(6초 안)나 말 없는 시범 시작(2초 안)이 먼저 오면 시범 예고."""
+    nxt = min([t for t in starts if t > b + 0.3] or [1e9])
+    return any(b <= o <= min(b + 6.0, nxt) for o in onsets) or any(b - 0.3 <= float(d[0]) <= min(b + 2.0, nxt) for d in demos or ())
+
+
+def _demo_calls(extra, words, starts, onsets, demos=()):
     """clean_lines 가 '슬레이트 말'로 뺀 것 중 '다시 …'(다시 해볼게요) 다음 말보다 공 소리가 먼저(6초 안) 오는 것 — 다시 찍기가 아니라
     시범 예고 (판정 round5: '어, 다시 해볼게요.' 를 빼서 '해볼게요'가 사라짐 · editor.recommend 의 슬레이트 말과 같은 규칙)."""
     out = []
@@ -503,8 +522,7 @@ def _demo_calls(extra, words, starts, onsets):
         txt = " ".join(w[2] for w in words if a - 0.1 <= (w[0] + w[1]) / 2 <= b + 0.1)
         if "다시" not in txt:
             continue
-        nxt = min([t for t in starts if t > b + 0.3] or [1e9])
-        if any(b <= o <= min(b + 6.0, nxt) for o in onsets):
+        if _demo_call_ok(b, starts, onsets, demos):
             out.append((a, b, why))
     return out
 
@@ -1897,7 +1915,8 @@ def pace_pauses(cuts, junk, cuts_per_min, blobs=()):
 
 
 SLIVER = 1.6   # 앞뒤가 다 잘린 이보다 짧은 조각은 뺌 (1초 남짓 사이에 점프 컷 두 번은 끊겨 보임)
-SLIVER_KEEP = ("play", "punchline", "emphasis", "success", "fail", "surprise", "section", "count", "total", "question", "hook_line", "closing")
+SLIVER_KEEP = ("play", "punchline", "emphasis", "success", "fail", "surprise", "section", "count", "total", "question", "hook_line", "closing",
+               "aside")   # 딴소리('자, 공 좀 가져올게요')도 말한 문장 — 빼면 판정이 '빠진 말'로 봄 (round5)
 
 
 def drop_slivers(cuts, moms):
@@ -3564,6 +3583,17 @@ def _shorts_window(rec, moms, dur, sig_demo=()):
     return out
 
 
+def _replay_span(a, b, t, cuts):
+    """다시 보기 원본 구간을 원본 장면 바뀜 안쪽으로 (판정 round5: 시범 뒤 스튜디오 장면까지 느리게 나와 '다시 보기' 표시가 말하는 장면 위에 남음) ·
+    공 차는 순간(t) 앞뒤 0.3초는 늘 남기고, 남는 길이가 1초보다 짧으면 그대로."""
+    for x in sorted(float(v) for v in cuts):
+        if t + 0.3 < x < b and x - 0.05 - a >= 1.0:
+            b = x - 0.05
+        if a < x < t - 0.3 and b - (x + 0.05) >= 1.0:
+            a = x + 0.05
+    return round(a, 3), round(b, 3)
+
+
 def _insert(B, c, name, sig, st, intensity, looks, pal, seed, cap_y):
     """슬로모 다시 보기 · 정지 화면을 지금 자리에 끼워 넣기."""
     prev = [x for x in B.items if x["track"] == "V1"]
@@ -3575,6 +3605,7 @@ def _insert(B, c, name, sig, st, intensity, looks, pal, seed, cap_y):
         if b - a > REPLAY_SRC:  # 다시 보기는 원본 REPLAY_SRC 초까지 (공 차는 순간 조금 앞부터 · 느리게 두 배)
             a = max(a, c["t"] - 1.2)
             b = min(b, a + REPLAY_SRC)
+        a, b = _replay_span(a, b, float(c["t"]), sig.get("cuts") or ())
         fx = None
         if intensity == "듬뿍":  # 다른 각도 느낌: 살짝 당겨서
             fx = {"scale": {"v": 118.0, "k": []}, "anchor": {"v": [0.5, 0.55], "k": []}}
