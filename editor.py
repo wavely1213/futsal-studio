@@ -1989,6 +1989,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     # 영상 밖 말 (E12 · BR-060): 촬영 준비 말·촬영 끝 말은 가편집·쇼츠에서 자르고, 구독·홍보 안내 말은 쇼츠·티저에서만 뺌
     off = takes.find_offscript(segs)
     edge_iv = [(o["a"], o["b"], o["why"]) for o in off if o["kind"] in ("pre", "post")]
+    post_a = next((o["a"] for o in off if o["kind"] == "post"), None)  # 촬영 끝 말 시작 (마지막 끝인사 + 0.5초)
     off_iv = [(o["a"], o["b"], o["why"]) for o in off]
 
     # 군더더기 표시: 추임새 · 같은 말 연속 반복(마지막 것만 남김) — 구령·환호('셋!' · '골!' · '나이스! 나이스!')는 그대로
@@ -2083,6 +2084,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
             if cur:
                 cuts.append(cur)
             cuts = _minus(_minus(_minus(cuts, junk_iv + off_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
+            if cuts and post_a is not None and post_a - 0.6 <= cuts[-1]["out"] < post_a:  # 끝인사로 끝나면 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리)
+                cuts[-1] = dict(cuts[-1], out=round(post_a, 2))
             if not cuts or e0 - s0 - _covered(junk_iv + off_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
                 continue
             hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
@@ -2117,7 +2120,6 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None):
     if cur:
         tidy.append(cur)
     tidy = _minus(_minus(_minus(tidy, junk_iv + edge_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
-    post_a = next((o["a"] for o in off if o["kind"] == "post"), None)
     if post_a is not None and tidy and post_a - 0.6 <= tidy[-1]["out"] < post_a:  # 마지막 끝인사는 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리가 잘리지 않게)
         tidy[-1] = dict(tidy[-1], out=round(post_a, 2))
     return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv), "segments": len(segs),

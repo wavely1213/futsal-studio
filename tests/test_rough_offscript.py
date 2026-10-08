@@ -531,6 +531,9 @@ class GhostAndWordsTest(RecMixin, unittest.TestCase):
             self.assertLessEqual(last["out"], 159.05, key)  # '자 컷'(160.47) 앞
             self.assertGreaterEqual(last["out"] - last["in"], 1.0, key)  # 0.3초짜리 잘린 조각으로 끝나지 않음
             self.assertLessEqual(last["in"], 157.5, key)
+            closing = [sh for sh in r["shorts"] if sh["start"] < 157.0 < sh["end"]]  # 끝인사로 끝나는 쇼츠도 낱말 꼬리까지
+            for sh in closing:
+                self.assertGreaterEqual(sh["cuts"][-1]["out"], 158.7, key)
 
     def test_msgraw03_zero_length_word_is_not_a_sentence_end(self):
         segs = FIX["MSGRAW03"]["transcript"]
