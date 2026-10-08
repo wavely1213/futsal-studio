@@ -97,6 +97,7 @@
   .evrow:hover { background: var(--panel-2); }
   .evrow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; width: 46px; }
   .evrow.silence .k { color: var(--cut); } .evrow.peak .k { color: var(--peak); }
+  .evrow.off .k { color: var(--danger); white-space: nowrap; }  /* 영상 밖 말 (E12) */
   .fxi { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 5px; cursor: grab; border: 1px solid transparent; }
   .fxi:hover { background: var(--panel-2); border-color: var(--line-2); }
   .fxi .sw { width: 26px; height: 18px; border-radius: 3px; flex: none; }
@@ -2640,6 +2641,7 @@ function showCapBan(n) {
 }
 
 /* ---------- 추천 · 자동 편집 ---------- */
+const OFF_KIND = { pre: "촬영 준비 말", post: "촬영 끝 말", cta: "구독 부탁", promo: "레슨 홍보" };  // editor.recommend offscript (E12)
 async function renderRec() {
   const r = REC || { shorts: [], tidy: [] };
   const m = t => mmss(t).slice(0, 5);
@@ -2669,6 +2671,9 @@ async function renderRec() {
       <button class="btn" id="recFull" ${noMain ? "disabled" : ""}>원본 전체로 되돌리기</button>
       <div class="hint" id="recWhy" style="margin-top:6px">${noMain ? "이 쇼츠에는 원본 영상 클립이 없어서 정리하거나 되돌릴 수 없어요." : S.format === "shorts" ? "쇼츠는 이 쇼츠 구간 안에서만 정리하거나 되돌리고, 쇼츠(세로) 그대로예요." : ""} 확대·빠르기·제목·표시·위 트랙은 같은 장면에 맞춰 함께 옮겨요.</div>
     </div>
+    ${(r.offscript || []).length ? `<div class="sec" id="recOff"><h4>영상 밖 말 <span class="hint">(촬영 준비·촬영 끝·구독/홍보 안내)</span></h4>
+      <div class="hint" style="margin-bottom:6px">가편집은 첫 인사 앞·마지막 끝인사 뒤를 잘라요. 구독·홍보 안내는 쇼츠와 티저에서만 빼고 롱폼에는 그대로 둬요 (홍보 내용은 올리기 키트 설명의 '레슨 문의'로 들어가요).</div></div>
+    ${r.offscript.map(o => `<div class="evrow off" data-t="${o.a}"><span class="tc">${m(o.a)}</span><span class="k">${esc(OFF_KIND[o.kind] || o.why)}</span><span class="hint">${o.cut === "long" ? "가편집에서 잘랐어요" : "쇼츠·티저에서 뺐어요"} · ${esc(cutText(o.text, 40))}</span></div>`).join("")}` : ""}
     <div class="sec"><h4>편집점 표시 <span class="hint">(타임라인 위쪽 눈금에도 표시)</span></h4></div>
     ${EVENTS.filter(e => e.type !== "speech").map(e => `<div class="evrow ${e.type}" data-t="${e.t}"><span class="tc">${m(e.t)}</span><span class="k">${e.type === "peak" ? "▲ 하이라이트" : "── 컷 후보"}</span><span class="hint">${esc(e.text)}</span></div>`).join("")}`;
   let sty = 0, kind = "long";

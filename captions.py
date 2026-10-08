@@ -543,3 +543,94 @@ def from_segments(segs, fmt="long", terms=(), silences=()):
     flush()
     out.sort(key=lambda c: c["start"])
     return _tidy(out)
+
+
+# ---------- 문장 단위로 나누기 (E12 · D-101) ----------
+# 받아쓰기가 앞 구간 글에 기대지 않으면(condition_on_previous_text=False) 문장부호가 줄고 한 구간이 30초 넘게 길어짐 →
+# 가편집·쇼츠 경계·영상 밖 말 찾기는 단어 시각으로 문장마다 나눠서 봄 (구간을 문장 끝(마침표가 없어도 '~요·~니다·~죠')·1초 넘게 쉰 곳에서).
+SENT_GAP = 1.0
+LONG_SEG = 8.0  # 단어 시각이 없는 구간은 이보다 길 때만 글자 수로 어림해서 나눔
+ZERO_WORD = 0.05  # 이보다 짧은 낱말은 받아쓰기가 시각을 못 맞춘 것 (문장 끝으로 안 봄)
+GHOST = 0.4       # 같은 말이 바로 이어 나올 때 이보다 짧은(또는 다른 쪽의 GHOST_PART 이하) 쪽은 받아쓰기가 겹쳐 쓴 그림자
+GHOST_PART = 0.4
+_LIKE = re.compile(r"^좋아요[,]?$")
+_SUB = re.compile(r"구독(?:이랑|하고|과|도|이나|랑)?[,]?$")
+
+
+def ends_sentence(w):
+    """낱말 하나가 문장 끝인지 ('있어요' · '됩니다' · '봤죠?' · '나이스!' — '필요'·'중요'·'~는데,' 는 아님)."""
+    t = re.sub(r"[\"'”’)\]]+$", "", str(w or "").strip())
+    return bool(_END.search(t)) or bool(_FIN.search(re.sub(r"[~]+$", "", t)))
+
+
+def split_sentences(segs, gap=SENT_GAP, guess=True):
+    """받아쓰기 구간 → 문장 구간 [{start, end, text(, words)}] (시간 순).
+    단어 시각이 있고 한 구간에 문장이 둘 넘으면 문장 끝 낱말 뒤·gap 초 넘게 쉰 곳에서 나눔 (글은 그 문장의 낱말을 이은 것 ·
+    첫 문장 시작·마지막 문장 끝은 원래 구간 그대로). 한 문장뿐인 구간은 그대로 · 단어 시각이 없는 구간(예전 받아쓰기)은
+    guess 일 때만, LONG_SEG 초보다 길면 글자 수대로 시각을 어림해서 나눔 (나눈 조각에는 words 를 넣지 않음 · 글만 쓰는 키트용 —
+    가편집은 guess=False: 어림한 시각으로 구간 안을 자르면 몇 초씩 어긋남).
+    길이가 0 인 낱말(받아쓰기가 시각을 못 맞춘 '빗나갔어요.' 61.23–61.23)은 문장 끝으로 보지 않음.
+    나눈 둘째 문장부터는 cont=True (원래 한 구간이었음)."""
+    out = []
+    for s in segs or ():
+        if not str(s.get("text") or "").strip():
+            continue
+        ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]
+        est = guess and not ws and float(s["end"]) - float(s["start"]) > LONG_SEG  # 단어 시각이 없는 긴 구간: 글자 수대로 어림해서 나눔
+        if est:
+            ws = even_words(str(s["text"]).split(), float(s["start"]), float(s["end"]))
+        parts, cur = [], []
+        for i, w in enumerate(ws):
+            cur.append(w)
+            nxt = ws[i + 1] if i + 1 < len(ws) else None
+            liked = i and _LIKE.match(str(w["w"]).strip()) and _SUB.search(str(ws[i - 1]["w"]))  # '구독이랑 좋아요 눌러 주세요'의 '좋아요'는 이름씨
+            ghost = not est and float(w["e"]) - float(w["s"]) < ZERO_WORD  # 길이 0 낱말 (지어낸 말일 수 있음): 뒤 말과 이어 봄
+            if nxt is None or (ends_sentence(w["w"]) and not liked and not ghost) or float(nxt["s"]) - float(w["e"]) >= gap:
+                parts.append(cur)
+                cur = []
+        for k in range(len(parts) - 2, -1, -1):  # 쉼으로만 떨어진 한두 글자('세' … '번째 포인트')는 뒤 문장에 붙임 (단어 시각이 앞으로 쏠린 것)
+            p = parts[k]
+            if len(re.sub(r"\s+", "", "".join(str(w["w"]) for w in p))) <= 2 and not ends_sentence(p[-1]["w"]):
+                parts[k:k + 2] = [p + parts[k + 1]]
+        if len(parts) < 2:
+            out.append(dict(s))
+            continue
+        for k, p in enumerate(parts):
+            a = float(s["start"]) if k == 0 else float(p[0]["s"])
+            b = float(s["end"]) if k == len(parts) - 1 else float(p[-1]["e"])
+            piece = {"start": round(a, 2), "end": round(max(a, b), 2), "text": " ".join(str(w["w"]).strip() for w in p)}
+            if k:
+                piece["cont"] = True  # 같은 받아쓰기 구간의 뒷 문장 (가편집은 예전처럼 사이를 자르지 않음 — 말 없는 시범이 그 사이에 있을 수 있음)
+            if not est:
+                piece["words"] = p
+            out.append(piece)
+    out.sort(key=lambda x: (x["start"], x["end"]))
+    return out
+
+
+def _plain(t):
+    return re.sub(r"[\s.,!?~…]+", "", str(t or ""))
+
+
+def merge_ghosts(sents, gap=1.0):
+    """문장들(시간 순) → 받아쓰기가 창 경계에서 겹쳐 쓴 '그림자' 문장을 진짜 문장에 합친 것.
+    같은 글의 문장이 gap 초 안에 이어 나오고 한쪽이 GHOST 초보다 짧거나 다른 쪽의 GHOST_PART 이하 길이면
+    (예: '감사합니다' 157.43–158.23 뒤 '감사합니다' 158.23–158.49) 긴 쪽 글·낱말에 두 시각을 합친 구간 하나로 —
+    말더듬 규칙이 진짜 말을 지우고 그림자를 남겨 낱말이 잘리지 않게 (E12 · I-102)."""
+    out = []
+    for s in sents or ():
+        p = out[-1] if out else None
+        if p is not None and _plain(p.get("text")) and _plain(p.get("text")) == _plain(s.get("text")) \
+                and float(s["start"]) - float(p["end"]) <= gap:
+            dp, ds = float(p["end"]) - float(p["start"]), float(s["end"]) - float(s["start"])
+            if min(dp, ds) < GHOST or min(dp, ds) <= GHOST_PART * max(dp, ds):
+                keep = dict(p if dp >= ds else s)
+                keep["start"], keep["end"] = round(min(float(p["start"]), float(s["start"])), 2), round(max(float(p["end"]), float(s["end"])), 2)
+                if p.get("cont"):
+                    keep["cont"] = True
+                else:
+                    keep.pop("cont", None)
+                out[-1] = keep
+                continue
+        out.append(s)
+    return out

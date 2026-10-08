@@ -484,7 +484,7 @@ class RecommendTest(unittest.TestCase):
         self.assertEqual(editor._covered(ivs, 23.0, 29.0), 0.0)
 
     def test_d_regression_same_as_before(self):
-        # (d) 다시 찍기·슬레이트가 없는 받아쓰기는 바꾸기 전과 똑같고 junk_list 만 더해짐
+        # (d) 다시 찍기·슬레이트가 없는 받아쓰기는 바꾸기 전과 똑같고 junk_list·offscript 만 더해짐 (코치 설명 끝의 구독 부탁은 쇼츠에서만 빠짐 · E12)
         fx = json.loads((FIX / "takes_before.json").read_text(encoding="utf-8"))
         self.assertEqual(len(fx["cases"]), 8)
         for c in fx["cases"]:
@@ -496,11 +496,22 @@ class RecommendTest(unittest.TestCase):
                 (d / "analysis.json").write_text(json.dumps(src["analysis"], ensure_ascii=False), encoding="utf-8")
                 now = editor.recommend(self.name, **c["kwargs"])
                 junk_list = now.pop("junk_list")
-                self.assertEqual(json.dumps(now, sort_keys=True, ensure_ascii=False), json.dumps(c["before"], sort_keys=True, ensure_ascii=False))
+                off = now.pop("offscript")  # E12: 영상 밖 말 목록이 더해짐
                 if c["input"].startswith("코치"):
                     self.assertEqual(junk_list, [])
+                    # E12 (BR-060): 끝의 '구독과 좋아요 부탁드립니다'는 영상 밖 안내 말 — 롱폼(정리 컷)은 그대로, 쇼츠에서만 빠짐
+                    self.assertEqual([(o["a"], o["b"], o["kind"], o["cut"]) for o in off], [(71.7, 74.8, "cta", "shorts")])
+                    before = c["before"]
+                    self.assertEqual((now["tidy"], now["junk"], now["segments"]), (before["tidy"], before["junk"], before["segments"]))
+                    gone = [s for s in before["shorts"] if any(x["in"] < 74.5 and x["out"] > 72.0 for x in s["cuts"])]
+                    kept = [s for s in before["shorts"] if s not in gone]
+                    self.assertEqual([s for s in now["shorts"] if s in kept], kept)  # 안내 말이 없던 쇼츠는 그대로
+                    for s in now["shorts"]:
+                        self.assertFalse(any(x["in"] < 74.5 and x["out"] > 72.0 for x in s["cuts"]), s)
                 else:  # 편집실 테스트 영상: '패스주고 리턴받고' 두 번 — 원래도 빠지던 앞쪽만 목록에 나옴 (컷은 그대로)
+                    self.assertEqual(json.dumps(now, sort_keys=True, ensure_ascii=False), json.dumps(c["before"], sort_keys=True, ensure_ascii=False))
                     self.assertEqual(junk_list, [{"a": 28.5, "b": 34.0, "why": NG}])
+                    self.assertEqual(off, [])
 
     def test_analyze_then_recommend_uses_real_silences(self):
         """받아쓰기(흉내) → 진짜 ffmpeg 무음 찾기 → analysis.json → 슬레이트 말이 조용한 곳 시작부터 빠짐."""

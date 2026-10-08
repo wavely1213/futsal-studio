@@ -675,8 +675,21 @@ def _analysis_session():
                 _WHISPER.clear()
 
 
+# 앞 구간 글에 기대지 않고 받아쓸 모델 (condition_on_previous_text=False · E12 D-103) — 정답 대사 A/B 로 잰 모델만.
+# '정확하게'(large-v3-turbo)는 글자 오류율 10.65% → 6.10% · '빠르게'(small)는 오히려 나빠져서(6.2% → 8.3%, 문장이 빠지고 그림자 '감사합니다') 예전 그대로
+NOCOND_MODELS = ("large-v3-turbo",)
+
+
+def _model_name(m):
+    """불러 둔 받아쓰기 모델의 이름 (_whisper 로 불러 둔 것만 · 모르면 None)."""
+    with _WHISPER_LOCK:
+        return next((k[0] for k, v in _WHISPER.items() if v is m), None)
+
+
 def _whisper_opts(m, vocab):
-    """단어 시각 + 용어 사전 힌트 (첫머리 initial_prompt, 설치된 faster-whisper 가 받으면 매 구간 hotwords)."""
+    """단어 시각 + 용어 사전 힌트 (첫머리 initial_prompt, 설치된 faster-whisper 가 받으면 매 구간 hotwords) ·
+    '정확하게' 모델은 앞 구간 글에 기대지 않기 (condition_on_previous_text=False — 같은 문장을 한 번 더 쓰거나 하지 않은 끝말을 지어내지 않게 ·
+    NOCOND_MODELS 만 · E12 D-103)."""
     import inspect
     import captions
     tok = getattr(m, "hf_tokenizer", None)
@@ -697,6 +710,8 @@ def _whisper_opts(m, vocab):
     h = captions.hotwords(vocab["terms"], 60, count) if "hotwords" in params else ""
     if h:
         opts["hotwords"] = h
+    if "condition_on_previous_text" in params and _model_name(m) in NOCOND_MODELS:  # 앞 문장에 기대지 않음 (같은 말 되풀이·지어내기 막기)
+        opts["condition_on_previous_text"] = False
     return opts
 
 

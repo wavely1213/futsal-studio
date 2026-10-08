@@ -1024,5 +1024,32 @@ class ReviewRegressionTests(KitBase):
         self.assertIn("1분 안에", kit["description"])
 
 
+class RunOnTranscriptKitTests(KitBase):
+    """E12 (D-103 · 검토 고침): 앞 구간에 기대지 않고 받아쓴 받아쓰기는 마침표 없이 30초 넘게 이어 써서
+    설명 첫 줄 인용이 문장 가운데서 잘린 긴 줄이 되던 것 — upload.sentences 가 먼저 문장 끝말에서 나눔."""
+    FIX = json.loads((Path(__file__).resolve().parent / "fixtures" / "rough_e12.json").read_text(encoding="utf-8"))["videos"]
+
+    def test_sentences_split_run_on_segment(self):
+        seg = {"start": 25.0, "end": 60.0, "text": "첫번째 포인트 패스를 주고 나서 바로 뛰어야 해요 패스를 주고 서 있으면 수비가 그냥 따라와요 "
+                                                   "메시랑 이니에스타가 2대1을 진짜 잘하잖아요 그 선수들은 패스하는 순간 이미 뛰고 있어요"}
+        out = [s["text"] for s in upload.sentences([seg])]
+        self.assertEqual(out, ["첫번째 포인트 패스를 주고 나서 바로 뛰어야 해요", "패스를 주고 서 있으면 수비가 그냥 따라와요",
+                               "메시랑 이니에스타가 2대1을 진짜 잘하잖아요", "그 선수들은 패스하는 순간 이미 뛰고 있어요"])
+        short = [{"start": 1.0, "end": 2.0, "text": "공을 받을 때는"}, {"start": 2.3, "end": 3.5, "text": "발 안쪽으로 받아요"}]
+        self.assertEqual([s["text"] for s in upload.sentences(short)], ["공을 받을 때는 발 안쪽으로 받아요"])  # 짧은 자막 잇기는 그대로
+
+    def test_first_description_line_is_one_sentence(self):
+        import captions
+        for key in ("LESSON04_nocond", "MSGRAW01_nocond"):
+            with self.subTest(key):
+                name = self.add_video(f"20261008_{key}_레슨.mp4", segs=self.FIX[key]["transcript"])
+                kit = upload.build_kit(name, save=False)
+                line1 = kit["description"].split("\n")[0]
+                self.assertTrue(line1.startswith("“") and line1.endswith("”"), line1)
+                quote = line1[1:-1]
+                self.assertLessEqual(len(quote), 60, quote)
+                self.assertTrue(captions.ends_sentence(quote.split()[-1]), quote)  # 문장 끝말로 끝남 (예전: '…메시랑 이니에스타가 2대1을')
+
+
 if __name__ == "__main__":
     unittest.main()

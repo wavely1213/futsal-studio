@@ -42,10 +42,13 @@ _LOCK = threading.RLock()  # 만들기·고친 내용 저장이 겹쳐도 파일
 DEFAULT_TEMPLATE = """## 올리기 키트의 설명 틀이에요. 고쳐서 저장하면 다음에 만드는 키트부터 그대로 들어가요.
 ## '##'로 시작하는 줄은 설명에 들어가지 않아요 (안내용이에요).
 ## {훅} 영상 내용으로 만든 첫 두 줄 · {챕터} 목차 (3분 넘는 긴 영상만) · {해시태그} 해시태그 · {제목} 고른 제목 · {주제} 주제어
+## {레슨 문의} 영상에서 말한 레슨·수강 안내 (인스타 DM·주말반 등 · 말하지 않았으면 빠져요)
 {훅}
 
 ▶ 출연
 최경진 감독 (풋살사관학교)
+
+{레슨 문의}
 
 {챕터}
 
@@ -179,9 +182,11 @@ SENT_GAP, SENT_MAX = 1.2, 120  # 이 안에 이어지는 말만 · 이은 문장
 
 def sentences(segs):
     """읽기 좋게 짧게 나눈 자막(쇼츠형·롱폼형 덩어리)을 다시 문장으로 이음 — 설명 첫 줄·챕터 제목·주제어가 반쪽 문장이 되지 않게.
-    앞 자막이 문장 끝(마침표·'~요'·'~다' 등)이 아니고 사이가 1.2초 안이면 이어 붙임 (120글자까지)."""
+    앞 자막이 문장 끝(마침표·'~요'·'~다' 등)이 아니고 사이가 1.2초 안이면 이어 붙임 (120글자까지).
+    마침표 없이 여러 문장을 이어 쓴 긴 받아쓰기 구간(condition_on_previous_text=False · 30초 넘는 한 줄)은 먼저 문장 끝말에서 나눔 (E12 · captions.split_sentences)."""
+    import captions
     out = []
-    for s in segs:
+    for s in captions.split_sentences(segs):
         p = out[-1] if out else None
         if (p and not _SENT_END.search(p["text"]) and s["start"] - p["end"] <= SENT_GAP
                 and len(p["text"]) + 1 + len(s["text"]) <= SENT_MAX):
@@ -481,6 +486,56 @@ def fit_description(text, notes=None):
         text = cut[:cut.rfind("\n")] if cut.rfind("\n") > DESC_MAX * 0.8 else cut
         notes.append(f"설명이 {DESC_MAX}자를 넘어서 뒷부분을 잘랐어요")
     return text
+
+
+# ---------- 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (E12 · BR-062) ----------
+PROMO_SLOT = "{레슨 문의}"
+PROMO_HEAD = "▶ 레슨 문의"
+_PROMO_LEAD = re.compile(r"^(?:(?:아\s*참|아참|참|참고로|그리고|아|자|또)[\s,.~!]*)+")
+
+
+def promo_lines(segs):
+    """받아쓰기 → 영상에서 말한 레슨·수강 홍보 문장들 (설명 '▶ 레슨 문의' 줄 · 나중에 설명 틀 링크 칸의 기본값으로도).
+    takes.notice_kinds 가 홍보로 본 문장 (연락할 곳·'레슨 문의'에 '주세요'·'주시면' 같은 부탁 꼴이 있는 줄과 바로 옆 '주말반 자리 있어요') —
+    촬영 준비 말·끝인사 뒤 촬영 끝 말 안에서 한 홍보도 넣음 (영상에서는 잘려도 설명에는 남게). 앞 군말('아 참,')만 떼고 'dm'은 'DM', 끝에 마침표."""
+    import captions
+    import takes
+    sents = takes._clean(captions.split_sentences(segs or []))
+    kinds = takes.notice_kinds(sents)
+    out = []
+    for i in sorted(k for k, v in kinds.items() if v == "promo"):
+        t = _PROMO_LEAD.sub("", re.sub(r"\s+", " ", str(sents[i]["text"])).strip())
+        t = re.sub(r"(?<![A-Za-z])dm(?![A-Za-z])", "DM", t, flags=re.I).strip(" ,")
+        if len(t) >= 4:
+            t = t if re.search(r"[.!?…]$", t) else t + "."
+            if t not in out:
+                out.append(t)
+    return out
+
+
+def add_promo(text, lines, notes=None):
+    """설명 글에 '▶ 레슨 문의' 묶음을 넣음 — 설명 틀의 {레슨 문의} 자리 (없으면 목차·해시태그 앞, 그것도 없으면 맨 끝).
+    lines 가 비면 {레슨 문의} 자리만 지움 · 설명 틀에 이미 '▶ 레슨 문의' 묶음(감독님이 직접 쓴 연락처)이나 같은 문장이 있으면 넣지 않음."""
+    text = str(text or "")
+    have = PROMO_HEAD in text.replace(PROMO_SLOT, "") or any(ln.rstrip(".") in text for ln in lines or ())
+    block = (PROMO_HEAD + "\n" + "\n".join(lines)) if lines and not have else ""
+    if lines and have and notes is not None:
+        notes.append("설명 틀에 이미 '▶ 레슨 문의'가 있어서 영상에서 말한 레슨 안내는 따로 넣지 않았어요")
+    if PROMO_SLOT in text:
+        text = re.sub(r"\n{3,}", "\n\n", text.replace(PROMO_SLOT, block))
+    elif block:
+        ls = text.split("\n")
+        at = next((i for i, ln in enumerate(ls) if ln.startswith("▶ 목차")), None)
+        if at is None:
+            at = next((i for i in range(len(ls) - 1, -1, -1) if _HASHTAG.match(ls[i].strip())), None)
+        if at is None:
+            ls += ["", block]
+        else:
+            ls[at:at] = [block, ""]
+        text = "\n".join(ls)
+        if notes is not None:
+            notes.append("영상에서 말한 레슨 안내를 설명의 '▶ 레슨 문의'에 넣었어요 (설명 틀에 {레슨 문의} 자리를 두면 그 자리에 들어가요)")
+    return fit_description(text, notes)
 
 
 def description(hook, chs, tags_h, title="", topics=(), template=None, notes=None):
@@ -893,6 +948,8 @@ def build_kit(name, seq=None, save=True):
     _apply_guests(kit, kit.get("guests") or [])  # 설명 '▶ 출연' 줄·태그·해시태그 (제목 후보는 위에서)
     kit["thumbnail"] = thumbnail_check(name, fmt)
     kit["prompt"] = claude_prompt(kit, segs)
+    kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
+    kit["description"] = add_promo(kit["description"], kit["promo"], notes)
     kit["notes"] = notes
     kit["counts"] = counts(kit)
     kit["limits"] = {"title": TITLE_MAX, "description": DESC_MAX, "tags": TAGS_MAX, "hashtags": HASHTAG_MAX}
