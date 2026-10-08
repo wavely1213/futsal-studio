@@ -1228,7 +1228,7 @@ def emphasis_placer(name, items, fmt, cap_style=None, captions_on=True, hook=Non
     state = {"cache": {}, "one": False}
 
     # 스타일 가편집(/api/edit/autoseq)은 작업이 아니라 바로 답하는 요청 → 얼굴 모델을 부르고(ensure) 쓰는(faces) 동안
-    # 쉬는 동안 내려놓기(idle)가 지우지 않게 idle.using() 으로 감쌈 (지워지면 조용히 흔한 얼굴 자리로 돌아감 · D-058)
+    # 쉬는 동안 내려놓기(idle)가 지우지 않게 idle.using() 으로 감쌈 (지워지면 조용히 흔한 얼굴 자리로 돌아감 · D-068)
     def prefetch(spans):
         spans = list(spans)
         state["one"] = 2 * len(spans) > FACE_FRAMES_MAX

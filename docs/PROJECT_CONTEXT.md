@@ -77,10 +77,10 @@ intake.py           보관함에 들어오는 영상 살피기 (복사 중·못 
 trouble.py          작업 오류 → 쉬운 한 줄 + 할 일 (화면의 실패 카드) · 로그인 정보 브라우저 목록
 studiolog.py        studio.log 쓰기 (연도 붙은 시각·크기 제한·오류 위치·갑자기 꺼짐 표시)
 worker.py           무거운 작업을 따로 파이썬 프로세스에서 (core.popen · 진행 표시 전달 · ✕로 끔) · 남은 메모리 avail_mb (D-051)
-cutout_worker.py    누끼를 따로 프로세스에서 (메모리가 모자라거나 실패하면 빠른 누끼 + 안내) (D-051)
+cutout_worker.py    누끼를 따로 프로세스에서 (메모리가 모자라거나 실패하면 빠른 누끼 + 안내) (D-051) · 썸네일 분석 자동 누끼도 (D-069)
 exportplan.py       내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 (D-054)
 hwdec.py            그래픽카드로 영상 풀기 (Windows·HDR · 확인된 PC 에서만) (D-053)
-idle.py             쉬는 동안(5분) 불러 둔 모델 내려놓기 (D-055)
+idle.py             쉬는 동안(5분) 불러 둔 모델 내려놓기 (얼굴·선수·공·글자·소리·받아쓰기) (D-055)
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027)
 tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이

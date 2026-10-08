@@ -4,10 +4,13 @@
   python setup_check.py venv         지금 .venv 를 그대로 써도 되는지 (깨졌거나·범위 밖·3.10 인데 더 새 Python 이 있으면 새로)
   python setup_check.py longpath     앱 폴더 경로가 너무 길어 설치가 실패할지 (Windows 260자 제한이 켜져 있을 때)
   python setup_check.py vcredist     받아쓰기·누끼에 필요한 Microsoft Visual C++ 구성요소(msvcp140)가 있는지
+  python setup_check.py place        앱 폴더가 임시 폴더(압축 파일 안에서 바로 실행·압축 프로그램이 잠깐 푼 곳)가 아닌지
+  python setup_check.py pip <기록>    pip 설치가 실패한 이유를 한국어 한 줄로 (bat 이 남긴 설치 기록 파일을 읽음 · 결과는 늘 1)
 
 되면 0, 아니면 1 (이유는 화면에 한국어로). bat 은 결과로 다음 할 일을 정함.
 """
 import os
+import re
 import subprocess
 import sys
 import sysconfig
@@ -20,6 +23,7 @@ PLATFORM = "win-amd64"              # ARM64·32비트 Python 은 ctranslate2·on
 VENV_TAIL = len(r"\.venv\Lib\site-packages\onnxruntime\tools\ort_format_model\ort_flatbuffers_py\fbs"
                 r"\RuntimeOptimizationRecordContainerEntry.py")  # 구성요소 중 가장 긴 파일 경로 (앱 폴더 뒤)
 MAX_PATH = 259
+PY_DIRECT = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"  # 설치 관리자가 아닌 독립 설치 파일 (bat 도 같은 주소)
 VC_MIN = (14, 40)                   # ctranslate2·onnxruntime 은 MSVC 14.4x 로 빌드 → 그보다 예전 msvcp140 이면 멈출 수 있음
 
 
@@ -31,8 +35,11 @@ def say(msg):
 
 
 def _ok_python(ver, plat):
-    if not (PY_MIN <= tuple(ver[:2]) <= PY_MAX):
-        return "Python %d.%d 은(는) 쓸 수 없어요 (3.10~3.14 필요 · 권장 3.13)" % tuple(ver[:2])
+    if tuple(ver[:2]) > PY_MAX:  # 막 나온 Python: 받아쓰기·누끼 구성요소(onnxruntime·ctranslate2)가 아직 그 버전용으로 안 나옴
+        return ("Python %d.%d 은(는) 너무 새로 나와서 아직 받아쓰기 구성요소가 없어요. "
+                "Python 3.14 를 함께 설치해 주세요 (%d.%d 은 지우지 않아도 돼요)" % (tuple(ver[:2]) * 2))
+    if tuple(ver[:2]) < PY_MIN:
+        return "Python %d.%d 은(는) 너무 오래됐어요 (3.10~3.14 필요 · 권장 3.13)" % tuple(ver[:2])
     if sys.platform == "win32" and plat != PLATFORM:
         return "이 Python 은 %s 용이에요. 64비트(x64) Python 이 필요해요 ('Windows installer (64-bit)')" % plat
     return None
@@ -140,13 +147,105 @@ def check_vcredist():
     return 0
 
 
+_TEMP_NAME = re.compile(r"^(temp\d+_.+\.zip|rar\$ex[\w.]*|7zo[0-9a-f]+(\.tmp)?|bnz\.[0-9a-f]+)$", re.I)
+# 탐색기(Temp1_x.zip)·WinRAR(Rar$EX…)·7-Zip(7zO…)·반디집(BNZ.…)이 잠깐 푸는 폴더 · 알집 등 나머지는 TEMP 아래인지로 잡음
+
+
+def _temp_dirs():
+    out = []
+    for var in ("TEMP", "TMP"):
+        v = os.environ.get(var)
+        if v:
+            # realpath: 사용자 이름이 길거나 한글이면 TEMP 가 짧은 이름(C:\Users\HONGGI~1\…)이라 앱 폴더(긴 이름)와 그냥은 안 맞음
+            for x in (os.path.abspath(v), os.path.realpath(v)):
+                x = os.path.normcase(x).rstrip("\\/")
+                if x not in out:
+                    out.append(x)
+    return out
+
+
+def _in_temp(path):
+    p = os.path.normcase(os.path.realpath(str(path)))
+    for t in _temp_dirs():
+        if p == t or p.startswith(t + os.sep) or p.startswith(t + "/"):
+            return True
+    return any(_TEMP_NAME.match(x) for x in Path(p).parts[1:])
+
+
+def check_place():
+    if not _in_temp(APP_DIR):
+        return 0
+    say("[안내] 앱 파일이 임시 폴더에 있어요. 압축 파일 안에서 바로 실행하면 이렇게 돼요 (나중에 저절로 지워져 앱이 사라져요):")
+    say("  " + str(APP_DIR))
+    say("  받은 압축 파일을 오른쪽 클릭 → '압축 풀기'(모두 압축 풀기)로 'C:\\풋살스튜디오' 같은 곳에 푼 뒤,")
+    say("  그 폴더의 '시작하기 (Windows).bat' 을 다시 실행해 주세요.")
+    return 1
+
+
+_NET = re.compile(r"NewConnectionError|Max retries exceeded|getaddrinfo failed|Temporary failure in name resolution|"
+                  r"Name or service not known|ConnectTimeout|ReadTimeout|timed out|ProxyError|Could not fetch URL|"
+                  r"Connection aborted|Connection reset|connection broken|RemoteDisconnected|IncompleteRead", re.I)
+
+
+def pip_reason(text, ver=None):
+    """pip 실패 기록 → (한국어 한 줄, 영어 원인 줄 · 없으면 '')."""
+    t = text or ""
+    ver = tuple((ver or sys.version_info)[:2])
+    err = ""
+    for ln in t.splitlines():
+        if re.search(r"^\s*(ERROR|error):|Error:", ln):
+            err = ln.strip()
+    if re.search(r"CERTIFICATE_VERIFY_FAILED|SSLError|SSL: ", t):
+        why = "인터넷 보안 연결이 막혔어요. 백신·회사 보안 프로그램이 막고 있으면 잠시 끄거나 다른 인터넷(휴대폰 핫스팟)으로 다시 실행해 주세요."
+    elif _NET.search(t):
+        why = "구성요소를 받는 중 인터넷이 끊겼어요. 인터넷 연결을 확인하고 이 파일을 다시 실행해 주세요."
+    elif re.search(r"No space left|WinError 112|Errno 28|디스크 공간이 부족", t):
+        why = "저장 공간이 부족해요 (약 2GB 필요). 공간을 비운 뒤 이 파일을 다시 실행해 주세요."
+    elif re.search(r"WinError 5\b|WinError 32\b|Access is denied|액세스가 거부|being used by another process|PermissionError", t):
+        why = "파일이 사용 중이라 설치하지 못했어요. 앱 창을 모두 닫고(백신 검사 중이면 끝난 뒤) 이 파일을 다시 실행해 주세요."
+    elif re.search(r"No matching distribution found|Could not find a version that satisfies|Requires-Python|requires a different Python", t):
+        why = ("이 Python(%d.%d)에 맞는 구성요소가 아직 없어요. Python 3.14 (64비트)를 설치한 뒤 이 파일을 다시 실행해 주세요: %s"
+               % (ver[0], ver[1], PY_DIRECT))
+    elif re.search(r"Failed building wheel|Failed to build|subprocess-exited-with-error|metadata-generation-failed|"
+                   r"Microsoft Visual C\+\+ 14", t):
+        # 이 Python 용 완성본(휠)이 없어 직접 만들려다 실패 — 막 나온 Python 에서 흔함 (인터넷 탓이 아님)
+        why = ("이 Python(%d.%d)에 맞게 미리 만든 구성요소가 없어 설치하지 못했어요. Python 3.14 (64비트)를 설치한 뒤 이 파일을 다시 실행해 주세요: %s"
+               % (ver[0], ver[1], PY_DIRECT))
+    elif re.search(r"Could not open requirements file", t):
+        why = "압축을 다 풀지 않고 실행했어요. 압축 파일을 '압축 풀기'로 푼 뒤 그 폴더에서 다시 실행해 주세요."
+    else:
+        why = "구성요소를 설치하지 못했어요. 인터넷 연결을 확인하고 이 파일을 다시 실행해 주세요. 계속되면 아래 기록 파일을 보내 주세요."
+    return why, err
+
+
+def check_pip(log):
+    try:
+        raw = Path(log).read_bytes() if log else b""
+    except OSError:
+        raw = b""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:  # 한국어 윈도우에서 PYTHONUTF8 없이 남은 기록은 cp949
+        text = raw.decode("cp949", errors="replace")
+    why, err = pip_reason(text)
+    if err:
+        say("  (" + err[:300] + ")")
+    if log:
+        say("  설치 기록: " + str(log))
+    say("[안내] " + why)
+    return 1
+
+
 def main(argv):
     try:
         sys.stdout.reconfigure(errors="replace")
     except Exception:  # noqa: BLE001
         pass
     what = argv[1] if len(argv) > 1 else ""
-    fn = {"python": check_python, "venv": check_venv, "longpath": check_longpath, "vcredist": check_vcredist}.get(what)
+    if what == "pip":
+        return check_pip(argv[2] if len(argv) > 2 else "")
+    fn = {"python": check_python, "venv": check_venv, "longpath": check_longpath, "vcredist": check_vcredist,
+          "place": check_place}.get(what)
     if fn is None:
         say(__doc__)
         return 2

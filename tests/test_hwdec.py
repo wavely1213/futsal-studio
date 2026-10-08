@@ -159,7 +159,7 @@ class MemWorkers(unittest.TestCase):
 
 
 class HdrPreWidth(unittest.TestCase):
-    """HDR 색 바꾸기 전에 줄일 가로 크기 (D-052 · D-058): 놓일 크기까지 · E6 펀치인(고정 확대)은 × 배율 · 키프레임은 예전 2W."""
+    """HDR 색 바꾸기 전에 줄일 가로 크기 (D-052 · D-068): 놓일 크기까지 · E6 펀치인(고정 확대)은 × 배율 · 키프레임은 예전 2W."""
     def test_pre_width(self):
         import editor
         md = {"kind": "video", "w": 3840, "h": 2160, "hdr": "hlg"}

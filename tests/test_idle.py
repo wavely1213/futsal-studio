@@ -24,10 +24,10 @@ class IdleTest(unittest.TestCase):
         idle.start(lock or threading.Lock(), lambda: ended["v"] or busy(), idle_sec=idle_sec)
 
     def test_release_clears_sessions(self):
-        mods = {"face": _fake("face"), "avmodels": _fake("avmodels"), "thumb": _fake("thumb")}
+        mods = {"face": _fake("face"), "detect": _fake("detect"), "avmodels": _fake("avmodels"), "thumb": _fake("thumb")}  # detect: 선수·공 찾기 (D-069)
         with mock.patch.dict(sys.modules, mods):
-            self.assertEqual(idle.release(), 6)
-            self.assertEqual([len(m._SESS) for m in mods.values()], [0, 0, 0])
+            self.assertEqual(idle.release(), 8)
+            self.assertEqual([len(m._SESS) for m in mods.values()], [0, 0, 0, 0])
 
     def test_locked_module_is_skipped(self):
         f = _fake("face")

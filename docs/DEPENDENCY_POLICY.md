@@ -47,7 +47,7 @@
   - 코드는 3.10 이상 기능을 쓴다(`tempfile.TemporaryDirectory(ignore_cleanup_errors=…)` — `updater.py` 업데이트 설치·`--selftest`, `core.py` Deno 설치).
   - 3.10 은 2026-10 지원이 끝나 yt-dlp 가 곧 뺄 예정이다. 그 뒤 3.10 PC 는 pip 가 예전 yt-dlp 에서 멈추므로 앱이 알아채 '새 Python 설치 → bat 다시 실행'을 안내하고(`core._engine_needs_newer_python`), bat 은 더 새 Python 이 있으면 `.venv` 를 옮겨 두고 새로 만든다.
   - 최소 지원 버전의 최종 확정은 소유자 몫이다 (`KNOWN_ISSUES.md` I-022).
-  - 막 나온 Python에는 onnxruntime·ctranslate2(faster-whisper) 휠이 늦게 나올 수 있다 → 휠이 나온 뒤에 `PY_MAX` 를 올린다.
+  - 막 나온 Python에는 onnxruntime·ctranslate2(faster-whisper) 휠이 늦게 나올 수 있다 → 휠이 나온 뒤에 `PY_MAX` 를 올린다. 그 전에는 bat 이 '너무 새로 나옴 → 3.14 함께 설치'로 안내하고 독립 설치 파일 주소(`setup_check.PY_DIRECT`, bat 과 같은 주소 · 2026-10 기준 3.14.8)를 연다. 새 'Python 설치 관리자'가 있으면 3.14 를 그것으로 설치한다 (D-058).
   - ctranslate2·onnxruntime 은 Microsoft Visual C++ 재배포 패키지(msvcp140·msvcp140_1)가 필요하다 (Python·휠에 없음). bat 이 없으면 설치한다(D-033). `msvc-runtime` 같은 pip 패키지로 대신하지 않는다 (venv 에서는 DLL 을 찾지 못함).
   - pip 는 23.3 이상으로 올려 둔다(bat·업데이트 · Windows 에서 켜진 앱이 쓰는 .pyd 를 못 지워도 설치를 실패로 끝내지 않음, D-032).
 - **메이저 업그레이드는 승인 필요** + 변경사항(breaking changes) 요약 보고 후 진행.
@@ -62,8 +62,9 @@
   - 현재 해당 사항: imageio-ffmpeg 자체는 BSD-2지만, 휠에 든 ffmpeg 실행 파일은 `--enable-gpl --enable-version3` 빌드다(개발 PC Linux 휠에서 확인, Windows 휠은 미확인).
   - 앱은 ffmpeg를 저장소·배포 zip에 넣지 않는다. pip로 설치된 것을 별도 프로세스로 실행만 한다.
   - ffmpeg를 앱에 직접 묶는 방식으로 바꾸려면 먼저 보고한다.
-- 함께 배포하는 글꼴(Pretendard·Black Han Sans·Do Hyeon)은 OFL이고, 라이선스 파일을 `fonts/`에 함께 둔다. 글꼴을 추가할 때도 라이선스 파일을 같이 넣는다.
-- 처음 쓸 때 받는 모델도 라이선스를 확인한다. 얼굴·표정 모델(ONNX model zoo UltraFace·FER+)은 MIT다(`face.py` 머리말). <!-- TODO: 누끼 모델(rembg 릴리스 v0.0.0의 BiRefNet-general-bb_swin_v1_tiny·u2net_human_seg)과 Whisper 모델(Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo`)의 라이선스 확인·기록 -->
+- 함께 배포하는 글꼴(Pretendard·Black Han Sans·Do Hyeon·Jua·Dokdo)은 OFL이고, 라이선스 파일을 `fonts/`에 함께 둔다. 글꼴을 추가할 때도 라이선스 파일을 같이 넣는다. 재배포 조건이 문서로 분명하지 않은 글꼴(Gmarket Sans 등)은 넣지 않는다 (D-062).
+- 함께 배포하는 스티커(`stickers/`, Microsoft Fluent UI Emoji 3D PNG 38개)는 MIT다. 원문 `stickers/LICENSE`, 출처·커밋·바꾼 것은 `stickers/NOTICE.md`.
+- 처음 쓸 때 받는 모델도 라이선스를 확인한다. 얼굴·표정 모델(ONNX model zoo UltraFace·FER+)은 MIT다(`face.py` 머리말). 선수·공 찾기 YOLOX-nano 는 Apache-2.0 이다(`detect.py` 머리말, D-061). <!-- TODO: 누끼 모델(rembg 릴리스 v0.0.0의 BiRefNet-general-bb_swin_v1_tiny·u2net_human_seg)과 Whisper 모델(Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo`)의 라이선스 확인·기록 -->
 - 라이선스 불명 패키지는 사용하지 않는다.
 
 ## 5. 보안·정리
@@ -95,9 +96,10 @@
 | Whisper 모델 `large-v3-turbo` | Hugging Face `mobiuslabsgmbh/faster-whisper-large-v3-turbo` (faster-whisper 기본 동작) | 받아쓰기 |
 | 누끼 모델 BiRefNet(약 220MB)·u2net_human_seg(약 170MB) | GitHub danielgatis/rembg 릴리스 → `~/.futsal-studio/models` | 썸네일 배경 지우기 |
 | 얼굴 UltraFace RFB-320·표정 FER+ (약 36MB) | ONNX model zoo 고정 커밋 → `~/.futsal-studio/models` | 썸네일 장면 고르기 표정 점수 |
-| PP-OCRv5 mobile 글자 찾기(4.8MB)·한국어 읽기(13.5MB)·글자 목록 (Apache-2.0, RapidOCR ONNX 변환본) | ModelScope RapidAI/RapidOCR `v3.9.2` 태그 (예비: Hugging Face monkt/paddleocr-onnx 고정 커밋, 주소별 크기·sha256) → `~/.futsal-studio/models` | 영상 기획 분석: 레퍼런스 화면 자막 읽기 (`avmodels.ocr`) |
+| 선수·공 찾기 YOLOX-nano (3,659,407 바이트, Apache-2.0) | GitHub Megvii-BaseDetection/YOLOX 릴리스 `0.1.1rc0` 고정 주소·sha256 → `~/.futsal-studio/models` (실패하면 `.detect-download-failed`, 10분 쉼) | 썸네일 장면 고르기 액션 점수·주인공·전술 그래픽 자리 (`detect.py`, D-061) |
+| PP-OCRv5 mobile 글자 찾기(4.8MB)·한국어 읽기(13.5MB)·글자 목록 (Apache-2.0, RapidOCR ONNX 변환본) | ModelScope RapidAI/RapidOCR `v3.9.2` 태그 (예비: Hugging Face monkt/paddleocr-onnx 고정 커밋, 주소별 크기·sha256) → `~/.futsal-studio/models` | 영상 기획 분석: 레퍼런스 화면 자막 읽기 (`avmodels.ocr`) · 썸네일 장면의 박힌 글자 감점·검수 글자 읽기(이미 받아 둔 경우에만, 썸네일 때문에 받지 않음) |
 | YAMNet (16MB, Apache-2.0 표시, tf2onnx 변환본) | Hugging Face zeropointnine/yamnet-onnx 고정 커밋 → `~/.futsal-studio/models` | 영상 기획 분석: 웃음·환호·음악·효과음 (`avmodels.tags`) |
-| Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021). 앱이 직접 받거나 묶지 않음 |
+| Claude Code CLI (선택, 사용자가 설치) | Anthropic 공식 설치 명령(`irm https://claude.ai/install.ps1 \| iex`) → `%USERPROFILE%\.local\bin\claude.exe` | 클로드 계정으로 기획 판단 (D-021) · 썸네일 문구 더 만들기·검수 평가 (D-060). 앱이 직접 받거나 묶지 않음 |
 | Pretendard 웹폰트 CSS (v1.3.9 고정) | jsDelivr CDN (`ui.html`만) | 메인 화면 글꼴. 편집실·썸네일은 로컬 `fonts/` |
 | cloudflared 2026.10.0 (Apache-2.0, Windows amd64 약 55MB / 386 약 38MB) | GitHub cloudflare/cloudflared 릴리스 고정 주소 · 크기·sha256 고정(`tunnel.CF_ASSETS`, 2026-10-07 공식 릴리스 노트와 맞춤) → `~/.futsal-studio/bin/cloudflared.exe` | 휴대폰으로 보기의 빠른 터널 (D-027). 원격 접속을 처음 켤 때만 받음 · 자동 업데이트 끔 · 6개월쯤마다 고정 판을 올린다(`KNOWN_ISSUES.md` I-037) |
 

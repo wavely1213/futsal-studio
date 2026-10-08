@@ -21,6 +21,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import core  # noqa: E402
+import detect  # noqa: E402
 import face  # noqa: E402
 import thumb  # noqa: E402
 import updater  # noqa: E402
@@ -110,12 +111,14 @@ class FaceBase(unittest.TestCase):
         # 인터넷은 절대 쓰지 않음 (모델이 이미 있으면 내려받기 자체를 안 함)
         self.patches += [mock.patch.object(urllib.request, "urlopen", side_effect=_offline),
                          mock.patch.object(urllib.request, "urlretrieve", side_effect=_offline)]
-        self.patches += [mock.patch.dict(face._SESS), mock.patch.dict(face._FAIL)]  # 모델 상태는 테스트마다 원래대로
+        self.patches += [mock.patch.dict(face._SESS), mock.patch.dict(face._FAIL),  # 모델 상태는 테스트마다 원래대로
+                         mock.patch.dict(detect._SESS), mock.patch.dict(detect._FAIL)]
         if not MODELS_OK:  # 모델이 없으면 사용자 폴더에 빈 모델 폴더도 만들지 않게
             self.patches.append(mock.patch.object(thumb, "MODELS", self.tmp / "models"))
         for p in self.patches:
             p.start()
         face._FAIL["t"] = 0.0
+        detect._FAIL["t"] = 0.0
         self.name = "얼굴 시험 영상.mp4"
         shutil.copy(self.video, core.VIDEOS / self.name)
         core.set_progress()
@@ -214,14 +217,22 @@ class TestFrameCandidates(FaceBase):
         self.assertEqual(len(top["faces"]), 1)
         self.assertEqual(top["url"], f"/frame?name={self.name}&t={top['t']}")
         self.assertEqual([i["score"] for i in items], sorted((i["score"] for i in items), reverse=True), "좋은 순")
-        self.assertEqual(len(items), 8)
+        # v4: 후보는 많아야 16장 · 같은 장면(지문이 같은 정지 사진)은 3장까지만 → 사진 3장짜리 영상이면 9장 안쪽
+        self.assertGreaterEqual(len(items), 6)
+        self.assertLessEqual(len(items), thumb.TOP_N)
+        for h in {i["hash"] for i in items}:  # 장면 경계의 프레임은 영상마다 0.1초쯤 어긋나므로 시각 대신 지문으로 셈
+            self.assertLessEqual(sum(i["hash"] == h for i in items), thumb.PER_SCENE, items)
+        for i in items:
+            self.assertIn(i["kind"], ("close", "mid", "wide", "scene"))
+            self.assertTrue(0 <= i["blur"] <= 1 and len(i["hash"]) == 16 and i["grade"]["on"])
+        self.assertEqual(top["kind"], "close")
         ts = sorted(i["t"] for i in items)
         self.assertTrue(all(b - a > 6 * 0.05 for a, b in zip(ts, ts[1:])), f"표정 다듬기 뒤에도 장면끼리 떨어져 있어야 함 · {ts}")
         for i in items:
             if self.segment(i["t"]) != 2:
                 self.assertNotIn("faces", i, i)
         # 저장된 캐시를 그대로 돌려줌
-        self.assertTrue((core.adir(self.name) / "frames" / "candidates3.json").is_file())
+        self.assertTrue((core.adir(self.name) / "frames" / thumb.CANDIDATES).is_file())
         self.assertEqual(thumb.cached_candidates(self.name), items)
         with mock.patch.object(thumb, "_score_frames", side_effect=AssertionError("다시 고르면 안 됨")):
             self.assertEqual(thumb.frame_candidates(self.name), items)
@@ -250,7 +261,7 @@ class TestFrameCandidates(FaceBase):
         os.utime(v, (st.st_atime, st.st_mtime + 120))
         self.assertIsNone(thumb.cached_candidates(self.name))
         # 깨진 캐시 파일 → None (오류 없이)
-        (a / "frames" / "candidates3.json").write_text("{깨짐", encoding="utf-8")
+        (a / "frames" / thumb.CANDIDATES).write_text("{깨짐", encoding="utf-8")
         self.assertIsNone(thumb.cached_candidates(self.name))
         # 없는 영상 → None
         self.assertIsNone(thumb.cached_candidates("없는 영상.mp4"))
@@ -259,15 +270,19 @@ class TestFrameCandidates(FaceBase):
         """모델을 못 받으면(인터넷 없음) 조용히 예전 점수로 장면을 고름."""
         empty = self.tmp / "모델 없음"
         face._SESS.clear()
+        detect._SESS.clear()
         with mock.patch.object(thumb, "MODELS", empty):
             self.assertFalse(face.ready())
+            self.assertFalse(detect.ready())
             items = thumb.frame_candidates(self.name)
             self.assertTrue(items)
             self.assertGreaterEqual(urllib.request.urlopen.call_count, 1, "내려받기를 시도했어야 함")
-            self.assertEqual([p.name for p in empty.glob("*") if p.name != face._MARK], [], "반쪽 파일이 남으면 안 됨")
+            self.assertEqual([p.name for p in empty.glob("*") if p.name not in (face._MARK, detect._MARK)], [], "반쪽 파일이 남으면 안 됨")
             for i in items:
                 self.assertNotIn("faces", i)
-                self.assertEqual(i["score"], round(float(thumb._sharpness(thumb.grab(self.name, i["t"]))), 3), "예전 점수 그대로")
+                # 모델이 없으면 선명도 점수(_sharpness) × 흔들림 감점만 (얼굴·선수 배율 없음)
+                self.assertAlmostEqual(i["score"], float(thumb._sharpness(thumb.grab(self.name, i["t"]))) * thumb.blur_penalty(i["blur"]), delta=0.01)
+                self.assertEqual(i["persons"], [])
             self.assertEqual(thumb.cached_candidates(self.name), items)
             # 바로 다시 열어도 또 기다리지 않음 (10분 동안 다시 시도 안 함)
             n = urllib.request.urlopen.call_count

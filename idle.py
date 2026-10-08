@@ -1,11 +1,13 @@
-"""쉬는 동안 메모리 돌려주기: 작업이 끝나고 IDLE_SEC(5분) 동안 새 작업이 없으면 불러 둔 모델(얼굴·표정 · 글자 읽기 ·
-소리 듣기 · 앱 안 누끼 · 받아쓰기)을 내려놓고 메모리를 OS 에 돌려줌. 다음에 쓸 때 다시 불러옴 (얼굴·글자·소리 0.1~0.3초).
+"""쉬는 동안 메모리 돌려주기: 작업이 끝나고 IDLE_SEC(5분) 동안 새 작업이 없으면 불러 둔 모델(얼굴·표정 · 선수·공 찾기 ·
+글자 읽기 · 소리 듣기 · 앱 안 누끼 · 받아쓰기)을 내려놓고 메모리를 OS 에 돌려줌. 다음에 쓸 때 다시 불러옴 (얼굴·글자·소리 0.1~0.3초).
 
 모델은 거의 작업(app.start_job) 안에서 쓰므로, 작업이 없을 때만(app 의 LOCK 을 잡고 확인) 내려놓음 → 쓰는 도중에 사라지지 않음.
+썸네일 작업(장면 고르기 · 썸네일 분석 · 클로드로 문구 만들기 · 클로드에게 평가받기)도 모두 start_job 이라 그동안은 '작업 중'.
 작업이 멈춰도 잠깐 더 사는 모델 스레드(plan 의 글자 읽기 'model-ocr')가 있으면 그것도 끝날 때까지 기다림.
 작업 밖에서 모델을 쓰는 곳은 `with idle.using():` 로 감쌈 — 지금은 스타일 가편집(/api/edit/autoseq · 바로 답하는 요청)의
-강조 글씨 얼굴 찾기(editor.emphasis_placer). 새로 생기면 start_job 안으로 넣거나 using() 으로 (스레드 이름 'model-' 만으로는
-ensure() 와 스레드 시작 사이가 비어 모자람).
+강조 글씨 얼굴 찾기(editor.emphasis_placer)와 썸네일 검수 글자 읽기(/api/thumb/ocr → thumb.read_text). 새로 생기면 start_job 안으로
+넣거나 using() 으로 (스레드 이름 'model-' 만으로는 ensure() 와 스레드 시작 사이가 비어 모자람).
+누끼 모델은 앱 프로세스에 없음 (cutout_worker 의 따로 프로세스 · 끝나면 메모리 반환) — thumb._SESS 비우기는 예전 캐시 대비.
 app.py 에서: idle.start(LOCK, lambda: bool(JOB["name"])) + JOB_HOOKS 에 idle.touch.
 """
 import contextlib
@@ -79,7 +81,7 @@ def models_in_use():
 
 def release():
     """불러 둔 모델을 모두 내려놓음 → 내려놓은 것 수. (작업이 없을 때만 부를 것)"""
-    n = _clear("face") + _clear("avmodels") + _clear("thumb")
+    n = _clear("face") + _clear("detect") + _clear("avmodels") + _clear("thumb")
     n += _clear("core", "_WHISPER", "_WHISPER_LOCK")
     trim()
     _ST["dirty"] = False

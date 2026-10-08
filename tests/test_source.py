@@ -262,8 +262,11 @@ class StoreTests(Base):
     def test_locked_file_retries(self):
         real = source.os.replace
         calls = []
+        target = source.store_path()
 
         def flaky(a, b):
+            if Path(b) != target:  # source.os 는 os 모듈 그대로 → 앞 시험에서 아직 도는 다른 스레드의 os.replace 는 세지 않고 그대로
+                return real(a, b)
             calls.append(1)
             if len(calls) < 3:
                 raise PermissionError("백신이 잡고 있음")

@@ -126,8 +126,14 @@ class BeaconTests(NotifyBase):
         self.turn_on()
         self.beacons()
         self.svc.turn_off("user")
-        got = self.beacons(n=2)
-        last = open_beacon(got[-1][1], self.a)
+        # 바쁜 PC 에서는 '켜짐' 비콘이 두 번 먼저 올 수 있음 → '꺼짐' 비콘이 올 때까지 기다림 (순서 경쟁)
+        end = time.time() + 20
+        while True:
+            got = self.beacons(n=2)
+            last = open_beacon(got[-1][1], self.a)
+            if (last and last.get("state") == "off") or time.time() > end:
+                break
+            time.sleep(0.05)
         self.assertEqual((last["state"], last["reason"], last["url"]), ("off", "원격 접속을 껐어요", None))
 
     def test_shutdown_sends_app_off_beacon_synchronously(self):
@@ -347,8 +353,13 @@ class NotifyTests(NotifyBase):
                 self.svc.pub.notify("done", f"끝 {i}")
             for i in range(5):
                 self.svc.pub.notify("attention", f"확인 {i}")
-            time.sleep(1.0)
-            texts = [p[1] for p in self.ntfy.topic(self.svc.store.data["topics"]["notify"])]
+            # 바쁜 PC 에서는 보내기가 1초보다 늦을 수 있음 → 6개가 올 때까지(최대 20초) 기다린 뒤 더 안 오는지 잠깐 확인
+            topic = self.svc.store.data["topics"]["notify"]
+            end = time.time() + 20
+            while len(self.ntfy.topic(topic)) < 6 and time.time() < end:
+                time.sleep(0.05)
+            time.sleep(0.5)
+            texts = [p[1] for p in self.ntfy.topic(topic)]
         self.assertEqual(texts, ["끝 0", "끝 1", "끝 2", "확인 0", "확인 1", "확인 2"])
         self.svc.pub.day = "1999-01-01"  # 자정이 지나면 다시
         self.svc.pub.notify("done", "다음 날")
