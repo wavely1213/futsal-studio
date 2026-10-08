@@ -178,9 +178,11 @@ SENT_GAP, SENT_MAX = 1.2, 120  # 이 안에 이어지는 말만 · 이은 문장
 
 def sentences(segs):
     """읽기 좋게 짧게 나눈 자막(쇼츠형·롱폼형 덩어리)을 다시 문장으로 이음 — 설명 첫 줄·챕터 제목·주제어가 반쪽 문장이 되지 않게.
-    앞 자막이 문장 끝(마침표·'~요'·'~다' 등)이 아니고 사이가 1.2초 안이면 이어 붙임 (120글자까지)."""
+    앞 자막이 문장 끝(마침표·'~요'·'~다' 등)이 아니고 사이가 1.2초 안이면 이어 붙임 (120글자까지).
+    마침표 없이 여러 문장을 이어 쓴 긴 받아쓰기 구간(condition_on_previous_text=False · 30초 넘는 한 줄)은 먼저 문장 끝말에서 나눔 (E12 · captions.split_sentences)."""
+    import captions
     out = []
-    for s in segs:
+    for s in captions.split_sentences(segs):
         p = out[-1] if out else None
         if (p and not _SENT_END.search(p["text"]) and s["start"] - p["end"] <= SENT_GAP
                 and len(p["text"]) + 1 + len(s["text"]) <= SENT_MAX):
