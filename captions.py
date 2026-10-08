@@ -21,6 +21,11 @@ _END = re.compile(r"[.?!…]$")
 _MOD = {"그", "이", "저", "이런", "그런", "저런", "어떤", "무슨", "몇", "첫", "각", "모든", "매", "온", "새", "다른", "딴"}
 _NUM = {"한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "스무"}
 _COUNTER = re.compile(r"^(?:번|개|명|걸음|가지|골|바퀴|시간|분|초|살|발|판|세트|회|차|군데|마리|잔|장|줄|칸|박자)")
+# 이음말·말끝 뒤(…인데 / …하고 / …해요)가 조사 뒤(공은 / 항상)보다 끊어 읽기 좋은 곳
+_CLAUSE = re.compile(r"(?:데|고|서|면|며|요|다|죠|까|네|야|지만|니까|거나|든지)[,.?!…~]*$")  # ('정확하게' 같은 -게 는 뒤 움직씨를 꾸밈)
+# 꾸밈을 자주 받는 이름씨: 그 앞의 움직씨 꾸밈꼴('받는 사람'·'하는 거'·'좋은 방법')은 따로 떼면 어색함
+_HEAD_N = ("사람", "것", "거", "게", "때", "곳", "쪽", "방향", "순간", "동작", "선수", "상황", "자리", "방법", "경우", "이유", "부분", "거리",
+           "느낌", "타이밍", "친구", "분들")
 # 사전 고치기: 낱말 뒤에 붙어도 되는 조사 (최대 두 개 · '피버를'은 고치고 '피버트'는 안 고침)
 _JOSA = "(?:이에요|예요|입니다|이랑|에서|에게|한테|으로|부터|까지|처럼|보다|하고|은|는|이|가|을|를|의|에|로|와|과|도|만|랑|씩)"
 # 요·야·죠는 낱말 바로 뒤에 혼자 붙을 때만 ('피버요'는 고치고, '가요'·'가야' 같은 말끝이 붙은 '피버가요'는 그대로)
@@ -243,11 +248,23 @@ def _term_joints(texts, terms):
     return inside
 
 
+def _adnominal(w, nxt):
+    """w 가 뒤 이름씨를 꾸미는 꼴('받는 사람'·'하는 거'·'좋은 방법'·'할 때')인지 — '-는·-은·-을'이나 받침 ㄴ·ㄹ로 끝나고
+    뒤가 꾸밈을 자주 받는 이름씨일 때만 (판정: '그리고 마지막으로 받는 / 사람 발 쪽으로…' 처럼 말 덩어리 가운데서 끊김)."""
+    h = re.sub(r"[^가-힣]", "", w or "")
+    n = re.sub(r"[^가-힣]", "", nxt or "")
+    if not h or not n or re.search(r"[,.?!…~]$", w) or not any(n == x or (n.startswith(x) and len(n) <= len(x) + 2) for x in _HEAD_N):
+        return False
+    jong = (ord(h[-1]) - 0xAC00) % 28 if "가" <= h[-1] <= "힣" else 0
+    return h[-1] in "는은을" or jong in (4, 8)  # 받침 ㄴ(4)·ㄹ(8)
+
+
 def _modifier(w, nxt):
-    """w 가 바로 뒤 낱말 nxt 를 꾸미는 말인지 (지시·수 관형사 · 수는 뒤에 단위가 올 때만 — '네' 대답·'세' 같은 다른 뜻과 가름)."""
+    """w 가 바로 뒤 낱말 nxt 를 꾸미는 말인지 (지시·수 관형사 · 수는 뒤에 단위가 올 때만 — '네' 대답·'세' 같은 다른 뜻과 가름 ·
+    움직씨·그림씨 꾸밈꼴은 _adnominal)."""
     if not w or re.search(r"[,.?!…~]$", w):
         return False
-    return w in _MOD or (w in _NUM and bool(_COUNTER.match(nxt or "")))
+    return w in _MOD or (w in _NUM and bool(_COUNTER.match(nxt or ""))) or _adnominal(w, nxt)
 
 
 def _lines(texts, inside):
@@ -296,7 +313,7 @@ def chunk(words, fmt="long", breaks=(), terms=()):
     for k in range(n - 1):  # 문장 끝(마침표 등)이 가장 강한 끊을 곳 · 받아쓰기 구간 끝은 문장 중간일 때도 있어 그보다 약하게
         end, seg, g = bool(_END.search(texts[k])), k in brk, gap[k]
         join.append(join[-1] + (10 if end else 4 if seg else 3 if texts[k].endswith(",") else 0) + (0.0 if mod[k] else 12 * max(0.0, g - 0.25)))
-        cut[k] = (0.0 if end or g >= 0.4 else 0.5 if seg else 1.0 if _NICE.search(texts[k]) or g >= 0.2 else 2.5) \
+        cut[k] = (0.0 if end or g >= 0.4 else 0.5 if seg else 0.6 if _CLAUSE.search(texts[k]) else 1.3 if _NICE.search(texts[k]) or g >= 0.2 else 2.5) \
             + (8 if k in inside else 0) + (12 if mod[k] else 0)
 
     best, prev = [0.0] + [float("inf")] * n, [0] * (n + 1)
