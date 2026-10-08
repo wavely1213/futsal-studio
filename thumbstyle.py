@@ -9,7 +9,7 @@
   누끼(글자 밖의 가는 흰 선 비율 — 흰 테두리를 두른 인물 누끼).
 - 버릇(summarize): 여러 장을 합친 값 → 스타일 파일의 thumb.habits. 편집기용 값(params): 강조색 2개·글자 크기 배율·위치 무게·테두리 두께·
   배경 밝기·채도 배율·누끼 가산·얼굴 크기·줄 수.
-- 썸네일에 쓸 스타일: thumbnails/thumb_style.json {style} (스타일 카드·썸네일 편집기에서 고름 · 없으면 가장 최근에 배운 썸네일 버릇).
+- 썸네일에 쓸 스타일: thumbnails/thumb_style.json {style} (스타일 카드·썸네일 편집기에서 고름 · 고르지 않았으면 기본 — 배우기만 해서는 바뀌지 않음).
 - A/B: A/B 묶음을 저장할 때 장마다 틀·색·문구 틀을 thumbnails/ab_tests.json 에 적어 두고, 이긴 장을 누르면 winner 로 표시 →
   ours()(이긴 횟수) → 편집기가 그 틀·문구 틀에 가산점 · '우리 채널' 스타일은 이긴 색을 씀. 사용자가 브랜드 키트에서 직접 바꾼 색이 늘 먼저.
 """
@@ -24,7 +24,7 @@ import urllib.request
 import core
 import updater
 
-VER = 1                                   # 재는 방식이 바뀌면 올림 (예전에 잰 값은 다시 잼)
+VER = 2                                   # 재는 방식이 바뀌면 올림 (예전에 잰 값은 다시 잼) · 2: 색 역할·네 쪽 테두리 (D-130 검토)
 ID_RX = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YTIMG = "https://i.ytimg.com/vi/{}/{}"
 SIZES = ("maxresdefault.jpg", "sddefault.jpg", "hqdefault.jpg")   # 큰 것부터 (maxres 가 없는 영상이 있음)
@@ -36,7 +36,7 @@ IDS_MAX = 30                              # 한 스타일에서 많아야 이만
 MW, MH = 640, 360                         # 재는 크기
 TITLE_MIN_H = 0.045                       # 제목 글자로 볼 글자 높이 (화면 높이 대비 · 작은 간판·채널 이름 빼고)
 TITLE_REL = 0.45                          # 가장 큰 줄의 이 비율 넘는 줄만 제목 줄로 셈
-BASE_TEXT_H = 0.17                        # 우리 기본 제목 큰 줄 글자 높이(화면 높이 대비) — 버릇이 이 값이면 글자 크기 배율 1
+BASE_TEXT_H = 0.147                       # 레퍼런스 47개 채널 제목 글자 높이(화면 높이 대비) 중앙값 — 이 값이면 글자 크기 배율 1 (보통 채널 = 우리 기본 크기 · D-130 검토)
 BASE_BRIGHT, BASE_SAT = 0.45, 0.36        # 레퍼런스 162장 평균 밝기·채도 (refstats) — 이 값이면 배경 배율 1
 CUT_THIN = 0.006                          # 글자 밖 가는 흰 선이 화면의 이 비율 넘으면 누끼(흰 테두리 인물)로 봄
 STORE = "thumb_style.json"                # 썸네일에 쓸 스타일
@@ -132,8 +132,54 @@ def _open(src):
     return im.resize((MW, MH) if im.size[0] >= im.size[1] else (MH, MW), Image.BILINEAR)
 
 
+def _shift(m, dy, dx):
+    """참/거짓 지도를 (dy, dx) 화소 옮김 (밖으로 나간 곳은 거짓)."""
+    import numpy as np
+    out = np.zeros_like(m)
+    H, W = m.shape
+    ys, yd = (slice(0, H - dy), slice(dy, H)) if dy >= 0 else (slice(-dy, H), slice(0, H + dy))
+    xs, xd = (slice(0, W - dx), slice(dx, W)) if dx >= 0 else (slice(-dx, W), slice(0, W + dx))
+    out[yd, xd] = m[ys, xs]
+    return out
+
+
+OL_DARK_BG = 0.6                          # 글자 먼 둘레가 이만큼 넘게 어두우면 (어두운 배경) 테두리를 잴 수 없음 → None
+
+
+def _outline(gb, dark, gh):
+    """테두리 두께(÷ 글자 높이) · 잴 수 없으면 None (D-130 검토).
+    - 네 쪽(위·아래·왼쪽·오른쪽)마다 글자에서 1화소씩 바깥으로 가며 '먼 둘레보다 뚜렷이 어두운' 띠의 폭을 직접 셈
+      (글자 가장자리 흐림 때문에 처음 몇 화소는 밝아도 넘어감) → 네 쪽 중 가장 얇은 쪽 = 테두리.
+      그림자는 한쪽(보통 아래·오른쪽)만 어둡게 하므로 위쪽 폭이 0 이 되어 테두리로 세지 않음.
+    - 배경이 어두우면 (먼 둘레 어두운 비율 > OL_DARK_BG) 테두리와 배경을 가를 수 없어 None (예전: '없음'으로 셈)."""
+    k = max(2, int(round(gh * 0.16)))
+    far = dilate(gb, 2 * k) & ~dilate(gb, k)
+    if not far.any():
+        return None
+    df = float(dark[far].mean())
+    if df > OL_DARK_BG:
+        return None
+    ws = []
+    for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        w, prev, lead = 0, gb.copy(), max(2, k // 3)
+        for i in range(1, k + 1):
+            sh = _shift(gb, dy * i, dx * i)
+            ring = sh & ~prev
+            prev |= sh
+            if not ring.any():
+                break
+            dn = float(dark[ring].mean())
+            if dn - df >= 0.2 and dn >= 0.55:
+                w += 1
+            elif w or i >= lead:  # 어두운 띠가 끝났거나, 글자 가장자리 흐림(lead 화소) 뒤에도 어둡지 않음
+                break
+        ws.append(w)
+    return min(0.3, min(ws) / max(1.0, float(gh)))
+
+
 def _row(cls, v, box):
-    """글자 상자 하나 → {color, h(글자 높이 0~1), y(가운데 0~1), outline(테두리 두께 ÷ 글자 높이), area} · 글자색을 못 찾으면 None."""
+    """글자 상자 하나 → {color(가장 많은 글자색), cmix({색: 넓이}), h(글자 높이 0~1), y(가운데 0~1), outline(테두리 두께 ÷ 글자 높이), area}
+    · 글자색을 못 찾으면 None. 한 줄 안에 두 색(흰 글자 + 노란 강조 낱말)이 있으면 cmix 에 둘 다."""
     import numpy as np
     H, W = cls.shape
     x0, y0, x1, y1 = box
@@ -146,54 +192,97 @@ def _row(cls, v, box):
     outer = cls[B0:B1, A0:A1].copy()
     ring = np.ones(outer.shape, bool)
     ring[Y0 - B0:Y1 - B0, X0 - A0:X1 - A0] = False
-    best, bs = 0, 0.04
+    ex = {}
     for c in range(1, len(CLS)):
         if CLS[c] == "black":
             continue
         fi = float((inner == c).mean())
         fr = float((outer[ring] == c).mean()) if ring.any() else 0.0
-        if fi - fr > bs:
-            best, bs = c, fi - fr
-    if not best:
+        if fi - fr > 0.04:
+            ex[c] = fi - fr
+    if not ex:
         return None
-    g = inner == best
-    base = float((outer[ring] == best).mean()) if ring.any() else 0.0  # 배경에도 그 색이 있으면 그만큼은 글자 줄로 보지 않음
+    best = max(ex, key=ex.get)
+    sel = [c for c in ex if ex[c] >= 0.2 * ex[best]]  # 둘째 색(강조 낱말)도 글자 넓이의 1/5 넘으면 글자색으로
+    g = np.isin(inner, sel)
+    base = sum(float((outer[ring] == c).mean()) for c in sel) if ring.any() else 0.0  # 배경에도 그 색이 있으면 그만큼은 글자 줄로 보지 않음
     rows = np.flatnonzero(g.mean(axis=1) > base + 0.03)
     if not len(rows):
         return None
     gh = rows[-1] - rows[0] + 1
-    # 테두리: 글자 바로 둘레(가까운 띠)가 그 바깥(먼 띠)보다 얼마나 더 어두운지 → 두께(화소) ÷ 글자 높이
     gb = np.zeros(outer.shape, bool)
     gb[Y0 - B0:Y1 - B0, X0 - A0:X1 - A0] = g
-    dark = v[B0:B1, A0:A1] < 0.3
-    k = max(2, int(round(gh * 0.16)))
-    near = dilate(gb, k) & ~gb
-    far = dilate(gb, 2 * k) & ~dilate(gb, k)
-    per = int((gb & ~erode(gb, 1)).sum())
-    outline = 0.0
-    if near.any() and far.any() and per:
-        dn, df = float(dark[near].mean()), float(dark[far].mean())
-        ex = max(0.0, dn - df) / max(1e-6, 1 - df)
-        outline = min(0.3, ex * near.sum() / per / gh)
-    return {"color": PALETTE[CLS[best]], "h": round(float(gh) / H, 4), "y": round(float(Y0 + (rows[0] + rows[-1]) / 2) / H, 4),
-            "outline": round(float(outline), 4), "area": round(float(g.sum()) / (H * W), 5), "x": [round(float(x0), 3), round(float(x1), 3)]}
+    outline = _outline(gb, v[B0:B1, A0:A1] < 0.3, gh)
+    tot = float(g.size)
+    cmix = {PALETTE[CLS[c]]: round(ex[c] * tot / (H * W), 5) for c in sel}
+    return {"color": PALETTE[CLS[best]], "cmix": cmix, "h": round(float(gh) / H, 4), "y": round(float(Y0 + (rows[0] + rows[-1]) / 2) / H, 4),
+            "outline": None if outline is None else round(float(outline), 4), "area": round(float(g.sum()) / (H * W), 5), "x": [round(float(x0), 3), round(float(x1), 3)]}
 
 
 def _merge_rows(rows):
-    """같은 높이의 글자 상자(한 줄이 낱말마다 나뉜 것)를 한 줄로 셈 → 줄 목록 (위에서 아래로)."""
+    """같은 높이의 글자 상자(한 줄이 낱말마다 나뉜 것)를 한 줄로 셈 → 줄 목록 (위에서 아래로) · 색 넓이(cmix)는 더함."""
     out = []
     for r in sorted(rows, key=lambda r: r["y"]):
         if out and abs(r["y"] - out[-1]["y"]) < 0.5 * max(r["h"], out[-1]["h"]):
             o = out[-1]
-            if r["area"] > o["area"]:
-                o["color"] = r["color"]
             o["h"] = max(o["h"], r["h"])
             o["area"] = round(o["area"] + r["area"], 5)
-            o["outline"] = max(o["outline"], r["outline"])
-            o["colors"] = o.get("colors", [o["color"]]) + [r["color"]]
+            ol = [x for x in (o["outline"], r["outline"]) if x is not None]
+            o["outline"] = max(ol) if ol else None
+            for c, a in r["cmix"].items():
+                o["cmix"][c] = round(o["cmix"].get(c, 0) + a, 5)
+            o["color"] = max(o["cmix"], key=o["cmix"].get)
         else:
-            out.append(dict(r))
+            out.append(dict(r, cmix=dict(r["cmix"])))
     return out
+
+
+def _line_cols(r):
+    """한 줄 → (바탕 글자색, 강조 낱말 색 | None) — 강조 색은 그 줄 글자 넓이의 15% 넘을 때만."""
+    cm = sorted(((a, c) for c, a in r["cmix"].items() if c != PALETTE["black"]), reverse=True)
+    if not cm:
+        return r["color"], None
+    tot = sum(a for a, _ in cm) or 1.0
+    return cm[0][1], (cm[1][1] if len(cm) > 1 and cm[1][0] / tot >= 0.15 else None)
+
+
+def roles_of(title):
+    """제목 줄들 → 색 역할 {mode, base, accent, top} (D-130 검토: 색을 '역할'로 적어 편집기의 같은 역할에 씀 · 바탕·강조를 뒤바꾸지 않음)
+    base = 바탕 글자색(편집기 hl2 '기본 글자') · accent = 강조색(편집기 hl '강조 글자'). 흰색이 있으면 흰색이 바탕, 다른 색이 강조
+    (흰색이 없으면 넓은 색이 바탕). mode — 큰 줄이 어떻게 칠해졌나:
+    - word : 큰 줄 하나에 바탕색 + 강조 낱말 (쌈바 '‘풋살’의 기본기' — 강조 낱말만 노랑)
+    - line : 큰 줄 전체가 강조색 (쌈바 'ALA 움직임' 노랑 한 줄)
+    - plain: 큰 줄 전체가 바탕색 (흰 큰 글자 · 작은 줄이 강조색이기도)
+    - stack: 같은 크기 두 줄이 다른 색 — top: 위 줄의 역할 ('hl2' 바탕 · 'hl' 강조) (lcs '이스타. 선수 시절(흰) / 이천수랑 패싸움 한 썰(노랑)')"""
+    if not title:
+        return None
+    hmax = max(r["h"] for r in title)
+    bigs = [r for r in title if r["h"] >= 0.85 * hmax]
+    area = {}
+    for r in title:
+        for c, a in r["cmix"].items():
+            if c != PALETTE["black"]:
+                area[c] = area.get(c, 0) + a
+    cs = sorted(area, key=lambda c: -area[c])
+    if not cs:
+        return None
+    if PALETTE["white"] in cs and len(cs) > 1:
+        base, accent = PALETTE["white"], next(c for c in cs if c != PALETTE["white"])
+    elif len(cs) > 1:
+        base, accent = cs[0], cs[1]
+    elif cs[0] == PALETTE["white"]:
+        base, accent = cs[0], None
+    else:
+        base, accent = None, cs[0]
+    role = lambda c: "hl" if c == accent else "hl2"  # noqa: E731
+    if len(bigs) >= 2:
+        t0, t1 = _line_cols(bigs[0])[0], _line_cols(bigs[-1])[0]
+        if t0 != t1:
+            return {"mode": "stack", "base": base, "accent": accent, "top": role(t0)}
+    big = bigs[0] if len(bigs) >= 2 else max(title, key=lambda r: r["h"])
+    bc, ba = _line_cols(big)
+    mode = "word" if ba else "line" if bc == accent else "plain"
+    return {"mode": mode, "base": base, "accent": accent}
 
 
 def _cutout(cls, boxes):
@@ -263,18 +352,19 @@ def measure(src, lines=None, faces=None):
         title = max(blocks, key=lambda b: sum(r["area"] for r in b))
     out = {"v": VER, "bright": round(float(v.mean()), 3), "sat": round(float(s.mean()), 3),
            "yellow": round(float((cls == CLS.index("yellow")).mean()), 4), "white": round(float((cls == CLS.index("white")).mean()), 4),
-           "ocr": lines is not None, "lines": len(title) if lines is not None else None, "textH": None, "pos": None, "colors": [], "outline": None,
+           "ocr": lines is not None, "lines": len(title) if lines is not None else None, "textH": None, "pos": None, "colors": [], "roles": None, "outline": None,
            "face": None, "cutout": _cutout(cls, boxes)}
     if title:
-        hmax = max(r["h"] for r in title)
-        big = min((r for r in title if r["h"] >= 0.85 * hmax), key=lambda r: r["y"])  # 큰 줄이 비슷하면 먼저 읽히는 (위) 줄의 색이 주 색
-        out["textH"] = round(float(hmax), 4)
+        out["textH"] = round(float(max(r["h"] for r in title)), 4)
         wsum = sum(r["area"] for r in title) or 1.0
         cy = sum(r["y"] * r["area"] for r in title) / wsum
         out["pos"] = "top" if cy < 0.42 else "bottom" if cy > 0.58 else "middle"
-        cols = [big["color"]] + [c for r in sorted(title, key=lambda r: -r["area"]) for c in r.get("colors", [r["color"]])]
-        out["colors"] = list(dict.fromkeys(cols))[:3]
-        out["outline"] = round(float(np.median([r["outline"] for r in title])), 4)
+        ro = roles_of(title)
+        out["roles"] = ro
+        rest = sorted({c: a for r in title for c, a in r["cmix"].items()}.items(), key=lambda x: -x[1])
+        out["colors"] = list(dict.fromkeys([c for c in (ro["accent"], ro["base"]) if c] + [c for c, _ in rest]))[:3]  # 강조색 → 바탕색 → 나머지 (화면용)
+        ol = sorted((r for r in title if r["outline"] is not None), key=lambda r: -r["h"])
+        out["outline"] = round(float(ol[0]["outline"]), 4) if ol else None  # 가장 큰 줄의 테두리 (어두운 배경 위 글자뿐이면 잴 수 없음)
     if faces is not None:
         hs = [float(f[3]) for f in faces if isinstance(f, (list, tuple)) and len(f) == 4]
         out["face"] = round(max(hs), 3) if hs else 0.0
@@ -287,36 +377,58 @@ def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
+def _num(x):
+    """숫자면 float · 아니면 None (스타일 파일을 메모장으로 고쳐 깨진 값이 있어도 스타일 목록이 멈추지 않게 · D-130 검토)."""
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and x == x else None
+
+
+def _top(cnt, skip=()):
+    c = {k: v for k, v in cnt.items() if k and k not in skip}
+    return max(c, key=lambda k: (c[k], k == PALETTE["white"])) if c else None
+
+
 def summarize(ms):
     """잰 값 여러 장 → 썸네일 버릇 (없으면 None)."""
     ms = [m for m in ms or [] if isinstance(m, dict) and m.get("v") == VER]
     if not ms:
         return None
     tx = [m for m in ms if m.get("textH")]
-    first, anyc = {}, {}
+    acc, base, modes, tops, anyc = {}, {}, {}, {}, {}
     for m in tx:
-        cs = [c for c in m.get("colors") or [] if c in COLOR_KO and c != PALETTE["black"]]
-        if cs:
-            first[cs[0]] = first.get(cs[0], 0) + 1
-        for c in cs:
-            anyc[c] = anyc.get(c, 0) + 1
-    c1 = max(first, key=lambda c: (first[c], anyc.get(c, 0))) if first else None
-    rest = {c: k for c, k in anyc.items() if c != c1}
-    c2 = max(rest, key=rest.get) if rest else None
+        ro = m.get("roles") if isinstance(m.get("roles"), dict) else {}
+        if ro.get("accent") in COLOR_KO:
+            acc[ro["accent"]] = acc.get(ro["accent"], 0) + 1
+        if ro.get("base") in COLOR_KO:
+            base[ro["base"]] = base.get(ro["base"], 0) + 1
+        if ro.get("mode"):
+            modes[ro["mode"]] = modes.get(ro["mode"], 0) + 1
+        if ro.get("mode") == "stack" and ro.get("top") in ("hl", "hl2"):
+            tops[ro["top"]] = tops.get(ro["top"], 0) + 1
+        for c in m.get("colors") or []:
+            if c in COLOR_KO:
+                anyc[c] = anyc.get(c, 0) + 1
+    c_acc = _top(acc, (PALETTE["black"],))
+    c_base = _top(base, (PALETTE["black"], c_acc))
+    if c_acc is None and c_base is None:  # 역할을 못 잰 옛 값 — 많이 나온 색 둘
+        c_acc = _top(anyc, (PALETTE["black"],))
     pos = {k: 0 for k in ("top", "middle", "bottom")}
     for m in tx:
         if m.get("pos") in pos:
             pos[m["pos"]] += 1
     share = {k: round(v / len(tx), 2) for k, v in pos.items()} if tx else None
     lines = [m["lines"] for m in tx if isinstance(m.get("lines"), int) and m["lines"] > 0]
+    ols = [m["outline"] for m in tx if _num(m.get("outline")) is not None]
     fs = [m for m in ms if m.get("face") is not None]
     fh = [m["face"] for m in fs if m["face"] > 0]
+    mode = max(modes, key=modes.get) if modes else None
     return {
-        "n": len(ms), "text": len(tx), "colors": [c for c in (c1, c2) if c],
+        "n": len(ms), "text": len(tx), "colors": [c for c in (c_acc, c_base) if c],  # [강조색, 바탕 글자색]
+        "accent": c_acc, "base": c_base, "mode": mode, "modeShare": round(modes[mode] / len(tx), 2) if mode else None,
+        "stackTop": _top(tops) if mode == "stack" else None,
         "lines": int(round(st.median(lines))) if lines else None,
         "textH": round(float(st.median(m["textH"] for m in tx)), 3) if tx else None,
         "pos": max(share, key=share.get) if share and any(share.values()) else None, "posShare": share,
-        "outline": round(float(st.median(m["outline"] for m in tx if m.get("outline") is not None)), 3) if any(m.get("outline") is not None for m in tx) else None,
+        "outline": round(float(st.median(ols)), 3) if ols else None, "outlineN": len(ols),
         "face": round(float(st.median(fh)), 3) if fh else (0.0 if fs else None), "faceShare": round(len(fh) / len(fs), 2) if fs else None,
         "bright": round(float(st.mean(float(m["bright"]) for m in ms)), 3), "sat": round(float(st.mean(float(m["sat"]) for m in ms)), 3),
         "yellow": round(float(st.mean(float(m.get("yellow") or 0) for m in ms)), 4), "white": round(float(st.mean(float(m.get("white") or 0) for m in ms)), 4),
@@ -324,40 +436,67 @@ def summarize(ms):
     }
 
 
+OL_THIN, OL_THICK = 0.015, 0.045          # 테두리 두께(÷ 글자 높이) 나눔 — 0.015 밑 없음 · 0.045 넘으면 두껍게
+
+
 def outline_tier(o):
-    """테두리 두께(÷ 글자 높이) → 0 없음 · 1 얇게 · 2 두껍게."""
-    return None if o is None else 0 if o < 0.02 else 1 if o < 0.045 else 2
+    """테두리 두께(÷ 글자 높이) → 0 없음 · 1 얇게 · 2 두껍게 · 잴 수 없으면 None."""
+    o = _num(o)
+    return None if o is None else 0 if o < OL_THIN else 1 if o < OL_THICK else 2
 
 
-SW_OF_TIER = (0.07, 0.09, 0.13)   # 편집기 바깥 획(글자 크기 대비) — 0.07 은 부드러운 그림자와 함께 대비 통과 하한, 0.13 은 '굵은 획' 기준(0.12) 위
+SW_OF_TIER = (0.07, 0.09, 0.13)   # 편집기 바깥 획(글자 크기 대비) — 0.07 은 부드러운 그림자와 함께 대비 통과 하한, 0.09 는 프리텐다드 블랙 기본(THIN_SW), 0.13 은 '굵은 획'
+OL_STRONG_N = 2                   # 두꺼운 획(0.13)은 테두리를 잰 썸네일이 이만큼 넘을 때만 (한 장만 재면 얇게 — 프리텐다드 블랙 얇은 획 상한 유지)
+
+
+def eff_tier(h):
+    """편집기에 쓰는 테두리 단계 — 두껍게(2)는 테두리를 잰 썸네일이 OL_STRONG_N 장 넘을 때만 (아니면 얇게)."""
+    t = outline_tier(h.get("outline"))
+    return 1 if t == 2 and (_num(h.get("outlineN")) or 0) < OL_STRONG_N else t
 
 
 def params(h):
-    """버릇 → 편집기(p8_ai.js styleBrand·styleBonus)가 쓰는 값. 없는 칸은 빼서 기본값 그대로."""
+    """버릇 → 편집기(p8_ai.js styleBrand·headline·styleBonus)가 쓰는 값. 없는 칸은 빼서 기본값 그대로.
+    색은 역할로: hl = 강조색(강조 낱말·큰 줄) · hl2 = 바탕 글자색 · big = 'line' 제목 큰 줄을 어느 역할 색으로 칠할지 ·
+    stack = 같은 크기 두 줄일 때 먼저 읽히는 줄의 역할. 바탕·강조를 뒤바꾸지 않음 (강조 낱말은 늘 hl)."""
     if not isinstance(h, dict):
         return None
     out = {}
-    cs = [c for c in h.get("colors") or [] if c in COLOR_KO and c != PALETTE["black"]]
-    if cs:
-        out["hl"] = cs[0]
-        out["hl2"] = cs[1] if len(cs) > 1 else (PALETTE["white"] if cs[0] != PALETTE["white"] else PALETTE["yellow"])
-    if h.get("textH"):
-        out["textScale"] = round(float(_clamp(h["textH"] / BASE_TEXT_H, 0.85, 1.25)), 2)
+    acc = h.get("accent") if h.get("accent") in COLOR_KO else None
+    base = h.get("base") if h.get("base") in COLOR_KO else None
+    if acc is None and base is None and "accent" not in h:  # 옛 버릇(색 목록만)
+        cs = [c for c in h.get("colors") or [] if c in COLOR_KO and c != PALETTE["black"]]
+        acc = cs[0] if cs else None
+    if acc or base:
+        out["hl"] = acc or (PALETTE["yellow"] if base != PALETTE["yellow"] else PALETTE["white"])
+        out["hl2"] = base if base and base != out["hl"] else (PALETTE["white"] if out["hl"] != PALETTE["white"] else PALETTE["yellow"])
+    mode = h.get("mode")
+    if mode == "plain":
+        out["big"] = "hl2"   # 큰 줄은 바탕색(흰 큰 글자) · 작은 줄이 강조색
+    elif mode == "line":
+        out["big"] = "hl"    # 큰 줄 전체가 강조색 ('word' 제목도 큰 줄 바탕을 강조색으로) · 'word' 버릇은 기본 역할 그대로 (바탕 + 강조 낱말)
+    elif mode == "stack" and h.get("stackTop") in ("hl", "hl2"):
+        out["stack"] = h["stackTop"]
+    th = _num(h.get("textH"))
+    if th:
+        out["textScale"] = round(float(_clamp(th / BASE_TEXT_H, 0.85, 1.25)), 2)
+        out["textH"] = round(float(_clamp(th, 0.08, 0.35)), 3)  # 글자 높이 가산점(styleBonus · 롱폼) — 크게 쓰는 채널은 큰 글자 후보를 앞으로
     if isinstance(h.get("posShare"), dict):
-        out["posW"] = {k: float(h["posShare"].get(k) or 0) for k in ("top", "middle", "bottom")}
-    t = outline_tier(h.get("outline"))
+        out["posW"] = {k: _num(h["posShare"].get(k)) or 0.0 for k in ("top", "middle", "bottom")}
+    t = eff_tier(h)
     if t is not None:
         out["sw"] = SW_OF_TIER[t]
-    if h.get("bright") is not None:
-        out["bgBright"] = round(_clamp(1 + (h["bright"] - BASE_BRIGHT) * 1.3, 0.8, 1.22), 3)
-    if h.get("sat") is not None:
-        out["bgSat"] = round(_clamp(1 + (h["sat"] - BASE_SAT) * 1.2, 0.85, 1.2), 3)
-    if h.get("cutout") is not None:
-        out["cut"] = h["cutout"]
-    if h.get("face") is not None and (h.get("faceShare") or 0) >= 0.34:
-        out["face"] = h["face"]
-    if h.get("lines"):
-        out["lines"] = min(2, int(h["lines"]))  # 편집기 제목은 한 줄 또는 두 줄
+    br, sa = _num(h.get("bright")), _num(h.get("sat"))
+    if br is not None:
+        out["bgBright"] = round(_clamp(1 + (br - BASE_BRIGHT) * 1.3, 0.8, 1.22), 3)
+    if sa is not None:
+        out["bgSat"] = round(_clamp(1 + (sa - BASE_SAT) * 1.2, 0.85, 1.2), 3)
+    if _num(h.get("cutout")) is not None:
+        out["cut"] = _num(h["cutout"])
+    if _num(h.get("face")) is not None and (_num(h.get("faceShare")) or 0) >= 0.34:
+        out["face"] = _num(h["face"])
+    if _num(h.get("lines")):
+        out["lines"] = max(1, min(2, int(_num(h["lines"]))))  # 편집기 제목은 한 줄 또는 두 줄
     return out
 
 
@@ -365,26 +504,38 @@ def _pct(x):
     return f"{round(x * 100)}%"
 
 
+MODE_KO = {"word": "강조 낱말만 강조색", "line": "큰 줄 전체 강조색", "plain": "큰 줄은 흰 글자", "stack": "두 줄 색을 나눔"}
+
+
 def describe(h):
     """버릇 → 쉬운 한 줄."""
     if not isinstance(h, dict):
         return ""
     bits = []
-    if h.get("colors"):
-        bits.append("강조색 " + "·".join(COLOR_KO.get(c, c) for c in h["colors"]))
-    if h.get("textH"):
-        bits.append(f"큰 글자 {h['lines'] or 1}줄(글자 높이 화면의 {_pct(h['textH'])})")
-    if h.get("pos"):
+    acc, base = h.get("accent"), h.get("base")
+    if "accent" not in h:  # 옛 버릇(색 목록만)
+        cs = [c for c in h.get("colors") or [] if isinstance(c, str)]
+        acc, base = (cs[0] if cs else None), (cs[1] if len(cs) > 1 else None)
+    cb = ([f"강조색 {COLOR_KO.get(acc, acc)}"] if isinstance(acc, str) else []) + ([f"바탕 글자 {COLOR_KO.get(base, base)}"] if isinstance(base, str) else [])
+    if cb:
+        bits.append(" · ".join(cb) + (f"({MODE_KO[h['mode']]})" if h.get("mode") in MODE_KO else ""))
+    th, ln = _num(h.get("textH")), _num(h.get("lines"))
+    if th:
+        bits.append(f"큰 글자 {int(ln or 1)}줄(글자 높이 화면의 {_pct(th)})")
+    if h.get("pos") in ("top", "middle", "bottom"):
         bits.append({"top": "위쪽", "middle": "가운데", "bottom": "아래쪽"}[h["pos"]])
-    t = outline_tier(h.get("outline"))
+    t = eff_tier(h)
     if t is not None:
         bits.append(("테두리 없음", "얇은 테두리", "두꺼운 테두리")[t])
-    if h.get("face") and (h.get("faceShare") or 0) >= 0.34:
-        bits.append(f"얼굴 {'크게' if h['face'] >= 0.3 else '보통' if h['face'] >= 0.18 else '작게'}({_pct(h['face'])})")
-    if h.get("bright") is not None:
-        bits.append(f"{'어두운' if h['bright'] < 0.4 else '밝은' if h['bright'] > 0.52 else '보통 밝기'} 배경({_pct(h['bright'])})")
-    if h.get("cutout") is not None:
-        bits.append("누끼 " + ("자주" if h["cutout"] >= 0.5 else "가끔" if h["cutout"] > 0 else "안 씀"))
+    fc = _num(h.get("face"))
+    if fc and (_num(h.get("faceShare")) or 0) >= 0.34:
+        bits.append(f"얼굴 {'크게' if fc >= 0.3 else '보통' if fc >= 0.18 else '작게'}({_pct(fc)})")
+    br = _num(h.get("bright"))
+    if br is not None:
+        bits.append(f"{'어두운' if br < 0.4 else '밝은' if br > 0.52 else '보통 밝기'} 배경({_pct(br)})")
+    cu = _num(h.get("cutout"))
+    if cu is not None:
+        bits.append("누끼 " + ("자주" if cu >= 0.5 else "가끔" if cu > 0 else "안 씀"))
     return " · ".join(bits)
 
 
@@ -550,8 +701,11 @@ def card(d):
     if not (isinstance(th, dict) and isinstance(th.get("habits"), dict)):
         return None
     h = th["habits"]
-    return {"habits": h, "params": params(h), "desc": describe(h), "n": h.get("n", 0), "learned": th.get("learned"),
-            "ids": [r["id"] for r in th.get("refs") or [] if isinstance(r, dict) and isinstance(r.get("id"), str) and ID_RX.match(r["id"])][:8]}
+    try:
+        return {"habits": h, "params": params(h), "desc": describe(h), "n": int(_num(h.get("n")) or 0), "learned": th.get("learned"),
+                "ids": [r["id"] for r in th.get("refs") or [] if isinstance(r, dict) and isinstance(r.get("id"), str) and ID_RX.match(r["id"])][:8]}
+    except Exception:  # noqa: BLE001 — 메모장으로 고쳐 깨진 버릇: 이 스타일만 '썸네일 버릇 없음'으로 (스타일 목록은 그대로 · D-130 검토)
+        return None
 
 
 # ---------- 썸네일에 쓸 스타일 ----------
@@ -607,13 +761,13 @@ def set_pick(name):
 
 
 def editor_view():
-    """썸네일 편집기용: {styles: [{name, desc, params}], pick, active: {name, params, desc} | None, ours, wins}.
-    고른 적이 없으면 가장 최근에 배운 썸네일 버릇 · 고른 스타일이 지워졌으면 그것도."""
+    """썸네일 편집기용: {styles: [{name, desc, params}], pick, active: {name, params, desc} | None, ours}.
+    사장님이 [썸네일에 이 스타일 쓰기]로 고른 스타일만 씀 — 고른 적이 없거나 고른 스타일이 지워졌으면 기본 (None)."""
     sts = styles_with_thumbs()
     o = ours()
     pick = get_pick()
     names = {s["name"] for s in sts}
-    eff = pick if pick == "" or pick == OURS and o["n"] or pick in names else (sts[0]["name"] if sts else "")
+    eff = pick if (pick == OURS and o["n"]) or pick in names else ""  # 고른 적 없음·고른 스타일이 지워짐 → 기본 (배우기만 해서는 바뀌지 않음 · D-130 검토)
     act = None
     if eff == OURS:
         act = {"name": OURS, "params": o["params"], "desc": o["desc"]}
@@ -639,6 +793,8 @@ def _meta_ok(m):
             out[k] = v
     cs = m.get("colors") if isinstance(m.get("colors"), dict) else {}
     out["colors"] = {k: cs[k].upper() for k in ("hl", "hl2") if isinstance(cs.get(k), str) and _HEX.match(cs[k])}
+    ro = m.get("roles") if isinstance(m.get("roles"), dict) else {}
+    out["roles"] = {k: ro[k] for k in ("big", "stack") if ro.get(k) in ("hl", "hl2")}  # 그 장을 그린 색 역할 (없으면 기본 역할)
     return out
 
 
@@ -687,20 +843,32 @@ def set_winner(sid, tag):
 
 
 def ours():
-    """우리 채널에서 이긴 것 모음 → {n, tpl: {틀: 횟수}, pid: {문구 틀: 횟수}, colors: {hl, hl2}, params, desc}."""
-    tpl, pid, hl, hl2 = {}, {}, {}, {}
+    """우리 채널에서 이긴 것 모음 → {n, tpl: {틀: 횟수}, pid: {문구 틀: 횟수}, colors: {hl, hl2}, params, desc}.
+    params 는 가장 많이 이긴 '모양'(색 + 색 역할) 그대로 — 기본 모양으로 이긴 장이면 기본과 같게 그림 (D-130 검토: 색만 따로 모으면 다른 그림이 됨)."""
+    tpl, pid, looks = {}, {}, {}
     n = 0
     for s in ab_sets():
         w = next((i for i in s["items"] if isinstance(i, dict) and i.get("tag") == s.get("winner")), None)
         if not w:
             continue
         n += 1
-        for dct, v in ((tpl, w.get("tpl")), (pid, w.get("pid")), (hl, (w.get("colors") or {}).get("hl")), (hl2, (w.get("colors") or {}).get("hl2"))):
+        for dct, v in ((tpl, w.get("tpl")), (pid, w.get("pid"))):
             if v:
                 dct[v] = dct.get(v, 0) + 1
+        cs = w.get("colors") if isinstance(w.get("colors"), dict) else {}
+        ro = w.get("roles") if isinstance(w.get("roles"), dict) else {}
+        if cs.get("hl") and cs.get("hl2"):
+            key = (cs["hl"], cs["hl2"], ro.get("big") or "", ro.get("stack") or "")
+            looks[key] = looks.get(key, 0) + 1
     top = lambda dct: max(dct, key=dct.get) if dct else None  # noqa: E731
-    cols = {k: v for k, v in (("hl", top(hl)), ("hl2", top(hl2))) if v}
+    lk = top(looks)
+    cols = {"hl": lk[0], "hl2": lk[1]} if lk else {}
+    prm = dict(cols)
+    if lk and lk[2]:
+        prm["big"] = lk[2]
+    if lk and lk[3]:
+        prm["stack"] = lk[3]
     desc = ""
     if n:
         desc = f"A/B {n}번 이긴 것" + (f" · 틀 '{top(tpl)}'" if tpl else "") + (" · 강조색 " + "·".join(COLOR_KO.get(c, c) for c in cols.values()) if cols else "")
-    return {"n": n, "tpl": tpl, "pid": pid, "colors": cols, "params": dict(cols), "desc": desc}
+    return {"n": n, "tpl": tpl, "pid": pid, "colors": cols, "params": prm, "desc": desc}

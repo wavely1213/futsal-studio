@@ -239,6 +239,7 @@ async function abSave() {
   g.fillStyle = "#0F0F0F"; g.fillRect(0, 0, mc.width, mc.height);
   rows.forEach((r, i) => { const x = 20 + i * (mw + 20); g.fillStyle = "#FFD24D"; g.font = "bold 16px sans-serif"; g.fillText(AB_TAGS[i], x, 24); g.drawImage(r, x, 34); });
   const metas = picks.map(x => ({ tpl: x.tpl, pid: x.copy.pid || "", l1: x.copy.l1 || "", l2: x.copy.l2 || "", colors: { hl: x.ctx.brand.colors.hl, hl2: x.ctx.brand.colors.hl2 },
+    roles: { big: (x.ctx.brand._st || {}).big || "", stack: (x.ctx.brand._st || {}).stack || "" },
     style: (TS.view && TS.view.active && TS.view.active.name) || "" }));  // 이긴 장을 나중에 한 번 눌러 적으면 이 틀·색·문구 틀에 가산점 (thumbstyle.record_ab)
   const j = await post("/api/thumb/ab", { name: NAME, items, metas, mobile: mc.toDataURL("image/jpeg", 0.9) });
   if (j.gone) { setAIStat(""); return markGone(j.error); }

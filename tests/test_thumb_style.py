@@ -1,7 +1,8 @@
 """썸네일 스타일 배우기(D-130)·A/B 이긴 것(D-131) — 저장소 폴더에서 python3 -m unittest tests.test_thumb_style
 
-- 재기(thumbstyle.measure): 시험 그림 4장(tests/fixtures/thumb_style · make_thumb_style_fixture.py) — 쌈바형(어두운 배경·아래 노란 큰 글자·흰 테두리 누끼)과
-  토크형(밝은 배경·큰 얼굴·흰 글자 + 노란 둘째 줄·검은 테두리)이 서로 다른 버릇으로 나오는지. 글자·얼굴 상자는 boxes.json 으로 줌 (모델 안 씀)
+- 재기(thumbstyle.measure): 시험 그림 5장(tests/fixtures/thumb_style · make_thumb_style_fixture.py) — 쌈바형(어두운 배경·아래 노란 큰 글자·흰 테두리 누끼
+  · 한 줄 안 노란 강조 낱말 + 흰 글자 + 그림자)과 토크형(밝은 배경·큰 얼굴·흰 글자 + 노란 둘째 줄·검은 테두리)이 서로 다른 버릇으로 나오는지.
+  색은 역할(강조색·바탕 글자색·큰 줄을 어떻게 칠했나)로 · 그림자는 테두리가 아님 · 어두운 배경 위 테두리는 '잴 수 없음'. 글자·얼굴 상자는 boxes.json 으로 줌 (모델 안 씀)
 - 버릇 → 편집기 값(params)·쉬운 한 줄(describe) · 썸네일 받기(fetch: 큰 크기부터 · 기억 · 인터넷 안 되면 멈춤) ·
   스타일에 배우기(learn: 스타일 파일 thumb · 다시 배울 때 잰 값 재사용 · 채널 인기 썸네일 더 보기) · 썸네일에 쓸 스타일(pick) ·
   A/B 묶음 기록·이긴 장(record_ab·set_winner·ours) · 브랜드 키트에서 직접 바꾼 색(thumb.brand_custom)
@@ -26,7 +27,7 @@ FIX = Path(__file__).resolve().parent / "fixtures" / "thumb_style"
 BOXES = json.loads((FIX / "boxes.json").read_text(encoding="utf-8"))
 YELLOW, WHITE = ts.PALETTE["yellow"], ts.PALETTE["white"]
 # 영상 id(11자) → 시험 그림
-IDS = {"darkAAAAAA1": "dark_1.jpg", "darkAAAAAA2": "dark_2.jpg", "brightBBBB1": "bright_1.jpg", "brightBBBB2": "bright_2.jpg"}
+IDS = {"darkAAAAAA1": "dark_1.jpg", "darkAAAAAA2": "dark_2.jpg", "darkAAAAAA3": "dark_3.jpg", "brightBBBB1": "bright_1.jpg", "brightBBBB2": "bright_2.jpg"}
 
 
 def meas(name):
@@ -47,19 +48,31 @@ class MeasureTests(unittest.TestCase):
             self.assertGreater(m["textH"], 0.15, n)
             self.assertLess(m["bright"], 0.35, n)
             self.assertGreater(m["yellow"], 0.05, n)
+            self.assertEqual(m["roles"], {"mode": "line", "base": None, "accent": YELLOW}, f"{n}: 큰 줄 전체가 노랑")
 
     def test_bright_white_two_lines(self):
         for n in ("bright_1.jpg", "bright_2.jpg"):
             m = self.m[n]
-            self.assertEqual(m["colors"][:2], [WHITE, YELLOW], f"{n}: 먼저 읽히는 흰 줄이 주 색")
+            self.assertEqual(m["roles"], {"mode": "stack", "base": WHITE, "accent": YELLOW, "top": "hl2"}, f"{n}: 같은 크기 두 줄 — 위 흰(바탕) · 아래 노랑(강조)")
             self.assertEqual(m["lines"], 2, n)
             self.assertLess(m["textH"], 0.15, n)
             self.assertGreater(m["bright"], 0.7, n)
             self.assertEqual(ts.outline_tier(m["outline"]), 2, f"{n}: 검은 테두리 9px → 두껍게 ({m['outline']})")
             self.assertAlmostEqual(m["face"], 0.417, places=2)
 
-    def test_outline_none_on_dark(self):
-        self.assertEqual(ts.outline_tier(self.m["dark_1.jpg"]["outline"]), 0, "어두운 배경 위 테두리 없는 글자는 '없음' (배경이 어두운 것을 테두리로 세지 않음)")
+    def test_outline_unknown_on_dark(self):
+        for n in ("dark_1.jpg", "dark_2.jpg"):
+            self.assertIsNone(self.m[n]["outline"], f"{n}: 어두운 배경 위 글자는 테두리를 잴 수 없음 (배경 어둠을 테두리로도, '없음'으로도 세지 않음)")
+        self.assertIsNone(ts.outline_tier(None))
+
+    def test_shadow_is_not_outline(self):
+        m = self.m["dark_3.jpg"]
+        self.assertEqual(ts.outline_tier(m["outline"]), 0, f"아래로 떨어진 그림자는 테두리가 아님 ({m['outline']})")
+
+    def test_word_emphasis_roles(self):
+        m = self.m["dark_3.jpg"]
+        self.assertEqual(m["roles"], {"mode": "word", "base": WHITE, "accent": YELLOW}, "한 줄 안 노란 강조 낱말 + 흰 글자 → 바탕 흰색 · 강조 노랑 (뒤바꾸지 않음)")
+        self.assertEqual(m["lines"], 1)
 
     def test_cutout_thin_white_line(self):
         self.assertGreater(min(self.m["dark_1.jpg"]["cutout"], self.m["dark_2.jpg"]["cutout"]), 0.003)
@@ -91,40 +104,61 @@ class MeasureTests(unittest.TestCase):
 class HabitTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.dark = ts.summarize([meas("dark_1.jpg"), meas("dark_2.jpg")])
+        cls.dark = ts.summarize([meas("dark_1.jpg"), meas("dark_2.jpg"), meas("dark_3.jpg")])
         cls.bright = ts.summarize([meas("bright_1.jpg"), meas("bright_2.jpg")])
 
     def test_summaries_differ(self):
         d, b = self.dark, self.bright
-        self.assertEqual(d["colors"][0], YELLOW)
-        self.assertEqual(b["colors"][:2], [WHITE, YELLOW])
+        self.assertEqual((d["accent"], d["base"], d["mode"]), (YELLOW, WHITE, "line"), "쌈바형: 노랑 강조 · 큰 줄 전체 노랑(2장) > 강조 낱말(1장)")
+        self.assertEqual((b["accent"], b["base"], b["mode"], b["stackTop"]), (YELLOW, WHITE, "stack", "hl2"), "토크형: 위 흰 · 아래 노랑")
+        self.assertEqual(d["colors"], [YELLOW, WHITE], "화면용 색 목록은 [강조색, 바탕 글자색]")
         self.assertEqual((d["lines"], b["lines"]), (1, 2))
         self.assertEqual(d["pos"], "bottom")
         self.assertEqual(d["posShare"]["bottom"], 1.0)
-        self.assertEqual((d["cutout"], b["cutout"]), (1.0, 0.0), "흰 테두리 누끼")
+        self.assertEqual((d["cutout"], b["cutout"]), (0.67, 0.0), "흰 테두리 누끼")
+        self.assertEqual((d["outlineN"], b["outlineN"]), (1, 2), "어두운 배경 위 글자는 테두리를 잰 장 수에서 빠짐")
         self.assertEqual((d["faceShare"], b["faceShare"]), (0.0, 1.0))
-        self.assertLess(d["bright"], 0.35)
+        self.assertLess(d["bright"], 0.4, "어두운 배경")
         self.assertGreater(b["bright"], 0.7)
 
     def test_params_dark(self):
         p = ts.params(self.dark)
-        self.assertEqual((p["hl"], p["hl2"]), (YELLOW, WHITE), "둘째 색이 없으면 흰색")
+        self.assertEqual((p["hl"], p["hl2"], p["big"]), (YELLOW, WHITE, "hl"), "강조 노랑 · 바탕 흰색 · 큰 줄은 강조색으로")
+        self.assertNotIn("stack", p)
         self.assertLess(p["bgBright"], 1)
         self.assertGreater(p["textScale"], 1)
+        self.assertEqual(p["textH"], self.dark["textH"], "글자 높이 가산점(styleBonus)용 버릇 그대로")
         self.assertEqual(p["posW"]["bottom"], 1.0)
-        self.assertEqual(p["sw"], ts.SW_OF_TIER[0])
+        self.assertEqual(p["sw"], ts.SW_OF_TIER[0], "그림자만 있는 한 장 → 테두리 없음 (어두운 배경 두 장은 셈에서 빠짐)")
         self.assertNotIn("face", p, "얼굴이 나온 썸네일이 드물면 얼굴 크기를 쓰지 않음")
         self.assertEqual(p["lines"], 1)
 
     def test_params_bright(self):
         p = ts.params(self.bright)
-        self.assertEqual((p["hl"], p["hl2"]), (WHITE, YELLOW))
+        self.assertEqual((p["hl"], p["hl2"], p["stack"]), (YELLOW, WHITE, "hl2"), "강조 노랑 · 바탕 흰색 · 같은 크기 두 줄은 위 줄이 바탕색")
+        self.assertNotIn("big", p)
         self.assertGreater(p["bgBright"], 1.1)
         self.assertLess(p["textScale"], 1)
         self.assertEqual(p["sw"], ts.SW_OF_TIER[2])
         self.assertAlmostEqual(p["face"], 0.417, places=2)
         self.assertLessEqual(p["lines"], 2)
         json.dumps(p)  # numpy 값이 섞이지 않음 (스타일 파일·화면으로 보냄)
+
+    def test_thick_outline_needs_two(self):
+        h = dict(self.bright, outlineN=1)
+        self.assertEqual(ts.params(h)["sw"], ts.SW_OF_TIER[1], "두꺼운 테두리를 한 장에서만 쟀으면 얇게 (프리텐다드 블랙 얇은 획 상한 유지)")
+        self.assertIn("얇은 테두리", ts.describe(h))
+
+    def test_broken_habits(self):
+        """메모장으로 고쳐 숫자가 깨진 버릇: 계산이 멈추지 않음 (스타일 목록이 500 이 되지 않게)."""
+        bad = dict(self.bright, textH="x", bright="밝음", sat=None, outline=[1], face="큼", faceShare="x", lines="둘", cutout={}, posShare={"top": "x"}, n="많이")
+        p = ts.params(bad)
+        self.assertNotIn("textScale", p)
+        self.assertNotIn("bgBright", p)
+        self.assertEqual(p["posW"]["top"], 0.0)
+        ts.describe(bad)
+        self.assertIsNotNone(ts.card({"thumb": {"habits": bad}}))
+        ts.card({"thumb": {"habits": {"colors": 5, "mode": [], "accent": 3}}})  # 깨져도 멈추지 않음
 
     def test_params_clamped(self):
         p = ts.params({"textH": 0.6, "bright": 1.0, "sat": 0.0, "colors": ["#111111"], "outline": 0.5})
@@ -140,7 +174,7 @@ class HabitTests(unittest.TestCase):
         for w in ("강조색 노랑", "아래쪽", "어두운 배경", "테두리 없음"):
             self.assertIn(w, d)
         b = ts.describe(self.bright)
-        for w in ("강조색 흰색·노랑", "두꺼운 테두리", "얼굴 크게", "밝은 배경", "누끼 안 씀"):
+        for w in ("강조색 노랑 · 바탕 글자 흰색(두 줄 색을 나눔)", "두꺼운 테두리", "얼굴 크게", "밝은 배경", "누끼 안 씀"):
             self.assertIn(w, b)
 
 
@@ -249,7 +283,7 @@ class LearnTests(Work):
         lv.assert_called_once()
         self.assertEqual(r["thumb"]["habits"]["n"], 2, "채널 인기 영상 썸네일도 (같은 영상은 한 번)")
         self.assertEqual(r["thumb"]["missing"], 1, "썸네일이 없는 영상은 셈만")
-        self.assertEqual(r["thumb"]["habits"]["colors"][0], WHITE)
+        self.assertEqual((r["thumb"]["habits"]["base"], r["thumb"]["habits"]["mode"]), (WHITE, "stack"))
 
     def test_learn_errors(self):
         (self.styles / "보관함 스타일.json").write_text(json.dumps({"source": ["내 촬영본.mp4"]}), encoding="utf-8")
@@ -263,6 +297,15 @@ class LearnTests(Work):
             with self.assertRaises(ts.ThumbStyleError):
                 self.learn("끊긴 스타일")
         self.assertEqual(get.call_count, 1, "인터넷이 안 되면 첫 장에서 멈춤 (장마다 기다리지 않음)")
+
+    def test_broken_style_file_keeps_list(self):
+        """스타일 파일의 thumb.habits 를 메모장으로 고쳐 깨뜨려도 스타일 목록(/api/style/list)은 나옴 (D-130 검토)."""
+        self.make_style("깨진 스타일", ["darkAAAAAA1"], {"thumb": {"v": ts.VER, "habits": {"textH": "x", "colors": "노랑", "bright": "x", "n": "x"}}})
+        self.make_style("멀쩡한 스타일", ["darkAAAAAA1"])
+        names = [s["name"] for s in style.list_styles()]
+        self.assertIn("깨진 스타일", names)
+        self.assertIn("멀쩡한 스타일", names)
+        ts.editor_view()
 
     def test_learn_quiet_never_raises(self):
         logs = []
@@ -282,7 +325,7 @@ class PickTests(Work):
                 self.learn("토크 스타일")
         v = ts.editor_view()
         self.assertIsNone(v["pick"])
-        self.assertEqual(v["active"]["name"], "토크 스타일", "고른 적이 없으면 가장 최근에 배운 버릇")
+        self.assertIsNone(v["active"], "고른 적이 없으면 기본 — 배우기만 해서는 썸네일이 바뀌지 않음 (D-130 검토)")
         self.assertEqual([s["name"] for s in v["styles"]], ["토크 스타일", "쌈바 스타일"], "썸네일 버릇이 있는 스타일만")
         ts.set_pick("쌈바 스타일")
         self.assertEqual(ts.editor_view()["active"]["params"]["hl"], YELLOW)
@@ -292,7 +335,7 @@ class PickTests(Work):
             ts.set_pick("없는 스타일")
         ts.set_pick("쌈바 스타일")
         (self.styles / "쌈바 스타일.json").unlink()
-        self.assertEqual(ts.editor_view()["active"]["name"], "토크 스타일", "고른 스타일을 지웠으면 다른 버릇")
+        self.assertIsNone(ts.editor_view()["active"], "고른 스타일을 지웠으면 기본 (다른 스타일로 넘어가지 않음)")
 
 
 class ABTests(Work):
@@ -332,6 +375,16 @@ class ABTests(Work):
         self.assertEqual(v["active"]["name"], ts.OURS)
         self.assertEqual(v["active"]["params"]["hl"], WHITE)
         self.assertEqual(v["ours"]["n"], 1)
+
+    def test_ours_replays_winning_look(self):
+        """기본 모양으로 이긴 장 → '우리 채널'은 기본과 같은 색·같은 역할 (색만 따로 모아 다른 그림이 되지 않게) · 역할을 적은 장은 그 역할 그대로."""
+        default = {"tpl": "아래 제목 (쌈바형)", "colors": {"hl": "#FFE14D", "hl2": "#FFFFFF"}, "roles": {"big": "", "stack": ""}}
+        sid = ts.record_ab("a.mp4", ["A.jpg", "B.jpg"], [default, dict(default, roles={"big": "hl2", "stack": "x"})])
+        ts.set_winner(sid, "A")
+        self.assertEqual(ts.ours()["params"], {"hl": YELLOW, "hl2": WHITE}, "기본 역할 (big·stack 없음)")
+        ts.set_winner(sid, "B")
+        self.assertEqual(ts.ours()["params"], {"hl": YELLOW, "hl2": WHITE, "big": "hl2"}, "이긴 장의 역할을 그대로 · 이상한 값은 버림")
+        self.assertEqual(ts.ab_sets()[0]["items"][1]["roles"], {"big": "hl2"})
 
 
 class BrandCustomTests(Work):

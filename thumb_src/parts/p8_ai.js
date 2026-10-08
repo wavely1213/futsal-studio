@@ -9,12 +9,12 @@ const SAFE = { long: { x0: 0.035, y0: 0.04, x1: 0.965, y1: 0.95, dur: [0.84, 0.8
 // 브랜드 키트에서 사용자가 직접 바꾼 색(AI.brandCustom)이 늘 먼저 · 'apply' 를 끄면 기본 색 + 스타일
 const TS = { view: null, sets: [] };  // /api/thumb/style 결과 {styles, pick, active, ours} · 이 영상의 A/B 묶음
 const activeStyle = () => (TS.view && TS.view.active ? TS.view.active.params : null);
-// 스타일 색: hl = 큰 줄의 주 색(그 채널 큰 글자 대부분의 색) · hl2 = 둘째 색. 'line' 제목은 큰 줄 hl·작은 줄 hl2 (예전과 같음),
-// 'word' 제목(흰 바탕 글자 + 강조 낱말)은 스타일 색일 때만 바탕 글자를 주 색으로 (swapWord · 쌈바형: 노란 큰 글자에 흰 강조)
+// 스타일 색은 역할로 (D-130 검토 · thumbstyle.params): hl = 강조색(강조 낱말·'line' 큰 줄) · hl2 = 바탕 글자색 — 바탕·강조를 뒤바꾸지 않음 (강조 낱말은 늘 hl)
+// big: 'line' 제목 큰 줄을 어느 역할 색으로 ('hl2' = 흰 큰 글자 채널 · 작은 줄이 강조색) · stack: 같은 크기 두 줄에서 먼저 읽히는 줄의 역할 (lcs: 위 흰 · 아래 노랑)
 function styleBrand(base, sp, custom) {  // 브랜드 + 스타일 값 → 이번 추천에 쓸 브랜드 (_st: 템플릿 손잡이 · 스타일이 없으면 브랜드 그대로)
   if (!sp) return base;
   const cu = custom || [], own = ["hl", "hl2"].filter(k => sp[k] && !cu.includes(k));
-  const out = Object.assign({}, base, { colors: Object.assign({}, base.colors), _st: Object.assign({}, sp, { swapWord: own.length === 2 }) });
+  const out = Object.assign({}, base, { colors: Object.assign({}, base.colors), _st: Object.assign({}, sp) });
   for (const k of own) out.colors[k] = sp[k];
   return out;
 }
@@ -298,18 +298,25 @@ function headline(ctx, box, o = {}) {
   const c = ctx.copy, b = ctx.brand.colors, bigI = c.l2 ? (c.emph ? c.emph[0] : 1) : 0, smallI = 1 - bigI;
   const bigT = bigI ? c.l2 : c.l1, smallT = c.l2 ? (smallI ? c.l2 : c.l1) : "";
   const align = o.align || "center", ratio = o.ratioFixed ? o.ratio : lineRatio(c, o.kicker), style = o.style || "line";
-  const swapW = style === "word" && !!(ctx.brand._st && ctx.brand._st.swapWord);
-  const ts = (ctx.brand._st && ctx.brand._st.textScale) || 1;  // 스타일의 글자 크기 버릇: 작게 쓰는 채널은 늘 작게 · 크게 쓰는 채널은 자리가 있을 때만 크게
+  const st = ctx.brand._st || {}, ts = st.textScale || 1;  // 스타일의 글자 크기 버릇: 작게 쓰는 채널은 늘 작게 · 크게 쓰는 채널은 자리가 있을 때만 크게
   let size = o.size || Math.round(ctx.H * 0.2);
   const em = emphOf(c, bigI);
+  // 색 역할 (D-130 검토): 큰 줄 = st.big 역할 색('line' 제목만 · 기본 hl) · 작은 줄 = 다른 역할 · 'word' 제목은 바탕 hl2 + 강조 낱말 hl
+  // (큰 줄 전체를 강조색으로 쓰는 채널(쌈바 'ALA 움직임')은 'word' 제목도 큰 줄 바탕을 hl — 강조 낱말은 그대로 hl · 크기로 강조)
+  // 같은 크기 두 줄(비율 ≥0.75)이고 stack 버릇이 있으면 먼저 읽히는 줄 = st.stack 역할 · 둘째 줄 = 다른 역할 (lcs: 위 흰 · 아래 노랑)
+  const other = r => (r === "hl" ? "hl2" : "hl");
+  let bigR = style === "line" ? (st.big || "hl") : (st.big === "hl" ? "hl" : "hl2"), smallR = style === "line" ? other(st.big || "hl") : "hl2";
+  if (st.stack && smallT && ratio >= 0.75) { const first = st.stack; if (bigI === 0) { bigR = first; smallR = other(first); } else { smallR = first; bigR = other(first); } }
+  const bigFill = o.bigFill || b[bigR];
   const bigO = style === "line"
-    ? { fill: o.bigFill || b.hl, fill2: o.grad === false || grayish(o.bigFill || b.hl) ? "" : mix(o.bigFill || b.hl, "#FF8A00", 0.42), emph: o.emphAccent && em ? em : null, emphFill: b.accent, emphScale: 1 }
-    : { fill: swapW ? b.hl : b.hl2, emph: em, emphFill: o.emphFill || (swapW ? b.hl2 : b.hl), emphScale: o.emphScale || 1.18 };
+    ? { fill: bigFill, fill2: o.grad === false || grayish(bigFill) ? "" : mix(bigFill, "#FF8A00", 0.42), emph: o.emphAccent && em ? em : null, emphFill: b.accent, emphScale: 1 }
+    : { fill: b[bigR], emph: em, emphFill: o.emphFill || b.hl, emphScale: o.emphScale || 1.18 };
+  const smallFill = o.smallFill || b[smallR];
   const subT = o.sub ? (c.sub || "") : "";
   const make = k => {
     const big = lineLayer(ctx, bigT, Math.round(size * k), Object.assign({ align, name: "제목 큰 줄", rot: o.rot, skew: o.skew, sw: o.sw, font: o.font }, bigO));
-    const small = smallT ? lineLayer(ctx, smallT, Math.round(size * ratio * k), { align, name: "제목 작은 줄", fill: o.smallFill || b.hl2, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font,
-      emph: style === "word" ? emphOf(c, smallI) : null, emphFill: swapW ? b.hl2 : b.hl }) : null;
+    const small = smallT ? lineLayer(ctx, smallT, Math.round(size * ratio * k), { align, name: "제목 작은 줄", fill: smallFill, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font,
+      emph: style === "word" ? emphOf(c, smallI) : null, emphFill: b.hl }) : null;
     const sub = subT ? subBox(ctx, subT, Math.round(size * (o.subRatio || 0.36) * k), { align }) : null;
     return { big, small, sub };
   };
@@ -323,7 +330,7 @@ function headline(ctx, box, o = {}) {
   for (let i = 0; i < 3 && Math.max(wOf(t.big), wOf(t.small), wOf(t.sub)) > box.w + 1; i++) { size = Math.round(size * 0.97); t = make(1); }  // 반올림으로 넘치면 조금 줄임
   // 휴대폰 목록 크기(롱폼 168px · 쇼츠 110px)에서 작은 줄·보조 문구도 8px 넘게: 모자라면 그 줄만 키움 (상자보다 넓어지면 점수 게이트가 거름)
   const minPx = Math.ceil(8.4 * ctx.W / (ctx.short ? 110 : 168));
-  if (t.small && t.small.size < minPx) t.small = lineLayer(ctx, smallT, minPx, { align, name: "제목 작은 줄", fill: o.smallFill || b.hl2, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font, emph: style === "word" ? emphOf(c, smallI) : null, emphFill: swapW ? b.hl2 : b.hl });
+  if (t.small && t.small.size < minPx) t.small = lineLayer(ctx, smallT, minPx, { align, name: "제목 작은 줄", fill: smallFill, rot: o.rot, skew: o.skew, sw: o.sw, font: o.font, emph: style === "word" ? emphOf(c, smallI) : null, emphFill: b.hl });
   if (t.sub && t.sub.size < minPx) t.sub = subBox(ctx, subT, minPx, { align });
   const order = (bigI === 0 ? [t.big, t.small] : [t.small, t.big]).concat(t.sub ? [t.sub] : []);  // 읽는 순서는 늘 첫째 줄 → 둘째 줄 (크기만 다름) → 보조 문구
   const ax = align === "center" ? 0.5 : align === "right" ? 1 : 0, X = box.x + box.w * ax;
@@ -1623,14 +1630,21 @@ function weakScenes() {
   if (AI.frames.every(f => (f.text || 0) >= TEXTY) && !AI.frames.some(f => (f.ai ?? 0) >= 5)) return true;
   return Math.max(...AI.frames.map(f => frameQ(f, maxS))) < 0.35;
 }
-// 스타일 버릇 가산점 (D-130): 제목 위치(롱폼만 · 레퍼런스 썸네일이 16:9 라서) · 누끼 · 큰 줄 수 · 얼굴 크기 — 템플릿 가산점(prior)과 같은 단위(점)
-const ST_W = { pos: 15, cut: 8, lines: 3, face: 6 };
+// 스타일 버릇 가산점 (D-130): 제목 위치(롱폼만 · 레퍼런스 썸네일이 16:9 라서) · 누끼 · 큰 줄 수 · 얼굴 크기 · 글자 높이(롱폼만 · D-132) — 템플릿 가산점(prior)과 같은 단위(점)
+// 글자 크기(D-132): 템플릿은 이미 제목 자리 폭을 채우므로 배율(textScale)만으로는 크게 쓰는 채널이 거의 커지지 않음(같은 장면·문구·틀 72개 모두 1.00배)
+// → 큰 줄 글자 높이가 버릇(textH · 화면 높이 대비)에 가까운 후보(짧은 문구·한 줄 틀)에 가산점 · 롱폼만 (레퍼런스가 16:9)
+const ST_W = { pos: 15, cut: 8, lines: 3, face: 6, size: 6 };
+const GLYPH_H = 0.85;  // 글자 크기(px) → 재기(thumbstyle.measure)의 글자 높이 (프리텐다드 블랙 한글 + 바깥 획 · 우리 결과물 실측)
 function styleBonus(doc, ctx) {
   const sp = ctx.brand && ctx.brand._st; if (!sp) return 0;
   const hs = doc.layers.filter(l => !l.hidden && l.type === "text" && /^제목/.test(l.name || "")), H = doc.h;
   let b = 0;
   if (sp.posW && hs.length && !ctx.short) { const bb = bbox(hs), cy = (bb.y + bb.h / 2) / H; b += ST_W.pos * ((sp.posW[cy < 0.42 ? "top" : cy > 0.58 ? "bottom" : "middle"] || 0) - 1 / 3); }
   if (sp.cut != null && doc.layers.some(l => l.name === "누끼" && !l.hidden)) b += ST_W.cut * (sp.cut - 0.3);
+  if (sp.textH && hs.length && !ctx.short) {
+    const px = Math.max(...hs.flatMap(l => [l.size || 0, ...(l.runs || []).map(u => u.size || 0)])), gh = px * GLYPH_H / H;
+    if (gh > 0) b += ST_W.size * (0.5 - Math.min(1, Math.abs(Math.log(gh / sp.textH)) * 2.5));
+  }
   if (sp.lines && hs.length) { const mx = Math.max(...hs.map(l => l.size || 0)), big = hs.filter(l => (l.size || 0) >= 0.6 * mx).length; b += big === sp.lines ? ST_W.lines : -ST_W.lines / 2; }
   const fc = mainFace(ctx.frame), bg = doc.layers.find(l => l.type === "image" && l.name === "배경");
   if (sp.face && fc && bg) { const fh = boxC(bg, fc, ctx.ar).h / H; if (fh > 0) b += ST_W.face * (0.5 - Math.min(1, Math.abs(Math.log(fh / sp.face)))); }

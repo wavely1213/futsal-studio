@@ -1956,15 +1956,17 @@ function planBlock(st) {
 // 썸네일 버릇 (thumbstyle.card · D-130): 강조색 2개·글자 줄 수·글자 높이·위/아래·테두리·얼굴 크기·배경 밝기·채도·누끼
 const TH_COLOR = { "#FFFFFF": "흰색", "#FFE14D": "노랑", "#FF8A00": "주황", "#FF3B30": "빨강", "#FF5FA2": "분홍", "#00D1FF": "하늘", "#2F6BFF": "파랑", "#2BD96B": "초록" };
 const pctOf = x => `${Math.round(x * 100)}%`;
+const TH_MODE = { word: "강조 낱말만 강조색", line: "큰 줄 전체를 강조색", plain: "큰 줄은 흰 글자", stack: "두 줄 색을 나눔" };  // thumbstyle.MODE_KO
 function thumbBlock(st, active) {
   const t = st.thumb, nm = esc(st.name);
   if (!t) return `<div class="thb"><div class="ptitle">썸네일 버릇</div><p class="fmtnote">아직 없어요 · 배운 영상의 유튜브 썸네일(과 그 채널 인기 썸네일)에서 글자 색·위치·크기·테두리·얼굴 크기·배경 밝기를 배워 AI 추천 썸네일에 써요
     <button class="btn" data-sthumb="${nm}">썸네일 버릇 배우기</button></p></div>`;
   const h = t.habits, pos = { top: "위쪽", middle: "가운데", bottom: "아래쪽" }, o = h.outline;
-  const tier = o == null ? "—" : o < 0.02 ? "없음" : o < 0.045 ? "얇게" : "두껍게";
+  const tier = o == null ? (h.textH ? "잴 수 없음 (어두운 배경 위 글자)" : "—") : o < 0.015 ? "없음" : o < 0.045 ? "얇게" : (h.outlineN || 0) < 2 ? "얇게 씀 (테두리를 잰 썸네일이 1장뿐)" : "두껍게";  // thumbstyle.eff_tier 와 같음
   const br = h.bright < 0.4 ? "어두움" : h.bright > 0.52 ? "밝음" : "보통";
   const rows = [
-    ["강조색", (h.colors || []).length ? h.colors.map(c => `<span class="sw" style="background:${esc(c)}"></span>${esc(TH_COLOR[c] || c)}`).join(" · ") : "—"],
+    ["강조색", (h.colors || []).length ? h.colors.map((c, i) => `${"accent" in h ? (c === h.accent ? "강조 " : "바탕 글자 ") : ""}<span class="sw" style="background:${esc(c)}"></span>${esc(TH_COLOR[c] || c)}`).join(" · ")
+      + (TH_MODE[h.mode] ? ` (${TH_MODE[h.mode]})` : "") : "—"],
     ["글자", h.textH ? `큰 글자 ${h.lines || 1}줄 · 글자 높이 화면의 ${pctOf(h.textH)}` : "글자가 거의 없어요"],
     ["글자 위치", h.pos ? `${pos[h.pos]} (${Object.entries(h.posShare || {}).filter(([, v]) => v > 0).map(([k, v]) => `${pos[k]} ${pctOf(v)}`).join(" · ")})` : "—"],
     ["테두리", `${tier}${o != null ? ` (글자 높이의 ${pctOf(o)})` : ""}`],
@@ -1983,7 +1985,7 @@ function thumbBlock(st, active) {
 function bindThumbHabits() {
   document.querySelectorAll("[data-sthumb]").forEach(b => (b.onclick = () => job("/api/style/thumbs", { name: b.dataset.sthumb }, r => {
     if (r && r.ok === false) { toast(r.error || "썸네일 버릇을 배우지 못했어요"); return; }
-    toast(`썸네일 버릇을 배웠어요${r && r.desc ? " · " + r.desc : ""}`); loadStyles();
+    toast(`썸네일 버릇을 배웠어요${r && r.desc ? " · " + r.desc : ""} · 이 스타일로 썸네일을 만들려면 [썸네일에 이 스타일 쓰기]를 눌러 주세요`); loadStyles();
   })));
   document.querySelectorAll("[data-sthpick]").forEach(b => (b.onclick = async () => {
     const r = await api("/api/thumb/style", { style: b.dataset.sthpick }).catch(() => ({}));
