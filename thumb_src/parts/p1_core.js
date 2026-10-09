@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const NAME = new URLSearchParams(location.search).get("name");
+// 끝까지 자동으로 (D-201): 스튜디오·편집실이 보이지 않는 틀로 이 화면을 열어 AI 추천 썸네일 하나를 그려 돌려줌 (편집기 화면·저장은 안 씀)
+const AUTO_RUN = new URLSearchParams(location.search).get("autothumb");
 const RAD = Math.PI / 180;
 const FMT = { long: { w: 1280, h: 720, label: "롱폼 16:9" }, short: { w: 1080, h: 1920, label: "쇼츠 9:16" } };
 let W = 1280, H = 720;

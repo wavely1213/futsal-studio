@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import autorun
 import bundle
 import captions
 import claude_cli
@@ -410,7 +411,7 @@ def _redirect_to_updater():
 
 GONE_MSG = "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"  # 옛 이름으로 열린 편집실·썸네일의 저장 (404 gone)
 CRASH = {}  # 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 → 보관함 카드 '○○ 영상' + [다시 하기]·[빠르게로 다시 하기] (/api/state · D-072)
-CRASH_RETRY = ("/api/analyze", "/api/bundle")  # 보관함에서 같은 영상으로 다시 할 수 있는 작업
+CRASH_RETRY = ("/api/analyze", "/api/bundle", autorun.PATH)  # 보관함에서 같은 영상으로 다시 할 수 있는 작업 (끝까지 자동으로는 [이어서 하기] · D-202)
 
 
 def _session_start():
@@ -709,7 +710,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드 · 내가 시킨 작업은 done.fail)
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
-                                    "remote": remote.SVC.brief(), "crash": dict(CRASH) or None})
+                                    "remote": remote.SVC.brief(), "crash": dict(CRASH) or None,
+                                    "auto": dict(autorun.LIVE) or None,  # 끝까지 자동으로: 지금 단계 (i/n · 이름)
+                                    "autoThumb": autorun.pending()})  # 끝까지 자동으로: 화면이 그려 줄 썸네일 요청 (D-201)
         if u.path == "/api/progress":  # 4단계 카드: 영상마다 가편집·내보냄·썸네일·올리기 (D-075 · 그 화면을 열 때만)
             try:
                 names = [v["name"] for v in core.local_videos() if v["analyzed"]]
@@ -737,6 +740,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(200, {"current": core.VERSION, "available": False, "note": f"확인 실패: {e}"})
         # ---- 올리기 키트 (제목 후보·설명·챕터·태그) ----
+        if u.path == "/api/auto/pending":  # 편집실이 3초마다: 그려 줄 썸네일 요청 (가벼운 물음 · /api/state 대신)
+            return self._send(200, {"ok": True, "want": autorun.pending()})
+        if u.path == "/api/auto":  # 끝까지 자동으로: 이 영상의 마지막 자동 작업 기록 (이어서 하기 · 결과 · 확인할 것) + 기본 설정
+            try:
+                n = editor.safe_name(q.get("name", [""])[0])
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "잘못된 파일 이름이에요"})
+            return self._send(200, {"ok": True, "run": autorun.view(n), "style": autorun.default_style(), "shortsMax": autorun.SHORTS_MAX,
+                                    "shortsDefault": autorun.SHORTS_DEFAULT})
         if u.path == "/api/upload/kit":  # 고를 수 있는 편집본 + 저장해 둔 키트
             try:
                 n = q["name"][0]
@@ -780,7 +792,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": str(e)})
         b, path = self._body(), urlparse(self.path).path
         try:  # 영상 이름은 파일 이름만
-            for n in ([b["name"]] if isinstance(b.get("name"), str) and path.startswith(("/api/edit/", "/api/thumb/", "/api/render")) else []) + \
+            for n in ([b["name"]] if isinstance(b.get("name"), str) and path.startswith(("/api/edit/", "/api/thumb/", "/api/render", "/api/auto")) else []) + \
                      (list(b.get("names") or []) if path in ("/api/analyze", "/api/style/learn") else []):
                 editor.safe_name(n)
         except ValueError:
@@ -789,8 +801,8 @@ class Handler(BaseHTTPRequestHandler):
             ck = trouble.browser(b.get("cookies"))
         except ValueError as e:
             return self._send(400, {"ok": False, "error": str(e)})
-        if path in ("/api/analyze", "/api/bundle"):  # 아직 복사 중인 영상은 편집점을 찾지 않음 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)
-            busy = self._copying(b.get("names"))  # 이름 검사는 그 전(analyze)·뒤(bundle 경로) 그대로 — 잘못된 이름은 복사 중으로 세지 않음
+        if path in ("/api/analyze", "/api/bundle", autorun.PATH):  # 아직 복사 중인 영상은 편집점을 찾지 않음 (앞부분만 받아쓰고 '준비됨'이 붙지 않게)
+            busy = self._copying(b.get("names") if path != autorun.PATH else [b.get("name")])  # 이름 검사는 그 전(analyze)·뒤(bundle 경로) 그대로 — 잘못된 이름은 복사 중으로 세지 않음
             if busy:
                 why = intake.copying_msg(busy[0]) + (f" (복사 중인 영상 {len(busy)}개)" if len(busy) > 1 else "")  # (msg 는 MSG 모듈 이름이라 쓰지 않음)
                 return self._send(409, {"ok": False, "error": why, "copying": busy, "fail": {"kind": "copying", "msg": why, "actions": ["retry"]}})
@@ -1152,6 +1164,13 @@ class Handler(BaseHTTPRequestHandler):
                     return {"ok": False, "error": str(e) or "클로드 판단을 저장하지 못했어요"}
             ok = start_job("클로드로 더 깊게 보기", do_ai)
             return self._send(200 if ok else 409, _started(ok))
+        if path == "/api/edit/sfx":  # 미디어 탭 '효과음 꺼내기' (#12 · E7): 실어 둔·만드는 효과음을 모두 편집실 미디어 폴더에 → '가져온 파일'에 보임
+            import sfxlib
+            try:
+                files = sfxlib.ensure_assets(list(sfxlib.CATALOG), editor.ASSETS)
+            except (OSError, RuntimeError) as e:
+                return self._send(500, {"ok": False, "error": f"효과음을 꺼내지 못했어요 · {e}"})
+            return self._send(200, {"ok": True, "files": sorted(files.values())})
         if path == "/api/edit/cancel":
             editor.cancel_export()
             return self._send(200, {"ok": True})
@@ -1262,6 +1281,30 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:  # 대답 전에 자리를 놓음 (화면이 바로 다음 작업을 시킬 수 있게)
                     JOB["name"] = None
             return self._send(code, res)
+        if path == autorun.PATH:  # 끝까지 자동으로 (E7 · D-200): 영상 하나 → 가편집·MSG·내보내기·쇼츠·썸네일·키트·확인할 것 (유튜브엔 안 올림)
+            try:
+                n = editor.safe_name(b.get("name"))
+                editor.video_path(n)
+            except (ValueError, TypeError, FileNotFoundError):
+                return self._send(404, {"ok": False, "error": "보관함에서 영상을 찾지 못했어요. 목록을 새로 고친 뒤 다시 골라 주세요"})
+            opts, resume = autorun.options(b), b.get("resume") is True
+            ok = start_job(autorun.JOB, lambda: autorun.run(n, opts, log, self._analyze, resume))
+            if ok:
+                CRASH.clear()
+            return self._send(200 if ok else 409, _started(ok))
+        if path == "/api/auto/claim":  # 썸네일 그리기 요청을 이 화면이 맡음 (먼저 맡은 화면 하나만)
+            got = autorun.claim(str(b.get("id") or ""))
+            return self._send(200 if got else 409, dict(got or {}, ok=bool(got)))
+        if path == "/api/auto/thumb":  # 보이지 않는 썸네일 편집기가 그린 그림 (이름은 서버가 정함)
+            try:
+                f = autorun.deliver(str(b.get("id") or ""), b)
+            except LookupError as e:
+                return self._send(410, {"ok": False, "error": str(e)})
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                return self._send(500, {"ok": False, "error": f"썸네일을 저장하지 못했어요 · {e}"})
+            return self._send(200, {"ok": True, "file": f})
         if path == "/api/crash/dismiss":  # 지난번 꺼짐 카드 닫기 (✕)
             CRASH.clear()
             return self._send(200, {"ok": True})

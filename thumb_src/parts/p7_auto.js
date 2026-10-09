@@ -411,7 +411,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
 
 /* ---------- 시작 ---------- */
 (async () => {
-  if (!NAME) return;
+  if (!NAME || AUTO_RUN) return;  // 끝까지 자동으로의 보이지 않는 틀은 autoThumbRun 만 (디자인 문서를 열거나 저장하지 않음)
   $("pname").textContent = niceName(NAME) + " · 썸네일";
   // 글꼴을 받는 동안 문서·장면 목록도 같이 받음 (차례로 기다리지 않게)
   const openP = fetch("/api/thumb/open?name=" + encodeURIComponent(NAME)).then(r => r.json());

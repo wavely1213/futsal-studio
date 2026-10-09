@@ -3054,9 +3054,10 @@ def _ai_copy(ai):
     return {k: dict(v) for k, v in (ai or {}).items()}
 
 
-def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log=print, caps=None, ai=None):
+def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log=print, caps=None, ai=None, win=None):
     """스타일·양 → 새 편집본 하나 (+ 필요한 효과음·배경음악·정지 화면 미디어). caps: 말 자막 (글자 자리를 피하려고 · 없으면 받아쓰기로 만듦).
     ai: 클로드가 쓴 재미 글자 (moment_key → {kind, text} · 없으면 정해 둔 문구).
+    win: 쇼츠 구간을 정해서 줄 때 (끝까지 자동으로 · editor.recommend 의 쇼츠 하나 {start, end, cuts, hook}) — 없으면 MSG 가 고름 (v2.16.0 그대로).
     롱폼은 화면 사건 수가 양 범위(DENSITY) 위쪽을 넘을 때만 구성을 한 단계씩 줄여 다시 만듦 (재미 글자보다 구조를 먼저 줄임 ·
     범위 안이면 그대로 — 예전처럼 '빠진 재미 순간'까지 줄이면 긴 원본에서 다시 보기·정지·몽타주가 모두 빠지고 스타일끼리 같아짐)."""
     knobs = _knobs(intensity)
@@ -3065,7 +3066,7 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
     prev = None
     for _ in range(10):
         _check()
-        seq, media, n_ev, lost = _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai)
+        seq, media, n_ev, lost = _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai, win)
         tot = editor.seq_total(seq)
         over = round(max(0.0, n_ev - DENSITY[intensity][1] * max(0.25, tot / 60.0)), 2)
         if best is None or (over, lost) < best[0]:
@@ -3087,7 +3088,7 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
     return best[1], best[2]
 
 
-def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai=None):
+def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai=None, win=None):
     dur = float(info["duration"])
     words = _words(segs)
     rh = st["rhythm"]
@@ -3095,7 +3096,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     junk = [(j["a"], j["b"], j["why"]) for j in rec.get("junk_list") or []]
     pace = dict(PACE[intensity], cuts=knobs["cuts"])
     if fmt == "shorts":
-        base = _shorts_window(rec, moms, dur, sig.get("demo") or [])
+        base = _shorts_window(rec, moms, dur, sig.get("demo") or [], win) if win else _shorts_window(rec, moms, dur, sig.get("demo") or [])
     else:
         base = keep_cuts(rec["tidy"], sig.get("demo")) or [{"in": 0.0, "out": dur}]
         base = editor._minus(base, junk) or base  # 시범 장면으로 살린 곳에 걸친 군말·NG 도 뺌
@@ -3150,6 +3151,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     sections = []   # 배경음악 구간 (타임라인 시작, 끝, 분위기)
     topic = _topic(segs, name)
     hook = _hook_text(moms, segs, fmt, name)
+    if fmt == "shorts" and win and win.get("hook"):  # 정해 준 쇼츠 구간: 쇼츠마다 다른 위 큰 제목 (editor.recommend 가 고른 것 · BR-093)
+        hook = str(win["hook"])
     hook_look = dict(looks["emphasis"], y=0.2 if cap_y > 0.5 else 0.7, size=84, fill="#FFFFFF", effect="pop")
 
     # --- 인트로 ---
@@ -3902,13 +3905,16 @@ def _settle_titles(B):
             t["style"]["effect"] = "none"
 
 
-def _shorts_window(rec, moms, dur, sig_demo=()):
-    """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳 (없으면 앞쪽 정리 구간 50초)."""
+def _shorts_window(rec, moms, dur, sig_demo=(), win=None):
+    """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳 (없으면 앞쪽 정리 구간 50초).
+    win: 정해 준 구간 (끝까지 자동으로 · 포인트 하나 = 쇼츠 하나) — 고르지 않고 그 구간을 씀 (시범 살리기·끝 다듬기는 같음)."""
     best, bs = None, -1.0
-    for r in rec.get("shorts") or []:
+    for r in [] if win else rec.get("shorts") or []:
         sc = sum(m["score"] for m in moms if r["start"] <= m["t"] <= r["end"] and m["kind"] in ("play", "punchline", "success", "emphasis", "surprise"))
         if sc > bs:
             best, bs = r, sc
+    if win and win.get("cuts"):
+        best = {"start": float(win["start"]), "end": float(win["end"]), "cuts": [dict(c) for c in win["cuts"]]}
     if best:  # 그 구간 안의 시범 장면도 살림 (말 정리만 하면 시범이 빠짐)
         demo = [d for d in sig_demo if best["start"] <= d[0] and d[1] <= best["end"]]
         # 구간이 시범 바로 뒤 반응('아이고, 공이 조금 뒤로 갔네요')으로 시작하면 그 시범부터 (판정 round5 최종: 쇼츠가 무엇에 대한
@@ -4680,14 +4686,16 @@ def _ai_lines(name, moms, segs, log, junk=()):
     return {}, []
 
 
-def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, proofread=False, writer=False, first=0):
+def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, proofread=False, writer=False, first=0, windows=None):
     """스타일 여러 개(최대 3) × 형식 → 새 편집본 후보 + 필요한 미디어. 같은 원본·스타일·양이면 늘 같은 결과.
     intensity: '담백'·'보통'·'듬뿍' 하나 또는 '모두' (스타일 하나를 양 3단계로 · 한 번에 비교).
     proofread: '클로드로 자막 오타 고치기'를 켰을 때 (사용자 클로드 계정으로 대사 글만 보냄) · writer: '클로드로 재미 자막 쓰기'를 켰을 때.
     first: 이미 있는 MSG 후보 수 (후보 글자를 이어서 D, E… · 두 번째로 만들어도 'MSG 후보 A'가 또 생기지 않게).
     지금 받아쓰기로 만든 자막은 결과의 captions 하나로 (편집실이 프로젝트 자막에 반영 · 예전처럼 후보마다 같은 자막(msgCaps)을 붙이면
     60분 원본 세 후보에서 결과가 3MB 가까이 됨).
-    captionsOld: MSG 가 다시 듣기 전 받아쓰기로 만든 자막 (프로젝트 자막을 사용자가 고쳤는지 보려고 · 다시 들은 적이 없으면 None)."""
+    captionsOld: MSG 가 다시 듣기 전 받아쓰기로 만든 자막 (프로젝트 자막을 사용자가 고쳤는지 보려고 · 다시 들은 적이 없으면 None).
+    windows: 쇼츠 구간 목록 (끝까지 자동으로 · editor.recommend 쇼츠) — 주면 쇼츠 형식은 구간마다 하나씩 (결과 편집본 seq['msgWin'] = 그 번호).
+    없으면 쇼츠는 하나 (MSG 가 고른 구간 · v2.16.0 그대로)."""
     if intensity != "모두" and intensity not in INTENSITY:
         raise ValueError("MSG 양은 담백·보통·듬뿍 중에서 골라 주세요")
     specs = [s for s in (specs or []) if isinstance(s, dict) and s.get("name")][:3]
@@ -4724,15 +4732,19 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
     for k, (spec, lv) in enumerate(jobs):
         _check()
         st = resolve(spec)
-        for fmt in kinds:
-            core.set_progress(label=LABEL, item=name, pct=70 + int(28 * k / len(jobs)), detail=f"후보 만드는 중 ({k + 1}/{len(jobs)})")
-            label = f"MSG 후보 {LETTERS[(first + n) % len(LETTERS)]} · {st['label']} · {lv}" + (" · 쇼츠" if fmt == "shorts" else "")
-            seed = _seed(sig["sig"], st["label"], lv, fmt)
-            seq, md = compile_seq(name, info, sig, segs, moms, st, lv, fmt, seed, label, log, caps, ai)
+        for fmt, wi in [(f, w) for f in kinds for w in (range(len(windows)) if f == "shorts" and windows else [None])]:
+            core.set_progress(label=LABEL, item=name, pct=70 + int(28 * k / len(jobs)), detail=f"후보 만드는 중 ({k + 1}/{len(jobs)})"
+                              + (f" · 쇼츠 {wi + 1}/{len(windows)}" if wi is not None else ""))
+            label = f"MSG 후보 {LETTERS[(first + n) % len(LETTERS)]} · {st['label']} · {lv}" + (" · 쇼츠" if fmt == "shorts" else "") \
+                + (f" {wi + 1}" if wi is not None else "")
+            seed = _seed(sig["sig"], st["label"], lv, fmt) + (wi or 0)
+            seq, md = compile_seq(name, info, sig, segs, moms, st, lv, fmt, seed, label, log, caps, ai, windows[wi] if wi is not None else None)
             _check()
             if fmt == "shorts" and editor.seq_total(seq) < MIN_SHORTS:
                 log(f"  쇼츠 후보는 만들지 않았어요 · 재미 순간이 모인 구간이 {editor.seq_total(seq):.0f}초뿐이에요 ({MIN_SHORTS:.0f}초 넘어야 해요)")
                 continue
+            if wi is not None:
+                seq["msgWin"] = wi
             seqs.append(seq)
             for m in md:
                 media[m["id"]] = m

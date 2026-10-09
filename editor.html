@@ -4204,7 +4204,7 @@ async function renderMediaBin() {
       <span class="mthumb" ${kind !== "audio" ? `data-th="${esc(src === "videos" && file === NAME ? thumbUrl(MED.main) : `/api/edit/poster.jpg?src=${src}&f=${encodeURIComponent(file)}`)}"` : ""}>${kind === "audio" ? "♪" : ""}</span>
       <span class="nm">${ico(kind)} ${esc(niceName(file))}${(P.media.find(x => x.src === src && x.file === file) || {}).missing ? '<span class="badge-miss">파일 없음</span>' : ""}</span><span class="st">${sub}</span>${prx(src, file, kind)}<button class="btn sm add" data-add="${esc(src + "|" + file)}" title="재생 위치에 넣기">＋</button></div>`;
   const prx = (src, file, kind) => { const m = P.media.find(x => x.src === src && x.file === file); if (!m || kind !== "video") return ""; return m.proxy ? `<span class="st" title="미리보기는 가벼운 파일로, 내보내기는 원본으로">⚡가벼움</span>` : `<button class="btn sm ${NOPLAY.has(m.id) ? "pri" : "add"}" data-proxy="${m.id}" title="4K·아이폰(HEVC) 영상이 끊기거나 안 나올 때: 미리보기용 가벼운 파일 만들기 (내보내기는 원본 화질)">미리보기 파일</button>`; };
-  el.innerHTML = `<div style="display:flex;gap:6px;padding:8px 10px;align-items:center"><button class="btn pri" id="mImport">가져오기…</button><span class="hint">음악·효과음·사진·영상 파일</span></div>
+  el.innerHTML = `<div style="display:flex;gap:6px;padding:8px 10px;align-items:center"><button class="btn pri" id="mImport">가져오기…</button><button class="btn" id="mSfx" title="앱에 들어 있는 효과음(딩동·뽁·휙·띠용·두둥·박수 …)을 '가져온 파일'에 꺼내 놓아요 · 저작권 걱정 없는 소리">효과음 꺼내기</button><span class="hint">음악·효과음·사진·영상 파일</span></div>
     <div class="hint" style="padding:4px 10px">이 프로젝트에 쓴 미디어</div>
     ${P.media.map(m => row(m.src, m.file, m.kind, m.kind === "image" ? "사진" : mmss(m.dur || 0).slice(0, 5))).join("")}
     ${LIB.assets.filter(a => !used.has("assets|" + a.file)).length ? `<div class="hint" style="padding:8px 10px 4px;border-top:1px solid var(--line)">가져온 파일</div>` : ""}
@@ -4212,6 +4212,13 @@ async function renderMediaBin() {
     ${LIB.videos.filter(v => !used.has("videos|" + v.file)).length ? `<div class="hint" style="padding:8px 10px 4px;border-top:1px solid var(--line)">보관함 영상</div>` : ""}
     ${LIB.videos.filter(v => !used.has("videos|" + v.file)).map(v => row("videos", v.file, "video", v.size_mb + "MB")).join("")}`;
   $("mImport").onclick = () => $("fileIn").click();
+  $("mSfx").onclick = async e => {  // 효과음 꺼내기 (#12): 서버가 edit_media 에 효과음_<이름>.wav 를 만들어 둠 → 목록을 다시 읽음
+    e.target.disabled = true; toast("효과음을 꺼내는 중이에요…");
+    let j = {}; try { j = await (await post("/api/edit/sfx", {})).json(); } catch (x) {}
+    e.target.disabled = false;
+    if (!j.ok) return toast(j.error || "효과음을 꺼내지 못했어요");
+    LIB = null; await renderMediaBin(); toast(`효과음 ${j.files.length}개를 '가져온 파일'에 꺼냈어요 · 끌어서 타임라인에 놓으세요`);
+  };
   el.querySelectorAll("[data-add]").forEach(b => b.onclick = e => { e.stopPropagation(); dropOn("media", b.dataset.add, null); });
   el.querySelectorAll("[data-proxy]").forEach(b => b.onclick = e => { e.stopPropagation(); makeProxy(MED[b.dataset.proxy]); });
   el.querySelectorAll(".item[data-drag]").forEach(r => r.onclick = () => { el.querySelectorAll(".item").forEach(x => x.classList.toggle("cur", x === r)); el.querySelectorAll(".item").forEach(x => x.classList.toggle("on", x === r)); });
@@ -4626,7 +4633,10 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   const r = await fetch("/api/edit/open?name=" + encodeURIComponent(NAME));
   const j = await r.json();
   if (!r.ok) { $("saved").textContent = j.error || "열지 못했어요"; return; }
-  P = j.project; P.sequences.forEach(ensureSeq); bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0;
+  P = j.project; P.sequences.forEach(ensureSeq);
+  const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
+  if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
+  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0;
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;
@@ -4637,6 +4647,24 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   requestAnimationFrame(loop);
   const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기" && !s.job_by) watchJob("내보내기", s.job_id);  // 휴대폰이 시킨 내보내기는 이 화면이 이어받지 않음
 })();
+/* 끝까지 자동으로 (D-201): 작업이 썸네일을 그려 달라고 하면 보이지 않는 틀로 썸네일 편집기를 열어 AI 추천 1등을 그려 줌 (ui.html autoThumb 와 같은 코드) */
+let AUTOTH = null;
+async function autoThumb(rq) {
+  if (!rq || AUTOTH) return;
+  let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
+  if (!c || !c.ok || AUTOTH) return;
+  const f = document.createElement("iframe"); AUTOTH = f;
+  f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+  f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
+  let tm = 0;
+  const onMsg = e => { if (e.source === f.contentWindow && e.data && e.data.autothumb === c.id) end(); };
+  const end = () => { window.removeEventListener("message", onMsg); clearTimeout(tm); f.remove(); AUTOTH = null; };
+  tm = setTimeout(end, 330000);
+  window.addEventListener("message", onMsg);
+  f.src = `/thumb?name=${encodeURIComponent(c.name)}&autothumb=${encodeURIComponent(c.id)}&fmt=${c.fmt}` + (c.a != null ? `&a=${c.a}&b=${c.b}` : "") + (c.avoid && c.avoid.length ? `&avoid=${encodeURIComponent(JSON.stringify(c.avoid))}` : "");
+  document.body.appendChild(f);
+}
+setInterval(async () => { if (AUTOTH) return; try { const j = await (await fetch("/api/auto/pending")).json(); if (j.want) autoThumb(j.want); } catch (e) {} }, 3000);
 </script>
 </body>
 </html>

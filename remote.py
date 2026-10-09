@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+import autorun
 import core
 import editor
 import qa
@@ -98,7 +99,9 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # AI 추천 썸네일 (PC 썸네일 편집기에서만 시작 · 휴대폰에는 진행·알림만 · 썸네일 작업은 휴대폰 허용 목록(ACTIONS)에 없음)
               thumb.JOB_ANALYZE, thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,
               # 썸네일 버릇 배우기 (PC 스타일 카드에서만 시작 · D-130)
-              thumbstyle.JOB}
+              thumbstyle.JOB,
+              # 끝까지 자동으로 (PC 보관함·휴대폰 'auto' · D-203)
+              autorun.JOB}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
     "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
@@ -151,6 +154,7 @@ STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보�
              "스타일 일치 점수", "클로드로 더 깊게 보기",
              strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,  # 채널 전략: 모두 editor.CANCEL 을 봄 (PC 8단계 [멈추기]와 같음)
              thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,  # 클로드 문구·평가: claude_cli.run 이 editor.CANCEL 을 봄 (썸네일 분석은 장면·선수 살피기(frame_candidates)가 멈추기 신호를 안 봄 → 빠짐 · 자동 누끼 자식은 ✕ 로 꺼짐 · D-069)
+             autorun.JOB,  # 끝까지 자동으로: 단계마다·내보내기·MSG·썸네일 기다리기가 editor.CANCEL 을 봄 → 만든 것은 두고 [이어서 하기]
              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}  # 유튜브: 조각마다 editor.CANCEL 을 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]
 # 줄바꿈·제어·방향 바꾸는 글자 + 줄을 나누는 유니코드(NEL·줄/문단 구분)·폭 없는 글자 → 기록에 가짜 줄을 못 만들게
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
@@ -1785,8 +1789,17 @@ def _a_preview(svc, dev, a, tok):
     return svc._go(dev, "작은 미리보기 만들기", lambda: editor.out_preview(f.name, svc.bridge.log), f.name)
 
 
+def _a_auto(svc, dev, a, tok):
+    """끝까지 자동으로 (D-203): 휴대폰에서도 같은 작업 · 받아쓰기는 이 PC 기본값 · 유튜브에는 올리지 않음 (키트까지).
+    썸네일은 PC 의 스튜디오 화면이 그림 (화면이 없으면 그 단계만 '확인할 것')."""
+    n = _one_video(a.get("name"))
+    resume = a.get("resume") is True
+    opts = autorun.options({k: a.get(k) for k in ("intensity", "shorts", "style")})
+    return svc._go(dev, autorun.JOB, lambda: autorun.run(n, opts, svc.bridge.log, svc.bridge.analyze, resume), n)
+
+
 ACTIONS = {"download": _a_download, "analyze": _a_analyze, "add_refs": _a_add_refs, "learn_refs": _a_learn_refs, "autoseq": _a_autoseq,
-           "export": _a_export, "qa": _a_qa, "preview": _a_preview, "cancel": None}
+           "export": _a_export, "qa": _a_qa, "preview": _a_preview, "auto": _a_auto, "cancel": None}
 
 
 # ---------- 원격 리스너 (HTTP) ----------

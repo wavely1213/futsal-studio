@@ -372,6 +372,24 @@
   #rmDot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
   #rmDot.wait { background: var(--peak); opacity: 1; }
   #rmDot.err { background: var(--danger); opacity: 1; }
+  /* 끝까지 자동으로 (E7): 단계 줄 · 결과물 표 · 확인할 것 */
+  .card.autocard { padding: 14px 16px; margin-bottom: 14px; border-left: 4px solid var(--brand); }
+  .autocard h3 { margin: 0 0 6px; font-size: 14.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .autocard h3 .sp { flex: 1; }
+  .asteps { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; padding: 0; list-style: none; }
+  .asteps li { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--cut-soft); color: var(--cut); white-space: nowrap; }
+  .asteps li.done, .asteps li.skip { background: var(--brand-soft); color: var(--brand); }
+  .asteps li.run { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 2px var(--brand); }
+  .asteps li.fail { background: var(--peak-soft); color: var(--peak); }
+  .aouts { display: grid; gap: 6px; margin: 10px 0; }
+  .aout { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; background: var(--surface-2); border-radius: 10px; font-size: 13px; }
+  .aout b { flex: 1; min-width: 180px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .achk { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; line-height: 1.5; }
+  .achk li { padding: 6px 10px; border-radius: 8px; background: var(--surface-2); }
+  .achk li.bad { color: var(--danger); font-weight: 600; }
+  .achk li.warn { color: var(--peak); }
+  .achk li.info { color: var(--ink-2); }
+  .rbox ol.aplan { margin: 0 0 4px; padding-left: 20px; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
   .rmask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 8; padding: 20px; }
   .rmask.show { display: flex; }
   .rbox { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; }
@@ -866,10 +884,12 @@
         <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
         <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
         <div class="seg" id="modelSeg" title="받아쓰기 방식 · 처음엔 이 PC 사양에 맞게 골라 두고, 바꾸면 기억해요"><button class="on" data-v="large-v3-turbo">정확하게</button><button data-v="small">빠르게</button></div>
+        <button class="btn" id="btnAuto" disabled title="영상 하나를 고르면 가편집·MSG·내보내기·쇼츠·썸네일·올리기 키트까지 한 번에 만들어요 (유튜브에는 올리지 않아요)">끝까지 자동으로</button>
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
         <div class="mhint" id="modelHint"></div>
       </div>
       <div class="failslot"></div>
+      <div class="card autocard" id="autoCard" hidden></div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
       <div class="card banner" id="refBanner" hidden><span class="tx" id="refBannerTx"></span><button class="btn primary" id="refBannerGo">모두 학습용으로 옮기기</button><button class="btn" id="refBannerNo">다음에</button></div>
       <div class="card rows" id="local"></div>
@@ -1202,6 +1222,7 @@
 
 <div class="topright"><span class="pill prog" id="busy"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="ptxt"><b><span id="busyTxt"></span><span class="pct" id="busyPct"></span></b><small id="busyDetail"></small></span></span><span class="pill upd" id="updPill"></span></div>
 <div class="toast" id="toast"></div>
+<div class="rmask" id="autoMask"><div class="card rbox" id="autoBox" role="dialog" aria-modal="true" aria-label="끝까지 자동으로"></div></div>
 <div class="rmask" id="rmMask"><div class="card rbox" id="rmBox" role="dialog" aria-modal="true" aria-label="휴대폰으로 보기"></div></div>
 <div class="drawer" id="drawer"><header>작업 기록<span class="sp"></span><button class="linkbtn" id="btnLogClose">닫기</button></header><pre id="logtxt"></pre></div>
 
@@ -1428,7 +1449,7 @@ function renderLocal() {
     return `<div class="row${v.copying ? " copying" : ""}">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" onerror="this.remove()">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button> · <button class="linkbtn" data-auto="${esc(v.name)}" title="이 영상 하나로 가편집·MSG·내보내기·쇼츠·썸네일·올리기 키트까지 한 번에 (유튜브에는 올리지 않아요)">끝까지 자동으로</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${chip}
       ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
         : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>`
@@ -1443,6 +1464,7 @@ function renderLocal() {
   document.querySelectorAll("#local [data-reana]").forEach(b => b.onclick = () => analyzeNames([b.dataset.reana], true));
   document.querySelectorAll("#local [data-conv]").forEach(b => b.onclick = () => convertMp4(b.dataset.conv));
   document.querySelectorAll("#local [data-ren]").forEach(b => b.onclick = () => renameVideo(b.dataset.ren));
+  document.querySelectorAll("#local [data-auto]").forEach(b => b.onclick = () => window.autoOpen && window.autoOpen(b.dataset.auto));
   document.querySelectorAll("#local [data-attach]").forEach(b => b.onclick = () => attachOld(b.dataset.attach, b.dataset.old));
   renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
@@ -1560,10 +1582,12 @@ const crashModel = m => m === "small" ? "빠르게" : m === "large-v3-turbo" ? "
 function crashOf(name) {
   const c = state.crash;
   if (!c || !(c.names || []).includes(name)) return "";
-  return c.path === "/api/bundle" ? "지난번에 묶다가 프로그램이 꺼졌어요" : "지난번에 이 영상의 편집점을 찾다가 프로그램이 꺼졌어요";
+  return c.path === "/api/bundle" ? "지난번에 묶다가 프로그램이 꺼졌어요" : c.path === "/api/auto" ? "지난번에 끝까지 자동으로 하다가 프로그램이 꺼졌어요"
+    : "지난번에 이 영상의 편집점을 찾다가 프로그램이 꺼졌어요";
 }
 function showCrash(c) {
   if (!c || crashShown === c.id) return;
+  if (c.path === "/api/auto" && window.autoCrash) { crashShown = c.id; return window.autoCrash(c); }  // 끝까지 자동으로: [이어서 하기]
   crashShown = c.id;
   const have = new Set(state.local.map(v => v.name)), names = (c.names || []).filter(n => have.has(n));
   const dismiss = () => api("/api/crash/dismiss", {}).catch(() => {});
@@ -2383,7 +2407,8 @@ function sync() {
   $("btnAnalyze").disabled = busy || !nl;
   $("btnToRefs").disabled = busy || !nl;
   $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
-  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren]").forEach(b => (b.disabled = busy));
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren], #local [data-auto]").forEach(b => (b.disabled = busy));
+  $("btnAuto").disabled = busy || nl !== 1;
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
@@ -2404,7 +2429,7 @@ function setRing(svg, pct) {
 function showBusy() {
   const pr = state.progress || {};
   $("busy").classList.toggle("show", !!state.job);
-  $("busyTxt").textContent = (state.jobBy ? "휴대폰에서 시킨 일 · " : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
+  $("busyTxt").textContent = (state.jobBy ? "휴대폰에서 시킨 일 · " : "") + (state.auto && state.job ? `끝까지 자동으로 ${state.auto.i}/${state.auto.n} · ` : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
   $("busyPct").textContent = pr.pct !== null && pr.pct !== undefined ? `${pr.pct}%` : "";
   $("busyDetail").textContent = pr.detail || "";
   $("busyDetail").style.display = pr.detail ? "" : "none";
@@ -2446,6 +2471,9 @@ async function poll() {
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
   state.unusable = s.unusable || [];  // 아직 못 쓰는 형식 (.MTS 등)
+  state.auto = s.auto || null;  // 끝까지 자동으로: 지금 단계 (busy 줄 · 보관함 카드)
+  if (s.autoThumb && window.autoThumb) window.autoThumb(s.autoThumb);  // 작업이 이 화면에 썸네일을 그려 달라고 함
+  if (window.autoTick) window.autoTick(s);
   state.crash = s.crash || null;  // 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (보관함 카드 · 줄 표시)
   if (wasBusy && !s.job && $("p-style").classList.contains("on")) loadRefs();  // 배우기·받기 뒤 '배움' 표시·용량을 새로
   // 내가 시킨 작업(번호)이 끝났을 때만 그 결과·실패로 — 번호가 없으면(예전 흐름) 작업이 비었을 때 (휴대폰이 시킨 작업과 안 섞임)
@@ -2521,6 +2549,145 @@ try {  // 편집실 '← 스튜디오'로 오면 4 편집실 (영상 카드의 �
 setInterval(poll, 1000);
 poll().then(() => { renderEvents(); renderEdList(); loadRefs(); });
 checkUpdate();
+</script>
+<script>
+/* 2-3. 끝까지 자동으로 (E7 · D-200~D-203): 영상 하나 → 편집점·가편집 → MSG 롱폼 → 내보내기 → 쇼츠 N개(포인트마다 MSG + 내보내기)
+   → 결과물마다 AI 추천 썸네일 → 올리기 키트 → 확인할 것. 유튜브에는 올리지 않음 (키트까지) · [멈추기] · 꺼지면 [이어서 하기].
+   썸네일은 이 화면이 보이지 않는 틀로 썸네일 편집기를 열어 그려 줌 (autoThumb · 편집실도 같은 코드) */
+(() => {
+  const A = { name: "", info: null, srcs: null, res: null, lastLive: null };
+  const KEY = "autoOpts", LV = ["담백", "보통", "듬뿍"];
+  const STEP_DESC = { analyze: "대사 받아쓰기 (이미 했으면 건너뛰어요)", rough: "첫 가편집 스타일로 정리 · 쇼츠로 쓸 포인트 고르기",
+    msg_long: "예능 자막·효과음·확대·배경음악", export_long: "완성본 + 자막 파일 · 자동 검수", msg_shorts: "포인트 하나 = 쇼츠 하나",
+    export_shorts: "쇼츠마다 완성본 + 검수", thumbs: "결과물마다 AI 추천 썸네일 저장", kits: "제목·설명·챕터·태그 (올리지는 않아요)", check: "사람이 확인할 것만 모아요" };
+  const STEPS = [["analyze", "편집점 찾기"], ["rough", "가편집·쇼츠 포인트"], ["msg_long", "MSG 롱폼"], ["export_long", "롱폼 내보내기"], ["msg_shorts", "쇼츠 MSG"],
+    ["export_shorts", "쇼츠 내보내기"], ["thumbs", "썸네일"], ["kits", "올리기 키트"], ["check", "확인할 것 정리"]];
+  const saved = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } };
+  const keep = o => { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {} };
+  const nice = n => cutText(niceName(n).replace(/\.[^.]+$/, ""), 40);
+  const mask = () => $("autoMask"), box = () => $("autoBox");
+  const close = () => mask().classList.remove("show");
+  mask().addEventListener("click", e => { if (e.target === mask()) close(); });
+  const msgSet = () => { try { return { proofread: localStorage.getItem("ed_msgProof") === "1", writer: localStorage.getItem("ed_msgWrite") === "1" }; } catch (e) { return { proofread: false, writer: false }; } };
+  const styleKey = s => s ? `${s.kind}|${s.name}` : "";
+  const doneCount = run => (run.steps || []).filter(s => s.state === "done" || s.state === "skip").length;
+  const STATUS = { done: "다 했어요", stopped: "멈췄어요 · 만든 것은 그대로예요", failed: "중간에 멈췄어요 · 만든 것은 그대로예요", running: "하던 중에 꺼졌어요" };
+
+  window.autoOpen = async name => {
+    if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요");
+    A.name = name;
+    const [info, srcs] = await Promise.all([api("/api/auto?name=" + encodeURIComponent(name)).catch(() => null), A.srcs ? Promise.resolve(A.srcs) : api("/api/style/presets").catch(() => null)]);
+    if (!info || !info.ok) return;
+    A.info = info; A.srcs = srcs || A.srcs;
+    render();
+    mask().classList.add("show");
+  };
+  function render() {
+    const info = A.info, run = info.run, sv = saved();
+    const lv = LV.includes(sv.intensity) ? sv.intensity : "보통";
+    const ns = Number.isInteger(sv.shorts) && sv.shorts >= 0 && sv.shorts <= info.shortsMax ? sv.shorts : info.shortsDefault;
+    const all = A.srcs ? [["기본 스타일", A.srcs.presets || []], ["섞은 스타일", A.srcs.mixes || []], ["배운 스타일", A.srcs.learned || []]] : [];
+    const want = sv.style && all.some(([, xs]) => xs.some(x => styleKey(x) === sv.style)) ? sv.style : styleKey(info.style);
+    const opts = all.map(([g, xs]) => xs.length ? `<optgroup label="${g}">${xs.map(x => `<option value="${esc(styleKey(x))}" ${styleKey(x) === want ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</optgroup>` : "").join("")
+      || `<option value="${esc(styleKey(info.style))}">${esc(info.style.name)}</option>`;
+    const m = msgSet(), model = segVal("modelSeg") === "small" ? "빠르게" : "정확하게";
+    const resum = run && run.resumable;
+    box().innerHTML = `<h2>끝까지 자동으로<span class="sp"></span><button class="linkbtn" data-ax="close">닫기</button></h2>
+      <p class="lead">'${esc(nice(A.name))}' 하나로 롱폼과 쇼츠를 끝까지 만들어요. <b>유튜브에는 올리지 않고</b> 올리기 키트까지만 만들어요 — 다 되면 '확인할 것'을 보고 7 올리기에서 직접 올려 주세요.</p>
+      <ol class="aplan">${STEPS.map(([k, l]) => `<li><b>${l}</b> · ${STEP_DESC[k]}</li>`).join("")}</ol>
+      <div class="rsec"><h3>설정</h3>
+        <div class="rrow"><span>MSG 양</span><div class="seg" id="autoLv">${LV.map(v => `<button data-v="${v}" class="${v === lv ? "on" : ""}">${v}</button>`).join("")}</div></div>
+        <div class="rrow"><span>쇼츠 (포인트마다 하나)</span><div class="seg" id="autoNs">${Array.from({ length: info.shortsMax + 1 }, (_, i) => `<button data-v="${i}" class="${i === ns ? "on" : ""}">${i ? i + "개" : "안 만듦"}</button>`).join("")}</div></div>
+        <div class="rrow"><span>MSG 스타일</span><select class="sel" id="autoSty">${opts}</select></div>
+        <div class="small">받아쓰기 '${model}' · 클로드로 자막 오타 고치기 ${m.proofread ? "켬" : "끔"} · 클로드로 재미 자막 쓰기 ${m.writer ? "켬" : "끔"} — 보관함·편집실 MSG 에서 고른 그대로예요. 가편집은 '첫 가편집에 쓰기' 스타일로 만들어요.</div>
+      </div>
+      ${resum ? `<div class="rnote">지난번에 하던 것이 있어요 · ${run.steps.length}단계 중 ${doneCount(run)}단계까지 했어요 (${STATUS[run.status] || ""}). [이어서 하기]는 끝난 단계·만든 결과물을 건너뛰고 그때 설정 그대로 나머지를 해요.</div>` : ""}
+      <div class="rrow" style="margin-top:14px">${resum ? `<button class="btn primary" data-ax="resume">이어서 하기</button><button class="btn" data-ax="fresh">처음부터 다시</button>`
+        : `<button class="btn primary" data-ax="go">시작</button>`}${run && run.status === "done" ? `<button class="btn" data-ax="last">지난 결과 보기</button>` : ""}</div>
+      <div class="small">썸네일은 이 화면(스튜디오)이 그려요 · 작업하는 동안 스튜디오나 편집실을 열어 두세요. 영상 길이·쇼츠 수에 따라 수십 분 걸릴 수 있어요 (위 오른쪽 진행 표시 · 보관함 카드의 [멈추기]).</div>`;
+    box().querySelectorAll(".seg button").forEach(b => b.onclick = () => { b.parentElement.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); });
+    box().querySelectorAll("[data-ax]").forEach(b => b.onclick = () => act(b.dataset.ax));
+  }
+  function act(a) {
+    if (a === "close") return close();
+    if (a === "last") { close(); A.res = A.info.run; renderCard(); return go("library"); }
+    const o = { intensity: segVal("autoLv"), shorts: +segVal("autoNs"), style: $("autoSty").value };
+    keep(o);
+    const [kind, ...nm] = o.style.split("|");
+    const body = { name: A.name, intensity: o.intensity, shorts: o.shorts, style: { kind, name: nm.join("|") }, model: segVal("modelSeg"), ...msgSet(), resume: a !== "fresh" };
+    if (a === "fresh" && !confirm("지난번 자동 작업 기록은 두고 처음부터 새로 만들어요 (먼저 만든 편집본·완성본은 그대로 남아요). 계속할까요?")) return;
+    close(); A.res = null; renderCard();
+    job("/api/auto", body, res => { A.res = res; renderCard(); if (res) toast(res.status === "done" ? "끝까지 자동으로 다 했어요 · 확인할 것을 봐 주세요" : "멈췄어요 · 만든 것은 그대로예요"); });
+  }
+  window.autoCrash = c => {  // 지난번에 끝까지 자동으로 하다가 꺼짐 → 보관함 카드 [이어서 하기]
+    const n = (c.names || [])[0]; if (!n || !state.local.some(v => v.name === n)) { api("/api/crash/dismiss", {}).catch(() => {}); return; }
+    showFail({ kind: "crash", msg: `지난번에 '${nice(n)}' 영상을 끝까지 자동으로 만들다가 프로그램이 갑자기 꺼졌어요 · [이어서 하기]를 누르면 끝난 단계는 건너뛰고 나머지를 해요`,
+      actions: ["retry", "log", "logfile"], labels: { retry: "이어서 하기" }, job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
+      { path: "/api/auto", body: { name: n, resume: true }, done: res => { A.res = res; renderCard(); }, panel: "p-library",
+        on: { retry: () => job("/api/auto", { name: n, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }) } });
+    const card = failSlot("p-library").querySelector(".card.fail");
+    if (card) card.querySelector(".fx").addEventListener("click", () => api("/api/crash/dismiss", {}).catch(() => {}));
+  };
+  function stepsHtml(steps, live) {
+    return `<ul class="asteps">${STEPS.map(([k, l], i) => {
+      const s = (steps || []).find(x => x.key === k) || {}, st = live ? (i + 1 < live.i ? "done" : i + 1 === live.i ? "run" : "") : (s.state || "");
+      return `<li class="${st}" title="${esc(s.note || "")}">${st === "done" || st === "skip" ? "✓ " : st === "fail" ? "! " : ""}${l}</li>`;
+    }).join("")}</ul>`;
+  }
+  function renderCard() {
+    const el = $("autoCard"), live = state.auto;
+    if (live) {
+      el.hidden = false;
+      el.innerHTML = `<h3>끝까지 자동으로 · ${esc(nice(live.name))}<span class="sp"></span><span class="hint">${live.i}/${live.n} 단계 · ${esc(live.label || "")}</span>
+        <button class="btn" id="autoStop">멈추기</button></h3>${stepsHtml(null, live)}
+        <div class="hint">유튜브에는 올리지 않아요 · 썸네일은 이 화면이 그려요 (창을 닫지 말아 주세요) · 멈춰도 만든 것은 그대로 두고 나중에 [이어서 하기]로 나머지를 해요</div>`;
+      $("autoStop").onclick = e => { e.target.disabled = true; api("/api/edit/cancel", {}); toast("멈추는 중이에요 · 하던 단계까지만 정리해요"); };
+      return;
+    }
+    const r = A.res;
+    if (!r) { el.hidden = true; el.innerHTML = ""; return; }
+    el.hidden = false;
+    const outs = (r.outputs || []).filter(o => o.seq);
+    const q = encodeURIComponent(r.name);
+    el.innerHTML = `<h3>끝까지 자동으로 · ${esc(nice(r.name))} · ${esc(STATUS[r.status] || "")}<span class="sp"></span>
+        ${r.status !== "done" ? `<button class="btn primary" id="autoResume">이어서 하기</button>` : ""}<button class="btn" id="autoOut">완성본 폴더</button><button class="linkbtn" id="autoX">닫기</button></h3>
+      ${stepsHtml(r.steps)}
+      <div class="aouts">${outs.map(o => `<div class="aout"><b title="${esc(o.name || "")}">${o.kind === "long" ? "🎬" : "📱"} ${esc(o.name || "")}</b>
+        <span class="chip ${o.export ? "ok" : "warn"}">${o.export ? "완성본 ✓" : "완성본 없음"}</span>
+        <span class="chip ${o.thumb ? "ok" : "warn"}">${o.thumb ? "썸네일 ✓" : "썸네일 없음"}</span>
+        <span class="chip ${o.kit ? "ok" : "warn"}">${o.kit ? "키트 ✓" : "키트 없음"}</span>
+        <button class="btn" data-aed="${esc(o.seq)}">편집실</button><button class="btn" data-ath="1">썸네일</button>${o.kit ? `<button class="btn primary" data-akit="${esc(o.seq)}">올리기 키트</button>` : ""}</div>`).join("") || `<div class="hint">아직 만든 결과물이 없어요</div>`}</div>
+      <b>확인할 것</b><ul class="achk">${(r.check || []).map(c => `<li class="${c.lv}">${c.lv === "bad" ? "⛔ " : c.lv === "warn" ? "⚠️ " : "ℹ️ "}${esc(c.text)}</li>`).join("") || `<li class="info">따로 확인할 것이 없어요</li>`}</ul>`;
+    $("autoX").onclick = () => { A.res = null; renderCard(); };
+    $("autoOut").onclick = () => api("/api/open", { which: "out" });
+    if ($("autoResume")) $("autoResume").onclick = () => { if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요"); job("/api/auto", { name: r.name, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }); A.res = null; renderCard(); };
+    el.querySelectorAll("[data-aed]").forEach(b => b.onclick = () => { location.href = `/editor?name=${q}&seq=${encodeURIComponent(b.dataset.aed)}`; });
+    el.querySelectorAll("[data-ath]").forEach(b => b.onclick = () => { location.href = `/thumb?name=${q}`; });
+    el.querySelectorAll("[data-akit]").forEach(b => b.onclick = async () => { go("upload"); if (window.upSelect && !(await window.upSelect(r.name, b.dataset.akit))) toast("그 영상을 찾지 못했어요"); });
+  }
+  window.autoTick = s => {  // 1초마다 (poll): 진행 카드 · 끝나면 결과 카드
+    const k = JSON.stringify(s.auto || null);
+    if (k !== A.lastLive) { A.lastLive = k; renderCard(); }
+  };
+  $("btnAuto").onclick = () => { const n = libChecked(); if (n.length === 1) window.autoOpen(n[0]); };
+  /* 썸네일 그리기: 작업이 요청하면 보이지 않는 틀로 썸네일 편집기(AI 추천)를 열어 그림 → 편집기가 /api/auto/thumb 로 보내고 알려 줌 */
+  let busyTh = null;
+  window.autoThumb = async rq => {
+    if (!rq || busyTh) return;
+    let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
+    if (!c || !c.ok || busyTh) return;
+    const f = document.createElement("iframe"); busyTh = f;
+    f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+    f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
+    let tm = 0;
+    const onMsg = e => { if (e.source === f.contentWindow && e.data && e.data.autothumb === c.id) end(); };
+    const end = () => { window.removeEventListener("message", onMsg); clearTimeout(tm); f.remove(); busyTh = null; };
+    tm = setTimeout(end, 330000);
+    window.addEventListener("message", onMsg);
+    f.src = `/thumb?name=${encodeURIComponent(c.name)}&autothumb=${encodeURIComponent(c.id)}&fmt=${c.fmt}` + (c.a != null ? `&a=${c.a}&b=${c.b}` : "") + (c.avoid && c.avoid.length ? `&avoid=${encodeURIComponent(JSON.stringify(c.avoid))}` : "");
+    document.body.appendChild(f);
+  };
+})();
 </script>
 <script>
 /* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */

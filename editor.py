@@ -1375,16 +1375,17 @@ def default_style_params():
     return dict(p, styleName=n) if p else None
 
 
-def auto_sequences(name, info, style=None, kinds=("long", "shorts")):
+def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
+    rec: 이미 고른 추천({shorts, tidy}) — 끝까지 자동으로가 MSG 를 못 넣은 쇼츠 하나를 가편집으로 만들 때 (없으면 recommend).
     style: style.edit_params() 결과 (말 사이 공백·줌 컷·자막 위치/색·소리 크기·컷 리듬·말 빠르기) — 있으면 그 스타일대로.
     쇼츠·긴 영상을 섞어 배운 스타일(byFormat)이면 롱폼은 긴 영상 값, 쇼츠는 쇼츠 값으로 (E12 · D-102)."""
     by = (style or {}).get("byFormat")
     if isinstance(by, dict) and by:
         sn = {"styleName": style["styleName"]} if style.get("styleName") else {}
-        return [q for k in kinds for q in auto_sequences(name, info, dict(by.get(k) or next(iter(by.values())), **sn), (k,))]
+        return [q for k in kinds for q in auto_sequences(name, info, dict(by.get(k) or next(iter(by.values())), **sn), (k,), rec)]
     st = style or {}
-    rec = recommend(name, keep_pause=st.get("keepPause"))
+    rec = rec or recommend(name, keep_pause=st.get("keepPause"))
     segs = _segments_of(name)
     # 화면 크기: 잘라 낸 자리(점프 컷)·나눈 곳마다 뒤집음 — 스타일 zoomScale, 스타일이 없으면 살짝(1.08배)
     every, zoom = float(st.get("zoomEvery") or 0), min(1.6, max(1.0, float(st.get("zoomScale") or SOFT_ZOOM)))

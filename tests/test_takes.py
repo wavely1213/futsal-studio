@@ -277,6 +277,17 @@ class FindJunkTest(unittest.TestCase):
         for t in no:
             self.assertFalse(takes.is_slate(t), t)
 
+    def test_more_slate_words_e7(self):
+        """슬레이트 말 보강 (E7 · 백로그 P3): '다시 시작할게요/하겠습니다' · '틀렸다, 다시' · '다시, 다시' — 연습 안내는 그대로."""
+        yes = ["다시 시작할게요", "아 다시 시작하겠습니다", "처음부터 다시 시작할게요", "틀렸다 다시", "틀렸네, 다시", "아 틀렸어요 다시 할게요",
+               "다시, 다시", "다시 다시"]
+        no = ["천천히 다시 시작할게요", "이번엔 왼발로 다시 시작할게요", "다시 시작하면 이렇게 공을 받아요", "이 자세는 틀렸어요 다시 보세요",
+              "틀렸어요", "다시!", "공을 다시 받아요"]
+        for t in yes:
+            self.assertTrue(takes.is_slate(t), t)
+        for t in no:
+            self.assertFalse(takes.is_slate(t), t)
+
     def test_polite_and_spaced_slates(self):
         # 검수: 존댓말·띄어 쓴 슬레이트 말도 알아봄 · 연습 안내는 그대로
         yes = ["다시 하겠습니다", "아 다시 가겠습니다", "다시 해 볼게요", "다시 가 볼게요", "다시 한 번 할게요", "다시 한번 갈게요",
