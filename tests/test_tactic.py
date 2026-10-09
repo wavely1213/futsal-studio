@@ -1,4 +1,4 @@
-"""편집실 전술 그림(D-180~D-183) — 저장소 폴더에서 python3 -m unittest tests.test_tactic
+"""편집실 전술 그림(D-180~D-185) — 저장소 폴더에서 python3 -m unittest tests.test_tactic
 
 - tactic.normalize: 저장본 정리 (모르는 종류·점 모자람 → 버림 · 값 범위 · 따라가기 정렬)
 - tactic.ops_at: 보이는 때·그려지며 나오기·끝에서 흐려지기·따라가기(원은 통째로, 화살표는 출발점만)·윤곽 방향(채우기 +, 구멍 −)
@@ -6,9 +6,9 @@
 - tactic.ass_lines / editor.build_ass: Board 스타일·프레임 가운데 시간 창·같은 모양은 한 줄·스포트라이트 먼저·편집본 끝에서 자름 · seq_total
 - 원본 ↔ 화면 자리 (media_rect·src_to_frame·frame_to_src) · 선수 고르기·이어 따라가기·놓친 장면 메우기·track(가짜 모델)
 - /api/edit/track (가짜 track) · msg.place_tactics: 담백 없음 · 보통 발밑 원(따라감) · 듬뿍 + 움직인 길 화살표 · 작은 사람·화면 밖은 건너뜀
+- 편집 뒤 따라가기 기록 (D-184): tacFollowCut·tacFollowHold·tidySeq 를 node 로 · MSG 확실할 때만 (D-185): 공 둘·공 곁 두 아이·몰림·근접·차기/몰고 가기·다른 공
 인터넷·모델·브라우저는 쓰지 않음 (node 가 없으면 미리보기 비교만 건너뜀)."""
 import json
-import math
 import shutil
 import subprocess
 import sys
@@ -221,6 +221,76 @@ class PreviewParityTests(unittest.TestCase):
             self.same(tactic.normalize(r), g, r.get("kind"))
         self.same(tactic.ordered(raws), got[-1], "order")
         self.assertEqual(got[-1][0]["kind"], "spot", "스포트라이트는 맨 아래")
+
+
+RETIME_RUN = r"""
+const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8'), extra = fs.readFileSync(process.argv[2], 'utf8');
+const a = src.indexOf('/* ---------- 전술 그림: 모양 계산 (tactic.py'), b = src.indexOf('/* ---------- 전술 그림: 모양 계산 끝');
+eval(extra + '\n' + src.slice(a, b) + '; globalThis.X = { tacFollowCut, tacFollowHold, tacFollowAt, tidySeq };');
+const cases = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(cases.map(([fn, args]) => X[fn](...args))));
+"""
+
+
+@unittest.skipUnless(HAS_NODE, "node 가 없어 따라가기 기록 옮기기 계산을 건너뜀")
+class FollowRetimeTests(unittest.TestCase):
+    """편집으로 그림 아래 영상이 잘리거나 밀리면 따라가기 기록도 같이 (리뷰: 잘라낸 뒤 원이 선수 옆에 둥둥 떠 있음)."""
+    FOL = [[k / 8, round(0.05 * k / 8, 4), 0.0] for k in range(33)]   # 4초 동안 오른쪽으로 초당 0.05
+
+    def js(self, cases):
+        from tests.test_tidy_remap import _js
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(_js())
+        try:
+            r = subprocess.run(["node", "-e", RETIME_RUN, str(ROOT / "editor.html"), f.name], input=json.dumps(cases), capture_output=True, text=True, timeout=120)
+        finally:
+            Path(f.name).unlink()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def ring(self, start=10.0, dur=4.0):
+        return tac("ring", [[0.5, 0.8]], start=start, dur=dur, follow=self.FOL)
+
+    def x_at(self, g, t):
+        return tactic.follow_at(g["follow"], t - g["start"])[0]
+
+    def test_cut_in_middle_keeps_ring_on_player(self):
+        g = self.ring()
+        (c,) = self.js([["tacFollowCut", [g, 11.0, 11.5]]])
+        n = dict(g, start=c["start"], follow=c["follow"], dur=3.5)
+        self.assertEqual(c["start"], 10.0)
+        for t_old in (10.5, 10.99, 11.5, 12.0, 13.5):   # 잘린 곳 뒤의 영상은 0.5초 당겨짐 → 원도 그 자리
+            t_new = t_old if t_old < 11.0 else t_old - 0.5
+            self.assertAlmostEqual(self.x_at(n, t_new), self.x_at(g, t_old), delta=0.0015, msg=t_old)
+        self.assertIsNotNone(tactic.normalize(n))
+
+    def test_cut_head_and_tail(self):
+        g = self.ring()
+        (h, t) = self.js([["tacFollowCut", [g, 9.0, 11.0]], ["tacFollowCut", [g, 13.0, 15.0]]])
+        self.assertEqual(h["start"], 9.0, "앞이 잘리면 잘린 곳에서 시작")
+        nh = dict(g, start=9.0, follow=h["follow"])
+        self.assertAlmostEqual(self.x_at(nh, 9.0), self.x_at(g, 11.0), delta=0.0015)
+        self.assertAlmostEqual(self.x_at(nh, 10.5), self.x_at(g, 12.5), delta=0.0015)
+        nt = dict(g, follow=t["follow"])
+        self.assertAlmostEqual(self.x_at(nt, 12.5), self.x_at(g, 12.5), delta=0.0015, msg="뒤가 잘리면 앞은 그대로")
+
+    def test_hold_when_gap_inserted(self):
+        g = self.ring()
+        (hd,) = self.js([["tacFollowHold", [g, 11.0, 2.0]]])
+        self.assertEqual(hd["dur"], 6.0)
+        n = dict(g, follow=hd["follow"], dur=6.0)
+        for t in (11.0, 12.0, 13.0):
+            self.assertAlmostEqual(self.x_at(n, t), self.x_at(g, 11.0), delta=0.0015, msg="끼운 동안 멈춤")
+        self.assertAlmostEqual(self.x_at(n, 14.5), self.x_at(g, 12.5), delta=0.0015, msg="밀린 선수를 이어서")
+
+    def test_tidy_remap_moves_follow(self):
+        from tests.test_tidy_remap import pair, seq
+        q = seq(pair(0.0, 20.0, 0.0), format="long", tactics=[self.ring()])
+        (r,) = self.js([["tidySeq", [q, [{"in": 0.0, "out": 11.0}, {"in": 11.5, "out": 20.0}]]]])
+        (n,) = r["tactics"]
+        self.assertEqual((n["start"], n["dur"]), (10.0, 3.5))
+        self.assertAlmostEqual(self.x_at(n, 12.0), self.x_at(self.ring(), 12.5), delta=0.0015, msg="군더더기 정리로 0.5초 빠져도 선수 위")
+        self.assertAlmostEqual(self.x_at(n, 10.9), self.x_at(self.ring(), 10.9), delta=0.0015)
 
 
 class AssTests(unittest.TestCase):
@@ -467,14 +537,15 @@ class MsgPlaceTests(unittest.TestCase):
             {"kind": "play", "t": 60.0, "a": 58.0, "b": 63.0, "score": 1.0}, {"kind": "play", "t": 35.0, "a": 33.0, "b": 37.0, "score": 9.0},
             {"kind": "emphasis", "t": 20.0, "a": 20.0, "b": 21.0, "score": 5.0}]
 
-    def place(self, intensity, moving=0.03, small=False, fmt="long", x0=0.4):
+    def place(self, intensity, moving=0.03, small=False, fmt="long", x0=0.4, kick=True):
         msg._TRACKS.clear()
         B = self.build(fmt)
         frames = [(k, k) for k in range(24)]
         h = 0.1 if small else 0.45
 
-        def det(k):
-            return {"persons": [P(x0 + moving * k / 2, 0.4, 0.1, h), P(0.05, 0.3, 0.05, h * 0.6)], "ball": [x0 + 0.05, 0.84, 0.02, 0.02, 0.5]}
+        def det(k):  # 공 차는 순간(6번째 장면 · 10초 - 0.8초 앞부터)부터 공이 그 선수 발에서 멀어짐
+            bx = x0 + 0.05 + moving * k / 2 + (0.03 * (k - 6) if kick and k > 6 else 0)
+            return {"persons": [P(x0 + moving * k / 2, 0.4, 0.1, h), P(0.05, 0.3, 0.05, h * 0.6)], "ball": [bx, 0.84, 0.02, 0.02, 0.5]}
         with mock.patch.object(tactic, "_frames", side_effect=lambda p, a, b, fps: [(a + k / fps, k) for k, _ in frames if a + k / fps < b]):
             made = msg.place_tactics(B, "v.mp4", {}, self.MOMS, intensity, fmt, detect_fn=det)
         return B, made
@@ -539,6 +610,63 @@ class MsgPlaceTests(unittest.TestCase):
     def test_skips_small_or_offscreen(self):
         self.assertEqual(self.place("보통", small=True)[1], [], "멀리 작게 보이는 사람에는 안 넣음")
         self.assertEqual(self.place("보통", moving=0.06, x0=0.6)[1], [], "발이 화면 밖으로 나가면 안 넣음")
+
+    def test_ends_when_player_fills_frame(self):
+        msg._TRACKS.clear()
+        B = self.build()
+
+        def det(k):  # 카메라 쪽으로 달려와 12번째 장면부터 화면을 채움 (머리가 위 가장자리)
+            p = P(0.4, 0.4, 0.1, 0.45) if k < 12 else P(0.35, 0.0, 0.2, 0.95)
+            return {"persons": [p], "ball": None}
+        with mock.patch.object(tactic, "_frames", side_effect=lambda p, a, b, fps: [(a + k / fps, k) for k in range(24) if a + k / fps < b]):
+            msg.place_tactics(B, "v.mp4", {}, self.MOMS[:1], "듬뿍", "long", detect_fn=det)
+        self.assertTrue(B.tactics, "앞부분은 넣음")
+        self.assertLessEqual(B.tactics[0]["dur"], 12 / 8 + 1 / 8 + 1e-6, "화면을 채우기 전까지만")
+        self.assertEqual([t["kind"] for t in B.tactics], ["ring"], "제자리(옆으로 안 움직임)면 화살표 없음")
+
+    def test_ball_owner_needed(self):
+        self.assertEqual(len(self.place("보통", kick=False)[1]), 1, "공을 발 곁에 두고 몰고 가는 시범도 넣음")
+        msg._TRACKS.clear()
+        B = self.build()
+
+        def det(k):  # 공 차는 순간 뒤로 찾기 모델이 멀리 있는 다른 아이의 공을 잡음 (공이 둘 · 그 선수 공은 안 움직임)
+            return {"persons": [P(0.4, 0.4, 0.1, 0.45), P(0.85, 0.4, 0.1, 0.45)], "ball": [0.44 if k <= 6 else 0.89, 0.84, 0.02, 0.02, 0.5]}
+        with mock.patch.object(tactic, "_frames", side_effect=lambda p, a, b, fps: [(a + k / fps, k) for k in range(24) if a + k / fps < b]):
+            self.assertEqual(msg.place_tactics(B, "v.mp4", {}, self.MOMS, "보통", "long", detect_fn=det), [], "다른 공으로 넘어가 공을 가진 사람을 확인 못 하면 안 넣음")
+
+    def test_subject_only_when_sure(self):
+        ball = [0.45, 0.84, 0.02, 0.02, 0.5]
+        a, b = P(0.4, 0.4, 0.1, 0.45), P(0.43, 0.42, 0.1, 0.45)
+        self.assertIs(msg._subject({"persons": [a, P(0.05, 0.3, 0.05, 0.3)], "ball": ball}), a)
+        self.assertIsNone(msg._subject({"persons": [a, b], "ball": ball}), "공 곁에 두 아이 (뒤의 아이 발도 공 가까이) → 건너뜀")
+        self.assertIsNone(msg._subject({"persons": [a, P(0.47, 0.6, 0.05, 0.22)], "ball": ball}), "작게 보이는 아이도 공 곁이면 모름")
+        self.assertIsNone(msg._subject({"persons": [P(0.4, 0.4, 0.1, 0.45)], "ball": [0.9, 0.5, 0.02, 0.02, 0.5]}), "공이 멀면")
+        self.assertIsNone(msg._subject({"persons": [P(0.3, 0.0, 0.4, 0.95)], "ball": [0.48, 0.94, 0.02, 0.02, 0.5]}), "너무 가까이 찍힌 장면 (신발만)")
+        self.assertIsNone(msg._subject({"persons": [P(0.3, 0.005, 0.2, 0.8)], "ball": [0.38, 0.8, 0.02, 0.02, 0.5]}), "머리가 위 가장자리에 닿음")
+        self.assertIs(msg._subject({"persons": [a], "ball": None}), a, "공이 안 보여도 혼자면 그 사람")
+        self.assertIsNone(msg._subject({"persons": [a, b], "ball": None}), "공도 없고 여럿이면 모름")
+        two = [0.75, 0.6, 0.02, 0.02, 0.4]
+        self.assertIsNone(msg._subject({"persons": [a, P(0.05, 0.3, 0.05, 0.3)], "ball": ball, "balls": [ball, two]}), "공이 둘 (모두 공을 가진 연습) → 모름")
+        self.assertIs(msg._subject({"persons": [a, P(0.05, 0.3, 0.05, 0.3)], "ball": ball, "balls": [ball]}), a)
+        crowd = [a] + [P(0.05 + 0.12 * i, 0.2, 0.05, 0.3) for i in range(4)]
+        self.assertIsNone(msg._subject({"persons": crowd, "ball": ball, "balls": [ball]}), "다섯 명 이상 몰린 장면 → 건너뜀")
+
+    def test_kicked(self):
+        box = [0.4, 0.4, 0.1, 0.45]
+        seq = [(k, {"ball": [0.44 + (0.02 * (k - 2) if k > 2 else 0), 0.84, 0.02, 0.02]}) for k in range(10)]
+        raw = [(k, box) for k in range(10)]
+        self.assertTrue(msg._kicked(seq, raw, 2))
+        still = [(k, {"ball": [0.44, 0.84, 0.02, 0.02], "persons": [box]}) for k in range(10)]
+        self.assertTrue(msg._kicked(still, raw, 2), "공을 발 곁에 두고 몰고 감 → 공을 가진 사람")
+        crowd = [(k, {"ball": [0.44, 0.84, 0.02, 0.02], "persons": [box, [0.42, 0.42, 0.1, 0.43]]}) for k in range(10)]
+        self.assertFalse(msg._kicked(crowd, raw, 2), "공 곁에 다른 아이도 붙어 있으면 누가 가졌는지 모름")
+        far = [(k, {"ball": [0.44, 0.84, 0.02, 0.02] if k <= 2 else [0.6, 0.84, 0.02, 0.02], "persons": [box]}) for k in range(10)]
+        self.assertTrue(msg._kicked(far, raw, 2), "차서 멀어짐")
+        self.assertFalse(msg._kicked([(k, {"ball": None}) for k in range(10)], raw, 2), "공을 못 보면 모름")
+        other = [(k, {"ball": [0.44, 0.84, 0.02, 0.02] if k <= 2 else [0.75, 0.6, 0.02, 0.02]}) for k in range(10)]
+        self.assertFalse(msg._kicked(other, raw, 2), "옆 아이의 다른 공으로 넘어간 것은 찬 것이 아님")
+        two = [(k, {"ball": seq[k][1]["ball"], "balls": [seq[k][1]["ball"]] + ([[0.8, 0.6, 0.02, 0.02]] if k == 5 else [])}) for k in range(10)]
+        self.assertFalse(msg._kicked(two, raw, 2), "그 1초 안에 공이 둘 보이는 장면이 있으면 누구 공인지 모름")
 
     def test_no_model_no_tactics(self):
         import detect

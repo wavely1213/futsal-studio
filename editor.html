@@ -522,7 +522,7 @@
   <div class="f" style="margin-top:8px"><label>초당 장면</label><div class="seg" id="exFps"><button data-v="30" class="on">30fps</button><button data-v="60">60fps (부드럽게)</button></div><span></span></div>
   <div class="f"><label>범위</label><div class="seg" id="exRange"><button data-v="all" class="on">전체</button><button data-v="io">표시한 구간 (I~O)</button></div><span></span></div>
   <label><input type="checkbox" id="exVideo" checked> 영상 (mp4) — 업로드용</label>
-  <label><input type="checkbox" id="exXml" checked> 프리미어 프로젝트 (XML) — 프리미어에서 이어서 편집</label>
+  <label><input type="checkbox" id="exXml" checked> 프리미어 프로젝트 (XML) — 프리미어에서 이어서 편집<span class="hint" id="exXmlHint"></span></label>
   <label><input type="checkbox" id="exSrt" checked> 자막 파일 (SRT)<span class="hint" id="exSrtHint"></span></label>
   <label title="검은 화면·소리 끊김·소리 크기·규격을 확인해요 (영상 길이의 몇 분의 1 정도 걸려요)"><input type="checkbox" id="exQa" checked> 다 만든 뒤 자동 검수 (올리기 전 실수 찾기)</label>
   <label title="엔비디아·인텔·AMD 그래픽카드나 맥의 하드웨어 인코더가 있으면 몇 배 빨라요. 안 되는 PC에선 저절로 일반 방식으로 만들어요."><input type="checkbox" id="exHw" checked> 그래픽카드로 빠르게 만들기 (되는 PC에서만)</label>
@@ -743,7 +743,15 @@ function remapSeq(q, cut, ins, extra) {
     if (x.full) return { ...x };
     const s = f(x.start, false), m = r6(f(x.start + x.dur, true) - s), d = x.start + x.dur >= end0 - 0.05 ? m : Math.min(m, x.dur);
     if (x.plan === "emphasis" && inCut(x.start)) return null; // 그 말이 잘려 나감
-    return d >= Math.min(0.3, x.dur) - EPS ? { ...x, start: s, dur: d } : null;
+    if (!(d >= Math.min(0.3, x.dur) - EPS)) return null;
+    if (!x.follow || !x.follow.length) return { ...x, start: s, dur: d };
+    // 따라가는 전술 그림: 따라가기 기록도 같은 규칙으로 옮김 (빠진 구간 기록은 버리고, 빠진 곳 앞뒤 자리는 이어 붙임)
+    const xe = x.start + x.dur, pairs = x.follow.map(fw => { const T = x.start + fw[0]; return [T, inCut(T) ? null : f(T, false)]; });
+    for (const [ca, cb] of cut) {
+      if (ca - 1e-3 > x.start && ca < xe) pairs.push([ca - 1e-3, f(ca - 1e-3, false)]);
+      if (cb > x.start && cb < xe) pairs.push([cb, f(cb, false)]);
+    }
+    return { ...x, start: s, dur: d, follow: tacRefollow(x, s, pairs) };
   };
   const trans = (q.trans || []).map(tr => ({ ...tr, a: tr.a ? last.get(tr.a) || null : null, b: tr.b ? first.get(tr.b) || null : null })).filter(tr => tr.a || tr.b);
   return { items, trans, titles: (q.titles || []).map(span).filter(Boolean), shapes: (q.shapes || []).map(span).filter(Boolean), tactics: (q.tactics || []).map(span).filter(Boolean),
@@ -1188,6 +1196,7 @@ function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기
     const s = g.start, e = g.start + g.dur;
     if (e <= a || s >= b) continue;
     const keep = Math.max(0, a - s) + Math.max(0, e - b);
+    if (g.follow && g.follow.length) g.follow = tacFollowCut(g, a, b).follow;  // 따라가는 전술 그림: 잘린 만큼 기록도 당김
     g.start = Math.min(s, a); g.dur = keep;
   }
   S.titles = S.titles.filter(g => g.dur > 0.15); S.shapes = S.shapes.filter(g => g.full || g.dur > 0.15); S.tactics = S.tactics.filter(g => g.dur > 0.15);
@@ -1228,6 +1237,7 @@ function insertGap(t, len, tracks) {
   for (const g of S.titles) if (g.start >= t - EPS) g.start += len;
   for (const g of S.shapes) if (!g.full && g.start >= t - EPS) g.start += len;
   for (const g of S.tactics) if (g.start >= t - EPS) g.start += len;
+    else if (g.follow && g.follow.length && g.start + g.dur > t + EPS) Object.assign(g, tacFollowHold(g, t, len)); // 따라가는 그림이 걸쳐 있으면: 끼운 동안 멈췄다가 밀린 선수를 이어서 따라감
   for (const m of S.markers) if (m.t >= t - EPS) m.t = fr(m.t + len); // 마커도 같이 밀림 (잘라내기·잔물결 삭제와 같게)
 }
 // 원본 구간 [a, b] (대사 하나) 를 타임라인에서 빼기
@@ -1277,7 +1287,7 @@ function deleteSel(ripple) {
     for (const r of rng) { const l = merged[merged.length - 1]; if (l && r[0] <= l[1] + EPS) l[1] = Math.max(l[1], r[1]); else merged.push([...r]); }
     const kept = new Set(), mv = [], mk = { moved: 0, removed: 0 };
     for (const [s, e] of merged.reverse()) {
-      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
+      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); tacRippleCut(s, e, sk); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
     }
     toast((kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv) + markNote(mk));
   } else toast("지웠어요 · 빈자리를 당기려면 빈 곳을 누르고 Delete (또는 Shift+Delete)");
@@ -1291,7 +1301,7 @@ function deleteGap(g) {
     selX = null; renderTimeline(); renderPanels(); return toast("빈 곳이 바뀌었어요 · 빈 곳을 다시 눌러 주세요");
   }
   const sk = spanning(g.s, g.e); sk.delete(g.track);
-  commit("빈 곳 지우기"); const mk = markCut(g.s, g.e), mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
+  commit("빈 곳 지우기"); tacRippleCut(g.s, g.e, sk); const mk = markCut(g.s, g.e), mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
   toast((sk.size ? `빈 곳을 당겼어요 · ${[...sk].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "빈 곳을 당겼어요") + followNote(mv) + markNote(mk));
 }
 function deleteGfx() {
@@ -1850,6 +1860,34 @@ function tacFollowAt(fol, e) {
   for (let i = 0; i < fol.length - 1; i++) { const a = fol[i], b = fol[i + 1]; if (e <= b[0]) { const x = (e - a[0]) / ((b[0] - a[0]) || 1); return [a[1] + (b[1] - a[1]) * x, a[2] + (b[2] - a[2]) * x]; } }
   const l = fol[fol.length - 1]; return [l[1], l[2]];
 }
+// 따라가기 기록 다시 맞추기 — 그림 아래 영상이 잘리거나 밀리면 (잘라내기·잔물결·군더더기 정리·MSG 빼기·끼워 넣기) 기록도 같은 만큼
+// pairs = [[옛 타임라인 시각, 새 타임라인 시각 | null(잘려 나감)]] · 값은 옛 기록에서 그 시각 자리 → 새 기록 (새 시작 기준)
+function tacRefollow(g, newStart, pairs) {
+  if (!g.follow || !g.follow.length) return g.follow || null;
+  const out = [];
+  for (const [T, nt] of pairs) {
+    if (nt == null) continue;
+    const [x, y] = tacFollowAt(g.follow, T - g.start);
+    out.push([Math.round(Math.max(0, nt - newStart) * 1000) / 1000, Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]);
+  }
+  out.sort((p, q) => p[0] - q[0]);
+  const u = out.filter((p, i) => !i || p[0] > out[i - 1][0]);
+  return u.length ? u : null;
+}
+// 타임라인 [a,b] 를 빼고 뒤를 당길 때 (그림의 새 시작 = 앞이 잘리면 a · gfxCut 과 같은 규칙)
+function tacFollowCut(g, a, b) {
+  const s = g.start, e = s + g.dur, d = b - a, m = T => T < a ? T : T >= b ? T - d : null;
+  const ns = s < a ? s : s < b ? a : s - d, pairs = g.follow.map(f => [s + f[0], m(s + f[0])]);
+  if (a - 1e-3 > s && a < e) pairs.push([a - 1e-3, a - 1e-3]);  // 잘린 곳 바로 앞 자리
+  if (b > s && b < e) pairs.push([b, a]);                          // 잘린 곳 바로 뒤 자리 (선수가 거기서 이어짐)
+  return { start: ns, follow: tacRefollow(g, ns, pairs) };
+}
+// 타임라인 t 에 len 초를 끼워 넣을 때 (그림이 t 에 걸쳐 있으면): 그 동안은 제자리에 멈추고, 그림도 그만큼 길어짐
+function tacFollowHold(g, t, len) {
+  const s = g.start, pairs = g.follow.map(f => [s + f[0], s + f[0] < t ? s + f[0] : s + f[0] + len]);
+  pairs.push([t, t], [t, t + len]);
+  return { dur: g.dur + len, follow: tacRefollow(g, s, pairs) };
+}
 function tQuad(P) {
   const a = P[0], c = P.length < 3 ? [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2] : P[1], b = P.length < 3 ? P[1] : P[2], out = [];
   for (let i = 0; i <= TC.SEG; i++) { const t = i / TC.SEG, u = 1 - t; out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); }
@@ -2024,6 +2062,26 @@ function tacShown(n, t) {
   const [ox, oy] = tacFollowAt(n.follow, clamp(t - n.start, 0, n.dur)), line = n.kind === "arrow" || n.kind === "curve" || n.kind === "pass";
   return n.pts.map((p, i) => (!line || i === 0 ? [p[0] + ox, p[1] + oy] : i === 1 && n.pts.length > 2 ? [p[0] + ox / 2, p[1] + oy / 2] : p.slice()));
 }
+// 화면을 눌러 전술 그림 고르기: 그 시각 보이는 그림 중 누른 자리에 있는 것 (맨 위 그림부터 · 스포트라이트는 밝은 원 안만)
+function tacHit(t, x, y) {  // x, y = 화면 비율 0~1
+  const W = BW(), H = BH(), u = Math.min(W, H) / TC.BASE, px = x * W, py = y * H, pad = 24 * u;
+  const segD = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, k = l ? clamp(((px - a[0]) * dx + (py - a[1]) * dy) / l, 0, 1) : 0; return Math.hypot(px - a[0] - k * dx, py - a[1] - k * dy); };
+  const list = t < total() + 0.01 ? tacOrder(S.tactics).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
+  for (const n of list.reverse()) {
+    const P = tacShown(n, t).map(([a, b]) => [a * W, b * H]);
+    if (n.kind === "ring" || n.kind === "spot") { const ry = n.kind === "ring" ? TC.RING_RY : 1; if (Math.hypot(px - P[0][0], (py - P[0][1]) / ry) <= n.size * u + pad) return n.id; }
+    else if (n.kind === "label") { const s = n.size * u, w = tacEm(n.text) * s / 2 + pad; if (Math.abs(px - P[0][0]) <= w && py <= P[0][1] + pad && py >= P[0][1] - s * 2.2 - pad) return n.id; }
+    else { const w = (n.width || 10) * u * 2 + pad; for (let i = 0; i < P.length - 1; i++) if (segD(P[i], P[i + 1]) <= w) return n.id; }
+  }
+  return null;
+}
+$("frame").addEventListener("mousedown", ev => {
+  if (playing || ev.button !== 0 || ev.target.closest("#tacH i, #tacH .tb")) return;
+  const r = $("frame").getBoundingClientRect(), id = tacHit(T, (ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height);
+  if (!id || (selX && selX.k === "tact" && selX.id === id)) return;
+  ev.preventDefault(); ev.stopPropagation();
+  selX = { k: "tact", id }; selI.clear(); setRtab("fx", true); renderTimeline(); renderPanels(); frameDirty = true;
+}, true);
 let tacHKey = "";
 function drawTacHandles() {
   const box = $("tacH"), tc = tacSel(), n = tc && tacNorm(tc);
@@ -2075,6 +2133,7 @@ function tacVideoAt(t) {  // 그 시각 화면에 보이는 맨 위 영상 클�
   }
   return null;
 }
+let tacFollowing = null;  // 따라가기 요청 중인 그림 id (한 번에 하나)
 async function tacFollow(tc) {
   const n = tacNorm(tc); if (!n) return;
   const it = tacVideoAt(n.start + 0.01);
@@ -2083,10 +2142,17 @@ async function tacFollow(tc) {
   const md = mdOf(it), W = BW(), H = BH(), t0 = n.start, t1 = Math.min(n.start + n.dur, iEnd(it));
   const [u, v] = tacToSrc(it, md, n.pts[0][0] * W, n.pts[0][1] * H, t0);
   if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1.05)) return toast("그림이 영상 밖에 있어요 · 선수 위에 놓고 다시 눌러 주세요");
+  if (tacFollowing) return toast("다른 그림의 선수를 따라가는 중이에요 · 끝나면 다시 눌러 주세요");
   const btn = $("tcFollow"); if (btn) { btn.disabled = true; btn.textContent = "따라가는 중…"; }
   toast("선수를 따라가는 중이에요… (몇 초 걸려요)");
-  let r = null;
+  // 기다리는 동안 되돌리기·그림 옮기기·클립 편집이 있었으면 결과를 버림 (옛 사본에 쓰거나 옛 자리 기준으로 따라가지 않게)
+  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.fit]]);
+  const sig0 = sig(n, it), id = tc.id, seqId = S.id;
+  let r = null; tacFollowing = id;
   try { r = await post("/api/edit/track", { name: NAME, file: md.file, src: md.src || "videos", t0: mt(it, t0), t1: mt(it, t1 - 1e-3), x: u, y: Math.min(1, v), kind: n.kind }).then(x => x.json()); } catch (e) { r = null; }
+  finally { tacFollowing = null; }
+  tc = S.id === seqId ? S.tactics.find(x => x.id === id) : null;
+  if (!tc || sig(tacNorm(tc), tacVideoAt(t0 + 0.01)) !== sig0) { renderPanels(); return toast("따라가는 동안 그림이나 영상이 바뀌어서 결과를 버렸어요 · 다시 눌러 주세요"); }
   if (!r || !Array.isArray(r.boxes) || !r.boxes.length) { renderPanels(); return toast((r && r.error) || "선수를 따라가지 못했어요 · 잠시 뒤 다시 눌러 주세요"); }
   const pts = r.boxes.map(([ts, x, y, w, h]) => { const tl = tlOf(it, ts), [px, py] = tacFromSrc(it, md, x + w / 2, y + h * TAC_ANCHOR[n.kind], tl); return [tl, px / W, py / H]; });
   commit("선수 따라가기");
@@ -2096,6 +2162,30 @@ async function tacFollow(tc) {
   changed(false);
   toast(cut != null && cut < n.dur ? `선수가 ${(tc.dur).toFixed(1)}초 뒤 화면에서 사라져서 그림도 거기서 끝나게 줄였어요`
     : r.lost ? `선수를 따라가요 · ${r.n}장면 중 ${r.lost}장면은 가려져서 앞뒤로 이었어요` : "선수를 따라가요 ✓ 재생해서 확인해 보세요");
+}
+// 잔물결로 타임라인 [a,b] 영상이 빠지고 뒤가 당겨질 때 (잔물결 삭제·빈 곳 지우기·잔물결 다듬기): 따라가는 그림도 같이 맞춤
+// 걸친 그림은 gfxCut 처럼 그만큼 줄이고 기록을 당김 · upto 앞까지 b 뒤에서 시작하는 그림은 같이 당김 (클립 머리 다듬기) · b 뒤 영상이 그대로면(그 트랙을 안 당김) 그대로
+const TAC_REFOLLOW = " · 따라가는 전술 그림은 '다시 따라가기'를 눌러 선수에 다시 맞춰 주세요";
+function tacRippleCut(a, b, skip = new Set(), upto = b) {
+  if (!(b - a > EPS)) return;
+  const v = tacVideoAt(b + 0.01); if (v && skip.has(v.track)) return;
+  for (const g of S.tactics) {
+    if (!g.follow || !g.follow.length) continue;
+    const s = g.start, e = s + g.dur;
+    if (s >= b - EPS) { if (s < upto - EPS) g.start = Math.max(0, s - (b - a)); continue; }
+    if (e <= a + EPS) continue;
+    const c = tacFollowCut(g, a, b); g.follow = c.follow; g.start = c.start; g.dur = Math.max(0, a - s) + Math.max(0, e - b);
+  }
+  S.tactics = S.tactics.filter(g => g.dur > 0.15);
+}
+// 잔물결로 t 에 len 초가 생기고 뒤가 밀릴 때: 걸친 따라가는 그림은 그동안 멈춤 · upto 앞까지 t 뒤에서 시작하는 그림은 같이 밂
+function tacRippleHold(t, len, upto = t) {
+  if (!(len > EPS)) return;
+  for (const g of S.tactics) {
+    if (!g.follow || !g.follow.length) continue;
+    if (g.start >= t - EPS) { if (g.start < upto - EPS) g.start += len; continue; }
+    if (g.start + g.dur > t + EPS) Object.assign(g, tacFollowHold(g, t, len));
+  }
 }
 function renderTacPanel(el, tc) {
   const k = tc.kind, d = TAC_DEF[k], n = tacNorm(tc) || tc;
@@ -2547,6 +2637,8 @@ function startMove(ev, anchor) {
     pushHist(dup ? "복제해서 옮기기" : e.ctrlKey ? "끼워 넣어 옮기기" : "클립 옮기기", before);
     changed(false);
     if (apply.blk) toast(`${apply.blk.join("·")} 트랙이 잠겨 있어 그쪽 클립은 제자리 트랙에 뒀어요 · 옮기려면 자물쇠를 풀어 주세요`);
+    else if (!dup && ids.some(id => { const x = byId(id); return x && isV(x); }) && S.tactics.some(g => g.follow && g.follow.length && g.start < maxE - EPS && g.start + g.dur > minS + EPS))
+      toast("클립을 옮겼어요" + TAC_REFOLLOW); // 그림은 제자리 · 영상만 옮겨져 선수와 어긋남 (I-181)
   };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
@@ -2601,6 +2693,8 @@ function edgeOp(mode, ids, edge, d) {
     d = clamp(d, lo, hi);
     const delta = edge === "l" ? -d : d;
     if (edge === "r" && delta < 0) markCut(pivot + delta, pivot);  // 끝을 줄여 사라진 장면 위 마커 (잘라내기와 같은 규칙 · 앞을 줄이면 사라지는 곳이 클립 머리라 따로 안 함)
+    if (edge === "r") { if (delta < 0) tacRippleCut(pivot + delta, pivot); else tacRippleHold(pivot, delta); } // 따라가는 전술 그림도 영상과 같이
+    else { const s0 = Math.min(...its.map(x => x.start)); if (d > 0) tacRippleCut(s0, s0 + d, new Set(), pivot); else tacRippleHold(s0, -d, pivot); }
     shiftAfter(pivot, delta, ign);
     for (const x of its) { if (edge === "l") { const s0 = x.start; trimStart(x, fr(s0 + d)); x.start = s0; } else trimEnd(x, fr(iEnd(x) + d)); }
   } else if (mode === "roll") {
@@ -3276,6 +3370,7 @@ function msgRemove(evId) {
     }
     for (const t of [...q.titles, ...q.shapes, ...(q.tactics || [])]) {
       const e = t.start + t.dur;
+      if (t.start < a - 1e-3 && e > a + 1e-3 && t.follow && t.follow.length) t.follow = tacFollowCut(t, a, b).follow; // 따라가는 전술 그림: 빠진 장면만큼 기록도 당김
       if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
     }
     for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
@@ -3854,8 +3949,11 @@ function setSpeed(its, s, ripple, rev, noCommit) {
     } else if (d > 0) for (const x of g) { const nx = nextStart(x); if (iEnd(x) > nx + EPS) { trimEnd(x, nx); trimmed = true; } }
   }
   changed(false);
-  if (trimmed) toast("뒤 클립과 겹쳐서 길이를 맞춰 잘랐어요");
-  else if (kept.size) toast(`${[...kept].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` + followNote(mv));
+  // 빠르기가 바뀐 클립 위 따라가는 전술 그림은 선수 움직임과 어긋남 → 다시 따라가기 안내 (I-181)
+  const fw = S.tactics.some(g => g.follow && g.follow.length && gs.some(q => g.start < Math.max(...q.map(iEnd)) - EPS && g.start + g.dur > Math.min(...q.map(x => x.start)) + EPS)) ? TAC_REFOLLOW : "";
+  if (trimmed) toast("뒤 클립과 겹쳐서 길이를 맞춰 잘랐어요" + fw);
+  else if (kept.size) toast(`${[...kept].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` + followNote(mv) + fw);
+  else if (fw && !noCommit) toast("빠르기를 바꿨어요" + fw);
 }
 function openSpeed() {
   const its = S.items.filter(x => selI.has(x.id) && unlocked(x.track)); if (!its.length) return toast("속도를 바꿀 클립을 먼저 골라 주세요");
@@ -4096,6 +4194,7 @@ function openExport() {
   $("exRange").querySelector('[data-v="io"]').disabled = !io; if (!io) EXP.range = "all";
   $("exRange").querySelectorAll("button").forEach(b => { b.classList.toggle("on", b.dataset.v === EXP.range); b.onclick = () => { if (!b.disabled) { EXP.range = b.dataset.v; openExport(); } }; });
   $("exSrtHint").textContent = S.captionsOn ? "" : " — 영상엔 자막을 안 넣어도 자막 파일은 만들어져요";
+  $("exXmlHint").textContent = S.tactics.length ? " · 전술 그림은 프리미어 파일에는 빠져요 (영상 mp4 에는 들어가요)" : "";
   $("exInfo").textContent = `길이 ${mmss(EXP.range === "io" ? markOut - markIn : total())} · 장면 전환 ${S.trans.length}개 · 트랙 ${new Set(S.items.map(x => x.track)).size}개 사용`;
   $("exModal").classList.add("show");
 }

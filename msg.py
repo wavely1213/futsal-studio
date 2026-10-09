@@ -3472,21 +3472,94 @@ TACTIC_MIN = 1.2      # 이보다 짧게 남으면 넣지 않음
 TACTIC_SEEN = 0.6     # 따라간 장면(마지막으로 본 곳까지) 중 이 비율 넘게 선수를 찾아야 넣음 (자주 놓치면 원이 엉뚱한 곳에 남음)
 TACTIC_MIN_H = 0.15   # 선수가 화면 높이의 이만큼은 보여야 (멀리 작은 사람·관중은 빼고)
 TACTIC_MOVE = 0.08    # 듬뿍: 선수가 화면 너비의 이만큼 넘게 움직이면 움직인 길을 곡선 화살표로
+TACTIC_NEAR = 0.25    # 공 차는 순간 선수 발과 공 사이가 화면의 이만큼 안이어야 그 선수 (I-182)
+TACTIC_CLEAR, TACTIC_CLEAR_D = 1.5, 0.05   # 다음으로 가까운 사람은 이 배수·이만큼 넘게 멀어야 (두 아이가 공 곁에 있으면 건너뜀)
+TACTIC_KICK = 0.06    # 다음 1초 안에 공이 그 선수 발에서 이만큼 넘게 멀어져야 (찬 사람 확인)
+TACTIC_OWN = 4        # 몰고 가기: 다음 1초(8장면) 중 이만큼 넘게 같은 공이 그 선수 발 곁에 있으면 공을 가진 사람
+TACTIC_BALL_JUMP = 0.15   # 공이 한 장면(1/8초)에 화면의 이만큼 넘게 옮겨 가면 다른 공으로 봄 (공이 둘 보이는 장면 · 못 본 장면이 있어도 두 장면 몫까지만)
+TACTIC_CROWD = 4      # 공이 보이는 장면에 사람이 이보다 많으면(다섯 명 이상 · 몰려 있는 연습·경기) 건너뜀
+TACTIC_CLOSE = 0.9    # 사람 상자가 화면 높이의 이만큼 넘으면 너무 가까이 찍힌 장면 (신발·다리만 · 원이 뜻이 없음)
 _TRACKS = {}          # (영상, 원본 a, b, 순간) → 선수 상자들 (스타일·양마다 다시 찾지 않게)
 
 
+def _framed(p):
+    """원이 뜻이 있는 크기로 보이는 선수 — 너무 가까이 찍혀(화면 높이 TACTIC_CLOSE 넘게·머리가 위 가장자리에 닿음) 신발·다리만 보이는 장면은 뺌."""
+    return p[3] <= TACTIC_CLOSE and p[1] > 0.01
+
+
+def _feet_d(p, ball):
+    return math.hypot(p[0] + p[2] / 2 - (ball[0] + ball[2] / 2), p[1] + p[3] - (ball[1] + ball[3] / 2))
+
+
+def _nballs(found):
+    """그 장면에서 찾은 공 수 (detect.people 'balls' · 예전 결과는 'ball' 하나)."""
+    f = found or {}
+    return len(f["balls"]) if "balls" in f else (1 if f.get("ball") else 0)
+
+
 def _subject(found):
-    """공 차는 순간 장면의 사람들 중 시범하는 선수 — 발이 공에 가장 가까운 사람 · 공을 못 찾으면 가장 크게 보이는 사람 (너무 작으면 None)."""
-    ps = [p for p in (found or {}).get("persons") or [] if p[3] >= TACTIC_MIN_H]
+    """공 차는 순간 장면에서 시범하는 선수 — 확실할 때만 (아니면 None · 엉뚱한 아이에게 원을 그리느니 안 넣음, I-182).
+    공이 보이면: 발이 공에 가장 가까운 사람이 TACTIC_NEAR 안이고, 다음으로 가까운 사람(작게 보이는 사람 포함)보다 뚜렷이 가까워야
+    (TACTIC_CLEAR 배 · 그리고 TACTIC_CLEAR_D 넘게). 공이 안 보이면: 화면에 사람이 한 명뿐일 때만 그 사람.
+    너무 작거나(멀리) 너무 가까이 찍힌(신발만) 사람은 None."""
+    allp = (found or {}).get("persons") or []
+    ps = [p for p in allp if p[3] >= TACTIC_MIN_H]
     if not ps:
         return None
     ball = (found or {}).get("ball")
-    if ball:
-        bx, by = ball[0] + ball[2] / 2, ball[1] + ball[3] / 2
-        near = min(ps, key=lambda p: math.hypot(p[0] + p[2] / 2 - bx, p[1] + p[3] - by))
-        if math.hypot(near[0] + near[2] / 2 - bx, near[1] + near[3] - by) < 0.25:
-            return near
-    return max(ps, key=lambda p: p[3])
+    if not ball:
+        return ps[0] if len(allp) == 1 and _framed(ps[0]) else None
+    if _nballs(found) > 1:
+        return None   # 공이 둘 넘게 보임 (모두 공을 가진 연습·골대 옆 공) — 누가 시범하는지 모름
+    if sum(1 for p in allp if p[3] >= TACTIC_MIN_H * 0.5) > TACTIC_CROWD:
+        return None   # 아이들이 여럿 몰려 있는 장면 — 상자가 겹쳐 엉뚱한 아이로 넘어가기 쉬움 (I-182)
+    ds = sorted(((_feet_d(p, ball), i) for i, p in enumerate(allp) if p[3] >= TACTIC_MIN_H * 0.5), key=lambda x: x[0])
+    near = min(ps, key=lambda p: _feet_d(p, ball))
+    d0 = _feet_d(near, ball)
+    if d0 >= TACTIC_NEAR or not _framed(near):
+        return None
+    rest = [d for d, i in ds if allp[i] is not near]
+    if rest and rest[0] < max(d0 * TACTIC_CLEAR, d0 + TACTIC_CLEAR_D):
+        return None   # 공 곁에 두 사람 — 누가 찼는지 모름
+    return near
+
+
+def _same_ball(seq, raw, k0, win):
+    """k0 다음 win 장면 중 같은 공(한 장면에 TACTIC_BALL_JUMP 넘게 튀지 않음)과 따라간 상자가 둘 다 보이는 장면 [(k, 공, 상자)].
+    공이 둘 보이는 장면에서 찾기 모델이 옆 아이의 공으로 넘어간 장면은 뺌 (못 본 장면이 있어도 두 장면 몫까지만 허용)."""
+    last, lk, out = (seq[k0][1] or {}).get("ball"), k0, []
+    for k in range(k0 + 1, min(len(seq), k0 + 1 + win)):
+        ball, bx = (seq[k][1] or {}).get("ball"), raw[k][1]
+        if not ball or bx is None:
+            continue
+        if math.hypot(ball[0] + ball[2] / 2 - last[0] - last[2] / 2, ball[1] + ball[3] / 2 - last[1] - last[3] / 2) > TACTIC_BALL_JUMP * min(2, k - lk):
+            continue
+        last, lk = ball, k
+        out.append((k, ball, bx))
+    return out
+
+
+def _kicked(seq, raw, k0, win=None):
+    """고른 선수가 공을 가진 사람인지 확인 — (차기) k0 다음 1초 안에 같은 공이 그 선수 발에서 TACTIC_KICK 넘게 멀어지거나
+    (몰고 가기) 같은 공이 TACTIC_OWN 장면 넘게 그 선수 발 곁(TACTIC_NEAR 안 · 다른 사람보다 뚜렷이 가까움)에 있어야.
+    seq = [(시각, 찾은 것)] · raw = [(시각, 따라간 상자 또는 None)] (같은 길이). 공이 안 보이면 False."""
+    win = win or int(tactic.TRACK_FPS)
+    ball0, bx0 = (seq[k0][1] or {}).get("ball"), raw[k0][1]
+    if not ball0 or bx0 is None:
+        return False
+    if any(_nballs(seq[k][1]) > 1 for k in range(k0, min(len(seq), k0 + 1 + win))):
+        return False   # 그 1초 안에 공이 둘 넘게 보이는 장면이 있음 → 누구 공인지 모름
+    d0, own = _feet_d(bx0, ball0), 0
+    for k, ball, bx in _same_ball(seq, raw, k0, win):
+        d = _feet_d(bx, ball)
+        if d - d0 >= TACTIC_KICK:
+            return True
+        others = sorted(_feet_d(p, ball) for p in (seq[k][1] or {}).get("persons") or [] if _feet_d(p, ball) > d + 0.01)
+        if d < TACTIC_NEAR and (not others or others[0] >= max(d * TACTIC_CLEAR, d + TACTIC_CLEAR_D)):
+            own += 1
+            if own >= TACTIC_OWN:
+                return True
+    return False
 
 
 def _seen_run(raw, k0, gap=2):
@@ -3528,8 +3601,10 @@ def _track_play(name, a, b, t, detect_fn=None):
         first = _subject(seq[k0][1]) if seq else None
         if first is not None:
             raw = tactic.follow_boxes([(ft, (r or {}).get("persons") or []) for ft, r in seq], first[0] + first[2] / 2, first[1] + first[3] / 2, start=k0)
-            lo, hi = _seen_run(raw, k0)   # 공 차는 순간에서 이어 본 곳만 (두 장면 넘게 놓친 뒤에 다시 잡은 상자는 다른 사람일 수 있음)
-            if sum(1 for _, x in raw[lo: hi + 1] if x is not None) >= TACTIC_SEEN * (hi - lo + 1):
+            if (seq[k0][1] or {}).get("ball") and not _kicked(seq, raw, k0):
+                raw = []   # 공을 차지도 몰고 가지도 않음 → 시범하는 사람인지 모름 (건너뜀)
+            lo, hi = _seen_run(raw, k0) if raw else (0, -1)   # 공 차는 순간에서 이어 본 곳만 (두 장면 넘게 놓친 뒤에 다시 잡은 상자는 다른 사람일 수 있음)
+            if raw and sum(1 for _, x in raw[lo: hi + 1] if x is not None) >= TACTIC_SEEN * (hi - lo + 1):
                 out = tactic.smooth(raw[lo: hi + 1])
     except Exception as e:  # noqa: BLE001 — 전술 그림은 곁가지: 못 넣어도 MSG 는 그대로
         import studiolog
@@ -3577,6 +3652,7 @@ def place_tactics(B, name, sig, moms, intensity, fmt, detect_fn=None):
         if any(t0 < y + TACTIC_GAP and x < t1 + TACTIC_GAP for x, y in used):
             continue
         boxes = _track_play(name, a, b, m["t"], detect_fn)
+        boxes = boxes[:next((i for i, (_, bx) in enumerate(boxes) if not _framed(bx)), len(boxes))]   # 선수가 카메라로 다가와 화면을 채우면(머리가 위에 닿음) 거기서 끝
         if not boxes:
             continue
         t0 = max(t0, editor.i_tl(it, boxes[0][0]))   # 선수를 처음·마지막으로 본 곳 사이만
@@ -3602,7 +3678,7 @@ def place_tactics(B, name, sig, moms, intensity, fmt, detect_fn=None):
         B.tactics.append(ring)
         text, why = "발밑 원", "시범 장면 · 선수를 따라가는 원"
         x1, y1 = pts[-1][1], pts[-1][2]
-        if intensity == "듬뿍" and math.hypot(x1 - x0, (y1 - y0) * H / W) >= TACTIC_MOVE:
+        if intensity == "듬뿍" and abs(x1 - x0) >= TACTIC_MOVE:   # 옆으로 움직였을 때만 (카메라 쪽으로 다가오면 길이 아래로 꺾여 뜻이 없음)
             mx, my = (x0 + x1) / 2, (y0 + y1) / 2
             ln = math.hypot((x1 - x0) * W, (y1 - y0) * H) or 1.0
             nx, ny = -(y1 - y0) * H / ln, (x1 - x0) * W / ln   # 진행 방향의 옆 (화면 px 단위 벡터)
