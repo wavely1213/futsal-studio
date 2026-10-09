@@ -278,10 +278,10 @@ class ShortsEdgesTest(Work):
         s = next(s for s in r["shorts"] if s["start"] <= 61.21 < s["end"])  # '아이고, 공이 조금 뒤로 갔네요.'로 여는 쇼츠
         demo_a, demo_b, kicks = FIX["MSGRAW02"]["demos"][1]  # 정답 실패 시범 53.97~60.97 · 공 소리 56.63·59.17
         self.assertLessEqual(s["start"], kicks[0] - 1.0)  # 공 소리(봉우리 56) 1초 앞부터 — 실패 장면이 반응 말 앞에
-        self.assertGreaterEqual(s["start"], 53.34)  # 앞 설명 문장 끝(53.34) 뒤 — 시범부터
-        c0 = s["cuts"][0]
-        self.assertLessEqual(c0["in"], kicks[0])
-        self.assertGreaterEqual(c0["out"], 61.21)  # 시범 → 반응 말이 한 컷으로 이어짐
+        # E2(BR-092): 그 포인트의 첫 문장('두 번째 동작은 …' 48.12)부터 시작할 수 있음 — 아니면 앞 설명 문장 끝(53.34) 뒤 시범부터
+        self.assertTrue(s["start"] >= 53.34 or abs(s["start"] - 48.12) < 0.05, s["start"])
+        c = next(c for c in s["cuts"] if c["in"] <= kicks[0] <= c["out"])
+        self.assertGreaterEqual(c["out"], 61.21)  # 시범 → 반응 말이 한 컷으로 이어짐
 
     def test_reaction_inside_short_keeps_its_demo(self):
         self.put("MSGRAW03", "MSGRAW03.mp4")

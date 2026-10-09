@@ -569,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p, ctype) if p.exists() else self._send(404, {"error": "not found"})
         if u.path == "/api/style/list":
             act = thumbstyle.editor_view().get("active")
-            return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else ""})
+            return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or ""})
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
             return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
@@ -674,7 +674,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"backups": editor.backups(q["name"][0])})
         if u.path == "/api/edit/autoseq":
             n = q["name"][0]
-            return self._send(200, {"sequences": editor.auto_sequences(n, editor.media_info(n))})
+            return self._send(200, {"sequences": editor.auto_sequences(n, editor.media_info(n), editor.default_style_params())})
         if u.path == "/api/edit/open":
             n = q["name"][0]
             try:
@@ -873,6 +873,14 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"스타일을 지우지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "스타일을 지우지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(200, {"ok": True})
+        if path == "/api/style/rough":  # 스타일 카드 '첫 가편집에 쓰기' 켜기/끄기 (E2 · BR-094)
+            try:
+                n = style.set_rough_default(str(b.get("name") or "") or None)
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, {"ok": True, "rough": n or ""})
         # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
         if path == "/api/style/tempo":
             try:
@@ -935,7 +943,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"ok": False, "error": "그림을 찾지 못했어요"})
 
             def do_cut():
-                sp2 = thumb.grab(cut_name, cut_t) if src.startswith("/frame") else sp
+                sp2 = thumb.grab(cut_name, cut_t, thumb.WORK_W) if src.startswith("/frame") else sp  # 누끼는 1920 으로 (메모리)
                 # 따로 프로세스에서 (끝나면 메모리 반환 · 죽어도 앱은 그대로 · 메모리가 모자라면 빠른 누끼)
                 out, used, note = cutout_worker.remove_bg(sp2, b.get("kind", "hq"), editor.CANCEL, editor._PROCS, log)
                 log(f"  누끼 완료 · {'고품질' if used == 'hq' else '빠른'} 모델{' · ' + note if note else ''}")

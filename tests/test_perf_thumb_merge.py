@@ -298,7 +298,7 @@ class CutRouteFrameTests(WorkBase):
         src = "/frame?name=" + quote(NAME) + "&t=1.5"
         with mock.patch.object(thumb, "grab", return_value=self.frame) as grab, mock.patch.object(cutout_worker, "remove_bg", side_effect=fake):
             done = self.cut({"src": src, "kind": "hq"})
-        grab.assert_called_once_with(NAME, 1.5)
+        grab.assert_called_once_with(NAME, 1.5, thumb.WORK_W)  # E2 (D-165): 누끼는 1920 장면으로
         self.assertEqual(seen, [(self.frame, "hq", self.editor.CANCEL, self.editor._PROCS)])
         self.assertIsNone(done["error"])
         self.assertEqual(done["result"], {"cut": "/asset/cut_9.png", "src": src, "kind": "fast", "note": cutout_worker.LOW_MEM_NOTE})
