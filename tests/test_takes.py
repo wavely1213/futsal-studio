@@ -510,6 +510,11 @@ class RecommendTest(unittest.TestCase):
                     self.assertEqual((now["tidy"], now["junk"], now["segments"]), (before["tidy"], before["junk"], before["segments"]))
                     gone = [s for s in before["shorts"] if any(x["in"] < 74.5 and x["out"] > 72.0 for x in s["cuts"])]
                     kept = [s for s in before["shorts"] if s not in gone]
+                    if c["kwargs"].get("n") == 5:
+                        # E2 검토: '그 다음에'는 장 나눔 말이 아니고 한 글자 추임새 줄('어')은 감점하지 않아서 31.0~61.0 후보(8.7)가
+                        # 21.5~48.2(8.5)보다 앞섬 → 그와 겹치는 둘째 쇼츠만 바뀜 (첫 쇼츠는 그대로)
+                        kept = [s for s in kept if s["start"] != 21.5]
+                        self.assertEqual([(s["start"], s["end"]) for s in now["shorts"] if s not in kept], [(31.0, 61.0)])
                     self.assertEqual([s for s in now["shorts"] if s in kept], kept)  # 안내 말이 없던 쇼츠는 그대로
                     for s in now["shorts"]:
                         self.assertFalse(any(x["in"] < 74.5 and x["out"] > 72.0 for x in s["cuts"]), s)

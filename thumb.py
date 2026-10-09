@@ -40,15 +40,16 @@ WORK_W = 1920     # 점수 매기기·글자 띠 찾기·누끼는 이 크기로
 
 def grab(name, t, w=None):
     """영상의 t초 장면을 이미지로. w 를 안 주면 원본 크기(가로 GRAB_MAX 까지 — 썸네일 편집기 배경 /frame),
-    주면 가로 최대 w (점수 매기기 WORK_W 등). 크기마다 다른 파일 (s_<시각>.jpg 원본 · h_<시각>.jpg 1920 · h_<시각>_w<w>.jpg) —
-    예전에는 크기와 상관없이 같은 이름이라 먼저 만든 작은 그림(MSG 얼굴 찾기 640)이 썸네일 배경으로 쓰일 수 있었음.
+    주면 가로 최대 w (점수 매기기 WORK_W 등). 크기마다 다른 파일 (s_<시각>.jpg 원본 · w_<시각>.jpg 1920 · h_<시각>_w<w>.jpg) —
+    예전에는 크기와 상관없이 같은 이름(h_<시각>.jpg)이라 먼저 만든 작은 그림(MSG 얼굴 찾기 640)이 썸네일 배경·점수·누끼에 쓰일 수 있었음 →
+    그 옛 캐시는 크기를 모르니 읽지 않고, 같은 장면의 1920 그림을 만들 때 지움 (E2 검토).
     임시 파일에 다 만든 뒤에만 제자리로 (디스크가 차거나 꺼져 반쪽이 된 그림이 '있는 파일'로 남아 계속 쓰이지 않게 ·
     같은 장면을 두 요청이 함께 만들어도 반쯤 쓴 파일을 내주지 않게)."""
     if w is None:
         out, ww = _frames_dir(name) / f"s_{t:09.3f}.jpg", GRAB_MAX
     else:
         ww = int(w)
-        out = _frames_dir(name) / (f"h_{t:09.3f}.jpg" if ww == WORK_W else f"h_{t:09.3f}_w{ww}.jpg")
+        out = _frames_dir(name) / (f"w_{t:09.3f}.jpg" if ww == WORK_W else f"h_{t:09.3f}_w{ww}.jpg")
     src, vf = str(core.VIDEOS / name), f"scale='min({ww},iw)':-2"
     if out.exists():
         return out
@@ -59,6 +60,8 @@ def grab(name, t, w=None):
         if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
             try:
                 updater.replace_retry(tmp, out)
+                if ww == WORK_W:
+                    (out.parent / f"h_{t:09.3f}.jpg").unlink(missing_ok=True)  # 크기를 모르는 옛 캐시
             except OSError:
                 pass
             break

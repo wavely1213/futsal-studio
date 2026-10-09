@@ -780,7 +780,7 @@ def _transcript(d):
         segs = json.loads(tj.read_text(encoding="utf-8"))
         try:  # 받아쓰기 헛것(무음 위 '감사합니다' · 영어 찌꺼기)은 제목·설명에 안 씀 (E2)
             sil = json.loads((d / "analysis.json").read_text(encoding="utf-8")).get("silences") if (d / "analysis.json").exists() else []
-            segs = captions.drop_hallucinations(segs, sil or [])[0]
+            segs = captions.drop_hallucinations(segs, sil or [], strict=True)[0]
         except Exception:  # noqa: BLE001
             pass
         return _segments(segs)

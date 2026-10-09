@@ -685,6 +685,7 @@ HALLU_SIL = 0.95     # 낱말 길이의 이만큼이 조용한 곳(silencedetect
 HALLU_SIL_P = 0.6    # 확신이 이보다 낮으면 소리 없이 지어낸 말
 HALLU_LATIN_P = 0.5  # 한글 없는 영어 낱말(3글자 넘게)이 이보다 확신이 낮으면 찌꺼기 ('functioning.' · 'paced...Pacific...')
 HALLU_WHY = "받아쓰기 헛것(확인 필요)"
+HALLU_MAYBE = "작은 말소리?(확인 필요 · 남겨 둠)"
 
 
 def _wplain(w):
@@ -710,8 +711,10 @@ def _covered_by(toks, near):
     return got / tot
 
 
-def hallucinations(words, silences=()):
-    """낱말 [{w, s, e, p}] (시간 순, 영상 전체) → 지어낸 낱말 번호 집합 (규칙은 위 HALLU_* · 말은 한국어 영상 기준)."""
+def hallucinations(words, silences=(), soft=None):
+    """낱말 [{w, s, e, p}] (시간 순, 영상 전체) → 지어낸 낱말 번호 집합 (규칙은 위 HALLU_* · 말은 한국어 영상 기준).
+    조용한 곳 위 확신 낮은 낱말은 멀리서 작게 찍힌 진짜 말일 수도 있어서 — 낱말 시각이 무너졌을 때만 지어낸 말로 보고,
+    아니면 soft(집합을 주면)에 넣어 '확인 필요'로 표시만 함 (자막·소리는 그대로 · E2 검토)."""
     ws = [w for w in words or ()]
     bad = set()
     sil = [(float(x["start"]), float(x["end"])) for x in silences or () if isinstance(x, dict) and "start" in x and "end" in x]
@@ -731,7 +734,10 @@ def hallucinations(words, silences=()):
             d = max(e - s, 1e-3)
             inside = sum(max(0.0, min(e, b) - max(s, a)) for a, b in sil)
             if (e - s < 1e-3 and any(a <= s <= b for a, b in sil)) or inside >= HALLU_SIL * d:
-                bad.add(i)
+                if _collapsed(w):
+                    bad.add(i)
+                elif soft is not None:
+                    soft.add(i)
     i = 0
     while i < len(ws):  # 한 점에 몰린 낱말 줄 — 가까운 곳에 같은 글이 있으면 그림자
         j = i
@@ -758,15 +764,22 @@ def hallucinations(words, silences=()):
     return bad
 
 
-def drop_hallucinations(segs, silences=()):
+def drop_hallucinations(segs, silences=(), soft=None, strict=False):
     """받아쓰기 구간 → (지어낸 낱말을 뺀 구간들, 뺀 것 [(시작, 끝, 글)]).
+    soft(목록을 주면): 조용한 곳 위 확신 낮은 낱말(빼지 않고 둠)을 [(시작, 끝, 글)] 로 더함 — 추천 탭 '확인 필요' 표시용.
+    strict: 그런 낱말도 뺌 (글로만 쓰는 곳 — 올리기 키트 제목·설명 · 소리를 자르지 않으니 놓쳐도 덜 아픔).
     낱말 시각이 있는 구간만 봄 · 남은 낱말로 글을 다시 쓰고 구간 시작·끝을 남은 낱말에 맞춤 · 다 빠지면 그 구간도 뺌.
     낱말 시각이 없는 예전 받아쓰기 구간은 영어 찌꺼기 한 줄('paced...Pacific...')만 뺌."""
     segs = [s for s in segs or () if isinstance(s, dict)]
     flat = [(k, j, w) for k, s in enumerate(segs) for j, w in enumerate(s.get("words") or ()) if isinstance(w, dict) and str(w.get("w") or "").strip()]
     flat.sort(key=lambda x: (float(x[2].get("s", 0) or 0), x[0], x[1]))
-    bad = hallucinations([w for _, _, w in flat], silences)
+    maybe = set()
+    bad = hallucinations([w for _, _, w in flat], silences, maybe)
+    if strict:
+        bad, maybe = bad | maybe, set()
     gone = {(flat[i][0], flat[i][1]) for i in bad}
+    if soft is not None:
+        soft.extend((round(float(flat[i][2]["s"]), 2), round(float(flat[i][2]["e"]), 2), str(flat[i][2]["w"]).strip()) for i in sorted(maybe))
     out, flags = [], []
     for k, s in enumerate(segs):
         ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]

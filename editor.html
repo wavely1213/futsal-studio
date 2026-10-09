@@ -779,7 +779,7 @@ function fullSeq(q, lo, hi) {
 }
 /* ---------- /군더더기 정리 ---------- */
 const shapeOn = (sh, t) => sh.full || (t >= sh.start && t < sh.start + sh.dur);
-function exportProject() { return { ...S, captions: P.captions, info: P.info, source: P.source, media: P.media }; }
+function exportProject() { return { ...S, captions: P.captions, speech: P.speech, info: P.info, source: P.source, media: P.media }; }
 
 /* 장면 전환 범위 · 트랙 상태 (editor.py 와 같은 규칙) */
 function trRange(tr) {
@@ -933,6 +933,7 @@ function commit(label) { pushHist(label, JSON.stringify(P)); }
 function uncommit() { hist.pop(); if (histDropped) { hist.unshift(histDropped); histDropped = null; } } // 방금 commit 한 것 취소 (할 일이 없었을 때)
 function changed(full = true) {
   S.items = S.items.filter(i => iLen(i) > 0.01); // 너무 짧아진 조각 정리
+  refitMusic();
   if (selX && selX.k === "gap") selX = null; // 내용이 바뀌면 예전 빈 곳 선택은 풀기
   ver++; fixTrans(); scheduleSave(); frameDirty = true;
   renderTimeline(); renderPanels();
@@ -1360,27 +1361,42 @@ function placeMedia(md, t, vt, at, mode, a = 0, b = null) {
 const BGM_FADE = 2;
 function videoEnd() { let e = 0; for (const it of S.items) { const tr = TRK(it.track); if (tr && tr.k === "v") e = Math.max(e, iEnd(it)); } return e; }
 function musicFit(it, how) {
-  const md = mdOf(it), dur = mDur(md), end = videoEnd(), k = sp(it);
+  const md = mdOf(it), dur = mDur(md), k = sp(it);
   S.items = S.items.filter(x => x.bgm !== it.id);
-  it.bgmFit = how;
-  const full = () => { if (it.rev) it.in = Math.max(0, it.out - dur); else it.out = Math.min(dur, it.in + (dur - it.in)); };
+  // 같은 트랙에서 이 음악 뒤에 놓인 다른 클립(두 번째 곡 등) 앞까지만 — 늘리거나 반복하며 남의 클립을 지우지 않음 (E8 검토)
+  const wall = Math.min(1e9, ...itemsOn(it.track).filter(x => x !== it && x.start >= it.start + EPS).map(x => x.start));
+  const end = Math.min(videoEnd(), wall);
+  it.bgmFit = how; delete it.bgmAt;
+  const full = () => { if (it.rev) it.in = Math.max(0, it.out - dur); else it.out = Math.min(dur, it.in + (dur - it.in)); if (iEnd(it) > wall) trimEnd(it, wall); };
   if (how === "full" || end <= it.start + 0.5) { full(); it.fadeOut = 0; return true; }
   if (how === "fit") {
     full();
     if (iEnd(it) > end) trimEnd(it, end);
-    it.fadeOut = Math.min(BGM_FADE, iLen(it) / 2); return true;
+    it.fadeOut = Math.min(BGM_FADE, iLen(it) / 2); it.bgmAt = iEnd(it); return true;
   }
   // loop
   full(); it.fadeOut = 0;
   let last = it, guard = 0;
   while (iEnd(last) < end - 0.05 && guard++ < 200) {
     const s0 = iEnd(last), c = { ...JSON.parse(JSON.stringify(it)), id: nid(), start: fr(s0), in: it.rev ? it.in : 0, out: it.rev ? it.out : dur, link: null, fadeIn: 0, fadeOut: 0, bgm: it.id };
-    delete c.bgmFit;
-    clearRange(it.track, c.start, Math.min(end, c.start + iLen(c))); S.items.push(c); last = c;
+    delete c.bgmFit; delete c.bgmAt;
+    S.items.push(c); last = c;
   }
   if (iEnd(last) > end) trimEnd(last, end);
   last.fadeOut = Math.min(BGM_FADE, iLen(last) / 2);
-  return true;
+  it.bgmAt = iEnd(last);
+  return wall < videoEnd() - 0.05 ? "wall" : true;
+}
+// 영상 끝이 바뀌면(잘라 내기·가편집 다시 만들기·끝 다듬기) '영상 끝에 맞추기'·'반복' 음악을 다시 맞춤 (E8 검토: 넣을 때만 맞추면 나중에 다시 검은 끝이 붙음)
+// 음악이 영상 끝을 넘으면 늘 맞춤 · 영상이 길어졌을 때는 마지막으로 맞춘 뒤 음악을 손대지 않았을 때만 (직접 줄인 음악은 그대로)
+function refitMusic() {
+  const end = videoEnd();
+  for (const it of S.items.slice()) {
+    if (it.bgm || (it.bgmFit !== "fit" && it.bgmFit !== "loop") || !unlocked(it.track) || end <= it.start + 0.5 || !S.items.includes(it)) continue;
+    const tail = Math.max(iEnd(it), ...S.items.filter(x => x.bgm === it.id).map(iEnd));
+    if (Math.abs(tail - end) < 0.05) continue;
+    if (tail > end + 0.05 || (it.bgmAt != null && Math.abs(tail - it.bgmAt) < 0.05)) musicFit(it, it.bgmFit);
+  }
 }
 const targetOf = k => (S.tracks.find(t => t.k === k && t.target && !t.lock) || S.tracks.find(t => t.k === k && !t.lock) || {}).id;
 
@@ -1636,9 +1652,11 @@ let speechHold = -9, duckG = 1, lastLoopT = 0;
 const DUCK_PAD = 0.2;
 let SPEECH = { key: "", spans: null };
 function speechSpans() {
-  const key = ver + "|" + (P.captions || []).length + "|" + S.id;
+  const key = ver + "|" + (P.captions || []).length + "|" + (P.speech || []).length + "|" + S.id;
   if (SPEECH.key === key) return SPEECH.spans;
-  const caps = (P.captions || []).filter(c => c.end > c.start && String(c.text || "").trim()).map(c => [c.start, c.end]).sort((a, b) => a[0] - b[0]);
+  // 자막 자리 + 받아쓴 말 자리(P.speech · 자막을 지운 말도) — editor.py speech_spans 와 같음
+  const caps = (P.captions || []).filter(c => c.end > c.start && String(c.text || "").trim()).map(c => [c.start, c.end])
+    .concat((P.speech || []).filter(x => x[1] > x[0])).sort((a, b) => a[0] - b[0]);
   let spans = null;
   if (caps.length) {
     const talk = [];
@@ -3334,7 +3352,8 @@ function bindFx(v, a, main, its) {
     $("pMute").onchange = e => { commit("음소거"); a.mute = e.target.checked; changed(false); };
     if ($("pBgm")) $("pBgm").querySelectorAll("button").forEach(b => b.onclick = () => {
       if (!unlocked(a.track)) return toast("잠긴 트랙이에요");
-      commit("음악 길이"); musicFit(a, b.dataset.v); changed();
+      commit("음악 길이"); const r = musicFit(a, b.dataset.v); changed();
+      if (r === "wall") return toast("같은 트랙 뒤에 다른 클립이 있어서 그 앞까지만 반복했어요 (그 클립은 그대로예요)");
       toast(b.dataset.v === "fit" ? `영상 끝에 맞춰 자르고 ${BGM_FADE}초 동안 줄였어요` : b.dataset.v === "loop" ? "영상 끝까지 음악을 반복했어요" : "음악을 원래 길이대로 뒀어요 (영상보다 길면 끝에 검은 화면이 붙어요)");
     });
     $("pVolAll").onclick = () => { commit("볼륨 모두 적용"); for (const x of itemsOn(a.track).filter(x => x !== a)) { x.fx = x.fx || {}; x.fx.level = remapFx(a, x, { level: prm(a, "level") }).level; x.gain = a.gain || 0; } changed(false); toast("같은 트랙 모든 클립에 적용했어요"); };
@@ -3493,6 +3512,7 @@ function renderMixer() {
       <div class="fw"><input type="range" class="vf" id="mxMaster" min="0" max="2" step="0.01" value="${S.master.volume}"><div class="mt"><i data-mt="master"></i></div></div><span class="db" id="mxMasterV">${fmtDb(linDb(S.master.volume))}</span></div></div>
     <div class="pg"><h4>배경음악 자동 줄이기 (덕킹)</h4>
       <label class="tog"><input type="checkbox" id="duckOn" ${S.duck.on ? "checked" : ""}> 말할 때 "음악" 트랙 소리를 자동으로 줄여요</label>
+      <div class="hint" style="margin-top:4px">받아쓴 말 자리(자막을 지운 말도)에서만 줄여요 · 말 없는 시범·공 소리에서는 음악을 그대로 둬요 · 받아쓰기가 놓친 말은 못 줄여요</div>
       <div style="margin-top:8px">${slider("duckAmt", "줄이는 정도", S.duck.amount, -30, -3, 1, v => v + " dB")}</div>
       <div class="hint">대사(A1) 트랙에 말소리가 있으면 음악(A2·A3)이 부드럽게 작아졌다가 말이 끝나면 다시 커져요.<br>배경음악 트랙을 잠그면(자물쇠) 구간 잘라내기(' · Q · W)를 해도 음악이 끊기지 않아요.</div></div>
     <div class="pg"><h4>목소리 보정 <span class="hint">(대사 트랙 · 프리미어의 에센셜 사운드 → 대화)</span></h4>

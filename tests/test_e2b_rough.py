@@ -21,6 +21,7 @@ import captions  # noqa: E402
 import core  # noqa: E402
 import editor  # noqa: E402
 import style  # noqa: E402
+import takes  # noqa: E402
 import upload  # noqa: E402
 
 FIX = json.loads((Path(__file__).resolve().parent / "fixtures" / "rough_e12.json").read_text(encoding="utf-8"))["videos"]
@@ -428,3 +429,217 @@ class OtherChannelKitTest(WorkMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------- E2 검토 고침 (E2b review) ----------
+
+class GreetingSectionReviewTest(WorkMixin, unittest.TestCase):
+    def test_greeting_only_real_greetings(self):
+        for t in ("이게 오늘의 핵심입니다", "여기는 디딤발이에요", "제가 시범 보여줄 거예요", "저는 왼발잡이예요", "저는 공이에요"):
+            self.assertFalse(editor.GREETING.search(t), t)
+        for t in ("안녕하세요. 여러분.", "풋살사관학교 최경진입니다.", "저는 김민수 코치예요.", "네, 저는 최경진입니다", "제가 감독이에요", "반갑습니다"):
+            self.assertTrue(editor.GREETING.search(t), t)
+
+    def test_section_only_explicit_markers(self):
+        for t in ("그 다음 발목을 고정하고", "다음으로 공을 보세요", "이번엔 왼발로 해볼게요", "정리하면 이거예요", "다음은 패스예요"):
+            self.assertFalse(editor.SECTION.match(t), t)
+        for t in ("자, 두 번째 포인트는 디딤발이에요", "세 번째 포인트.", "마지막으로 하나만", "오늘 배운 거 정리해 볼게요", "정리할게요"):
+            self.assertTrue(editor.SECTION.match(t), t)
+
+    LINES = ["오늘은 인사이드 패스 꿀팁을 알려드릴게요", "먼저 디딤발을 공 옆에 두세요", "그 다음 발목을 단단하게 고정하세요", "이게 진짜 중요해요",
+             "그 다음 발 안쪽으로 공의 가운데를 미세요", "다음으로 공을 끝까지 보세요", "이번엔 왼발로 해볼게요", "정리하면 디딤발과 발목이 핵심이에요",
+             "여러분도 꼭 연습해 보세요"]
+
+    def test_one_drill_with_step_words_stays_one_short(self):
+        """'그 다음'·'다음으로'·'이번엔'을 여러 번 쓰는 한 동작 설명 → 쇼츠 하나로 (예전: '다음으로' 앞에서 끊겨 24.5초에서 끝남)."""
+        segs = [{"start": 1.0 + 5 * k, "end": 4.5 + 5 * k, "text": t} for k, t in enumerate(self.LINES)]
+        r = editor.recommend(self.put("v.mp4", segs))
+        self.assertEqual([(s["start"], s["end"]) for s in r["shorts"]], [(1.0, 39.5)])
+
+    def test_lesson_line_early_is_not_dropped_from_shorts(self):
+        segs = [{"start": 1.0, "end": 3.0, "text": "안녕하세요"}, {"start": 3.5, "end": 6.0, "text": "이게 오늘의 핵심입니다"}] + \
+            [{"start": 7.0 + 5 * k, "end": 10.5 + 5 * k, "text": t} for k, t in enumerate(self.LINES[1:6])]
+        r = editor.recommend(self.put("v.mp4", segs + [{"start": 80.0, "end": 82.0, "text": "좋아요"}]))
+        self.assertTrue(r["shorts"])
+        self.assertEqual(r["shorts"][0]["start"], 3.5)  # 인사는 빼고 '이게 오늘의 핵심입니다'부터 (예전: 핵심 말도 빠짐)
+
+    def test_msg_segs_mode_keeps_v2160_rules(self):
+        """MSG(segs=…)는 새 쇼츠 규칙(인사·끝인사 빼기 · 장 나눔 점수 · 그림자 줄)을 안 씀 — v2.16.0 그대로 (따로 판정하며 다듬는 중)."""
+        import re
+        segs = [{"start": 0.5, "end": 4.0, "text": "안녕하세요 인사이드 패스 꿀팁 핵심이에요"}] + \
+            [{"start": 4.5 + 5 * k, "end": 8.0 + 5 * k, "text": t} for k, t in enumerate(self.LINES[1:5] + ["두 번째 포인트는 발목이에요", "이게 진짜 중요해요"])] + \
+            [{"start": 40.0, "end": 42.0, "text": "감사합니다"}]
+        name = self.put("v.mp4", segs)
+        off = (mock.patch.object(editor, "GREETING", re.compile("$^")), mock.patch.object(editor, "SECTION", re.compile("$^")),
+               mock.patch.object(takes, "CLOSING", re.compile("$^")))
+
+        def both(**kw):
+            a = editor.recommend(name, **kw)
+            for p in off:
+                p.start()
+            try:
+                b = editor.recommend(name, **kw)
+            finally:
+                for p in off:
+                    p.stop()
+            return [(s["start"], s["end"]) for s in a["shorts"]], [(s["start"], s["end"]) for s in b["shorts"]]
+        a, b = both()
+        self.assertNotEqual(a, b)  # 기본 가편집: 새 규칙이 쇼츠를 바꿈
+        a, b = both(segs=json.loads(json.dumps(segs)))
+        self.assertEqual(a, b)     # MSG: 그대로
+
+
+class QuietWordReviewTest(WorkMixin, unittest.TestCase):
+    def test_quiet_word_in_silence_is_soft(self):
+        ws = W(("발목을", 10.2, 10.7, 0.45), ("고정", 30.0, 30.0, 0.3))
+        sil = [{"start": 9.5, "end": 12.0}, {"start": 29.0, "end": 31.0}]
+        soft = set()
+        self.assertEqual(captions.hallucinations(ws, sil, soft), {1})  # 길이 0(무너진) 낱말만 지어낸 말
+        self.assertEqual(soft, {0})                                       # 멀리서 작게 찍힌 진짜 말일 수도 → 표시만
+
+    def test_drop_keeps_soft_words_strict_drops(self):
+        segs = [S(W(("공을", 1.0, 1.4), ("발목을", 10.2, 10.7, 0.45), ("고정하세요", 10.8, 11.6, 0.95)))]
+        sil = [{"start": 9.5, "end": 10.75}]
+        soft = []
+        out, flags = captions.drop_hallucinations(segs, sil, soft)
+        self.assertEqual(out[0]["text"], "공을 발목을 고정하세요")
+        self.assertEqual(flags, [])
+        self.assertEqual([x[2] for x in soft], ["발목을"])
+        out, flags = captions.drop_hallucinations(segs, sil, strict=True)  # 올리기 키트 글: 그래도 뺌
+        self.assertEqual(out[0]["text"], "공을 고정하세요")
+
+    def test_quiet_word_audio_not_cut(self):
+        ws = W(("발목을", 10.2, 10.7, 0.45), ("단단하게", 10.8, 11.5), ("고정하세요.", 11.6, 12.4), ("공은", 13.0, 13.4), ("가볍게", 13.5, 14.0), ("미세요.", 14.1, 14.7))
+        name = self.put("v.mp4", [S(ws)], {"silences": [{"start": 9.6, "end": 10.75}], "loud_peaks": []})
+        with mock.patch.object(editor, "_sound_onsets", lambda n, w: []):
+            r = editor.recommend(name)
+        self.assertGreater(kept(r["tidy"], 10.2, 10.7), 0.45)
+        self.assertIn(captions.HALLU_MAYBE, [j["why"] for j in r["junk_list"]])
+        self.assertEqual(r["junk"], 0)  # '확인 필요' 표시는 군더더기 수에 안 셈
+        self.assertIn("발목을", " ".join(s["text"] for s in editor._segments_of(name)))  # 자막에도 남음
+
+
+class DemoPeakReviewTest(WorkMixin, unittest.TestCase):
+    def test_loud_peak_alone_is_not_a_demo(self):
+        """분석 loud_peaks(카메라만 켜진 쉼의 바람·발소리에도 걸림)만으로는 말 없는 틈을 살리지 않음 — 파형 onset 만."""
+        ws = W(("공을", 1.0, 1.5), ("보세요.", 1.6, 2.2), ("발목을", 12.0, 12.5), ("고정", 12.6, 13.0), ("하세요.", 13.1, 13.8))
+        name = self.put("v.mp4", [S(ws)], {"silences": [{"start": 2.4, "end": 11.8}], "loud_peaks": [{"time": 6.5}]})
+        with mock.patch.object(editor, "_sound_onsets", lambda n, w: []):
+            r = editor.recommend(name)
+        self.assertEqual(r["demos"], [])
+        self.assertLess(kept(r["tidy"], 3.0, 11.5), 0.5)
+        with mock.patch.object(editor, "_sound_onsets", lambda n, w: [7.0]):
+            r = editor.recommend(name)
+        self.assertTrue(r["demos"])
+
+
+class HookReviewTest(unittest.TestCase):
+    def test_sentence_filter(self):
+        for t in ("마지막 다섯번째, 이거 넣으면 세개에요", "네번째, 슛", "이것도 들어갔어요", "나이스! 들어갔어요", "두 골 넣었어요"):
+            self.assertFalse(editor._hook_sentence_ok(t), t)
+        for t in ("패스하고 그 자리에 서 있으면 왜 안될까요?", "공이 오기 전에 고개를 들어서 주변을"):
+            self.assertTrue(editor._hook_sentence_ok(t), t)
+
+    def test_challenge_topic_before_raw_sentence(self):
+        segs = [{"start": 0.0, "end": 3.0, "text": "오늘은 슈팅 챌린지예요."}, {"start": 10.0, "end": 12.0, "text": "자, 첫번째, 갑니다."},
+                {"start": 14.0, "end": 15.0, "text": "이것도 들어갔어요."}, {"start": 40.0, "end": 42.0, "text": "마지막 다섯번째, 이거 넣으면 세개에요."},
+                {"start": 50.0, "end": 52.0, "text": "슈팅은 디딤발 방향이 핵심이에요."}]
+        shorts = [{"start": 10.0, "end": 30.0, "title": "이것도 들어갔어요", "keywords": []},
+                  {"start": 40.0, "end": 60.0, "title": "마지막 다섯번째, 이거 넣으면 세개에요", "keywords": []}]
+        self.assertEqual(editor.short_hooks(shorts, segs), ["슈팅 챌린지", "슈팅 꿀팁"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node 가 없어요")
+class MusicFitReviewTest(unittest.TestCase):
+    """editor.html musicFit·refitMusic 을 node 로 그대로 실행 (E8 검토: 영상이 짧아지면 다시 맞춤 · 반복은 다른 클립을 안 지움)."""
+
+    def run_js(self, body):
+        import subprocess
+        src = (Path(__file__).resolve().parents[1] / "editor.html").read_text(encoding="utf-8")
+        out = []
+        for name in ("const FPS =", "const EPS =", "const fr =", "const sp =", "const iEnd =", "const iLen =", "const itemsOn =", "const mDur =",
+                     "function trimEnd("):
+            i = src.index(name)
+            out.append(src[i:src.index("\n", i)])
+        i = src.index("const BGM_FADE")
+        out.append(src[i:src.index("const targetOf", i)])
+        prog = "let FPS_=0;\n" + "\n".join(out) + """
+const MED = {v: {id: "v", kind: "video", dur: 100}, m: {id: "m", kind: "audio", dur: 50}, m2: {id: "m2", kind: "audio", dur: 30}};
+const TR = {V1: {id: "V1", k: "v"}, A2: {id: "A2", k: "a"}};
+const TRK = id => TR[id], unlocked = () => true, mdOf = it => MED[it.media];
+let N = 0; const nid = () => "n" + (++N);
+const S = {items: []};
+""" + body
+        r = subprocess.run([shutil.which("node"), "-e", prog], capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_fit_follows_shorter_video(self):
+        res = self.run_js("""
+S.items.push({id: "v1", track: "V1", media: "v", start: 0, in: 0, out: 40}, {id: "mu", track: "A2", media: "m", start: 0, in: 0, out: 50});
+musicFit(S.items[1], "fit"); const a = iEnd(S.items[1]);
+S.items[0].out = 25; refitMusic(); const b = iEnd(S.items[1]);
+S.items[1].out = 20; refitMusic(); const c = iEnd(S.items[1]);  // 직접 줄인 음악은 그대로
+S.items[0].out = 35; refitMusic(); const d = iEnd(S.items[1]);
+process.stdout.write(JSON.stringify([a, b, c, d, S.items[1].fadeOut]));""")
+        self.assertEqual(res[:4], [40, 25, 20, 20])
+        self.assertEqual(res[4], 2)
+
+    def test_fit_grows_back_when_untouched(self):
+        res = self.run_js("""
+S.items.push({id: "v1", track: "V1", media: "v", start: 0, in: 0, out: 40}, {id: "mu", track: "A2", media: "m", start: 0, in: 0, out: 50});
+musicFit(S.items[1], "fit"); S.items[0].out = 25; refitMusic(); S.items[0].out = 45; refitMusic();
+process.stdout.write(JSON.stringify([iEnd(S.items[1])]));""")
+        self.assertEqual(res, [45])
+
+    def test_loop_stops_at_other_clip(self):
+        res = self.run_js("""
+S.items.push({id: "v1", track: "V1", media: "v", start: 0, in: 0, out: 100}, {id: "mu", track: "A2", media: "m2", start: 0, in: 0, out: 30},
+             {id: "song2", track: "A2", media: "m", start: 70, in: 0, out: 30});
+const r = musicFit(S.items[1], "loop");
+process.stdout.write(JSON.stringify([r, S.items.some(x => x.id === "song2" && x.start === 70 && x.out === 30),
+  Math.max(...S.items.filter(x => x.track === "A2" && x.id !== "song2").map(iEnd))]));""")
+        self.assertEqual(res, ["wall", True, 70])
+
+    def test_loop_refits_after_ripple(self):
+        res = self.run_js("""
+S.items.push({id: "v1", track: "V1", media: "v", start: 0, in: 0, out: 100}, {id: "mu", track: "A2", media: "m2", start: 0, in: 0, out: 30});
+musicFit(S.items[1], "loop"); const a = S.items.filter(x => x.bgm === "mu").length;
+S.items[0].out = 50; refitMusic();
+process.stdout.write(JSON.stringify([a, Math.max(...S.items.filter(x => x.track === "A2").map(iEnd)), S.items.filter(x => x.bgm === "mu").length]));""")
+        self.assertEqual(res, [3, 50, 1])
+
+
+class SpeechWordsReviewTest(WorkMixin, unittest.TestCase):
+    def test_speech_words_merge_and_old_segments(self):
+        segs = [S(W(("공을", 1.0, 1.4), ("보세요", 1.5, 2.0), ("나이스", 5.0, 5.5))), {"start": 8.0, "end": 9.0, "text": "좋아요"}]
+        self.assertEqual(editor.speech_words(segs), [[1.0, 2.0], [5.0, 5.5], [8.0, 9.0]])
+
+    def test_deleted_caption_still_ducks(self):
+        q = DuckingTest.seq(None, [])
+        q["speech"] = [[11.0, 12.0]]
+        sp, _ = editor.speech_spans(q)
+        self.assertEqual([[round(a, 2), round(b, 2)] for a, b in sp], [[2.8, 4.2]])
+
+    def test_project_has_speech(self):
+        name = self.put("v.mp4", [S(W(("공을", 1.0, 1.4), ("보세요", 1.5, 2.0)))])
+        proj = {"source": name, "info": {"duration": 10, "width": 1920, "height": 1080}, "captions": [], "sequences": [], "media": [{"id": "main"}]}
+        with mock.patch.object(editor, "_has_audio", lambda n: True):
+            editor.migrate_project(name, proj)
+        self.assertEqual(proj["speech"], [[1.0, 2.0]])
+
+
+class ThumbCacheReviewTest(WorkMixin, unittest.TestCase):
+    def test_old_unknown_size_cache_ignored(self):
+        import thumb
+        v = core.VIDEOS / "big.mp4"
+        r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=2560x1440:r=10:d=1", "-c:v", "libx264", "-preset", "ultrafast",
+                      "-pix_fmt", "yuv420p", str(v)])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        from PIL import Image
+        old = thumb._frames_dir("big.mp4") / "h_00000.500.jpg"
+        Image.new("RGB", (640, 360)).save(old)  # 예전 MSG 가 같은 이름으로 남긴 640 그림
+        work = thumb.grab("big.mp4", 0.5, thumb.WORK_W)
+        with Image.open(work) as im:
+            self.assertEqual(im.size, (1920, 1080))
+        self.assertFalse(old.exists())

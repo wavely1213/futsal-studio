@@ -284,7 +284,8 @@ def export_saved(name, seq_id, preset="youtube", log=print):
     seq = next((q for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("id") == seq_id), None)
     if not seq:
         raise RuntimeError("편집본을 찾지 못했어요 · 편집실에서 지웠는지 확인해 주세요")
-    merged = {**seq, "captions": proj.get("captions"), "info": proj.get("info"), "source": proj.get("source"), "media": proj.get("media")}
+    merged = {**seq, "captions": proj.get("captions"), "speech": proj.get("speech"), "info": proj.get("info"), "source": proj.get("source"),
+              "media": proj.get("media")}
     return export(name, merged, {"preset": preset, "fps": 30, "video": True, "srt": True, "xml": False, "hw": True, "range": None}, log)
 
 
@@ -857,6 +858,19 @@ def _hook_cut(text, limit=HOOK_MAX):
     return re.sub(r"[.,…\s]+$", "", " ".join(out)) if out else t[:limit]
 
 
+HOOK_COUNT = re.compile(r"^(?:자[,\s]*)?(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열|한|\d+)\s?(?:번째|개|번|골)|"
+                        r"(?:한|두|세|네|다섯|\d)\s?개(?:에요|예요|째|\W|$)")
+
+
+def _hook_sentence_ok(t):
+    """제목으로 쓸 문장인지 — 순서·개수로 시작하거나 개수를 말하는 문장('마지막 다섯번째, 이거 넣으면 세개에요' · 결과를 미리 알려 줌)과
+    반응만 있는 짧은 문장('이것도 들어갔어요' · 혼자서는 뜻이 없음)은 아님 (E2 검토)."""
+    t = str(t or "").strip()
+    if not t or HOOK_COUNT.search(t):
+        return False
+    return not (REACTION.match(t) or (re.search(REACT_STRONG, t) and len(_norm(t)) <= 10))
+
+
 def short_hooks(shorts, segs):
     """쇼츠 후보들의 위 큰 제목 (E2 · BR-093) — 쇼츠마다 다르게:
     ① 그 쇼츠 대사의 풋살 용어(hooks.topic_keywords · 흔한 말 하나는 빼고) → '디딤발 꿀팁'(포인트·핵심 같은 말이 있으면) / '트래핑!'
@@ -868,6 +882,7 @@ def short_hooks(shorts, segs):
         whole = [t for t in hooks.topic_keywords(texts, n=3, lesson=False) if hooks._compact(t) not in HOOK_NOT_TOPIC - {"패스"}]
     except Exception:  # noqa: BLE001 — 용어 사전을 못 읽어도 제목은 만듦
         whole = []
+    challenge = any("챌린지" in t for t in texts)
     used, out = set(), []
     for r in shorts:
         inside = [t for t in texts_in(segs, r["start"], r["end"])]
@@ -885,9 +900,13 @@ def short_hooks(shorts, segs):
         if m and whole:
             cands.append(f"{whole[0]}\n" + re.sub(r"(첫|두|세|네|다섯|여섯|일곱)\s?번째\s?", r"\1 번째 ", m.group(0)))  # 두 줄로 ('첫 / 번째'처럼 갈라지지 않게)
         cands += [f"{t} 꿀팁" if tip else f"{t}!" for t in own if t not in lead]
-        if r.get("title") and len(_norm(_hook_cut(r["title"]))) >= HOOK_MIN:  # 너무 짧은 첫 문장('네 번째')은 제목으로 안 씀
-            cands.append(_hook_cut(r["title"]))
-        cands += [f"{whole[0]} 꿀팁" if tip else f"{whole[0]}!"] if whole else []
+        sent = _hook_cut(r["title"]) if r.get("title") and len(_norm(_hook_cut(r["title"]))) >= HOOK_MIN else ""  # 너무 짧은 첫 문장('네 번째')은 안 씀
+        sent = sent if _hook_sentence_ok(sent) else ""
+        if sent.endswith("?"):  # 묻는 말 첫 문장은 주제어보다 앞 ('패스하고 그 자리에 서 있으면 왜 안될까요?')
+            cands.append(sent)
+        if whole:  # 문장보다 영상 주제 ('슈팅 챌린지' · '슈팅 꿀팁' · '슈팅!') — 쇼츠마다 다르게 고르도록 여럿
+            cands += ([f"{whole[0]} 챌린지"] if challenge else []) + ([f"{whole[0]} 꿀팁"] if tip else []) + [f"{whole[0]}!"]
+        cands.append(sent)
         cands.append(_old_hook(r))
         h = next((c for c in cands if c and _norm(c) not in used and _norm(c) not in {_norm(g) for g in GENERIC}), cands[0] if cands else "")
         used.add(_norm(h))
@@ -1247,7 +1266,7 @@ def _face_samples(items, a, b, one=False):
 
 
 def _grab_small(name, t, folder):
-    """원본 t 초 장면 → folder 안 FACE_W 크기 그림 (못 만들면 None) · 썸네일 장면 캐시(frames/h_*.jpg, 1920)와 섞이지 않게 따로."""
+    """원본 t 초 장면 → folder 안 FACE_W 크기 그림 (못 만들면 None) · 썸네일 장면 캐시(frames/w_*.jpg 1920 · s_*.jpg 원본)와 섞이지 않게 따로."""
     out = Path(folder) / f"f_{t:09.3f}.jpg"
     r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(core.VIDEOS / name), "-frames:v", "1",
                   "-vf", f"scale='min({FACE_W},iw)':-2", "-q:v", "3", str(out)])
@@ -1478,6 +1497,11 @@ def migrate_project(name, proj):
                 pass
         for s in bare:
             s["auto"] = "rough" if s.get("name") in auto else "user"
+    if "speech" not in proj:  # E2 검토: 받아쓴 말 자리 (배경음악 줄이기) — 예전 프로젝트는 받아쓰기에서 한 번 만듦
+        try:
+            proj["speech"] = speech_words(_segments_of(name))
+        except Exception:  # noqa: BLE001 — 받아쓰기를 못 읽어도 프로젝트는 열림 (자막만으로)
+            proj["speech"] = []
     for s in proj["sequences"]:
         migrate_seq(s)
         lm = {}  # 자르기를 반복해 길어진 연결 표시(link)를 짧게 (같은 것끼리는 계속 같게)
@@ -1722,6 +1746,7 @@ def load_project(name):
         "source": name,
         "info": info,
         "captions": _captions_of(segs, info, silences_of(name)),
+        "speech": speech_words(segs),
         "sequences": seqs,
         "active": seqs[0]["id"],
     }
@@ -1840,6 +1865,7 @@ def reanalyze_project(name):
     caps = _captions_of(segs, info, silences_of(name))
     changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
     proj["captions"] = caps
+    proj["speech"] = speech_words(segs)
     for m in proj.get("media") or []:
         if m.get("id") == "main":
             m.update(dur=info["duration"], w=info["width"], h=info["height"], fps=info.get("fps", 30.0))
@@ -1933,15 +1959,22 @@ OPENER = re.compile(r"^(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마�
 FRESH = re.compile(r"^(?:자[\s,]|오늘은?\s|이제\s|그리고\s|(?:자[,\s]*)?(?:(?:첫|두|세|네|다섯)\s?번째|마지막으로))")  # 새 문장을 여는 첫마디
 REACT_ONLY = 16        # 앞에 시범이 없으면 이 글자 이하의 반응 말 줄은 쇼츠 첫 줄에서 뺌 ('좋아요, 그럼 두 번째는…' 같은 긴 줄은 그대로)
 # 여담 ('오늘 진짜 물 좀 마시고 할게요' · '아 오늘 바람 진짜 많이 부네요') — 쇼츠에서는 뺌 (롱폼은 그대로 · 짧은 줄만)
+ASIDE_V2160 = r"물\s?(?:좀\s?)?마시고|바람\s?(?:이\s?)?(?:진짜\s?|정말\s?|너무\s?)?(?:많이\s?)?부네|(?:^|\s)(?:진짜\s?|너무\s?)?(?:덥네요|춥네요)|잠깐\s?쉬(?:었다|고\s?(?:할|갈))"
+ASIDE_OLD = re.compile(ASIDE_V2160)  # MSG(segs 를 줌) 쇼츠는 v2.16.0 여담 말 그대로 (E2 검토 · 공 줍기 말은 기본 가편집에서만)
 ASIDE = re.compile(r"공\s?(?:좀\s?)?가져(?:올|오|갈)|공\s?(?:좀\s?)?(?:주우|주워|줍)|물\s?(?:좀\s?)?마시고|바람\s?(?:이\s?)?(?:진짜\s?|정말\s?|너무\s?)?(?:많이\s?)?부네|(?:^|\s)(?:진짜\s?|너무\s?)?(?:덥네요|춥네요)|잠깐\s?쉬(?:었다|고\s?(?:할|갈))")
 ASIDE_LEN = 20
 # 쇼츠 끝에 두면 매달리는 말: 다음 일을 예고하는 말('정리해 볼게요' · '보여 드릴게요' · '첫 번째 갑니다') · 여담
 DANGLING = re.compile(r"(?:(?:할|갈|볼|드릴|줄|올)게요|하겠습니다|가겠습니다|보겠습니다|드리겠습니다|(?:^|\s)갑니다|시작(?:할게요|합니다))\W*$|"
                       r"(?:^|\s)(?:첫|두|세|네|다섯|마지막)\s?번째\W*$|" + ASIDE.pattern)
-SECTION = re.compile(r"^(?:자[,\s]*)?(?:(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱) ?번째|다음은|다음으로|이번엔|이번에는|그 ?다음|(?:그리고\s)?마지막으로|"
-                     r"오늘\s?배운\s?(?:거|것)|정리(?:해\s?볼게요|할게요|하면|해\s?보면))")  # 장 나눔 말 (msg.SECTION 과 같은 말 + 마무리 정리 '오늘 배운 거 정리해 볼게요')
-GREETING = re.compile(r"안녕하세요|안녕하십니까|반갑습니다|(?:저는|제가|여기는)\s?.{1,12}(?:입니다|이에요|예요)|\S{2,10}의\s?\S{2,6}입니다|"
-                      r"사관학교\s?\S*입니다|최경진입니다")  # 인사·자기소개 (takes.OPENING 에서 '오늘은 … 알려 드릴게요' 주제 소개만 뺀 것)
+SECTION = re.compile(r"^(?:자[,\s]*)?(?:(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱) ?번째|(?:그리고\s)?마지막으로|"
+                     r"오늘\s?배운\s?(?:거|것)|정리(?:해\s?볼게요|할게요))")  # 포인트를 나누는 분명한 말만 ('N번째 …' · '마지막으로' · 마무리 정리) —
+# '다음으로'·'그 다음'·'이번엔'·'정리하면'은 한 동작 안 순서 말로도 늘 쓰여서 장 나눔으로 안 봄 (E2 검토)
+_GREET_END = r"(?:입니다|이에요|예요)(?:[.!~,\s]|$)"
+GREETING = re.compile(r"안녕하세요|안녕하십니까|반갑습니다|사관학교\s?\S*입니다|최경진(?:\s?감독)?입니다|"
+                      r"(?:^|[.!?]\s*)(?:저는|제가)\s?(?:[" + "".join(sorted(set("김이박최정강조윤장임한오서신권황안송류전홍고문양손배백허유남심노하곽성차주우구민진나지엄채원천방공현함변염여추도소석선설마길연위표명기반왕금옥육인맹제모탁국어은편용"))) +
+                      r"][가-힣]{1,2}\s?)?(?:감독|코치|선생님?|강사)?" + _GREET_END)
+# 인사·자기소개만 ('안녕하세요' · '풋살사관학교 최경진입니다' · '저는 김민수 코치예요') — '오늘의 핵심입니다' · '여기는 디딤발이에요' ·
+# '제가 시범 보여줄 거예요' 같은 레슨 말은 아님 (E2 검토)
 SECTION_CROSS = 4.0    # 쇼츠 후보가 장 나눔 말을 하나 넘을 때마다 뺄 점수 (포인트 하나 = 쇼츠 하나)
 SECTION_START = 3.0    # 장 나눔 말로 시작하는 후보에 더할 점수
 SHORT_EDGE = 0.25      # 첫 인사는 영상 앞 이 비율 안, 끝인사는 뒤 이 비율 안에서만 찾음
@@ -2089,13 +2122,14 @@ GAP_DEMO_POST = 2.0    # 마지막 큰 소리 뒤 공이 굴러가는 것까지(
 GAP_DEMO_RUN = 8.0     # 큰 소리끼리 이 초 안이면 한 시범
 
 
-def _clean_transcript(name, silences=None):
-    """받아쓰기 파일 → (헛것을 뺀 구간들, 뺀 것 [(시작, 끝, 글)]) — 글이 빈 구간도 뺌 (E2 · BR-090)."""
+def _clean_transcript(name, silences=None, soft=None):
+    """받아쓰기 파일 → (헛것을 뺀 구간들, 뺀 것 [(시작, 끝, 글)]) — 글이 빈 구간도 뺌 (E2 · BR-090).
+    soft(목록을 주면): 빼지는 않고 '확인 필요'로만 보일 낱말 (조용한 곳 위 확신 낮은 말)."""
     t = core.adir(name) / "transcript.json"
     if not t.exists():
         return [], []
     raw = [s for s in json.loads(t.read_text(encoding="utf-8")) if str(s.get("text") or "").strip()]
-    segs, flags = captions.drop_hallucinations(raw, silences_of(name) if silences is None else silences)
+    segs, flags = captions.drop_hallucinations(raw, silences_of(name) if silences is None else silences, soft)
     return [s for s in segs if str(s.get("text") or "").strip()], flags
 
 
@@ -2221,13 +2255,14 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     extra_p = core.adir(name) / "analysis.json"
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
-    word_mode, hallu, line_junk, demos = segs is None, [], [], []
+    word_mode, hallu, line_junk, demos, maybe = segs is None, [], [], [], []
     if segs is not None:
         segs = [s for s in segs if str(s.get("text") or "").strip()]
     else:
-        segs, hallu = _clean_transcript(name, extra.get("silences"))
+        segs, hallu = _clean_transcript(name, extra.get("silences"), maybe)
     hallu_iv = [(a, b, captions.HALLU_WHY) for a, b, _ in hallu if b > a]  # 빈 길이(한 점에 몰린 낱말)는 자를 소리가 없음 · 표시만
     hallu_show = [(a, max(b, a + 0.01), captions.HALLU_WHY) for a, b, _ in hallu if b <= a]
+    maybe_show = [(a, max(b, a + 0.01), captions.HALLU_MAYBE) for a, b, _ in maybe]  # 조용한 곳 위 낮은 확신: 자르지 않고 표시만 · 군더더기 수에 안 셈 (E2 검토)
     if word_mode and segs:
         # 낱말 단위 (E2 · BR-091): 받아쓰기 구간이 문장 여럿·말 없는 틈을 한데 묶어도 문장·쉼에서 나눠 그 사이 빈 곳은 자르고
         # (MSG 와 같은 msg.clean_lines — 한 줄 안의 다시 하기·끊긴 말·슬레이트 말·영어 찌꺼기도 뺌), 말 없는 틈의 시범·환호(순간 큰 소리)는 살림
@@ -2246,7 +2281,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
                     ln["cont"] = True
                 prev = k
         else:
-            demos = gap_demos(raw_words, [float(p) + 0.5 for p in peaks] + ons)
+            # 순간 큰 소리(파형 onset)만 — 분석의 loud_peaks 는 카메라만 켜진 쉼(바람·발소리)에도 걸려 빈 곳을 살림 (E2 검토)
+            demos = gap_demos(raw_words, ons)
         # '다시 해볼게요' 뒤에 다음 말보다 공 소리·시범이 먼저 오면 다시 찍기가 아니라 시범 예고 → 남김 (msg._recommend 와 같은 규칙 ·
         # 그 말을 받아쓰기가 한 번 더 겹쳐 쓴 줄('해볼게요.')은 '다음 말'로 보지 않음)
         acts = [float(p) + 0.5 for p in peaks] + (ons or [])
@@ -2277,7 +2313,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         if i + 1 < len(segs) and _norm(s["text"]) == _norm(segs[i + 1]["text"]) and not takes.repeat_ok(s["text"], segs[i + 1]["text"]):
             junk.add(i)
         # 받아쓰기가 앞 말 둘을 한 점에 겹쳐 다시 쓴 그림자 ('네 번째' '빗나갔어요.' 뒤 '네번째 빗나갔어요.'(길이 0 낱말)) → 그림자를 뺌 (E2)
-        if i >= 2 and any(captions._collapsed(w) for w in s.get("words") or ()) and len(_norm(s["text"])) >= 4 \
+        if word_mode and i >= 2 and any(captions._collapsed(w) for w in s.get("words") or ()) and len(_norm(s["text"])) >= 4 \
                 and _norm(segs[i - 2]["text"] + segs[i - 1]["text"]) == _norm(s["text"]) and float(s["start"]) - float(segs[i - 2]["start"]) <= 15:
             junk.add(i)
     junk_iv = takes.find_junk(segs, extra.get("silences", []), peaks)  # NG 테이크·슬레이트·말더듬 구간 (사이에 시범 소리가 있으면 같은 설명도 그대로)
@@ -2286,17 +2322,19 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
     fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
     sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
-    sjunk |= {i for i, s in enumerate(segs) if ASIDE.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
+    aside = ASIDE if word_mode else ASIDE_OLD
+    sjunk |= {i for i, s in enumerate(segs) if aside.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
     # 쇼츠 = 포인트 하나 (E2 · BR-092): 영상 첫머리 인사·자기소개와 끝인사(그 뒤 모두)는 쇼츠에서 빼고 ('오늘은 … 알려 드릴게요' 주제 소개는 둠),
     # 장 나눔 말('자, 두 번째 포인트는 …')을 넘어가는 후보는 점수를 덜 줌 · 장 나눔 말로 시작하면 조금 더
-    if segs:
+    # MSG(segs 를 줌)는 v2.16.0 그대로 — MSG 쇼츠는 따로 판정하며 다듬는 중이라 새 점수 규칙은 기본 가편집(word_mode)에만 (E2 검토)
+    if segs and word_mode:
         t_end = float(segs[-1]["end"])
         sjunk |= {i for i, s in enumerate(segs) if float(s["start"]) <= SHORT_EDGE * t_end and GREETING.search(s["text"])
                   and len(_norm(s["text"])) <= GREET_LEN}
         bye = next((i for i, s in enumerate(segs) if float(s["start"]) >= (1 - SHORT_EDGE) * t_end and takes.CLOSING.search(s["text"])), None)
         if bye is not None:
             sjunk |= set(range(bye, len(segs)))
-    section = [bool(SECTION.match(str(s["text"]).strip())) for s in segs]
+    section = [word_mode and bool(SECTION.match(str(s["text"]).strip())) for s in segs]
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
@@ -2318,12 +2356,12 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         j, sc, chars, junk_n = i, 0.0, 0, 0
         while j < len(segs) and segs[j]["end"] - start <= max_len:
             if j in sjunk:
-                junk_n += 0 if len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
+                junk_n += 0 if word_mode and len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
             else:
                 sc += seg_score(segs[j])
                 chars += len(_norm(segs[j]["text"]))
             end = segs[j]["end"]
-            if end - start >= min_len and j not in sjunk:  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
+            if end - start >= min_len and not (word_mode and j in sjunk):  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
                 dur = end - start
                 score = sc + 2.5 * sum(1 for p in peaks if start <= p <= end) + 2.0 * (chars / dur) - 1.5 * junk_n
                 # 첫 문장이 강한 말로 시작하면 가산 (훅)
@@ -2390,7 +2428,8 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         if len(picked) >= n:
             break
     picked.sort(key=lambda p: -p["score"])
-    for r, h in zip(picked, short_hooks(picked, segs)):
+    by_time = sorted(picked, key=lambda r: r["start"])  # 제목은 영상 순서대로 고름 (앞 쇼츠가 '주제 챌린지' · 뒤 쇼츠가 그다음 후보)
+    for r, h in zip(by_time, short_hooks(by_time, segs)):
         r["hook"] = h
 
     # 롱폼용: 전체에서 군더더기·긴 무음 정리한 컷 (반응 말 앞 시범은 남김 · 같은 받아쓰기 구간 안 빈 곳은 예전처럼 그대로)
@@ -2422,7 +2461,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         tidy[-1] = dict(tidy[-1], out=round(post_a, 2))
     lj = line_junk + hallu_iv + hallu_show
     return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv) + len(lj), "segments": len(segs),
-            "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + edge_iv + fill_iv + lj, key=lambda x: (x[0], -x[1]))],
+            "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + edge_iv + fill_iv + lj + maybe_show, key=lambda x: (x[0], -x[1]))],
             "demos": [[round(a, 2), round(b, 2)] for a, b in demos],
             # 영상 밖 말 (추천 탭에 보여 줌) · cut: long 은 가편집(롱폼)에서도 자른 것, shorts 는 쇼츠·티저에서만 뺀 것 (롱폼은 표시만)
             "offscript": [dict(o, cut="long" if o["kind"] in ("pre", "post") else "shorts") for o in off]}
@@ -3624,6 +3663,18 @@ AFFTDN_DELAY = int(round(SR * 0.025))  # 잡음 줄이기(afftdn)가 소리를 2
 DUCK_PAD = 0.2   # 배경음악 줄이기: 받아쓴 말(자막) 앞뒤 이만큼(초)도 말하는 중으로 봄 (E2 · BR-095)
 
 
+def _rms20(buf, n, win):
+    """소리 버퍼 (n×2) → 20ms 창마다 RMS (n // win + 1 칸)."""
+    import numpy as np
+    rms = np.zeros(n // win + 1, np.float32)
+    for b in range(0, n, win * 3000):
+        seg = np.asarray(buf[b: b + win * 3000])
+        k = len(seg) // win
+        if k:
+            rms[b // win: b // win + k] = np.sqrt((seg[: k * win] ** 2).mean(axis=(1,)).reshape(k, win).mean(axis=1))
+    return rms
+
+
 def _merge_spans(ivs, gap=0.0):
     out = []
     for a, b in sorted(ivs):
@@ -3634,8 +3685,22 @@ def _merge_spans(ivs, gap=0.0):
     return out
 
 
+def speech_words(segs, gap=0.3):
+    """받아쓰기(헛것 뺀 것) → 말소리 자리 [[a, b]] (원본 시각 · 낱말 사이 gap 초 안은 합침 · 낱말 시각이 없는 구간은 통째로).
+    프로젝트 'speech' 로 저장 — 자막을 지워도(일부러 뺀 말·지운 자막) 배경음악 줄이기는 그 말 자리를 앎 (E2 검토)."""
+    ivs = []
+    for sg in segs or ():
+        ws = [w for w in sg.get("words") or () if str(w.get("w") or "").strip()]
+        try:
+            ivs += [(float(w["s"]), float(w["e"])) for w in ws] if ws else [(float(sg["start"]), float(sg["end"]))]
+        except (KeyError, TypeError, ValueError):
+            continue
+    return [[round(a, 2), round(b, 2)] for a, b in _merge_spans([(a, b) for a, b in ivs if b > a], gap)]
+
+
 def speech_spans(seq):
-    """배경음악을 줄일 '말하는 중' 타임라인 구간 — 대사 트랙의 원본 클립에서 받아쓴 말(프로젝트 자막 captions, 원본 시각) 자리 ± DUCK_PAD.
+    """배경음악을 줄일 '말하는 중' 타임라인 구간 — 대사 트랙의 원본 클립에서 받아쓴 말(프로젝트 자막 captions 와 받아쓴 말 자리 speech,
+    원본 시각) 자리 ± DUCK_PAD (자막을 지운 말도 줄임 · 받아쓰기가 아예 놓친 말은 못 앎 — I-161).
     (말 없는 시범·환호·공 소리는 줄이지 않음 · 미리보기 editor.html speechSpans 와 같은 규칙)
     → (구간 [[a, b]], 소리 크기로 볼 다른 영상 대사 클립 구간 [[a, b]]) · 자막이 하나도 없으면 None (예전처럼 소리 크기로)."""
     caps = []
@@ -3645,6 +3710,13 @@ def speech_spans(seq):
         except (KeyError, TypeError, ValueError):
             continue
         if b > a and str(c.get("text") or "").strip():
+            caps.append((a, b))
+    for c in seq.get("speech") or ():
+        try:
+            a, b = float(c[0]), float(c[1])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if b > a:
             caps.append((a, b))
     if not caps:
         return None
@@ -3880,14 +3952,7 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         win = SR // 50  # 20ms
         if mus is not None and duck.get("on"):
             nw = n // win + 1
-            rms = np.zeros(nw, np.float32)
-            for b in range(0, n, win * 3000):
-                seg = np.asarray(dia[b: b + win * 3000])
-                k = len(seg) // win
-                if k:
-                    r = np.sqrt((seg[: k * win] ** 2).mean(axis=(1,)).reshape(k, win).mean(axis=1))
-                    rms[b // win: b // win + k] = r
-            act = rms > 10 ** (-40 / 20)
+            act = _rms20(dia, n, win) > 10 ** (-40 / 20)
             sp_tl = speech_spans(seq)
             if sp_tl is not None:  # 받아쓴 말 자리만 (말 없는 시범·환호에서는 음악이 살아남) · 다른 영상 대사 클립은 소리 크기로 (E2)
                 tw = t_lo + np.arange(nw) * 0.02
