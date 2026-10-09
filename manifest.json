@@ -1,6 +1,8 @@
 {
   "version": "2.17.0",
   "notes": "편집실 전술 그림: 영상 위에 형광 화살표·굽은 화살표·패스 길·선수 발밑 원·스포트라이트·이름표를 그려요 (그래픽 탭) · '이 선수 따라가기'를 누르면 그림이 선수를 따라 움직여요 · 미리보기와 완성본이 똑같이 나와요 · MSG 보통·듬뿍은 시범 장면에 선수를 확실히 찾을 때만 원을 넣어요",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/7dd855c6a9bcec2d0412dee5bdb2f9ddfd230f05.zip",
+  "commit": "7dd855c6a9bcec2d0412dee5bdb2f9ddfd230f05",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "8c7472394d9044f00ae16839c9d0e882743e035c1242c5f13f3ea2f455cea040",
