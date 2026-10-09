@@ -1287,11 +1287,13 @@ class Handler(BaseHTTPRequestHandler):
                 editor.video_path(n)
             except (ValueError, TypeError, FileNotFoundError):
                 return self._send(404, {"ok": False, "error": "보관함에서 영상을 찾지 못했어요. 목록을 새로 고친 뒤 다시 골라 주세요"})
-            opts, resume = autorun.options(b), b.get("resume") is True
+            opts, resume = autorun.options(b, remember=True), b.get("resume") is True
             ok = start_job(autorun.JOB, lambda: autorun.run(n, opts, log, self._analyze, resume))
             if ok:
                 CRASH.clear()
             return self._send(200 if ok else 409, _started(ok))
+        if path == "/api/auto/prefs":  # 편집실 MSG 체크(클로드 오타·재미 자막)를 바꿈 → 휴대폰에서 시작한 끝까지 자동으로도 같은 설정
+            return self._send(200, {"ok": True, "prefs": autorun.save_prefs({k: b.get(k) for k in ("proofread", "writer")})})
         if path == "/api/auto/claim":  # 썸네일 그리기 요청을 이 화면이 맡음 (먼저 맡은 화면 하나만)
             got = autorun.claim(str(b.get("id") or ""))
             return self._send(200 if got else 409, dict(got or {}, ok=bool(got)))

@@ -76,8 +76,11 @@ def save(st):
 
 
 def resumable(st):
-    """이어서 할 수 있는 기록 (끝나지 않았음)."""
-    return bool(st) and st.get("status") in ("running", "stopped", "failed")
+    """이어서 할 수 있는 기록: 끝나지 않았거나, 다 했어도 실패한 단계가 있음 (화면이 없어 못 그린 썸네일 등 · 빠진 것만 다시)."""
+    if not st:
+        return False
+    return st.get("status") in ("running", "stopped", "failed") or (
+        st.get("status") == "done" and any((x or {}).get("state") == "fail" for x in (st.get("steps") or {}).values()))
 
 
 def view(name):
@@ -95,8 +98,16 @@ def public(st):
     steps = [dict(key=k, label=lb, **{x: v for x, v in (st["steps"].get(k) or {"state": "todo"}).items() if x in ("state", "note", "at")})
              for k, lb in STEPS]
     return {"name": st["name"], "id": st["id"], "status": st.get("status"), "opts": st.get("opts"), "steps": steps,
-            "outputs": st.get("outputs") or [], "check": st.get("check") or [], "started": st.get("started"),
-            "finished": st.get("finished"), "points": len(st.get("points") or [])}
+            "outputs": [dict(o, thumbLabel=thumb_label(o)) for o in st.get("outputs") or []], "check": st.get("check") or [], "started": st.get("started"),
+            "finished": st.get("finished"), "points": len(st.get("points") or []), "redo": resumable(st)}
+
+
+def thumb_label(o):
+    """결과물 썸네일 파일 이름에 넣는 말 ('<편집본 이름>_썸네일' → '<영상>_<편집본 이름>_썸네일_N.jpg' · 그 편집본 키트가 고름).
+    결과 카드 [썸네일]이 썸네일 편집기에 넘겨, 사람이 다시 만든 썸네일도 그 결과물 것으로 저장됨 (E7 검토)."""
+    import upload
+    sq = {"name": o.get("name"), "format": "shorts" if o.get("kind") == "shorts" else "long"}
+    return upload._seq_label(sq) + upload.OWN_THUMB.rstrip("_")
 
 
 def default_style():
@@ -117,9 +128,42 @@ def default_style():
     return {"kind": "preset", "name": next(iter(msg.PRESETS))}
 
 
-def options(b):
-    """화면·휴대폰이 보낸 값 → 정해 둔 값만 (모르는 값은 기본값). 화면에서 정한 받아쓰기·MSG 설정(클로드 오타·재미 자막)을 그대로 따름."""
+PREFS_FILE = "auto_prefs.json"   # 작업 폴더 안: PC 화면에서 마지막으로 고른 받아쓰기·MSG 설정 (휴대폰에서 시작할 때 씀 · E7 검토)
+PREF_KEYS = ("proofread", "writer", "model")
+
+
+def load_prefs():
+    try:
+        d = json.loads((core.WORK / PREFS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: d[k] for k in PREF_KEYS if k in d} if isinstance(d, dict) else {}
+
+
+def save_prefs(b):
+    """PC 화면(스튜디오 시작 · 편집실 MSG 체크)이 고른 설정을 남김 — 보낸 것만 바꿈. → 남긴 설정."""
     b = b if isinstance(b, dict) else {}
+    d = load_prefs()
+    for k in ("proofread", "writer"):
+        if isinstance(b.get(k), bool):
+            d[k] = b[k]
+    if isinstance(b.get("model"), str):
+        d["model"] = core.model_of(b["model"])
+    try:
+        updater.write_atomic(core.WORK / PREFS_FILE, json.dumps(d, ensure_ascii=False))
+    except OSError:  # 못 남겨도 이번 작업은 그대로
+        pass
+    return d
+
+
+def options(b, remember=False):
+    """화면·휴대폰이 보낸 값 → 정해 둔 값만 (모르는 값은 기본값). 화면에서 정한 받아쓰기·MSG 설정(클로드 오타·재미 자막)을 그대로 따름 —
+    휴대폰처럼 그 설정을 보내지 않으면 PC 화면에서 마지막으로 고른 것 (remember: PC 화면이 보낸 것을 남김)."""
+    b = b if isinstance(b, dict) else {}
+    if remember:
+        save_prefs(b)
+    pf = load_prefs()
+    b = dict(b, **{k: pf[k] for k in PREF_KEYS if k in pf and k not in b})
     lv = b.get("intensity") if b.get("intensity") in LEVELS else "보통"
     try:
         n = int(b.get("shorts", SHORTS_DEFAULT))
@@ -168,10 +212,14 @@ def run(name, opts, log=print, analyze=None, resume=False):
         LIVE.update(name=name, i=0, n=len(STEPS), label="")
     studiolog.target(path=PATH, names=[name])  # 갑자기 꺼지면 다음에 켤 때 이 영상으로 [이어서 하기]
     ctx = _Ctx(st, log, analyze)
+    ran = False
     try:
         for i, (key, label) in enumerate(STEPS):
-            if key != "check" and (st["steps"].get(key) or {}).get("state") in ("done", "skip"):  # 실패한 단계는 이어서 할 때 다시 (만든 결과물은 건너뜀)
+            # 이어서 할 때: 끝난 단계는 건너뛰고 실패한 단계부터 다시 — 그 뒤 단계는 모두 다시 봄 (단계 안에서 만든 결과물은 건너뜀 ·
+            # 앞에서 새로 만든 MSG 편집본·썸네일이 뒤의 내보내기·키트에 담기게 · E7 검토)
+            if not ran and key != "check" and (st["steps"].get(key) or {}).get("state") in ("done", "skip"):
                 continue
+            ran = True
             if _cancelled():
                 raise Stopped()
             LIVE.update(i=i + 1, label=label)
@@ -234,6 +282,17 @@ def _out(st, key, **init):
     st["outputs"].append(o)
     st["outputs"].sort(key=lambda x: (x["key"] != "long", int(re.sub(r"\D", "", x["key"]) or 0)))
     return o
+
+
+def _set_seq(o, sid, name, msg):
+    """결과물의 편집본을 정함 — 편집본이 바뀌면(가편집 → 다시 해서 MSG) 예전 편집본으로 만든 완성본·썸네일·키트 기록은 버림 (다시 만들게)."""
+    if o.get("seq") and o["seq"] != sid:
+        for k in ("export", "srt", "qaScore", "thumb", "thumbInfo", "kit"):
+            o.pop(k, None)
+        o["qa"] = []
+    o.update(seq=sid, name=name, msg=msg)
+    if msg:
+        o.pop("msgFail", None)
 
 
 def _seq_of(proj, sid):
@@ -300,6 +359,46 @@ def _shorts_keep():
     return st.get("keepPause")
 
 
+ORDINAL = re.compile(r"(?:첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열|한|\d+)\s*번\s*째")
+ORD_TAIL = {"포인트", "동작", "방법", "단계", "팁", "꿀팁", "기술", "가지", "연습", "훈련", "설명", "시범"}
+
+
+def generic_hook(h):
+    """'퍼스트 터치 첫 번째 포인트' · '패스 두 번째 동작' 처럼 순서 말뿐인 제목 (유튜브 제목·쇼츠 위 큰 제목으로 뜻이 안 드러남)."""
+    h = re.sub(r"\s+", " ", str(h or "")).strip()
+    if not h:
+        return True
+    if not ORDINAL.search(h):
+        return False
+    rest = [w for w in ORDINAL.sub(" ", h).replace("!", " ").replace("?", " ").split() if w not in ORD_TAIL and re.sub(r"[^0-9A-Za-z가-힣]", "", w)]
+    return len("".join(rest)) <= 6
+
+
+def _cut_off(alt, title):
+    """예전 규칙 제목이 첫 문장을 글자 수로 자른 조각인지 ('공이 오기 전에 고개를 들어서 주변을' ← '… 주변을 먼저 보세요.')."""
+    a, t = (re.sub(r"[^0-9A-Za-z가-힣]", "", str(x or "")) for x in (alt, title))
+    return bool(a) and a in t and len(a) < len(t)
+
+
+def short_hook(r):
+    """쇼츠 하나의 위 큰 제목 · 키트 제목 → (제목, 사람이 확인할지). 추천 제목이 순서 말뿐이면 예전 규칙('주제어 꿀팁')으로 —
+    예전 규칙이 첫 문장을 자른 조각이면 추천 제목의 주제어 + '꿀팁' (E7 검토)."""
+    h = editor._hook(r)
+    if not generic_hook(h):
+        return h, False
+    title = str(r.get("title") or "")
+    try:
+        alt = editor._old_hook(dict(r, keywords=list(r.get("keywords") or []), title=title))
+    except Exception:  # noqa: BLE001 — 예전 규칙이 안 되면 아래
+        alt = ""
+    if alt and not generic_hook(alt) and not _cut_off(alt, title):
+        return alt, True
+    rest = " ".join(w for w in ORDINAL.sub(" ", str(h or "")).split() if w not in ORD_TAIL).strip()
+    if rest:
+        return f"{rest} 꿀팁", True
+    return (alt if alt and not generic_hook(alt) else (h or "오늘의 포인트")), True
+
+
 def _step_rough(c):
     proj = editor.load_project(c.name)  # 없으면 첫 가편집(첫 가편집 스타일)까지 만듦
     rough = next((q for q in proj.get("sequences") or [] if q.get("format") == "long" and q.get("auto") in ("rough", "style")), None)
@@ -309,8 +408,16 @@ def _step_rough(c):
     if n:
         rec = editor.recommend(c.name, keep_pause=_shorts_keep(), n=n)
         for r in sorted(rec["shorts"], key=lambda r: r["start"]):
-            pts.append({"start": round(float(r["start"]), 2), "end": round(float(r["end"]), 2), "hook": editor._hook(r),
+            hook, check = short_hook(r)
+            pts.append({"start": round(float(r["start"]), 2), "end": round(float(r["end"]), 2), "hook": hook, "hookCheck": check,
                         "title": r.get("title") or "", "keywords": r.get("keywords") or [], "cuts": r["cuts"]})
+        seen = {}
+        for pt in pts:  # 쇼츠끼리 같은 제목이면 사람이 고르게
+            seen.setdefault(pt["hook"], []).append(pt)
+        for same in seen.values():
+            if len(same) > 1:
+                for pt in same:
+                    pt["hookCheck"] = True
     c.st["points"] = pts
     if not n:
         return "done", "쇼츠는 만들지 않아요"
@@ -330,7 +437,7 @@ def _step_msg_long(c):
     proj = editor.load_project(c.name)
     have = _tagged(proj, c.st["id"], "long")
     if have:
-        o.update(seq=have["id"], name=have.get("name"), msg=bool(have.get("msg")))
+        _set_seq(o, have["id"], have.get("name"), bool(have.get("msg")))
         return "done", "이미 만들었어요"
     try:
         res = msg.build_variants(c.name, [c.opts["style"]], c.opts["intensity"], ("long",), **_msg_args(c))
@@ -341,22 +448,39 @@ def _step_msg_long(c):
         if not rid or not _seq_of(proj, rid):
             raise
         sq = _seq_of(proj, rid)
-        o.update(seq=rid, name=sq.get("name"), msg=False, msgFail=_say(e))
+        _set_seq(o, rid, sq.get("name"), False)
+        o["msgFail"] = _say(e)
         return "fail", f"MSG 를 넣지 못해 가편집 '{sq.get('name')}' 그대로 내보내요 · {_say(e)}"
     seq = res["sequences"][0]
     seq.update(name=f"자동 롱폼 · {seq['msg']['style'].get('label') if isinstance(seq.get('msg'), dict) and isinstance(seq['msg'].get('style'), dict) else c.opts['style']['name']} · {c.opts['intensity']}",
                autoRun=c.st["id"], autoKey="long")
     got = add_to_project(c.name, [seq], res.get("media") or [], res.get("captions"), res.get("captionsOld"))
-    o.update(seq=got[0]["id"], name=got[0]["name"], msg=True)
+    _set_seq(o, got[0]["id"], got[0]["name"], True)
     return "done", (seq.get("msg") or {}).get("summary", {}).get("text", "")
 
 
 def _short_name(i, pt, tail=""):
     """쇼츠 편집본 이름 (파일 이름이 되므로 줄바꿈·겹친 빈칸 없이 · 위 큰 제목은 두 줄일 수 있음)."""
-    hook = re.sub(r"\s+", " ", str(pt.get("hook") or "")).strip()
-    if len(hook) > 24:  # 길면 낱말 경계에서 (파일 이름이 너무 길지 않게)
-        hook = hook[:24].rsplit(" ", 1)[0]
-    return f"자동 쇼츠 {i + 1} · {hook}{tail}"
+    return f"자동 쇼츠 {i + 1} · {_name_cut(pt.get('hook'))}{tail}"
+
+
+NAME_MAX = 24
+
+
+def _name_cut(text, n=NAME_MAX):
+    """파일 이름이 될 제목을 n 자 안으로: 문장부호 뒤 → 이음말(…면·…고·…데·…서) 뒤 → 낱말 경계 순으로 자르고 '…' (질문 한가운데서 끊지 않게 · E7 검토)."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(t) <= n:
+        return t
+    head = t[:n]
+    m = list(re.finditer(r"[,.?!~…]", head))
+    if m and m[-1].start() >= n // 3:
+        return head[:m[-1].start()].strip() + "…"
+    ws = head.split(" ")[:-1] if not t[n:n + 1].isspace() else head.split(" ")
+    for k in range(len(ws), 1, -1):
+        if re.search(r"(?:면|고|데|서|며|니까|는데|지만)$", ws[k - 1]) and len(" ".join(ws[:k])) >= n // 3:
+            return " ".join(ws[:k]) + "…"
+    return (" ".join(ws) or head).strip() + "…"
 
 
 def _rough_short(c, i, pt):
@@ -380,9 +504,10 @@ def _step_msg_shorts(c):
     todo = []
     for i, pt in enumerate(pts):
         o = _out(c.st, f"short{i + 1}", kind="shorts", point=i, hook=pt["hook"], src=[pt["start"], pt["end"]])
+        o["hookCheck"] = bool(pt.get("hookCheck"))
         have = _tagged(proj, c.st["id"], f"short{i + 1}")
         if have:
-            o.update(seq=have["id"], name=have.get("name"), msg=bool(have.get("msg")))
+            _set_seq(o, have["id"], have.get("name"), bool(have.get("msg")))
         else:
             todo.append(i)
     if not todo:
@@ -404,7 +529,7 @@ def _step_msg_shorts(c):
     for i in todo:
         o = _out(c.st, f"short{i + 1}")
         if i in got:
-            o.update(seq=got[i]["id"], name=got[i]["name"], msg=True)
+            _set_seq(o, got[i]["id"], got[i]["name"], True)
             continue
         q = _rough_short(c, i, pts[i])
         if q:
@@ -412,7 +537,9 @@ def _step_msg_shorts(c):
     if rough:
         added = add_to_project(c.name, [q for _, q in rough])
         for (i, _), q in zip(rough, added):
-            _out(c.st, f"short{i + 1}").update(seq=q["id"], name=q["name"], msg=False, msgFail=err or "재미 순간이 모인 구간이 너무 짧아요")
+            o = _out(c.st, f"short{i + 1}")
+            _set_seq(o, q["id"], q["name"], False)
+            o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
     if rough:
         return "fail", f"쇼츠 {len(rough)}개는 MSG 를 넣지 못해 가편집 그대로예요" + (f" · {err}" if err else "")
     return "done", f"쇼츠 {len(todo)}개"
@@ -477,7 +604,6 @@ def _step_export_shorts(c):
 
 def _step_thumbs(c):
     import thumb
-    import upload
     outs = [o for o in c.st["outputs"] if o.get("seq")]
     if not outs:
         return "skip", "썸네일을 만들 결과물이 없어요"
@@ -495,7 +621,7 @@ def _step_thumbs(c):
         core.set_progress(label="썸네일", item=c.name, pct=None, detail=f"AI 추천 썸네일 그리는 중 ({k + 1}/{len(todo)}) · 스튜디오 화면이 그려요")
         try:
             used = [x["thumbInfo"]["copy"] for x in outs if x is not o and (x.get("thumbInfo") or {}).get("copy")]
-            r = request_thumb(c.name, "short" if o["kind"] == "shorts" else "long", upload._seq_label(sq) + upload.OWN_THUMB.rstrip("_"),
+            r = request_thumb(c.name, "short" if o["kind"] == "shorts" else "long", thumb_label(dict(o, name=sq.get("name") or o.get("name"))),
                               o.get("src"), used)
         except AutoError as e:
             o["thumbFail"] = str(e)
@@ -556,8 +682,18 @@ def _mmss(t):
     return f"{t // 60:02d}:{t % 60:02d}"
 
 
-def caption_checks(name, limit=CAPTION_MAX):
-    """사람이 들어 봐야 할 자막: 헛것으로 보고 뺀 말·작은 말소리(확인 필요) + 받아쓰기가 자신 없어 한 낱말 (원본 시각 순)."""
+def _cut_point(items, a, b):
+    """원본에서 지운 구간 [a, b] 가 이 편집본 안(앞뒤로 남긴 컷 사이)에 있으면 그 이음매의 타임라인 시각 · 아니면 None."""
+    v1 = sorted((it for it in items if it.get("track") == "V1" and it.get("media", "main") == "main"), key=lambda it: float(it["start"]))
+    before = any(float(it["out"]) <= a + 0.3 for it in v1)
+    after = next((it for it in v1 if float(it["in"]) >= b - 0.3), None)
+    return float(after["start"]) if before and after else None
+
+
+def caption_checks(name, outputs=None, limit=CAPTION_MAX):
+    """사람이 들어 봐야 할 자막: 헛것으로 보고 뺀 말·작은 말소리(확인 필요) + 받아쓰기가 자신 없어 한 낱말.
+    outputs(결과물 기록)를 주면 결과물에 실제로 들어간(또는 그 사이에서 지운) 것만, '결과물 이름 + 그 편집본 시각'으로 (E7 검토 ·
+    모든 결과물에서 잘려 나간 말은 빼서 찾느라 헛수고하지 않게). 결과물이 없으면 원본 시각."""
     import captions
     out = []
     try:
@@ -570,21 +706,48 @@ def caption_checks(name, limit=CAPTION_MAX):
 
     def said(a, b):
         return " ".join(str(w["w"]).strip() for w in words if a - 0.05 <= (float(w["s"]) + float(w["e"])) / 2 <= b + 0.05)[:30]
-    flagged = []
+    flagged = []  # (a, b, 낱말, 까닭, 지웠는지)
     for j in rec.get("junk_list") or []:
         if j.get("why") in (captions.HALLU_WHY, captions.HALLU_MAYBE):
-            what = "지어낸 말 같아서 뺐어요" if j["why"] == captions.HALLU_WHY else "작은 말소리라 남겨 뒀어요"
-            flagged.append((float(j["a"]), float(j["b"]), f"자막 확인 {_mmss(j['a'])} '{said(j['a'], j['b']) or '…'}' · {what}"))
+            gone = j["why"] == captions.HALLU_WHY
+            flagged.append((float(j["a"]), float(j["b"]), said(j["a"], j["b"]) or "…", "지어낸 말 같아서 뺐어요 (진짜 말이었는지 들어 봐 주세요)" if gone
+                            else "작은 말소리라 남겨 뒀어요", gone))
     low = sorted(((float(w.get("p")), float(w["s"]), float(w["e"]), str(w["w"]).strip()) for s in segs for w in s.get("words") or ()
                   if isinstance(w.get("p"), (int, float)) and float(w["p"]) < LOW_P
                   and len(re.sub(r"[^0-9A-Za-z가-힣]", "", str(w.get("w") or ""))) >= 2), key=lambda x: x[0])  # '어?'·'세' 같은 한 글자는 늘 낮게 나와 뺌
     for p, a, b, w in low:
-        if any(fa - 0.1 <= a <= fb + 0.1 for fa, fb, _ in flagged):
+        if any(fa - 0.1 <= a <= fb + 0.1 for fa, fb, *_ in flagged):
             continue
-        flagged.append((a, b, f"자막 확인 {_mmss(a)} '{w}' · 받아쓰기가 자신 없어 했어요 ({int(p * 100)}%)"))
-    for a, b, text in sorted(flagged[:limit]):
-        out.append({"kind": "caption", "lv": "warn", "text": text, "t": round(a, 2)})
-    return out
+        flagged.append((a, b, w, f"받아쓰기가 자신 없어 했어요 ({int(p * 100)}%)", False))
+    seqs = []
+    if outputs is not None:
+        try:
+            proj = editor.load_project(name)
+        except Exception:  # noqa: BLE001 — 프로젝트를 못 읽으면 결과물 시각 없이 (원본 시각)
+            proj = None
+        for o in outputs:
+            sq = _seq_of(proj or {}, o.get("seq")) if o.get("seq") else None
+            if sq and sq.get("items"):
+                seqs.append((o, sq["items"]))
+    rows = []
+    for a, b, w, why, gone in flagged:
+        if not seqs:
+            if outputs is None or not any(o.get("seq") for o in outputs):
+                rows.append((0, a, {"kind": "caption", "lv": "warn", "text": f"자막 확인 · 원본 {_mmss(a)} '{w}' · {why}", "t": round(a, 2), "src": round(a, 2)}))
+            continue
+        hits = []
+        for o, items in seqs:
+            t = _cut_point(items, a, b) if gone else editor._src_to_tl(items, (a + b) / 2)
+            if t is not None:
+                hits.append((o, t))
+        if not hits:
+            continue  # 모든 결과물에서 잘려 나감 → 볼 것 없음
+        o, t = hits[0]
+        more = f" (그 밖에 결과물 {len(hits) - 1}개에도)" if len(hits) > 1 else ""
+        rows.append((0 if o.get("kind") == "long" else 1, t, {"kind": "caption", "lv": "warn", "out": o["key"], "seq": o["seq"], "t": round(t, 2),
+                                                               "src": round(a, 2), "text": f"자막 확인 · {o.get('name') or o['key']} {_mmss(t)} '{w}' · {why}{more}"}))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    return [r[2] for r in rows[:limit]]
 
 
 def checklist(st):
@@ -601,8 +764,11 @@ def checklist(st):
         elif s.get("state") in (None, "todo", "run") and st.get("status") in ("stopped", "failed"):
             add("fail", "warn", f"{lb} · 아직 안 했어요 ([이어서 하기]로 마저 해요)")
     if (st["steps"].get("rough") or {}).get("state") in ("done", "skip"):
-        items += caption_checks(st["name"])
+        items += caption_checks(st["name"], [o for o in st.get("outputs") or [] if o.get("seq")])
     weak = []
+
+    def low_score(ti):
+        return ti.get("score") is not None and float(ti["score"]) < THUMB_WEAK
 
     def tried(step):  # 그 단계를 해 봤을 때만 '없어요'를 적음 (멈춰서 아직 안 한 단계는 위의 '아직 안 했어요' 한 줄)
         return (st["steps"].get(step) or {}).get("state") in ("done", "fail")
@@ -619,13 +785,16 @@ def checklist(st):
         ti = o.get("thumbInfo") or {}
         if o.get("seq") and not o.get("thumb") and tried("thumbs"):
             add("thumb", "warn", f"{nm} · 썸네일이 없어요" + (f" · {o['thumbFail']}" if o.get("thumbFail") else ""), key)
-        elif o.get("thumb") and ti.get("weak"):
+        elif o.get("thumb") and ti.get("weak") and low_score(ti):  # 장면이 약하다는 표시는 점수도 낮을 때만 (점수가 높으면 쓸 만함 · E7 검토)
             weak.append(o)
-        elif o.get("thumb") and ((ti.get("score") is not None and float(ti["score"]) < THUMB_WEAK) or ti.get("gates")):
+        elif o.get("thumb") and (low_score(ti) or ti.get("gates")):
             add("thumb", "warn", f"{nm} · 썸네일 AI 점수가 낮아요 ({round(float(ti.get('score') or 0))}점"
-                + (f" · {', '.join(ti['gates'][:2])}" if ti.get("gates") else "") + ") · 썸네일 편집기에서 다시 골라 보세요", key)
+                + (f" · {', '.join(ti['gates'][:2])}" if ti.get("gates") else "") + ") · 결과 카드의 [썸네일]에서 다시 골라 보세요", key)
         if o.get("thumb") and o["kind"] == "shorts" and ti.get("within") is False:
             add("thumb", "warn", f"{nm} · 이 쇼츠 구간에는 썸네일로 쓸 장면이 없어 다른 장면으로 만들었어요", key)
+        if o.get("seq") and o.get("hookCheck"):
+            add("title", "warn", f"{nm} · 위 큰 제목·키트 제목: '{o.get('hook') or ''}' · 추천 제목이 순서 말뿐이거나 다른 쇼츠와 같아 바꿨어요. "
+                "내용이 드러나는지 편집실(제목)과 7 올리기(키트 제목)에서 확인해 주세요", key)
         kit = o.get("kit") or {}
         if o.get("seq") and not kit and tried("kits"):
             add("kit", "bad", f"{nm} · 올리기 키트를 만들지 못했어요" + (f" · {o['kitFail']}" if o.get("kitFail") else ""), key)
@@ -635,8 +804,10 @@ def checklist(st):
             add("chapters", "warn", f"{nm} · 챕터가 {'없어요' if not kit.get('chapters') else str(kit['chapters']) + '개뿐이에요'} · 유튜브 챕터는 3개 이상이어야 보여요 (키트에서 챕터를 확인해 주세요)", key)
     if weak:  # 장면이 약한 것은 영상 탓이라 결과물마다가 아니라 한 줄로
         names = [o.get("name") or o["key"] for o in weak]
-        add("thumb", "warn", ("이 영상은 " if len(weak) > 1 else f"{names[0]} · ") + "썸네일로 쓸 만한 장면이 약해요 (AI 추천이 이 영상 장면을 낮게 봤어요)"
-            + (f" · 결과물 {len(weak)}개 모두" if len(weak) > 1 else "") + " · 썸네일 편집기에서 장면을 직접 골라 보세요", weak[0]["key"])
+        sc = ", ".join(f"{round(float(o['thumbInfo']['score']))}점" for o in weak[:4])
+        add("thumb", "warn", ("이 영상은 " if len(weak) > 1 else f"{names[0]} · ") + f"썸네일로 쓸 만한 장면이 약해요 (AI 점수 {sc} · {THUMB_WEAK}점 아래 · "
+            "장면 평가도 낮았어요)" + (f" · 결과물 {len(weak)}개" if len(weak) > 1 else "")
+            + " · 결과 카드의 [썸네일]에서 장면을 직접 골라 저장하면 그 결과물 키트에 들어가요", weak[0]["key"])
     order = {"bad": 0, "warn": 1, "info": 2}
     items.sort(key=lambda x: order.get(x["lv"], 3))
     add("upload", "info", UPLOAD_NOTE)
@@ -645,7 +816,8 @@ def checklist(st):
 
 # ---------- 썸네일 그리기 (스튜디오 화면 ↔ 작업) ----------
 
-PAGE_WAIT = 120   # 화면이 맡을 때까지 기다리는 시간(초) — 창을 내려 두면 브라우저가 1초 타이머를 늦출 수 있음
+PAGE_WAIT = 600   # 화면이 맡을 때까지 기다리는 시간(초) — 창을 5분 넘게 내려 두면 브라우저가 타이머를 1분에 한 번으로 늦춤 (E7 검토)
+PAGE_NOTE = 8     # 이만큼 기다려도 아무 화면도 안 맡으면 진행 표시에 '화면을 열어 주세요'를 띄움
 DRAW_WAIT = 300   # 맡은 뒤 다 그릴 때까지 (처음 한 번 글꼴·장면 그림을 받음)
 DATA_MAX = 2_900_000   # dataURL 글자 수 상한 (thumb.AB_MAX 와 같음 · JPG 2MB 안쪽)
 _RQ = {"want": None, "claim": None, "got": {}}
@@ -705,7 +877,7 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
         _RQ.update(want={"id": rid, "name": name, "fmt": fmt, "label": label, "within": list(within) if within else None,
                          "avoid": [str(a)[:60] for a in avoid if a][:10]}, claim=None)
         _RQ["got"].pop(rid, None)
-    t0 = time.time()
+    t0, noted = time.time(), False
     try:
         while True:
             with _RQC:
@@ -714,6 +886,10 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
                 if got is None:
                     _RQC.wait(0.5)
                     got = _RQ["got"].pop(rid, None)
+                    cl = _RQ["claim"]
+            if cl is not None and noted:  # 창을 다시 열어 화면이 맡음 → '창을 열어 주세요'를 거둠
+                noted = False
+                core.set_progress(label="썸네일", item=name, pct=None, detail="AI 추천 썸네일 그리는 중 · 스튜디오 화면이 그려요")
             if got is not None:
                 if got.get("error"):
                     raise AutoError(f"썸네일을 그리지 못했어요 · {got['error']}")
@@ -723,6 +899,10 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
             now = time.time()
             if cl is None and now - t0 > PAGE_WAIT:
                 raise AutoError(NO_PAGE)
+            if cl is None and now - t0 > PAGE_NOTE and not noted:
+                noted = True
+                core.set_progress(label="썸네일", item=name, pct=None,
+                                  detail="썸네일을 그릴 화면을 기다려요 · 스튜디오나 편집실 창을 열어 보이게 해 주세요")
             if cl is not None and now - cl > DRAW_WAIT:
                 raise AutoError("썸네일을 그리는 데 너무 오래 걸려 건너뛰었어요")
     finally:

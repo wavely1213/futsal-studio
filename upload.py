@@ -630,13 +630,25 @@ def own_thumb_prefix(name, sq):
     return f"{core.adir(name).name}_{label}{OWN_THUMB}"
 
 
+def pick_own_thumbs(name, files, sq):
+    """편집본 하나의 썸네일 후보 (최근 것부터): 그 편집본 이름의 것('…_<편집본 이름>_썸네일_N') + 그보다 나중에 썸네일 편집기에서
+    따로 저장한 것 — 자동 썸네일 뒤에 사람이 다시 만든 썸네일이 이김 (E7 검토). 다른 편집본 이름의 자동 썸네일은 뺌.
+    그 편집본 이름의 것이 없으면 전부 (예전과 같음)."""
+    own = own_thumb_prefix(name, sq)
+    auto = re.compile(re.escape(core.adir(name).name + "_") + r".+" + re.escape(OWN_THUMB) + r"\d+\.(?:jpe?g|png)$", re.I)
+    mine = [p for p in files if p.name.startswith(own)]
+    loose = [p for p in files if not p.name.startswith(own) and not auto.match(p.name)]
+    if not mine:
+        return files
+    newest = max(_mtime(p) for p in mine)
+    keep = set(mine) | {p for p in loose if _mtime(p) > newest}
+    return [p for p in files if p in keep]  # _images_of 차례 그대로 (A/B 묶음은 A 먼저)
+
+
 def thumbnail_check(name, fmt="long", sq=None):
     """가장 최근에 저장한 썸네일(A/B 묶음이면 그 묶음의 A) 확인: 2MB 이하 · 1280×720(긴 영상) / 1080×1920(쇼츠).
     sq: 편집본 — 그 편집본 이름으로 저장한 썸네일('<영상>_<편집본 이름>_썸네일_N.jpg')이 있으면 그것을 먼저 (쇼츠 여러 개가 저마다 썸네일 · E7)."""
-    files = _images_of(name)
-    if sq:
-        own = own_thumb_prefix(name, sq)
-        files = [p for p in files if p.name.startswith(own)] or files
+    files = pick_own_thumbs(name, _images_of(name), sq) if sq else _images_of(name)
     if not files:
         return {"ok": False, "file": None, "problems": ["아직 저장한 썸네일이 없어요 · 아래 '썸네일 만들기'를 눌러 편집기에서 '이미지로 저장'을 눌러 주세요"]}
     sized = [(p, image_size(p)) for p in files[:30]]

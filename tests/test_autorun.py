@@ -97,6 +97,23 @@ class Options(unittest.TestCase):
         o = autorun.options({"intensity": "듬뿍", "shorts": "2", "style": {"kind": "mix", "name": "내 섞기"}, "writer": True, "model": "small"})
         self.assertEqual((o["intensity"], o["shorts"], o["style"], o["writer"], o["model"]), ("듬뿍", 2, {"kind": "mix", "name": "내 섞기"}, True, "small"))
 
+    def test_phone_uses_pc_prefs(self):
+        """휴대폰은 클로드 오타·재미 자막·받아쓰기 방식을 안 보냄 → PC 화면에서 마지막으로 고른 것 (E7 검토)."""
+        w = Work()
+        self.addCleanup(w.close)
+        with mock.patch.object(autorun, "default_style", return_value={"kind": "preset", "name": "담백 레슨형"}):
+            o = autorun.options({"intensity": "듬뿍"})
+            self.assertEqual((o["proofread"], o["writer"]), (False, False), "남긴 것이 없으면 끔")
+            autorun.options({"proofread": True, "writer": True, "model": "small"}, remember=True)  # PC 스튜디오에서 시작
+            o = autorun.options({"intensity": "듬뿍", "shorts": 2})  # 휴대폰
+            self.assertEqual((o["proofread"], o["writer"], o["model"]), (True, True, "small"))
+            autorun.save_prefs({"writer": False})  # 편집실 MSG 체크를 끔
+            o = autorun.options({})
+            self.assertEqual((o["proofread"], o["writer"]), (True, False))
+            o = autorun.options({"proofread": False})  # 화면이 보낸 값이 먼저
+            self.assertFalse(o["proofread"])
+            self.assertEqual(autorun.load_prefs()["proofread"], True, "remember 없이는 남기지 않음")
+
     def test_default_style_order(self):
         """첫 가편집 배운 스타일 → 섞은 스타일(초안) 파일 → 기본 스타일 첫째."""
         import style
@@ -189,6 +206,19 @@ class Flow(unittest.TestCase):
         self.assertNotEqual(r2["id"], r["id"])
         self.assertEqual(self.calls, [k for k, _ in autorun.STEPS][:-1])
 
+    def test_done_with_failed_step_can_redo_only_missing(self):
+        """다 했지만 실패한 단계(화면이 없어 못 그린 썸네일 등)가 있으면 [못 한 것 다시 하기] — 그 단계부터 뒤만 다시 (E7 검토)."""
+        r = self.run_(fail=("thumbs",))
+        self.assertEqual(r["status"], "done")
+        self.assertTrue(r["redo"])
+        self.assertTrue(autorun.view(self.w.name)["resumable"])
+        self.calls.clear()
+        r2 = self.run_(resume=True)
+        self.assertEqual(r2["id"], r["id"], "같은 기록에 이어서")
+        self.assertEqual(self.calls, ["thumbs", "kits"], "앞 단계는 건너뛰고 썸네일과 그 뒤(키트)만")
+        self.assertFalse(r2["redo"])
+        self.assertFalse(autorun.view(self.w.name)["resumable"])
+
     def test_crash_marker_names_the_video(self):
         got = []
         with mock.patch.object(autorun.studiolog, "target", lambda **w: got.append(w)):
@@ -261,6 +291,36 @@ class Bridge(unittest.TestCase):
         except Exception as e:  # noqa: BLE001
             return e
 
+    def test_waiting_for_page_tells_owner(self):
+        """화면이 맡지 않으면 진행 표시에 '창을 열어 주세요' · 숨은 창이 1분에 한 번 묻는 것보다 넉넉히 기다림 (E7 검토)."""
+        self.assertGreaterEqual(autorun.PAGE_WAIT, 300)
+        got = []
+        with mock.patch.object(autorun, "PAGE_WAIT", 0.6), mock.patch.object(autorun, "PAGE_NOTE", 0.1), \
+                mock.patch.object(core, "set_progress", lambda **k: got.append(k)):
+            with self.assertRaises(autorun.AutoError):
+                autorun.request_thumb(self.w.name, "long", "x_썸네일")
+        self.assertEqual(len(got), 1)
+        self.assertIn("창을 열어", got[0]["detail"])
+        # 창을 다시 열어 화면이 맡으면 그 안내를 거두고 그림을 받음
+        got.clear()
+        rq = {}
+
+        def page():
+            while not autorun.pending():
+                time.sleep(0.02)
+            time.sleep(1.2)  # 안내가 뜬 뒤에 맡음 (작업은 0.5초마다 봄)
+            rq["id"] = autorun.pending()["id"]
+            autorun.claim(rq["id"])
+            time.sleep(0.6)
+            autorun.deliver(rq["id"], {"data": jpeg((1280, 720)), "score": 80})
+        th = threading.Thread(target=page)
+        th.start()
+        with mock.patch.object(autorun, "PAGE_NOTE", 0.1), mock.patch.object(core, "set_progress", lambda **k: got.append(k)):
+            r = autorun.request_thumb(self.w.name, "long", "x_썸네일")
+        th.join()
+        self.assertTrue(r["file"].endswith(".jpg"))
+        self.assertEqual([("창을 열어" in g["detail"]) for g in got], [True, False], [g["detail"] for g in got])
+
     def test_no_page_and_error_and_stop(self):
         with mock.patch.object(autorun, "PAGE_WAIT", 0.3):
             with self.assertRaises(autorun.AutoError) as e:
@@ -312,12 +372,26 @@ class Checklist(unittest.TestCase):
 
     def test_weak_scenes_one_line(self):
         outs = [{"key": k, "kind": "shorts", "name": k, "seq": k, "msg": True, "export": k, "qa": [], "thumb": k + ".jpg",
-                 "thumbInfo": {"score": 90, "weak": True}, "kit": {"txt": "x"}} for k in ("short1", "short2", "short3")]
+                 "thumbInfo": {"score": 60, "weak": True}, "kit": {"txt": "x"}} for k in ("short1", "short2", "short3")]
         with mock.patch.object(autorun, "caption_checks", return_value=[]):
             items = autorun.checklist(self.st(outs))
         th = [c for c in items if c["kind"] == "thumb"]
         self.assertEqual(len(th), 1, "약한 장면은 영상 탓이라 한 줄")
-        self.assertIn("결과물 3개 모두", th[0]["text"])
+        self.assertIn("결과물 3개", th[0]["text"])
+        self.assertIn("60점", th[0]["text"], "왜 떴는지 (점수)")
+        for o in outs:  # 점수가 높으면 장면이 약하다는 표시가 있어도 쓸 만함 → 안 띄움 (E7 검토: 95.8점에 '약해요')
+            o["thumbInfo"] = {"score": 95.8, "weak": True}
+        with mock.patch.object(autorun, "caption_checks", return_value=[]):
+            items = autorun.checklist(self.st(outs))
+        self.assertEqual([c["kind"] for c in items], ["upload"])
+
+    def test_generic_short_title_listed(self):
+        o = {"key": "short1", "kind": "shorts", "name": "자동 쇼츠 1 · 퍼스트 터치 꿀팁", "seq": "a", "msg": True, "export": "a.mp4", "qa": [],
+             "thumb": "a.jpg", "thumbInfo": {"score": 90}, "kit": {"txt": "a"}, "hook": "퍼스트 터치 꿀팁", "hookCheck": True}
+        with mock.patch.object(autorun, "caption_checks", return_value=[]):
+            items = autorun.checklist(self.st([o]))
+        self.assertEqual(items[0]["kind"], "title")
+        self.assertIn("'퍼스트 터치 꿀팁'", items[0]["text"])
 
     def test_stopped_lists_steps_not_each_missing_file(self):
         o = {"key": "long", "kind": "long", "name": "롱", "seq": "a", "msg": True, "export": None, "qa": [], "thumb": None, "kit": None}
@@ -354,6 +428,35 @@ class Checklist(unittest.TestCase):
         self.assertIn("21%", out[0]["text"])
         self.assertIn("지어낸 말 같아서 뺐어요", out[1]["text"])
         self.assertIn("'감사합니다'", out[1]["text"])
+        self.assertIn("원본 00:05", out[0]["text"], "결과물이 없으면 원본 시각")
+
+    def test_caption_checks_only_inside_outputs_with_their_times(self):
+        """결과물에 들어간 말(또는 그 사이에서 지운 말)만 · '결과물 이름 + 그 편집본 시각' (E7 검토: 원본 시각·모든 결과물에서 잘린 말)."""
+        import captions
+        w = Work()
+        self.addCleanup(w.close)
+        d = core.adir(w.name)
+        d.mkdir(parents=True)
+        words = [{"w": "파벨로", "s": 5.0, "e": 5.5, "p": 0.21}, {"w": "디딤발", "s": 40.0, "e": 40.5, "p": 0.2},
+                 {"w": "감사합니다", "s": 20.0, "e": 20.6, "p": 0.3}, {"w": "구독", "s": 90.0, "e": 90.5, "p": 0.1}]
+        (d / "transcript.json").write_text(json.dumps([{"start": x["s"], "end": x["e"], "text": x["w"], "words": [x]} for x in words],
+                                                      ensure_ascii=False), encoding="utf-8")
+        rec = {"junk_list": [{"a": 20.0, "b": 20.6, "why": captions.HALLU_WHY}, {"a": 90.0, "b": 90.5, "why": captions.HALLU_WHY}]}
+        segs = [{"start": x["s"], "end": x["e"], "text": x["w"], "words": [x]} for x in words if x["w"] in ("파벨로", "디딤발")]
+        long_items = editor._pair(0.0, 10.0, start=0.0) + editor._pair(25.0, 30.0, start=10.0)  # 20초 '감사합니다'는 두 컷 사이에서 지움
+        short_items = editor._pair(38.0, 45.0, start=0.0)
+        proj = {"sequences": [{"id": "L", "items": long_items}, {"id": "S", "items": short_items}]}
+        outs = [{"key": "long", "kind": "long", "name": "자동 롱폼", "seq": "L"}, {"key": "short1", "kind": "shorts", "name": "자동 쇼츠 1", "seq": "S"}]
+        with mock.patch.object(editor, "recommend", return_value=rec), mock.patch.object(editor, "_segments_of", return_value=segs), \
+                mock.patch.object(editor, "load_project", return_value=proj):
+            out = autorun.caption_checks(w.name, outs)
+        texts = [c["text"] for c in out]
+        self.assertEqual(len(out), 3, texts)
+        self.assertFalse(any("구독" in t for t in texts), "모든 결과물 밖(90초)은 뺌")
+        self.assertIn("자동 롱폼 00:05 '파벨로'", texts[0])
+        self.assertIn("자동 롱폼 00:10 '감사합니다'", texts[1], "지운 말은 그 이음매 시각")
+        self.assertIn("자동 쇼츠 1 00:02 '디딤발'", texts[2])
+        self.assertEqual((out[2]["seq"], out[2]["out"], out[2]["t"], out[2]["src"]), ("S", "short1", 2.25, 40.0))
 
 
 class Pieces(unittest.TestCase):
@@ -375,6 +478,67 @@ class Pieces(unittest.TestCase):
         self.assertTrue(a["ok"], a)
         self.assertEqual(upload.thumbnail_check(self.w.name, "shorts")["file"], f"{pre}_자동 쇼츠 2 · B_썸네일_1.jpg", "편집본을 안 주면 예전처럼 가장 최근")
         self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", {"name": "다른 쇼츠"})["file"], f"{pre}_자동 쇼츠 2 · B_썸네일_1.jpg")
+
+    def test_kit_prefers_thumbnail_remade_after_auto(self):
+        """자동 썸네일 뒤에 썸네일 편집기에서 다시 저장하면 키트는 다시 만든 것을 고름 (E7 검토 · 사람이 고친 것이 이김)."""
+        from PIL import Image
+        import os
+        pre = core.adir(self.w.name).name
+        own, other, manual, old = (f"{pre}_자동 쇼츠 1 · A_썸네일_1.jpg", f"{pre}_자동 쇼츠 2 · B_썸네일_1.jpg",
+                                   f"{pre}_디자인 1_쇼츠_1.jpg", f"{pre}_디자인 1_쇼츠_2.jpg")
+        for nm, age in ((old, 100), (own, 50), (other, 5), (manual, 10)):
+            Image.new("RGB", (1080, 1920)).save(core.OUT / nm)
+            t = time.time() - age
+            os.utime(core.OUT / nm, (t, t))
+        sq = {"name": "자동 쇼츠 1 · A", "format": "shorts"}
+        self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", sq)["file"], manual, "나중에 직접 만든 것")
+        t = time.time() - 60
+        os.utime(core.OUT / manual, (t, t))
+        self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", sq)["file"], own, "직접 만든 것이 더 예전이면 자동 썸네일")
+        self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", {"name": "자동 쇼츠 2 · B"})["file"], other, "다른 쇼츠의 자동 썸네일보다 제 것")
+        # 결과 카드 [썸네일]이 연 편집기는 그 편집본 이름(label)으로 저장 → 그 편집본 것으로 잡힘
+        f = thumb.export_image(self.w.name, "data:image/jpeg;base64," + base64.b64encode((core.OUT / own).read_bytes()).decode(),
+                               "jpg", autorun.public({"name": self.w.name, "id": "x", "steps": {}, "outputs": [
+                                   {"key": "short1", "kind": "shorts", "seq": "s1", "name": "자동 쇼츠 1 · A"}]})["outputs"][0]["thumbLabel"])
+        self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", sq)["file"], f.name)
+        self.assertEqual(upload.thumbnail_check(self.w.name, "shorts", {"name": "자동 쇼츠 2 · B"})["file"], other, "다른 쇼츠는 그대로")
+
+    def test_generic_hooks_fall_back(self):
+        """순서 말뿐인 추천 제목('퍼스트 터치 첫 번째 포인트')은 예전 규칙('주제어 꿀팁')으로 · 사람이 확인 (E7 검토)."""
+        self.assertTrue(autorun.generic_hook("퍼스트 터치 첫 번째 포인트"))
+        self.assertTrue(autorun.generic_hook("패스 두 번째 동작"))
+        self.assertFalse(autorun.generic_hook("디딤발 꿀팁"))
+        self.assertFalse(autorun.generic_hook("두 번째 슛은 왜 안 들어갈까?"))
+        self.assertEqual(autorun.short_hook({"hook": "디딤발 꿀팁", "keywords": [], "title": ""}), ("디딤발 꿀팁", False))
+        h, chk = autorun.short_hook({"hook": "퍼스트 터치 첫 번째 포인트", "keywords": ["퍼스트 터치", "포인트"], "title": "퍼스트 터치 첫 번째 포인트는"})
+        self.assertEqual((h, chk), ("퍼스트 터치 꿀팁", True))
+        self.assertEqual(autorun.short_hook({"hook": "패스 두 번째 동작", "keywords": [], "title": "두 번째 동작은"}), ("패스 꿀팁", True))
+        # 예전 규칙이 첫 문장을 글자 수로 자른 조각('… 고개를 들어서 주변을')이면 주제어 + 꿀팁 (E7 재렌더: MSGRAW01 쇼츠 1)
+        r = {"hook": "퍼스트 터치 첫 번째 포인트", "keywords": ["핵심", "포인트", "첫번째"], "title": "공이 오기 전에 고개를 들어서 주변을 먼저 보세요."}
+        with mock.patch.object(editor, "_hook", return_value=r["hook"]):
+            self.assertEqual(autorun.short_hook(r), ("퍼스트 터치 꿀팁", True))
+        r = {"hook": "첫 번째 포인트", "keywords": [], "title": "공이 오기 전에 고개를 들어서 주변을 먼저 보세요."}
+        with mock.patch.object(editor, "_hook", return_value=r["hook"]):
+            h, chk = autorun.short_hook(r)
+        self.assertTrue(chk)
+        self.assertTrue(h.startswith("공이 오기 전에"), h)  # 주제어가 없으면 조각이라도 (사람이 확인)
+        self.assertFalse(autorun._cut_off("디딤발 꿀팁", "자, 두 번째 포인트는 디딤발이에요."))
+
+    def test_short_name_cut_at_phrase(self):
+        """파일 이름이 될 쇼츠 이름: 질문 한가운데('… 있으면 왜')서 끊지 않고 구절 끝 + '…' (E7 검토)."""
+        n = autorun._short_name(0, {"hook": "패스하고 그 자리에 서 있으면 왜 안 될까요?"})
+        self.assertEqual(n, "자동 쇼츠 1 · 패스하고 그 자리에 서 있으면…")
+        self.assertEqual(autorun._short_name(1, {"hook": "디딤발\n꿀팁"}), "자동 쇼츠 2 · 디딤발 꿀팁")
+        self.assertEqual(autorun._name_cut("왜 다들 첫 터치에서, 공을 놓칠까요 이거 알면 돼요"), "왜 다들 첫 터치에서…")
+
+    def test_new_sequence_drops_old_outputs(self):
+        """이어서 할 때 가편집 결과물이 MSG 편집본으로 바뀌면 예전 완성본·썸네일·키트 기록은 버림 (다시 만들게)."""
+        o = {"key": "long", "seq": "rough", "name": "롱폼 가편집", "msg": False, "msgFail": "x", "export": "a.mp4", "qa": [{"lv": "warn"}],
+             "thumb": "a.jpg", "thumbInfo": {}, "kit": {"txt": "a"}}
+        autorun._set_seq(o, "rough", "롱폼 가편집", False)
+        self.assertEqual(o["export"], "a.mp4", "같은 편집본이면 그대로")
+        autorun._set_seq(o, "m1", "자동 롱폼", True)
+        self.assertEqual((o["seq"], o["msg"], o.get("export"), o.get("thumb"), o.get("kit"), o["qa"], o.get("msgFail")), ("m1", True, None, None, None, [], None))
 
     def test_auto_sequences_takes_given_recommendation(self):
         r = {"start": 1.0, "end": 25.0, "cuts": [{"in": 1.0, "out": 12.0}, {"in": 14.0, "out": 25.0}], "hook": "디딤발 꿀팁", "title": "디딤발", "keywords": ["디딤발"]}
@@ -574,6 +738,9 @@ class Routes(unittest.TestCase):
         self.assertIs(an, self.app.Handler._analyze)
         self.assertEqual(self.call("/api/auto", {"name": "../x.mp4"})[0], 400)
         self.assertEqual(self.call("/api/auto", {"name": "없는.mp4"})[0], 404)
+        self.assertEqual(autorun.load_prefs(), {"writer": True, "model": "small"}, "PC 화면이 시작하면 그 설정을 남김 (휴대폰이 씀)")
+        code, j = self.call("/api/auto/prefs", {"proofread": True, "writer": "yes", "model": "large"})  # 편집실 MSG 체크
+        self.assertEqual((code, j["prefs"]), (200, {"writer": True, "model": "small", "proofread": True}), "체크 두 가지만 · 참/거짓만")
 
     def test_state_and_thumb_routes(self):
         code, j = self.call("/api/auto?name=" + urllib.request.quote(self.w.name))

@@ -1790,7 +1790,8 @@ def _a_preview(svc, dev, a, tok):
 
 
 def _a_auto(svc, dev, a, tok):
-    """끝까지 자동으로 (D-203): 휴대폰에서도 같은 작업 · 받아쓰기는 이 PC 기본값 · 유튜브에는 올리지 않음 (키트까지).
+    """끝까지 자동으로 (D-203): 휴대폰에서도 같은 작업 · 받아쓰기 방식·클로드 오타 고치기·재미 자막은 PC 화면에서 마지막으로 고른 것
+    (autorun.load_prefs · E7 검토) · 유튜브에는 올리지 않음 (키트까지).
     썸네일은 PC 의 스튜디오 화면이 그림 (화면이 없으면 그 단계만 '확인할 것')."""
     n = _one_video(a.get("name"))
     resume = a.get("resume") is True

@@ -2601,7 +2601,7 @@ checkUpdate();
         <div class="rrow"><span>MSG 스타일</span><select class="sel" id="autoSty">${opts}</select></div>
         <div class="small">받아쓰기 '${model}' · 클로드로 자막 오타 고치기 ${m.proofread ? "켬" : "끔"} · 클로드로 재미 자막 쓰기 ${m.writer ? "켬" : "끔"} — 보관함·편집실 MSG 에서 고른 그대로예요. 가편집은 '첫 가편집에 쓰기' 스타일로 만들어요.</div>
       </div>
-      ${resum ? `<div class="rnote">지난번에 하던 것이 있어요 · ${run.steps.length}단계 중 ${doneCount(run)}단계까지 했어요 (${STATUS[run.status] || ""}). [이어서 하기]는 끝난 단계·만든 결과물을 건너뛰고 그때 설정 그대로 나머지를 해요.</div>` : ""}
+      ${resum ? `<div class="rnote">지난번에 하던 것이 있어요 · ${run.steps.length}단계 중 ${doneCount(run)}단계까지 했어요 (${run.status === "done" ? "끝났지만 못 한 단계가 있어요" : STATUS[run.status] || ""}). [이어서 하기]는 끝난 단계·만든 결과물을 건너뛰고 그때 설정 그대로 나머지를 해요.</div>` : ""}
       <div class="rrow" style="margin-top:14px">${resum ? `<button class="btn primary" data-ax="resume">이어서 하기</button><button class="btn" data-ax="fresh">처음부터 다시</button>`
         : `<button class="btn primary" data-ax="go">시작</button>`}${run && run.status === "done" ? `<button class="btn" data-ax="last">지난 결과 보기</button>` : ""}</div>
       <div class="small">썸네일은 이 화면(스튜디오)이 그려요 · 작업하는 동안 스튜디오나 편집실을 열어 두세요. 영상 길이·쇼츠 수에 따라 수십 분 걸릴 수 있어요 (위 오른쪽 진행 표시 · 보관함 카드의 [멈추기]).</div>`;
@@ -2640,7 +2640,7 @@ checkUpdate();
       el.hidden = false;
       el.innerHTML = `<h3>끝까지 자동으로 · ${esc(nice(live.name))}<span class="sp"></span><span class="hint">${live.i}/${live.n} 단계 · ${esc(live.label || "")}</span>
         <button class="btn" id="autoStop">멈추기</button></h3>${stepsHtml(null, live)}
-        <div class="hint">유튜브에는 올리지 않아요 · 썸네일은 이 화면이 그려요 (창을 닫지 말아 주세요) · 멈춰도 만든 것은 그대로 두고 나중에 [이어서 하기]로 나머지를 해요</div>`;
+        <div class="hint">유튜브에는 올리지 않아요 · 썸네일은 이 화면이 그려요 (창을 닫거나 오래 내려 두지 말아 주세요) · 멈춰도 만든 것은 그대로 두고 나중에 [이어서 하기]로 나머지를 해요</div>`;
       $("autoStop").onclick = e => { e.target.disabled = true; api("/api/edit/cancel", {}); toast("멈추는 중이에요 · 하던 단계까지만 정리해요"); };
       return;
     }
@@ -2650,19 +2650,19 @@ checkUpdate();
     const outs = (r.outputs || []).filter(o => o.seq);
     const q = encodeURIComponent(r.name);
     el.innerHTML = `<h3>끝까지 자동으로 · ${esc(nice(r.name))} · ${esc(STATUS[r.status] || "")}<span class="sp"></span>
-        ${r.status !== "done" ? `<button class="btn primary" id="autoResume">이어서 하기</button>` : ""}<button class="btn" id="autoOut">완성본 폴더</button><button class="linkbtn" id="autoX">닫기</button></h3>
+        ${r.status !== "done" || r.redo ? `<button class="btn primary" id="autoResume" title="끝난 단계는 건너뛰고 못 한 것만 다시 해요">${r.status === "done" ? "못 한 것 다시 하기" : "이어서 하기"}</button>` : ""}<button class="btn" id="autoOut">완성본 폴더</button><button class="linkbtn" id="autoX">닫기</button></h3>
       ${stepsHtml(r.steps)}
       <div class="aouts">${outs.map(o => `<div class="aout"><b title="${esc(o.name || "")}">${o.kind === "long" ? "🎬" : "📱"} ${esc(o.name || "")}</b>
         <span class="chip ${o.export ? "ok" : "warn"}">${o.export ? "완성본 ✓" : "완성본 없음"}</span>
         <span class="chip ${o.thumb ? "ok" : "warn"}">${o.thumb ? "썸네일 ✓" : "썸네일 없음"}</span>
         <span class="chip ${o.kit ? "ok" : "warn"}">${o.kit ? "키트 ✓" : "키트 없음"}</span>
-        <button class="btn" data-aed="${esc(o.seq)}">편집실</button><button class="btn" data-ath="1">썸네일</button>${o.kit ? `<button class="btn primary" data-akit="${esc(o.seq)}">올리기 키트</button>` : ""}</div>`).join("") || `<div class="hint">아직 만든 결과물이 없어요</div>`}</div>
-      <b>확인할 것</b><ul class="achk">${(r.check || []).map(c => `<li class="${c.lv}">${c.lv === "bad" ? "⛔ " : c.lv === "warn" ? "⚠️ " : "ℹ️ "}${esc(c.text)}</li>`).join("") || `<li class="info">따로 확인할 것이 없어요</li>`}</ul>`;
+        <button class="btn" data-aed="${esc(o.seq)}">편집실</button><button class="btn" data-ath="${esc(o.thumbLabel || "")}" data-afmt="${o.kind === "shorts" ? "short" : "long"}" title="여기서 저장한 썸네일이 이 결과물 키트에 들어가요">썸네일</button>${o.kit ? `<button class="btn primary" data-akit="${esc(o.seq)}">올리기 키트</button>` : ""}</div>`).join("") || `<div class="hint">아직 만든 결과물이 없어요</div>`}</div>
+      <b>확인할 것</b><ul class="achk">${(r.check || []).map(c => `<li class="${c.lv}">${c.lv === "bad" ? "⛔ " : c.lv === "warn" ? "⚠️ " : "ℹ️ "}${esc(c.text)}${c.seq ? ` <button class="linkbtn" data-aed="${esc(c.seq)}" data-at="${c.t != null ? c.t : ""}">편집실에서 보기</button>` : ""}</li>`).join("") || `<li class="info">따로 확인할 것이 없어요</li>`}</ul>`;
     $("autoX").onclick = () => { A.res = null; renderCard(); };
     $("autoOut").onclick = () => api("/api/open", { which: "out" });
     if ($("autoResume")) $("autoResume").onclick = () => { if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요"); job("/api/auto", { name: r.name, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }); A.res = null; renderCard(); };
-    el.querySelectorAll("[data-aed]").forEach(b => b.onclick = () => { location.href = `/editor?name=${q}&seq=${encodeURIComponent(b.dataset.aed)}`; });
-    el.querySelectorAll("[data-ath]").forEach(b => b.onclick = () => { location.href = `/thumb?name=${q}`; });
+    el.querySelectorAll("[data-aed]").forEach(b => b.onclick = () => { location.href = `/editor?name=${q}&seq=${encodeURIComponent(b.dataset.aed)}` + (b.dataset.at ? `&t=${encodeURIComponent(b.dataset.at)}` : ""); });  // 확인할 것: 그 편집본 그 시각
+    el.querySelectorAll("[data-ath]").forEach(b => b.onclick = () => { location.href = `/thumb?name=${q}&fmt=${b.dataset.afmt}` + (b.dataset.ath ? `&label=${encodeURIComponent(b.dataset.ath)}` : ""); });  // 그 결과물 이름으로 저장 → 키트가 고름
     el.querySelectorAll("[data-akit]").forEach(b => b.onclick = async () => { go("upload"); if (window.upSelect && !(await window.upSelect(r.name, b.dataset.akit))) toast("그 영상을 찾지 못했어요"); });
   }
   window.autoTick = s => {  // 1초마다 (poll): 진행 카드 · 끝나면 결과 카드
@@ -2687,6 +2687,9 @@ checkUpdate();
     f.src = `/thumb?name=${encodeURIComponent(c.name)}&autothumb=${encodeURIComponent(c.id)}&fmt=${c.fmt}` + (c.a != null ? `&a=${c.a}&b=${c.b}` : "") + (c.avoid && c.avoid.length ? `&avoid=${encodeURIComponent(JSON.stringify(c.avoid))}` : "");
     document.body.appendChild(f);
   };
+  // 창을 내려 두었다가 다시 보면 바로 물어봄 (숨은 창은 브라우저가 타이머를 1분에 한 번까지 늦추거나 멈춤 · E7 검토)
+  const wake = () => { if (document.visibilityState === "visible" && !busyTh) fetch("/api/auto/pending").then(r => r.json()).then(j => { if (j && j.want) window.autoThumb(j.want); }).catch(() => {}); };
+  document.addEventListener("visibilitychange", wake); window.addEventListener("focus", wake); window.addEventListener("pageshow", wake); document.addEventListener("resume", wake);
 })();
 </script>
 <script>

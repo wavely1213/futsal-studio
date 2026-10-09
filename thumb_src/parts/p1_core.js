@@ -3,6 +3,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const NAME = new URLSearchParams(location.search).get("name");
 // 끝까지 자동으로 (D-201): 스튜디오·편집실이 보이지 않는 틀로 이 화면을 열어 AI 추천 썸네일 하나를 그려 돌려줌 (편집기 화면·저장은 안 씀)
 const AUTO_RUN = new URLSearchParams(location.search).get("autothumb");
+// 끝까지 자동으로 결과 카드 [썸네일]로 열면 그 결과물 이름('<편집본 이름>_썸네일')으로 저장 → 그 결과물 올리기 키트가 이 그림을 고름 (E7 검토)
+const SAVE_LABEL = (new URLSearchParams(location.search).get("label") || "").slice(0, 120);
 const RAD = Math.PI / 180;
 const FMT = { long: { w: 1280, h: 720, label: "롱폼 16:9" }, short: { w: 1080, h: 1920, label: "쇼츠 9:16" } };
 let W = 1280, H = 720;
