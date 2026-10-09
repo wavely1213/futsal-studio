@@ -141,7 +141,8 @@ def _pick(boxes, sc, cls, thr):
 
 
 def people(src, ball_retry=True):
-    """사진(경로나 PIL 이미지) 속 사람·공 → {"persons": [[x, y, w, h, 확률]...](0~1, 큰 사람부터), "ball": [x, y, w, h, 확률] 또는 None}.
+    """사진(경로나 PIL 이미지) 속 사람·공 → {"persons": [[x, y, w, h, 확률]...](0~1, 큰 사람부터), "ball": [x, y, w, h, 확률] 또는 None,
+    "balls": 찾은 공 모두(확률 높은 것부터 · 최대 4)}.
     공을 못 찾으면 왼쪽·오른쪽 반쪽을 크게 다시 봄(공이 작게 보이는 넓은 장면). 모델을 쓸 수 없으면 None (먼저 ensure())."""
     if "det" not in _SESS:
         return None
@@ -171,10 +172,12 @@ def people(src, ball_retry=True):
                 continue
             persons.append([round(float(x1 / W), 4), round(float(y1 / H), 4), round(float((x2 - x1) / W), 4), round(float((y2 - y1) / H), 4), round(float(ps[i]), 3)])
     persons.sort(key=lambda p: -p[3])
-    ball = None
+    ball, balls = None, []   # balls = 찾은 공 모두 (확률 높은 것부터 · 공이 둘 보이는 장면인지 — MSG 전술 그림이 '누가 시범하나' 모를 때 건너뜀)
     if len(bb):
-        i = nms(bb, bs)[0]
-        x1, y1, x2, y2 = np.clip(bb[i], [0, 0, 0, 0], [W, H, W, H])
-        if x2 > x1 and y2 > y1:
-            ball = [round(float(x1 / W), 4), round(float(y1 / H), 4), round(float((x2 - x1) / W), 4), round(float((y2 - y1) / H), 4), round(float(bs[i]), 3)]
-    return {"persons": persons[:12], "ball": ball}
+        for n, i in enumerate(nms(bb, bs)):
+            x1, y1, x2, y2 = np.clip(bb[i], [0, 0, 0, 0], [W, H, W, H])
+            if x2 > x1 and y2 > y1:
+                balls.append([round(float(x1 / W), 4), round(float(y1 / H), 4), round(float((x2 - x1) / W), 4), round(float((y2 - y1) / H), 4), round(float(bs[i]), 3)])
+                if n == 0:
+                    ball = balls[0]
+    return {"persons": persons[:12], "ball": ball, "balls": balls[:4]}

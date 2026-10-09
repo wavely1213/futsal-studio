@@ -37,6 +37,7 @@ import strategy
 import studiolog
 import trouble
 import style
+import tactic
 import thumb
 import thumbcopy
 import thumbstyle
@@ -1069,6 +1070,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, editor.freeze_frame(b.get("src", "videos"), b["file"], float(b["t"])))
             except Exception as e:
                 return self._send(400, {"error": str(e)})
+        if path == "/api/edit/track":  # 전술 그림 '선수 따라가기' (몇 초 · 한 번에 하나 · 결과는 원본 기준 선수 상자들)
+            try:
+                f = editor.media_path(b.get("file"), b.get("src", "videos"))
+                if not f.is_file():
+                    raise FileNotFoundError("영상을 찾지 못했어요")
+                return self._send(200, tactic.track(f, b.get("t0"), b.get("t1"), b.get("x"), b.get("y"), log=log, kind=b.get("kind")))
+            except tactic.Busy as e:
+                return self._send(409, {"ok": False, "error": str(e)})
+            except (ValueError, TypeError, LookupError, FileNotFoundError) as e:
+                return self._send(400, {"ok": False, "error": str(e) or "따라가지 못했어요"})
+            except RuntimeError as e:
+                return self._send(500, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001 — 예상 못 한 오류도 화면에 쉬운 말로 (위치는 studio.log)
+                studiolog.trace(e, "선수 따라가기 오류 위치")
+                return self._send(500, {"ok": False, "error": "선수를 따라가지 못했어요 · 잠시 뒤 다시 눌러 주세요"})
         if path == "/api/edit/qa":  # 내보낸 영상 자동 검수
             f = (core.OUT / Path(b["file"]).name).resolve()
             if core.OUT.resolve() not in f.parents or not f.exists():

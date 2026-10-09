@@ -134,6 +134,15 @@
   .tgrp { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
   .ov { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
   #shp { z-index: 55; }
+  #tac { z-index: 57; width: 100%; height: 100%; }
+  #tacH { position: absolute; inset: 0; z-index: 71; pointer-events: none; display: none; }
+  #tacH i { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; border: 2px solid #111; pointer-events: auto; cursor: move; z-index: 2; }
+  #tacH i.sz { background: #ffe14d; cursor: ew-resize; }
+  #tacH .tb { position: absolute; border: 1px dashed rgba(255,225,77,.8); pointer-events: auto; cursor: move; }
+  .tcpal { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .tcpal button { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #333; cursor: pointer; padding: 0; }
+  .tcpal button.on { border-color: #fff; box-shadow: 0 0 0 2px #000; }
+  .tcpal input[type=color] { width: 26px; height: 22px; padding: 0; border: 0; background: none; }
   .txt { position: absolute; left: 50%; white-space: pre-wrap; text-align: center; font-family: PretendardE; font-synthesis: none; line-height: 1.25; paint-order: stroke fill; transform-origin: 50% 100%; max-width: 92%; width: max-content; word-break: keep-all; text-wrap: balance; }
   .mbox { position: absolute; z-index: 70; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); display: none; cursor: move; }
   .mbox i { position: absolute; width: 9px; height: 9px; background: #fff; border: 1px solid #000; }
@@ -302,6 +311,7 @@
   .c1 .clip { background: var(--cap); cursor: pointer; }
   .gt .clip { background: var(--title); }
   .gs .clip { background: #3e8a46; }
+  .gs .clip.tacc { background: #0b6e86; }
   .clip.muted { filter: grayscale(.9) brightness(.6); }
   .clip.missing { outline: 2px dashed #ff5d5d; outline-offset: -2px; }
   .badge-miss { color: #ff7b7b; font-size: 11px; margin-left: 4px; }
@@ -440,7 +450,7 @@
         <button class="btn sm pri" id="sOver" title="프로그램 재생 위치에 덮어쓰기 ( . )">덮어쓰기</button>
         <div class="sp"></div><span class="tcdim" id="sDur"></span></div>
     </div>
-    <div class="mon" id="mon"><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="shp"></div><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i></div></div></div>
+    <div class="mon" id="mon"><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="shp"></div><canvas class="ov" id="tac"></canvas><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i></div><div id="tacH"></div></div></div>
     <div class="scrub" id="scrub"><div class="io" id="scrubIO"></div><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
     <div class="ctl" id="pctl">
       <span class="tcbig" id="tcNow">00:00:00:00</span>
@@ -512,7 +522,7 @@
   <div class="f" style="margin-top:8px"><label>초당 장면</label><div class="seg" id="exFps"><button data-v="30" class="on">30fps</button><button data-v="60">60fps (부드럽게)</button></div><span></span></div>
   <div class="f"><label>범위</label><div class="seg" id="exRange"><button data-v="all" class="on">전체</button><button data-v="io">표시한 구간 (I~O)</button></div><span></span></div>
   <label><input type="checkbox" id="exVideo" checked> 영상 (mp4) — 업로드용</label>
-  <label><input type="checkbox" id="exXml" checked> 프리미어 프로젝트 (XML) — 프리미어에서 이어서 편집</label>
+  <label><input type="checkbox" id="exXml" checked> 프리미어 프로젝트 (XML) — 프리미어에서 이어서 편집<span class="hint" id="exXmlHint"></span></label>
   <label><input type="checkbox" id="exSrt" checked> 자막 파일 (SRT)<span class="hint" id="exSrtHint"></span></label>
   <label title="검은 화면·소리 끊김·소리 크기·규격을 확인해요 (영상 길이의 몇 분의 1 정도 걸려요)"><input type="checkbox" id="exQa" checked> 다 만든 뒤 자동 검수 (올리기 전 실수 찾기)</label>
   <label title="엔비디아·인텔·AMD 그래픽카드나 맥의 하드웨어 인코더가 있으면 몇 배 빨라요. 안 되는 PC에선 저절로 일반 방식으로 만들어요."><input type="checkbox" id="exHw" checked> 그래픽카드로 빠르게 만들기 (되는 PC에서만)</label>
@@ -651,7 +661,7 @@ function total() {
 }
 function ensureSeq(q) {
   q.layout = Object.assign({ mode: "fill", bar: "#000000", zoom: 1, vpos: 0.5, cropTop: 0, cropBottom: 0 }, q.layout || {});
-  q.shapes = q.shapes || []; q.titles = q.titles || []; q.trans = q.trans || []; q.markers = q.markers || [];
+  q.shapes = q.shapes || []; q.tactics = q.tactics || []; q.titles = q.titles || []; q.trans = q.trans || []; q.markers = q.markers || [];
   q.duck = q.duck || { on: true, amount: -14 }; q.master = Object.assign({ volume: 1, normalize: true, lufs: -14 }, q.master || {});
   if (!q.tracks) q.tracks = defaultTracks();
   q.items = q.items || [];
@@ -733,10 +743,18 @@ function remapSeq(q, cut, ins, extra) {
     if (x.full) return { ...x };
     const s = f(x.start, false), m = r6(f(x.start + x.dur, true) - s), d = x.start + x.dur >= end0 - 0.05 ? m : Math.min(m, x.dur);
     if (x.plan === "emphasis" && inCut(x.start)) return null; // 그 말이 잘려 나감
-    return d >= Math.min(0.3, x.dur) - EPS ? { ...x, start: s, dur: d } : null;
+    if (!(d >= Math.min(0.3, x.dur) - EPS)) return null;
+    if (!x.follow || !x.follow.length) return { ...x, start: s, dur: d };
+    // 따라가는 전술 그림: 따라가기 기록도 같은 규칙으로 옮김 (빠진 구간 기록은 버리고, 빠진 곳 앞뒤 자리는 이어 붙임)
+    const xe = x.start + x.dur, pairs = x.follow.map(fw => { const T = x.start + fw[0]; return [T, inCut(T) ? null : f(T, false)]; });
+    for (const [ca, cb] of cut) {
+      if (ca - 1e-3 > x.start && ca < xe) pairs.push([ca - 1e-3, f(ca - 1e-3, false)]);
+      if (cb > x.start && cb < xe) pairs.push([cb, f(cb, false)]);
+    }
+    return { ...x, start: s, dur: d, follow: tacRefollow(x, s, pairs) };
   };
   const trans = (q.trans || []).map(tr => ({ ...tr, a: tr.a ? last.get(tr.a) || null : null, b: tr.b ? first.get(tr.b) || null : null })).filter(tr => tr.a || tr.b);
-  return { items, trans, titles: (q.titles || []).map(span).filter(Boolean), shapes: (q.shapes || []).map(span).filter(Boolean),
+  return { items, trans, titles: (q.titles || []).map(span).filter(Boolean), shapes: (q.shapes || []).map(span).filter(Boolean), tactics: (q.tactics || []).map(span).filter(Boolean),
     markers: (q.markers || []).map(m => ({ ...m, t: f(m.t, false) })), cut: r6(cut.reduce((a, [x, y]) => a + y - x, 0)), added: r6(ins.reduce((a, x) => a + x.len, 0)) };
 }
 // 군더더기 정리: 원본 keep([{in,out}]) 밖에 있는 V1 원본 구간을 타임라인에서 뺌 — 쇼츠는 자기 구간 안에서만 줄어듦
@@ -1052,6 +1070,7 @@ function shiftAfter(t0, d, ignore = new Set(), skip = new Set()) {
   const moved = followTo(fol, d);
   for (const g of S.titles) if (g.start >= t0 - EPS) g.start = Math.max(0, g.start + d);
   for (const g of S.shapes) if (!g.full && g.start >= t0 - EPS) g.start = Math.max(0, g.start + d);
+  for (const g of S.tactics) if (g.start >= t0 - EPS) g.start = Math.max(0, g.start + d);
   for (const m of S.markers) if (m.t >= t0 - EPS) m.t = Math.max(0, m.t + d);
   return moved;
 }
@@ -1173,13 +1192,14 @@ function renderMarkers() {
   });
 }
 function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기
-  for (const g of [...S.titles, ...S.shapes.filter(x => !x.full)]) {
+  for (const g of [...S.titles, ...S.shapes.filter(x => !x.full), ...S.tactics]) {
     const s = g.start, e = g.start + g.dur;
     if (e <= a || s >= b) continue;
     const keep = Math.max(0, a - s) + Math.max(0, e - b);
+    if (g.follow && g.follow.length) g.follow = tacFollowCut(g, a, b).follow;  // 따라가는 전술 그림: 잘린 만큼 기록도 당김
     g.start = Math.min(s, a); g.dur = keep;
   }
-  S.titles = S.titles.filter(g => g.dur > 0.15); S.shapes = S.shapes.filter(g => g.full || g.dur > 0.15);
+  S.titles = S.titles.filter(g => g.dur > 0.15); S.shapes = S.shapes.filter(g => g.full || g.dur > 0.15); S.tactics = S.tactics.filter(g => g.dur > 0.15);
 }
 // 구간 잘라내기·들어내기가 적용될 트랙: 대상 트랙 + 그 구간 클립의 연결된 짝 (Ctrl+K·Q/W 와 같은 규칙).
 // 대상이 아닌 트랙은 그 구간에 걸친 클립이 있으면 그대로 두고(배경음악이 끊기지 않게), 없으면 같이 당겨 싱크를 맞춤.
@@ -1216,6 +1236,8 @@ function insertGap(t, len, tracks) {
   for (const it of S.items) if (ok.has(it.track) && it.start >= t - EPS) it.start = fr(it.start + len);
   for (const g of S.titles) if (g.start >= t - EPS) g.start += len;
   for (const g of S.shapes) if (!g.full && g.start >= t - EPS) g.start += len;
+  for (const g of S.tactics) if (g.start >= t - EPS) g.start += len;
+    else if (g.follow && g.follow.length && g.start + g.dur > t + EPS) Object.assign(g, tacFollowHold(g, t, len)); // 따라가는 그림이 걸쳐 있으면: 끼운 동안 멈췄다가 밀린 선수를 이어서 따라감
   for (const m of S.markers) if (m.t >= t - EPS) m.t = fr(m.t + len); // 마커도 같이 밀림 (잘라내기·잔물결 삭제와 같게)
 }
 // 원본 구간 [a, b] (대사 하나) 를 타임라인에서 빼기
@@ -1265,7 +1287,7 @@ function deleteSel(ripple) {
     for (const r of rng) { const l = merged[merged.length - 1]; if (l && r[0] <= l[1] + EPS) l[1] = Math.max(l[1], r[1]); else merged.push([...r]); }
     const kept = new Set(), mv = [], mk = { moved: 0, removed: 0 };
     for (const [s, e] of merged.reverse()) {
-      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
+      const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); tacRippleCut(s, e, sk); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
     }
     toast((kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv) + markNote(mk));
   } else toast("지웠어요 · 빈자리를 당기려면 빈 곳을 누르고 Delete (또는 Shift+Delete)");
@@ -1279,7 +1301,7 @@ function deleteGap(g) {
     selX = null; renderTimeline(); renderPanels(); return toast("빈 곳이 바뀌었어요 · 빈 곳을 다시 눌러 주세요");
   }
   const sk = spanning(g.s, g.e); sk.delete(g.track);
-  commit("빈 곳 지우기"); const mk = markCut(g.s, g.e), mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
+  commit("빈 곳 지우기"); tacRippleCut(g.s, g.e, sk); const mk = markCut(g.s, g.e), mv = shiftAfter(g.e, -(g.e - g.s), new Set(), sk); selX = null; changed();
   toast((sk.size ? `빈 곳을 당겼어요 · ${[...sk].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` : "빈 곳을 당겼어요") + followNote(mv) + markNote(mk));
 }
 function deleteGfx() {
@@ -1289,6 +1311,7 @@ function deleteGfx() {
   if (selX.k === "caption") P.captions = P.captions.filter(c => c.id !== selX.id);
   if (selX.k === "title") S.titles = S.titles.filter(t => t.id !== selX.id);
   if (selX.k === "shape") S.shapes = S.shapes.filter(t => t.id !== selX.id);
+  if (selX.k === "tact") S.tactics = S.tactics.filter(t => t.id !== selX.id);
   if (selX.k === "trans") S.trans = S.trans.filter(t => t.id !== selX.id);
   selX = null; changed();
 }
@@ -1680,6 +1703,7 @@ function renderFrame() {
   drawOverlays(t);
   drawMonBox(t);
   drawGfxBox();
+  drawTacHandles();
   const tot = total();
   $("tcNow").textContent = tc(t); $("tcNow2").textContent = tc(t); $("tcDur").textContent = tc(tot);
   const pct = tot ? t / tot * 100 : 0;
@@ -1796,6 +1820,7 @@ function effect(el, st, e, r, scale, text, kw) {
 }
 let ovEls = {}, shpKey = "";
 function drawOverlays(t) {
+  drawTactics(t);
   const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, scale = fh / BH(), tot = total();
   const shs = S.shapes.filter(sh => shapeOn(sh, t) && t < tot + 0.01);
   const key = fw + "|" + fh + "|" + JSON.stringify(shs) + (selX && selX.k === "shape" ? selX.id : "");
@@ -1817,6 +1842,378 @@ function drawOverlays(t) {
     effect(el, w.st, t - w.s, w.e - t, scale, w.text, w.kw);
   }
 }
+/* ---------- 전술 그림: 모양 계산 (tactic.py ops_at 과 짝 — 한쪽을 고치면 다른 쪽도 · 미리보기 = 내보내기) ---------- */
+const TAC_KINDS = ["arrow", "curve", "pass", "ring", "spot", "label"];
+const TAC_NAMES = { arrow: "형광 화살표", curve: "곡선 화살표", pass: "패스 길 (점선)", ring: "발밑 원", spot: "스포트라이트", label: "선수 이름표" };
+const TAC_PALETTE = [["#00D1FF", "하늘 네온"], ["#A6FF00", "형광 연두"], ["#FFE14D", "노랑"], ["#FF3B30", "빨강"], ["#FF3EA5", "분홍"], ["#FFFFFF", "흰색"]];
+const TAC_DEF = { arrow: { color: "#FFE14D", width: 14, draw: 0.6 }, curve: { color: "#FFE14D", width: 14, draw: 0.7 }, pass: { color: "#A6FF00", width: 9, draw: 0.8 },
+  ring: { color: "#00D1FF", width: 10, size: 110, draw: 0.5 }, spot: { color: "#FFFFFF", size: 210, dim: 0.6, draw: 0.5 }, label: { color: "#FFE14D", size: 40, text: "선수", draw: 0.35 } };
+const TAC_NPTS = { arrow: 2, curve: 3, pass: 3, ring: 1, spot: 1, label: 1 };
+const TC = { BASE: 1080, SEG: 48, CAP_N: 8, ELL_N: 48, FADE_OUT: 0.25, GLOW_W: 2.2, GLOW_A: 0.55, GLOW_BLUR: 0.75, CORE_W: 0.34, CORE_A: 0.9, HEAD_K: 3.4,
+  DASH_ON: 1.4, DASH_OFF: 1.5, MARCH: 0.6, RING_RY: 0.32, RING_BACK: 0.45, RING_FILL: 0.22, SPOT_FEATHER: 0.1 };
+const tR2 = v => Math.round(v * 100) / 100;
+const tClamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const tEase = x => { x = tClamp(x, 0, 1); return 1 - (1 - x) * (1 - x) * (1 - x); };
+function tacFollowAt(fol, e) {
+  if (!fol || !fol.length) return [0, 0];
+  if (e <= fol[0][0]) return [fol[0][1], fol[0][2]];
+  for (let i = 0; i < fol.length - 1; i++) { const a = fol[i], b = fol[i + 1]; if (e <= b[0]) { const x = (e - a[0]) / ((b[0] - a[0]) || 1); return [a[1] + (b[1] - a[1]) * x, a[2] + (b[2] - a[2]) * x]; } }
+  const l = fol[fol.length - 1]; return [l[1], l[2]];
+}
+// 따라가기 기록 다시 맞추기 — 그림 아래 영상이 잘리거나 밀리면 (잘라내기·잔물결·군더더기 정리·MSG 빼기·끼워 넣기) 기록도 같은 만큼
+// pairs = [[옛 타임라인 시각, 새 타임라인 시각 | null(잘려 나감)]] · 값은 옛 기록에서 그 시각 자리 → 새 기록 (새 시작 기준)
+function tacRefollow(g, newStart, pairs) {
+  if (!g.follow || !g.follow.length) return g.follow || null;
+  const out = [];
+  for (const [T, nt] of pairs) {
+    if (nt == null) continue;
+    const [x, y] = tacFollowAt(g.follow, T - g.start);
+    out.push([Math.round(Math.max(0, nt - newStart) * 1000) / 1000, Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]);
+  }
+  out.sort((p, q) => p[0] - q[0]);
+  const u = out.filter((p, i) => !i || p[0] > out[i - 1][0]);
+  return u.length ? u : null;
+}
+// 타임라인 [a,b] 를 빼고 뒤를 당길 때 (그림의 새 시작 = 앞이 잘리면 a · gfxCut 과 같은 규칙)
+function tacFollowCut(g, a, b) {
+  const s = g.start, e = s + g.dur, d = b - a, m = T => T < a ? T : T >= b ? T - d : null;
+  const ns = s < a ? s : s < b ? a : s - d, pairs = g.follow.map(f => [s + f[0], m(s + f[0])]);
+  if (a - 1e-3 > s && a < e) pairs.push([a - 1e-3, a - 1e-3]);  // 잘린 곳 바로 앞 자리
+  if (b > s && b < e) pairs.push([b, a]);                          // 잘린 곳 바로 뒤 자리 (선수가 거기서 이어짐)
+  return { start: ns, follow: tacRefollow(g, ns, pairs) };
+}
+// 타임라인 t 에 len 초를 끼워 넣을 때 (그림이 t 에 걸쳐 있으면): 그 동안은 제자리에 멈추고, 그림도 그만큼 길어짐
+function tacFollowHold(g, t, len) {
+  const s = g.start, pairs = g.follow.map(f => [s + f[0], s + f[0] < t ? s + f[0] : s + f[0] + len]);
+  pairs.push([t, t], [t, t + len]);
+  return { dur: g.dur + len, follow: tacRefollow(g, s, pairs) };
+}
+function tQuad(P) {
+  const a = P[0], c = P.length < 3 ? [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2] : P[1], b = P.length < 3 ? P[1] : P[2], out = [];
+  for (let i = 0; i <= TC.SEG; i++) { const t = i / TC.SEG, u = 1 - t; out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); }
+  return out;
+}
+function tCum(S) { const c = [0]; for (let i = 1; i < S.length; i++) c.push(c[i - 1] + Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1])); return c; }
+function tPoint(S, C, l) {
+  l = tClamp(l, 0, C[C.length - 1]); let i = 1;
+  while (i < S.length - 1 && C[i] < l) i++;
+  const seg = (C[i] - C[i - 1]) || 1, x = (l - C[i - 1]) / seg, dx = S[i][0] - S[i - 1][0], dy = S[i][1] - S[i - 1][1], d = Math.hypot(dx, dy) || 1;
+  return [[S[i - 1][0] + dx * x, S[i - 1][1] + dy * x], [dx / d, dy / d]];
+}
+function tPart(S, C, a, b) { const out = [tPoint(S, C, a)[0]]; for (let i = 0; i < S.length; i++) if (a < C[i] && C[i] < b) out.push(S[i]); out.push(tPoint(S, C, b)[0]); return out; }
+function tArea(ct) { let s = 0; for (let i = 0; i < ct.length; i++) { const [x0, y0] = ct[i], [x1, y1] = ct[(i + 1) % ct.length]; s += x0 * y1 - x1 * y0; } return s; }
+const tOrient = (ct, hole = false) => ((tArea(ct) < 0) !== hole ? ct.slice().reverse() : ct);
+function tCircle(cx, cy, r, n = TC.CAP_N * 2) { const o = []; for (let k = 0; k < n; k++) o.push([cx + r * Math.cos(2 * Math.PI * k / n), cy + r * Math.sin(2 * Math.PI * k / n)]); return o; }
+function tStroke(pts, h) {
+  const P = [pts[0]];
+  for (const p of pts.slice(1)) if (Math.hypot(p[0] - P[P.length - 1][0], p[1] - P[P.length - 1][1]) > 1e-6) P.push(p);
+  if (P.length < 2) return tOrient(tCircle(P[0][0], P[0][1], h));
+  const n = P.length, N = [];
+  for (let i = 0; i < n; i++) { const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1; N.push([-dy / d, dx / d]); }
+  const left = P.map((p, i) => [p[0] + N[i][0] * h, p[1] + N[i][1] * h]), right = P.map((p, i) => [p[0] - N[i][0] * h, p[1] - N[i][1] * h]);
+  const ne = N[n - 1], de = [N[n - 1][1], -N[n - 1][0]], ns = N[0], ds = [N[0][1], -N[0][0]], endcap = [], startcap = [];
+  const cn = Math.max(2, Math.min(TC.CAP_N, Math.ceil(h / 2)));  // 가는 선은 둥근 끝 조각을 적게 (tactic._stroke 와 같게)
+  for (let k = 1; k < cn; k++) {
+    const f = Math.PI * k / cn, c = Math.cos(f), s = Math.sin(f);
+    endcap.push([P[n - 1][0] + h * (ne[0] * c + de[0] * s), P[n - 1][1] + h * (ne[1] * c + de[1] * s)]);
+    startcap.push([P[0][0] + h * (-ns[0] * c - ds[0] * s), P[0][1] + h * (-ns[1] * c - ds[1] * s)]);
+  }
+  return tOrient(left.concat(endcap, right.reverse(), startcap));
+}
+function tArcBand(cx, cy, rx, ry, h, a0, a1) {
+  const n = Math.max(2, Math.ceil(TC.ELL_N * (a1 - a0) / (2 * Math.PI))), outer = [], inner = [];
+  for (let k = 0; k <= n; k++) {
+    const a = a0 + (a1 - a0) * k / n, c = Math.cos(a), s = Math.sin(a);
+    outer.push([cx + (rx + h) * c, cy + (ry + h) * s]); inner.push([cx + Math.max(0.5, rx - h) * c, cy + Math.max(0.5, ry - h) * s]);
+  }
+  return tOrient(outer.concat(inner.reverse()));
+}
+function tEllipse(cx, cy, rx, ry, hole = false) { const o = []; for (let k = 0; k < TC.ELL_N; k++) o.push([cx + rx * Math.cos(2 * Math.PI * k / TC.ELL_N), cy + ry * Math.sin(2 * Math.PI * k / TC.ELL_N)]); return tOrient(o, hole); }
+function tHead(tip, d, size, k = 1) {
+  const [ux, uy] = d, ln = size * k, half = size * 0.58 * k, tx = tip[0] - ux * size * (1 - k) * 0.35, ty = tip[1] - uy * size * (1 - k) * 0.35, bx = tx - ux * ln, by = ty - uy * ln;
+  return tOrient([[tx, ty], [bx - uy * half, by + ux * half], [bx + uy * half, by - ux * half]]);
+}
+function tGrow(ct, s) { let cx = 0, cy = 0; for (const p of ct) { cx += p[0]; cy += p[1]; } cx /= ct.length; cy /= ct.length; return ct.map(p => [cx + (p[0] - cx) * s, cy + (p[1] - cy) * s]); }
+function tIvs(a0, a1, ivs) { const out = []; for (const [lo, hi] of ivs) { const a = Math.max(a0, lo), b = Math.min(a1, hi); if (b - a > 1e-6) out.push([a, b]); } return out; }
+const tacEm = text => Array.from(String(text)).reduce((w, ch) => w + (ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? 0.95 : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42), 0);
+function tLuma(hex) { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; }
+// 저장본 정리 (tactic.normalize 와 같은 규칙)
+function tacNorm(tc) {
+  if (!tc || !TAC_KINDS.includes(tc.kind)) return null;
+  const k = tc.kind, d = TAC_DEF[k], num = (v, df, lo, hi) => { const x = +v; if (v === null || v === undefined || v === "" || !isFinite(x)) return df; return Math.min(hi ?? Infinity, Math.max(lo ?? -Infinity, x)); };
+  const pts = (tc.pts || []).slice(0, TAC_NPTS[k]).filter(p => Array.isArray(p) && p.length >= 2).map(p => [num(p[0], 0.5, -0.5, 1.5), num(p[1], 0.5, -0.5, 1.5)]);
+  if (pts.length < TAC_NPTS[k]) return null;
+  const hex = c => /^#[0-9a-fA-F]{6}$/.test(String(c || "")) ? String(c).toUpperCase() : d.color;
+  const o = { ...tc, pts, start: num(tc.start, 0, 0), dur: num(tc.dur, 3, 0.1, 3600), color: hex(tc.color), draw: num(tc.draw, d.draw, 0, 10), glow: tc.glow !== false };
+  if ("width" in d) o.width = num(tc.width, d.width, 2, 80);
+  if ("size" in d) o.size = num(tc.size, d.size, 10, 1500);
+  if (k === "spot") o.dim = num(tc.dim, d.dim, 0, 0.95);
+  if (k === "label") o.text = String(tc.text ?? d.text).slice(0, 30);
+  const fol = (tc.follow || []).filter(f => Array.isArray(f) && f.length >= 3).map(f => [num(f[0], 0, 0), num(f[1], 0, -2, 2), num(f[2], 0, -2, 2)]);
+  fol.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]); o.follow = fol.length ? fol : null;
+  return o;
+}
+// 그리는 차례: 스포트라이트(화면 어둡게)는 늘 아래 (tactic.ordered 와 같게)
+function tacOrder(list) { const ts = (list || []).map(tacNorm).filter(Boolean); return ts.filter(t => t.kind === "spot").concat(ts.filter(t => t.kind !== "spot")); }
+function tacOps(tc, t, W, H) {
+  const e = t - tc.start; if (e < 0 || e >= tc.dur) return [];
+  const k = tc.kind, u = Math.min(W, H) / TC.BASE, A = tClamp((tc.dur - e) / TC.FADE_OUT, 0, 1), dr = tc.draw || 0, p = dr <= 0 ? 1 : tEase(e / dr);
+  const [fx, fy] = tacFollowAt(tc.follow, e), ox = fx * W, oy = fy * H;
+  let pts = tc.pts.map(([x, y]) => [x * W, y * H]);
+  if (k === "arrow" || k === "curve" || k === "pass") { pts[0] = [pts[0][0] + ox, pts[0][1] + oy]; if (pts.length > 2) pts[1] = [pts[1][0] + ox / 2, pts[1][1] + oy / 2]; }
+  else pts = pts.map(([x, y]) => [x + ox, y + oy]);
+  const col = tc.color, w = (tc.width || 10) * u, glow = tc.glow !== false, ops = [];
+  const poly = (cts, c, a, blur = 0) => { if (a <= 0.004 || !cts.length) return; ops.push({ k: "poly", c: cts.map(ct => ct.map(([x, y]) => [tR2(x), tR2(y)])), col: c, a: tR2(Math.min(1, a)), b: tR2(blur) }); };
+  if (k === "arrow" || k === "curve") {
+    const S = tQuad(k === "curve" ? pts : pts.slice(0, 2)), C = tCum(S), ln = C[C.length - 1] * p;
+    if (ln <= 0.5) return [];
+    const full = w * TC.HEAD_K, hs = full * Math.min(1, ln / (full * 1.5)), [tip, d] = tPoint(S, C, ln), se = ln - hs * 0.72;
+    const shaft = se > 0.5 ? tPart(S, C, 0, se) : null, head = tHead(tip, d, hs);
+    if (glow) { if (shaft) poly([tStroke(shaft, w / 2 * TC.GLOW_W)], col, TC.GLOW_A * A, w * TC.GLOW_BLUR); poly([tGrow(head, 1.35)], col, TC.GLOW_A * A, w * TC.GLOW_BLUR); }
+    if (shaft) poly([tStroke(shaft, w / 2)], col, A);
+    poly([head], col, A);
+    if (shaft) poly([tStroke(shaft, w / 2 * TC.CORE_W)], "#FFFFFF", TC.CORE_A * A);
+    poly([tHead(tip, d, hs, 0.42)], "#FFFFFF", TC.CORE_A * A);
+  } else if (k === "pass") {
+    const S = tQuad(pts), C = tCum(S), L = C[C.length - 1], ln = L * p;
+    if (ln <= 0.5) return [];
+    const endR = w * 1.25, startR = w * 0.8, period = (TC.DASH_ON + TC.DASH_OFF) * w, phase = (e / TC.MARCH) % 1 * period;
+    const lo = startR * 1.8, hi = Math.min(ln, L - endR * 1.6), dashes = [];
+    for (let j = -1; ; j++) {
+      const a = j * period + phase; if (a >= hi) break;
+      const b = a + TC.DASH_ON * w, a2 = Math.max(a, lo), b2 = Math.min(b, hi);
+      if (b2 - a2 > 0.5) dashes.push(tPart(S, C, a2, b2));
+    }
+    const dots = [tOrient(tCircle(S[0][0], S[0][1], startR))], er = endR * tClamp((p - 0.85) / 0.15, 0, 1);
+    if (er > 0.5) dots.push(tOrient(tCircle(S[S.length - 1][0], S[S.length - 1][1], er)));
+    if (glow && hi > lo) poly([tStroke(tPart(S, C, lo, hi), w / 2 * TC.GLOW_W)].concat(dots.map(c => tGrow(c, TC.GLOW_W))), col, TC.GLOW_A * A, w * TC.GLOW_BLUR);  // 빛 번짐은 길 하나로
+    else if (glow) poly(dots.map(c => tGrow(c, TC.GLOW_W)), col, TC.GLOW_A * A, w * TC.GLOW_BLUR);
+    poly(dashes.map(x => tStroke(x, w / 2)).concat(dots), col, A);
+  } else if (k === "ring") {
+    const [cx, cy] = pts[0], rx = (tc.size ?? 110) * u, ry = rx * TC.RING_RY, h = w / 2, a0 = Math.PI / 2, a1 = a0 + 2 * Math.PI * p, PI = Math.PI;
+    const front = [[0.5 * PI, PI], [2 * PI, 2.5 * PI]], back = [[PI, 2 * PI]];
+    poly([tEllipse(cx, cy, Math.max(0.5, rx - h), Math.max(0.5, ry - h))], col, TC.RING_FILL * A * p);
+    if (glow) poly(tIvs(a0, a1, [[a0, a0 + 2 * PI]]).map(([a, b]) => tArcBand(cx, cy, rx, ry, h * TC.GLOW_W, a, b)), col, TC.GLOW_A * A, w * TC.GLOW_BLUR);
+    poly(tIvs(a0, a1, back).map(([a, b]) => tArcBand(cx, cy, rx, ry, h, a, b)), col, TC.RING_BACK * A);
+    poly(tIvs(a0, a1, front).map(([a, b]) => tArcBand(cx, cy, rx, ry, h, a, b)), col, A);
+    poly(tIvs(a0, a1, [[0.5 * PI, 0.92 * PI], [2.08 * PI, 2.5 * PI]]).map(([a, b]) => tArcBand(cx, cy, rx, ry, h * 0.3, a, b)), "#FFFFFF", TC.CORE_A * A);
+  } else if (k === "spot") {
+    const [cx, cy] = pts[0], r = (tc.size ?? 210) * u, rr = r * (1 + 0.6 * (1 - p)), fe = rr * TC.SPOT_FEATHER, pad = fe * 4 + 2;
+    const rect = tOrient([[-pad, -pad], [W + pad, -pad], [W + pad, H + pad], [-pad, H + pad]]);
+    poly([rect, tEllipse(cx, cy, rr, rr, true)], "#000000", (tc.dim ?? 0.6) * A * p, fe);
+    if (glow) poly([tArcBand(cx, cy, rr, rr, 5 * u, 0, 2 * Math.PI)], col, 0.5 * A * p, 6 * u);
+    poly([tArcBand(cx, cy, rr, rr, 2 * u, 0, 2 * Math.PI)], col, 0.85 * A * p);
+  } else if (k === "label") {
+    const [tx, ty] = pts[0], text = String(tc.text || ""); if (!text) return [];
+    const fs = (tc.size ?? 40) * u, s = 0.7 + 0.3 * p, bw = tacEm(text) * fs + fs * 1.1, bh = fs * 1.45, ph = fs * 0.45, m = 10 * u;
+    const cx = bw > W - 2 * m ? W / 2 : tClamp(tx, bw / 2 + m, W - bw / 2 - m), y1 = ty - ph, y0 = y1 - bh, rad = bh * 0.3, box = [];
+    for (const [qx, qy, a] of [[cx + bw / 2 - rad, y0 + rad, -0.5], [cx + bw / 2 - rad, y1 - rad, 0], [cx - bw / 2 + rad, y1 - rad, 0.5], [cx - bw / 2 + rad, y0 + rad, 1]])
+      for (let j = 0; j < 7; j++) { const ang = Math.PI * (a + 0.5 * j / 6); box.push([qx + rad * Math.cos(ang), qy + rad * Math.sin(ang)]); }
+    const hw = fs * 0.38, px = tClamp(tx, cx - bw / 2 + rad + hw, cx + bw / 2 - rad - hw), tri = [[tx, ty], [px + hw, y1 - u], [px - hw, y1 - u]];
+    const sc = ct => ct.map(([x, y]) => [tx + (x - tx) * s, ty + (y - ty) * s]);
+    poly([tOrient(sc(box)), tOrient(sc(tri))], col, A * p);
+    if (A * p > 0.004) ops.push({ k: "text", x: tR2(tx + (cx - tx) * s), y: tR2(ty + ((y0 + y1) / 2 - ty) * s), s: tR2(fs * s), t: text, col: tLuma(col) > 0.55 ? "#111111" : "#FFFFFF", a: tR2(Math.min(1, A * p)) });
+  }
+  return ops;
+}
+/* ---------- 전술 그림: 모양 계산 끝 ---------- */
+/* ---------- 전술 그림: 미리보기 그리기 · 넣기 · 화면에서 점 끌기 · 선수 따라가기 ---------- */
+const TAC_TEXT_DY = 0;  // 이름표 글자 세로 보정 (글자 크기 배 · tactic.TEXT_DY 와 같은 값)
+let tacKey = "";
+function drawTactics(t) {
+  const cv = $("tac"), F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, dpr = window.devicePixelRatio || 1, W = BW(), H = BH();
+  const list = t < total() + 0.01 ? tacOrder(S.tactics).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
+  const key = list.length ? `${fw}|${fh}|${dpr}|${W}|${t}|${JSON.stringify(list)}` : `${fw}|${fh}|none`;
+  if (key === tacKey) return;
+  tacKey = key;
+  const pw = Math.max(1, Math.round(fw * dpr)), ph = Math.max(1, Math.round(fh * dpr));
+  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+  const g = cv.getContext("2d"); g.clearRect(0, 0, pw, ph);
+  const k = pw / W;  // 미리보기도 1920×1080(쇼츠 1080×1920) 기준으로 계산한 모양을 그대로 줄여 그림 (내보내기 ASS 와 같은 기준)
+  for (const tc of list) for (const o of tacOps(tc, t, W, H)) tacPaint(g, o, k);
+}
+function tacPaint(g, o, k) {
+  g.save(); g.globalAlpha = o.a; g.fillStyle = o.col; g.filter = o.b > 0 ? `blur(${o.b * k}px)` : "none";
+  if (o.k === "text") { g.font = `900 ${o.s * k}px PretendardE`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(o.t, o.x * k, (o.y + o.s * TAC_TEXT_DY) * k); }
+  else { g.beginPath(); for (const ct of o.c) { ct.forEach(([x, y], i) => (i ? g.lineTo(x * k, y * k) : g.moveTo(x * k, y * k))); g.closePath(); } g.fill(); }
+  g.restore();
+}
+const TAC_START = { arrow: [[0.38, 0.72], [0.62, 0.52]], curve: [[0.32, 0.75], [0.5, 0.42], [0.7, 0.62]], pass: [[0.3, 0.7], [0.5, 0.5], [0.72, 0.66]],
+  ring: [[0.5, 0.8]], spot: [[0.5, 0.55]], label: [[0.5, 0.3]] };
+const TAC_HINT = { arrow: "곧게 그려지며 나오는 형광 화살표", curve: "휘어지는 화살표 (가운데 점으로 휨 조절)", pass: "패스·움직임 길을 흐르는 점선으로",
+  ring: "선수 발밑에 빛나는 원", spot: "선수만 밝게, 나머지는 어둡게", label: "선수 머리 위 이름표" };
+const TAC_FOLLOW_HINT = { ring: "원을 선수 발밑에 놓고 누르면 원이 그 선수를 따라 움직여요", spot: "밝은 원을 선수 몸 위에 놓고 누르면 그 선수를 따라 움직여요",
+  label: "이름표 아래 뾰족한 끝을 선수 머리 위에 놓고 누르면 따라 움직여요", arrow: "출발점을 선수 발밑에 놓고 누르면 출발점이 선수를 따라가요 (끝은 그대로)" };
+TAC_FOLLOW_HINT.curve = TAC_FOLLOW_HINT.pass = TAC_FOLLOW_HINT.arrow;
+const tacSel = () => (selX && selX.k === "tact" ? S.tactics.find(x => x.id === selX.id) || null : null);
+function addTactic(kind, at) {
+  const d = TAC_DEF[kind], t0 = fr(at ?? T);
+  commit("전술 그림 넣기");
+  const tc = { id: nid(), kind, name: TAC_NAMES[kind], start: t0, dur: fr(Math.max(1, Math.min(4, total() - t0))), pts: JSON.parse(JSON.stringify(TAC_START[kind])), color: d.color, draw: d.draw, glow: true };
+  if ("width" in d) tc.width = d.width;
+  if ("size" in d) tc.size = d.size;
+  if (kind === "spot") tc.dim = d.dim;
+  if (kind === "label") tc.text = d.text;
+  S.tactics.push(tc); selX = { k: "tact", id: tc.id }; selI.clear(); setRtab("fx", true); changed(false);
+  toast(`${TAC_NAMES[kind]}을(를) 넣었어요 · 화면의 흰 점을 끌어 자리를 잡아요`);
+}
+// 지금 화면에 보이는 점들 (따라가기로 옮긴 만큼 포함 · 0~1) — tacOps 와 같은 규칙: 화살표·패스는 출발점만(휘는 곳은 반만) 따라감
+function tacShown(n, t) {
+  const [ox, oy] = tacFollowAt(n.follow, clamp(t - n.start, 0, n.dur)), line = n.kind === "arrow" || n.kind === "curve" || n.kind === "pass";
+  return n.pts.map((p, i) => (!line || i === 0 ? [p[0] + ox, p[1] + oy] : i === 1 && n.pts.length > 2 ? [p[0] + ox / 2, p[1] + oy / 2] : p.slice()));
+}
+// 화면을 눌러 전술 그림 고르기: 그 시각 보이는 그림 중 누른 자리에 있는 것 (맨 위 그림부터 · 스포트라이트는 밝은 원 안만)
+function tacHit(t, x, y) {  // x, y = 화면 비율 0~1
+  const W = BW(), H = BH(), u = Math.min(W, H) / TC.BASE, px = x * W, py = y * H, pad = 24 * u;
+  const segD = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, k = l ? clamp(((px - a[0]) * dx + (py - a[1]) * dy) / l, 0, 1) : 0; return Math.hypot(px - a[0] - k * dx, py - a[1] - k * dy); };
+  const list = t < total() + 0.01 ? tacOrder(S.tactics).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
+  for (const n of list.reverse()) {
+    const P = tacShown(n, t).map(([a, b]) => [a * W, b * H]);
+    if (n.kind === "ring" || n.kind === "spot") { const ry = n.kind === "ring" ? TC.RING_RY : 1; if (Math.hypot(px - P[0][0], (py - P[0][1]) / ry) <= n.size * u + pad) return n.id; }
+    else if (n.kind === "label") { const s = n.size * u, w = tacEm(n.text) * s / 2 + pad; if (Math.abs(px - P[0][0]) <= w && py <= P[0][1] + pad && py >= P[0][1] - s * 2.2 - pad) return n.id; }
+    else { const w = (n.width || 10) * u * 2 + pad; for (let i = 0; i < P.length - 1; i++) if (segD(P[i], P[i + 1]) <= w) return n.id; }
+  }
+  return null;
+}
+$("frame").addEventListener("mousedown", ev => {
+  if (playing || ev.button !== 0 || ev.target.closest("#tacH i, #tacH .tb")) return;
+  const r = $("frame").getBoundingClientRect(), id = tacHit(T, (ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height);
+  if (!id || (selX && selX.k === "tact" && selX.id === id)) return;
+  ev.preventDefault(); ev.stopPropagation();
+  selX = { k: "tact", id }; selI.clear(); setRtab("fx", true); renderTimeline(); renderPanels(); frameDirty = true;
+}, true);
+let tacHKey = "";
+function drawTacHandles() {
+  const box = $("tacH"), tc = tacSel(), n = tc && tacNorm(tc);
+  if (!n || playing || T < n.start || T >= n.start + n.dur) { if (tacHKey !== "") { css(box, "display", "none"); tacHKey = ""; } return; }
+  const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, P = tacShown(n, T), k = fw / BW(), u = Math.min(BW(), BH()) / TC.BASE;
+  const hs = P.map(([x, y], i) => ({ p: String(i), x: x * fw, y: y * fh }));
+  if (n.kind === "ring") hs.push({ p: "sz", x: P[0][0] * fw + n.size * u * k, y: P[0][1] * fh });
+  if (n.kind === "spot") hs.push({ p: "sz", x: P[0][0] * fw + n.size * u * k, y: P[0][1] * fh });
+  const xs = hs.map(h => h.x), ys = hs.map(h => h.y), pad = 14, bx = Math.min(...xs) - pad, by = Math.min(...ys) - pad;
+  const key = JSON.stringify([hs, fw, fh]);
+  if (key === tacHKey) return;
+  tacHKey = key; css(box, "display", "block");
+  box.innerHTML = `<div class="tb" style="left:${bx}px;top:${by}px;width:${Math.max(...xs) + pad - bx}px;height:${Math.max(...ys) + pad - by}px" title="끌어서 통째로 옮기기"></div>` +
+    hs.map(h => `<i class="${h.p === "sz" ? "sz" : ""}" data-p="${h.p}" style="left:${h.x}px;top:${h.y}px" title="${h.p === "sz" ? "끌어서 크기 바꾸기" : "끌어서 자리 옮기기"}"></i>`).join("");
+}
+$("tacH").addEventListener("mousedown", ev => {
+  const tc = tacSel(); if (!tc || !ev.target.closest("i,.tb")) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const F = $("frame").getBoundingClientRect(), x0 = ev.clientX, y0 = ev.clientY, before = JSON.stringify(P), p0 = JSON.parse(JSON.stringify(tc.pts)), hp = ev.target.dataset.p;
+  const n = tacNorm(tc), c0 = tacShown(n, T)[0], u = Math.min(BW(), BH()) / TC.BASE;
+  let moved = false;
+  const mv = e => {
+    moved = true; const dx = (e.clientX - x0) / F.width, dy = (e.clientY - y0) / F.height;
+    if (hp === "sz") { const mx = (e.clientX - F.left) / F.width * BW(), my = (e.clientY - F.top) / F.height * BH(); tc.size = Math.round(clamp(Math.hypot(mx - c0[0] * BW(), (my - c0[1] * BH()) / (n.kind === "ring" ? TC.RING_RY : 1)) / u, 20, 1500)); }
+    else if (hp == null) tc.pts = p0.map(([x, y]) => [clamp(x + dx, -0.2, 1.2), clamp(y + dy, -0.2, 1.2)]);
+    else tc.pts[+hp] = [clamp(p0[+hp][0] + dx, -0.2, 1.2), clamp(p0[+hp][1] + dy, -0.2, 1.2)];
+    ver++; frameDirty = true;
+  };
+  const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); if (moved) { tc.pts = tc.pts.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]); pushHist("전술 그림 옮기기", before); changed(false); } };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+});
+// 원본 자리 ↔ 화면 자리 (tactic.src_to_frame·frame_to_src 와 같은 계산 · fitRect·motionAt 기준)
+function tacFromSrc(it, md, u, v, t) {
+  const f = fitRect(it, md), mo = motionAt(it, t), W = BW(), H = BH(), a = mo.rot * Math.PI / 180;
+  const px = f.bx + f.mx + u * f.mw, py = f.by + f.my + v * f.mh, ox = f.bx + mo.anc[0] * f.bw, oy = f.by + mo.anc[1] * f.bh, dx = (px - ox) * mo.sc, dy = (py - oy) * mo.sc;
+  return [ox + (mo.pos[0] - 0.5) * W + dx * Math.cos(a) - dy * Math.sin(a), oy + (mo.pos[1] - 0.5) * H + dx * Math.sin(a) + dy * Math.cos(a)];
+}
+function tacToSrc(it, md, x, y, t) {
+  const f = fitRect(it, md), mo = motionAt(it, t), W = BW(), H = BH(), a = mo.rot * Math.PI / 180, sc = mo.sc || 1;
+  const ox = f.bx + mo.anc[0] * f.bw, oy = f.by + mo.anc[1] * f.bh, dx = x - ox - (mo.pos[0] - 0.5) * W, dy = y - oy - (mo.pos[1] - 0.5) * H;
+  const rx = (dx * Math.cos(a) + dy * Math.sin(a)) / sc, ry = (-dx * Math.sin(a) + dy * Math.cos(a)) / sc;
+  return [(ox + rx - f.bx - f.mx) / (f.mw || 1), (oy + ry - f.by - f.my) / (f.mh || 1)];
+}
+const TAC_ANCHOR = { ring: 1, arrow: 1, curve: 1, pass: 1, spot: 0.5, label: 0 };  // tactic.ANCHOR 와 같은 값
+function tacVideoAt(t) {  // 그 시각 화면에 보이는 맨 위 영상 클립
+  for (const tr of S.tracks.filter(x => x.k === "v" && !x.hide).sort((a, b) => +b.id.slice(1) - +a.id.slice(1))) {
+    const st = trackState(tr.id, t), it = st && (st.item || st.b || st.a);
+    if (it && mdOf(it).kind === "video") return it;
+  }
+  return null;
+}
+let tacFollowing = null;  // 따라가기 요청 중인 그림 id (한 번에 하나)
+async function tacFollow(tc) {
+  const n = tacNorm(tc); if (!n) return;
+  const it = tacVideoAt(n.start + 0.01);
+  if (!it) return toast("이 그림 아래에 영상 클립이 없어요 · 영상 위에 그림을 놓고 다시 눌러 주세요");
+  if (it.rev) return toast("거꾸로 재생하는 클립에서는 선수를 따라가지 못해요");
+  const md = mdOf(it), W = BW(), H = BH(), t0 = n.start, t1 = Math.min(n.start + n.dur, iEnd(it));
+  const [u, v] = tacToSrc(it, md, n.pts[0][0] * W, n.pts[0][1] * H, t0);
+  if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1.05)) return toast("그림이 영상 밖에 있어요 · 선수 위에 놓고 다시 눌러 주세요");
+  if (tacFollowing) return toast("다른 그림의 선수를 따라가는 중이에요 · 끝나면 다시 눌러 주세요");
+  const btn = $("tcFollow"); if (btn) { btn.disabled = true; btn.textContent = "따라가는 중…"; }
+  toast("선수를 따라가는 중이에요… (몇 초 걸려요)");
+  // 기다리는 동안 되돌리기·그림 옮기기·클립 편집이 있었으면 결과를 버림 (옛 사본에 쓰거나 옛 자리 기준으로 따라가지 않게)
+  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.fit]]);
+  const sig0 = sig(n, it), id = tc.id, seqId = S.id;
+  let r = null; tacFollowing = id;
+  try { r = await post("/api/edit/track", { name: NAME, file: md.file, src: md.src || "videos", t0: mt(it, t0), t1: mt(it, t1 - 1e-3), x: u, y: Math.min(1, v), kind: n.kind }).then(x => x.json()); } catch (e) { r = null; }
+  finally { tacFollowing = null; }
+  tc = S.id === seqId ? S.tactics.find(x => x.id === id) : null;
+  if (!tc || sig(tacNorm(tc), tacVideoAt(t0 + 0.01)) !== sig0) { renderPanels(); return toast("따라가는 동안 그림이나 영상이 바뀌어서 결과를 버렸어요 · 다시 눌러 주세요"); }
+  if (!r || !Array.isArray(r.boxes) || !r.boxes.length) { renderPanels(); return toast((r && r.error) || "선수를 따라가지 못했어요 · 잠시 뒤 다시 눌러 주세요"); }
+  const pts = r.boxes.map(([ts, x, y, w, h]) => { const tl = tlOf(it, ts), [px, py] = tacFromSrc(it, md, x + w / 2, y + h * TAC_ANCHOR[n.kind], tl); return [tl, px / W, py / H]; });
+  commit("선수 따라가기");
+  tc.follow = pts.map(([tl, x, y]) => [Math.round((tl - t0) * 1000) / 1000, Math.round((x - pts[0][1]) * 1e4) / 1e4, Math.round((y - pts[0][2]) * 1e4) / 1e4]);
+  const cut = r.lostTail ? fr(tlOf(it, r.seenUntil) + 1 / 8 - tc.start) : null;  // 끝에서 선수가 사라지면(장면 바뀜) 그림도 거기서 끝 (1/8 = tactic.TRACK_FPS · 끝 0.25초는 흐려짐)
+  if (cut != null && cut < tc.dur) tc.dur = Math.max(0.5, cut);
+  changed(false);
+  toast(cut != null && cut < n.dur ? `선수가 ${(tc.dur).toFixed(1)}초 뒤 화면에서 사라져서 그림도 거기서 끝나게 줄였어요`
+    : r.lost ? `선수를 따라가요 · ${r.n}장면 중 ${r.lost}장면은 가려져서 앞뒤로 이었어요` : "선수를 따라가요 ✓ 재생해서 확인해 보세요");
+}
+// 잔물결로 타임라인 [a,b] 영상이 빠지고 뒤가 당겨질 때 (잔물결 삭제·빈 곳 지우기·잔물결 다듬기): 따라가는 그림도 같이 맞춤
+// 걸친 그림은 gfxCut 처럼 그만큼 줄이고 기록을 당김 · upto 앞까지 b 뒤에서 시작하는 그림은 같이 당김 (클립 머리 다듬기) · b 뒤 영상이 그대로면(그 트랙을 안 당김) 그대로
+const TAC_REFOLLOW = " · 따라가는 전술 그림은 '다시 따라가기'를 눌러 선수에 다시 맞춰 주세요";
+function tacRippleCut(a, b, skip = new Set(), upto = b) {
+  if (!(b - a > EPS)) return;
+  const v = tacVideoAt(b + 0.01); if (v && skip.has(v.track)) return;
+  for (const g of S.tactics) {
+    if (!g.follow || !g.follow.length) continue;
+    const s = g.start, e = s + g.dur;
+    if (s >= b - EPS) { if (s < upto - EPS) g.start = Math.max(0, s - (b - a)); continue; }
+    if (e <= a + EPS) continue;
+    const c = tacFollowCut(g, a, b); g.follow = c.follow; g.start = c.start; g.dur = Math.max(0, a - s) + Math.max(0, e - b);
+  }
+  S.tactics = S.tactics.filter(g => g.dur > 0.15);
+}
+// 잔물결로 t 에 len 초가 생기고 뒤가 밀릴 때: 걸친 따라가는 그림은 그동안 멈춤 · upto 앞까지 t 뒤에서 시작하는 그림은 같이 밂
+function tacRippleHold(t, len, upto = t) {
+  if (!(len > EPS)) return;
+  for (const g of S.tactics) {
+    if (!g.follow || !g.follow.length) continue;
+    if (g.start >= t - EPS) { if (g.start < upto - EPS) g.start += len; continue; }
+    if (g.start + g.dur > t + EPS) Object.assign(g, tacFollowHold(g, t, len));
+  }
+}
+function renderTacPanel(el, tc) {
+  const k = tc.kind, d = TAC_DEF[k], n = tacNorm(tc) || tc;
+  el.innerHTML = `<div class="pg"><h4><span class="dot" style="background:${n.color}"></span>전술 그림 · ${esc(TAC_NAMES[k] || k)}</h4>
+    <div class="hint" style="margin-bottom:8px">${mmss(n.start)}부터 ${n.dur.toFixed(1)}초 · 화면의 흰 점을 끌어 자리를 잡고, 타임라인(G 줄)에서 끌어 옮기거나 끝을 늘려요</div>
+    ${k === "label" ? `<div class="f"><label>이름</label><input class="s" id="tcText" maxlength="30" value="${esc(n.text)}"><span></span></div>` : ""}
+    <div class="f"><label>색</label><div class="tcpal">${TAC_PALETTE.map(([c, nm]) => `<button class="${n.color === c ? "on" : ""}" data-tcc="${c}" title="${nm}" style="background:${c}"></button>`).join("")}<input type="color" id="tcColor" value="${n.color.toLowerCase()}" title="다른 색"></div><span></span></div>
+    ${"width" in d ? slider("tcW", "두께", n.width, 4, 40, 1, v => Math.round(v)) : ""}
+    ${"size" in d ? slider("tcS", k === "label" ? "글자 크기" : k === "spot" ? "밝은 원 크기" : "원 크기", n.size, k === "label" ? 20 : 30, k === "label" ? 120 : k === "spot" ? 600 : 400, 1, v => Math.round(v)) : ""}
+    ${k === "spot" ? slider("tcDim", "주변 어둡게", n.dim, 0.1, 0.9, 0.05, v => Math.round(v * 100) + "%") : ""}
+    ${slider("tcDraw", "그려지는 시간", n.draw, 0, 2, 0.05, v => (+v === 0 ? "바로 나타남" : (+v).toFixed(2) + "초"))}
+    <div class="f"><label>빛 번짐</label><label class="tog"><input type="checkbox" id="tcGlow" ${n.glow ? "checked" : ""}> 형광처럼 빛나게</label><span></span></div></div>
+    <div class="pg"><h4>선수 따라가기</h4><div class="hint" style="margin-bottom:8px">${n.follow ? `선수를 따라 움직여요 (${n.follow.length}곳) · 그림 자리를 옮겼으면 다시 따라가기를 눌러요` : TAC_FOLLOW_HINT[k]}</div>
+    <button class="btn" id="tcFollow">${n.follow ? "다시 따라가기" : "이 선수 따라가기"}</button>${n.follow ? ' <button class="btn" id="tcUnfollow">따라가기 끄기</button>' : ""}</div>
+    <div class="pg"><button class="btn" id="tcDel">삭제</button></div>`;
+  el.querySelectorAll("[data-tcc]").forEach(b => b.onclick = () => { commit("전술 그림 색"); tc.color = b.dataset.tcc; changed(false); });
+  { const c = $("tcColor"); let before = null; c.oninput = () => { if (!before) before = JSON.stringify(P); tc.color = c.value.toUpperCase(); ver++; frameDirty = true; }; c.onchange = () => { if (before) { pushHist("전술 그림 색", before); before = null; changed(false); } }; }
+  if ($("tcText")) { const ta = $("tcText"); let before = null; ta.oninput = () => { if (!before) before = JSON.stringify(P); tc.text = cutText(ta.value, 30); ver++; frameDirty = true; scheduleSave(); }; ta.onblur = () => { if (before) { pushHist("이름표 글자", before); before = null; renderTimeline(); } }; }
+  bindRange("tcW", v => tc.width = v, v => Math.round(v), "전술 그림 두께");
+  bindRange("tcS", v => tc.size = v, v => Math.round(v), "전술 그림 크기");
+  bindRange("tcDim", v => tc.dim = v, v => Math.round(v * 100) + "%", "스포트라이트 어둡게");
+  bindRange("tcDraw", v => tc.draw = v, v => (+v === 0 ? "바로 나타남" : (+v).toFixed(2) + "초"), "그려지는 시간");
+  $("tcGlow").onchange = e => { commit("빛 번짐"); tc.glow = e.target.checked; changed(false); };
+  $("tcFollow").onclick = () => tacFollow(tc);
+  if ($("tcUnfollow")) $("tcUnfollow").onclick = () => { commit("따라가기 끄기"); tc.follow = null; changed(false); };
+  $("tcDel").onclick = deleteGfx;
+}
+/* ---------- 전술 그림 끝 ---------- */
 let lastCapOn = null;
 function highlightCaption() {
   const st = trackState("V1", T); const it = st && (st.item || st.b || st.a); if (!it || it.media !== "main") return;
@@ -1966,10 +2363,11 @@ function renderTimeline() {
   }
   const tit = S.titles.map(g => `<div class="clip ${selX && selX.k === "title" && selX.id === g.id ? "sel" : ""}" data-gk="title" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px"><div class="eh l"></div><div class="lbl">${esc(g.text)}</div><div class="eh r"></div></div>`).join("");
   const shp = S.shapes.map(g => { const s0 = g.full ? 0 : g.start, d = g.full ? tot : g.dur; return `<div class="clip ${selX && selX.k === "shape" && selX.id === g.id ? "sel" : ""}" data-gk="shape" data-gid="${g.id}" style="left:${s0 * zoom}px;width:${Math.max(4, d * zoom)}px">${g.full ? "" : '<div class="eh l"></div>'}<div class="lbl">${esc(g.name || "도형")}${g.full ? " · 전체" : ""}</div>${g.full ? "" : '<div class="eh r"></div>'}</div>`; }).join("");
+  const tcs = S.tactics.map(g => `<div class="clip tacc ${selX && selX.k === "tact" && selX.id === g.id ? "sel" : ""}" data-gk="tact" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px" title="전술 그림 · ${esc(TAC_NAMES[g.kind] || "")}"><div class="eh l"></div><div class="lbl">${esc(g.kind === "label" && g.text ? `${TAC_NAMES.label} · ${g.text}` : g.name || TAC_NAMES[g.kind] || "전술 그림")}${g.follow ? " · 따라감" : ""}</div><div class="eh r"></div></div>`).join("");
   const rows = [["ruler", `<div class="row ruler" data-tk="ruler"><div class="hd"><span class="hint" style="margin-left:4px">시간</span><div class="sp"></div><button class="btn sm" id="addTrk" title="영상·오디오 트랙 추가 / 빈 트랙 지우기" style="padding:0 6px">+ 트랙</button></div>${lane(ticks + marks.join(""))}</div>`],
     ["C1", `<div class="row c1" data-tk="C1"><div class="hd"><span class="bdg" style="background:#5a3610">C1</span><button class="ic ${S.captionsOn ? "on" : ""}" id="hCap" title="자막 보이기/숨기기">${S.captionsOn ? ICON.eye : ICON.eyeoff}</button><span class="hint">자막</span></div>${lane(caps)}</div>`],
     ["T", `<div class="row gt" data-tk="T"><div class="hd"><span class="bdg" style="background:#3c2457">T</span><span class="hint" style="margin-left:26px">타이틀</span></div>${lane(tit)}</div>`],
-    ["G", `<div class="row gs" data-tk="G"><div class="hd"><span class="bdg" style="background:#1f3f22">G</span><span class="hint" style="margin-left:26px">도형</span></div>${lane(shp)}</div>`]];
+    ["G", `<div class="row gs" data-tk="G"><div class="hd"><span class="bdg" style="background:#1f3f22">G</span><span class="hint" style="margin-left:26px">도형</span></div>${lane(shp + tcs)}</div>`]];
   for (const r of rowList().slice(4)) {
     const tr = r.tr, its = S.items.filter(i => i.track === tr.id).map(i => itemHTML(i, v0, v1)).join("");
     const trs = S.trans.filter(x => x.track === tr.id).map(x => { const rg = trRange(x); if (!rg || rg[1] < v0 || rg[0] > v1) return "";
@@ -2239,6 +2637,8 @@ function startMove(ev, anchor) {
     pushHist(dup ? "복제해서 옮기기" : e.ctrlKey ? "끼워 넣어 옮기기" : "클립 옮기기", before);
     changed(false);
     if (apply.blk) toast(`${apply.blk.join("·")} 트랙이 잠겨 있어 그쪽 클립은 제자리 트랙에 뒀어요 · 옮기려면 자물쇠를 풀어 주세요`);
+    else if (!dup && ids.some(id => { const x = byId(id); return x && isV(x); }) && S.tactics.some(g => g.follow && g.follow.length && g.start < maxE - EPS && g.start + g.dur > minS + EPS))
+      toast("클립을 옮겼어요" + TAC_REFOLLOW); // 그림은 제자리 · 영상만 옮겨져 선수와 어긋남 (I-181)
   };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
@@ -2293,6 +2693,8 @@ function edgeOp(mode, ids, edge, d) {
     d = clamp(d, lo, hi);
     const delta = edge === "l" ? -d : d;
     if (edge === "r" && delta < 0) markCut(pivot + delta, pivot);  // 끝을 줄여 사라진 장면 위 마커 (잘라내기와 같은 규칙 · 앞을 줄이면 사라지는 곳이 클립 머리라 따로 안 함)
+    if (edge === "r") { if (delta < 0) tacRippleCut(pivot + delta, pivot); else tacRippleHold(pivot, delta); } // 따라가는 전술 그림도 영상과 같이
+    else { const s0 = Math.min(...its.map(x => x.start)); if (d > 0) tacRippleCut(s0, s0 + d, new Set(), pivot); else tacRippleHold(s0, -d, pivot); }
     shiftAfter(pivot, delta, ign);
     for (const x of its) { if (edge === "l") { const s0 = x.start; trimStart(x, fr(s0 + d)); x.start = s0; } else trimEnd(x, fr(iEnd(x) + d)); }
   } else if (mode === "roll") {
@@ -2357,7 +2759,7 @@ function slideDrag(ev, it) {
 }
 function gfxDown(ev, rk, tAt) {
   const ce = ev.target.closest(".clip"); if (!ce) return emptyDown(ev, rk, tAt);
-  const k = ce.dataset.gk, id = ce.dataset.gid, g = (k === "title" ? S.titles : S.shapes).find(x => x.id === id);
+  const k = ce.dataset.gk, id = ce.dataset.gid, g = (k === "title" ? S.titles : k === "tact" ? S.tactics : S.shapes).find(x => x.id === id);
   selX = { k, id }; selI.clear(); setRtab("fx");
   if (!g.full && (T < g.start || T >= g.start + g.dur)) seek(Math.min(g.start + Math.min(0.5, g.dur / 2), g.start + g.dur - 0.05));
   if (g.full) { renderTimeline(); renderPanels(); return; }
@@ -2373,7 +2775,7 @@ function gfxDown(ev, rk, tAt) {
   };
   const rd = dragFrame(() => { renderTimeline(); showSnap(mv.at); });
   const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); rd.cancel(); showSnap(null);
-    if (moved) { pushHist(k === "title" ? "타이틀 옮기기" : "도형 옮기기", before); changed(false); } else { renderTimeline(); renderPanels(); } };
+    if (moved) { pushHist(k === "title" ? "타이틀 옮기기" : k === "tact" ? "전술 그림 옮기기" : "도형 옮기기", before); changed(false); } else { renderTimeline(); renderPanels(); } };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
 function trnDown(ev, el) {
@@ -2781,7 +3183,7 @@ async function renderRec() {
     const hit = S.tracks.filter(t => t.lock && sig(S.items, S.trans, t.id) !== sig(res.items, res.trans, t.id)).map(t => t.id);
     if (hit.length) return toast(`${hit.join("·")} 트랙이 잠겨 있어요 · 자물쇠를 풀어야 장면을 맞춰 옮길 수 있어요`);
     const nTr = res.trans.length;
-    commit(label); Object.assign(S, { items: res.items, trans: res.trans, titles: res.titles, shapes: res.shapes, markers: res.markers });
+    commit(label); Object.assign(S, { items: res.items, trans: res.trans, titles: res.titles, shapes: res.shapes, tactics: res.tactics, markers: res.markers });
     selI.clear(); selX = null; changed(); seek(0);
     const gone = nTr - S.trans.length; // 사이에 장면이 다시 들어가 붙어 있지 않게 된 두 클립의 전환은 뺌 (이제 이어진 원본이라)
     toast(msg(res) + (gone > 0 ? ` · 이어지지 않게 된 장면 전환 ${gone}개는 뺐어요` : ""));
@@ -2801,9 +3203,9 @@ async function renderRec() {
 
 /* ---------- 재미있게 자동 편집 (MSG · msg.py) ---------- */
 const MSG_KIND = { teaser: "티저", title: "제목 카드", emphasis: "강조 자막", situ: "상황 자막", inner: "속마음 자막", fx: "효과 글자", count: "숫자 세기", sfx: "효과음",
-  punch: "확대", shake: "흔들기", replay: "다시 보기", freeze: "정지 화면", montage: "몽타주", end: "엔드 화면", bgm: "배경음악", chapters: "챕터" };
+  punch: "확대", shake: "흔들기", replay: "다시 보기", freeze: "정지 화면", montage: "몽타주", end: "엔드 화면", bgm: "배경음악", chapters: "챕터", tactic: "전술 그림" };
 const MSG_COL = { teaser: "#e5484d", title: "#0f7a3d", emphasis: "#ffe14d", situ: "#3fa34d", inner: "#9ad7ff", fx: "#ff9f1c", count: "#ffffff", sfx: "#1f8c86",
-  punch: "#2f6fb0", shake: "#8b4fc6", replay: "#e5484d", freeze: "#bbbbbb", montage: "#e5484d", end: "#777777", bgm: "#555555", chapters: "#555555" };
+  punch: "#2f6fb0", shake: "#8b4fc6", replay: "#e5484d", freeze: "#bbbbbb", montage: "#e5484d", end: "#777777", bgm: "#555555", chapters: "#555555", tactic: "#00d1ff" };
 const MSG_ASPECTS = [["intro", "인트로"], ["rhythm", "컷 리듬"], ["captions", "자막 모양"], ["fun", "재미(개그 글자·효과)"], ["sound", "음악"]];
 let MSGPICK = null, MSGAMT = "보통", MSGFMT = "long", MSGPROOF = false, MSGWRITE = false, recMoreOpen = false;
 try { MSGPROOF = localStorage.getItem("ed_msgProof") === "1"; MSGWRITE = localStorage.getItem("ed_msgWrite") === "1"; } catch (e) {}
@@ -2944,11 +3346,11 @@ function msgRemove(evId) {
   const q = S, m = q.msg; if (!m) return;
   const ev = m.events.find(e => e.id === evId); if (!ev) return;
   commit(`MSG 빼기 · ${MSG_KIND[ev.kind] || ev.kind}`);
-  const r = ev.refs || {}, ids = new Set([...(r.items || []), ...(r.titles || []), ...(r.shapes || []), ...(r.trans || [])]);
+  const r = ev.refs || {}, ids = new Set([...(r.items || []), ...(r.titles || []), ...(r.shapes || []), ...(r.tactics || []), ...(r.trans || [])]);
   if (r.fx) { for (const it of q.items) if (ids.has(it.id)) { it.fx = r.fx === "punch" ? Object.fromEntries(Object.entries(it.fx || {}).filter(([k]) => !["scale", "anchor", "pos"].includes(k))) : {}; } }
   else {
     q.items = q.items.filter(it => !ids.has(it.id));
-    q.titles = q.titles.filter(t => !ids.has(t.id)); q.shapes = q.shapes.filter(t => !ids.has(t.id));
+    q.titles = q.titles.filter(t => !ids.has(t.id)); q.shapes = q.shapes.filter(t => !ids.has(t.id)); q.tactics = (q.tactics || []).filter(t => !ids.has(t.id));
     q.trans = q.trans.filter(t => !ids.has(t.id) && !ids.has(t.a) && !ids.has(t.b));
     if (r.markers) q.markers = q.markers.filter(mk => !r.markers.some(t => Math.abs(t - mk.t) < 1e-3));
   }
@@ -2966,12 +3368,13 @@ function msgRemove(evId) {
       if (it.start < a - 1e-3 && e > a + 1e-3) it.out = fr(it.out - Math.min(d, e - a) * sp(it)); // 앞에서 시작해 걸침: 걸친 만큼 뒤를 줄임
       else if (it.start >= a - 1e-3 && it.start < b - 1e-3 && e > b + 1e-3) { it.in = fr(it.in + (b - it.start) * sp(it)); it.start = b; } // 안에서 시작해 뒤로 나감
     }
-    for (const t of [...q.titles, ...q.shapes]) {
+    for (const t of [...q.titles, ...q.shapes, ...(q.tactics || [])]) {
       const e = t.start + t.dur;
+      if (t.start < a - 1e-3 && e > a + 1e-3 && t.follow && t.follow.length) t.follow = tacFollowCut(t, a, b).follow; // 따라가는 전술 그림: 빠진 장면만큼 기록도 당김
       if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
     }
     for (const it of q.items) if (it.start >= a + d - 1e-3) it.start = fr(it.start - d);
-    for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start));
+    for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start)); for (const t of q.tactics || []) t.start = fr(sh(t.start));
     for (const mk of q.markers) mk.t = fr(sh(mk.t));
     for (const e of m.events) { e.t = sh(e.t); if (e.ins) e.ins.start = sh(e.ins.start); }
   }
@@ -3014,8 +3417,11 @@ function renderFxList() {
 function renderGfxList() {
   $("lt-gfx").innerHTML = `<div class="sec"><h4>에센셜 그래픽 <span class="hint">재생 위치에 넣기 (두 번 클릭) · 타임라인에 끌어 놓기</span></h4>
     ${Object.entries(GFX).map(([k, v]) => `<div class="fxi" data-drag="gfx" data-name="${k}"><span class="sw" style="background:var(--title)"></span><span class="nm">${k}</span><span class="hint">${v.hint}</span></div>`).join("")}</div>
-    <div class="sec"><h4>기본</h4><div class="presets"><button class="btn" id="gAddTitle">타이틀 추가 (T)</button>${Object.keys(SHAPES).map(k => `<button class="btn" data-shape="${k}">${k}</button>`).join("")}</div></div>`;
+    <div class="sec"><h4>기본</h4><div class="presets"><button class="btn" id="gAddTitle">타이틀 추가 (T)</button>${Object.keys(SHAPES).map(k => `<button class="btn" data-shape="${k}">${k}</button>`).join("")}</div></div>
+    <div class="sec"><h4>전술 그림 <span class="hint">재생 위치에 넣기 · 선수를 따라 움직이게 할 수 있어요</span></h4>
+    ${TAC_KINDS.map(k => `<div class="fxi" data-tac="${k}"><span class="sw" style="background:${TAC_DEF[k].color}"></span><span class="nm">${TAC_NAMES[k]}</span><span class="hint">${TAC_HINT[k]}</span></div>`).join("")}</div>`;
   $("gAddTitle").onclick = addTitle;
+  document.querySelectorAll("#lt-gfx [data-tac]").forEach(b => b.onclick = () => addTactic(b.dataset.tac));
   document.querySelectorAll("#lt-gfx [data-shape]").forEach(b => b.onclick = () => addShape(b.dataset.shape));
   bindDrags($("lt-gfx"));
 }
@@ -3177,6 +3583,7 @@ function renderFx() {
   if (selX && selX.k === "trans") return renderTransPanel(el);
   if (selX && selX.k === "gap") { el.innerHTML = `<div class="pg"><h4>빈 곳 · ${selX.track}</h4><div class="hint" style="margin-bottom:8px">${mmss(selX.s)} ~ ${mmss(selX.e)} (${(selX.e - selX.s).toFixed(2)}초)</div><button class="btn" id="gapDel">빈 곳 지우고 당기기 (Delete)</button></div>`; $("gapDel").onclick = () => deleteGap(selX); return; }
   if (selX && ["title", "caption", "shape"].includes(selX.k)) return renderGfxPanel(el);
+  if (selX && selX.k === "tact") { const tc = tacSel(); if (tc) return renderTacPanel(el, tc); selX = null; }
   const its = S.items.filter(x => selI.has(x.id) && unlocked(x.track)); // 잠긴 트랙 클립은 바꾸지 않음
   if (!its.length && selI.size) { el.innerHTML = `<div class="pg hint">잠긴 트랙의 클립이에요. 트랙 머리의 자물쇠를 풀면 효과를 바꿀 수 있어요.</div>`; return; }
   if (!its.length) { el.innerHTML = `<div class="pg hint">타임라인에서 클립을 누르면 여기서 위치·크기·회전·불투명도·볼륨을 바꾸고 키프레임(시간에 따라 바뀌는 값)을 넣을 수 있어요.<br><br>• 영상 위·아래 트랙에 다른 영상·사진·음악을 올리려면 왼쪽 아래 <b>미디어</b> 탭<br>• 장면 전환·효과는 왼쪽 위 <b>효과</b> 탭에서 끌어다 놓기<br>• 단축키는 위쪽 ⌨ 버튼</div>`; return; }
@@ -3542,8 +3949,11 @@ function setSpeed(its, s, ripple, rev, noCommit) {
     } else if (d > 0) for (const x of g) { const nx = nextStart(x); if (iEnd(x) > nx + EPS) { trimEnd(x, nx); trimmed = true; } }
   }
   changed(false);
-  if (trimmed) toast("뒤 클립과 겹쳐서 길이를 맞춰 잘랐어요");
-  else if (kept.size) toast(`${[...kept].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` + followNote(mv));
+  // 빠르기가 바뀐 클립 위 따라가는 전술 그림은 선수 움직임과 어긋남 → 다시 따라가기 안내 (I-181)
+  const fw = S.tactics.some(g => g.follow && g.follow.length && gs.some(q => g.start < Math.max(...q.map(iEnd)) - EPS && g.start + g.dur > Math.min(...q.map(x => x.start)) + EPS)) ? TAC_REFOLLOW : "";
+  if (trimmed) toast("뒤 클립과 겹쳐서 길이를 맞춰 잘랐어요" + fw);
+  else if (kept.size) toast(`${[...kept].join("·")} 트랙은 걸쳐 있는 클립이 있어 그대로 뒀어요` + followNote(mv) + fw);
+  else if (fw && !noCommit) toast("빠르기를 바꿨어요" + fw);
 }
 function openSpeed() {
   const its = S.items.filter(x => selI.has(x.id) && unlocked(x.track)); if (!its.length) return toast("속도를 바꿀 클립을 먼저 골라 주세요");
@@ -3784,6 +4194,7 @@ function openExport() {
   $("exRange").querySelector('[data-v="io"]').disabled = !io; if (!io) EXP.range = "all";
   $("exRange").querySelectorAll("button").forEach(b => { b.classList.toggle("on", b.dataset.v === EXP.range); b.onclick = () => { if (!b.disabled) { EXP.range = b.dataset.v; openExport(); } }; });
   $("exSrtHint").textContent = S.captionsOn ? "" : " — 영상엔 자막을 안 넣어도 자막 파일은 만들어져요";
+  $("exXmlHint").textContent = S.tactics.length ? " · 전술 그림은 프리미어 파일에는 빠져요 (영상 mp4 에는 들어가요)" : "";
   $("exInfo").textContent = `길이 ${mmss(EXP.range === "io" ? markOut - markIn : total())} · 장면 전환 ${S.trans.length}개 · 트랙 ${new Set(S.items.map(x => x.track)).size}개 사용`;
   $("exModal").classList.add("show");
 }
