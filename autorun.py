@@ -38,8 +38,8 @@ CAPTION_MAX = 8                # '자막 확인' 줄 수 상한 (헛것 + 확신
 THUMB_WEAK = 70                # AI 추천 점수가 이보다 낮으면 '썸네일 장면이 약해요'
 CHAPTERS_MIN = 3               # 유튜브 챕터는 3개 이상 (BR-007)
 LOUD_TITLES = ("소리가 작아요", "소리가 커요", "소리 크기", "소리 깨짐 가능")
-NO_PAGE = ("썸네일을 그릴 화면이 없어요 · 스튜디오 첫 화면이나 편집실을 열어 둔 채로 다시 해 주세요 "
-           "(그동안 썸네일 만들기의 'AI 추천 썸네일'로 직접 만들 수 있어요)")
+NO_PAGE = ("썸네일을 그릴 화면이 없었어요 · 스튜디오(보관함)·편집실·썸네일 만들기 화면 중 하나를 열어 둔 채로 결과 카드의 [못 한 것 다시 하기]를 "
+           "누르거나, 결과물마다 [썸네일]로 직접 만들어 저장해 주세요 (그 결과물 키트에 들어가요)")
 UPLOAD_NOTE = "유튜브에는 아직 올리지 않았어요 · 7 올리기에서 키트를 확인하고 직접 올려 주세요"
 _LOCK = threading.RLock()
 LIVE = {}   # 지금 도는 자동 작업 {name, i, n, label} (/api/state · 화면의 단계 표시)
@@ -60,12 +60,41 @@ def state_path(name):
 
 
 def load(name):
-    """저장된 자동 작업 기록 (없거나 깨졌으면 None)."""
+    """저장된 자동 작업 기록 (없거나 깨졌으면 None). 기록은 그 영상의 분석 폴더에 있으므로 늘 지금 영상 이름으로 —
+    이름 바꾸기(D-073)는 분석 폴더째 옮기고 안의 이름은 고치지 않음 → 옛 이름으로 단계를 돌리거나 옛 폴더를 다시 만들지 않게 (D-207)."""
     try:
         d = json.loads(state_path(name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return d if isinstance(d, dict) and d.get("v") == VER and isinstance(d.get("steps"), dict) else None
+    if not (isinstance(d, dict) and d.get("v") == VER and isinstance(d.get("steps"), dict)):
+        return None
+    d["name"] = name
+    return d
+
+
+ARCHIVE_KEEP = 5   # '처음부터 다시' 때 남겨 두는 지난 기록 수 (분석 폴더 'auto_run_<기록 id>.json')
+
+
+def archive(name):
+    """새 기록으로 바꾸기 전에 지난 기록을 'auto_run_<기록 id>.json' 으로 남김 (최근 ARCHIVE_KEEP 개 · 화면 '지난번 기록은 두고' · D-207).
+    → 남긴 파일 (없거나 못 옮기면 None · 못 옮겨도 새 작업은 그대로)."""
+    p = state_path(name)
+    if not p.is_file():
+        return None
+    prev = load(name) or {}
+    rid = re.sub(r"[^0-9A-Za-z]", "", str(prev.get("id") or ""))[:24] or time.strftime("%Y%m%d%H%M%S")
+    dst = p.with_name(f"auto_run_{rid}.json")
+    try:
+        p.replace(dst)
+    except OSError:
+        return None
+    try:
+        olds = sorted(p.parent.glob("auto_run_*.json"), key=lambda x: x.stat().st_mtime)
+        for x in olds[:-ARCHIVE_KEEP]:
+            x.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return dst
 
 
 def save(st):
@@ -89,8 +118,28 @@ def view(name):
     if not st:
         return None
     out = public(st)
+    fixed = set()  # 작업이 끝난 뒤 결과 카드 [썸네일]로 사람이 그 결과물 썸네일을 저장했으면 '썸네일 ✓'·'썸네일이 없어요' 줄 거둠 (D-207)
+    for o in out["outputs"]:
+        if o.get("seq") and not (o.get("thumb") and (core.OUT / o["thumb"]).is_file()):
+            f = own_thumb(name, o)
+            if f:
+                o.update(thumb=f, thumbOwn=True)
+                fixed.add(o["key"])
+    if fixed:
+        out["check"] = [c for c in out["check"] if not (c.get("kind") == "thumb" and set(c.get("outs") or [c.get("out")]) <= fixed)]
     out["resumable"] = resumable(st) and not (LIVE.get("name") == name)
     return out
+
+
+def own_thumb(name, o):
+    """사람이 그 결과물 이름으로 저장한 썸네일 ('<영상>_<편집본 이름>_썸네일_N' · 결과 카드 [썸네일] · 가장 최근) — 없으면 None."""
+    import upload
+    pre = upload.own_thumb_prefix(name, {"name": o.get("name"), "format": "shorts" if o.get("kind") == "shorts" else "long"})
+    try:
+        hits = [p for p in core.OUT.iterdir() if p.is_file() and p.name.startswith(pre) and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
+        return max(hits, key=lambda p: p.stat().st_mtime).name if hits else None
+    except OSError:
+        return None
 
 
 def public(st):
@@ -205,6 +254,7 @@ def run(name, opts, log=print, analyze=None, resume=False):
         if st is old:
             log(f"{JOB} · 지난번에 하던 것을 이어서 해요 (끝난 단계는 건너뛰어요)")
         else:
+            archive(name)  # 지난 기록은 따로 남김 ('처음부터 다시' · 끝난 기록에 [시작])
             log(f"{JOB} · {name} · MSG {opts['intensity']} · 쇼츠 {opts['shorts']}개까지 · 유튜브에는 올리지 않아요")
         st["status"] = "running"
         save(st)
@@ -300,11 +350,13 @@ def _seq_of(proj, sid):
 
 
 def _tagged(proj, run_id, key):
-    """이번 자동 작업이 이미 프로젝트에 더한 편집본 (꺼진 뒤 이어서 할 때 같은 MSG 를 또 더하지 않게)."""
-    return next((q for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("autoRun") == run_id and q.get("autoKey") == key), None)
+    """이번 자동 작업이 이미 프로젝트에 더한 편집본 (꺼진 뒤 이어서 할 때 같은 MSG 를 또 더하지 않게).
+    같은 결과물에 MSG 를 못 넣은 가편집과 다시 해서 넣은 MSG 편집본이 함께 있으면 MSG 편집본 (D-207)."""
+    hits = [q for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("autoRun") == run_id and q.get("autoKey") == key]
+    return next((q for q in hits if q.get("msg")), hits[0] if hits else None)
 
 
-def add_to_project(name, seqs, media=(), captions=None, captions_old=None, client="auto"):
+def add_to_project(name, seqs, media=(), captions=None, captions_old=None, client=editor.AUTO_CLIENT):
     """새 편집본(+ MSG 미디어)을 프로젝트에 더함 (편집실 msgAdd 와 같은 규칙: 이름이 겹치면 (2) · 자막은 사용자가 고치지 않았을 때만 새 받아쓰기로).
     편집실이 그 사이 저장했으면 한 번 다시 읽어 더함. → 실제로 붙은 이름들."""
     for attempt in (1, 2):
@@ -501,15 +553,17 @@ def _step_msg_shorts(c):
     if not pts:
         return "skip", "쇼츠 포인트가 없어요"
     proj = editor.load_project(c.name)
-    todo = []
+    todo, rough_have = [], {}
     for i, pt in enumerate(pts):
         o = _out(c.st, f"short{i + 1}", kind="shorts", point=i, hook=pt["hook"], src=[pt["start"], pt["end"]])
         o["hookCheck"] = bool(pt.get("hookCheck"))
         have = _tagged(proj, c.st["id"], f"short{i + 1}")
         if have:
             _set_seq(o, have["id"], have.get("name"), bool(have.get("msg")))
-        else:
-            todo.append(i)
+            if have.get("msg"):
+                continue
+            rough_have[i] = have  # 지난번에 MSG 를 못 넣어 가편집으로 둔 쇼츠 → MSG 를 다시 (롱폼과 같게 · 또 안 되면 그 가편집 그대로 · D-207)
+        todo.append(i)
     if not todo:
         return "done", "이미 만들었어요"
     err, got = None, {}
@@ -525,11 +579,15 @@ def _step_msg_shorts(c):
         if _cancelled():
             raise Stopped() from None
         err, got = _say(e), {}
-    rough = []
+    rough, kept = [], []
     for i in todo:
         o = _out(c.st, f"short{i + 1}")
         if i in got:
-            _set_seq(o, got[i]["id"], got[i]["name"], True)
+            _set_seq(o, got[i]["id"], got[i]["name"], True)  # 가편집이었으면 그 완성본·썸네일·키트 기록은 버림 (MSG 로 다시 만들게)
+            continue
+        if i in rough_have:  # 이미 만든 가편집 쇼츠 그대로 (또 더하지 않음)
+            kept.append(i)
+            o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
             continue
         q = _rough_short(c, i, pts[i])
         if q:
@@ -540,8 +598,8 @@ def _step_msg_shorts(c):
             o = _out(c.st, f"short{i + 1}")
             _set_seq(o, q["id"], q["name"], False)
             o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
-    if rough:
-        return "fail", f"쇼츠 {len(rough)}개는 MSG 를 넣지 못해 가편집 그대로예요" + (f" · {err}" if err else "")
+    if rough or kept:
+        return "fail", f"쇼츠 {len(rough) + len(kept)}개는 MSG 를 넣지 못해 가편집 그대로예요" + (f" · {err}" if err else "")
     return "done", f"쇼츠 {len(todo)}개"
 
 
@@ -550,24 +608,37 @@ def _exported(name, o):
     return bool(o.get("export")) and (core.OUT / o["export"]).is_file()
 
 
+def _qa_done(o):
+    """이 완성본의 자동 검수를 마쳤는지 (qaDone 이 없는 예전 기록: 점수나 검수 줄이 있으면 마친 것)."""
+    return bool(o.get("qaDone", o.get("qaScore") is not None or bool(o.get("qa"))))
+
+
 def _export_one(c, o):
+    """결과물 하나 내보내기 + 검수. 내보낸 파일은 검수 전에 기록에 남기고(검수 중에 멈추거나 꺼져도 다시 내보내지 않음),
+    검수를 마치지 못한 완성본은 이어서 할 때 검수만 다시 (D-207)."""
     import qa
-    if _exported(c.name, o):
+    if not _exported(c.name, o):
+        outs = editor.export_saved(c.name, o["seq"], c.opts.get("preset") or "youtube", c.log)
+        mp4 = next((x for x in outs if str(x).lower().endswith(".mp4")), None)
+        srt = next((x for x in outs if str(x).lower().endswith(".srt")), None)
+        o.update(export=mp4, srt=srt, qa=[], qaDone=False)
+        o.pop("qaScore", None)
+        o.pop("exportFail", None)
+        save(c.st)
+    mp4 = o.get("export")
+    if not mp4 or _qa_done(o):
         return
-    outs = editor.export_saved(c.name, o["seq"], c.opts.get("preset") or "youtube", c.log)
-    mp4 = next((x for x in outs if str(x).lower().endswith(".mp4")), None)
-    srt = next((x for x in outs if str(x).lower().endswith(".srt")), None)
-    o.update(export=mp4, srt=srt, qa=[])
-    if mp4:
-        meta = editor.EXPORT_META.get(mp4) or {}
-        try:  # 검수 (소리 크기·검은 화면·멈춘 화면 · 편집실 '영상 검수'와 같은 것)
-            r = qa.check_video(core.OUT / mp4, meta.get("format"), meta.get("master"), editor.run_killable)
-            o["qa"] = [{"lv": x["lv"], "title": x["title"], "msg": x["msg"], "t": x.get("t")} for x in r.get("items") or [] if x["lv"] != "ok"]
-            o["qaScore"] = r.get("score")
-        except Exception as e:  # noqa: BLE001 — 검수를 못 해도 완성본은 그대로
-            if _cancelled():
-                raise Stopped() from None
-            o["qa"] = [{"lv": "warn", "title": "검수 못 함", "msg": f"자동 검수를 하지 못했어요 · {_say(e)}", "t": None}]
+    meta = editor.EXPORT_META.get(mp4) or {}
+    try:  # 검수 (소리 크기·검은 화면·멈춘 화면 · 편집실 '영상 검수'와 같은 것)
+        r = qa.check_video(core.OUT / mp4, meta.get("format") or ("shorts" if o.get("kind") == "shorts" else "long"), meta.get("master"),
+                           editor.run_killable)
+        o["qa"] = [{"lv": x["lv"], "title": x["title"], "msg": x["msg"], "t": x.get("t")} for x in r.get("items") or [] if x["lv"] != "ok"]
+        o["qaScore"] = r.get("score")
+    except Exception as e:  # noqa: BLE001 — 검수를 못 해도 완성본은 그대로
+        if _cancelled():
+            raise Stopped() from None  # 검수를 마치지 못함 (qaDone 그대로 거짓 → 이어서 할 때 검수만)
+        o["qa"] = [{"lv": "warn", "title": "검수 못 함", "msg": f"자동 검수를 하지 못했어요 · {_say(e)}", "t": None}]
+    o["qaDone"] = True
 
 
 def _step_export_long(c):
@@ -610,33 +681,56 @@ def _step_thumbs(c):
     todo = [o for o in outs if not (o.get("thumb") and (core.OUT / o["thumb"]).is_file())]
     if not todo:
         return "done", "이미 만들었어요"
-    if thumb.cached_analysis(c.name) is None:  # 장면·선수·누끼·문구 (썸네일 편집기 'AI 추천'과 같은 분석 · 캐시)
-        thumb.analyze(c.name, c.log)
     proj = editor.load_project(c.name)
-    bad = []
-    for k, o in enumerate(todo):
-        if _cancelled():
-            raise Stopped()
+    draw, own = [], 0
+    for o in todo:  # 사람이 결과 카드 [썸네일]로 그 결과물 이름으로 저장해 둔 썸네일이 있으면 그것 (새로 그려 덮지 않음 · BR-111 · D-207)
         sq = _seq_of(proj, o["seq"]) or {"name": o.get("name"), "format": "shorts" if o["kind"] == "shorts" else "long"}
-        core.set_progress(label="썸네일", item=c.name, pct=None, detail=f"AI 추천 썸네일 그리는 중 ({k + 1}/{len(todo)}) · 스튜디오 화면이 그려요")
-        try:
-            used = [x["thumbInfo"]["copy"] for x in outs if x is not o and (x.get("thumbInfo") or {}).get("copy")]
-            r = request_thumb(c.name, "short" if o["kind"] == "shorts" else "long", thumb_label(dict(o, name=sq.get("name") or o.get("name"))),
-                              o.get("src"), used)
-        except AutoError as e:
-            o["thumbFail"] = str(e)
-            bad.append(str(e))
-            if str(e) == NO_PAGE:  # 그릴 화면이 없음 → 나머지도 못 그림
-                for x in todo[k + 1:]:
-                    x["thumbFail"] = str(e)
-                break
-            continue
-        o.update(thumb=r["file"], thumbInfo={x: r.get(x) for x in ("score", "weak", "gates", "within", "tpl", "copy", "t")})
-        o.pop("thumbFail", None)
+        f = own_thumb(c.name, dict(o, name=sq.get("name") or o.get("name")))
+        if f:
+            o.update(thumb=f, thumbInfo={"own": True})
+            o.pop("thumbFail", None)
+            own += 1
+        else:
+            draw.append((o, sq))
+    if not draw:
         save(c.st)
+        return "done", f"직접 만든 썸네일 {own}개를 그대로 써요"
+    c.st.pop("thumbCut", None)
+    ana = thumb.cached_analysis(c.name)  # 장면·선수·누끼·문구 (썸네일 편집기 'AI 추천'과 같은 분석 · 캐시)
+    if ana is None:
+        ana = thumb.analyze(c.name, c.log)
+        if ana.get("cutFail"):  # 누끼를 못 땀(모델 받기 막힘·메모리·VC++ 런타임) → 누끼 없이 그리고 까닭은 '확인할 것'에
+            c.st["thumbCut"] = str(ana["cutFail"])[:300]
+    bad = []
+    with _RQC:  # 그리는 화면(보이지 않는 썸네일 편집기)이 이 분석을 받게 — 이 작업이 작업 자리를 잡고 있어 새 분석 작업을 못 띄움
+        _ANA.clear()
+        _ANA[c.name] = ana
+    try:
+        for k, (o, sq) in enumerate(draw):
+            if _cancelled():
+                raise Stopped()
+            core.set_progress(label="썸네일", item=c.name, pct=None, detail=f"AI 추천 썸네일 그리는 중 ({k + 1}/{len(draw)}) · 스튜디오 화면이 그려요")
+            try:
+                used = [x["thumbInfo"]["copy"] for x in outs if x is not o and (x.get("thumbInfo") or {}).get("copy")]
+                r = request_thumb(c.name, "short" if o["kind"] == "shorts" else "long", thumb_label(dict(o, name=sq.get("name") or o.get("name"))),
+                                  o.get("src"), used)
+            except AutoError as e:
+                o["thumbFail"] = str(e)
+                bad.append(str(e))
+                if str(e) == NO_PAGE:  # 그릴 화면이 없음 → 나머지도 못 그림
+                    for x, _ in draw[k + 1:]:
+                        x["thumbFail"] = str(e)
+                    break
+                continue
+            o.update(thumb=r["file"], thumbInfo={x: r.get(x) for x in ("score", "weak", "gates", "within", "tpl", "copy", "t")})
+            o.pop("thumbFail", None)
+            save(c.st)
+    finally:
+        with _RQC:
+            _ANA.pop(c.name, None)
     if bad:
         return "fail", bad[0] if len(set(bad)) == 1 else f"썸네일 {len(bad)}개를 만들지 못했어요"
-    return "done", f"썸네일 {len(todo)}개"
+    return "done", f"썸네일 {len(draw)}개" + (f" · 직접 만든 것 {own}개" if own else "")
 
 
 def _step_kits(c):
@@ -644,12 +738,23 @@ def _step_kits(c):
     outs = [o for o in c.st["outputs"] if o.get("seq")]
     if not outs:
         return "skip", "키트를 만들 결과물이 없어요"
-    bad = []
+    proj = editor.load_project(c.name)
+    bad, kept = [], 0
     for o in outs:
         if _cancelled():
             raise Stopped()
         try:
-            kit = upload.build_kit(c.name, o["seq"])
+            # 이미 있는 키트는 다시 만들지 않음 — 사람이 7 올리기에서 고친 키트(edited) · 이 작업이 만들지 않은 편집본(MSG 를 못 넣은 롱폼의
+            # 사용자 가편집)의 키트 · 이 작업이 이미 만든 키트. 썸네일 확인만 지금 것으로 (이어서 하기가 고친 제목·설명·태그를 덮지 않게 · D-207)
+            _, prev = upload._find_kit(c.name, o["seq"])
+            mine = (_seq_of(proj, o["seq"]) or {}).get("autoRun") == c.st["id"]
+            src = (prev or {}).get("source")
+            fresh = mine and o.get("kit") and isinstance(src, dict) and src.get("export") == o.get("export")  # 이 작업 키트 · 그 뒤 다시 내보내지 않음
+            if prev is not None and (prev.get("edited") or not mine or fresh):
+                kit = upload.keep_kit(c.name, o["seq"]) or upload.build_kit(c.name, o["seq"])
+                kept += 1
+            else:
+                kit = upload.build_kit(c.name, o["seq"])
         except Exception as e:  # noqa: BLE001 — 하나가 안 돼도 다음 것
             o["kitFail"] = _say(e)
             bad.append(o.get("name") or o["key"])
@@ -657,11 +762,11 @@ def _step_kits(c):
         th = kit.get("thumbnail") or {}
         o["kit"] = {"txt": (kit.get("files") or {}).get("txt"), "title": kit.get("title"), "chapters": len(kit.get("chapters") or []),
                     "format": kit.get("format"), "duration": kit.get("duration"), "foreign": [f.get("channel") for f in kit.get("foreign") or [] if isinstance(f, dict)],
-                    "thumb": th.get("file"), "thumbOk": bool(th.get("ok")), "notes": list(kit.get("notes") or [])[:6]}
+                    "thumb": th.get("file"), "thumbOk": bool(th.get("ok")), "notes": list(kit.get("notes") or [])[:6], "edited": kit.get("edited")}
         o.pop("kitFail", None)
     if bad:
         return "fail", f"키트 {len(bad)}개를 만들지 못했어요 · " + ", ".join(bad)
-    return "done", f"키트 {len(outs)}개 (유튜브에는 올리지 않았어요)"
+    return "done", f"키트 {len(outs)}개 (유튜브에는 올리지 않았어요)" + (f" · 이미 있던 키트 {kept}개는 그대로 (썸네일만 새로)" if kept else "")
 
 
 def _step_check(c):
@@ -759,7 +864,7 @@ def checklist(st):
         items.append({"kind": kind, "lv": lv, "text": text, "out": out, "t": t})
     for k, lb in STEPS:
         s = st["steps"].get(k) or {}
-        if s.get("state") == "fail":
+        if s.get("state") == "fail" and not (k == "thumbs" and s.get("note") == NO_PAGE):  # 그릴 화면이 없었음 → 아래 한 줄 (결과물 이름과 함께)
             add("fail", "bad", f"{lb} · {s.get('note') or '하지 못했어요'}")
         elif s.get("state") in (None, "todo", "run") and st.get("status") in ("stopped", "failed"):
             add("fail", "warn", f"{lb} · 아직 안 했어요 ([이어서 하기]로 마저 해요)")
@@ -772,6 +877,7 @@ def checklist(st):
 
     def tried(step):  # 그 단계를 해 봤을 때만 '없어요'를 적음 (멈춰서 아직 안 한 단계는 위의 '아직 안 했어요' 한 줄)
         return (st["steps"].get(step) or {}).get("state") in ("done", "fail")
+    no_page = []  # 그릴 화면이 없어 못 그린 결과물 (같은 긴 안내를 결과물마다 되풀이하지 않고 한 줄로 · D-207)
     for o in st.get("outputs") or []:
         nm, key = o.get("name") or o["key"], o["key"]
         if o.get("seq") and not o.get("msg"):
@@ -783,7 +889,9 @@ def checklist(st):
             if loud or q["lv"] == "bad":
                 add("loud" if loud else "qa", q["lv"], f"{nm} · {q['title']} · {q['msg']}", key, q.get("t"))
         ti = o.get("thumbInfo") or {}
-        if o.get("seq") and not o.get("thumb") and tried("thumbs"):
+        if o.get("seq") and not o.get("thumb") and tried("thumbs") and o.get("thumbFail") == NO_PAGE:
+            no_page.append(o)
+        elif o.get("seq") and not o.get("thumb") and tried("thumbs"):
             add("thumb", "warn", f"{nm} · 썸네일이 없어요" + (f" · {o['thumbFail']}" if o.get("thumbFail") else ""), key)
         elif o.get("thumb") and ti.get("weak") and low_score(ti):  # 장면이 약하다는 표시는 점수도 낮을 때만 (점수가 높으면 쓸 만함 · E7 검토)
             weak.append(o)
@@ -802,6 +910,13 @@ def checklist(st):
             add("source", "warn", f"{nm} · 다른 채널 영상이 들어 있어요 ({', '.join(kit['foreign'][:3])}) · 설명에 출처를 넣었어요. 짧게, 해설 위주인지 확인해 주세요", key)
         if kit and o["kind"] == "long" and kit.get("chapters", 0) < CHAPTERS_MIN and float(kit.get("duration") or 0) >= upload.CH_MIN_VIDEO:
             add("chapters", "warn", f"{nm} · 챕터가 {'없어요' if not kit.get('chapters') else str(kit['chapters']) + '개뿐이에요'} · 유튜브 챕터는 3개 이상이어야 보여요 (키트에서 챕터를 확인해 주세요)", key)
+    if no_page:
+        names = [o.get("name") or o["key"] for o in no_page]
+        who = ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")
+        add("thumb", "bad", f"썸네일이 없어요 ({who}) · {NO_PAGE}", no_page[0]["key"])
+        items[-1]["outs"] = [o["key"] for o in no_page]
+    if st.get("thumbCut") and any(o.get("thumb") or o.get("thumbFail") for o in st.get("outputs") or []):
+        add("thumb", "warn", f"썸네일 · 주인공 누끼를 따지 못해 누끼 없이 그렸어요 · {st['thumbCut']}")
     if weak:  # 장면이 약한 것은 영상 탓이라 결과물마다가 아니라 한 줄로
         names = [o.get("name") or o["key"] for o in weak]
         sc = ", ".join(f"{round(float(o['thumbInfo']['score']))}점" for o in weak[:4])
@@ -820,8 +935,28 @@ PAGE_WAIT = 600   # 화면이 맡을 때까지 기다리는 시간(초) — 창�
 PAGE_NOTE = 8     # 이만큼 기다려도 아무 화면도 안 맡으면 진행 표시에 '화면을 열어 주세요'를 띄움
 DRAW_WAIT = 300   # 맡은 뒤 다 그릴 때까지 (처음 한 번 글꼴·장면 그림을 받음)
 DATA_MAX = 2_900_000   # dataURL 글자 수 상한 (thumb.AB_MAX 와 같음 · JPG 2MB 안쪽)
-_RQ = {"want": None, "claim": None, "got": {}}
+_RQ = {"want": None, "claim": None, "got": {}, "rel": 0}   # rel: 맡았다가 푼 횟수 (기다리는 작업이 알아챔)
 _RQC = threading.Condition()
+_ANA = {}   # 영상 이름 → 썸네일 단계가 막 한 분석 (그리는 화면의 /api/thumb/analyze 가 받음 · 누끼 실패로 캐시가 비어도 · D-207)
+
+
+def analysis_for(name):
+    """끝까지 자동으로가 지금 그 영상 썸네일을 그리는 중이면 그 분석 (없으면 None) — 이 작업이 작업 자리를 잡고 있어
+    그리는 화면이 분석 작업을 새로 띄우지 못함(409 를 기다리며 5분씩 멈춤 · D-207)."""
+    with _RQC:
+        return _ANA.get(name) if LIVE.get("name") == name else None
+
+
+def release(rid):
+    """맡은 화면이 닫히거나 다른 화면으로 넘어감 (pagehide 신호) → 그 요청을 다른 화면이 다시 맡게 (5분 기다리지 않게 · D-207). → 풀었는지."""
+    with _RQC:
+        w = _RQ["want"]
+        if not w or w["id"] != rid or not _RQ["claim"] or rid in _RQ["got"]:
+            return False
+        _RQ["claim"] = None
+        _RQ["rel"] += 1
+        _RQC.notify_all()
+        return True
 
 
 def pending():
@@ -850,22 +985,32 @@ def deliver(rid, b):
         w = _RQ["want"]
         if not w or w["id"] != rid or not _RQ["claim"]:
             raise LookupError("이미 끝난 썸네일 요청이에요")
+
+    def put(res):
+        with _RQC:
+            _RQ["got"][rid] = res
+            _RQC.notify_all()
     if b.get("error"):
-        res = {"error": str(b["error"])[:200]}
-    else:
+        put({"error": str(b["error"])[:200]})
+        return None
+    try:  # 그림이 이상하거나 저장을 못 해도(디스크 가득·OneDrive·백신 잠금) 기다리는 작업에 그 까닭을 바로 넘김 (5분 기다린 뒤 '너무 오래'가 아니게 · D-207)
         data = b.get("data")
         if not isinstance(data, str) or not data.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")) or len(data) > DATA_MAX:
             raise ValueError("그림 형식이 다르거나 너무 커요")
         f = thumb.export_image(w["name"], data, "jpg", w["label"])
+    except ValueError as e:
+        put({"error": str(e)})
+        raise
+    except OSError as e:
+        put({"error": f"그린 썸네일을 저장하지 못했어요 · {_say(e)}"})
+        raise
 
-        def num(v):
-            return round(float(v), 1) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-        res = {"file": f.name, "score": num(b.get("score")), "weak": bool(b.get("weak")), "within": b.get("within") is not False,
-               "gates": [str(g)[:40] for g in (b.get("gates") or [])[:5] if isinstance(g, str)] if isinstance(b.get("gates"), list) else [],
-               "tpl": str(b.get("tpl") or "")[:40], "copy": str(b.get("copy") or "")[:60], "t": num(b.get("t"))}
-    with _RQC:
-        _RQ["got"][rid] = res
-        _RQC.notify_all()
+    def num(v):
+        return round(float(v), 1) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    res = {"file": f.name, "score": num(b.get("score")), "weak": bool(b.get("weak")), "within": b.get("within") is not False,
+           "gates": [str(g)[:40] for g in (b.get("gates") or [])[:5] if isinstance(g, str)] if isinstance(b.get("gates"), list) else [],
+           "tpl": str(b.get("tpl") or "")[:40], "copy": str(b.get("copy") or "")[:60], "t": num(b.get("t"))}
+    put(res)
     return res.get("file")
 
 
@@ -877,6 +1022,7 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
         _RQ.update(want={"id": rid, "name": name, "fmt": fmt, "label": label, "within": list(within) if within else None,
                          "avoid": [str(a)[:60] for a in avoid if a][:10]}, claim=None)
         _RQ["got"].pop(rid, None)
+        rel = _RQ["rel"]
     t0, noted = time.time(), False
     try:
         while True:
@@ -887,6 +1033,13 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
                     _RQC.wait(0.5)
                     got = _RQ["got"].pop(rid, None)
                     cl = _RQ["claim"]
+                now_rel = _RQ["rel"]
+            if now_rel != rel and got is None:  # 그리던 화면이 닫힘(다른 화면으로 넘어감) → 다른 화면이 맡을 때까지 처음부터 기다림
+                rel, t0 = now_rel, time.time()
+                if cl is None:
+                    noted = True
+                    core.set_progress(label="썸네일", item=name, pct=None,
+                                      detail="썸네일을 그리던 화면이 닫혔어요 · 스튜디오·편집실·썸네일 만들기 화면 중 하나가 이어서 그려요")
             if cl is not None and noted:  # 창을 다시 열어 화면이 맡음 → '창을 열어 주세요'를 거둠
                 noted = False
                 core.set_progress(label="썸네일", item=name, pct=None, detail="AI 추천 썸네일 그리는 중 · 스튜디오 화면이 그려요")
@@ -902,7 +1055,7 @@ def request_thumb(name, fmt, label, within=None, avoid=()):
             if cl is None and now - t0 > PAGE_NOTE and not noted:
                 noted = True
                 core.set_progress(label="썸네일", item=name, pct=None,
-                                  detail="썸네일을 그릴 화면을 기다려요 · 스튜디오나 편집실 창을 열어 보이게 해 주세요")
+                                  detail="썸네일을 그릴 화면을 기다려요 · 스튜디오·편집실·썸네일 만들기 창을 열어 보이게 해 주세요")
             if cl is not None and now - cl > DRAW_WAIT:
                 raise AutoError("썸네일을 그리는 데 너무 오래 걸려 건너뛰었어요")
     finally:

@@ -278,6 +278,25 @@ class NotifyTests(NotifyBase):
                                  remote.NOTE_TEXT["blocked"], remote.NOTE_TEXT["net"], "작업이 끝났어요 · 클로드로 전략 보기 (1분)"])
         self.assertFalse(any(t.startswith("작업이 끝났어요 · 채널") for t in texts))
 
+    def test_autorun_stopped_or_partial_not_shown_as_done(self):
+        """D-207 (E7 재검토): 끝까지 자동으로는 멈추거나 단계 몇 개가 안 돼도 결과(ok 없음)를 돌려줌 → 휴대폰 '끝 ✓'·'작업이 끝났어요'가 아님.
+        멈춤 = '멈췄어요 · 만든 것은 그대로' · 못 한 단계·확인할 것 = '확인이 필요해요' · 확인할 것이 없으면 그대로 '끝났어요'."""
+        import autorun
+        self.turn_on()
+        upload_note = {"kind": "upload", "lv": "info", "text": autorun.UPLOAD_NOTE}
+        self.svc.job_hook(autorun.JOB, None, {"status": "stopped", "redo": True, "check": [{"kind": "fail", "lv": "warn", "text": "x"}, upload_note]},
+                          None, 600)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["error"]), (False, False, remote.AUTO_MSG["stopped"]))
+        bad = [{"kind": "thumb", "lv": "bad", "text": "썸네일이 없어요"}, {"kind": "caption", "lv": "warn", "text": "자막 확인"}, upload_note]
+        self.svc.job_hook(autorun.JOB, None, {"status": "done", "redo": True, "check": bad}, None, 1800)
+        last = self.svc.last
+        self.assertEqual((last["ok"], last["warn"], last["error"]), (False, True, remote.AUTO_MSG["check"].format(n=2)))
+        self.svc.job_hook(autorun.JOB, None, {"status": "done", "redo": False, "check": [upload_note]}, "휴대폰 · 폰 A", 1800)
+        self.assertEqual((self.svc.last["ok"], self.svc.last["warn"], self.svc.last["error"]), (True, False, None))
+        texts = [p[1] for p in self.notes(n=3)]
+        self.assertEqual(texts, ["작업이 멈췄어요 · 끝까지 자동으로 — 휴대폰에서 자세히 보기", remote.NOTE_TEXT["auto"], "작업이 끝났어요 · 끝까지 자동으로 (30분)"])
+
     def test_youtube_jobs_fixed_text_never_url_or_token(self):
         """유튜브 바로 올리기와 합침(D-048): PC 에서 시킨 올리기도 끝·실패는 늘 알림 · 휴대폰에는 정해진 문장만
         (영상 주소·번호·Google 오류 글·토큰이 결과에 있어도 넣지 않음) · 진행·[멈추기]는 보이고 시작은 휴대폰 허용 목록에 없음."""

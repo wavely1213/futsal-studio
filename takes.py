@@ -225,10 +225,12 @@ def _demo_between(segs, i, j, silences, peaks):
     return False
 
 
-def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=()):
+def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=(), cues=None):
     """i(앞 테이크) ~ j(다시 찍은 테이크) 사이가 정말 NG 인지: 사이의 말이 다시 한 말·슬레이트·추임새뿐이고, 오래 비지 않음.
     슬레이트 말이 없으면 더 엄격히: 사이에 다른 말이 하나도 없고 뒤 테이크가 앞 말을 거의 다 다시 함 (같은 말로 감싼 팁·나란한 설명은 그대로).
-    슬레이트 말 없이 다 말한 앞 테이크 뒤에 시범(큰 소리·말 없는 긴 장면)이 있으면 '같은 설명 → 시범 → 같은 설명' 드릴이라 NG 아님."""
+    슬레이트 말 없이 다 말한 앞 테이크 뒤에 시범(큰 소리·말 없는 긴 장면)이 있으면 '같은 설명 → 시범 → 같은 설명' 드릴이라 NG 아님.
+    cues: 다시 찍는 신호일 수 있는 말('틀렸어요, 다시' · '다시, 다시' · REDO_CUE) — 사이에 있어도 '다른 말'로 세지 않을 뿐(짝과 함께 지워짐)
+    슬레이트처럼 시범·조용한 곳 확인을 건너뛰게 하지는 않음 (설명 → 시범 → '틀렸어요 다시' → 같은 설명은 드릴 그대로 · D-207)."""
     ed = _ed()
     slate = any(slates[i + 1:j])
     if not slate and (_resaid(_trimmed(segs[i]["text"], ed), cores[j]) < COVER
@@ -238,7 +240,7 @@ def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=()):
         return False
     win, loose = range(j, min(len(segs), j + (j - i) + 2)), 0
     for k in range(i + 1, j):
-        if len(cores[k]) > 1 and not slates[k] and not FIX_WORDS.fullmatch(cores[k]) \
+        if len(cores[k]) > 1 and not slates[k] and not (cues and cues[k]) and not FIX_WORDS.fullmatch(cores[k]) \
                 and not any(_similar(cores[k], cores[w], 0.6) for w in win):
             loose += len(cores[k])
             if loose > (LOOSE_MAX if slate else 0):
@@ -265,7 +267,7 @@ def find_junk(segs, silences=(), peaks=()):
         if slates[k] and RETRY.search(segs[k]["text"]) and not NOT_RETRY.search(segs[k]["text"]) and _demo_between(segs, k, k + 1, sil, pk):
             slates[k] = False
     out, pairs = [], []
-    marks = [a or b for a, b in zip(slates, cues)]  # 테이크 짝을 볼 때의 슬레이트 (다시 찍는 신호 포함)
+    marks = [a or b for a, b in zip(slates, cues)]  # 테이크 기준으로 쓰지 않을 말 (슬레이트 + 다시 찍는 신호)
 
     for j, later in enumerate(segs):  # 다시 찍은 앞 테이크
         if len(cores[j]) < MIN_CHARS or marks[j] or chants[j]:  # 슬레이트 말끼리·구령끼리는 테이크 기준으로 안 씀
@@ -275,7 +277,7 @@ def find_junk(segs, silences=(), peaks=()):
             if d > RETAKE_MAX:
                 break
             if d >= RETAKE_MIN and not marks[i] and not chants[i] and _similar(cores[i], cores[j]):
-                if _retake_ok(segs, cores, marks, i, j, sil, pk):
+                if _retake_ok(segs, cores, slates, i, j, sil, pk, cues):  # 신호는 사이 말 셈에서만 (시범·조용한 곳 확인은 진짜 슬레이트로만 건너뜀)
                     pairs.append((i, j))
                 break
     keep = []  # 앞 테이크 순서로 고르되, 고른 테이크를 가로지르는 짝(여러 줄을 다시 찍었을 때 둘째 줄끼리)은 버림 · 안에 든 짝은 그대로

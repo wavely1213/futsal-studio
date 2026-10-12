@@ -96,6 +96,8 @@ class _Stub(BaseHTTPRequestHandler):
             return self._send(200, {"docs": {"designs": []}, "hooks": ["풋살 꿀팁 대방출"], "keywords": [], "info": {"duration": 60, "width": 1280, "height": 720}})
         if u.path == "/api/state":
             return self._send(200, {"job": None})
+        if u.path == "/api/auto/pending":  # 끝까지 자동으로 썸네일 요청 (썸네일 만들기 화면도 3초마다 물음 · D-207) — 없음
+            return self._send(200, {"ok": True, "want": None})
         if u.path == "/api/thumb/brand":  # 브랜드 키트 (편집기가 켤 때 읽음)
             return self._send(200, {"ok": True, "brand": {"logo": "", "logoPos": "tr", "colors": {"hl": "#FFE14D", "hl2": "#FFFFFF", "accent": "#FF3B30", "neon": "#00D1FF", "box": "#111111"},
                                                           "font": "Black Han Sans", "series": "", "seriesOn": False, "handle": "", "apply": True}})

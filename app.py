@@ -971,6 +971,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"ok": False, "error": "영상을 찾지 못했어요"})
             if path == "/api/thumb/analyze":
                 c = thumb.cached_analysis(n)
+                if c is None:  # 끝까지 자동으로가 그 영상 썸네일을 그리는 중: 막 한 분석 (그 작업이 작업 자리를 잡고 있어 새 분석을 못 띄움 · D-207)
+                    c = autorun.analysis_for(n)
                 if c is not None:
                     return self._send(200, dict(c, ok=True))
                 ok = start_job(thumb.JOB_ANALYZE, lambda: thumb.analyze(n, log))
@@ -1063,13 +1065,15 @@ class Handler(BaseHTTPRequestHandler):
                 editor.video_path(b.get("name"))
             except (ValueError, TypeError, FileNotFoundError):
                 return self._send(404, {"ok": False, "gone": True, "error": GONE_MSG})
+            merged = {}  # 그 사이 끝까지 자동으로가 더한 편집본·미디어(·자막) — 이 창 내용에 합쳐 저장하고 창에도 알려 줌 (D-207)
+            client = b.get("client") if b.get("client") != editor.AUTO_CLIENT else None  # '자동' 저장 표시는 작업만 씀
             try:  # rev: 편집실이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌
-                rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), b.get("client"), b.get("seq"))
+                rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), client, b.get("seq"), merged=merged)
             except editor.Conflict as e:
                 return self._send(409, {"ok": False, "conflict": True, "rev": e.rev, "error": str(e)})
             except (OSError, ValueError) as e:
                 return self._send(500, {"ok": False, "error": f"저장하지 못했어요 · {e}"})
-            return self._send(200, {"ok": True, "rev": rev})
+            return self._send(200, dict({"ok": True, "rev": rev}, **({"autoAdded": merged} if merged else {})))
         if path == "/api/edit/oneline":  # 편집실 '자막 한 줄씩 나누기' (지금 글 그대로 나눔 · 저장은 편집실이 함)
             caps = b.get("captions")
             if not isinstance(caps, list):
@@ -1297,6 +1301,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auto/claim":  # 썸네일 그리기 요청을 이 화면이 맡음 (먼저 맡은 화면 하나만)
             got = autorun.claim(str(b.get("id") or ""))
             return self._send(200 if got else 409, dict(got or {}, ok=bool(got)))
+        if path == "/api/auto/release":  # 맡은 화면이 닫히거나 다른 화면으로 넘어감 (pagehide 신호) → 다른 화면이 다시 맡게 (D-207)
+            return self._send(200, {"ok": autorun.release(str(b.get("id") or ""))})
         if path == "/api/auto/thumb":  # 보이지 않는 썸네일 편집기가 그린 그림 (이름은 서버가 정함)
             try:
                 f = autorun.deliver(str(b.get("id") or ""), b)

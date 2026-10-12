@@ -1643,6 +1643,7 @@ async function renameVideo(name) {
   const j = await api("/api/rename", { name, to: t }).catch(() => ({}));
   if (!j.ok) return;  // 안내는 api() 가 토스트로
   if (libSel.delete(name)) libSel.add(j.name);
+  if (window.autoRenamed) window.autoRenamed(name, j.name);
   lastLocalKey = ""; poll();
   toast(`'${cutText(j.name, 40)}'(으)로 바꿨어요` + (j.analysis || j.project ? " · 받아쓰기·편집본도 함께 옮겼어요" : "")
     + (j.outKept ? " · 완성본 폴더의 파일은 옛 이름 그대로예요 (다시 내보내면 4·7단계에 보여요)" : "") + (j.warn ? ` · ${j.warn}` : ""));
@@ -2603,8 +2604,8 @@ checkUpdate();
       </div>
       ${resum ? `<div class="rnote">지난번에 하던 것이 있어요 · ${run.steps.length}단계 중 ${doneCount(run)}단계까지 했어요 (${run.status === "done" ? "끝났지만 못 한 단계가 있어요" : STATUS[run.status] || ""}). [이어서 하기]는 끝난 단계·만든 결과물을 건너뛰고 그때 설정 그대로 나머지를 해요.</div>` : ""}
       <div class="rrow" style="margin-top:14px">${resum ? `<button class="btn primary" data-ax="resume">이어서 하기</button><button class="btn" data-ax="fresh">처음부터 다시</button>`
-        : `<button class="btn primary" data-ax="go">시작</button>`}${run && run.status === "done" ? `<button class="btn" data-ax="last">지난 결과 보기</button>` : ""}</div>
-      <div class="small">썸네일은 이 화면(스튜디오)이 그려요 · 작업하는 동안 스튜디오나 편집실을 열어 두세요. 영상 길이·쇼츠 수에 따라 수십 분 걸릴 수 있어요 (위 오른쪽 진행 표시 · 보관함 카드의 [멈추기]).</div>`;
+        : `<button class="btn primary" data-ax="go">시작</button>`}${run ? `<button class="btn" data-ax="last">지난 결과 보기</button>` : ""}</div>
+      <div class="small">썸네일은 열려 있는 화면이 그려요 · 작업하는 동안 스튜디오·편집실·썸네일 만들기 화면 중 하나를 열어 두세요. 영상 길이·쇼츠 수에 따라 수십 분 걸릴 수 있어요 (위 오른쪽 진행 표시 · 보관함 카드의 [멈추기]).</div>`;
     box().querySelectorAll(".seg button").forEach(b => b.onclick = () => { b.parentElement.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); });
     box().querySelectorAll("[data-ax]").forEach(b => b.onclick = () => act(b.dataset.ax));
   }
@@ -2615,8 +2616,8 @@ checkUpdate();
     keep(o);
     const [kind, ...nm] = o.style.split("|");
     const body = { name: A.name, intensity: o.intensity, shorts: o.shorts, style: { kind, name: nm.join("|") }, model: segVal("modelSeg"), ...msgSet(), resume: a !== "fresh" };
-    if (a === "fresh" && !confirm("지난번 자동 작업 기록은 두고 처음부터 새로 만들어요 (먼저 만든 편집본·완성본은 그대로 남아요). 계속할까요?")) return;
-    close(); A.res = null; renderCard();
+    if (a === "fresh" && !confirm("처음부터 새로 만들어요. 결과 카드·확인할 것은 새 작업 것으로 바뀌고, 지난번 기록은 영상 분석 폴더에 따로 남겨 둬요 (먼저 만든 편집본·완성본·키트는 그대로 남아요). 계속할까요?")) return;
+    close(); A.res = null; watch(A.name); renderCard();
     job("/api/auto", body, res => { A.res = res; renderCard(); if (res) toast(res.status === "done" ? "끝까지 자동으로 다 했어요 · 확인할 것을 봐 주세요" : "멈췄어요 · 만든 것은 그대로예요"); });
   }
   window.autoCrash = c => {  // 지난번에 끝까지 자동으로 하다가 꺼짐 → 보관함 카드 [이어서 하기]
@@ -2624,7 +2625,7 @@ checkUpdate();
     showFail({ kind: "crash", msg: `지난번에 '${nice(n)}' 영상을 끝까지 자동으로 만들다가 프로그램이 갑자기 꺼졌어요 · [이어서 하기]를 누르면 끝난 단계는 건너뛰고 나머지를 해요`,
       actions: ["retry", "log", "logfile"], labels: { retry: "이어서 하기" }, job: "지난번에 꺼진 작업" + (c.at ? ` · ${c.at.slice(5, 16)} 시작` : "") },
       { path: "/api/auto", body: { name: n, resume: true }, done: res => { A.res = res; renderCard(); }, panel: "p-library",
-        on: { retry: () => job("/api/auto", { name: n, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }) } });
+        on: { retry: () => { watch(n); job("/api/auto", { name: n, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }); } } });
     const card = failSlot("p-library").querySelector(".card.fail");
     if (card) card.querySelector(".fx").addEventListener("click", () => api("/api/crash/dismiss", {}).catch(() => {}));
   };
@@ -2640,7 +2641,7 @@ checkUpdate();
       el.hidden = false;
       el.innerHTML = `<h3>끝까지 자동으로 · ${esc(nice(live.name))}<span class="sp"></span><span class="hint">${live.i}/${live.n} 단계 · ${esc(live.label || "")}</span>
         <button class="btn" id="autoStop">멈추기</button></h3>${stepsHtml(null, live)}
-        <div class="hint">유튜브에는 올리지 않아요 · 썸네일은 이 화면이 그려요 (창을 닫거나 오래 내려 두지 말아 주세요) · 멈춰도 만든 것은 그대로 두고 나중에 [이어서 하기]로 나머지를 해요</div>`;
+        <div class="hint">유튜브에는 올리지 않아요 · 썸네일은 열려 있는 스튜디오·편집실·썸네일 만들기 화면이 그려요 (창을 닫거나 오래 내려 두지 말아 주세요) · 멈춰도 만든 것은 그대로 두고 나중에 [이어서 하기]로 나머지를 해요</div>`;
       $("autoStop").onclick = e => { e.target.disabled = true; api("/api/edit/cancel", {}); toast("멈추는 중이에요 · 하던 단계까지만 정리해요"); };
       return;
     }
@@ -2654,20 +2655,48 @@ checkUpdate();
       ${stepsHtml(r.steps)}
       <div class="aouts">${outs.map(o => `<div class="aout"><b title="${esc(o.name || "")}">${o.kind === "long" ? "🎬" : "📱"} ${esc(o.name || "")}</b>
         <span class="chip ${o.export ? "ok" : "warn"}">${o.export ? "완성본 ✓" : "완성본 없음"}</span>
-        <span class="chip ${o.thumb ? "ok" : "warn"}">${o.thumb ? "썸네일 ✓" : "썸네일 없음"}</span>
+        <span class="chip ${o.thumb ? "ok" : "warn"}">${o.thumb ? (o.thumbOwn ? "썸네일 ✓ (직접)" : "썸네일 ✓") : "썸네일 없음"}</span>
         <span class="chip ${o.kit ? "ok" : "warn"}">${o.kit ? "키트 ✓" : "키트 없음"}</span>
         <button class="btn" data-aed="${esc(o.seq)}">편집실</button><button class="btn" data-ath="${esc(o.thumbLabel || "")}" data-afmt="${o.kind === "shorts" ? "short" : "long"}" title="여기서 저장한 썸네일이 이 결과물 키트에 들어가요">썸네일</button>${o.kit ? `<button class="btn primary" data-akit="${esc(o.seq)}">올리기 키트</button>` : ""}</div>`).join("") || `<div class="hint">아직 만든 결과물이 없어요</div>`}</div>
       <b>확인할 것</b><ul class="achk">${(r.check || []).map(c => `<li class="${c.lv}">${c.lv === "bad" ? "⛔ " : c.lv === "warn" ? "⚠️ " : "ℹ️ "}${esc(c.text)}${c.seq ? ` <button class="linkbtn" data-aed="${esc(c.seq)}" data-at="${c.t != null ? c.t : ""}">편집실에서 보기</button>` : ""}</li>`).join("") || `<li class="info">따로 확인할 것이 없어요</li>`}</ul>`;
-    $("autoX").onclick = () => { A.res = null; renderCard(); };
+    $("autoX").onclick = () => { A.res = null; watch(null); renderCard(); };
     $("autoOut").onclick = () => api("/api/open", { which: "out" });
-    if ($("autoResume")) $("autoResume").onclick = () => { if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요"); job("/api/auto", { name: r.name, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }); A.res = null; renderCard(); };
+    if ($("autoResume")) $("autoResume").onclick = () => { if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요"); watch(r.name); job("/api/auto", { name: r.name, resume: true, model: segVal("modelSeg"), ...msgSet() }, res => { A.res = res; renderCard(); }); A.res = null; renderCard(); };
     el.querySelectorAll("[data-aed]").forEach(b => b.onclick = () => { location.href = `/editor?name=${q}&seq=${encodeURIComponent(b.dataset.aed)}` + (b.dataset.at ? `&t=${encodeURIComponent(b.dataset.at)}` : ""); });  // 확인할 것: 그 편집본 그 시각
     el.querySelectorAll("[data-ath]").forEach(b => b.onclick = () => { location.href = `/thumb?name=${q}&fmt=${b.dataset.afmt}` + (b.dataset.ath ? `&label=${encodeURIComponent(b.dataset.ath)}` : ""); });  // 그 결과물 이름으로 저장 → 키트가 고름
     el.querySelectorAll("[data-akit]").forEach(b => b.onclick = async () => { go("upload"); if (window.upSelect && !(await window.upSelect(r.name, b.dataset.akit))) toast("그 영상을 찾지 못했어요"); });
   }
+  // 지켜보는 영상 (sessionStorage): 작업 중 편집실·썸네일 화면에 다녀오거나 휴대폰에서 시켜도 끝나면 결과 카드 · 확인할 것을 보임 (D-207)
+  const WKEY = "autoWatch";
+  function watch(n) { try { n ? sessionStorage.setItem(WKEY, n) : sessionStorage.removeItem(WKEY); } catch (e) {} }
+  function watched() { try { return sessionStorage.getItem(WKEY) || ""; } catch (e) { return ""; } }
+  async function showLast(n, note) {  // 그 영상의 마지막 기록을 결과 카드로 (이 화면이 받은 결과와 같으면 그대로)
+    const info = await api("/api/auto?name=" + encodeURIComponent(n)).catch(() => null), run = info && info.run;
+    if (!run || state.auto) return;
+    const same = A.res && A.res.id === run.id && A.res.status === run.status && A.res.finished === run.finished;
+    const key = `${run.id}|${run.status}|${run.finished || ""}`;
+    let seen = ""; try { seen = sessionStorage.getItem("autoSeen") || ""; sessionStorage.setItem("autoSeen", key); } catch (e) {}
+    A.res = run; renderCard();
+    if (note && !same && seen !== key) toast(run.status === "done" ? "끝까지 자동으로 다 했어요 · 보관함의 결과 카드에서 확인할 것을 봐 주세요" : `끝까지 자동으로 · ${STATUS[run.status] || ""}`);
+  }
+  window.autoRenamed = (old, neu) => {  // 이름 바꾸기 → 결과 카드·지켜보기도 새 이름 (옛 이름으로 이어서 하면 '못 찾음')
+    if (A.res && A.res.name === old) { A.res.name = neu; renderCard(); }
+    if (A.name === old) A.name = neu;
+    if (watched() === old) watch(neu);
+  };
   window.autoTick = s => {  // 1초마다 (poll): 진행 카드 · 끝나면 결과 카드
+    if (!A.ticked) {  // 처음 받은 상태: 다른 화면에서 돌아옴 — 지켜보던 영상의 작업이 그 사이 끝났으면 결과 카드
+      A.ticked = true;
+      const n = watched();
+      if (n && !s.auto && !A.res) { if ((s.local || []).some(v => v.name === n)) showLast(n, true); else watch(null); }
+    }
     const k = JSON.stringify(s.auto || null);
-    if (k !== A.lastLive) { A.lastLive = k; renderCard(); }
+    if (k === A.lastLive) return;
+    const was = A.lastLive && JSON.parse(A.lastLive);
+    A.lastLive = k;
+    if (s.auto) watch(s.auto.name);
+    renderCard();
+    if (was && !s.auto) setTimeout(() => showLast(was.name, true), 400);  // 끝남 (이 화면이 시킨 작업이면 그 결과와 같음)
   };
   $("btnAuto").onclick = () => { const n = libChecked(); if (n.length === 1) window.autoOpen(n[0]); };
   /* 썸네일 그리기: 작업이 요청하면 보이지 않는 틀로 썸네일 편집기(AI 추천)를 열어 그림 → 편집기가 /api/auto/thumb 로 보내고 알려 줌 */
@@ -2676,7 +2705,7 @@ checkUpdate();
     if (!rq || busyTh) return;
     let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
     if (!c || !c.ok || busyTh) return;
-    const f = document.createElement("iframe"); busyTh = f;
+    const f = document.createElement("iframe"); busyTh = f; f.dataset.rid = c.id;
     f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
     f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
     let tm = 0;
@@ -2690,6 +2719,8 @@ checkUpdate();
   // 창을 내려 두었다가 다시 보면 바로 물어봄 (숨은 창은 브라우저가 타이머를 1분에 한 번까지 늦추거나 멈춤 · E7 검토)
   const wake = () => { if (document.visibilityState === "visible" && !busyTh) fetch("/api/auto/pending").then(r => r.json()).then(j => { if (j && j.want) window.autoThumb(j.want); }).catch(() => {}); };
   document.addEventListener("visibilitychange", wake); window.addEventListener("focus", wake); window.addEventListener("pageshow", wake); document.addEventListener("resume", wake);
+  // 그리는 중에 이 화면을 떠나면(편집실 열기 등) 맡은 요청을 풀어 다른 화면이 바로 이어서 그림 (작업이 5분 기다린 뒤 '너무 오래'로 건너뛰지 않게 · D-207)
+  window.addEventListener("pagehide", () => { if (busyTh && busyTh.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: busyTh.dataset.rid })], { type: "application/json" })); } catch (e) {} });
 })();
 </script>
 <script>

@@ -632,14 +632,14 @@ def own_thumb_prefix(name, sq):
 
 def pick_own_thumbs(name, files, sq):
     """편집본 하나의 썸네일 후보 (최근 것부터): 그 편집본 이름의 것('…_<편집본 이름>_썸네일_N') + 그보다 나중에 썸네일 편집기에서
-    따로 저장한 것 — 자동 썸네일 뒤에 사람이 다시 만든 썸네일이 이김 (E7 검토). 다른 편집본 이름의 자동 썸네일은 뺌.
-    그 편집본 이름의 것이 없으면 전부 (예전과 같음)."""
+    따로 저장한 것 — 자동 썸네일 뒤에 사람이 다시 만든 썸네일이 이김 (E7 검토). 다른 편집본 이름의 자동 썸네일은 늘 뺌 —
+    그 편집본 이름의 것이 없어도 (썸네일을 못 그린 쇼츠가 다른 쇼츠 썸네일을 '문제없음'으로 쓰지 않게 · D-207) 따로 저장한 것만."""
     own = own_thumb_prefix(name, sq)
     auto = re.compile(re.escape(core.adir(name).name + "_") + r".+" + re.escape(OWN_THUMB) + r"\d+\.(?:jpe?g|png)$", re.I)
     mine = [p for p in files if p.name.startswith(own)]
     loose = [p for p in files if not p.name.startswith(own) and not auto.match(p.name)]
     if not mine:
-        return files
+        return loose
     newest = max(_mtime(p) for p in mine)
     keep = set(mine) | {p for p in loose if _mtime(p) > newest}
     return [p for p in files if p in keep]  # _images_of 차례 그대로 (A/B 묶음은 A 먼저)
@@ -1135,6 +1135,21 @@ def load_kit(name, seq=None, live=False):
     kit["thumbnail"] = thumbnail_check(name, kit.get("format", "long"), sq)
     kit["counts"] = counts(kit)
     return annotate(kit) if live else kit
+
+
+def keep_kit(name, seq):
+    """저장해 둔 키트를 그대로 씀 — 사람이 고친 제목·설명·태그(edited)를 새로 만든 내용으로 덮지 않게 (끝까지 자동으로의 이어서 하기 · D-207).
+    썸네일 확인만 지금 것으로: 저장된 것과 다르면 썸네일 칸(.txt 의 썸네일 줄도)만 바꿔 다시 저장. → 키트 (저장된 키트가 없으면 None)."""
+    with _LOCK:
+        sq, _ = _target(name, seq)
+        _, saved = _find_kit(name, seq)
+        if saved is None:
+            return None
+        kit = load_kit(name, seq)
+        old, new = saved.get("thumbnail") or {}, kit.get("thumbnail") or {}
+        if any(old.get(k) != new.get(k) for k in ("file", "ok", "mtime", "problems")):
+            _store(kit, name, seq, sq)
+        return kit
 
 
 def save_edits(name, seq, title=None, desc=None, tags=None):

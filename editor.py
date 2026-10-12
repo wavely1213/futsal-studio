@@ -1530,6 +1530,9 @@ def migrate_project(name, proj):
 _SAVE_LOCK = threading.RLock()
 _REVC = {}
 _WRITER = {}  # 파일별 마지막으로 저장한 편집실 창: (창 id, 그 창이 이어서 저장하기 시작한 판, 마지막 판, 편집 번호)
+AUTO_CLIENT = "auto"  # 끝까지 자동으로(autorun.add_to_project)가 편집본을 더할 때의 저장 표시 (화면 창 id 로는 못 씀)
+_AUTO_ADDS = {}  # 파일별 끝까지 자동으로가 더한 것 [(판, 편집본 id 들, 미디어 id 들, 바꾸기 전 자막 글 또는 None)] (최근 AUTO_ADDS_MAX 개 · D-207)
+AUTO_ADDS_MAX = 40
 
 
 class Conflict(Exception):
@@ -1757,23 +1760,77 @@ def load_project(name):
     return proj
 
 
-def save_project(name, proj, base_rev=None, force=False, client=None, seq=None):
+def _cap_text(cs):
+    return "\n".join(str(c.get("text") or "") for c in cs or [] if isinstance(c, dict))
+
+
+def _auto_diff(p, proj):
+    """끝까지 자동으로가 이번 저장으로 더하는 것 → (편집본 id 들, 미디어 id 들, 바꾸기 전 자막 글 또는 None)."""
+    try:
+        old = _read_json(p)
+    except (OSError, ValueError):
+        old = {}
+    old = old if isinstance(old, dict) else {}
+    have_s = {q.get("id") for q in old.get("sequences") or [] if isinstance(q, dict)}
+    have_m = {m.get("id") for m in old.get("media") or [] if isinstance(m, dict)}
+    seqs = [q.get("id") for q in proj.get("sequences") or [] if isinstance(q, dict) and q.get("id") not in have_s]
+    media = [m.get("id") for m in proj.get("media") or [] if isinstance(m, dict) and m.get("id") not in have_m]
+    was = _cap_text(old.get("captions"))
+    return seqs, media, (was if was != _cap_text(proj.get("captions")) else None)
+
+
+def _merge_auto(p, proj, adds, merged):
+    """편집실 창이 모르는 사이 끝까지 자동으로가 더한 편집본·미디어를 이 창 내용에 붙임 (창이 지운 것은 그대로 · 그 판 뒤에 더한 것만).
+    자막은 자동 작업이 바꾸기 전 글 그대로일 때만 새 자막으로 (autorun.add_to_project 와 같은 규칙). merged: 붙인 것 (창에 알려 줌)."""
+    try:
+        disk = _read_json(p)
+    except (OSError, ValueError):
+        return
+    want_s = {i for a in adds for i in a[1]}
+    want_m = {i for a in adds for i in a[2]}
+    have_s = {q.get("id") for q in proj.get("sequences") or [] if isinstance(q, dict)}
+    have_m = {m.get("id") for m in proj.get("media") or [] if isinstance(m, dict)}
+    seqs = [q for q in disk.get("sequences") or [] if isinstance(q, dict) and q.get("id") in want_s and q.get("id") not in have_s]
+    media = [m for m in disk.get("media") or [] if isinstance(m, dict) and m.get("id") in want_m and m.get("id") not in have_m]
+    was = next((a[3] for a in adds if a[3] is not None), None)
+    caps = disk.get("captions") if was is not None and _cap_text(proj.get("captions")) == was else None
+    if seqs:
+        proj["sequences"] = list(proj.get("sequences") or []) + seqs
+        merged["sequences"] = seqs
+    if media:
+        proj["media"] = list(proj.get("media") or []) + media
+        merged["media"] = media
+    if caps is not None:
+        proj["captions"] = caps
+        merged["captions"] = caps
+
+
+def save_project(name, proj, base_rev=None, force=False, client=None, seq=None, merged=None):
     """base_rev: 편집실이 열 때 받은 판 번호. 그 사이 다른 창·작업이 저장했으면 Conflict (덮어쓰지 않음).
     force: 그래도 이 내용으로 (덮어쓰기 전 상태는 백업).
     client·seq: 편집실 창 id·편집 번호 — 저장 응답을 받기 전에 창을 닫아(신호 저장) 판 번호가 뒤처져도
-    그 사이 저장한 게 같은 창뿐이면 이어서 저장 (늦게 도착한 예전 내용은 버림)."""
+    그 사이 저장한 게 같은 창뿐이면 이어서 저장 (늦게 도착한 예전 내용은 버림).
+    끝까지 자동으로(client=AUTO_CLIENT)가 base_rev 뒤에 더한 편집본·미디어는 창 내용에 합쳐 저장 — 그 사이 저장이 모두 자동 작업이면
+    충돌 창 없이, force 여도 그 편집본은 남김 (작업 중 편집실을 열어 두라는 안내대로 열어 둔 창이 MSG 편집본을 지우지 않게 · D-207).
+    merged(dict): 합친 것 {sequences, media, captions} (편집실 창에 알려 줌)."""
     p = _ppath(name)
     client = str(client) if client else None
     seq = int(seq) if isinstance(seq, (int, float)) and not isinstance(seq, bool) else None
+    merged = {} if merged is None else merged
     with _SAVE_LOCK:
         disk = _disk_rev(p) if p.exists() else 0
         w = _WRITER.get(str(p))
         mine = client is not None and w is not None and w[0] == client and w[2] == disk
+        adds = [a for a in _AUTO_ADDS.get(str(p)) or () if a[0] > int(base_rev)] if base_rev is not None and client != AUTO_CLIENT else []
         if base_rev is not None and not force and disk >= 0 and int(base_rev) != disk:
-            if not (mine and w[1] <= int(base_rev) < disk):
+            if mine and w[1] <= int(base_rev) < disk:
+                if seq is not None and w[3] is not None and seq <= w[3]:
+                    return disk  # 같은 창의 더 최근 내용이 이미 저장됨
+            elif not (adds and int(base_rev) < disk and {a[0] for a in adds} >= set(range(int(base_rev) + 1, disk + 1))):
                 raise Conflict(disk)
-            if seq is not None and w[3] is not None and seq <= w[3]:
-                return disk  # 같은 창의 더 최근 내용이 이미 저장됨
+        if adds:
+            _merge_auto(p, proj, adds, merged)
+        auto = _auto_diff(p, proj) if client == AUTO_CLIENT else None
         if force and p.exists():
             _backup_copy(p, "덮어쓰기전")
         proj.pop("_recovered", None)
@@ -1793,6 +1850,8 @@ def save_project(name, proj, base_rev=None, force=False, client=None, seq=None):
             _WRITER[str(p)] = (client, w[1] if mine else proj["rev"] - 1, proj["rev"], seq)
         else:
             _WRITER.pop(str(p), None)
+        if auto is not None:
+            _AUTO_ADDS[str(p)] = (_AUTO_ADDS.get(str(p)) or [])[-(AUTO_ADDS_MAX - 1):] + [(proj["rev"], *auto)]
         # 자동 백업: 5분마다 한 벌씩, 최근 10개까지 · 이미 저장은 끝났으므로 백업이 실패해도(디스크 가득·잠긴 옛 백업) 저장 실패가 아님
         try:
             regs = [x for x in _backup_files(p.stem) if not x[1]]

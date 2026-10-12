@@ -4889,6 +4889,31 @@ async function autoThumbRun() {
   } catch (e) { return done({ error: "썸네일을 그리다 문제가 생겼어요 · " + String(e && e.message || e).slice(0, 120) }); }
 }
 if (AUTO_RUN && NAME) autoThumbRun();
+// 끝까지 자동으로 (D-207): 썸네일 만들기 화면에 머물러 있어도 작업의 썸네일 요청을 맡아 보이지 않는 틀로 그림
+// (스튜디오·편집실의 autoThumb 와 같은 코드 · 예전엔 이 화면에서는 아무도 안 맡아 10분 뒤 '그릴 화면이 없어요'로 건너뜀)
+if (!AUTO_RUN) {
+  let autoFrame = null;
+  const autoClaim = async rq => {
+    if (!rq || autoFrame) return;
+    let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
+    if (!c || !c.ok || autoFrame) return;
+    const f = document.createElement("iframe"); autoFrame = f; f.dataset.rid = c.id;
+    f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+    f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
+    let tm = 0;
+    const onMsg = e => { if (e.source === f.contentWindow && e.data && e.data.autothumb === c.id) end(); };
+    const end = () => { window.removeEventListener("message", onMsg); clearTimeout(tm); f.remove(); autoFrame = null; };
+    tm = setTimeout(end, 330000);
+    window.addEventListener("message", onMsg);
+    f.src = `/thumb?name=${encodeURIComponent(c.name)}&autothumb=${encodeURIComponent(c.id)}&fmt=${c.fmt}` + (c.a != null ? `&a=${c.a}&b=${c.b}` : "") + (c.avoid && c.avoid.length ? `&avoid=${encodeURIComponent(JSON.stringify(c.avoid))}` : "");
+    document.body.appendChild(f);
+  };
+  const autoPoll = async () => { if (autoFrame) return; try { const j = await (await fetch("/api/auto/pending")).json(); if (j.want) autoClaim(j.want); } catch (e) {} };
+  setInterval(autoPoll, 3000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoPoll(); });
+  window.addEventListener("focus", autoPoll);
+  window.addEventListener("pagehide", () => { if (autoFrame && autoFrame.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: autoFrame.dataset.rid })], { type: "application/json" })); } catch (e) {} });
+}
 
 /* ---------- 전술 그래픽 넣기 · 점 핸들 · 스티커 · 브랜드 키트 · 검수(모바일 미리보기·글자 읽기·클로드 평가) · A/B 묶음 ---------- */
 const TAC_MENU = [["arrow2", "곡선 화살표", {}], ["arrow2", "직선 화살표", { pts: [[0.04, 0.5], [0.96, 0.5]], h: 90 }], ["pass", "패스 점선", {}], ["ring", "발밑 원", {}],

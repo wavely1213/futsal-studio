@@ -111,6 +111,7 @@ NOTE_TEXT = {
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
     "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
+    "auto": "확인이 필요해요 · 끝까지 자동으로 · 다 했지만 PC 보관함의 결과 카드에서 볼 것이 있어요",
     "moved": "알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · mulgyeol.kr/futsal 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
@@ -128,6 +129,11 @@ STRATEGY_MSG = {
     "stopped_check": "멈췄어요 · 그때까지 받은 숫자로 점검했어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
     "blocked": "YouTube가 잠시 막아 6시간 쉬어요 · 남은 채널은 최근 날짜·조회수만 새로 고쳤어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
     "net": "PC 인터넷이 끊겨 일부 채널만 새로 고쳤어요 · 인터넷을 확인한 뒤 PC 8단계 '채널 전략'에서 다시 새로 고쳐 주세요",
+}
+# 끝까지 자동으로: 멈추거나 단계 몇 개가 안 돼도 작업은 끝까지 가서 결과(public · ok 없음)를 돌려줌 → 휴대폰에 '끝 ✓'로 보이면 안 됨 (D-207)
+AUTO_MSG = {
+    "stopped": "멈췄어요 · 만든 것은 그대로예요 · PC 보관함의 [끝까지 자동으로] → [이어서 하기]로 나머지를 해요",
+    "check": "다 했지만 확인할 것이 {n}개 있어요 · PC 보관함의 결과 카드에서 봐 주세요 (유튜브에는 아직 올리지 않았어요)",
 }
 # 유튜브 올리기 끝 — 휴대폰 '마지막 작업' 칸·알림에는 이 정해진 문장만 (영상 주소·번호·토큰·Google 오류 글은 넣지 않음 · D-048)
 YOUTUBE_JOBS = {youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}
@@ -1322,6 +1328,13 @@ class Service:
                 blocked = bool(result.get("blocked"))
                 ok, warn, note = False, True, "blocked" if blocked else "net"
                 err = STRATEGY_MSG[note]
+        elif name == autorun.JOB and isinstance(result, dict):  # 멈춤 → '멈췄어요' · 못 한 단계·확인할 것 → '확인이 필요해요' (D-207)
+            n_chk = sum(1 for c in result.get("check") or [] if isinstance(c, dict) and c.get("lv") in ("bad", "warn"))
+            if result.get("status") == "stopped":
+                ok, err = False, AUTO_MSG["stopped"]
+            elif result.get("status") != "done" or result.get("redo") or n_chk:
+                ok, warn, note = False, True, "auto"
+                err = AUTO_MSG["check"].format(n=max(n_chk, 1))
         elif name == "보관함에 담기" and _missed(result):  # 받기: 못 받은 영상 id 목록 · {failed, why} 면 첫 영상의 쉬운 까닭으로
             missed = _missed(result)
             first = _first_why(result, missed)

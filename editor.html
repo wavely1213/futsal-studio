@@ -989,6 +989,7 @@ async function doSave(force) {
     }
     if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
     if (j.rev != null) REV = j.rev;
+    if (j.autoAdded) autoMerge(j.autoAdded);
     conflict = false; if (seq === editSeq) dirty = false;
     const d = new Date(); $("saved").textContent = `자동 저장됨 · ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
     return true;
@@ -1007,7 +1008,22 @@ function leaveTo(url, back) {  // back: 스튜디오에서 열 화면 (sessionSt
     else if (!conflict) toast("저장하지 못해서 이 화면에 머물러요 · 잠시 뒤 다시 눌러 주세요");
   });
 }
-function restoreP(snap) { P = JSON.parse(snap); P.sequences.forEach(ensureSeq); bindS(); P.media.forEach(m => { MED[m.id] = m; }); }
+function restoreP(snap) { P = JSON.parse(snap); keepAuto(); P.sequences.forEach(ensureSeq); bindS(); P.media.forEach(m => { MED[m.id] = m; }); }
+/* 끝까지 자동으로가 이 창이 모르는 사이 더한 편집본·미디어(·자막): 서버가 저장 때 이 창 내용에 합쳐 알려 줌 → 이 창에도 더함 (D-207).
+   그보다 앞 기록으로 되돌려도 그 편집본은 남김 (되돌린 내용을 저장하며 자동 편집본을 지우지 않게 · 이 창에서 지운 것은 빼고) */
+const AUTO_KEPT = { seqs: new Map(), media: new Map() };
+function keepAuto() {
+  for (const [id, q] of AUTO_KEPT.seqs) if (!P.sequences.some(x => x.id === id)) P.sequences.push(JSON.parse(q));
+  for (const [id, m] of AUTO_KEPT.media) if (!P.media.some(x => x.id === id)) P.media.push(JSON.parse(m));
+}
+function autoMerge(a) {
+  let n = 0;
+  for (const md of a.media || []) { AUTO_KEPT.media.set(md.id, JSON.stringify(md)); if (!P.media.some(m => m.id === md.id)) { P.media.push(md); MED[md.id] = md; loadBundle(md); } }
+  for (const q of a.sequences || []) { AUTO_KEPT.seqs.set(q.id, JSON.stringify(q)); if (!P.sequences.some(x => x.id === q.id)) { ensureSeq(q); P.sequences.push(q); n++; } }
+  if (a.captions) { P.captions = a.captions; renderCaps(); }
+  ver++; renderBin(); if (ltab === "rec") renderRec();
+  if (n) toast(`끝까지 자동으로가 만든 편집본 ${n}개를 이 창에도 더했어요 · 편집본 목록에서 볼 수 있어요`);
+}
 function undo() { if (!hist.length) return; const h = hist.pop(); redoS.push({ label: h.label, snap: JSON.stringify(P), at: h.at }); restoreP(h.snap); afterHist(); toast(`되돌림 · ${h.label}`); }
 function redo() { if (!redoS.length) return; const h = redoS.pop(); hist.push({ label: h.label, snap: JSON.stringify(P), at: h.at || Date.now() }); if (hist.length > HIST_MAX) hist.splice(0, hist.length - HIST_MAX); restoreP(h.snap); afterHist(); toast(`다시 실행 · ${h.label}`); }
 // 기록 패널에서 여러 단계를 한 번에: 저장된 사본만 옮기고 마지막에 한 번만 다시 그림 (단계마다 다시 그리지 않음)
@@ -4192,7 +4208,7 @@ async function renderBin() {
   $("seqDel").onclick = () => {
     if (P.sequences.length <= 1) return toast("편집본이 하나뿐이라 지울 수 없어요");
     if (!confirm(`"${S.name}" 편집본을 지울까요? (Ctrl+Z로 되돌릴 수 있어요)`)) return;
-    commit("편집본 삭제"); const i = P.sequences.indexOf(S); P.sequences.splice(i, 1); switchSeq(P.sequences[Math.max(0, i - 1)].id);
+    commit("편집본 삭제"); AUTO_KEPT.seqs.delete(S.id); const i = P.sequences.indexOf(S); P.sequences.splice(i, 1); switchSeq(P.sequences[Math.max(0, i - 1)].id);
   };
 }
 let LIB = null;
@@ -4656,7 +4672,7 @@ async function autoThumb(rq) {
   if (!rq || AUTOTH) return;
   let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
   if (!c || !c.ok || AUTOTH) return;
-  const f = document.createElement("iframe"); AUTOTH = f;
+  const f = document.createElement("iframe"); AUTOTH = f; f.dataset.rid = c.id;
   f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
   f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
   let tm = 0;
@@ -4672,6 +4688,8 @@ setInterval(autoAsk, 3000);
 // 창을 내려 두었다가 다시 보면 바로 물어봄 (숨은 창은 브라우저가 타이머를 1분에 한 번까지 늦추거나 멈춤 · E7 검토)
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoAsk(); });
 window.addEventListener("focus", autoAsk); document.addEventListener("resume", autoAsk);
+// 그리는 중에 이 화면을 떠나면 맡은 요청을 풀어 다른 화면이 바로 이어서 그림 (D-207 · ui.html 과 같음)
+window.addEventListener("pagehide", () => { if (AUTOTH && AUTOTH.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: AUTOTH.dataset.rid })], { type: "application/json" })); } catch (e) {} });
 </script>
 </body>
 </html>
