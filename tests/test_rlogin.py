@@ -572,6 +572,14 @@ class PendingTests(unittest.TestCase):
         self.assertEqual(self.p.take(c)["x"], 3)
         self.assertRegex(a, r"^[A-Za-z0-9_-]{22}$")
 
+    def test_same_time_oldest_is_first_put(self):
+        for _ in range(20):   # 같은 시각이면 먼저 넣은 것이 밀려남 (확인 번호의 글자 차례와 상관없이)
+            p = rlogin.Pending(self.clock)
+            a, b = p.put("n1", {"x": 1}), p.put("n1", {"x": 2})
+            c = p.put("n1", {"x": 3})
+            self.assertIsNone(p.take(a))
+            self.assertEqual((p.take(b)["x"], p.take(c)["x"]), (2, 3))
+
     def test_256_total_busy_no_eviction(self):
         ids = [self.p.put(f"n{i}", {"i": i}) for i in range(256)]
         with self.assertRaises(rlogin.Busy):

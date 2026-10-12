@@ -602,6 +602,7 @@ class Pending:
         self.clock, self.ttl = clock, ttl
         self.lock = threading.Lock()
         self.items = {}
+        self.n = 0   # 넣은 차례 (같은 시각이면 먼저 넣은 것이 '가장 오래된 것')
 
     def _sweep(self, now):
         for k in [k for k, v in self.items.items() if now - v["created"] > self.ttl]:
@@ -612,13 +613,14 @@ class Pending:
         now = self.clock()
         with self.lock:
             self._sweep(now)
-            mine = sorted((v["created"], k) for k, v in self.items.items() if v["net"] == net)
+            mine = sorted((v["created"], v["n"], k) for k, v in self.items.items() if v["net"] == net)
             if len(mine) >= PENDING_PER_NET:
-                del self.items[mine[0][1]]
+                del self.items[mine[0][2]]
             elif len(self.items) >= PENDING_MAX:
                 raise Busy()
             lid = lid or _b64u(secrets.token_bytes(16))
-            self.items[lid] = dict(entry, net=net, created=now)
+            self.n += 1
+            self.items[lid] = dict(entry, net=net, created=now, n=self.n)
             return lid
 
     def take(self, lid):
