@@ -4,7 +4,6 @@
 """
 import hashlib
 import io
-import json
 import socket
 import sys
 import time
@@ -19,7 +18,7 @@ import core  # noqa: E402
 import editor  # noqa: E402
 import rstudio  # noqa: E402
 import source  # noqa: E402
-from test_remote_studio import DEV, NAME, StudioBase, quote  # noqa: E402
+from test_remote_studio import DEV, StudioBase, quote  # noqa: E402
 
 DU = namedtuple("DU", "total used free")
 BIG = DU(1 << 44, 0, 1 << 43)

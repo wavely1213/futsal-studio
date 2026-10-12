@@ -35,6 +35,14 @@
   function size(n) { return n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + "GB" : n >= 1 << 20 ? Math.round(n / (1 << 20)) + "MB" : Math.max(1, Math.round(n / 1024)) + "KB"; }
   function dur(s) { s = Math.max(0, Math.round(s)); return s >= 3600 ? Math.floor(s / 3600) + "시간 " + Math.floor(s % 3600 / 60) + "분" : s >= 60 ? Math.floor(s / 60) + "분 " + (s % 60) + "초" : s + "초"; }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function sleepOrOnline(ms) {  // 기다리다가 인터넷이 돌아오면(online) 바로 깸 — 지하철·와이파이 바꿈 뒤 오래 기다리지 않게
+    return new Promise(function (r) {
+      var t = setTimeout(done, ms);
+      function done() { clearTimeout(t); window.removeEventListener("online", wake); r(); }
+      function wake() { setTimeout(done, 500); }
+      window.addEventListener("online", wake);
+    });
+  }
   function ready(fn) { if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn); else fn(); }
 
   // ---------- 알림 줄 ----------
@@ -396,7 +404,7 @@
         u.state = "wait"; upView();
         u.tries++;
         if (u.tries > 40) { u.state = "paused"; u.error = "연결이 계속 끊겨요 · [이어 올리기]를 눌러 주세요"; upView(); return; }
-        await sleep(Math.min(30000, 1000 * Math.pow(2, Math.min(5, u.tries - 1))));
+        await sleepOrOnline(Math.min(30000, 1000 * Math.pow(2, Math.min(5, u.tries - 1))));
         try {
           var s = await fsFetch("/s/upload/status?id=" + u.id, { cache: "no-store" });
           if (s.ok) u.received = (await s.json()).received;

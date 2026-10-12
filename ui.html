@@ -2427,7 +2427,7 @@ function setRing(svg, pct) {
 function showBusy() {
   const pr = state.progress || {};
   $("busy").classList.toggle("show", !!state.job);
-  $("busyTxt").textContent = (state.jobBy ? "휴대폰에서 시킨 일 · " : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
+  $("busyTxt").textContent = (state.jobBy ? (String(state.jobBy).startsWith("밖에서") ? "밖에서 시킨 일 · " : "휴대폰에서 시킨 일 · ") : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
   $("busyPct").textContent = pr.pct !== null && pr.pct !== undefined ? `${pr.pct}%` : "";
   $("busyDetail").textContent = pr.detail || "";
   $("busyDetail").style.display = pr.detail ? "" : "none";

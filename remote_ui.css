@@ -61,3 +61,6 @@
   #fsr-panel { padding: calc(var(--fsr-h) + 8px) 8px 8px; }
   .fsr-card { padding: 14px; }
 }
+@media (max-width: 600px) {  /* 휴대폰: 진행 표시가 위 단계 단추를 덮지 않게 아래로 (ui.html 본문 아래 여백 120px) */
+  :root[data-remote] .topright { top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+}
