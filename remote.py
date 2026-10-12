@@ -34,6 +34,7 @@ import core
 import editor
 import qa
 import refs
+import rstudio
 import source
 import strategy
 import style
@@ -88,7 +89,7 @@ NONCE_MAX = 4000             # 기기마다 기억하는 nonce 수 (꽉 차면 �
 TICKET_TTL, TICKET_REUSE, TICKET_MAX = 3600, 1200, 4000  # 표는 1시간 · 20분 넘게 남았으면 같은 표 · 받은 곳(IP 대역)에 묶음
 BODY_MAX = 64 * 1024
 MEDIA_CHUNK = 4 << 20        # 구간 요청 한 번에 내주는 최대 크기
-CONCURRENCY = 24
+CONCURRENCY = 48               # 처리 동시 (밖에서 작업 화면은 한 번에 여러 요청 · Cloudflare 빠른 터널은 약 200)
 MEDIA_PER_DEVICE, MEDIA_TOTAL = 6, 10
 ACTION_GAP = 2.0             # 기기마다 동작 요청 간격(초)
 NOTIFY_TEST_GAP = 60         # 휴대폰의 '알림 시험'은 1분에 한 번
@@ -105,7 +106,7 @@ INSTALL_RE = re.compile(r"[A-Za-z0-9_-]{16,43}")  # 휴대폰 브라우저마다
 PREVIEW_KEEP = 10
 CROCK = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32 (I·L·O·U 없음)
 CONFIRM_TTL = 120
-BUCKETS = {"open": (10, 1 / 6), "auth": (60, 5.0)}  # (최대, 초당 채움)
+BUCKETS = {"open": (10, 1 / 6), "auth": (60, 5.0), "studio": (300, 40.0)}  # (최대, 초당 채움) · studio: 밖에서 작업 화면 (D-230)
 LRU_MAX = 10000
 MISSING_MSG = "원격 접속에 필요한 구성요소가 없어요 · 왼쪽 아래 '업데이트 확인' → 다운로드 엔진 최신으로 바꾼 뒤 다시 켜 주세요"
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
@@ -134,6 +135,7 @@ NOTE_TEXT = {
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
     "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
+    "studio": "밖에서 PC 스튜디오를 열었어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
     "moved": f"알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · {SITE_TEXT} 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
@@ -199,9 +201,9 @@ class PairError(Exception):
 
 
 class ActionError(Exception):
-    def __init__(self, msg, status=400):
+    def __init__(self, msg, status=400, code=None):
         super().__init__(msg)
-        self.status = status
+        self.status, self.code = status, code
 
 
 # ---------- 작은 도구 ----------
@@ -245,6 +247,12 @@ _SECRETS = (
     (re.compile(r"('(?:access_token|refresh_token|client_secret|code_verifier|uri)'\s*:\s*')[^']*"), r"\1…"),
     # Google 로그인 코드(4/0…) — 주소 밖(요청 값 repr 등)에 놓여도
     (re.compile(r"\b4/0[A-Za-z0-9_-]{10,}"), "4/0…"),
+    # 밖에서 작업 (D-230): 넘겨주기 표(#t=) · 세션 쿠키 · CSRF·확인 머리글 · JSON 의 token·csrf 칸
+    (re.compile(r"([#&?]t=)[A-Za-z0-9_-]{20,}"), r"\1…"),
+    (re.compile(r"\b((?:__Host-)?fs_s=)[^;\s'\"]+"), r"\1…"),
+    (re.compile(r"\b(X-FS-(?:CSRF|Confirm)['\"]?\s*[:=,]\s*['\"]?)[^\s'\",}]+", re.I), r"\1…"),
+    (re.compile(r'("(?:token|csrf)"\s*:\s*")[^"]*'), r"\1…"),
+    (re.compile(r"('(?:token|csrf)'\s*:\s*')[^']*"), r"\1…"),
 )
 
 
@@ -454,7 +462,9 @@ def channel_url(s):
 def _fresh():
     return {"v": 1, "pc": {"id": secrets.token_hex(8), "name": "내 PC"}, "enabled": False,
             # PC 잠들지 않게: 기본은 '켜 둔 동안 항상' (잠들면 밖에서 새 작업을 못 시킴 · 원격 접속 자체가 소유자가 켜는 것)
-            "settings": {"autoOffHours": 12, "keepAwake": "always", "notify": {"done": True, "failed": True, "attention": True}},
+            "settings": {"autoOffHours": 12, "keepAwake": "always", "notify": {"done": True, "failed": True, "attention": True},
+                         # 밖에서 작업 허용 (D-234): 기본 켜짐 — 기기를 연결해야 쓸 수 있으므로 사실상 '연결하면 켜짐' · 끄면 휴대폰으로 보기만
+                         "studio": True},
             "devices": [], "topics": {"beacon": "fsb" + secrets.token_hex(12), "notify": "fsn" + secrets.token_hex(12)}, "seq": 0}
 
 
@@ -787,11 +797,13 @@ class Limiter:
 
 class Bridge:
     """app → remote: log(msg) · start_job(name, fn, by) · job() 지금 작업 모습 · logs(since) → (줄, 전체 수) ·
-    analyze(b) 편집점 찾기 + 가편집 · refs_job(fn) 학습용 작업 안내 처리 · version."""
+    analyze(b) 편집점 찾기 + 가편집 · refs_job(fn) 학습용 작업 안내 처리 · version ·
+    studio: 밖에서 작업 화면 처리기 클래스 (app.StudioHandler · 없으면 /r/* 밖의 요청은 모두 401)."""
 
-    def __init__(self, log, start_job, job, logs, analyze, refs_job, version):
+    def __init__(self, log, start_job, job, logs, analyze, refs_job, version, studio=None):
         self.log, self.start_job, self.job, self.logs = log, start_job, job, logs
         self.analyze, self.refs_job, self.version = analyze, refs_job, version
+        self.studio = studio
 
 
 def _dur_text(secs):
@@ -865,7 +877,7 @@ class Publisher:
                         self.pending = (False, None, None)  # 같은 꼴은 마지막 것만 (60초에 한 번)
                 elif item[0] == "notify":
                     _, kind, text, prio, tags, topic = item
-                    if self._budget(kind in ("attention", "failed", "paired", "moved")):
+                    if self._budget(kind in ("attention", "failed", "paired", "moved", "studio")):
                         self._post_notify(text, prio, tags, topic)
                 elif item[0] == "raw":
                     if self._budget(True):
@@ -973,6 +985,9 @@ class Service:
         self._retry = {"n": 0, "at": None}
         self._last_test = -1e9
         self._proj_cache = collections.OrderedDict()
+        self.studio = None      # 밖에서 작업 (rstudio.Studio · 세션·넘겨주기·확인·올리기)
+        self._hcls = None
+        self._up_swept = 0.0
 
     # ----- 준비 -----
     def init(self, bridge):
@@ -983,6 +998,7 @@ class Service:
         self.pairing = Pairing(self.clock)
         self.tickets = Tickets(self.clock)
         self.limiter = Limiter(self.clock)
+        self.studio = rstudio.Studio(self)
         if not self._started:
             self._started = True
             self.pub = Publisher(self)
@@ -1001,6 +1017,62 @@ class Service:
     def site(self):
         return (os.environ.get("FUTSAL_REMOTE_SITE") if _dev() else None) or SITE
 
+    @staticmethod
+    def dev():
+        return _dev()
+
+    net_of = staticmethod(net_of)
+
+    def handler_class(self):
+        """원격 리스너의 처리기: 앱이 화면 처리기(StudioHandler)를 넘겨줬으면 RemoteHandler 와 묶음 (RemoteHandler 가 앞 →
+        do_GET·_route·timeout 은 원격 쪽 · 스튜디오 요청은 rstudio.gate 가 studio_call 로 앱 코드를 부름) · 없으면 RemoteHandler 만."""
+        st = getattr(self.bridge, "studio", None) if self.bridge else None
+        if st is None:
+            return RemoteHandler
+        if self._hcls is None or self._hcls.__bases__[1] is not st:
+            self._hcls = type("RemoteStudioHandler", (RemoteHandler, st), {})
+        return self._hcls
+
+    # ----- 밖에서 작업 (D-230~D-234) -----
+    def studio_allowed(self):
+        """PC 의 '밖에서 작업 허용' (기본 켜짐) · 앱이 화면 처리기를 넘겨준 때만."""
+        return bool(self.store and self.studio and getattr(self.bridge, "studio", None)
+                    and self.store.data["settings"].get("studio", True))
+
+    def auth_failed(self, ip):
+        if self.limiter.failed(ip) and self.clock() - self._lockout_logged > 600:
+            self._lockout_logged = self.clock()
+            self.log("원격 접속 · 잘못된 연결 시도가 많아 잠시 막았어요")
+
+    def studio_started(self, rec, replaced=False):
+        if not replaced:
+            self.log(f"밖에서 작업 시작 · {clean(rec['name'], 40)}")
+        if rec.get("quietBefore"):  # 그 기기가 30분 넘게 세션이 없었음 → 내가 한 게 아니면 알 수 있게 (정해진 문장)
+            self._note("studio", NOTE_TEXT["studio"])
+
+    def studio_ended(self, recs):
+        for r in recs or []:
+            self.log(f"밖에서 작업 끝냄 · {clean(r['name'], 40)} ({r.get('endedWhy') or '끝'})")
+
+    def studio_revoke(self, ids=None, everyone=False):
+        """PC 의 [끊기]·[모두 끊기]: 세션만 끝냄 (기기 열쇠는 그대로 — 기기째 끊기는 revoke) → 끝낸 수."""
+        if not self.studio:
+            return 0
+        want = set(ids or [])
+        gone = self.studio.sessions.end(lambda r: everyone or r["id"] in want, "revoked", "PC에서 끊음")
+        self.studio_ended(gone)
+        return len(gone)
+
+    def _studio_view(self):
+        if not self.studio:
+            return {"available": False, "allowed": False, "sessions": []}
+        now = self.clock()
+        return {"available": bool(getattr(self.bridge, "studio", None)), "allowed": self.studio_allowed(),
+                "sessions": [{"id": r["id"], "device": r["name"], "deviceId": r["device"], "startedAt": int(r["created"]),
+                              "lastSeen": int(r["last"]), "active": now - r["last"] <= rstudio.ACTIVE_SECS,
+                              "uploads": self.studio.uploads.count(r["device"])}
+                             for r in sorted(self.studio.sessions.all(), key=lambda r: r["created"])]}
+
     def origins(self):
         extra = [o.strip() for o in (os.environ.get("FUTSAL_REMOTE_ORIGINS") or "").split(",") if o.strip()] if _dev() else []
         return ORIGINS + tuple(extra)
@@ -1016,7 +1088,10 @@ class Service:
 
     # ----- PC 화면 (/api/remote*) -----
     def brief(self):
-        return {"state": self.state, "devices": len(self.store.data["devices"]) if self.store else 0}
+        """PC 화면 1초 상태(/api/state)용 짧은 모습 · studio: 지금 밖에서 작업 중인 세션 (2분 안에 요청이 있었던 것)."""
+        act = self.studio.sessions.active() if self.studio else []
+        return {"state": self.state, "devices": len(self.store.data["devices"]) if self.store else 0,
+                "studio": [{"id": r["id"], "device": r["name"]} for r in act]}
 
     def pc_status(self):
         d = self.store.data
@@ -1031,7 +1106,7 @@ class Service:
                 "maxDevices": MAX_DEVICES, "pair": pair, "pairNote": PAIR_NOTES.get(self.pairing.note) if not pair else None,
                 "settings": d["settings"], "pc": d["pc"],
                 "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}, "site": self.site(),
-                "autoOffAt": self._auto_off_at(), "crypto": crypto_ok(),
+                "autoOffAt": self._auto_off_at(), "crypto": crypto_ok(), "studio": self._studio_view(),
                 "retryAt": int(self._retry["at"]) if self.state == "error" and self._retry["at"] and d.get("enabled") else None}
 
     def pair_link(self, code):
@@ -1146,6 +1221,8 @@ class Service:
             else:
                 return
         if kind == "on" and changed:
+            if self.studio:  # 새 주소에는 옛 쿠키가 없음 → 세션도 모두 끝 (휴대폰 페이지가 새 주소로 다시 넘겨줌)
+                self.studio_ended(self.studio.drop_all("none", "연결 주소가 바뀜"))
             self.pub.beacon(important=True)
             self._publish_pair()
         if kind == "error":
@@ -1189,6 +1266,8 @@ class Service:
         self._stop_resources(tuns, lst)
         self.tickets.drop()
         self.pairing.cancel()
+        if self.studio:
+            self.studio_ended(self.studio.drop_all("none", "원격 접속을 끔"))
         if was != "off":
             self.pub.beacon(important=True)
             self.log(f"원격 접속을 껐어요 · {OFF_REASONS.get(why, why)}")
@@ -1225,6 +1304,14 @@ class Service:
         self.store.remove({x["id"] for x in gone})
         self.tickets.drop({x["id"] for x in gone})
         self.auth.forget([x["id"] for x in gone])
+        if self.studio:  # 그 기기의 밖에서 작업 세션·넘겨주기 표·올리던 조각도
+            ids = {x["id"] for x in gone}
+            self.studio.handoffs.drop(ids)
+            self.studio_ended(self.studio.sessions.end(lambda r: r["device"] in ids, "revoked", "기기 연결 끊음"))
+            try:
+                self.studio.uploads.drop_devices(ids)
+            except OSError:
+                pass
         if everyone:
             self.pairing.cancel()
         new = dict(self.store.data["topics"])
@@ -1249,7 +1336,16 @@ class Service:
             s["keepAwake"] = b["keepAwake"]
         if isinstance(b.get("notify"), dict):
             s["notify"] = {k: bool(b["notify"].get(k, s["notify"].get(k, True))) for k in ("done", "failed", "attention")}
+        if "studio" in b:
+            if not isinstance(b["studio"], bool):
+                raise ValueError("밖에서 작업 설정을 다시 골라 주세요")
+            s["studio"] = b["studio"]
         self.store.set(settings=s)
+        if "studio" in b and self.studio:
+            if not b["studio"]:  # 끄면 열려 있던 밖에서 작업도 바로 끝 (휴대폰으로 보기는 그대로)
+                self.studio.handoffs.drop()
+                self.studio_ended(self.studio.sessions.end(lambda r: True, "none", "밖에서 작업 허용을 끔"))
+            self.log("밖에서 작업 허용을 " + ("켰어요" if b["studio"] else "껐어요"))
         return s
 
     def test_notify(self):
@@ -1269,6 +1365,8 @@ class Service:
                 tuns, lst = self._take_resources()
                 self.state, self.url, self.prep = "off", None, None
             self._stop_resources(tuns, lst, timeout=1.0)
+            if self.studio:
+                self.studio.drop_all("none", "앱을 끔")
             if was != "off" and self.pub:
                 body = self.beacon_body(state="off", reason=OFF_REASONS["app"])
                 if body:
@@ -1423,13 +1521,22 @@ class Service:
             self._retry["at"] = None
             self.log("원격 접속을 다시 켜 볼게요")
             self.turn_on(auto=True)
+        if self.studio:  # 밖에서 작업: 오래 안 쓴(30분)·12시간 지난 세션 끝 · 7일 넘은 올리던 조각은 한 시간에 한 번 정리
+            self.studio_ended(self.studio.sessions.sweep())
+            if self.clock() - self._up_swept >= 3600:
+                self._up_swept = self.clock()
+                try:
+                    self.studio.uploads.sweep()
+                except OSError:
+                    pass
         old = self.store.expired()
         if old:  # 오래 안 쓴 기기: 비콘 주제만 바꿈 (알림 주제까지 바꾸면 쓰고 있는 휴대폰의 ntfy 알림이 조용히 끊김)
             self.revoke(old, why="90일 동안 안 씀", rotate_notify=False)
 
     def _awake_wanted(self):
         return self.state in ("on", "restarting") and (bool((self.bridge.job() or {}).get("name"))
-                                                       or self.store.data["settings"].get("keepAwake") == "always")
+                                                       or self.store.data["settings"].get("keepAwake") == "always"
+                                                       or bool(self.studio and self.studio.sessions.active()))  # 밖에서 작업 중
 
     def _keep_awake(self):
         """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기 (remote-awake 스레드)."""
@@ -1494,7 +1601,10 @@ class Service:
         self.store.touch(dev)
 
     def r_ping(self):
-        return {"api": API, "pc": self.store.data["pc"], "time": int(self.clock())}
+        out = {"api": API, "pc": self.store.data["pc"], "time": int(self.clock())}
+        if getattr(self.bridge, "studio", None):  # 이 PC 는 밖에서 작업(PC 스튜디오 열기)을 함 · API 판은 그대로 1 (예전 페이지·예전 PC 와 서로 됨)
+            out["features"] = ["studio"]
+        return out
 
     def r_pair(self, b):
         """짝짓기: 코드 증명이 맞으면 기기 열쇠·주제·지금 주소를 코드에서 만든 열쇠로 잠가 돌려줌 (터널 쪽은 아무것도 못 읽음)."""
@@ -1544,7 +1654,9 @@ class Service:
                              "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}})
         return {"api": API, "ver": self.bridge.version, "time": int(self.clock()), "pc": d["pc"], "job": job, "last": self.last,
                 "log": [scrub(x) for x in new], "logTotal": total,
-                "remote": {"autoOffAt": self._auto_off_at(), "devices": len(d["devices"]), "device": {"id": dev["id"], "name": dev["name"]}},
+                "remote": {"autoOffAt": self._auto_off_at(), "devices": len(d["devices"]), "device": {"id": dev["id"], "name": dev["name"]},
+                           "studio": {"allowed": self.studio_allowed()}},
+                "features": ["studio"] if getattr(self.bridge, "studio", None) else [],  # 휴대폰 페이지가 [PC 스튜디오 열기]를 보일지
                 # 주제 이름은 곧 비밀(알림 주제 = 보내기 열쇠) → 기기 비콘 열쇠로 잠가서 (Cloudflare 가 못 봄)
                 "topics": gcm_seal(_unb64u(dev["beacon"]), topics, topics_aad(d["pc"]["id"], dev["id"]))}
 
@@ -1673,6 +1785,22 @@ class Service:
         self.test_notify()
         self.log(f"원격 · {clean(dev['name'], 40)} · 알림 시험")
         return {"ok": True}
+
+    def r_handoff(self, dev, b, ip=""):
+        """PC 스튜디오 열기 (D-230): 서명된 요청 → 한 번 쓰는 표(60초 · 이 기기·이 IP 대역·갈 곳에 묶음 · 기기마다 하나) + 지금 주소.
+        휴대폰 페이지는 <주소>/s/hello#t=<표> 로 넘어감 (표는 주소의 # 뒤라 Cloudflare 기록·Referer 에 안 남음)."""
+        if not self.studio_allowed():
+            raise ActionError(rstudio.MSG["studio_off"], 403, "studio_off")
+        path = b.get("path", "/")
+        if not isinstance(path, str) or not rstudio.NEXT_RE.fullmatch(path):
+            raise ActionError("잘못된 요청이에요")
+        if not self.url:
+            raise ActionError("PC 연결 주소를 준비하는 중이에요 · 잠시 뒤 다시 해 주세요", 503)
+        try:
+            tok = self.studio.handoffs.issue(dev["id"], net_of(ip), path)
+        except rstudio.TooMany as e:
+            raise ActionError(str(e), 429) from None
+        return {"ok": True, "url": self.url, "token": tok}
 
 
 # ---------- 허용 동작 (그 밖은 400) ----------
@@ -1826,7 +1954,7 @@ class RemoteServer(ThreadingHTTPServer):
 
     def __init__(self, addr, svc):
         self.svc = svc
-        super().__init__(addr, RemoteHandler)
+        super().__init__(addr, svc.handler_class())
 
     def handle_error(self, request, client_address):
         """처리 밖으로 나온 오류: socketserver 기본은 보낸 곳 주소와 추적을 그대로 오류 출력(→ studio-error.log)에 → 비밀을 지우고 추적만."""
@@ -1920,8 +2048,14 @@ class RemoteHandler(BaseHTTPRequestHandler):
         ip = (self.headers.get("Cf-Connecting-Ip") or "").strip()[:64] or self.client_address[0]
         if svc.limiter.locked(ip):
             return self._json(429, {"error": "잠시 막았어요 · 15분 뒤 다시 해 주세요"}, {"Retry-After": str(LOCKOUT)})
-        if not svc.limiter.take("open" if path in ("/r/ping", "/r/pair") else "auth", ip):
+        studio = not path.startswith("/r/")  # 밖에서 작업 화면 (D-230) — /r/* 는 아래 예전 순서 그대로
+        if studio and not hasattr(self, "studio_call"):  # 앱이 화면 처리기를 넘겨주지 않음 → 그 밖의 길은 없음
+            return self._json(401, {"error": "연결 정보가 없어요", "code": "none"})
+        bucket = rstudio.bucket_of(path) if studio else "open" if path in ("/r/ping", "/r/pair") else "auth"
+        if not svc.limiter.take(bucket, ip):
             return self._json(429, {"error": "너무 자주 눌렀어요 · 잠시 뒤 다시 해 주세요"}, {"Retry-After": "5"})
+        if studio:
+            return rstudio.gate(self, method, svc, ip)
         # 4. CORS · Origin · JSON
         origin = self.headers.get("Origin")
         self._origin = origin if origin in svc.origins() else None
@@ -1979,7 +2113,7 @@ class RemoteHandler(BaseHTTPRequestHandler):
                   ("GET", "/r/library"): lambda: svc.r_library(dev, ip), ("GET", "/r/outputs"): lambda: svc.r_outputs(dev, ip),
                   ("GET", "/r/choices"): lambda: svc.r_choices(dev), ("POST", "/r/action"): lambda: svc.r_action(dev, b),
                   ("POST", "/r/cancel"): lambda: svc.r_cancel(dev, b.get("job")), ("POST", "/r/forget"): lambda: svc.r_forget(dev),
-                  ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev)}
+                  ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev), ("POST", "/r/handoff"): lambda: svc.r_handoff(dev, b, ip)}
         if (method, path) == ("POST", "/r/remote-off"):  # 더 안전하게만 (휴대폰에서 켜는 길은 없음)
             svc.log(f"원격 · {clean(dev['name'], 40)} · 원격 접속 끄기")
             self._json(200, {"ok": True})
@@ -1991,7 +2125,7 @@ class RemoteHandler(BaseHTTPRequestHandler):
         try:
             return self._json(200, fn())
         except ActionError as e:
-            return self._json(e.status, {"ok": False, "error": str(e)})
+            return self._json(e.status, dict({"ok": False, "error": str(e)}, **({"code": e.code} if e.code else {})))
 
     def _fail(self, svc, ip):
         if svc.limiter.failed(ip) and svc.clock() - svc._lockout_logged > 600:
@@ -2000,8 +2134,8 @@ class RemoteHandler(BaseHTTPRequestHandler):
 
     def _media(self, svc, tid, ip):
         it = svc.tickets.get(tid, ip) if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", tid or "") else None
-        if not it:  # 없거나·지났거나·다른 곳(IP 대역)에서 온 표 → 휴대폰 화면이 목록을 다시 받아 새 표로
-            return self._json(404, {"error": "다시 불러와 주세요"})
+        if not it:  # 없거나·지났거나·다른 곳(IP 대역)에서 온 표 → 휴대폰 화면이 목록을 다시 받아 새 표로 (403: 허락 안 됨 · 같은 문장)
+            return self._json(403, {"error": "다시 불러와 주세요"})
         device, kind, ref = it[:3]
         try:
             if kind == "poster":

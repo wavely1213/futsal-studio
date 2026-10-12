@@ -868,8 +868,8 @@ def links(vid, shorts=False):
             "studio": f"https://studio.youtube.com/video/{vid}/edit"}
 
 
-def open_link(what, video_id=None, key=None):
-    """정해진 주소만 엶 (화면이 보낸 주소는 쓰지 않음)."""
+def link_of(what, video_id=None, key=None):
+    """정해진 주소만 만듦 (화면이 보낸 주소는 쓰지 않음) — PC 는 open_link 로 열고, 밖에서 작업(rstudio)은 그 기기 브라우저가 엶."""
     if what in ("watch", "shorts", "studio"):
         if not VIDEO_ID.match(str(video_id or "")):
             raise UploadError("잘못된 영상이에요")
@@ -879,6 +879,12 @@ def open_link(what, video_id=None, key=None):
         url = GUIDE_URLS[key]
     else:
         raise UploadError("무엇을 열지 모르겠어요")
+    return url
+
+
+def open_link(what, video_id=None, key=None):
+    """정해진 주소만 엶 (화면이 보낸 주소는 쓰지 않음)."""
+    url = link_of(what, video_id, key)
     webbrowser.open(url)
     return url
 

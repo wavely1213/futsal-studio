@@ -340,17 +340,23 @@ def _upright_image(dest):
         pass
 
 
+def unique_name(folder, name):
+    """folder 안에 아직 없는 이름: 같은 이름이 있으면 '이름_1.확장자'·'이름_2.확장자' … (덮어쓰지 않게 · 가져오기·밖에서 올리기가 같이 씀)."""
+    folder = Path(folder)
+    dest, k = folder / name, 1
+    while dest.exists():
+        dest = folder / f"{Path(name).stem}_{k}{Path(name).suffix}"
+        k += 1
+    return dest
+
+
 def save_upload(name, stream, length):
     """가져오기: 음악·이미지·영상 파일을 그대로 받아 저장. 끝까지 받은 뒤에만 제 이름으로 (끊기거나 디스크가 차면
     반쪽 파일이 미디어 목록에 남아 내보내기가 깨졌음 · Windows 는 끊김이 ConnectionAbortedError)."""
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", core.clean_text(Path(name).name)).strip(" .") or "media"
     if Path(name).suffix.lower() not in MEDIA_EXTS:
         raise ValueError("영상·음악·이미지 파일만 가져올 수 있어요")
-    dest = ASSETS / name
-    k = 1
-    while dest.exists():
-        dest = ASSETS / f"{Path(name).stem}_{k}{Path(name).suffix}"
-        k += 1
+    dest = unique_name(ASSETS, name)
     part = ASSETS / f".{dest.name}.{os.getpid()}_{threading.get_ident()}.part"  # 미디어 목록(MEDIA_EXTS)에 안 잡히는 이름
     left = length
     try:

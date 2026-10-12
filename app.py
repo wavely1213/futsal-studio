@@ -32,6 +32,7 @@ import qr
 import refs
 import remote
 import rename
+import rstudio
 import source
 import strategy
 import studiolog
@@ -71,6 +72,7 @@ BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
 RESTARTING = threading.Event()  # 업데이트 다시 시작이 정해짐 → 새 작업(PC·휴대폰)을 받지 않음 (곧 이 프로세스가 끝나 그 작업이 끊기므로)
 RESTART_WAIT_MSG = "지금 하는 작업이 끝나면 다시 시작해요"
 JOB_HOOKS = []  # 작업이 끝나면 부름 (이름, 오류, 결과, 시킨 곳, 걸린 초) — 휴대폰 알림·결과 (remote.Service.job_hook)
+_REMOTE = threading.local()  # 밖에서 작업(rstudio.gate → StudioHandler.studio_call) 요청을 처리하는 동안만: who = 그 기기 이름
 
 
 LOGFILE = core.WORK / "studio.log"
@@ -101,7 +103,15 @@ YT_CTX = {"youtube": True}  # 유튜브 올리기 작업의 start_job ctx → tr
 def start_job(name, fn, by=None, ctx=None):
     """긴 작업 하나 시작 → 작업 번호(1부터 · 참) · 이미 돌고 있으면 False. by: 휴대폰에서 시켰으면 '휴대폰 · <기기 이름>'.
     실패하면 JOB error(쉬운 한 줄)·fail(종류·할 일 · trouble.explain) — 끝난 작업(DONE[번호])에도 같이 남겨 그 작업을 시킨 화면이 받음.
-    ctx: 오류 안내에 쓸 것 — browser(고른 로그인 정보 브라우저)·blocked(이 화면용 YouTube 막힘 안내)."""
+    ctx: 오류 안내에 쓸 것 — browser(고른 로그인 정보 브라우저)·blocked(이 화면용 YouTube 막힘 안내).
+    밖에서 작업(D-230) 요청이 시킨 작업이면 by='밖에서 · <기기>' 이고 다운로드 엔진·Deno 를 스스로 설치·업데이트하지 않는다 (휴대폰과 같게)."""
+    who = getattr(_REMOTE, "who", None)
+    if who and by is None:
+        by, inner = f"밖에서 · {who}", fn
+
+        def fn():
+            with core.no_self_update():
+                return inner()
     with LOCK:
         if JOB["name"] or RESTARTING.is_set():
             return False
@@ -252,7 +262,7 @@ def _log_lines(since):
 
 def _remote_bridge():
     return remote.Bridge(log=log, start_job=start_job, job=_job_snapshot, logs=_log_lines, analyze=Handler._analyze,
-                         refs_job=_refs_job, version=core.VERSION)
+                         refs_job=_refs_job, version=core.VERSION, studio=StudioHandler)
 
 
 def _fail_extra(info, e):
@@ -529,6 +539,10 @@ class Handler(BaseHTTPRequestHandler):
         """이 컴퓨터의 앱 창(127.0.0.1)에서 온 요청만 (다른 사이트가 주소를 바꿔 몰래 읽는 것 막기)."""
         return (self.headers.get("Host") or "") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
 
+    def _origin_ok(self, origin):
+        """POST 의 Origin: 없거나(같은 PC 의 프로그램 · _focus_running) 이 앱 창과 같은 출처만 (다른 사이트의 몰래 요청 막기)."""
+        return not origin or origin in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}")
+
     def handle_one_request(self):
         """요청 처리 중 잡히지 않은 오류도 studio.log 에 위치(어느 요청인지)를 남김 (pythonw 는 콘솔이 없어 사라졌음).
         traceback 은 studiolog.trace 가 한 번만 오류 출력에 → 서버의 handle_error(_Server)는 같은 오류를 다시 찍지 않음."""
@@ -769,8 +783,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         # 다른 사이트가 이 로컬 서버를 조작하지 못하게: 같은 출처 요청만 허용
-        origin = self.headers.get("Origin")
-        if not self._host_ok() or (origin and origin not in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}")):
+        if not self._host_ok() or not self._origin_ok(self.headers.get("Origin")):
             return self._send(403, {"error": "forbidden"})
         if urlparse(self.path).path == "/api/edit/upload":  # 큰 파일은 JSON 대신 그대로 받음
             try:
@@ -1381,6 +1394,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "removed": n})
                 if path == "/api/remote/settings":
                     return self._send(200, {"ok": True, "settings": svc.set_settings(b)})
+                if path == "/api/remote/session/revoke":  # 밖에서 작업 중인 세션 끊기 (기기 열쇠는 그대로 · 기기째 끊기는 /api/remote/revoke)
+                    if b.get("all") is True:
+                        n = svc.studio_revoke(everyone=True)
+                    elif isinstance(b.get("id"), str):
+                        n = svc.studio_revoke([b["id"]])
+                    else:
+                        return self._send(400, {"ok": False, "error": "끊을 연결을 골라 주세요"})
+                    return self._send(200, {"ok": True, "ended": n})
                 if path == "/api/remote/test":
                     if not svc.store.data["devices"]:
                         return self._send(400, {"ok": False, "error": "먼저 휴대폰을 연결해 주세요"})
@@ -1708,6 +1729,57 @@ class Handler(BaseHTTPRequestHandler):
             core.update_engine(log)
         changed = core.update_app(log) if b.get("app", True) else False
         return {"restart": changed}
+
+
+class StudioHandler(Handler):
+    """밖에서 작업(D-230): 원격 리스너가 RemoteHandler 와 묶어 쓰는 화면 처리기 — rstudio.gate 가 Host·세션·Origin·CSRF·길 분류를 본 뒤에만
+    studio_call 로 이 앱의 처리 코드를 그대로 부른다. 그 동안(_studio_req)만 응답 머리글을 굳힘 (앱이 붙인 Cache-Control·CORS 는 빼고
+    private·no-store · nosniff · 틀 안에 못 넣음 · CSP) · JSON·HTML 은 gzip · /api/state 의 사용자 폴더 경로는 '~'.
+    로컬 서버(8765)는 이것을 쓰지 않는다 (_Server 는 Handler)."""
+    _studio_req = False
+
+    def _host_ok(self):
+        return True if self._studio_req else super()._host_ok()  # 경계(rstudio.gate)가 Host 를 이미 봄
+
+    def _origin_ok(self, origin):
+        return True if self._studio_req else super()._origin_ok(origin)  # 경계가 터널 출처와 정확히 같은지 이미 봄
+
+    def studio_call(self, method, who):
+        """경계를 지난 요청을 이 앱의 처리 코드로 · 그 동안 이 스레드는 '밖에서 · <기기>' (start_job) · 엔진 스스로 고치기 없음."""
+        _REMOTE.who = who
+        try:
+            with core.no_self_update():
+                return Handler.do_GET(self) if method == "GET" else Handler.do_POST(self)
+        finally:
+            _REMOTE.who = None
+
+    def send_response(self, code, message=None):
+        if self._studio_req:
+            self._studio_sent = set()
+        super().send_response(code, message)
+
+    def send_header(self, keyword, value):
+        if self._studio_req:
+            k = keyword.lower()
+            if k == "cache-control" or k.startswith("access-control-"):  # 캐시는 늘 private (Cloudflare 가 .jpg·.mp4·.js 를 가장자리에 두지 않게)
+                return
+            self._studio_sent.add(k)
+        super().send_header(keyword, value)
+
+    def end_headers(self):
+        if self._studio_req:
+            for k, v in rstudio.hardening(self):
+                if k.lower() not in self._studio_sent:
+                    super().send_header(k, v)
+        super().end_headers()
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        if not self._studio_req:
+            return super()._send(code, body, ctype)
+        if isinstance(body, dict) and urlparse(self.path).path == "/api/state":
+            body = rstudio.scrub_state(body)  # 작업 폴더·기록 줄의 사용자 폴더 경로(Windows 사용자 이름) → '~'
+        gz = bool(getattr(self, "_studio_gz", False)) and ctype.startswith(("application/json", "text/html"))
+        return rstudio.send(self, code, body, ctype, gz=gz)
 
 
 class _Server(ThreadingHTTPServer):
