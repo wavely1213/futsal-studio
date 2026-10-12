@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import remote  # noqa: E402
 import rstudio  # noqa: E402
 from test_remote_studio import NAME, StudioBase, quote  # noqa: E402
 
@@ -154,6 +155,9 @@ class RouteEnumerationTest(StudioBase):
                 for secret in (self.cred["keys"]["auth"], self.svc.store.data["topics"]["notify"]):
                     self.assertNotIn(secret.encode(), out)
                 continue
+            if (m, p) in remote.LOGIN_OPEN:  # 아이디·비밀번호로 연결의 열린 길 (세션 없이 · D-251): 안 정했으면 login_off · 확인 번호가 없으면 again
+                self.assertIn(st, (403, 410), p)   # 이 Origin 은 허용 출처가 아님 → 403 (허용 출처면 login_off · again)
+                continue
             if st not in (401, 403):
                 bad.append((m, p, st))
             if p.startswith("/r/"):
@@ -199,6 +203,45 @@ class RouteEnumerationTest(StudioBase):
         for _ in range(10):
             self.assertEqual(self.jreq("POST", "/api/crash/dismiss", {}, csrf="x" * 43)[0], 403)
         self.assertEqual(self.jreq("GET", "/api/state")[0], 429)  # 그 IP 를 15분 잠금
+
+    def test_login_routes_classified(self):
+        """아이디·비밀번호로 연결 (D-250): 열린 길 둘은 LOGIN_OPEN · 나머지 넷은 서명 길 표 · PC 설정 길은 모두 PC 에서만."""
+        r = remote_routes()
+        for want in (("POST", "/r/login/start"), ("POST", "/r/login/finish"), ("GET", "/r/login/events"), ("POST", "/r/login/kick"),
+                     ("POST", "/r/login/unlock"), ("POST", "/r/login/logout")):
+            self.assertIn(want, r)
+        self.assertEqual(set(remote.LOGIN_OPEN), {("POST", "/r/login/start"), ("POST", "/r/login/finish")})
+        logins = {(m, p) for m, p in self.exact if p.startswith("/api/remote/login")}
+        self.assertEqual({p for _, p in logins}, {"/api/remote/login", "/api/remote/login/id", "/api/remote/login/check",
+                                                   "/api/remote/login/suggest", "/api/remote/login/on", "/api/remote/login/off",
+                                                   "/api/remote/login/unlock", "/api/remote/login/kick"})
+        for m, p in logins:
+            self.assertEqual(rstudio.classify(m, p), rstudio.PC_ONLY, p)
+        self.login()
+        for m, p in logins:
+            self.clock.tick(0.5)
+            st, j = self.jreq(m, p, {"id": "김코치77", "password": "노을축구공바다4827", "password2": "노을축구공바다4827", "ack": True, "force": True})
+            self.assertEqual((st, j.get("code")), (403, "pc_only"), p)
+        self.assertIsNone(self.svc.store.login())
+
+    def test_no_password_input_in_studio_pages(self):
+        """밖에서 여는 스튜디오 화면·안내 쪽 글(스크립트 밖)에 비밀번호 칸이 없음 · ui.html 의 아이디·비밀번호 창은 열 때만 그림 (L5 피싱)."""
+        self.login()
+        for path in ("/", "/editor", "/thumb"):
+            st, hd, out = self.req("GET", path)
+            self.assertEqual(st, 200, path)
+            html = re.sub(r"<script\b[^>]*>.*?</script>", "", out.decode("utf-8"), flags=re.S | re.I)
+            # 예전부터 있던 유튜브 OAuth 클라이언트 보안 비밀번호 칸(#ytSecret · PC 에서만 저장 · D-046) 말고는 없음
+            found = [m for m in re.findall(r"<input[^>]*type=[\"']?password[^>]*>", html, re.I) if 'id="ytSecret"' not in m]
+            self.assertEqual(found, [], path)
+            self.assertNotIn("current-password", html)
+            self.assertNotIn("new-password", html)
+            if path == "/":
+                self.assertRegex(html, r'<div class="card rbox" id="rlBox"[^>]*></div>')   # 아이디·비밀번호 창은 비어 있음 (열 때만 그림)
+        self.cookie = None
+        for path in ("/s/hello", "/"):
+            st, hd, out = self.req("GET", path, headers={"Accept": "text/html", "Sec-Fetch-Dest": "document"})
+            self.assertNotIn(b"password", out.lower(), path)
 
     def test_rejected_without_session_even_with_valid_device_signature(self):
         """기기 서명(FSR2)은 /r/* 에서만 — 스튜디오 길은 세션 쿠키가 없으면 서명이 있어도 401."""

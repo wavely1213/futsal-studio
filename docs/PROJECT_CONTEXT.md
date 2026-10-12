@@ -31,7 +31,7 @@
   - 웹 프레임워크·번들러·빌드 도구 도입. 화면은 단일 파일 HTML, 서버는 표준 라이브러리만 쓴다.
   - 사용자 계정 정보로 YouTube 봇 검사를 자동 우회하는 것. 쿠키는 사용자가 브라우저를 직접 고를 때만 쓴다.
   - 유료 AI API 호출. Claude는 사용자가 '복사' 버튼으로 프롬프트를 복사해 claude.ai에 붙여 넣는 방식으로만 쓴다.
-  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다. 예외는 소유자가 켤 때만 여는 '휴대폰으로 보기'(D-027: 빠른 터널 → 루프백 원격 리스너, 짝지은 휴대폰 최대 5대)와 그 위의 '밖에서 작업'(D-230: 짝지은 기기가 PC 스튜디오 화면을 세션 쿠키로 그대로 씀 · 일은 PC 가 함)뿐이다.
+  - 인터넷 공개 서버·다중 사용자·로그인. 앱은 127.0.0.1 전용 1인 로컬 앱이다. 예외는 소유자가 켤 때만 여는 '휴대폰으로 보기'(D-027: 빠른 터널 → 루프백 원격 리스너, 짝지은 휴대폰 최대 5대)와 그 위의 '밖에서 작업'(D-230: 짝지은 기기가 PC 스튜디오 화면을 세션 쿠키로 그대로 씀 · 일은 PC 가 함), PC 에서 정한 '아이디·비밀번호로 연결'(D-250: 새 기기를 QR 대신 아이디·비밀번호(SRP-6a)로 · 계정 서버 없음 · 비밀번호는 PC 에만 검증값으로)뿐이다.
   - 영상 업로드 자동화. 앱은 올리기 키트를 만들고 YouTube Studio를 여는 데까지만 한다.
   - 이 항목들의 결정 이유는 `DECISION_LOG.md`에 있다.
 
@@ -43,7 +43,7 @@
 | 프론트엔드 | 단일 파일 HTML 3개: `ui.html`(스튜디오), `editor.html`(편집실), `thumb.html`(썸네일) | 프레임워크·빌드 없음. pywebview 전용 창(Windows는 WebView2)에 띄우고, 창을 못 열면 브라우저로 연다 |
 | 백엔드 | Python 표준 라이브러리 `ThreadingHTTPServer` (`app.py`) | `127.0.0.1:FUTSAL_PORT`(기본 8765)에만 bind. Host 헤더를 검사. 긴 작업은 `start_job` 하나씩 처리 |
 | 데이터베이스 | 없음. 작업 폴더의 JSON·미디어 파일에 저장 | 작업 폴더는 `config.json`의 `workspace`, 비어 있으면 `~/풋살사관학교_작업` |
-| 인증 | 로컬 화면: 없음 (로컬 1인용 · Host·Origin·파일 이름 검사, `ARCHITECTURE.md` 6절) · 휴대폰으로 보기: 기기 짝짓기(10분 코드 증명) + 요청 서명(`FSR2`) + 미디어 표 · 밖에서 작업: 서명한 넘겨주기 표 → SameSite=Strict 세션 쿠키(메모리 · 30분/12시간) + CSRF · 길 분류 `rstudio.POLICY` (D-230·D-231) | 원격은 켜 둔 동안만 · 규칙은 `SECURITY_GUIDELINES.md` 2·3절, D-027 |
+| 인증 | 로컬 화면: 없음 (로컬 1인용 · Host·Origin·파일 이름 검사, `ARCHITECTURE.md` 6절) · 휴대폰으로 보기: 기기 짝짓기(10분 코드 증명) + 요청 서명(`FSR2`) + 미디어 표 · 밖에서 작업: 서명한 넘겨주기 표 → SameSite=Strict 세션 쿠키(메모리 · 30분/12시간) + CSRF · 길 분류 `rstudio.POLICY` (D-230·D-231) · 아이디·비밀번호로 연결: SRP-6a(RFC 5054 3072 · PBKDF2-SHA256 600k · `rlogin.py` · D-250~D-257) → 같은 기기 열쇠(기억하기) 또는 메모리 손님(이번만) · 잠김(D-254)·새 기기 알림·[끊기](D-255) | 원격은 켜 둔 동안만 · 규칙은 `SECURITY_GUIDELINES.md` 2·3절, D-027 |
 | 배포/호스팅 | 앱: GitHub `main`의 `manifest.json` + 배포 커밋 zip · 휴대폰 화면: 와벨리 저장소 `public/futsal/` → Vercel 프로젝트 `wavely` → `futsal.mulgyeol.kr` (정적 · D-240) | 사용자 PC의 `updater.py`가 받아서 확인한 뒤 설치. 앱 서버 호스팅은 없음 (원격은 PC → Cloudflare 빠른 터널, D-027) |
 | 기타 (결제, 알림 등) | 영상: ffmpeg(`imageio-ffmpeg` 번들, ffprobe 없음) · 다운로드: `yt-dlp[default]` + Deno · 받아쓰기: `faster-whisper`(`large-v3-turbo`, CPU int8, 한국어) · 이미지·추론: Pillow, numpy, onnxruntime · 폰트: Pretendard, Black Han Sans, Do Hyeon(OFL, `fonts/`) · 휴대폰으로 보기: cloudflared(고정 판, 처음 켤 때 받음) · ntfy.sh(비콘·알림) · pycryptodomex(yt-dlp 와 함께 깔린 것 · AES-GCM) | 의존성 목록은 `requirements.txt`, 정책은 `DEPENDENCY_POLICY.md` · 원격은 D-027 |
 
@@ -86,6 +86,7 @@ idle.py             쉬는 동안(5분) 불러 둔 모델 내려놓기 (얼굴·
 strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027) · 원격 홈 주소 SITE 한 줄 (D-233)
 rstudio.py          밖에서 작업: 세션·넘겨주기·길 분류(POLICY)·경계(gate)·올리기(조각)·받기 (D-230~D-232)
+rlogin.py           아이디·비밀번호로 연결의 순수 부분: canon·규칙·SRP-6a·PC 찾기 열쇠·잠김·미리 정해 둔 로그인(PRESET) (D-250~D-258)
 remote_ui.js·.css   밖에서 연 화면에만 끼워 넣는 심 (위 띠·올리기·받기·잠금·확인) · hello.js 넘겨주기 인사 쪽 (D-230)
 tunnel.py           Cloudflare 빠른 터널(cloudflared) 받기·지킴이
 qr.py               연결 QR 만들기 (표준 라이브러리)
@@ -95,6 +96,7 @@ editor.html         편집실 화면 (프리미어식)
 thumb.html          썸네일 편집기 화면 (포토샵식). 빌드 산출물이며 원본은 저장소 밖에 있음 (아래 주의)
 fonts/              자막·썸네일 폰트 + OFL 라이선스
 tests/              단위 테스트 (unittest) + 가짜 Google(tests/fake_google.py). 배포 목록에서 빠짐
+tools/              개발 PC 용 도구: make_preset.py (미리 정해 둔 로그인의 검증값 만들기 · 비밀번호는 환경 변수 FUTSAL_PRESET_PW 로만 · D-258)
 docs/               개발 지침·기록 문서 (이 문서 포함)
 config.json         기본 설정 (channel_url·workspace·update_manifest_url). 사용자 PC에서는 업데이트가 덮어쓰지 않음
 version.txt         현재 버전 (release.sh가 씀)
@@ -127,6 +129,7 @@ icon.ico / icon.png 앱 아이콘
   - 성능(D-051·D-053): `FUTSAL_HQ_MIN_MB`(고품질 누끼를 할 남은 메모리 문턱 · 시험용), `FUTSAL_HWDEC`(그래픽카드로 영상 풀기 · `0` 이면 끔, `1` 이면 Windows 가 아니어도 확인해 봄 · 시험용)
   - `FUTSAL_RESTART`, `FUTSAL_VIA_UPDATER`, `FUTSAL_OLD_PID`: 내부용. 재시작·실행기 경유·다시 시작 전 앱 프로세스 번호(미룬 구성요소 설치가 그 프로세스가 끝나길 기다림, D-034)를 표시하며 직접 설정하지 않는다.
   - 휴대폰으로 보기(D-027): `FUTSAL_REMOTE_PORT`(원격 리스너 포트, 기본 임의 · 앱 화면 포트 창 8765~8804 안이면 켜지 않음, D-034), `FUTSAL_CLOUDFLARED`(cloudflared 실행 파일 직접 지정 · 시험의 가짜도 이것으로), `FUTSAL_NTFY`(ntfy 주소 · 시험용). 개발·시험 전용: `FUTSAL_REMOTE_DEV=1`(루프백 Host 받기·cloudflared 없이 `http://127.0.0.1:<포트>`를 주소로), `FUTSAL_REMOTE_ORIGINS`(더 받을 CORS 출처 · 개발 모드만), `FUTSAL_REMOTE_SITE`(연결 QR·알림이 가리킬 페이지 주소 · 개발 모드만 · 진짜 주소는 `remote.SITE` 한 곳), `FUTSAL_SITE_DIR`(맞물림 시험·e2e 가 쓰는 휴대폰 페이지 폴더, 기본은 개발 PC 의 와벨리 저장소 `public/futsal` — 경로는 `AGENTS.md` 5번), `FUTSAL_UPLOAD_RESERVE`(밖에서 올리기가 남길 디스크 바이트 · 개발 모드만 · 디스크가 거의 찬 개발 PC 용 · D-232)
+  - 아이디·비밀번호로 연결(D-254 · 시험용): `FUTSAL_LOGIN_TIME_SCALE`(잠김·이번만·자동 끄기 시간 배율 · `FUTSAL_REMOTE_DEV=1` 일 때만 읽음), `FUTSAL_PYSRP_PATH`(개발 PC 에 따로 깐 pysrp 위치 · `tests.test_rlogin` 교차 시험만), `FUTSAL_PRESET_PW`(`tools/make_preset.py` 만 읽음 · 앱은 읽지 않음)
   - `RELEASE_TRAILER`: `release.sh`가 커밋 메시지 끝에 붙일 줄
   - `TH_PORT`·`TH_OUTDIR`(`th2_test.py`), `ED_PORT`·`ED_DIR`·`ED_REPO`(`ed2_test.py`): 저장소 밖 e2e용 (`TESTING_GUIDELINES.md` 1번)
 - **실행 명령어**: `AGENTS.md` 5번 항목과 동일하게 유지
@@ -154,7 +157,7 @@ icon.ico / icon.png 앱 아이콘
 | i.ytimg.com | 소재 찾기 목록 · 채널 전략 대표 영상의 미리보기 그림 · 썸네일 버릇 배우기(D-130): 스타일이 배운 영상 + 그 채널 인기 영상 12개의 썸네일을 앱이 받아 `styles/_thumbs/` 에 기억 (maxres → sd → hq · 3MB 까지 · 시간 제한 10초 · 닿지 않으면 남은 장은 받지 않음) | 없음 |
 | YouTube Studio · claude.ai | 브라우저로 열기, 사용자가 프롬프트를 복사해 붙여 넣기만 함 (API 호출 없음) | 없음 |
 | Cloudflare 빠른 터널 (`*.trycloudflare.com`) · GitHub cloudflare/cloudflared 릴리스 | 휴대폰으로 보기(D-027)를 켠 동안만: 휴대폰 → 원격 리스너 · 밖에서 작업 화면·올리기·받기(D-230 · 제한은 I-232). 계정 없음. cloudflared 는 처음 한 번 고정 판을 받음(크기·sha256) | 없음 (빠른 터널은 계정·키 없음) |
-| ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장. 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
+| ntfy.sh | 휴대폰으로 보기: 기기마다 암호로 잠근 비콘(지금 터널 주소)·짝짓기 만남 글·정해진 알림 문장 · 아이디 연결의 PC 찾기 기록(아이디 열쇠로 잠금 · 3시간마다 · D-252)·[끊기] 제어 주제(D-255). 하루 200개까지 | 주제 이름이 곧 비밀 → `~/.futsal-studio/remote.json` |
 | futsal.mulgyeol.kr (저장소 밖: 와벨리 저장소 `public/futsal/`, Vercel 프로젝트 `wavely` · D-240) | 휴대폰 화면(정적 PWA · 그 출처에 이 페이지만). 와벨리 저장소 `main`에 병합되면 공개된다. 옛 `wavely-nine.vercel.app` 은 이 주소로 넘어감 | 없음 |
 | Google OAuth 2.0 (`accounts.google.com/o/oauth2/v2/auth` · `oauth2.googleapis.com/token`·`/revoke`) | 유튜브 바로 올리기의 계정 연결(D-046): 설치형 앱 루프백(`127.0.0.1` 빈 포트 한 번) + PKCE · 범위 `youtube.force-ssl` 하나 · 토큰 새로 받기 · [연결 끊기] 때 취소 | 소유자가 만든 Google Cloud OAuth 클라이언트(데스크톱 앱)의 JSON 을 7단계 안내에서 넣음 → `~/.futsal-studio/youtube/client.bin`, 토큰은 `token.bin` (Windows DPAPI · 그 밖 권한 600) |
 | YouTube Data API v3 (`www.googleapis.com/youtube/v3` · `/upload/youtube/v3`) | 7단계 [유튜브에 올리기]를 누를 때만: 재개 가능한 업로드(videos.insert) · thumbnails.set · captions.insert · playlists list/insert · playlistItems.insert · videos.list(상태) · channels.list(연결 확인). 할당량: 업로드 하루 100번 + 그 밖 하루 10,000 단위(2026-06-01 기준) | 위 토큰 (사용자 본인 계정) |

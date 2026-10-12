@@ -40,7 +40,7 @@
    │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
    │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 futsal.mulgyeol.kr 만)
    │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
-   │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
+   │ ⓪ 짝짓기: QR(#pair=코드 · 원격 홈에 코드 칸은 없음 · D-259) → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
 [Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · core.popen(Job Object)] ── Host: remote.futsal.invalid ──┐
                                                                                                                   ▼
@@ -53,6 +53,13 @@
 밖에서 작업 (D-230): 원격 홈 [PC 스튜디오 열기] → 서명한 POST /r/handoff → 한 번 쓰는 표(60초)
    → <터널>/s/hello#t=<표> → hello.js 가 같은 출처 POST /s/handoff → 세션 쿠키 __Host-fs_s (SameSite=Strict · 메모리에만)
    → PC 스튜디오 화면(ui.html·editor.html·thumb.html + 심 remote_ui.js/css) · 올리기 /s/upload/* (8MB 조각) · 받기 /s/dl
+
+아이디·비밀번호로 연결 (D-250~D-259): 원격 홈 '아이디·비밀번호로 연결' → 아이디 canon(D-253) → PBKDF2(100k) → 아이디 주제 fsl…·기록 열쇠·idc
+   → ntfy.sh/<아이디 주제> 12시간 기록(fsl1. · PC 마다 {seq, ts, state, reason, url}) → 후보 셋까지 (ts, seq) 순 → GET /r/ping (login 기능 확인)
+   → POST /r/login/start {idc, A} → {login, salt, iters, B, pc}  (틀린 아이디도 같은 꼴의 가짜 대답 · 망마다 잠김 판정)
+   → POST /r/login/finish {login, M1, remember, name, install} → {M2, sealed=fsl2.}  (T·M1·M2 묶음 · 봉투는 HKDF(K, T) 의 AES-GCM)
+   → 봉투 안: 기기 열쇠·(기억하기면) 비콘 주제·지금 주소 → 그다음은 QR 기기와 같은 FSR2·/r/handoff (넓은 화면은 바로 PC 스튜디오)
+   → PC: 보안 알림(ntfy 알림 주제 · [끊기] http 동작 → 제어 주제 fsc… ← PC 의 _control_loop 가 들음) · 이번만 기기는 메모리에만
 ```
 
 ## 2. 레이어와 책임
@@ -153,6 +160,7 @@
 | forecast | `forecast.py` | 가능성(%) (D-025): `calibrate`(반응 회귀·분류 줄이기·σ·Theil–Sen 전환·탄력성·bootstrap·DEFAULTS), `own_posterior`, `simulate`(주 단위 · 공통 난수 · 지수 누적 · 되먹임), 목표·궤적·KPI, 민감도 `variants`, 표시 `show`(BR-015), `assumptions`, 검증(`loo_coverage`·`video_reliability`·`backtest`·`brier`), `inputs_hash` |
 | remote | `remote.py` | 휴대폰으로 보기 (D-027): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일 · 같은 브라우저는 바꿔 끼움), `Pairing`(10분 한 번 코드 · 증명 확인 · PBKDF2 만남 주제·잠금·증명 열쇠), `Auth`(FSR2 서명: host 포함 · nonce), `Tickets`(미디어 표: 기기·IP 대역·1시간), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기는 시도 번호로 · 터널 추적 · 오류 뒤 다시 켜기 · 끊기·설정·작업 끝 알림 `job_hook`(실패는 `trouble.explain` 의 쉬운 한 줄 그대로 · 일부만 실패도 '확인이 필요해요' · D-044)·자동 끄기·절전 막기), `RemoteHandler`(`/r/*` · 그 밖의 길은 `rstudio.gate` 로 · 로그인 정보 브라우저 고르기(`/api/browsers`·`cookies`)는 PC 화면에서만 · D-044), 허용 동작 `ACTIONS`, 넘겨주기 `r_handoff` · `SITE`(원격 홈 주소 한 줄 · `ORIGINS` 는 여기서 · D-233) |
 | rstudio | `rstudio.py` | 밖에서 작업 (D-230~D-232): `Sessions`(메모리 · 기기마다 하나 · 30분/12시간 · 끊은 까닭), `Handoffs`(60초 한 번 표), `Confirms`(428 확인 표), `POLICY`·`classify`(길 분류), `gate`(경계 순서), `inject`(화면에 nonce·CSRF·심), `scrub_state`, 미디어(미리보기 파일만·동시 수), 받기(`outputs_route`·`send_file` · 구간·ETag), `Uploads`(1~16MB 조각·이어 올리기·`WORK/uploads/` · 7일 · 기기마다 2개 · NFC 이름), `yt_guard`(밖에서 온 yt-dlp 주소는 YouTube 만 · D-235), `start`(밖에서 시킨 작업) |
+| rlogin | `rlogin.py` | 아이디·비밀번호로 연결의 순수 부분 (D-250~D-258 · 표준 라이브러리 + 함수 안의 `Cryptodome` HKDF 만 · 네트워크·파일 없음): canon v1(`canon_pw`·`canon_id` · 두벌식 글쇠·NFKC·소문자), 아이디·비밀번호 규칙(`id_problem`·`pw_problems` · 문장 `ID_MSG`·`PW_MSG`)·추천(`suggest`), 아이디 주제·열쇠(`derive_login`·`seal_lookup`·`open_lookup`), SRP-6a(RFC 5054 3072 · `make_verifier`·`server_start`·`server_S`·`transcript`·`m1`·`m2`·`seal_key`·`fake_params`), 잠김(`Guard` · 망 사다리·전체·평생 50 · 알림 문턱), 대기 표(`Pending`), 기기 종류 낱말·나라(`ua_vocab`·`country`), 끊기 표(`kill_token`·`kill_hash`), 미리 정해 둔 로그인(`PRESET`·`preset_ok` · D-258). 같은 계산의 페이지 쪽은 와벨리 `public/futsal/proto.js` (`tests.test_remote_proto` 가 맞춤) · 만드는 도구 `tools/make_preset.py` |
 | 밖에서 작업 심 | `remote_ui.js` · `remote_ui.css` · `hello.js` | 밖에서 연 화면에만 끼워 넣음: fetch·sendBeacon 감싸기(CSRF·401·`studio_off` 잠금(잠긴 뒤 더 묻지 않음)·428 확인·끊김 띠(다시 잇기 실패 뒤 그대로 · 저장할 것 없으면 원격 홈 `#resume` · D-236)·45초 · 끝까지 자동으로 썸네일 맡기는 8초 뒤 아무도 안 맡았을 때만) · 올리기 줄 세우기(2개씩)·조각 크기 맞춤·화면 켜 두기(D-237) · 위 띠(기기 · 받기 · 올리기 · 원본 화질 · 연결 끝내기) · 올리기·받기 창 · `window.FS_REMOTE` · 같은 출처 틀(끝까지 자동으로의 보이지 않는 썸네일 편집기) 안에서는 감싸기만. `hello.js` = 넘겨주기 인사 쪽·잠금 안내 쪽(세션 없이 내주는 정적 파일) |
 | tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·`core.popen`/`core.run` 으로 띄워 앱의 Job Object 하나에(따로 두지 않음 · D-034)·남은 pid 정리) · 출력 줄은 기록하지 않음 |
 | qr | `qr.py` | QR 만들기(바이트·M·버전 1~10) → 줄 문자열 (PC 창이 SVG 로 그림) |
@@ -187,7 +195,7 @@
 - 올리기 키트 JSON 의 선택 칸 (E11 · 예전 판은 무시): `guests[{name, bio}]`·`guestAuto{titles, lines, tags, hashtags}`(자동으로 넣은 것 · 바꾸면 지움)·`guestHint[]`·`titlePool[]`(처음 만든 제목 후보 · 게스트를 빼면 다시 채움)·`seriesFit{sum, vs}`(총정리·대결 시리즈를 붙여도 되는지). 꼬리표·겹침·올릴 날(`titleInfo`·`taken`·`applied`·`maxLen`·`schedule`·`planSaved`·`guestBook`)은 열 때마다 계산하고 저장하지 않는다 (`upload._LIVE_KEYS`)
 - 그 밖에 `edit_media/`(편집실로 가져온 음악·이미지·영상·정지 화면), `analysis/_media/`(가져온 미디어 캐시), `channel_cache.json`, `upload_template.txt`, `guests.json`(적어 둔 게스트 {v, items[{name, bio, uses[[영상, 편집본]], at}]} · 200명 · D-085), `dict.json`(용어 사전 {terms, fix, v}, 없으면 기본 사전), `studio.log`(2MB 넘으면 하나만 `studio.old.log` · 기록 줄 + 오류 위치 한 줄), `studio-error.log`(pythonw 일 때만: traceback 전체 + faulthandler · 1MB 넘으면 `studio-error.old.log`), 실행 표시 `studio.running.json` {pid, start, version, job, jobAt}(켜져 있는 동안만 · 정상 종료(창 닫기 — 작업 중이면 확인 뒤 · 업데이트 재시작)면 지움 · D-037)
 - 휴대폰용 작은 미리보기 `analysis/_remote/<이름>_<sha1 10자>/preview.mp4` (최근 10개 · 완성본 폴더에는 안 넣음)
-- 사용자별 `~/.futsal-studio/`: `remote.json`(휴대폰으로 보기: pc id·기기 열쇠·ntfy 주제·설정·seq, 권한 600), `remote/cloudflared.yml`·`tunnel.pid`, `bin/cloudflared.exe`, `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `youtube/client.bin`·`token.bin`·`sessions/*.bin`(유튜브 바로 올리기 · DPAPI), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각) · 모델을 받다 끊기면 `models/<이름>.part` + `.part.resume`(주소·전체 길이·ETag · 다음에 이어받음 · 14일 손대지 않으면 지움 · D-071)
+- 사용자별 `~/.futsal-studio/`: `remote.json`(휴대폰으로 보기: pc id·기기 열쇠(기기마다 `via` code·login)·ntfy 주제·설정·seq · 아이디 연결 `login` 블록(아이디·SRP 검증값·아이디 주제·기록 열쇠·제어 주제·잠김 셈·최근 연결 20개 · D-250)·`presetApplied`·`offReason`(D-258·D-252), 권한 600 · 그 옆 `remote-preset.json`(미리 정한 로그인을 다룬 표 · `remote.json` 이 새로 만들어져도 다시 넣지 않게 · D-258) · 이번만 기기는 메모리에만), `remote/cloudflared.yml`·`tunnel.pid`, `bin/cloudflared.exe`, `bin/deno.exe`, `models/*.onnx`(+ OCR 글자 목록 `ocr-ppocrv5-korean-dict.txt`), `claude_token`(선택: 사용자가 붙여 넣은 클로드 로그인 코드), `youtube/client.bin`·`token.bin`·`sessions/*.bin`(유튜브 바로 올리기 · DPAPI), `engine_upgrade.json`·`deno_install.json`(엔진을 마지막으로 바꾼·실패한 시각) · 모델을 받다 끊기면 `models/<이름>.part` + `.part.resume`(주소·전체 길이·ETag · 다음에 이어받음 · 14일 손대지 않으면 지움 · D-071)
 - 앱 폴더의 업데이트 상태: `.update_staging/`, `.rollback/v<이전>/{files/, rollback.json}`, `.update_pending`, `.update_result`, `.req_hash`, `.update_skip` (모두 `.gitignore`에 있음)
 - 규칙·불변식(예: 다시 분석해도 사용자 편집본을 덮어쓰지 않음, `config.json`을 보존함)은 `DOMAIN_KNOWLEDGE.md` 참고
 

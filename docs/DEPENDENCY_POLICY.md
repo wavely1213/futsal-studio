@@ -12,6 +12,7 @@
 
 1. **표준 라이브러리/기존 의존성으로 해결되는가?** → 되면 추가하지 않는다. 이 프로젝트는 서버(`http.server`)·화면(단일 파일 HTML)·업데이트(`urllib`·`zipfile`)를 표준 라이브러리로 만든다(`DECISION_LOG.md`).
 2. **직접 구현이 50줄 이내인가?** → 그 정도면 직접 구현을 우선 검토한다 (단, 보안·암호화·파싱은 예외 — 검증된 라이브러리 사용).
+   - 승인된 예외 하나(D-257 · 2026-10-12 소유자 승인): 원격 아이디·비밀번호 연결의 SRP-6a 는 새 라이브러리 없이 검증된 기본 부품(파이썬 `hashlib`·`hmac`·`pow` + 이미 있는 `pycryptodomex` AES-GCM·HKDF + 브라우저 WebCrypto·BigInt) 위에 직접 만들었다(`rlogin.py`·와벨리 `public/futsal/proto.js` · 약 200줄). RFC 5054 부록 B 시험값과 pysrp 교차 시험(개발 PC 에만 · `FUTSAL_PYSRP_PATH` · `requirements.txt` 에 넣지 않음)으로 고정한다. 이 예외는 SRP 하나에만 해당한다.
 3. 추가한다면 건강성 확인: 최근 1년 내 릴리스, 알려진 심각 취약점 없음, 다운로드 수·유지보수 상태, 라이선스.
 4. 이 프로젝트의 추가 기준은 다음과 같다.
    - **Windows용 휠이 있어야 한다**: 사용자 PC에는 컴파일러가 없어 소스 빌드가 필요한 패키지는 설치에 실패한다. 사용자 Python 버전(python.org 설치본, 고정 안 됨)용 휠이 있는지도 본다.
@@ -104,6 +105,6 @@
 | cloudflared 2026.10.0 (Apache-2.0, Windows amd64 약 55MB / 386 약 38MB) | GitHub cloudflare/cloudflared 릴리스 고정 주소 · 크기·sha256 고정(`tunnel.CF_ASSETS`, 2026-10-07 공식 릴리스 노트와 맞춤) → `~/.futsal-studio/bin/cloudflared.exe` | 휴대폰으로 보기의 빠른 터널 (D-027). 원격 접속을 처음 켤 때만 받음 · 자동 업데이트 끔 · 6개월쯤마다 고정 판을 올린다(`KNOWN_ISSUES.md` I-037) |
 
 **pip 에는 없지만 코드가 직접 쓰는 것**: `pycryptodomex`(`Cryptodome.Cipher.AES` GCM — 휴대폰으로 보기의 비콘·짝짓기 암호, BSD·퍼블릭 도메인). `yt-dlp[default]`의 의존성으로 모든 PC 에 깔려 있어 `requirements.txt`에 넣지 않았다(넣으면 모든 PC 가 pip 를 다시 돌림 · 넣을지는 소유자 결정, D-027). `remote.py`가 함수 안에서만 불러오고, 없으면 원격 접속만 켜지지 않는다.
-**직접 만든 것**: QR 만들기(`qr.py`, 표준 라이브러리 · ISO 18004 바이트 모드). 라이브러리를 들이면 새 런타임 의존성이 되므로 직접 썼다(암호·파싱이 아님). 개발 PC 의 `segno` 와 칸을 하나하나 비교해 확인한다(`tests.test_qr`).
+**직접 만든 것**: QR 만들기(`qr.py`, 표준 라이브러리 · ISO 18004 바이트 모드). 라이브러리를 들이면 새 런타임 의존성이 되므로 직접 썼다(암호·파싱이 아님). 개발 PC 의 `segno` 와 칸을 하나하나 비교해 확인한다(`tests.test_qr`). SRP-6a(`rlogin.py` · D-257 승인 예외 · 위 1절 2번) — `tests.test_rlogin`(RFC 5054 시험값 · pysrp 교차 시험은 pysrp 가 있을 때만)·`tests.test_remote_proto`(node⇄파이썬 왕복).
 
 **개발 전용** (`requirements.txt`에 넣지 않음): Playwright(Python·Chromium, e2e 묶음), 시스템 `ffmpeg`·`ffprobe`(`ed2_test.py` 결과 확인), node(`thumb.html` JS 문법 확인 · ≥ 20 이면 `tests.test_remote_proto` 휴대폰 페이지 맞물림 시험), git·bash(`release.sh`), pyflakes/ruff(린트, `CODING_STANDARDS.md` 3번), segno(BSD, `tests.test_qr` 의 QR 칸 비교 · 없으면 건너뜀).

@@ -25,6 +25,7 @@ import secrets
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,7 @@ import core
 import editor
 import qa
 import refs
+import rlogin
 import rstudio
 import source
 import strategy
@@ -46,6 +48,7 @@ import thumbstyle
 import trouble
 import tunnel
 import updater
+import youtube_api as yt_api
 import youtube_upload
 
 API = 1
@@ -94,7 +97,18 @@ INSTALL_RE = re.compile(r"[A-Za-z0-9_-]{16,43}")  # 휴대폰 브라우저마다
 PREVIEW_KEEP = 10
 CROCK = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32 (I·L·O·U 없음)
 CONFIRM_TTL = 120
-BUCKETS = {"open": (10, 1 / 6), "auth": (60, 5.0), "studio": (300, 40.0)}  # (최대, 초당 채움) · studio: 밖에서 작업 화면 (D-230)
+# (최대, 초당 채움) · studio: 밖에서 작업 화면 (D-230) · login: 아이디·비밀번호로 연결의 열린 두 길 (start·finish 같이 · D-250)
+# login 은 인터넷 대역(net_of: IPv4 /24 · IPv6 /48)마다 — IPv6 /64 안에서 주소를 바꿔 가며 보내도 한 바구니 · login_start 는 PC 하나에
+# 모두 합쳐 (start 하나가 3072비트 거듭제곱 둘 · 약 15~30ms → 1초에 2개면 CPU 몇 %만 · 대역을 많이 가진 쪽의 CPU 쏟아붓기 막음)
+BUCKETS = {"open": (10, 1 / 6), "auth": (60, 5.0), "studio": (300, 40.0), "login": (12, 1 / 5), "login_start": (60, 2.0)}
+# 아이디·비밀번호로 연결 (D-250~D-258): 열린 길 둘 (세션·서명 없이 · Origin 은 필요) — 그 밖(/r/login/events·kick·unlock·logout)은 서명 길
+LOGIN_OPEN = (("POST", "/r/login/start"), ("POST", "/r/login/finish"))
+LOGIN_BODY_MAX = 4096
+GUEST_IDLE, GUEST_AGE, GUEST_MAX = 1800, 43200, 3   # '이번만' 기기: 30분 안 쓰면 · 12시간이면 끝 · 3대까지 (메모리에만)
+LOOKUP_HB = 10800            # 'PC 찾기' 기록을 3시간마다 다시 (ntfy 는 12시간 담아 둠)
+COLLISION_AGE = 43200        # 다른 PC 의 같은 아이디 기록이 12시간 안이면 겹침
+LOGIN_CONTROL_TIMEOUT = 90   # [끊기] 주제 듣기: ntfy 는 45초마다 keepalive
+PRESET_MARK = "remote-preset.json"   # 미리 정한 로그인(D-258)을 이 PC 에서 다룬 표 (remote.json 옆 · 그 파일과 따로)
 LRU_MAX = 10000
 MISSING_MSG = "원격 접속에 필요한 구성요소가 없어요 · 왼쪽 아래 '업데이트 확인' → 다운로드 엔진 최신으로 바꾼 뒤 다시 켜 주세요"
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
@@ -129,6 +143,11 @@ NOTE_TEXT = {
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
     "studio": "밖에서 PC 스튜디오를 열었어요 ({kind}) · " + NOT_ME,
     "auto": "확인이 필요해요 · 끝까지 자동으로 · 다 했지만 PC 보관함의 결과 카드에서 볼 것이 있어요",
+    # 아이디·비밀번호로 연결 (D-255): 늘 보냄(알림 켜기·끄기와 상관없음) · 정해진 낱말만 (login_note)
+    "login": "아이디로 새 기기가 연결됐어요 ({how}) · {dev} · {where}{at} · 내가 아니면 [끊기]를 눌러 주세요",
+    "login_fail": "아이디·비밀번호 연결에서 비밀번호가 {n}번 틀렸어요 · 내가 아니면 PC에서 비밀번호를 바꿔 주세요",
+    "login_stop": "비밀번호가 너무 많이 틀려서 아이디·비밀번호 연결을 잠갔어요 · 연결된 휴대폰은 그대로 써요 · 휴대폰 '더보기'나 PC에서 다시 켤 수 있어요",
+    "login_kill": "끊었어요 · 그 기기 연결을 끊고 아이디·비밀번호 연결을 잠갔어요 · PC에서 새 비밀번호를 정해 주세요",
     "moved": f"알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · {SITE_TEXT} 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
@@ -156,6 +175,38 @@ def device_kind(name):
 def note_text(kind, name=None):
     """정해진 알림 문장 (기기 종류 칸이 있으면 device_kind 로만 채움)."""
     return NOTE_TEXT[kind].replace("{kind}", device_kind(name))
+
+
+def ko_time(ts):
+    """알림·기록용 '오후 2:05' (이 PC 시각)."""
+    lt = time.localtime(ts)
+    return f"{'오전' if lt.tm_hour < 12 else '오후'} {lt.tm_hour % 12 or 12}:{lt.tm_min:02d}"
+
+
+def login_note(guest, ua, cc, at):
+    """새 기기 알림 (D-255): 정해진 낱말만 — 기기는 User-Agent 에서 고른 낱말 · 나라는 Cf-Ipcountry · 기기가 보낸 이름은 넣지 않음."""
+    where = rlogin.country(cc)
+    return (NOTE_TEXT["login"].replace("{how}", "이번만" if guest else "기억함").replace("{dev}", rlogin.ua_vocab(ua))
+            .replace("{where}", f"{where} · " if where else "").replace("{at}", ko_time(at)))
+
+
+# 아이디·비밀번호로 연결 — 휴대폰 페이지에 돌려주는 정해진 문장 (페이지는 code 로 자기 문장을 고름)
+LOGIN_MSG = {
+    "not_ready": "PC가 아직 준비 중이에요 · 잠시 뒤 다시 해 주세요",
+    "login_off": "이 PC는 지금 아이디·비밀번호 연결을 쓰지 않아요 · PC '휴대폰으로 보기'에서 켜 주세요",
+    "suspended": "아이디·비밀번호 연결이 잠겨 있어요",
+    "locked": "비밀번호를 여러 번 틀려서 잠시 막았어요",
+    "busy": "지금 연결하려는 기기가 많아요 · 잠시 뒤 다시 해 주세요",
+    "again": "다시 해 주세요",
+    "bad": "비밀번호가 맞지 않아요",
+    "bad_request": "잘못된 요청이에요",
+    "not_allowed": "QR·코드로 연결한 휴대폰이나 PC에서 할 수 있어요",
+    "guest_off": "이번만 연결한 기기에서는 원격 접속을 끌 수 없어요 · 다 쓰면 [이 기기에서 나가기]를 눌러 주세요",
+}
+LOGIN_ACK_MSG = ("연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요")
+LOGIN_TAKEN_MSG = "이 아이디는 다른 PC가 쓰고 있어요 · 다른 아이디를 골라 주세요"
+LOGIN_UNCHECKED_MSG = "겹치는지 확인하지 못했어요 (인터넷 확인) · 그래도 쓸까요?"
+LOGIN_BAD_BLOCK_MSG = "아이디·비밀번호 설정을 읽지 못했어요 · 다시 정해 주세요"
 
 
 MISSED_MSG = ("받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 "
@@ -231,6 +282,23 @@ class ActionError(Exception):
         self.status, self.code = status, code
 
 
+class LoginError(Exception):
+    """/r/login/* 의 대답 (정해진 문장 + code + 덧붙일 칸)."""
+
+    def __init__(self, status, code, extra=None, counted=False):
+        super().__init__(LOGIN_MSG.get(code, LOGIN_MSG["bad_request"]))
+        self.status, self.code, self.extra = status, code, dict(extra or {})
+        self.counted = counted   # 틀린 비밀번호로 센 시도 (그 시도로 잠가서 'suspended' 로 대답해도)
+
+
+class LoginAsk(ValueError):
+    """PC 화면의 설정이 한 번 더 물어야 함 (code: need_ack · unchecked) — app 이 409 로."""
+
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
 # ---------- 작은 도구 ----------
 
 def _b64u(b):
@@ -254,7 +322,13 @@ def clean(s, n=80):
 # 기록에 남으면 안 되는 것: 터널 주소 · 비콘/알림 주제 · 영상·그림 표(ticket) · 서명 머리글 · 연결 코드와 터널 힌트
 _SECRETS = (
     (re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I), "https://….trycloudflare.com"),
-    (re.compile(r"\bfs[bnp][0-9a-f]{24}\b"), "fs…"),  # 비콘(fsb)·알림(fsn)·짝짓기 만남(fsp, derive_pair) 주제
+    (re.compile(r"\bfs[bnplc][0-9a-f]{24}\b"), "fs…"),  # 비콘(fsb)·알림(fsn)·짝짓기 만남(fsp)·PC 찾기(fsl)·[끊기](fsc) 주제
+    # 아이디·비밀번호로 연결 (D-250): [끊기] 표·PC 찾기 기록·알림의 #kill=·비밀번호와 검증값이 든 JSON·repr 칸
+    (re.compile(r"\bfsk1\.[A-Za-z0-9_-]+"), "fsk1.…"),
+    (re.compile(r"\bfsl[12]\.[A-Za-z0-9_.-]+"), "fsl….…"),
+    (re.compile(r"([#&?](?:kill|seen)=)[^&\s'\"]+"), r"\1…"),
+    (re.compile(r'("(?:password|password2|verifier|fake|bkey|idc)"\s*:\s*")[^"]*'), r"\1…"),
+    (re.compile(r"('(?:password|password2|verifier|fake|bkey|idc)'\s*:\s*')[^']*"), r"\1…"),
     (re.compile(r"/r/m/[A-Za-z0-9_-]+"), "/r/m/…"),
     (re.compile(r"FSR2 [^\s'\"]+"), "FSR2 …"),
     (re.compile(r"([#&?]pair=)[^&\s'\"]+"), r"\1…"),
@@ -540,12 +614,16 @@ def _valid_store(d):
 
 
 class Store:
-    """기기 열쇠·알림 주제가 든 비밀 파일. 앱 폴더·config.json 밖(사용자 폴더), 바꿔 끼우기로 저장, 깨지면 .bad 로 남기고 새로."""
+    """기기 열쇠·알림 주제가 든 비밀 파일. 앱 폴더·config.json 밖(사용자 폴더), 바꿔 끼우기로 저장, 깨지면 .bad 로 남기고 새로.
+    'login' 블록(아이디·비밀번호로 연결 · D-250)은 따로 확인: 깨졌으면 메모리에서만 끄고(login_bad) 파일·기기 목록은 그대로.
+    guests: '이번만' 기기 (메모리에만 · 파일·비콘에 없음 · D-256) — device() 는 저장된 기기 다음에 여기서도 찾음."""
 
     def __init__(self, path, clock=time.time):
         self.path, self.clock = Path(path), clock
         self.lock = threading.RLock()
         self._saved_seen = 0.0
+        self.login_bad = False
+        self.guests = {}
         self.data = self._load()
 
     def _load(self):
@@ -566,7 +644,13 @@ class Store:
         d["settings"] = base["settings"]
         for x in d["devices"]:  # 예전 페이지가 'PC · …' 로 지은 노트북 이름 (D-239)
             x["name"] = dev_name(x.get("name"))
+        if d.get("login") is not None and not rlogin.valid_login(d["login"]):  # 그 블록만 끔 (.bad 로 바꾸지 않음 · 기기는 그대로)
+            d["login"], self.login_bad = None, True
         return d
+
+    def login(self):
+        """아이디·비밀번호로 연결 블록 (없으면 None)."""
+        return self.data.get("login")
 
     def save(self):
         """공통 저장 도구(updater.write_atomic): 임시 파일을 나만 읽게(0600 · Windows 는 무시) 해 둔 뒤 바꿔 끼움 ·
@@ -576,14 +660,17 @@ class Store:
             updater.write_atomic(self.path, json.dumps(self.data, ensure_ascii=False, indent=1), mode=0o600)
 
     def device(self, did):
-        return next((x for x in self.data["devices"] if x["id"] == did), None)
+        return next((x for x in self.data["devices"] if x["id"] == did), None) or self.guests.get(did)
 
-    def add_device(self, name, install=None):
-        """새 기기 → (기기, 바꿔 끼운 옛 기기들). 같은 브라우저(install)가 다시 연결하면 옛 항목을 지우고 새것으로."""
+    def add_device(self, name, install=None, via="code", gen=None):
+        """새 기기 → (기기, 바꿔 끼운 옛 기기들). 같은 브라우저(install)가 다시 연결하면 옛 항목을 지우고 새것으로.
+        via: 'code'(QR·코드) · 'login'(아이디·비밀번호 · gen 은 그때 비밀번호 판) — 없으면 code 로 봄."""
         with self.lock:
             now = int(self.clock())
             dev = {"id": secrets.token_hex(8), "name": dev_name(name), "created": now, "lastSeen": now,
-                   "auth": _b64u(secrets.token_bytes(32)), "beacon": _b64u(secrets.token_bytes(32))}
+                   "auth": _b64u(secrets.token_bytes(32)), "beacon": _b64u(secrets.token_bytes(32)), "via": via}
+            if via == "login":
+                dev["loginGen"] = int(gen or 0)
             old = []
             if install and INSTALL_RE.fullmatch(install):
                 dev["install"] = install
@@ -591,6 +678,28 @@ class Store:
             self.data["devices"] = [x for x in self.data["devices"] if x not in old] + [dev]
             self.save()
             return dev, old
+
+    def add_guest(self, name, scale=1.0):
+        """'이번만' 기기 → (기기, 밀려난 옛 이번만 기기들) · 3대가 넘으면 가장 오래된 것부터."""
+        with self.lock:
+            now = int(self.clock())
+            dev = {"id": secrets.token_hex(8), "name": dev_name(name), "created": now, "lastSeen": now,
+                   "auth": _b64u(secrets.token_bytes(32)), "beacon": _b64u(secrets.token_bytes(32)),
+                   "exp": now + int(GUEST_AGE * scale), "guest": True, "via": "login"}
+            self.guests[dev["id"]] = dev
+            out = []
+            while len(self.guests) > GUEST_MAX:
+                old = min(self.guests.values(), key=lambda x: x["created"])
+                out.append(self.guests.pop(old["id"]))
+            return dev, out
+
+    def take_guests(self, ids=None):
+        """이번만 기기 떼어 내기 (ids 가 None 이면 모두) → 뗀 기기들."""
+        with self.lock:
+            gone = [g for k, g in self.guests.items() if ids is None or k in ids]
+            for g in gone:
+                self.guests.pop(g["id"], None)
+            return gone
 
     def remove(self, ids):
         with self.lock:
@@ -612,6 +721,8 @@ class Store:
     def touch(self, dev):
         now = int(self.clock())
         dev["lastSeen"] = now
+        if dev.get("guest"):  # 이번만 기기는 파일에 없음
+            return
         if now - self._saved_seen >= LASTSEEN_SAVE:
             self._saved_seen = now
             try:
@@ -880,6 +991,8 @@ def _label(name):
 
 
 # ---------- ntfy 로 보내기 (비콘·알림 · 작업·HTTP 를 막지 않게 따로 도는 스레드) ----------
+# 하루 몫(180개)을 넘겨도 보내는 알림 — 보안 알림(아이디로 새 기기·틀린 비밀번호·잠금·끊음)은 늘 (D-255)
+IMPORTANT_NOTES = ("attention", "failed", "paired", "moved", "studio", "login", "login_fail", "login_stop", "login_kill")
 
 class Publisher:
     def __init__(self, svc):
@@ -896,10 +1009,14 @@ class Publisher:
     def beacon(self, important=False, moved=None, topic=None):
         self.q.put(("beacon", important, moved, topic))
 
-    def notify(self, kind, text, prio=3, tags="bell", topic=None):
-        self.q.put(("notify", kind, text, prio, tags, topic))
+    def notify(self, kind, text, prio=3, tags="bell", topic=None, click=None, actions=None):
+        self.q.put(("notify", kind, text, prio, tags, topic, click, actions))
 
     def rendezvous(self, topic, body):
+        self.q.put(("raw", topic, body))
+
+    def lookup(self, topic, body):
+        """'PC 찾기' 기록 (아이디·비밀번호로 연결 · D-252) — 하루 몫에서 중요한 것으로."""
         self.q.put(("raw", topic, body))
 
     def _budget(self, important):
@@ -936,9 +1053,9 @@ class Publisher:
                     else:
                         self.pending = (False, None, None)  # 같은 꼴은 마지막 것만 (60초에 한 번)
                 elif item[0] == "notify":
-                    _, kind, text, prio, tags, topic = item
-                    if self._budget(kind in ("attention", "failed", "paired", "moved", "studio")):
-                        self._post_notify(text, prio, tags, topic)
+                    _, kind, text, prio, tags, topic, click, actions = item
+                    if self._budget(kind in IMPORTANT_NOTES):
+                        self._post_notify(text, prio, tags, topic, click, actions)
                 elif item[0] == "raw":
                     if self._budget(True):
                         self._post(f"{self.svc.ntfy()}/{item[1]}", item[2].encode("utf-8"), {"Content-Type": "text/plain"})
@@ -954,9 +1071,11 @@ class Publisher:
             self._post(f"{self.svc.ntfy()}/{topic or self.svc.store.data['topics']['beacon']}", body.encode("ascii"),
                        {"Content-Type": "text/plain"})
 
-    def _post_notify(self, text, prio, tags, topic=None):
+    def _post_notify(self, text, prio, tags, topic=None, click=None, actions=None):
         msg = {"topic": topic or self.svc.store.data["topics"]["notify"], "title": "풋살 스튜디오", "message": text,
-               "tags": [tags], "priority": prio, "click": self.svc.site()}
+               "tags": [tags], "priority": prio, "click": click or self.svc.site()}
+        if actions:  # 알림의 [끊기] 단추 (ntfy http 동작 · D-255)
+            msg["actions"] = actions
         self._post(self.svc.ntfy() + "/", json.dumps(msg, ensure_ascii=False).encode("utf-8"), {"Content-Type": "application/json"})
 
     def _post(self, url, data, headers):
@@ -1048,6 +1167,17 @@ class Service:
         self.studio = None      # 밖에서 작업 (rstudio.Studio · 세션·넘겨주기·확인·올리기)
         self._hcls = None
         self._up_swept = 0.0
+        # 아이디·비밀번호로 연결 (D-250~D-258): 로그인 블록을 바꾸는 일(정하기·끄기·세기·끊기)은 모두 이 잠금 하나 안에서
+        self.login_lock = threading.RLock()
+        self.pending = None
+        self._guard_obj = None
+        self._lookup_at = 0.0       # 'PC 찾기' 기록을 마지막으로 올린 때 (3시간 하트비트)
+        self._collision_at = 0.0    # 같은 아이디를 쓰는 다른 PC 를 마지막으로 살핀 때
+        self._ctl = None            # [끊기] 주제를 듣는 스레드 (remote-login-control)
+        self._ctl_seen = collections.deque()
+        self._ctl_timeout = LOGIN_CONTROL_TIMEOUT
+        self._ctl_stop = threading.Event()   # 앱을 끌 때 (데몬 스레드라 남아도 앱 끄기를 막지 않음)
+        self._preset_thread = None           # 미리 정한 로그인 넣기 (D-258 · 같은 아이디를 쓰는 PC 살피기)
 
     # ----- 준비 -----
     def init(self, bridge):
@@ -1059,6 +1189,13 @@ class Service:
         self.tickets = Tickets(self.clock)
         self.limiter = Limiter(self.clock)
         self.studio = rstudio.Studio(self)
+        self.pending = rlogin.Pending(self.clock)
+        self._guard_obj = None
+        if self.store.data.get("offReason") in ("user", "idle"):  # 꺼 둔 채로 앱을 껐다 켬 → 'PC 찾기' 기록의 까닭을 그대로
+            self._off_reason = self.store.data["offReason"]
+        if self.store.login_bad:
+            self.log(LOGIN_BAD_BLOCK_MSG)
+        self._apply_preset()
         if not self._started:
             self._started = True
             self.pub = Publisher(self)
@@ -1132,7 +1269,7 @@ class Service:
         return {"available": bool(getattr(self.bridge, "studio", None)), "allowed": self.studio_allowed(),
                 "sessions": [{"id": r["id"], "device": r["name"], "deviceId": r["device"], "startedAt": int(r["created"]),
                               "lastSeen": int(r["last"]), "active": now - r["last"] <= rstudio.ACTIVE_SECS,
-                              "uploads": self.studio.uploads.count(r["device"])}
+                              "uploads": self.studio.uploads.count(r["device"]), "guest": bool(r.get("guest"))}
                              for r in sorted(self.studio.sessions.all(), key=lambda r: r["created"])]}
 
     def origins(self):
@@ -1166,13 +1303,14 @@ class Service:
             pair = {"code": fmt_code(p["code"]), "link": self.pair_link(p["code"]), "expiresAt": int(p["exp"])}
         now = self.clock()
         return {"state": self.state, "error": self.error, "prep": self.prep, "dev": _dev(),
-                "devices": [{"id": x["id"], "name": x["name"], "created": x["created"], "lastSeen": x["lastSeen"],
+                "devices": [{"id": x["id"], "name": x["name"], "created": x["created"], "lastSeen": x["lastSeen"], "via": x.get("via", "code"),
                              "stale": now - (x.get("lastSeen") or x.get("created") or 0) > STALE_DAYS * 86400} for x in d["devices"]],
                 "maxDevices": MAX_DEVICES, "pair": pair, "pairNote": PAIR_NOTES.get(self.pairing.note) if not pair else None,
                 "settings": d["settings"], "pc": d["pc"],
                 "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}, "site": self.site(),
                 "autoOffAt": self._auto_off_at(), "crypto": crypto_ok(), "studio": self._studio_view(),
-                "retryAt": int(self._retry["at"]) if self.state == "error" and self._retry["at"] and d.get("enabled") else None}
+                "retryAt": int(self._retry["at"]) if self.state == "error" and self._retry["at"] and d.get("enabled") else None,
+                "login": self.login_view()}
 
     def pair_link(self, code):
         hint = ""
@@ -1288,12 +1426,18 @@ class Service:
         if kind == "on" and changed:
             if self.studio:  # 새 주소에는 옛 쿠키가 없음 → 세션도 모두 끝 (휴대폰 페이지가 새 주소로 다시 넘겨줌)
                 self.studio_ended(self.studio.drop_all("none", "연결 주소가 바뀜"))
+            self._drop_guests(None, "none", "연결 주소가 바뀜")  # 이번만 기기는 새 주소에서 다시 로그인 (D-256)
+            self.pending.clear()
             self.pub.beacon(important=True)
             self._publish_pair()
+            self._publish_lookup()
         if kind == "error":
             self._stop_resources([dead], lst, timeout=2)  # 멈춘 터널이 (혹시라도) 남긴 프로세스까지 · 이 스레드가 터널 스레드여도 됨
             self.log(f"원격 접속 · {error}")
+            self._drop_guests(None, "none", "연결이 끊김")
+            self.pending.clear()
             self.pub.beacon(important=True)
+            self._publish_lookup("off", "error")
 
     def _take_resources(self):
         """(잠금 안에서) 지금 터널·추적 중인 모든 터널·리스너를 떼어 냄 → 끄는 것은 _stop_resources 가 잠금 밖에서.
@@ -1324,8 +1468,8 @@ class Service:
             self.state, self.error, self.prep, self.url, self._err_kind = "off", None, None, None, None
             self._retry = {"n": 0, "at": None}
             if not keep_enabled:
-                try:
-                    self.store.set(enabled=False)  # 같은 잠금 안 → 바로 뒤의 새 켜기가 쓴 True 를 덮지 않음
+                try:  # 꺼진 까닭(user·idle)도 남김 → 앱을 다시 켠 뒤의 'PC 찾기' 기록도 같은 까닭 (D-252)
+                    self.store.set(enabled=False, offReason=why if why in ("user", "idle") else "user")  # 같은 잠금 안 → 바로 뒤의 새 켜기가 쓴 True 를 덮지 않음
                 except OSError as e:
                     err = e
         self._stop_resources(tuns, lst)
@@ -1333,9 +1477,13 @@ class Service:
         self.pairing.cancel()
         if self.studio:
             self.studio_ended(self.studio.drop_all("none", "원격 접속을 끔"))
+        self._drop_guests(None, "none", "원격 접속을 끔")
+        if self.pending is not None:
+            self.pending.clear()
         if was != "off":
             self.pub.beacon(important=True)
             self.log(f"원격 접속을 껐어요 · {OFF_REASONS.get(why, why)}")
+            self._publish_lookup("off", why if why in ("user", "idle") else "user")
         if err:
             raise err
         return True
@@ -1360,11 +1508,16 @@ class Service:
         self.pub.rendezvous(p["topic"], "fsp1." + gcm_seal(p["key"], msg, "fsp1|" + p["topic"]))
 
     def revoke(self, ids=None, everyone=False, why="PC에서", rotate_notify=True):
-        """끊기: 열쇠·표·nonce 를 바로 버리고 비콘 주제를 바꿈 (rotate_notify 면 알림 주제도 → 옛 알림 주제에 한 번 안내를 남김)."""
+        """끊기: 열쇠·표·nonce 를 바로 버리고 비콘 주제를 바꿈 (rotate_notify 면 알림 주제도 → 옛 알림 주제에 한 번 안내를 남김).
+        알림 주제는 끊는 기기 중 QR·코드 기기가 있을 때만 바꿈 — 아이디로 연결한 기기는 알림 주제를 받은 적이 없으므로, 그 기기만 끊으면
+        (PC [끊기] · 그 기기의 '이 기기 연결 끊기') 소유자의 ntfy 구독을 끊지 않는다 (D-256).
+        이번만 기기(메모리)도 같이 (주제는 원래 모름 · 바꾸지 않음)."""
         d = self.store.data
+        guests = self._drop_guests(None if everyone else set(ids or []), "revoked", "기기 연결 끊음") if (everyone or ids) else 0
         gone = [x for x in d["devices"] if everyone or x["id"] in (ids or [])]
         if not gone:
-            return 0
+            return guests
+        rotate_notify = rotate_notify and any(x.get("via", "code") == "code" for x in gone)
         old = self.store.rotate_topics(notify=rotate_notify)
         self.store.remove({x["id"] for x in gone})
         self.tickets.drop({x["id"] for x in gone})
@@ -1387,7 +1540,7 @@ class Service:
             self.pub.notify("moved", NOTE_TEXT["moved"], 4, "warning", topic=old["notify"])
         for x in gone:
             self.log(f"휴대폰 연결을 끊었어요 · {clean(x['name'], 40)} ({why})")
-        return len(gone)
+        return len(gone) + guests
 
     def set_settings(self, b):
         s = dict(self.store.data["settings"])
@@ -1421,6 +1574,7 @@ class Service:
         (느린 DNS 에도 앱 끄기·업데이트 다시 시작이 기다리지 않게 따로 스레드). 다음에 켜면 다시 켜지도록 enabled 는 그대로."""
         if not self.store:
             return
+        self._ctl_stop.set()
         try:
             with self.lock:
                 was = self.state
@@ -1432,14 +1586,26 @@ class Service:
             self._stop_resources(tuns, lst, timeout=1.0)
             if self.studio:
                 self.studio.drop_all("none", "앱을 끔")
-            if was != "off" and self.pub:
-                body = self.beacon_body(state="off", reason=OFF_REASONS["app"])
+            self.store.take_guests()
+            if self.pending is not None:
+                self.pending.clear()
+            if self.pub:
+                posts = []
+                body = self.beacon_body(state="off", reason=OFF_REASONS["app"]) if was != "off" else None
                 if body:
-                    t = threading.Thread(target=self.pub.post_now, daemon=True, name="remote-last-beacon",
-                                         args=(f"{self.ntfy()}/{self.store.data['topics']['beacon']}", body.encode("ascii"),
-                                               {"Content-Type": "text/plain"}, timeout))
+                    posts.append((f"{self.ntfy()}/{self.store.data['topics']['beacon']}", body.encode("ascii")))
+                # 아이디로 찾는 기록도 '앱을 껐어요' (같은 시간 안에서 · D-252) — 원격 접속이 켜져 있었을 때만 (이미 꺼 둔(user·idle) PC 는
+                # 그 까닭이 마지막 기록으로 남게: 'off/app' 이면 페이지가 '스튜디오를 켜면 저절로 켜져요'라고 잘못 안내함)
+                look = self._publish_lookup("off", "app", direct=True) if was != "off" else None
+                if look:
+                    posts.append((f"{self.ntfy()}/{look[0]}", look[1].encode("ascii")))
+                ts = [threading.Thread(target=self.pub.post_now, daemon=True, name="remote-last-beacon",
+                                       args=(url, data, {"Content-Type": "text/plain"}, timeout)) for url, data in posts]
+                for t in ts:
                     t.start()
-                    t.join(timeout)
+                end = time.monotonic() + timeout
+                for t in ts:
+                    t.join(max(0.0, end - time.monotonic()))
         except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
             _trace()
 
@@ -1457,18 +1623,20 @@ class Service:
         job = {"name": _label(snap.get("name")), "pct": (snap.get("progress") or {}).get("pct")} if snap.get("name") else None
         inner = {"v": 1, "pc": d["pc"]["id"], "seq": seq, "ts": int(self.clock()), "state": st, "reason": reason,
                  "url": self.url if st == "on" else None, "job": job, "ver": self.bridge.version if self.bridge else "", "api": API}
-        if moved:
-            inner["moved"] = moved
-        items = []
-        for x in devs:
-            pt = json.dumps(inner, ensure_ascii=False)
-            items.append({"d": x["id"], "c": gcm_seal(_unb64u(x["beacon"]), pt, f"fsb1|{d['pc']['id']}|{x['id']}|{seq}")})
-        body = "fsb1." + _b64u(json.dumps({"v": 1, "pc": d["pc"]["id"], "seq": seq, "items": items}).encode("utf-8"))
+
+        def build():
+            items = []
+            for x in devs:
+                one = inner
+                if moved:  # 옮긴 주제: 아이디로 연결한 기기에는 비콘 주제만 (알림 주제 = [끊기] 표가 든 보안 알림 · D-255 · 기기마다 따로 잠금)
+                    one = dict(inner, moved=moved if x.get("via", "code") == "code" else {"beacon": moved.get("beacon")})
+                pt = json.dumps(one, ensure_ascii=False)
+                items.append({"d": x["id"], "c": gcm_seal(_unb64u(x["beacon"]), pt, f"fsb1|{d['pc']['id']}|{x['id']}|{seq}")})
+            return "fsb1." + _b64u(json.dumps({"v": 1, "pc": d["pc"]["id"], "seq": seq, "items": items}).encode("utf-8"))
+        body = build()
         if len(body) > 3900 and job:  # ntfy 는 4KB 가 넘으면 첨부 파일로 바꿈 → 작업 칸을 빼고 다시
             inner["job"] = None
-            items = [{"d": x["id"], "c": gcm_seal(_unb64u(x["beacon"]), json.dumps(inner, ensure_ascii=False), f"fsb1|{d['pc']['id']}|{x['id']}|{seq}")}
-                     for x in devs]
-            body = "fsb1." + _b64u(json.dumps({"v": 1, "pc": d["pc"]["id"], "seq": seq, "items": items}).encode("utf-8"))
+            body = build()
         return body
 
     # ----- 작업이 끝났을 때 (app.JOB_HOOKS) -----
@@ -1558,7 +1726,7 @@ class Service:
     # ----- 뒤에서: 하트비트·자동 끄기·오래된 기기·오류 뒤 다시 켜기 -----
     def _auto_off_at(self):
         h = self.store.data["settings"].get("autoOffHours") or 0
-        return int(self.last_auth + h * 3600) if h and self.state == "on" else None
+        return int(self.last_auth + h * 3600 * rlogin.time_scale()) if h and self.state == "on" else None
 
     def _watch(self):
         last_hb = self.clock()
@@ -1585,7 +1753,7 @@ class Service:
             elif last_hb is not None and self.clock() - last_hb >= HEARTBEAT:
                 self.pub.beacon()
             h = self.store.data["settings"].get("autoOffHours") or 0
-            if h and not cur and self.clock() - self.last_auth >= h * 3600:
+            if h and not cur and self.clock() - self.last_auth >= h * 3600 * rlogin.time_scale():  # 시간 줄이기는 개발 때만 (e2e)
                 self.turn_off("idle")
                 self._note("attention", f"원격 접속을 껐어요 ({h}시간 동안 안 써서)")
         elif (self.state == "error" and self._err_kind in ("tunnel", "start") and self.store.data.get("enabled")
@@ -1604,6 +1772,7 @@ class Service:
         old = self.store.expired()
         if old:  # 오래 안 쓴 기기: 비콘 주제만 바꿈 (알림 주제까지 바꾸면 쓰고 있는 휴대폰의 ntfy 알림이 조용히 끊김)
             self.revoke(old, why="90일 동안 안 씀", rotate_notify=False)
+        self._login_tick()
 
     def _awake_wanted(self):
         """PC 잠들지 않게: 원격이 켜져 있을 때(on·restarting) — 그리고 켜 두기로 한(enabled) 원격이 터널 오류 뒤 저절로 다시 켜 보는 사이
@@ -1681,9 +1850,16 @@ class Service:
         self.store.touch(dev)
 
     def r_ping(self):
-        out = {"api": API, "pc": self.store.data["pc"], "time": int(self.clock())}
+        """열린 길: PC 이름은 넣지 않음 (아이디만 아는 사람에게 PC 이름이 보이지 않게 · 예전 페이지는 pc.id 만 읽음 · D-252)."""
+        out = {"api": API, "pc": {"id": self.store.data["pc"]["id"]}, "time": int(self.clock())}
+        feats = []
         if getattr(self.bridge, "studio", None):  # 이 PC 는 밖에서 작업(PC 스튜디오 열기)을 함 · API 판은 그대로 1 (예전 페이지·예전 PC 와 서로 됨)
-            out["features"] = ["studio"]
+            feats.append("studio")
+        lg = self.store.login()
+        if lg and lg.get("enabled"):  # 아이디·비밀번호로 연결을 받음
+            feats.append("login")
+        if feats:
+            out["features"] = feats
         return out
 
     def r_pair(self, b):
@@ -1730,15 +1906,22 @@ class Service:
             new, total = self.bridge.logs(max(0, total - LOG_TAIL))
         new = new[-LOG_TAIL:]
         d = self.store.data
+        out = {"api": API, "ver": self.bridge.version, "time": int(self.clock()), "pc": d["pc"], "job": job, "last": self.last,
+               "log": [scrub(x) for x in new], "logTotal": total,
+               "remote": {"autoOffAt": self._auto_off_at(), "devices": len(d["devices"]), "device": {"id": dev["id"], "name": dev["name"]},
+                          "studio": {"allowed": self.studio_allowed()}},
+               "features": ["studio"] if getattr(self.bridge, "studio", None) else []}  # 휴대폰 페이지가 [PC 스튜디오 열기]를 보일지
+        if dev.get("guest"):  # 이번만 기기: 주제를 주지 않음 (비콘·알림 없음 · D-256)
+            out["remote"]["guestExp"] = int(dev["exp"])
+            return out
+        code = dev.get("via", "code") == "code"
+        # 주제 이름은 곧 비밀(알림 주제 = 보내기 열쇠) → 기기 비콘 열쇠로 잠가서 (Cloudflare 가 못 봄) · 아이디로 연결한 기기는 알림 주제를 받지 않음
+        # (알림에 [끊기] 표가 들어 있음 · D-255) · 아이디·비밀번호 연결 모습도 같은 봉투 안에
         topics = json.dumps({"beacon": {"server": self.ntfy(), "topic": d["topics"]["beacon"]},
-                             "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]}})
-        return {"api": API, "ver": self.bridge.version, "time": int(self.clock()), "pc": d["pc"], "job": job, "last": self.last,
-                "log": [scrub(x) for x in new], "logTotal": total,
-                "remote": {"autoOffAt": self._auto_off_at(), "devices": len(d["devices"]), "device": {"id": dev["id"], "name": dev["name"]},
-                           "studio": {"allowed": self.studio_allowed()}},
-                "features": ["studio"] if getattr(self.bridge, "studio", None) else [],  # 휴대폰 페이지가 [PC 스튜디오 열기]를 보일지
-                # 주제 이름은 곧 비밀(알림 주제 = 보내기 열쇠) → 기기 비콘 열쇠로 잠가서 (Cloudflare 가 못 봄)
-                "topics": gcm_seal(_unb64u(dev["beacon"]), topics, topics_aad(d["pc"]["id"], dev["id"]))}
+                             "notify": {"server": self.ntfy(), "topic": d["topics"]["notify"]} if code else None,
+                             "login": self._login_brief(code)}, ensure_ascii=False)
+        out["topics"] = gcm_seal(_unb64u(dev["beacon"]), topics, topics_aad(d["pc"]["id"], dev["id"]))
+        return out
 
     def _projects(self, name):
         """편집본 목록 (id·이름·형식) — 프로젝트 파일이 바뀌지 않았으면 기억한 것 (보관함 목록이 큰 파일을 매번 다 읽지 않게)."""
@@ -1858,6 +2041,8 @@ class Service:
         return {"ok": True}
 
     def r_notify_test(self, dev):
+        if dev.get("via", "code") != "code":  # 알림은 QR·코드로 연결한 휴대폰에서만 (아이디로 연결한 기기는 알림 주제를 모름 · D-255)
+            raise ActionError(LOGIN_MSG["not_allowed"], 403, "not_allowed")
         now = self.clock()
         if now - self._last_test < NOTIFY_TEST_GAP:
             raise ActionError("알림 시험은 1분에 한 번만 보낼 수 있어요 · 잠시 뒤 다시 눌러 주세요", 429)
@@ -1881,6 +2066,666 @@ class Service:
         except rstudio.TooMany as e:
             raise ActionError(str(e), 429) from None
         return {"ok": True, "url": self.url, "token": tok}
+
+    # ----- 아이디·비밀번호로 연결 (D-250~D-258) -----
+    def _guard(self):
+        """지금 로그인 블록의 Guard (블록이 바뀌면 새로 · 잠금은 login_lock 하나)."""
+        lg = self.store.login()
+        if lg is None:
+            return None
+        if self._guard_obj is None or self._guard_obj.login is not lg:
+            self._guard_obj = rlogin.Guard(lg, self.store.save, self.clock, lock=self.login_lock)
+        return self._guard_obj
+
+    def _security(self, kind, text, click=None, actions=None):
+        """보안 알림: '알림' 켜기·끄기와 상관없이 늘 (D-255)."""
+        if self.pub:
+            self.pub.notify(kind, text, 4, "warning", click=click, actions=actions)
+
+    def _code_devices(self):
+        return [x for x in self.store.data["devices"] if x.get("via", "code") == "code"]
+
+    def _login_devices(self):
+        return [x for x in self.store.data["devices"] if x.get("via") == "login"]
+
+    def _drop_guests(self, ids=None, code="revoked", why="끊음"):
+        """이번만 기기 버리기 (ids 가 None 이면 모두): 열쇠·표·nonce·세션·넘겨주기·올리던 조각까지 → 버린 수."""
+        if not self.store:
+            return 0
+        return self._end_guests(self.store.take_guests(ids), code, why)
+
+    def _end_guests(self, gone, code, why):
+        if not gone:
+            return 0
+        gids = {g["id"] for g in gone}
+        self.tickets.drop(gids)
+        self.auth.forget(gids)
+        if self.studio:
+            self.studio.handoffs.drop(gids)
+            self.studio_ended(self.studio.sessions.end(lambda r: r["device"] in gids, code, why))
+            try:
+                self.studio.uploads.drop_devices(gids)
+            except OSError:
+                pass
+        return len(gone)
+
+    def _lookup_state(self):
+        """'PC 찾기' 기록에 넣을 지금 상태 → (state, reason) · 켜는 중·다시 잡는 중이면 None (다음에)."""
+        if self.state == "on" and self.url:
+            return "on", None
+        if self.state in ("preparing", "starting", "restarting"):
+            return None
+        if self.state == "error":
+            return "off", "error"
+        return "off", self._off_reason if self._off_reason in ("app", "user", "idle", "error") else "user"
+
+    def _publish_lookup(self, state=None, reason=None, lg=None, direct=False):
+        """아이디로 PC 를 찾는 기록 (D-252): {v, pc, seq, ts, state, reason, url} 을 아이디 열쇠로 잠가 아이디 주제에 — PC 이름·작업은 없음.
+        로그인을 켜 둔 동안만 (꺼짐 알림 login_off 는 예외) · direct: 앱을 끌 때 (보낼 (주제, 글)만 돌려줌)."""
+        lg = lg or (self.store.login() if self.store else None)
+        if not lg or not crypto_ok() or not self.pub:
+            return None
+        if not lg.get("enabled") and reason != "login_off":
+            return None
+        with self.store.lock:   # 상태·순번·시각을 한 번에 (켜짐 기록이 꺼짐 기록보다 늦은 순번을 받지 않게 · 페이지는 (ts, seq) 순)
+            if state is None:
+                st = self._lookup_state()
+                if st is None:
+                    return None
+                state, reason = st
+            url = self.url if state == "on" else None
+            lg["seq"] = int(lg.get("seq") or 0) + 1
+            seq, ts = lg["seq"], int(self.clock())
+            try:
+                self.store.save()
+            except OSError:
+                pass
+        inner = {"v": 1, "pc": self.store.data["pc"]["id"], "seq": seq, "ts": ts, "state": state, "reason": reason, "url": url}
+        body = rlogin.seal_lookup(_unb64u(lg["bkey"]), lg["topic"], inner, gcm_seal)
+        self._lookup_at = self.clock()
+        if direct:
+            return lg["topic"], body
+        self.pub.lookup(lg["topic"], body)
+        return lg["topic"], body
+
+    def _collision(self, cid, timeout=5):
+        """같은 아이디를 쓰는 다른 PC 가 12시간 안에 기록을 올렸는지 → 'taken' · 'clear' · 'unknown'(ntfy 에 닿지 않음)."""
+        d = rlogin.derive_login(cid)
+        try:
+            req = urllib.request.Request(f"{self.ntfy()}/{d['topic']}/json?poll=1&since=all", headers=updater.UA)
+            with updater.urlopen(req, timeout) as r:
+                raw = r.read(1 << 20)
+        except Exception:  # noqa: BLE001 — 인터넷·ntfy 문제 (주소는 기록하지 않음)
+            return "unknown"
+        mine, now = self.store.data["pc"]["id"], self.clock()
+        for line in raw.decode("utf-8", "replace").splitlines():
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(m, dict) or m.get("event") != "message":
+                continue
+            rec = rlogin.open_lookup(d["bkey"], d["topic"], m.get("message"), gcm_open)
+            if rec and rec["pc"] != mine and rec["ts"] >= now - COLLISION_AGE:
+                return "taken"
+        return "clear"
+
+    def _check_free(self, cid, force):
+        """정하기·켜기 전에: 다른 PC 가 쓰는 아이디면 ValueError · 확인을 못 했으면(인터넷) force 가 있어야 함."""
+        got = self._collision(cid)
+        if got == "taken":
+            raise ValueError(LOGIN_TAKEN_MSG)
+        if got == "unknown" and not force:
+            raise LoginAsk("unchecked", LOGIN_UNCHECKED_MSG)
+
+    def _recheck_collision(self):
+        """앱을 켤 때·3시간마다: 겹치면 PC 화면에 알림 띠 (login.collision) — 따로 스레드 (ntfy 를 기다리지 않게)."""
+        lg = self.store.login()
+        if not lg or not lg.get("enabled"):
+            return
+        cid = lg["id"]
+
+        def run():
+            got = self._collision(cid)
+            with self.login_lock:
+                cur = self.store.login()
+                if got == "unknown" or cur is not lg or cur["id"] != cid:
+                    return
+                want = int(self.clock()) if got == "taken" else None
+                if bool(cur.get("collision")) != bool(want):
+                    cur["collision"] = want
+                    try:
+                        self.store.save()
+                    except OSError:
+                        pass
+                    if want:
+                        self.log("다른 PC가 같은 아이디를 쓰고 있어요 · PC '휴대폰으로 보기'에서 아이디를 바꿔 주세요")
+        threading.Thread(target=run, daemon=True, name="remote-login-collision").start()
+
+    def _new_block(self, cid, id_show, ver, old=None):
+        d = rlogin.derive_login(cid)
+        return {"v": 1, "canon": rlogin.CANON, "enabled": True, "id": cid, "idShow": id_show, "topic": d["topic"],
+                "bkey": _b64u(d["bkey"]), "idc": d["idc"], "grp": ver["grp"], "salt": ver["salt"], "iters": ver["iters"],
+                "verifier": ver["verifier"], "fake": _b64u(secrets.token_bytes(32)), "control": "fsc" + secrets.token_hex(12),
+                "gen": int(old["gen"]) + 1 if old else 1, "setAt": int(self.clock()), "seq": int(old.get("seq") or 0) if old else 0,
+                "guard": rlogin.fresh_guard(), "suspended": None, "events": [], "collision": None}
+
+    @staticmethod
+    def _id_show(s):
+        return clean(unicodedata.normalize("NFKC", str(s or "")).strip(), 32)
+
+    def _preset_marker(self):
+        """미리 정한 로그인을 이 PC 에서 한 번 다룬 표 (remote.json 밖 · 그 파일이 깨져 새로 만들어져도 다시 넣지 않게 · D-258)."""
+        return self.store.path.with_name(PRESET_MARK)
+
+    def _mark_preset(self, result):
+        self._preset_marker().parent.mkdir(parents=True, exist_ok=True)
+        updater.write_atomic(self._preset_marker(), json.dumps({"v": 1, "at": int(self.clock()), "id": rlogin.PRESET_ID, "result": result}),
+                             mode=0o600)
+
+    def _preset_owner(self):
+        """소유자 PC 표시 (D-258 보강) → 'paired' · 'youtube' · None. config 의 채널 주소는 모든 설치의 기본값(core.CONFIG_DEFAULT ·
+        config.json)이라 그것만으로는 소유자 PC 를 못 가림 → 이 PC 에만 있는 것 하나가 더 있어야 함:
+          (1) 이 판 전에 QR·코드로 연결해 둔 기기 (via 칸이 없는 옛 기기 · 이 판부터 새 기기는 늘 via 를 씀 → 새로 깐 PC 는 절대 안 맞음)
+          (2) 유튜브 올리기가 바로 그 채널로 연결돼 있음 (Google 이 확인한 채널 · youtube/token.bin)."""
+        if any("via" not in x for x in self.store.data["devices"]):
+            return "paired"
+        tok = yt_api.load_secret(self.store.path.parent / "youtube" / "token.bin") or {}
+        ch = tok.get("channel") if isinstance(tok.get("channel"), dict) else {}
+        return "youtube" if ch.get("id") == rlogin.PRESET_CHANNEL else None
+
+    def _apply_preset(self):
+        """미리 정해 둔 로그인 (D-258): rlogin.PRESET(검증값만)이 있고 · 이 PC 가 로그인을 정한 적이 없고 · 한 번도 다룬 적이 없고 ·
+        설정의 채널이 최경진 풋살사관학교이고 · 소유자 PC 표시(_preset_owner)가 있을 때만 → 따로 스레드에서 같은 아이디를 쓰는 다른 PC 를
+        살핀 뒤(ntfy · 5초) 한 번 넣음. 넣었거나 다른 PC 가 쓰고 있으면 표(_preset_marker)와 presetApplied 를 남겨 다시 넣지 않음 ·
+        ntfy 에 닿지 않으면 다음에 켤 때 다시. 원격 접속은 켜지 않는다. → 살피기 시작했으면 그 스레드 (시험이 기다림)."""
+        p = rlogin.PRESET
+        d = self.store.data
+        marker = self._preset_marker()
+        if d.get("presetApplied") and not marker.exists():  # (예전 판이 남긴 기록) 파일 밖 표로도 남김
+            try:
+                self._mark_preset("applied")
+            except OSError:
+                pass
+        if not p or not rlogin.preset_ok(p) or d.get("login") is not None or self.store.login_bad or d.get("presetApplied"):
+            return None
+        if marker.exists() or rlogin.PRESET_CHANNEL not in str((core.CONFIG or {}).get("channel_url") or ""):
+            return None
+        owner = self._preset_owner()
+        if not owner:
+            return None
+        t = threading.Thread(target=self._preset_run, args=(p, owner), daemon=True, name="remote-login-preset")
+        self._preset_thread = t
+        t.start()
+        return t
+
+    def _preset_run(self, p, owner):
+        cid = rlogin.canon_id(p["id"])
+        got = self._collision(cid)
+        if got == "unknown":  # ntfy 에 닿지 않음 → 다음에 켤 때 다시
+            return False
+        block = self._new_block(cid, self._id_show(p["idShow"]),
+                                {"grp": p["grp"], "salt": p["salt"], "iters": p["iters"], "verifier": p["verifier"]})
+        block["preset"] = True
+        if not rlogin.valid_login(block):
+            return False
+        d = self.store.data
+        with self.login_lock:
+            if d.get("login") is not None or self.store.login_bad or d.get("presetApplied") or self._preset_marker().exists():
+                return False   # 그사이 소유자가 직접 정함
+            try:
+                self._mark_preset("applied" if got == "clear" else "taken")   # 파일 밖 표부터 (깨져 새로 만든 remote.json 에도 다시 넣지 않게)
+            except OSError:
+                return False
+            d["presetApplied"] = int(self.clock())
+            if got == "clear":
+                d["login"] = block
+            try:
+                self.store.save()
+            except OSError:
+                d["login"] = None
+                return False
+        if got == "taken":
+            self.log(f"미리 정해 둔 아이디({rlogin.PRESET_ID})는 다른 PC가 쓰고 있어서 이 PC에는 넣지 않았어요")
+            return False
+        self.log("미리 정해 둔 아이디·비밀번호로 연결을 준비했어요 · PC '휴대폰으로 보기'에서 비밀번호를 바꾸는 걸 권해요")
+        return True
+
+    def _login_brief(self, manage):
+        """연결된 기기에 주는 모습 (기기 비콘 열쇠로 잠긴 봉투 안 · D-255): 켜짐 · 아이디 · 영문 자판 꼴 · 막힘 · 잠김 · 관리 권한."""
+        lg = self.store.login()
+        if not lg:
+            return {"on": False, "set": False, "manage": manage}
+        g = self._guard().view()
+        return {"on": bool(lg.get("enabled")), "set": True, "show": lg["idShow"], "keys": lg["id"], "lock": g["lock"],
+                "suspended": g["suspended"], "manage": manage}
+
+    def login_view(self):
+        """PC 화면(/api/remote)용 — 검증값·salt·주제·열쇠·가짜 비밀·[끊기] 주제는 넣지 않는다."""
+        if not self.store:
+            return {"set": False}
+        lg = self.store.login()
+        now = self.clock()
+        base = {"set": bool(lg), "bad": self.store.login_bad, "idHint": rlogin.PRESET_ID,
+                "autoOffHours": self.store.data["settings"].get("autoOffHours") or 0, "codeDevices": len(self._code_devices()),
+                "loginDevices": len(self._login_devices()) + len(self.store.guests)}
+        if not lg:
+            return base
+        g = self._guard().view()
+        evs = []
+        for e in lg.get("events") or []:
+            dev = self.store.device(e.get("dev"))
+            evs.append({"ref": e["ref"], "at": e["at"], "kind": e["kind"], "vocab": e.get("vocab") or "기타 · 기타", "cc": e.get("cc"),
+                        "alive": bool(dev), "active": bool(dev and now - (dev.get("lastSeen") or 0) <= rstudio.ACTIVE_SECS),
+                        "kicked": bool(e.get("kicked"))})
+        base.update({"enabled": bool(lg.get("enabled")), "idShow": lg["idShow"], "idKeys": lg["id"], "setAt": lg["setAt"], "gen": lg["gen"],
+                     "lock": g["lock"], "netLocks": g["netLocks"], "suspended": g["suspended"], "failsToday": g["failsToday"],
+                     "total": g["total"], "collision": lg.get("collision"), "events": evs, "preset": bool(lg.get("preset"))})
+        return base
+
+    def login_check(self, id_=None, password=""):
+        """[저장] 전 살아 있는 점검표 (0.3초마다) → {problems: [코드], canonLen} · 비밀번호는 저장·기록하지 않음."""
+        lg = self.store.login()
+        cid = rlogin.canon_id(id_) if id_ else (lg["id"] if lg else None)
+        return {"problems": rlogin.pw_problems(password or "", cid), "canonLen": len(rlogin.canon_pw(password or "")),
+                "idProblem": rlogin.id_problem(id_) if id_ else None}
+
+    def login_suggest(self, id_=None):
+        lg = self.store.login()
+        return {"password": rlogin.suggest(rlogin.canon_id(id_) if id_ else (lg["id"] if lg else None))}
+
+    def login_set(self, id_=None, password=None, password2=None, revoke=True, force=False, ack=False):
+        """아이디·비밀번호 정하기 / 비밀번호 바꾸기 (PC 화면에서만 · 옛 비밀번호는 묻지 않음 · D-256):
+        새 salt·검증값·가짜 비밀·[끊기] 주제 · 판(gen)+1 · 막힘·잠김·기록·주고받는 중 지움 · 이번만 기기 모두 끊음 ·
+        revoke(기본) 면 아이디로 연결한 기기도 끊음 (QR·코드 기기는 그대로)."""
+        lg = self.store.login()
+        if id_ is None and not lg:
+            raise ValueError("아이디를 넣어 주세요")
+        if id_ is not None:
+            p = rlogin.id_problem(id_)
+            if p:
+                raise ValueError(rlogin.ID_MSG[p])
+            cid = rlogin.canon_id(id_)
+        else:
+            cid = lg["id"]
+        probs = rlogin.pw_problems(password or "", cid, password2)
+        if probs:
+            raise ValueError(rlogin.PW_MSG[probs[0]])
+        if not crypto_ok():
+            raise ValueError(MISSING_MSG)
+        if not self._code_devices() and not ack:
+            raise LoginAsk("need_ack", LOGIN_ACK_MSG)
+        if not lg or cid != lg["id"]:
+            self._check_free(cid, force)
+        ver = rlogin.make_verifier(password)
+        password = password2 = None  # noqa: F841 — 여기서 버림 (검증값만 남김)
+        with self.login_lock:
+            old = self.store.login()
+            show = self._id_show(id_) if id_ is not None else old["idShow"]
+            self.store.data["login"] = self._new_block(cid, show, ver, old)
+            self.store.login_bad = False
+            self.store.save()
+            self.pending.clear()
+        self._drop_guests(None, "revoked", "비밀번호를 바꿈")
+        if old and revoke:
+            ids = [x["id"] for x in self._login_devices()]
+            if ids:
+                self.revoke(ids, why="비밀번호를 바꿈", rotate_notify=False)
+        if old and old["id"] != cid:
+            self._publish_lookup("off", "login_off", lg=old)
+        self._publish_lookup()
+        self._control_ensure()
+        self.log("아이디·비밀번호로 연결의 비밀번호를 바꿨어요" if old else "아이디·비밀번호로 연결을 켰어요")
+        return self.login_view()
+
+    def login_id(self, id_, force=False):
+        """아이디만 바꾸기: 새 주제·열쇠 · 옛 주제에 '안 씀' 기록 · 기억한 기기·이번만 기기는 그대로."""
+        lg = self.store.login()
+        if not lg:
+            raise ValueError("먼저 아이디·비밀번호를 정해 주세요")
+        p = rlogin.id_problem(id_)
+        if p:
+            raise ValueError(rlogin.ID_MSG[p])
+        cid = rlogin.canon_id(id_)
+        if cid != lg["id"]:
+            self._check_free(cid, force)
+        with self.login_lock:
+            old = dict(self.store.login())
+            d = rlogin.derive_login(cid)
+            cur = self.store.login()
+            cur.update({"id": cid, "idShow": self._id_show(id_), "topic": d["topic"], "bkey": _b64u(d["bkey"]), "idc": d["idc"],
+                        "collision": None})
+            self.store.save()
+            self.pending.clear()
+        if old["id"] != cid:
+            self._publish_lookup("off", "login_off", lg=old)
+        self._publish_lookup()
+        self.log("아이디·비밀번호로 연결의 아이디를 바꿨어요")
+        return self.login_view()
+
+    def login_on(self, force=False):
+        lg = self.store.login()
+        if not lg:
+            raise ValueError("먼저 아이디·비밀번호를 정해 주세요")
+        self._check_free(lg["id"], force)
+        with self.login_lock:
+            lg["enabled"] = True
+            self.store.save()
+        self._publish_lookup()
+        self.log("아이디·비밀번호로 연결을 다시 켰어요")
+        return self.login_view()
+
+    def login_off(self, revoke=False):
+        """끄기: 같은 아이디·비밀번호로 [다시 켜기] 할 수 있음 · 이번만 기기는 끊음 · revoke 면 아이디로 연결한 기기도 (기본 아님)."""
+        lg = self.store.login()
+        if not lg:
+            raise ValueError("아이디·비밀번호로 연결이 꺼져 있어요")
+        with self.login_lock:
+            lg["enabled"] = False
+            self.store.save()
+            self.pending.clear()
+        self._publish_lookup("off", "login_off", lg=lg)
+        self._drop_guests(None, "revoked", "아이디 연결을 끔")
+        if revoke:
+            ids = [x["id"] for x in self._login_devices()]
+            if ids:
+                self.revoke(ids, why="아이디 연결을 끔", rotate_notify=False)
+        self.log("아이디·비밀번호로 연결을 껐어요")
+        return self.login_view()
+
+    def login_unlock(self, where="PC에서"):
+        """막힘·모두 틀린 수·잠김을 지움 (PC [지금 풀기]·[그대로 다시 켜기] · QR·코드 휴대폰 [다시 켜기])."""
+        g = self._guard()
+        if not g:
+            raise ValueError("아이디·비밀번호로 연결이 꺼져 있어요")
+        with self.login_lock:
+            g.unlock()
+        self.log(f"아이디·비밀번호 연결을 다시 열었어요 ({where})")
+        return self.login_view()
+
+    def login_kill(self, ref=None, kh=None, where="PC에서"):
+        """[끊기] (알림·#kill 쪽·QR 휴대폰·PC · D-255): 그 기기를 끊고 아이디·비밀번호 연결을 잠금 (기기가 이미 없어도 잠금 —
+        '내가 아님' = 비밀번호가 샜다는 뜻) · [끊기] 주제는 바꾸지 않음 (두 번째 알림의 [끊기]도 되게)."""
+        with self.login_lock:
+            lg = self.store.login()
+            if not lg:
+                raise ValueError("아이디·비밀번호로 연결이 꺼져 있어요")
+            now = self.clock()
+            if kh is not None:
+                ev = next((e for e in lg.get("events") or [] if hmac.compare_digest(str(e.get("kh")), kh)
+                           and not e.get("kicked") and e.get("until", 0) > now), None)
+                if not ev:
+                    return False
+            else:
+                ev = next((e for e in lg.get("events") or [] if e.get("ref") == ref), None)
+                if not ev:
+                    raise ValueError("그 연결 기록을 찾지 못했어요 · 목록을 새로 고쳐 주세요")
+            ev["kicked"] = True
+            lg["suspended"] = {"why": "kick", "at": int(now)}
+            self.store.save()
+            self.pending.clear()
+            dev_id = ev.get("dev")
+        if dev_id in self.store.guests:
+            self._drop_guests({dev_id}, "revoked", "아이디 연결 [끊기]")
+        elif self.store.device(dev_id):
+            self.revoke([dev_id], why="아이디 연결 [끊기]", rotate_notify=False)
+        self.log(f"아이디로 연결한 기기를 끊었어요 ({where})")
+        self._security("login_kill", NOTE_TEXT["login_kill"])
+        return True
+
+    # 터널 쪽 (열린 길 둘)
+    def r_login_start(self, b, ip, ua="", cc=""):
+        """POST /r/login/start {v, grp, idc, A} → {v, login, grp, salt, iters, B, pc:{id}, time} — 아무것도 세지 않음."""
+        if not crypto_ok() or not self.url:
+            raise LoginError(503, "not_ready")
+        lg = self.store.login()
+        if not lg or not lg.get("enabled"):
+            raise LoginError(403, "login_off")
+        net = net_of(ip)
+        with self.login_lock:
+            v = self._guard().check(net)
+        if v:
+            raise LoginError(423, v["code"], {k: v[k] for k in ("why", "scope", "until") if k in v})
+        idc, A = b.get("idc"), b.get("A")
+        if (b.get("v") != 1 or b.get("grp") != rlogin.GROUP or not isinstance(idc, str) or not re.fullmatch(r"[A-Za-z0-9_-]{22}", idc)
+                or not isinstance(A, str) or not re.fullmatch(r"[A-Za-z0-9_-]{512}", A)):
+            raise LoginError(400, "bad_request")
+        try:
+            raw = _unb64u(A)
+        except ValueError:
+            raise LoginError(400, "bad_request") from None
+        N = rlogin.group()[0]
+        a_int = int.from_bytes(raw, "big")
+        if len(raw) != rlogin.nlen(N) or not rlogin.a_ok(a_int):
+            raise LoginError(400, "bad_request")
+        real = hmac.compare_digest(idc, lg["idc"])
+        if real:
+            salt, ver = _unb64u(lg["salt"]), int.from_bytes(_unb64u(lg["verifier"]), "big")
+        else:  # 틀린 아이디: 같은 모양의 가짜 대답 (아이디가 맞는지 알 수 없게 · 틀리면 그 대역만 셈)
+            salt, ver = rlogin.fake_params(_unb64u(lg["fake"]), idc)
+        iters = int(lg["iters"])
+        bb, B, u = rlogin.server_start(ver, a_int)
+        lid = rlogin._b64u(secrets.token_bytes(16))
+        T = rlogin.transcript(self.host(), self.store.data["pc"]["id"], idc, lid, rlogin.GROUP, iters, salt, a_int, B)
+        try:
+            self.pending.put(net, {"A": a_int, "b": bb, "u": u, "v": ver, "T": T, "real": real, "gen": lg["gen"], "ip": ip,
+                                   "ua": str(ua or "")[:512], "cc": str(cc or "")[:8]}, lid=lid)
+        except rlogin.Busy:
+            raise LoginError(429, "busy") from None
+        return {"v": 1, "login": lid, "grp": rlogin.GROUP, "salt": _b64u(salt), "iters": iters, "B": _b64u(rlogin.pad(B, N)),
+                "pc": {"id": self.store.data["pc"]["id"]}, "time": int(self.clock())}
+
+    def r_login_finish(self, b, ip, ua="", cc=""):
+        """POST /r/login/finish {v, login, M1, remember, name, install} → {v, M2, sealed, remembered, time}.
+        계산(S·K·M1)은 잠금 밖 · 막힘 다시 보기·M1 비교·세기·저장은 login_lock 안 (동시에 와도 넘치지 않게 · D-254)."""
+        e = self.pending.take(b.get("login"))
+        if not e:
+            raise LoginError(410, "again")
+        m1b, remember, name, install = b.get("M1"), b.get("remember"), b.get("name"), b.get("install", "")
+        if (b.get("v") != 1 or not isinstance(m1b, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", m1b) or not isinstance(remember, bool)
+                or not isinstance(name, str) or len(name) > rlogin.NAME_MAX or not isinstance(install, str)
+                or (install and not INSTALL_RE.fullmatch(install))):
+            raise LoginError(400, "bad_request")
+        net = net_of(ip)
+        lg = self.store.login()
+        if not lg or not lg.get("enabled") or lg["gen"] != e["gen"] or e["net"] != net:
+            raise LoginError(410, "again")
+        K = rlogin.session_key(rlogin.server_S(e["A"], e["b"], e["v"], e["u"]))
+        want = rlogin.m1(K, e["T"], remember, name, install)
+        got = _unb64u(m1b)
+        with self.login_lock:
+            g = self._guard()
+            if g is None or self.store.login() is not lg:
+                raise LoginError(410, "again")
+            v = g.check(net)
+            if v:  # 그사이 막힘 → 맞았는지 알려 주지 않고 세지도 않음
+                raise LoginError(423, v["code"], {k: v[k] for k in ("why", "scope", "until") if k in v})
+            ok = hmac.compare_digest(want, got) and e["real"]
+            if ok:
+                g.success(net)
+            else:
+                out = g.fail(net, real=e["real"])
+        if not ok:
+            stop = False
+            for kind, n in out["notes"]:
+                if kind == "login_stop":
+                    stop = True
+                    self.log("비밀번호가 너무 많이 틀려서 아이디·비밀번호 연결을 잠갔어요")
+                    self._security("login_stop", NOTE_TEXT["login_stop"])
+                else:
+                    self._security("login_fail", NOTE_TEXT["login_fail"].replace("{n}", str(n)))
+            if stop:  # 이 시도(50번째)로 잠김 → '남은 기회 0번 · 잠시 막혀요'가 아니라 잠긴 까닭을 바로 (PC·QR 휴대폰이 다시 켤 때까지)
+                raise LoginError(423, "suspended", {"why": "fails"}, counted=True)
+            raise LoginError(403, "bad", {"left": out["left"], "until": out["until"]})
+        return self._login_success(lg, e, K, got, b.get("login"), remember, name, install)
+
+    def _login_success(self, lg, e, K, M1, lid, remember, name, install):
+        saved = self.store.data["devices"]
+        same = bool(install) and any(x.get("install") == install for x in saved)
+        guest = not remember or (len(saved) >= MAX_DEVICES and not same)
+        if guest:
+            dev, evicted = self.store.add_guest(name, rlogin.time_scale())
+            if evicted:
+                self._end_guests(evicted, "revoked", "이번만 기기가 많음")
+                self.log("이번만 연결 기기가 많아 가장 오래된 기기를 끊었어요")
+        else:
+            dev, old = self.store.add_device(name, install or None, via="login", gen=lg["gen"])
+            if old:  # 같은 브라우저가 다시 연결 → 옛 열쇠·표는 바로 버림 (짝짓기와 같음)
+                self.tickets.drop({x["id"] for x in old})
+                self.auth.forget([x["id"] for x in old])
+        now = int(self.clock())
+        tok = rlogin.kill_token()
+        cc = e.get("cc") if rlogin.country(e.get("cc")) else None
+        ev = {"ref": _b64u(secrets.token_bytes(8)), "at": now, "dev": dev["id"], "kind": "guest" if guest else "remember",
+              "vocab": rlogin.ua_vocab(e.get("ua")), "cc": cc, "kh": rlogin.kill_hash(tok), "until": now + rlogin.KILL_TTL, "kicked": False}
+        with self.login_lock:
+            lg["events"] = ([ev] + list(lg.get("events") or []))[:rlogin.EVENTS_MAX]
+            try:
+                self.store.save()
+            except OSError:
+                pass
+        act = [{"action": "http", "label": "끊기", "url": f"{self.ntfy()}/{lg['control']}", "method": "POST", "body": "fsk1." + tok, "clear": True}]
+        self._security("login", login_note(guest, e.get("ua"), cc, now), click=f"{self.site()}#kill={lg['control']}.{tok}.{now}", actions=act)
+        if self.studio:  # 방금 보안 알림을 보냈으니 밖에서 작업 '새 세션' 알림은 또 울리지 않게
+            self.studio.sessions.seen[dev["id"]] = now
+        self.touch(dev)
+        if not guest:
+            self.pub.beacon(important=True)
+        self.log(f"밖에서 아이디로 연결했어요 · {ev['vocab']} ({'이번만' if guest else '기억함'})")
+        self._control_ensure()
+        d = self.store.data
+        inner = {"v": 2, "via": "login", "url": self.url, "pc": {"id": d["pc"]["id"], "name": d["pc"]["name"]},
+                 "device": {"id": dev["id"], "name": dev["name"]}, "keys": {"auth": dev["auth"], "beacon": dev["beacon"]},
+                 "login": {"show": lg["idShow"]}}
+        if guest:
+            inner.update(guest=True, exp=int(dev["exp"]))
+        else:
+            inner.update(beacon={"server": self.ntfy(), "topic": d["topics"]["beacon"]}, notify=None)
+        sealed = "fsl2." + gcm_seal(rlogin.seal_key(K, e["T"]), json.dumps(inner, ensure_ascii=False), rlogin.sealed_aad(lid, d["pc"]["id"]))
+        return {"v": 1, "M2": _b64u(rlogin.m2(K, e["T"], M1, sealed)), "sealed": sealed, "remembered": not guest, "time": now}
+
+    # 서명 길 (연결된 기기)
+    def _manage(self, dev):
+        if dev.get("via", "code") != "code":  # 아이디로 연결한 기기·이번만 기기는 보기·끊기·풀기를 못 함 (D-255)
+            raise ActionError(LOGIN_MSG["not_allowed"], 403, "not_allowed")
+
+    def r_login_events(self, dev):
+        self._manage(dev)
+        v = self.login_view()
+        return {"ok": True, "login": self._login_brief(True), "events": v.get("events") or [], "failsToday": v.get("failsToday") or 0}
+
+    def r_login_kick(self, dev, b):
+        self._manage(dev)
+        ref = b.get("ref")
+        if not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9_-]{6,24}", ref):
+            raise ActionError("잘못된 요청이에요")
+        try:
+            self.login_kill(ref=ref, where="휴대폰에서")
+        except ValueError as e:
+            raise ActionError(str(e), 404) from None
+        return {"ok": True}
+
+    def r_login_unlock(self, dev):
+        self._manage(dev)
+        try:
+            self.login_unlock("휴대폰에서")
+        except ValueError as e:
+            raise ActionError(str(e), 409) from None
+        return {"ok": True}
+
+    def r_login_logout(self, dev):
+        if not dev.get("guest"):
+            raise ActionError("이번만 연결한 기기에서만 할 수 있어요", 403, "not_allowed")
+        self.guest_logout(dev["id"])
+        return {"ok": True}
+
+    def guest_logout(self, dev_id):
+        """[이 기기에서 나가기] (휴대폰 페이지 /r/login/logout · 스튜디오 /s/logout): 그 이번만 기기를 버림."""
+        dev = self.store.guests.get(dev_id)
+        if dev and self._drop_guests({dev_id}, "logout", "이 기기에서 나감"):
+            self.log(f"이번만 연결한 기기가 나갔어요 · {clean(dev['name'], 40)}")
+
+    # [끊기] 주제 듣기 (remote-login-control · 터널이 꺼져 있어도 · D-255)
+    def _live_events(self):
+        lg = self.store.login() if self.store else None
+        now = self.clock()
+        return [e for e in (lg.get("events") or []) if not e.get("kicked") and e.get("until", 0) > now] if lg else []
+
+    def _control_ensure(self):
+        with self.login_lock:
+            if (self._ctl and self._ctl.is_alive()) or not self._live_events():
+                return
+            self._ctl = threading.Thread(target=self._control_loop, daemon=True, name="remote-login-control")
+            self._ctl.start()
+
+    def _control_loop(self):
+        backoff = 5
+        while not self._ctl_stop.is_set():
+            lg = self.store.login()
+            live = self._live_events()
+            if not lg or not live:
+                return
+            control, since = lg["control"], min(int(e["at"]) for e in live)
+            try:
+                req = urllib.request.Request(f"{self.ntfy()}/{control}/json?since={since}", headers=updater.UA)
+                with updater.urlopen(req, self._ctl_timeout) as r:
+                    backoff = 5
+                    for line in r:
+                        cur = self.store.login()
+                        if self._ctl_stop.is_set() or not cur or cur["control"] != control or not self._live_events():
+                            break
+                        self._control_message(line)
+                    else:
+                        self._ctl_stop.wait(1)
+            except Exception:  # noqa: BLE001 — ntfy·인터넷 문제 → 잠시 뒤 다시 (주소는 기록하지 않음)
+                self._ctl_stop.wait(backoff)
+                backoff = min(60, backoff * 2)
+
+    def _control_message(self, line):
+        try:
+            m = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(m, dict) or m.get("event") != "message":
+            return
+        msg = str(m.get("message") or "").strip()
+        tok = msg[5:] if msg.startswith("fsk1.") else ""
+        if not rlogin.KILL_RE.fullmatch(tok):
+            return
+        # 먼저 살아 있는 [끊기] 표와 맞춰 봄 (sha256 하나 · 싸다) — 맞지 않는 글은 세지도 않고 버림: 주제를 아는 사람이 가짜 'fsk1.…'를
+        # 쏟아부어도 진짜 [끊기]가 밀려나지 않게. 1분에 30개 제한은 진짜 표에만 (표는 많아야 20개 · 한 번 쓰면 끝)
+        kh = rlogin.kill_hash(tok)
+        if not any(hmac.compare_digest(str(e.get("kh")), kh) for e in self._live_events()):
+            return
+        now = self.clock()
+        while self._ctl_seen and now - self._ctl_seen[0] > 60:
+            self._ctl_seen.popleft()
+        if len(self._ctl_seen) >= 30:
+            return
+        self._ctl_seen.append(now)
+        try:
+            self.login_kill(kh=kh, where="알림에서")
+        except ValueError:
+            pass
+
+    def _login_tick(self):
+        """5초마다: 이번만 기기 정리(30분 안 씀·12시간) · 주고받는 중 정리 · 3시간마다 'PC 찾기' 기록과 겹침 살피기 · [끊기] 듣기."""
+        if self.pending is None:
+            return
+        now, sc = self.clock(), rlogin.time_scale()
+        self.pending.sweep()
+        old = [g["id"] for g in list(self.store.guests.values()) if now - (g.get("lastSeen") or 0) > GUEST_IDLE * sc or now >= g["exp"]]
+        if old:
+            self._drop_guests(set(old), "expired", "이번만 기기 시간 끝")
+        lg = self.store.login()
+        if not lg or not lg.get("enabled"):
+            return
+        if now - self._lookup_at >= LOOKUP_HB * sc:
+            self._publish_lookup()
+        if now - self._collision_at >= LOOKUP_HB * sc:
+            self._collision_at = now
+            self._recheck_collision()
+        self._control_ensure()
 
 
 # ---------- 허용 동작 (그 밖은 400) ----------
@@ -2136,14 +2981,18 @@ class RemoteHandler(BaseHTTPRequestHandler):
         path = u.path
         # 3. 요청 수 (Cloudflare 가 붙이는 실제 주소 기준)
         ip = (self.headers.get("Cf-Connecting-Ip") or "").strip()[:64] or self.client_address[0]
-        if svc.limiter.locked(ip):
+        login_open = (method, path) in LOGIN_OPEN
+        net = net_of(ip) if login_open else None  # 아이디 연결의 열린 길: 막기·요청 수는 인터넷 대역으로도 (IPv6 주소 바꾸기로 못 피함)
+        if svc.limiter.locked(ip) or (net and svc.limiter.locked(net)):
             return self._json(429, {"error": "잠시 막았어요 · 15분 뒤 다시 해 주세요"}, {"Retry-After": str(LOCKOUT)})
         studio = not path.startswith("/r/")  # 밖에서 작업 화면 (D-230) — /r/* 는 아래 예전 순서 그대로
         if studio and not hasattr(self, "studio_call"):  # 앱이 화면 처리기를 넘겨주지 않음 → 그 밖의 길은 없음
             return self._json(401, {"error": "연결 정보가 없어요", "code": "none"})
-        bucket = rstudio.bucket_of(path) if studio else "open" if path in ("/r/ping", "/r/pair") else "auth"
-        if not svc.limiter.take(bucket, ip):
+        bucket = rstudio.bucket_of(path) if studio else "open" if path in ("/r/ping", "/r/pair") else "login" if login_open else "auth"
+        if not svc.limiter.take(bucket, net or ip):
             return self._json(429, {"error": "너무 자주 눌렀어요 · 잠시 뒤 다시 해 주세요"}, {"Retry-After": "5"})
+        if login_open and path == "/r/login/start" and not svc.limiter.take("login_start", "*"):  # PC 하나에 모두 합친 start 수 (거듭제곱 전에)
+            return self._json(429, {"ok": False, "code": "busy", "error": LOGIN_MSG["busy"]}, {"Retry-After": "5"})
         if studio:
             return rstudio.gate(self, method, svc, ip)
         # 4. CORS · Origin · JSON
@@ -2171,7 +3020,7 @@ class RemoteHandler(BaseHTTPRequestHandler):
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 return self._json(400, {"error": "잘못된 요청이에요"})
-            if n < 0 or n > BODY_MAX:
+            if n < 0 or n > (LOGIN_BODY_MAX if login_open else BODY_MAX):  # 아이디 연결의 열린 길은 4KB 까지 (읽기 전에)
                 self.close_connection = True
                 return self._json(413, {"error": "요청이 너무 커요"})
             body = self.rfile.read(n) if n else b""
@@ -2189,6 +3038,19 @@ class RemoteHandler(BaseHTTPRequestHandler):
             except PairError as e:
                 self._fail(svc, ip)
                 return self._json(403, {"error": str(e), "code": e.code, "time": int(svc.clock())})
+        if login_open:  # 아이디·비밀번호로 연결 (D-251): 열린 길 (Origin·JSON·4KB 는 위에서) · 틀린 비밀번호는 잠금 횟수에도 셈
+            b = _json_body(body)
+            if b is None:
+                return self._json(400, {"ok": False, "code": "bad_request", "error": LOGIN_MSG["bad_request"]})
+            ua, cc = self.headers.get("User-Agent") or "", self.headers.get("Cf-Ipcountry") or ""
+            try:
+                fn = svc.r_login_start if path.endswith("/start") else svc.r_login_finish
+                return self._json(200, fn(b, ip, ua, cc))
+            except LoginError as e:
+                if e.code == "bad" or e.counted:  # 틀린 비밀번호 (그 시도로 잠겼어도) → 주소와 인터넷 대역 둘 다 셈
+                    self._fail(svc, ip)
+                    self._fail(svc, net)
+                return self._json(e.status, dict({"ok": False, "code": e.code, "error": str(e), "time": int(svc.clock())}, **e.extra))
         try:  # 서명은 받은 본문 바이트 그대로 확인 → 그 뒤에만 JSON 을 읽음
             dev = svc.auth.verify(self.headers.get("Authorization"), method, self.path, body, svc.host())
         except AuthError as e:
@@ -2203,8 +3065,13 @@ class RemoteHandler(BaseHTTPRequestHandler):
                   ("GET", "/r/library"): lambda: svc.r_library(dev, ip), ("GET", "/r/outputs"): lambda: svc.r_outputs(dev, ip),
                   ("GET", "/r/choices"): lambda: svc.r_choices(dev), ("POST", "/r/action"): lambda: svc.r_action(dev, b),
                   ("POST", "/r/cancel"): lambda: svc.r_cancel(dev, b.get("job")), ("POST", "/r/forget"): lambda: svc.r_forget(dev),
-                  ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev), ("POST", "/r/handoff"): lambda: svc.r_handoff(dev, b, ip)}
+                  ("POST", "/r/notify-test"): lambda: svc.r_notify_test(dev), ("POST", "/r/handoff"): lambda: svc.r_handoff(dev, b, ip),
+                  # 아이디·비밀번호로 연결 (D-255): 보기·끊기·풀기는 QR·코드 기기만 · 나가기는 이번만 기기만
+                  ("GET", "/r/login/events"): lambda: svc.r_login_events(dev), ("POST", "/r/login/kick"): lambda: svc.r_login_kick(dev, b),
+                  ("POST", "/r/login/unlock"): lambda: svc.r_login_unlock(dev), ("POST", "/r/login/logout"): lambda: svc.r_login_logout(dev)}
         if (method, path) == ("POST", "/r/remote-off"):  # 더 안전하게만 (휴대폰에서 켜는 길은 없음)
+            if dev.get("guest"):  # 이번만 기기(빌린 기기)는 모두의 원격 접속을 끄지 못함 — 끝낼 때는 [이 기기에서 나가기] (D-256)
+                return self._json(403, {"ok": False, "code": "not_allowed", "error": LOGIN_MSG["guest_off"]})
             svc.log(f"원격 · {clean(dev['name'], 40)} · 원격 접속 끄기")
             self._json(200, {"ok": True})
             threading.Timer(0.3, svc.turn_off, args=("user",)).start()

@@ -412,6 +412,7 @@
   .rbox ol.aplan { margin: 0 0 4px; padding-left: 20px; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
   .rmask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 8; padding: 20px; }
   .rmask.show { display: flex; }
+  #rlMask { z-index: 9; }
   .rbox { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; }
   .rbox h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.3px; display: flex; align-items: center; gap: 8px; }
   .rbox h2 .sp { flex: 1; }
@@ -425,7 +426,6 @@
   .rbox .rerr { color: var(--danger); font-weight: 600; font-size: 13.5px; line-height: 1.55; }
   .rbox .rpair { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; background: var(--surface-2); border-radius: 12px; padding: 14px; margin-top: 10px; }
   .rbox .rpair svg { width: 220px; height: 220px; border-radius: 8px; display: block; }
-  .rbox .rcode { font: 700 22px/1.3 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 1px; margin: 6px 0; user-select: all; }
   .rbox .rdev { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
   .rbox .rdev:last-child { border-bottom: 0; }
   .rbox .rdev b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -1250,6 +1250,7 @@
 <div class="toast" id="toast"></div>
 <div class="rmask" id="autoMask"><div class="card rbox" id="autoBox" role="dialog" aria-modal="true" aria-label="끝까지 자동으로"></div></div>
 <div class="rmask" id="rmMask"><div class="card rbox" id="rmBox" role="dialog" aria-modal="true" aria-label="휴대폰으로 보기"></div></div>
+<div class="rmask" id="rlMask"><div class="card rbox" id="rlBox" role="dialog" aria-modal="true" aria-label="아이디·비밀번호"></div></div>
 <div class="drawer" id="drawer"><header>작업 기록<span class="sp"></span><button class="linkbtn" id="btnLogClose">닫기</button></header><pre id="logtxt"></pre></div>
 
 <script>
@@ -4306,7 +4307,7 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
 })();
 </script>
 <script>
-/* 휴대폰으로 보기: 원격 접속 켜기·휴대폰 연결(QR·코드)·연결된 휴대폰·설정 (/api/remote*, remote.py) — 창을 연 동안만 2초마다 새로 */
+/* 휴대폰으로 보기: 원격 접속 켜기·휴대폰 연결(QR)·연결된 휴대폰·설정 (/api/remote*, remote.py) — 창을 연 동안만 2초마다 새로 */
 const RM = { open: false, iv: null, key: "", d: null };
 function remoteDot(r) {
   const d = $("rmDot"); if (!d || !r) return;
@@ -4340,15 +4341,15 @@ function rmQr(rows) {  // 서버가 준 '0'·'1' 줄 → SVG (글자를 그대�
 function rmRender(d) {
   const st = d.state, set = d.settings || {}, nt = set.notify || {};
   const sd = d.studio || { available: false, allowed: false, sessions: [] };
-  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.pairNote, d.retryAt, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen), x.stale]), set, d.notify.topic,
-    sd.allowed, sd.sessions.map(x => [x.id, x.active, rmAgo(x.lastSeen), x.uploads])]);
+  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.pairNote, d.retryAt, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen), x.stale, x.via]), set, d.notify.topic,
+    sd.allowed, sd.sessions.map(x => [x.id, x.active, rmAgo(x.lastSeen), x.uploads, x.guest]), d.login]);
   if (key === RM.key) return;
   RM.key = key;
   let h = `<h2>휴대폰으로 보기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
   if (st === "off") {
     h += `<p class="lead">PC에서 하는 작업을 휴대폰으로 보고, 밖에서도 영상 받기·편집점 찾기·내보내기를 시킬 수 있어요. 켜 둔 동안에는 PC를 켜 두세요.</p>
       <button class="btn primary" data-rm="on">원격 접속 켜기</button>
-      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>`;
+      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>` + rlOffNote(d);
   } else if (st === "preparing") {
     h += `<p class="lead">연결 도구 받는 중${d.prep != null ? " · " + esc(d.prep) + "%" : "…"}</p><div class="rbar"><i style="width:${Math.max(3, +d.prep || 0)}%"></i></div>
       <div class="rbtns"><button class="btn" data-rm="off">그만두기</button></div>`;
@@ -4363,27 +4364,28 @@ function rmRender(d) {
     const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));  // 주소는 서버(remote.SITE) 하나에서만
     h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰·노트북에서 <b>${site}</b> 을 열어 주세요</p>`;
     if (d.pair) {
-      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">노트북·태블릿은 그 기기에서 <b>${site}</b> 을 열고 이 코드를 넣어 주세요</div>
-        <div class="rcode">${esc(d.pair.code)}</div><div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
+      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">노트북·태블릿·아이폰 홈 화면 앱은 그 기기에서 <b>${site}</b> 을 열고 아래 '아이디·비밀번호로 연결'로 연결해요</div>
+        <div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
         <div class="rbtns"><button class="btn sm" data-rm="pcancel">취소</button></div></div></div>`;
     } else {
       if (d.pairNote) h += `<p class="rnote">${esc(d.pairNote)}</p>`;
       h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button>`
-        + `<div class="small">노트북·태블릿도 같은 단추로 연결해요 (휴대폰 대신 그 기기에서 코드를 넣어요)</div>`
+        + `<div class="small">노트북·태블릿은 아래 '아이디·비밀번호로 연결'로 연결해요</div>`
         + (d.devices.length >= d.maxDevices ? `<div class="small">기기는 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 기기를 먼저 끊어 주세요</div>` : "");
     }
     h += `<div class="rsec"><h3>연결된 기기 (휴대폰·노트북)</h3>` + (d.devices.length ? d.devices.map(x =>
-        `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
+        `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}${x.via === "login" ? " · 아이디로" : ""}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
         + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 기기 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
     if (sd.available) {  // 밖에서 작업 (D-234): 연결한 기기에서 PC 스튜디오 화면 그대로 · 처리는 이 PC
       const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
       h += `<div class="rsec"><h3>밖에서 작업</h3>
         <div class="rrow"><label><input type="checkbox" data-rm="studio"${sd.allowed ? " checked" : ""}> 밖에서 작업 허용</label></div>
         <div class="small">연결한 휴대폰·노트북에서 <b>${site}</b> 을 열고 [PC 스튜디오 열기]를 누르면 이 PC 화면 그대로 밖에서 작업해요 · 처리는 이 PC가 해요 · 끄면 휴대폰으로 보기만 돼요</div>`
-        + (sd.sessions.length ? sd.sessions.map(x => `<div class="rdev"><b title="${esc(x.device)}">${esc(x.device)}</b><span>${esc(rmClock(x.startedAt))} 시작 · ${x.active ? "지금 쓰는 중" : esc(rmAgo(x.lastSeen))}${x.uploads ? ` · 올리는 파일 ${esc(x.uploads)}개` : ""}</span><button class="btn sm" data-rm="scut" data-id="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button></div>`).join("")
+        + (sd.sessions.length ? sd.sessions.map(x => `<div class="rdev"><b title="${esc(x.device)}">${esc(x.device)}${x.guest ? " · 이번만" : ""}</b><span>${esc(rmClock(x.startedAt))} 시작 · ${x.active ? "지금 쓰는 중" : esc(rmAgo(x.lastSeen))}${x.uploads ? ` · 올리는 파일 ${esc(x.uploads)}개` : ""}</span><button class="btn sm" data-rm="scut" data-id="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button></div>`).join("")
           + `<div class="rbtns"><button class="btn sm" data-rm="scutAll">모두 끊기</button></div>` : `<div class="small">지금 밖에서 작업 중인 기기는 없어요</div>`)
         + `<div class="small">[끊기]는 지금 연결만 끝내요 · 그 기기를 아예 못 쓰게 하려면 위 '연결된 기기'에서 [끊기]를 눌러 주세요 (열쇠까지 지워요)</div></div>`;
     }
+    h += rlSection(d);
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
     h += `<div class="rsec"><h3>설정</h3>
@@ -4394,7 +4396,7 @@ function rmRender(d) {
         `<label><input type="checkbox" data-rm="notify" data-k="${k}"${nt[k] !== false ? " checked" : ""}> ${t}</label>`).join("")}
         <button class="btn sm" data-rm="test"${d.devices.length ? "" : " disabled"}>알림 시험</button></div>
       <div class="small">알림은 ntfy 앱으로 받아요 · 휴대폰을 연결하면 휴대폰 화면이 알림 설정을 안내해요 · 주제 이름 <span class="rtopic">${esc(d.notify.topic)}</span> <button class="linkbtn" data-rm="copyTopic">복사</button></div>
-      <div class="small">스튜디오 알림은 '작업이 끝났어요' 같은 짧은 문장뿐이에요 · 알림이 무엇을 설치하라고 하면 열지 말고 무시해 주세요</div></div>
+      <div class="small">스튜디오 알림은 '작업이 끝났어요' 같은 짧은 문장뿐이에요 · 알림이 무엇을 설치하라고 하면 열지 말고 무시해 주세요 · 알림은 비밀번호를 묻지 않아요</div></div>
       <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
   }
   $("rmBox").innerHTML = h;
@@ -4411,7 +4413,8 @@ function rmClose() { RM.open = false; clearInterval(RM.iv); RM.iv = null; $("rmM
 async function rmPost(path, body) { const r = await api(path, body || {}); RM.key = ""; await rmLoad(); return r; }
 $("btnRemote").onclick = rmOpen;
 $("rmMask").addEventListener("click", e => { if (e.target === $("rmMask")) rmClose(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && RM.open) rmClose(); });
+document.addEventListener("keydown", e => { if (e.key !== "Escape") return; if (RL.kind) rlClose(); else if (RM.open) rmClose(); });
+$("rmBox").addEventListener("click", e => { const b = e.target.closest("[data-rl]"); if (b) rlAct(b.dataset.rl, b); });
 $("rmBox").addEventListener("click", async e => {
   const b = e.target.closest("[data-rm]"); if (!b || b.tagName === "SELECT" || b.tagName === "INPUT") return;
   const a = b.dataset.rm;
@@ -4437,6 +4440,214 @@ $("rmBox").addEventListener("change", e => {
   }
   if (t.dataset.rm === "notify") { const n = {}; $("rmBox").querySelectorAll('[data-rm="notify"]').forEach(c => n[c.dataset.k] = c.checked); rmPost("/api/remote/settings", { notify: n }); }
 });
+/* 아이디·비밀번호로 연결 (D-250~D-258): 휴대폰으로 보기 창의 칸(rlSection · RM.key 에 들어감 · 2초마다 다시 그림) +
+   따로 뜨는 창 #rlMask/#rlBox (열 때 한 번만 그리고 rmLoad 가 건드리지 않음 · 열기 전에는 비어 있어 이 화면에 비밀번호 칸이 없음) */
+const RL = { kind: null, t: null, busy: false };
+const rlDay = t => { const d = new Date(t * 1000); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+// 막힌 때까지: 오늘이면 시각만 · 내일이면 '내일 오후 3:40' · 그 뒤면 '10월 14일 오후 3:40' (24시간 막힘이 '벌써 지난 시각'처럼 읽히지 않게)
+const rlUntil = t => {
+  const d = new Date(t * 1000), n = new Date(), tm = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1);
+  return (d.toDateString() === n.toDateString() ? "" : d.toDateString() === tm.toDateString() ? "내일 " : rlDay(t) + " ") + rmClock(t);
+};
+// 영문 자판 꼴: 한글이 든 아이디만 (영문 아이디는 같은 글이 두 번 나오지 않게 · 점·- 를 뺀 꼴이 다르면 보여 줌)
+const rlKeys = L => String(L.idShow || "").toLowerCase() === String(L.idKeys || "") ? "" : ` (영문 자판으로는 ${esc(L.idKeys)})`;
+async function rlPost(path, body) {  // 오류는 알림 글 대신 창 안에 (api() 는 오류를 알림으로 띄움)
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    let j = {};
+    try { j = await r.json(); } catch (e) { /* 글이 아님 */ }
+    return { status: r.status, j };
+  } catch (e) { return { status: 0, j: { error: "PC 스튜디오와 연결이 끊겼어요 · 잠시 뒤 다시 해 주세요" } }; }
+}
+function rlSection(d) {
+  const L = d.login || {};
+  const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
+  let h = `<div class="rsec" id="rlSec"><h3>아이디·비밀번호로 연결 (밖에서 새 기기)</h3>`;
+  if (L.bad) h += `<p class="rerr">아이디·비밀번호 설정을 읽지 못했어요 · 다시 정해 주세요</p>`;
+  if (!L.set) {
+    return h + `<div class="small">PC 화면을 볼 수 없는 곳(사무실 PC·노트북·다른 휴대폰)에서는 아이디와 비밀번호로 연결해요 · QR은 PC 앞에서 휴대폰으로 찍어요</div>
+      <div class="small">이미 연결된 기기 ${esc(d.devices.length)}대는 비밀번호 없이 그대로 열려요</div>
+      <div class="rbtns"><button class="btn primary" data-rl="set">아이디·비밀번호 정하기</button></div></div>`;
+  }
+  const s = L.suspended, again = `<div class="rbtns"><button class="btn primary" data-rl="pw">비밀번호 바꾸기</button><button class="btn" data-rl="resume">그대로 다시 켜기</button></div>`;
+  if (s && s.why === "kick") h += `<p class="rerr">밖에서 [끊기]를 눌러 아이디 연결을 잠갔어요 · 비밀번호가 새어 나갔을 수 있으니 바꿔 주세요</p>` + again;
+  else if (s) h += `<p class="rerr">비밀번호가 ${esc(L.total)}번 틀려서 아이디 연결을 잠갔어요 · 누가 맞히려 했을 수 있어요 · 새 비밀번호로 바꾸는 걸 권해요</p>` + again;
+  else if (L.lock) h += `<p class="rerr">비밀번호가 여러 번 틀려서 ${esc(rlUntil(L.lock.until))}까지 아이디 연결을 막았어요 · 내가 아니라면 비밀번호를 바꿔 주세요</p>
+      <div class="rbtns"><button class="btn" data-rl="unlock">지금 풀기</button></div>`;
+  if (L.collision) h += `<p class="rerr">다른 PC가 같은 아이디를 쓰고 있어요 · 아이디를 바꿔 주세요</p><div class="rbtns"><button class="btn" data-rl="id">아이디 바꾸기</button></div>`;
+  if (!L.enabled) {
+    return h + `<p>꺼져 있어요 · 아이디 <b>${esc(L.idShow)}</b></p>
+      <div class="rbtns"><button class="btn primary" data-rl="on">다시 켜기</button><button class="btn" data-rl="set">아이디·비밀번호 바꾸기</button></div></div>`;
+  }
+  h += `<p><span class="rok">켜져 있어요 ✓</span> · 아이디 <b>${esc(L.idShow)}</b>${rlKeys(L)} · ${esc(rlDay(L.setAt))}에 정함</p>`;
+  if (L.preset) h += `<div class="rnote">미리 정해 둔 비밀번호예요 · 바꾸기를 권해요 <button class="btn sm primary" data-rl="pw">비밀번호 바꾸기</button></div>`;
+  // QR 로 연결한 휴대폰이 없으면 새 기기 알림·[끊기]를 받을 곳이 없음 → '알림이 와요' 대신 그 경고와 [휴대폰 연결하기] (미리 정한 로그인은 정하기 창의 확인을 안 거침)
+  h += `<div class="small">밖에서 <b>${site}</b> → '아이디·비밀번호로 연결' · 이 주소가 아닌 곳에는 비밀번호를 넣지 마세요${L.codeDevices === 0 ? "" : " · 새 기기가 연결되면 휴대폰 알림이 와요"}</div>`;
+  if (L.codeDevices === 0) h += `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>
+    <div class="rbtns"><button class="btn sm" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button></div>`;
+  if (L.autoOffHours > 0) h += `<div class="small">자동으로 끄기가 ${esc(L.autoOffHours)}시간이라, ${esc(L.autoOffHours)}시간 동안 안 쓰면 원격 접속이 꺼져 밖에서 연결할 수 없어요 <button class="btn sm" data-rl="autooff">안 함으로 바꾸기</button></div>`;
+  const ev = L.events || [];
+  if (ev.length) {
+    h += `<div class="small"><b>최근 아이디로 연결한 기기</b></div>` + ev.map(x =>
+      `<div class="rdev"><b>${esc(x.vocab)}</b><span>${esc(rlDay(x.at))} ${esc(rmClock(x.at))} · ${x.kind === "guest" ? "이번만" : "기억함"}${x.active ? " · 지금 쓰는 중" : ""}</span>`
+      + (x.kicked ? `<span>끊었어요</span>` : `<button class="btn sm" data-rl="kick" data-ref="${esc(x.ref)}">끊기</button>`) + `</div>`).join("");
+  }
+  h += `<div class="small">오늘 틀린 시도 ${esc(L.failsToday || 0)}번</div>
+    <div class="rbtns"><button class="btn" data-rl="pw">비밀번호 바꾸기</button><button class="btn" data-rl="id">아이디 바꾸기</button><button class="btn" data-rl="off">끄기</button></div></div>`;
+  return h;
+}
+function rlOffNote(d) {  // 원격 접속이 꺼져 있을 때: 준비된 아이디 연결을 알려 주고 [원격 접속 켜기] 하나만 (D-258 · 저절로 켜지 않음)
+  const L = d.login || {};
+  if (!L.set || !L.enabled) return "";
+  return `<div class="rnote">아이디·비밀번호로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b>${L.preset ? " · 미리 정해 둔 비밀번호예요 · 바꾸기를 권해요" : ""} · 밖에서 쓰려면 위 [원격 접속 켜기]를 눌러 주세요`
+    + (L.preset ? ` <button class="btn sm" data-rl="pw">비밀번호 바꾸기</button>` : "") + `</div>`
+    + (L.codeDevices === 0 ? `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>` : "");
+}
+function rlPwFields(L) {
+  return `<div class="rrow"><span>비밀번호</span><input class="inp" id="rlPw" type="password" autocomplete="new-password" maxlength="128" style="min-width:0;flex:1 1 200px">
+      <button class="btn sm" data-rlx="show">보기</button><button class="btn sm" data-rlx="suggest">쉬운 비밀번호 추천</button></div>
+    <div class="rrow"><span>비밀번호 확인</span><input class="inp" id="rlPw2" type="password" autocomplete="new-password" maxlength="128" style="min-width:0;flex:1 1 200px"></div>
+    <ul class="achk" id="rlChk"></ul>
+    <div class="small">대문자·소문자, 한글·영문 자판은 가리지 않아요 — 같은 글쇠를 누르면 같은 비밀번호예요</div>
+    <div class="small" id="rlSugg" hidden>이 비밀번호를 적어 두거나 휴대폰 브라우저에 저장해 두세요 · 휴대폰에서 한글 자판이 안 나오면 [보기]를 누르고 쳐요</div>
+    <div class="rnote">이 비밀번호를 아는 사람은 밖에서 이 PC 스튜디오를 그대로 쓸 수 있어요 (영상 받기·편집·유튜브 올리기까지) · 다른 사이트에서 쓰는 비밀번호는 쓰지 마세요</div>`
+    + (L.codeDevices === 0
+      ? `<p class="rerr">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>
+         <div class="rrow"><label><input type="checkbox" id="rlAck"> 알고 있어요 · 그래도 켤게요</label></div>`
+      : `<div class="small">새 기기 알림은 휴대폰 ntfy 앱으로 와요 <button class="btn sm" data-rlx="test">알림 시험</button></div>`);
+}
+async function rlOpen(kind) {
+  if (window.FS_REMOTE) return;  // 밖에서 연 스튜디오 화면에는 비밀번호 칸을 그리지 않음 (PC 화면에서만 · L5)
+  try { const d = await (await fetch("/api/remote")).json(); if (d && d.state) RM.d = d; } catch (e) { /* 가진 것으로 */ }  // 방금 연결한 휴대폰 수까지
+  const L = (RM.d && RM.d.login) || {};
+  RL.kind = kind;
+  const head = t => `<h2>${t}<span class="sp"></span><button class="linkbtn" data-rlx="close">닫기</button></h2>`;
+  const foot = (ok, danger) => `<p class="rerr" id="rlErr" hidden></p><p class="small" id="rlBusy" hidden>아이디가 겹치는지 확인하는 중이에요… (몇 초)</p>
+    <div class="rbtns"><button class="btn" data-rlx="close">취소</button><button class="btn ${danger ? "" : "primary"}" data-rlx="save">${ok}</button></div>`;
+  let h = "";
+  if (kind === "set") {
+    h = head("아이디·비밀번호 정하기")
+      + `<div class="rrow"><span>아이디</span><input class="inp" id="rlId" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40" style="min-width:0;flex:1 1 200px"></div>
+         <div class="small">한글·영문·숫자 (영문·숫자면 6글자 이상, 한글이면 3글자 이상) · 남이 짐작하기 어려운 걸로 (채널 이름·전화번호는 피해 주세요)</div>`
+      + rlPwFields(L) + foot("저장");
+  } else if (kind === "pw") {
+    h = head("비밀번호 바꾸기") + rlPwFields(L)
+      + `<div class="rrow"><label><input type="checkbox" id="rlRevoke" checked> 아이디·비밀번호로 연결한 기기도 모두 끊기 (권장) · 이 PC에 ${esc(L.loginDevices || 0)}대</label></div>` + foot("저장");
+  } else if (kind === "id") {
+    h = head("아이디 바꾸기")
+      + `<div class="rrow"><span>새 아이디</span><input class="inp" id="rlId" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40" style="min-width:0;flex:1 1 200px"></div>
+         <div class="small">한글·영문·숫자 (영문·숫자면 6글자 이상, 한글이면 3글자 이상) · 남이 짐작하기 어려운 걸로 (채널 이름·전화번호는 피해 주세요)</div>
+         <div class="small">바꾸면 옛 아이디로는 찾을 수 없어요 · 기억한 기기는 그대로 써요</div>` + foot("저장");
+  } else if (kind === "off") {
+    h = head("아이디·비밀번호로 연결 끄기")
+      + `<p class="lead">아이디·비밀번호로 연결을 끌까요? 밖에서 새 기기로 연결할 수 없게 돼요</p>
+         <div class="rrow"><label><input type="checkbox" id="rlRevoke"> 아이디로 연결한 기기도 모두 끊기</label></div>` + foot("끄기", true);
+  } else return;
+  $("rlBox").innerHTML = h;
+  $("rlMask").classList.add("show");
+  if (kind === "set" && $("rlId")) $("rlId").value = L.set ? (L.idShow || "") : (L.idHint || "");  // 아직 안 정한 PC 는 wavely1213 을 미리 (D-258)
+  const first = $("rlId") || $("rlPw");
+  if (first) first.focus();
+  rlCheck();
+}
+function rlClose() {
+  clearTimeout(RL.t);
+  RL.kind = null;
+  $("rlBox").querySelectorAll("input").forEach(i => { i.value = ""; });
+  $("rlBox").innerHTML = "";
+  $("rlMask").classList.remove("show");
+}
+const RL_CHECKS = [
+  ["8글자 이상 (한글이면 5글자 이상)", (p, n) => n > 0 && !p.includes("short") && !p.includes("long") && !p.includes("chars") && !p.includes("empty")],
+  ["영문과 숫자 섞기 (한글 5글자 이상이면 숫자 없어도 돼요)", (p, n) => n > 0 && !p.includes("letters") && !p.includes("digits") && !p.includes("short")],
+  ["아이디와 다르게", (p, n) => n > 0 && !p.includes("id")],
+  ["흔한 비밀번호 아님", (p, n) => n > 0 && !p.includes("common") && !p.includes("run") && !p.includes("personal")]];
+function rlDrawChecks(probs, n) {
+  const ul = $("rlChk");
+  if (!ul) return;
+  ul.innerHTML = RL_CHECKS.map(([t, ok]) => { const y = ok(probs, n); return `<li class="${y ? "info" : "warn"}">${y ? "✓" : "○"} ${esc(t)}</li>`; }).join("");
+}
+function rlCheck() {  // 살아 있는 점검표: 0.3초 쉬었다가 PC 서버에 물어봄 (비밀번호는 저장·기록하지 않음)
+  clearTimeout(RL.t);
+  if (!$("rlPw")) return;
+  RL.t = setTimeout(async () => {
+    const pw = $("rlPw") ? $("rlPw").value : "";
+    if (!pw) return rlDrawChecks([], 0);
+    const body = { password: pw };
+    if ($("rlId") && $("rlId").value) body.id = $("rlId").value;
+    const r = await rlPost("/api/remote/login/check", body);
+    if (r.j && Array.isArray(r.j.problems) && RL.kind) rlDrawChecks(r.j.problems, r.j.canonLen || 0);
+  }, 300);
+}
+function rlErr(msg) { const e = $("rlErr"); if (e) { e.textContent = msg || ""; e.hidden = !msg; } }
+async function rlSave(force) {
+  if (RL.busy) return;
+  const kind = RL.kind, body = { force: !!force };
+  if (kind === "set" || kind === "pw") {
+    body.password = $("rlPw").value; body.password2 = $("rlPw2").value;
+    body.ack = !!($("rlAck") && $("rlAck").checked);
+    if (kind === "set") body.id = $("rlId").value;
+    else body.revoke = $("rlRevoke").checked;
+  } else if (kind === "id") body.id = $("rlId").value;
+  else if (kind === "off") body.revoke = $("rlRevoke").checked;
+  const path = { set: "/api/remote/login", pw: "/api/remote/login", id: "/api/remote/login/id", off: "/api/remote/login/off" }[kind];
+  RL.busy = true; rlErr("");
+  if ($("rlBusy") && kind !== "off") $("rlBusy").hidden = false;
+  const r = await rlPost(path, body);
+  RL.busy = false;
+  if ($("rlBusy")) $("rlBusy").hidden = true;
+  if (r.status === 409 && r.j.code === "unchecked") { if (confirm(r.j.error)) return rlSave(true); return; }
+  if (!r.j.ok) return rlErr(r.j.error || "저장하지 못했어요 · 잠시 뒤 다시 해 주세요");
+  rlClose();
+  RM.key = ""; rmLoad();
+}
+async function rlAct(a, b) {
+  if (a === "set" || a === "pw" || a === "id" || a === "off") return rlOpen(a);
+  if (a === "on") {
+    let r = await rlPost("/api/remote/login/on", {});
+    if (r.status === 409 && r.j.code === "unchecked" && confirm(r.j.error)) r = await rlPost("/api/remote/login/on", { force: true });
+    if (!r.j.ok && r.j.error && r.j.code !== "unchecked") toast(r.j.error);
+  } else if (a === "unlock") await rlPost("/api/remote/login/unlock", {});
+  else if (a === "resume") {
+    if (!confirm("비밀번호를 바꾸지 않고 다시 켤까요? 누가 비밀번호를 알고 있다면 다시 들어올 수 있어요")) return;
+    await rlPost("/api/remote/login/unlock", {});
+  } else if (a === "kick") {
+    if (!confirm("이 기기를 끊을까요? 비밀번호가 새어 나갔을 수 있어서 아이디·비밀번호 연결도 잠가요")) return;
+    const r = await rlPost("/api/remote/login/kick", { ref: b.dataset.ref });
+    if (!r.j.ok) toast(r.j.error || "끊지 못했어요");
+  } else if (a === "autooff") await rlPost("/api/remote/settings", { autoOffHours: 0 });
+  RM.key = ""; rmLoad();
+}
+$("rlBox").addEventListener("click", async e => {
+  const b = e.target.closest("[data-rlx]"); if (!b) return;
+  const a = b.dataset.rlx;
+  if (a === "close") return rlClose();
+  if (a === "save") return rlSave(false);
+  if (a === "show") {
+    const show = $("rlPw").type === "password";
+    ["rlPw", "rlPw2"].forEach(id => { if ($(id)) $(id).type = show ? "text" : "password"; });
+    b.textContent = show ? "숨기기" : "보기";
+    return;
+  }
+  if (a === "suggest") {
+    const body = $("rlId") && $("rlId").value ? { id: $("rlId").value } : {};
+    const r = await rlPost("/api/remote/login/suggest", body);
+    if (!r.j.password) return;
+    $("rlPw").value = $("rlPw2").value = r.j.password;
+    ["rlPw", "rlPw2"].forEach(id => { $(id).type = "text"; });
+    const sb = $("rlBox").querySelector('[data-rlx="show"]'); if (sb) sb.textContent = "숨기기";
+    $("rlSugg").hidden = false;
+    rlErr("");   // 앞서 저장할 때의 오류 글은 지움 (추천 비밀번호까지 거절된 것처럼 보이지 않게)
+    return rlCheck();
+  }
+  if (a === "test") { const r = await rlPost("/api/remote/test", {}); toast(r.j.ok ? "알림을 보냈어요 · 휴대폰을 확인해 주세요" : (r.j.error || "보내지 못했어요")); }
+});
+$("rlBox").addEventListener("input", e => {
+  if (e.target.id === "rlPw" || e.target.id === "rlPw2" || e.target.id === "rlId") rlErr("");  // 고치기 시작하면 앞서의 오류 글은 지움
+  if (e.target.id === "rlPw" || e.target.id === "rlId") rlCheck();
+});
+$("rlBox").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "checkbox") rlSave(false); });
+$("rlMask").addEventListener("click", e => { if (e.target === $("rlMask")) rlClose(); });
 </script>
 </body>
 </html>

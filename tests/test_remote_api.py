@@ -267,7 +267,9 @@ class StatusListTests(Base):
         d = self.svc.store.data
         self.assertNotIn(d["topics"]["notify"], json.dumps(b))  # 알림 주제(= 보내기 열쇠)는 Cloudflare 가 못 보게 잠가서
         self.assertEqual(topics_of(self.svc, self.cred, b), {"beacon": {"server": self.svc.ntfy(), "topic": d["topics"]["beacon"]},
-                                                              "notify": {"server": self.svc.ntfy(), "topic": d["topics"]["notify"]}})
+                                                              "notify": {"server": self.svc.ntfy(), "topic": d["topics"]["notify"]},
+                                                              # 아이디·비밀번호로 연결 모습도 같은 봉투 안 (D-255 · 안 정했으면 꺼짐)
+                                                              "login": {"on": False, "set": False, "manage": True}})
         self.assertTrue(any("~/풋살사관학교_작업/out/x.mp4" in x for x in b["log"]))
         self.assertFalse(any(home in x for x in b["log"]))
         st, _, b2 = self.call("GET", f"/r/status?since={b['logTotal']}")
