@@ -401,7 +401,9 @@ class TestFixtureEndToEnd(WorkBase):
 
     @NEED_OCR
     def test_captions_with_ocr(self):
-        name, sev, pe = self.run_plan()
+        # 이 시험은 '무엇을 읽어 내는지'만 본다 — 시험 PC 가 바쁠 때 느린 PC 규칙(한 장 0.3초 넘으면 덜 읽음)이 켜져 결과가 흔들리지 않게 끔
+        with mock.patch.object(plan, "OCR_SLOW", float("inf")):
+            name, sev, pe = self.run_plan()
         self.assertTrue(pe["models"]["ocr"])
         self.assertLessEqual(pe["ocrN"], plan.OCR_CAP)
         caps = plan.detect(pe, sev, plan._transcript(name))["caps"]
