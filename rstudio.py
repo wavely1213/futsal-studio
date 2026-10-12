@@ -117,7 +117,7 @@ class Sessions:
         self.seen = {}                           # 기기 → 마지막으로 세션이 있던 때 (새 세션 알림을 30분에 한 번만)
 
     def _expired(self, rec, now):
-        return now - rec["last"] > IDLE or now - rec["created"] > ABSOLUTE
+        return now - rec["last"] > IDLE or now - rec["created"] > ABSOLUTE or now >= rec.get("hardEnd", float("inf"))
 
     def _forget(self, rec, code, why):
         self.items.pop(rec["hash"], None)
@@ -132,6 +132,9 @@ class Sessions:
         rec = {"id": secrets.token_hex(8), "hash": _h(tok), "device": dev["id"], "name": clean(dev.get("name"), 40) or "기기",
                "csrf": secrets.token_urlsafe(32), "created": now, "last": now, "nets": [net], "prefs": {"fullRes": False},
                "quietBefore": now - self.seen.get(dev["id"], -1e12) >= NOTICE_QUIET}
+        if dev.get("guest"):  # '이번만' 기기 (D-256): 그 기기가 끝나는 때(12시간)를 넘지 않음
+            rec["guest"] = True
+            rec["hardEnd"] = min(now + ABSOLUTE, float(dev.get("exp") or now + ABSOLUTE))
         with self.lock:
             old = [r for r in self.items.values() if r["device"] == dev["id"]]
             for r in old:
@@ -552,7 +555,8 @@ def read_cookie(h, name):
 
 
 def set_cookie(svc, tok, max_age):
-    attrs = ["Path=/", "HttpOnly", "SameSite=Strict", f"Max-Age={max(0, int(max_age))}"]
+    """max_age None: 세션 쿠키 (브라우저를 닫으면 사라짐 · '이번만' 기기 · D-256)."""
+    attrs = ["Path=/", "HttpOnly", "SameSite=Strict"] + ([f"Max-Age={max(0, int(max_age))}"] if max_age is not None else [])
     if not svc.dev():
         attrs.insert(1, "Secure")
     return f"{cookie_name(svc)}={tok}; " + "; ".join(attrs)
@@ -736,7 +740,7 @@ def _public(h, svc, method, path, ip, net):
     tok, rec, old = st.sessions.create(dev, net)
     svc.touch(dev)
     svc.studio_started(rec, bool(old))
-    hdr = {"Set-Cookie": set_cookie(svc, tok, ABSOLUTE)}
+    hdr = {"Set-Cookie": set_cookie(svc, tok, None if dev.get("guest") else ABSOLUTE)}
     return send(h, 200, {"ok": True, "next": v["path"]}, extra=hdr)
 
 
@@ -753,7 +757,8 @@ def _page(h, svc, sess, path):
 
 
 def session_view(svc, sess):
-    return {"ok": True, "device": sess["name"], "pc": svc.store.data["pc"]["name"], "csrf": sess["csrf"], "expiresAt": int(sess["created"] + ABSOLUTE),
+    return {"ok": True, "device": sess["name"], "pc": svc.store.data["pc"]["name"], "csrf": sess["csrf"],
+            "expiresAt": int(min(sess["created"] + ABSOLUTE, sess.get("hardEnd", float("inf")))), "guest": bool(sess.get("guest")),
             "idleSec": IDLE, "site": svc.site(), "pcOnly": PC_ONLY_LIST, "features": FEATURES, "prefs": dict(sess["prefs"]),
             "chunk": CHUNK, "chunkMax": CHUNK_MAX, "upMax": UP_PER_DEVICE, "editUploadMax": EDIT_UPLOAD_MAX}
 
@@ -768,6 +773,8 @@ def own(h, svc, sess, method, path, u, b):
         # 저절로 다시 연결하지 않고 '연결을 끝냈어요'로 잠김 (쿠키를 지우면 'none' 이라 원격 홈이 다시 넘겨줘 버림 · D-236)
         st.sessions.end(lambda r: r is sess, "logout", "밖에서 연결 끝냄")
         svc.studio_ended([sess])
+        if sess.get("guest"):  # 이번만 기기: [이 기기에서 나가기] → 기기 열쇠까지 버림 (D-256)
+            svc.guest_logout(sess["device"])
         return send(h, 200, {"ok": True, "site": svc.site()})
     if path == "/s/prefs":
         if "fullRes" in b:

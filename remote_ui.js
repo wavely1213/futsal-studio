@@ -293,6 +293,7 @@
       var s = await r.json();
       R.csrf = s.csrf; R.site = s.site || R.site; R.device = s.device || R.device; R.pc = s.pc || ""; R.prefs = s.prefs || R.prefs;
       R.expiresAt = s.expiresAt || 0; R.chunk = s.chunk || R.chunk; R.chunkMax = s.chunkMax || R.chunkMax; R.upMax = s.upMax || R.upMax;
+      R.guest = !!s.guest;
       return true;
     } catch (e) { return false; }
   }
@@ -316,12 +317,25 @@
       el("button", { class: "fsr-btn", type: "button", text: "내 기기에서 올리기", onclick: function () { FS.showUploads(true); } }),
       el("label", { class: "fsr-chk", title: "데이터를 많이 써요" }, full, el("span", { text: "원본 화질로 보기" })),
       el("button", { class: "fsr-btn", type: "button", text: "연결 끝내기", onclick: logout }),
-      el("a", { class: "fsr-btn", href: homeUrl(""), text: "← 원격 홈" }));
+      el("a", { class: "fsr-btn", id: "fsr-home", href: homeUrl(""), text: "← 원격 홈" }));
     var more = el("button", { class: "fsr-btn fsr-more", type: "button", "aria-expanded": "false", text: "메뉴", onclick: function () {
       var open = b.classList.toggle("open"); more.setAttribute("aria-expanded", open ? "true" : "false");
     } });
     b.append(el("span", { class: "fsr-dot", "aria-hidden": "true" }), name, upPct, more, menu);
     document.body.prepend(b);
+  }
+  // '이번만' 연결한 기기 (아이디·비밀번호 · D-256): 원격 홈에는 연결 정보가 남지 않으므로 [← 원격 홈] 대신 [이 기기에서 나가기]
+  function guestBar() {
+    var a = document.getElementById("fsr-home");
+    if (!R.guest || !a || a.tagName === "BUTTON") return;
+    a.replaceWith(el("button", { class: "fsr-btn", id: "fsr-home", type: "button", text: "이 기기에서 나가기", onclick: guestExit }));
+  }
+  async function guestExit() {
+    if (!window.confirm(dirty() ? "저장하지 않은 내용이나 올리던 파일이 있어요. 그래도 이 기기에서 나갈까요?"
+      : "이 기기에서 나갈까요? 다시 쓰려면 아이디·비밀번호로 다시 연결해요")) return;
+    try { await fsFetch("/s/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); } catch (e) { /* 그래도 나감 */ }
+    R.locked = true;
+    location.replace(homeUrl(""));
   }
   async function logout() {
     if (dirty() && !window.confirm("저장하지 않은 내용이나 올리던 파일이 있어요. 그래도 연결을 끝낼까요?")) return;
@@ -604,6 +618,7 @@
     bar();
     refreshSession().then(function () {
       netMark(R.net !== "ok");
+      guestBar();
       var f = document.getElementById("fsr-full"); if (f) f.checked = !!R.prefs.fullRes;
     });
     var slot = document.getElementById("remoteLibSlot");  // 보관함 머리 (ui.html)

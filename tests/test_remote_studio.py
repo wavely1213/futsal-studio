@@ -860,5 +860,70 @@ def quote(s):
     return q(s, safe="")
 
 
+class GuestStudioTest(StudioBase):
+    """'이번만' 기기 (아이디·비밀번호로 연결 · D-256): 세션 쿠키(Max-Age 없음) · 그 기기가 끝나는 때를 넘지 않음 · 나가기."""
+
+    def guest(self, exp_in=None):
+        g, _ = self.svc.store.add_guest("Windows 노트북 · Chrome")
+        if exp_in is not None:
+            g["exp"] = int(self.clock() + exp_in)
+        return g, {"device": {"id": g["id"], "name": g["name"]}, "keys": {"auth": g["auth"], "beacon": g["beacon"]}, "host": self.svc.host()}
+
+    def guest_login(self, gcred):
+        self.cred, keep = gcred, self.cred
+        try:
+            st, hd, j, _ = self.handoff("/")
+        finally:
+            self.cred = keep
+        self.assertEqual(st, 200, j)
+        return hd
+
+    def test_guest_cookie_no_max_age(self):
+        _, gc = self.guest()
+        c = self.hget(self.guest_login(gc), "Set-Cookie")[0]
+        self.assertNotIn("Max-Age", c)
+        self.assertIn("HttpOnly", c)
+        self.assertIn("SameSite=Strict", c)
+
+    def test_remembered_cookie_max_age(self):
+        st, hd, j, _ = self.handoff("/")
+        self.assertIn(f"Max-Age={rstudio.ABSOLUTE}", self.hget(hd, "Set-Cookie")[0])
+
+    def test_hardend_caps_session(self):
+        g, gc = self.guest(exp_in=600)
+        hd = self.guest_login(gc)
+        self.cookie = self.hget(hd, "Set-Cookie")[0].split(";")[0]
+        st, j = self.jreq("GET", "/s/session")
+        self.assertEqual(st, 200)
+        self.assertEqual(j["expiresAt"], g["exp"])
+        self.clock.tick(601)
+        st, j = self.jreq("GET", "/s/session")
+        self.assertEqual((st, j["code"]), (401, "expired"))
+
+    def test_session_view_guest(self):
+        _, gc = self.guest()
+        hd = self.guest_login(gc)
+        self.cookie = self.hget(hd, "Set-Cookie")[0].split(";")[0]
+        st, j = self.jreq("GET", "/s/session")
+        self.assertTrue(j["guest"])
+        self.cookie = None
+        self.login()
+        st, j = self.jreq("GET", "/s/session")
+        self.assertFalse(j["guest"])
+
+    def test_guest_logout_drops_device(self):
+        g, gc = self.guest()
+        hd = self.guest_login(gc)
+        self.cookie = self.hget(hd, "Set-Cookie")[0].split(";")[0]
+        st, j = self.jreq("GET", "/s/session")
+        self.csrf = j["csrf"]
+        st, j = self.jreq("POST", "/s/logout", {})
+        self.assertEqual(st, 200)
+        self.assertIsNone(self.svc.store.device(g["id"]))
+        st, j = self.jreq("GET", "/s/session")
+        self.assertEqual((st, j["code"]), (401, "logout"))
+        self.assertIsNotNone(self.svc.store.device(self.cred["device"]["id"]))   # QR 기기는 그대로
+
+
 if __name__ == "__main__":
     unittest.main()

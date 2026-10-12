@@ -283,5 +283,213 @@ class ProtoInteropTests(unittest.TestCase):
         self.assertEqual(out["pair"], self.svc.pairing.live()["code"])
 
 
+LOGIN_RUNNER = r"""
+import * as P from %s;
+const cmd = JSON.parse(await new Promise(r => { let s = ""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => r(s)); }));
+const hexb = h => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+const out = [];
+for (const c of cmd) {
+  try {
+    if (c.op === "canon") out.push(c.list.map(s => [P.keysOf(s), P.canonId(s), P.canonPw(s), P.idProblem(s), P.pwProblem(s)]));
+    else if (c.op === "derive") { const d = await P.deriveLogin(c.cid); out.push({ topic: d.topic, idc: d.idc, ex: d.bkey.extractable, usages: d.bkey.usages,
+      rec: c.msg ? await P.openLookup(d.bkey, c.topic || d.topic, c.msg, true) : null }); }
+    else if (c.op === "modpow") out.push(P.modPow(BigInt("0x" + c.b), BigInt("0x" + c.e), BigInt("0x" + c.m)).toString(16));
+    else if (c.op === "k") out.push((await P.srpK()).toString(16));
+    else if (c.op === "x") out.push((await P.srpX(c.pw, P.unb64u(c.salt), c.iters)).toString(16));
+    else if (c.op === "start") { const s = P.srpStart(hexb(c.a)); out.push(s.Ab64); }
+    else if (c.op === "proof" || c.op === "finish") {
+      const s = P.srpStart(hexb(c.a));
+      const pr = await P.srpProof(s, c.st, c.o);
+      if (c.op === "proof") out.push({ M1: P.b64u(pr.M1) });
+      else {
+        const ok = await P.verifyM2(pr.K, pr.T, pr.M1, c.fin.sealed, c.fin.M2);
+        const opened = ok ? await P.openLoginSealed(pr.K, pr.T, c.fin.sealed, c.st.login, c.o.pcId) : null;
+        out.push({ ok, inner: opened && opened.inner, ex: opened && [opened.keys.auth.extractable, opened.keys.beacon.extractable],
+          tamperedM2: await P.verifyM2(pr.K, pr.T, pr.M1, c.fin.sealed.slice(0, -2) + "AA", c.fin.M2),
+          tamperedSeal: await P.openLoginSealed(pr.K, pr.T, c.fin.sealed.slice(0, -4) + "AAAA", c.st.login, c.o.pcId),
+          otherPc: await P.openLoginSealed(pr.K, pr.T, c.fin.sealed, c.st.login, "ffffffffffffffff") });
+      }
+    }
+    else if (c.op === "hash") out.push(P.parseHash(c.h).kill);
+  } catch (e) { out.push({ error: String(e && e.message || e) }); }
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def _login_page():
+    try:
+        return _node_ok() and "deriveLogin" in (SITE / "proto.js").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+@unittest.skipUnless(_login_page(), "node 20 이상이나 아이디·비밀번호로 연결 판 페이지(FUTSAL_SITE_DIR)가 없어 건너뜀")
+class LoginProtoInteropTests(unittest.TestCase):
+    """아이디·비밀번호로 연결 (D-250~D-253): canon v1 표 · PC 찾기 열쇠 · SRP-6a (node 클라이언트 ⇄ 파이썬 PC) · #kill=."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.runner = cls.tmp / "login.mjs"
+        cls.runner.write_text(LOGIN_RUNNER % json.dumps((SITE / "proto.js").resolve().as_uri()), encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def node(self, cmds):
+        r = subprocess.run([NODE, str(self.runner)], input=json.dumps(cmds), capture_output=True, text=True, timeout=180)
+        self.assertEqual(r.returncode, 0, r.stderr[-1500:])
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_canon_table_equal(self):
+        import rlogin
+        table = ["김코치77", "RLAZHCL77", "까치", "가치", "ㅒㅖ", "닭", "달ㄱ", "닭", "ㄷㅏㄹㄱ", "Ｋｉｍ　Ｃｏａｃｈ", "₩￦\\",
+                 " kim.coach-7_7 ", "  ab cd 12  \t\n", "노을축구공바다4827", "SHDMFCNRRNRHDQKEK4827", "ㆍㆍㆍ아이디만", "축구⚽코치12",
+                 "風林火山코치", "ᅀᅀabcdef1234", "ÀÉÎ", "ﬁ ligature", "①②③④⑤⑥", "가나다", "철수", "01012345678", "a" * 70, "", "Ǆ"]
+        got = self.node([{"op": "canon", "list": table}])[0]
+        js_pw = {"empty": "empty", "chars": "chars", "short": "short", "long": "long"}
+        for s, (keys, cid, cpw, idp, pwp) in zip(table, got):
+            self.assertEqual(keys, rlogin.keys_of(s), s)
+            self.assertEqual(cid, rlogin.canon_id(s), s)
+            self.assertEqual(cpw, rlogin.canon_pw(s), s)
+            want_id = rlogin.id_problem(s)
+            self.assertEqual(idp, None if want_id == "reserved" else want_id, s)   # 흔한 아이디 목록은 PC 에서만
+            want = [x for x in rlogin.pw_problems(s) if x in js_pw]
+            self.assertEqual(pwp, want[0] if want else None, s)
+
+    def test_derive_login_equal(self):
+        import rlogin
+        d = rlogin.derive_login("rlazhcl77")
+        got = self.node([{"op": "derive", "cid": "rlazhcl77"}])[0]
+        self.assertEqual((got["topic"], got["idc"]), (d["topic"], d["idc"]))
+        self.assertEqual((got["topic"], got["idc"]), ("fsl1d315a8a97aaa3d816a1584b", "nBjO1vuzIzg432UZX9coMQ"))   # tests.test_rlogin 과 같은 수
+        self.assertEqual((got["ex"], got["usages"]), (False, ["decrypt"]))
+
+    def test_open_lookup_interop(self):
+        import rlogin
+        d = rlogin.derive_login("rlazhcl77")
+        on = {"v": 1, "pc": "0123456789abcdef", "seq": 4, "ts": 1_800_000_000, "state": "on", "reason": None, "url": "http://127.0.0.1:9541"}
+        off = dict(on, state="off", reason="idle", url=None)
+        bad_url = dict(on, url="https://evil.example")
+        msgs = [rlogin.seal_lookup(d["bkey"], d["topic"], x, remote.gcm_seal) for x in (on, off, bad_url)]
+        got = self.node([{"op": "derive", "cid": "rlazhcl77", "msg": m} for m in msgs]
+                        + [{"op": "derive", "cid": "rlazhcl77", "msg": msgs[0], "topic": "fsl" + "0" * 24},
+                           {"op": "derive", "cid": "kimcoach99", "msg": msgs[0]}])
+        self.assertEqual(got[0]["rec"], on)
+        self.assertEqual(got[1]["rec"], off)
+        self.assertIsNone(got[2]["rec"])   # 받으면 안 되는 주소
+        self.assertIsNone(got[3]["rec"])   # 다른 주제로 옮긴 글
+        self.assertIsNone(got[4]["rec"])   # 다른 아이디
+
+    def test_rfc_vectors_node(self):
+        """node 의 modPow·srpK·srpX 가 RFC 5054 부록 B(1024)·파이썬과 같은지."""
+        import rlogin
+        N, g, _ = rlogin.group("5054-1024-sha1")
+        a = "60975527035CF2AD1989806F0407210BC81EDC04E2762A56AFD529DDDA2D4393"
+        want_A = format(rlogin.client_start("5054-1024-sha1", int(a, 16))[1], "x")
+        salt = rlogin._b64u(bytes(range(16)))
+        got = self.node([{"op": "modpow", "b": format(g, "x"), "e": a, "m": format(N, "x")}, {"op": "k"},
+                         {"op": "x", "pw": "shdmfcnrrnrhdqkek4827", "salt": salt, "iters": 100000}])
+        self.assertEqual(got[0], want_A)
+        self.assertEqual(int(got[1], 16), rlogin.srp_k())
+        self.assertEqual(int(got[2], 16), rlogin.srp_x("shdmfcnrrnrhdqkek4827", bytes(range(16)), 100000))
+
+    def _service(self):
+        import rlogin
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        clock = Clock()
+        svc, _ = service(home, clock)
+        svc.url = "http://127.0.0.1:9541"
+        p = __import__("unittest.mock", fromlist=["patch"]).patch.object(rlogin, "LOGIN_ITERS", 100_000)
+        p.start()
+        self.addCleanup(p.stop)
+        svc._collision = lambda cid, timeout=5: "clear"
+        svc.login_set("김코치77", "노을축구공바다4827", "노을축구공바다4827", ack=True)
+        return svc, clock
+
+    def test_full_handshake_node_client_python_server(self):
+        import rlogin
+        svc, clock = self._service()
+        d = rlogin.derive_login("rlazhcl77")
+        a = os.urandom(32).hex()
+        A = self.node([{"op": "start", "a": a}])[0]
+        self.assertEqual(A, rlogin._b64u(rlogin.pad(rlogin.client_start(a=int(a, 16))[1], rlogin.group()[0])))
+        for remember, name in ((False, "Windows 노트북 · Chrome"), (True, "iPhone · Safari · 홈 화면")):
+            st = svc.r_login_start({"v": 1, "grp": rlogin.GROUP, "idc": d["idc"], "A": A}, "198.51.100.1", "", "KR")
+            o = {"canonPw": "SHDMFCNRRNRHDQKEK4827".lower(), "host": svc.host(), "pcId": st["pc"]["id"], "idc": d["idc"], "remember": remember,
+                 "name": name, "install": "i" * 22 if remember else ""}
+            m1 = self.node([{"op": "proof", "a": a, "st": st, "o": o}])[0]
+            self.assertNotIn("error", m1)
+            fin = svc.r_login_finish({"v": 1, "login": st["login"], "M1": m1["M1"], "remember": remember, "name": name, "install": o["install"]},
+                                     "198.51.100.1", "", "KR")
+            res = self.node([{"op": "finish", "a": a, "st": st, "o": o, "fin": fin}])[0]
+            self.assertTrue(res["ok"], res)
+            self.assertEqual(res["inner"]["via"], "login")
+            self.assertEqual(bool(res["inner"].get("guest")), not remember)
+            self.assertIsNone(res["inner"]["keys"])
+            self.assertEqual(res["ex"], [False, False])   # test_sealed_keys_non_extractable
+            self.assertFalse(res["tamperedM2"])
+            self.assertIsNone(res["tamperedSeal"])
+            self.assertIsNone(res["otherPc"])
+
+    def test_tampered_B_M2_sealed_rejected(self):
+        import rlogin
+        N = rlogin.group()[0]
+        st = {"v": 1, "login": "L" * 22, "grp": rlogin.GROUP, "salt": rlogin._b64u(bytes(16)), "iters": 100000,
+              "B": rlogin._b64u(rlogin.pad(N - 1, N)), "pc": {"id": "0123456789abcdef"}}
+        o = {"canonPw": "shdmfcnrrnrhdqkek4827", "host": "a.trycloudflare.com", "pcId": "0123456789abcdef", "idc": "I" * 22, "remember": False,
+             "name": "x", "install": ""}
+        bad = [dict(st, B=rlogin._b64u(bytes(384))), dict(st, B=rlogin._b64u(N.to_bytes(384, "big"))),
+               dict(st, B=rlogin._b64u(bytes(383))), dict(st, salt=rlogin._b64u(bytes(15))), dict(st, login="short"),
+               dict(st, pc={"id": "ffffffffffffffff"})]
+        got = self.node([{"op": "proof", "a": "11" * 32, "st": b, "o": o} for b in bad])
+        for g in got:
+            self.assertIn("error", g)
+
+    def test_server_group_refused(self):
+        import rlogin
+        st = {"login": "L" * 22, "grp": "5054-1024-sha1", "salt": rlogin._b64u(bytes(16)), "iters": 100000, "B": rlogin._b64u(bytes([1]) * 128),
+              "pc": {"id": "0123456789abcdef"}}
+        got = self.node([{"op": "proof", "a": "11" * 32, "st": st, "o": {"pcId": "0123456789abcdef", "canonPw": "x" * 8, "host": "h", "idc": "i"}}])
+        self.assertEqual(got[0], {"error": "group"})
+
+    def test_iters_out_of_bounds_refused(self):
+        import rlogin
+        N = rlogin.group()[0]
+        base = {"login": "L" * 22, "grp": rlogin.GROUP, "salt": rlogin._b64u(bytes(16)), "B": rlogin._b64u(rlogin.pad(N - 1, N)),
+                "pc": {"id": "0123456789abcdef"}}
+        o = {"pcId": "0123456789abcdef", "canonPw": "x" * 8, "host": "h", "idc": "i", "remember": False, "name": "n", "install": ""}
+        got = self.node([{"op": "proof", "a": "11" * 32, "st": dict(base, iters=n), "o": o} for n in (99_999, 2_000_001, "600000", 1.5)])
+        self.assertEqual(got, [{"error": "iters"}] * 4)
+
+    def test_B_zero_u_zero_refused(self):
+        import rlogin
+        N = rlogin.group()[0]
+        base = {"login": "L" * 22, "grp": rlogin.GROUP, "salt": rlogin._b64u(bytes(16)), "iters": 100000, "pc": {"id": "0123456789abcdef"}}
+        o = {"pcId": "0123456789abcdef", "canonPw": "x" * 8, "host": "h", "idc": "i", "remember": False, "name": "n", "install": ""}
+        got = self.node([{"op": "proof", "a": "11" * 32, "st": dict(base, B=rlogin._b64u(bytes(384))), "o": o},
+                         {"op": "proof", "a": "11" * 32, "st": dict(base, B=rlogin._b64u(N.to_bytes(384, "big"))), "o": o}])
+        self.assertEqual(got, [{"error": "B"}, {"error": "B"}])
+
+    def test_parse_hash_kill(self):
+        c, t = "fsc" + "a" * 24, "Ab_-" * 6
+        got = self.node([{"op": "hash", "h": f"#kill={c}.{t}.1800000000"}, {"op": "hash", "h": f"#kill={c}.{t}"},
+                         {"op": "hash", "h": f"#kill=fsx{'a' * 24}.{t}.1"}, {"op": "hash", "h": f"#kill={c}.{t[:-1]}.1"},
+                         {"op": "hash", "h": f"#kill={c}.{t}.12a"}, {"op": "hash", "h": "#pair=ABCDEFGHJK"}])
+        self.assertEqual(got[0], {"control": c, "token": t, "at": 1800000000})
+        self.assertEqual(got[1:], [None] * 5)
+
+    def test_index_html_and_vercel_json_unchanged(self):
+        """아이디·비밀번호로 연결은 index.html(CSP)·vercel.json 을 바꾸지 않음 (이미 ntfy.sh·*.trycloudflare.com 허용 · D-250)."""
+        self.assertEqual(hashlib.sha256((SITE / "index.html").read_bytes()).hexdigest(),
+                         "4fad325eae12e3034d6b1526fd2e7d6dbf578d953aebf91df88d956f8ca9e14c")
+        vj = SITE.parent.parent / "vercel.json"
+        if vj.is_file():
+            self.assertEqual(hashlib.sha256(vj.read_bytes()).hexdigest(), "f637dc2a0b0cc993ea86d93cfed12f14d9ef27e79cb51dd4b7ca79f1b5c3392c")
+
+
 if __name__ == "__main__":
     unittest.main()

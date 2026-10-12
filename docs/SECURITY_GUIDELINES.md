@@ -17,6 +17,9 @@
     - **기록·응답·문서에 남기지 않는 것**: 연결 코드, 기기 열쇠, ntfy 주제, 터널 주소(`*.trycloudflare.com`), `Authorization` 머리글, 미디어 표(ticket), cloudflared 출력 줄(주소가 들어 있음). cloudflared 는 `--loglevel info` 만 쓴다(`debug` 는 요청 머리글을 찍음). 원격 리스너는 접속 기록(`log_message`)을 남기지 않는다.
     - 휴대폰 쪽 열쇠는 가져오기 전용(non-extractable) WebCrypto 키로 IndexedDB 에만 둔다(원래 바이트는 짝짓기 대답을 푼 순간에만 있음).
     - 연결 코드 글은 터널로 보내지 않는다. 휴대폰은 코드에서 만든 증명(`HMAC`)만 보내고, PC 는 기기 열쇠·주제·지금 주소를 코드에서 만든 열쇠로 잠가(AES-GCM) 돌려준다 — Cloudflare 는 코드도 열쇠도 못 본다. `/r/status` 의 주제 이름도 기기 비콘 열쇠로 잠가 보낸다(알림 주제 이름은 곧 ntfy 보내기 열쇠).
+    - **아이디·비밀번호로 연결(D-250·D-257)**: 비밀번호는 PC 화면(로컬 서버 `/api/remote/login*`)에서만 받아 SRP 검증값을 만든 뒤 버린다 — 저장·기록하지 않는다. `remote.json` 의 `login` 블록에는 아이디(맞춘 꼴·보이는 꼴)·salt·verifier(PBKDF2-SHA256 600k 위의 SRP-6a)·아이디 주제(`fsl…`)·기록 열쇠(`bkey`)·`idc`·가짜 대답 씨앗(`fake`)·끊기 제어 주제(`fsc…`)·잠김 셈·최근 연결 20개(끊기 표는 sha256 만)가 있다. 터널·ntfy 로는 비밀번호도, 비밀번호에서 나온 값(x·verifier)도 가지 않는다(SRP · A·B·M1·M2 만).
+    - 기록·응답·문서에 남기지 않는 것에 더함: 비밀번호·비밀번호 확인·verifier·fake·bkey·idc, 아이디 기록·봉투(`fsl1.`·`fsl2.`), 끊기 표(`fsk1.` · `#kill=`·`seen=` 값), 주제(`fs[bnplc]` + 24자) — `remote.redact` 가 지운다(`tests.test_remote_login` 의 비밀 검사). 이번만 기기(D-256)의 열쇠는 PC 메모리에만 있다.
+    - 미리 정해 둔 로그인(D-258)도 코드에는 검증값만 둔다. 만드는 도구 `tools/make_preset.py` 는 비밀번호를 환경 변수 `FUTSAL_PRESET_PW` 로만 받고(명령 줄·파일에 남지 않게) 출력에 비밀번호가 없다. 실제 비밀번호를 시험·문서·커밋에 쓰지 않는다(시험은 가짜 비밀번호).
   - 또 하나의 예외: **유튜브 바로 올리기**(D-046). 비밀은 셋이다 — 소유자가 만든 Google OAuth 클라이언트의 보안 비밀번호(`client.bin`), Google 토큰(refresh·access, `token.bin`), 올리던 업로드 세션 주소(업로드 권한이 들어 있는 주소).
     - 둘 곳: `~/.futsal-studio/youtube/client.bin`·`token.bin`(사용자 폴더 · 앱 폴더·`config.json` 밖). Windows 는 DPAPI(이 Windows 사용자만 풂 · `youtube_api.protect`), 그 밖은 권한 600(폴더 700). 세션 주소도 같은 곳 `sessions/<열쇠>.bin`(D-047) — 작업 폴더(OneDrive·NAS 일 수 있음) `youtube/uploads/<열쇠>.json` 에는 `uri: true` 와 짝 번호(`sid`)만 둔다. 읽을 때는 이 PC 방식 머리만 받는다(Windows 에 놓인 평문 `FSY1P` 는 '없음'). [연결 끊기]·[Google 설정 지우기]는 도는 작업을 먼저 멈추고 세션 주소도 지운다.
     - 화면·응답·`studio.log`·오류 문장에 넣지 않는다. `/api/youtube/status`·`/client` 는 클라이언트 ID 앞 12자만 돌려준다. 오류 문장은 한국어 틀 + Google 의 reason 낱말만 쓰고 응답 원문·주소를 넣지 않는다. `tests.test_youtube`·e2e 가 시크릿 위생(기록·작업 폴더·응답에 가짜 토큰·코드·비밀번호·세션 주소가 없음)을 확인한다.
@@ -58,6 +61,8 @@
   5. 확인: API 는 기기 서명(`FSR2`: HMAC-SHA256(받는 곳 = PC 터널 주소의 host·메서드·경로+쿼리·시각 ±300초·nonce 10분 기억·본문 sha256), `hmac.compare_digest`) — **받은 본문 바이트로 서명을 먼저 확인하고 그 뒤에만 JSON 을 읽는다**. 기기의 nonce 기억이 꽉 차면 지우지 않고 429(지우면 붙잡은 요청을 다시 쓸 수 있음). 미디어는 표(ticket): 기기 · 목록을 받은 곳(`Cf-Connecting-Ip` 의 IPv4 /24 · IPv6 /48) · 1시간에 묶임. `/r/ping`·`/r/pair` 만 열려 있고 아주 좁게 제한한다(`/r/pair` 는 코드 증명만 받음 · JSON 깊이 폭탄은 400).
   6. 허용 동작 목록(`remote.ACTIONS`)과 인자 검사: 이름은 `editor.safe_name`+`video_path`, 완성본은 `core.OUT` 안 `.mp4`, 편집본 id·스타일·채널은 목록에 있는 것만, 받기는 YouTube 영상 주소에서 뽑은 11글자 id 만(원래 글은 yt-dlp 에 안 넘김), 학습용 채널은 다시 만든 표준 주소만.
   7. 내주는 파일은 `resolve()` 후 `core.OUT`·`core.VIDEOS`·`analysis/_remote/`(작은 미리보기)·`analysis/`(그림) 안인지, 확장자 허용 목록(mp4·jpg·png·txt·srt)인지 확인. 응답은 늘 `nosniff`·`Referrer-Policy: no-referrer`·`CSP default-src 'none'`·`Cache-Control: no-store`, 오류는 한국어 JSON(추적 없음).
+  - 아이디 연결의 열린 길 둘(`remote.LOGIN_OPEN` = `POST /r/login/start`·`/r/login/finish` · D-251)은 같은 순서에 다음을 더한다: 3. 요청 수 바구니 `login`(IP 마다 12개 · 5초에 1개) → 4. 허용 출처만(없으면 403) → 본문은 `application/json` 이고 `Content-Length` ≤ 4096(`LOGIN_BODY_MAX` · 읽기 전에 · 넘으면 413) → 로그인 켜짐(아니면 403 `login_off`) → 잠김 판정(`Guard.check` · `login_lock` 안 · 423) → 모양 검사(v·grp·`idc` 22자·`A` 512자 · A mod N ≠ 0 · 아니면 400) → 대기 표(망마다 2 · 전체 256 · 60초 · 한 번 · 넘치면 429 busy) → finish 의 M1 비교(`hmac.compare_digest`)와 틀림 셈·잠김은 한 잠금 안에서. 틀림(`bad`)은 IP 잠금 횟수(`_fail`)에도 센다. 틀린 아이디에도 같은 꼴의 가짜 대답을 준다.
+  - 아이디 연결의 관리 길(`GET /r/login/events`·`POST /r/login/kick`·`/r/login/unlock`)은 서명 길이고 QR·코드로 연결한 기기(`via="code"`)만 쓴다(아니면 403 `not_allowed`). `POST /r/login/logout` 은 이번만 기기 자신만.
 - **밖에서 작업 경계(`rstudio.gate`, D-230·D-231)**: 원격 리스너에 온 요청 중 `/r/*` 가 아닌 것(PC 스튜디오 화면·`/api/*`·`/s/*`)은 모두 이것을 지난다. 로컬 `Handler` 의 처리 코드는 이 경계를 다 지난 뒤에만 `app.StudioHandler.studio_call` 로 부른다(같은 프로세스 · 8765 는 여전히 터널 뒤에 없음). 순서:
   1. remote 와 같은 Host·본문 방식(`Content-Length` 만)·IP 잠금·요청 수 바구니(`studio` · 넘겨주기만 `open`) → 2. 메서드 GET·POST 만(나머지 405) → 3. '밖에서 작업 허용'이 꺼져 있으면 403 `studio_off`(안내 쪽 `/s/hello.js` 만 예외) → 4. `Sec-Fetch-Site` 가 same-origin·none 이 아니면 403(`/s/hello` 만 예외 · 다른 사이트에서 연 화면은 안내 쪽) → 5. 열린 길(`/s/hello`·`/s/hello.js`·`/s/handoff`) → 6. 세션 쿠키(없음·지남·끊김 → 401 {code} · 길이 있는지 알려 주지 않음 · 모르는 쿠키는 잠금 횟수에 안 셈) · 기기가 끊겼으면 401 `revoked` → 7. POST 는 Origin 이 터널 출처와 정확히 같고 `X-FS-CSRF` 가 세션 값과 `hmac.compare_digest` 로 같아야 함(틀리면 잠금 횟수에 셈) → 8. `rstudio.POLICY`(분류 안 된 `/api/` 는 403 `not_remote` · 그 밖 404 · PC 에서만 403 `pc_only`) → 9. 본문: JSON 32MB · 편집실 한 번 올리기 64MB · 조각 16MB(넘으면 읽기 전에 413) · JSON 은 `application/json` · 깊이 폭탄 400 · `cookies` 칸이 비어 있지 않으면 403 · yt-dlp 로 가는 주소·영상 id(`YT_GUARD` = `/api/download` `ids`·`/api/list`·`/api/refs/add` `url`)는 YouTube 만(`yt_guard` → `remote.youtube_id`·`remote.listing_url` · 그 밖은 400 `yt_only` · 앱에는 표준 주소로 다시 쓴 본문 · SSRF 막기 · D-235) → 10. 분류별 처리(화면 = 심 끼워 넣기 · 미디어 = 미리보기 파일만 · 확인 = 428 확인 표 · 대신 답함 · 쓰기·읽기 = 앱 처리 코드).
   - 응답은 모두 `Cache-Control: private, no-store`(정적 파일만 `private, max-age=604800`) · `Vary: Cookie` · `nosniff` · `X-Frame-Options: DENY`(화면 HTML 만 `SAMEORIGIN`) · `Referrer-Policy: no-referrer` · `Cross-Origin-Opener-Policy`·`Cross-Origin-Resource-Policy: same-origin` · `Access-Control-*` 머리글 없음(앱 처리 코드가 붙인 것도 지움). 화면 HTML 은 응답마다 새 nonce CSP(`script-src 'nonce-…'` · `object-src 'none'` · `base-uri 'none'` · `frame-ancestors 'self'` · `form-action 'self'`) — 같은 출처 틀만 허용하는 것은 끝까지 자동으로의 보이지 않는 썸네일 편집기 틀(D-201·D-231) 때문이고, 다른 출처(다른 터널·원격 홈 포함)는 띄우지 못한다 — 화면에 인라인 처리기(`onclick=` 등)를 새로 넣지 않는다(nonce CSP 가 막음).
@@ -107,7 +112,8 @@
   - 지우기·저장·작업 시작·폴더 열기처럼 상태를 바꾸는 동작은 반드시 POST로 만든다.
   - 지금 GET이 하는 쓰기는 캐시 생성(`/frame`·`/api/edit/thumbs.jpg` 등 · 채널 전략 `strategy/forecast.json`·`solution.json`)뿐이다. 사용자 기록(`strategy/state.json` 등)은 GET 에서 쓰지 않는다.
   - 계산이 무거운 GET(채널 전략 `/api/strategy/forecast`·`/api/strategy/preview`)은 한 번에 하나만 계산한다(`strategy._FC_LOCK`). 가능성 입력은 자료 받은 시각 기준이라 같은 자료면 캐시를 쓰고, 미리 보기는 저장·캐시를 하지 않는다 (D-026).
-- 비밀번호를 다루지 않는다. 다룬다면 bcrypt/argon2 해싱을 쓴다(직접 구현 금지, 검증된 라이브러리 사용).
+- 비밀번호를 다루지 않는다. 다룬다면 bcrypt/argon2 해싱을 쓴다(직접 구현 금지, 검증된 라이브러리 사용). 원격 아이디·비밀번호(D-250)만 예외 — 비밀번호는 PC 화면에서만 받고 저장·기록하지 않으며 remote.json 에는 SRP-6a 검증값(PBKDF2-SHA256 600k)만 둔다 · 밖에서는 비밀번호도 비밀번호에서 나온 값도 보내지 않는다(SRP). SRP-6a 는 소유자 승인(D-257)으로 검증된 기본 부품(hashlib·hmac·pow·pycryptodomex·WebCrypto) 위에 직접 만들었고 RFC 5054 시험값·pysrp 교차 시험으로 고정한다 — 다른 암호를 직접 만드는 근거로 쓰지 않는다.
+  - 아이디 연결의 서버 쪽 확인: 클라이언트는 서버가 고른 군(group)을 받지 않고(RFC 5054 3072 하나), iters 는 100000~2000000 만, B mod N ≠ 0 · u ≠ 0 을 확인한다. M1 은 기록 T(host·pc·idc·login·grp·iters·salt·A·B)와 기억하기·이름·설치 id 를, M2 는 봉투의 sha256 을 묶는다 — 중간에서 이번만을 기억하기로 바꾸거나 다른 PC 대답을 섞으면 맞지 않는다.
   - YouTube 계정 비밀번호를 앱이 받거나 저장하는 기능은 없다.
   - **YouTube 봇 확인을 사용자 자격 증명으로 자동 우회하지 않는다.** 막히면 엔진을 최신으로 바꿔 한 번만 다시 시도한다. 쿠키는 사용자가 직접 켤 때만 쓴다(`DECISION_LOG.md`).
 - **인가는 모든 요청에서 서버 측 검증**: IDOR 대신 **경로 탈출**을 막는다.
@@ -159,6 +165,7 @@
 ## 5. 기타 규칙
 
 - **Rate limiting**: 로컬 서버는 로그인·가입이 없어 해당 없다. 원격 리스너(D-027)는 제한한다: 열린 길(`/r/ping`·`/r/pair`) IP 마다 10개·6초에 1개, 서명 길 60개·초당 5개, 확인 실패 10분에 10번이면 그 IP 를 15분 잠금, 작업 시작은 기기마다 2초에 1번, 휴대폰 알림 시험은 1분에 1번, 미디어 동시 기기마다 6·전체 10, 처리 동시 48(넘으면 503 · 밖에서 작업 화면이 한 번에 여러 요청 · D-230), 소켓 20초. 밖에서 작업(D-230): 화면 요청은 IP 마다 바구니 `studio` 300개·초당 40개, 넘겨주기 `/s/handoff` 는 열린 길 바구니, 넘겨주기 표는 기기마다 1분에 6번, CSRF 실패는 확인 실패처럼 잠금 횟수에 셈, 올리기는 기기마다 2개·전체 4개(30분 안에 조각이 온 것만)·하나 100GB·남길 디스크 max(2GB, 3%)·7일 지나면 정리, 미디어는 자리가 없으면 15초 기다린 뒤 503. 기억(표·버킷)은 LRU 로 상한, nonce 는 기기마다 4000개까지(꽉 차면 지우지 않고 429). ntfy 로 보내기는 하루 200개·비콘은 같은 꼴이면 60초에 1번. 터널 오류 뒤 저절로 다시 켜기는 2분·5분·15분·그 뒤 30분마다. 그 밖에 다음 두 가지를 지킨다.
+  - 아이디·비밀번호로 연결(D-254 · `rlogin.Guard`): 망(IPv4 /24 · IPv6 /48)마다 5번 틀리면 15분, 그다음 3번마다 1시간·4시간·24시간(마지막 잠김이 끝나고 24시간 뒤 처음부터) · 모든 망 합쳐 한 시간 10번·하루 30번이면 전체 잠김 · 맞는 아이디의 틀림이 모두 50번이면 멈춤(`suspended` · PC 나 QR 기기가 풂) · 보안 알림은 5·20·40번째(1시간 간격)와 멈춤. 셈은 `login_lock` 안에서 `remote.json` 에 저장한다(앱을 다시 켜도 그대로). 시간 배율 `FUTSAL_LOGIN_TIME_SCALE` 은 `FUTSAL_REMOTE_DEV=1` 일 때만.
   - 긴 작업은 `start_job`으로 한 번에 하나만 돌린다(겹치면 409).
   - 외부 재시도는 횟수와 간격을 제한한다.
     - YouTube가 막으면 엔진 최신화 후 **1회만** 다시 시도한다.
@@ -220,6 +227,12 @@
   - 알림 글이 정해진 문장뿐인가 (파일 이름·제목·경로·오류 글 없음)
   - 로컬 서버(8765)가 여전히 터널 Host 에 403 이고 CORS 헤더가 없는가
   - `/r/*` 의 경계 순서를 밖에서 작업 때문에 바꾸지 않았는가 (`/r/*` 가 아닌 요청만 `rstudio.gate` 로)
+- [ ] 아이디·비밀번호로 연결(`rlogin.py`·`/r/login/*` · D-250~D-259)을 고쳤다면:
+  - 새 비밀(표·봉투·주제·열쇠)을 `remote.redact` 에 더했는가 · 비밀번호·verifier 가 기록·응답·알림·ntfy 글에 없는가 (`tests.test_remote_login`)
+  - 터널 출처(밖에서 작업 화면)에 아이디 비밀번호 칸이 생기지 않았는가 — 비밀번호는 PC 화면과 원격 홈(`futsal.mulgyeol.kr`)에서만 (`tests.test_remote_routes`)
+  - 클라이언트(`proto.js`)가 서버가 고른 군·범위 밖 iters 를 받지 않는가 · M1/M2/봉투 묶음이 그대로인가 (`tests.test_remote_proto` node⇄파이썬 · RFC 5054 시험값)
+  - 관리 길(보기·끊기·풀기)이 `via="code"` 기기만인가 · 이번만 기기가 디스크에 남지 않는가
+  - 잠김 셈이 한 잠금 안에서 저장되는가 · 새 열린 길을 `LOGIN_OPEN`·바구니·4KB 제한에 넣었는가
 - [ ] 앱에 `/api/*` 길(또는 화면·정적 파일)을 새로 만들었다면 (밖에서 작업 · D-231):
   - `rstudio.POLICY` 에 분류했는가 — 읽기·쓰기·미디어·확인·대신 답함·PC 에서만 중 하나 (`tests.test_remote_routes` 가 app.py 에서 길을 찾아 분류가 없으면 실패) · 설정·업데이트·로그인·토큰·PC 폴더처럼 PC 앞에서만 할 일은 `PC_ONLY`
   - 상태를 바꾸는 길이 POST 이고(밖에서는 CSRF 가 POST 에만 붙음) GET 이 아무것도 바꾸지 않는가

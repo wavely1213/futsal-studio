@@ -1467,6 +1467,31 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send(400, {"ok": False, "error": "먼저 휴대폰을 연결해 주세요"})
                     svc.test_notify()
                     return self._send(200, {"ok": True})
+                # 아이디·비밀번호로 연결 (D-250 · 이 PC 화면에서만 · 비밀번호는 검증값으로만 남기고 요청 본문은 기록하지 않음)
+                pw = lambda k: b.get(k) if isinstance(b.get(k), str) else None  # noqa: E731
+                if path == "/api/remote/login":  # 정하기 · 비밀번호 바꾸기 (아이디를 빼면 그대로)
+                    return self._send(200, {"ok": True, "login": svc.login_set(pw("id"), pw("password") or "", pw("password2"),
+                                                                                 b.get("revoke") is not False, b.get("force") is True,
+                                                                                 b.get("ack") is True)})
+                if path == "/api/remote/login/id":
+                    return self._send(200, {"ok": True, "login": svc.login_id(pw("id") or "", b.get("force") is True)})
+                if path == "/api/remote/login/check":
+                    return self._send(200, dict(svc.login_check(pw("id"), pw("password") or ""), ok=True))
+                if path == "/api/remote/login/suggest":
+                    return self._send(200, dict(svc.login_suggest(pw("id")), ok=True))
+                if path == "/api/remote/login/on":
+                    return self._send(200, {"ok": True, "login": svc.login_on(b.get("force") is True)})
+                if path == "/api/remote/login/off":
+                    return self._send(200, {"ok": True, "login": svc.login_off(b.get("revoke") is True)})
+                if path == "/api/remote/login/unlock":
+                    return self._send(200, {"ok": True, "login": svc.login_unlock()})
+                if path == "/api/remote/login/kick":
+                    if not isinstance(b.get("ref"), str):
+                        return self._send(400, {"ok": False, "error": "끊을 연결을 골라 주세요"})
+                    svc.login_kill(ref=b["ref"], where="PC에서")
+                    return self._send(200, {"ok": True, "login": svc.login_view()})
+            except remote.LoginAsk as e:  # 한 번 더 물어야 함 (휴대폰 없음 · 겹침 확인 못 함)
+                return self._send(409, {"ok": False, "code": e.code, "error": str(e)})
             except (remote.PairError, ValueError) as e:
                 return self._send(400, {"ok": False, "error": str(e)})
             except OSError as e:

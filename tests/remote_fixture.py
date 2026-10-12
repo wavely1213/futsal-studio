@@ -1,7 +1,9 @@
 """원격 접속 시험 도우미 (tests/test_remote*.py 가 같이 씀) — 가짜 시계·가짜 ntfy·가짜 Bridge·서명 요청.
 
-가짜 ntfy 는 ntfy.sh 가 하는 일 중 우리가 쓰는 것만 한다: POST /<주제> (글 그대로) · POST / (JSON 알림) ·
-GET /<주제>/json?poll=1&since=latest (마지막 글 한 줄) · 모든 응답에 Access-Control-Allow-Origin: *.
+가짜 ntfy 는 ntfy.sh 가 하는 일 중 우리가 쓰는 것만 한다: POST /<주제> (글 그대로) · POST / (JSON 알림 · click·actions 도 남김) ·
+GET /<주제>/json?poll=1&since=latest (마지막 글 한 줄) · since=all · since=<유닉스 시각> (그때부터 모두 · 아이디 연결 D-252) ·
+GET /<주제>/json (poll 없음: 계속 열어 두고 새 글을 흘려 보냄 · keepalive · [끊기] 주제 D-255) · down=True 면 503 ·
+모든 응답에 Access-Control-Allow-Origin: *.
 """
 import json
 import os
@@ -34,6 +36,9 @@ class FakeNtfy:
         self.posts = []  # (주제, 글, 머리글 dict)
         self.lock = threading.Lock()
         self.fail = False
+        self.down = False          # GET·POST 모두 503 (ntfy 에 닿지 않음)
+        self.keepalive = 1.0       # 흘려 보내기의 keepalive 간격(초)
+        self.streams = 0
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -54,7 +59,7 @@ class FakeNtfy:
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n).decode("utf-8")
-                if outer.fail:
+                if outer.fail or outer.down:
                     self.send_response(503)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -75,16 +80,63 @@ class FakeNtfy:
                 self.end_headers()
                 self.wfile.write(out)
 
+            def _since(self, msgs, since):
+                if since == "all":
+                    return msgs
+                if since.isdigit():
+                    return [p for p in msgs if p[3] >= int(since)]
+                return msgs[-1:]
+
+            def _stream(self, topic, since):
+                """poll 없는 GET: 지금까지 것(since 부터)을 보낸 뒤 연결을 열어 두고 새 글을 흘려 보냄."""
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.end_headers()
+                outer.streams += 1
+                with outer.lock:
+                    msgs = [p for p in outer.posts if p[0] == topic]
+                sent = len(msgs)
+                first = self._since(msgs, since) if since else []
+                last_ka = time.time()
+                try:
+                    for t, m, _, at in first:
+                        self.wfile.write((json.dumps({"id": "x", "time": int(at), "event": "message", "topic": t, "message": m}) + "\n").encode())
+                    self.wfile.flush()
+                    end = time.time() + 120
+                    while time.time() < end and not outer.closing:
+                        with outer.lock:
+                            msgs = [p for p in outer.posts if p[0] == topic]
+                        for t, m, _, at in msgs[sent:]:
+                            self.wfile.write((json.dumps({"id": "x", "time": int(at), "event": "message", "topic": t, "message": m}) + "\n").encode())
+                        sent = len(msgs)
+                        if time.time() - last_ka >= outer.keepalive:
+                            last_ka = time.time()
+                            self.wfile.write((json.dumps({"id": "k", "time": int(last_ka), "event": "keepalive", "topic": topic}) + "\n").encode())
+                        self.wfile.flush()
+                        time.sleep(0.05)
+                except OSError:
+                    pass
+                finally:
+                    outer.streams -= 1
+
             def do_GET(self):
                 u = urlparse(self.path)
                 parts = u.path.strip("/").split("/")
                 lines = b""
-                if len(parts) == 2 and parts[1] == "json" and parse_qs(u.query).get("poll") == ["1"]:
+                q = parse_qs(u.query)
+                if outer.down:
+                    self.send_response(503)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if len(parts) == 2 and parts[1] == "json" and q.get("poll") != ["1"]:
+                    return self._stream(parts[0], (q.get("since") or [""])[0])
+                if len(parts) == 2 and parts[1] == "json" and q.get("poll") == ["1"]:
                     with outer.lock:
                         msgs = [p for p in outer.posts if p[0] == parts[0]]
-                    if msgs:
-                        t, m, _, at = msgs[-1]
-                        lines = (json.dumps({"id": "x", "time": int(at), "event": "message", "topic": t, "message": m}) + "\n").encode()
+                    for t, m, _, at in self._since(msgs, (q.get("since") or ["latest"])[0]):
+                        lines += (json.dumps({"id": "x", "time": int(at), "event": "message", "topic": t, "message": m}) + "\n").encode()
                 self.send_response(200)
                 self._cors()
                 self.send_header("Content-Type", "application/x-ndjson")
@@ -92,9 +144,16 @@ class FakeNtfy:
                 self.end_headers()
                 self.wfile.write(lines)
 
+        self.closing = False
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.srv.daemon_threads = True
         self.url = f"http://127.0.0.1:{self.srv.server_address[1]}"
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def seed(self, topic, msg, at=None):
+        """남이 올린 글처럼 (겹침·가짜 기록 시험)."""
+        with self.lock:
+            self.posts.append((topic, msg, {}, at if at is not None else time.time()))
 
     def topic(self, t):
         with self.lock:
@@ -111,6 +170,7 @@ class FakeNtfy:
         return []
 
     def close(self):
+        self.closing = True
         self.srv.shutdown()
         self.srv.server_close()
 
