@@ -677,14 +677,20 @@ class KillTokenTests(unittest.TestCase):
 
 
 class PresetToolTests(unittest.TestCase):
-    """tools/make_preset.py (가짜 비밀번호로만) · 저장소의 PRESET 은 None (기능 꺼짐)."""
+    """tools/make_preset.py (가짜 비밀번호로만) · 저장소의 PRESET 은 None(끔) 이거나 검증값만 든 모양 (D-258 소유자 결정으로 넣음)."""
 
     def setUp(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         self.mp = importlib.import_module("make_preset")
 
-    def test_shipped_preset_is_off(self):
-        self.assertIsNone(rlogin.PRESET)
+    def test_shipped_preset_is_off_or_verifier_only(self):
+        # D-258: 소유자가 넣기로 정함 — 넣었다면 SRP 검증값 열쇠만 (비밀번호·평문 칸 없음) · 아이디는 PRESET_ID
+        P = rlogin.PRESET
+        if P is not None:
+            self.assertTrue(rlogin.preset_ok(P))
+            self.assertEqual(set(P), {"id", "idShow", "canon", "grp", "salt", "iters", "verifier"})
+            self.assertEqual(P["id"], rlogin.canon_id(rlogin.PRESET_ID))
+            self.assertGreaterEqual(P["iters"], rlogin.LOGIN_ITERS)
         self.assertEqual(rlogin.PRESET_ID, "wavely1213")
         self.assertIsNone(rlogin.id_problem(rlogin.PRESET_ID))
 
