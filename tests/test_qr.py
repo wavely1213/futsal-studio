@@ -18,7 +18,7 @@ try:
 except ImportError:  # 개발 전용 도구가 없으면 비교만 건너뜀
     segno = None
 
-LONGEST_PAIR = "https://mulgyeol.kr/futsal#pair=7K3QM9XD2P&u=" + "a" * 63  # 빠른 터널 이름이 가장 길 때
+LONGEST_PAIR = "https://futsal.mulgyeol.kr#pair=7K3QM9XD2P&u=" + "a" * 63  # 빠른 터널 이름이 가장 길 때
 
 
 def _spec_padding(buff, version, length):
@@ -49,7 +49,7 @@ class EncodeTests(unittest.TestCase):
         self.assertTrue(all(len(r) == len(rows) and set(r) <= {"0", "1"} for r in rows))
 
     def test_finder_patterns_in_three_corners(self):
-        rows = qr.encode("https://mulgyeol.kr/futsal")
+        rows = qr.encode("https://futsal.mulgyeol.kr")
         n = len(rows)
         finder = ["1111111", "1000001", "1011101", "1011101", "1011101", "1000001", "1111111"]
         for ox, oy in ((0, 0), (n - 7, 0), (0, n - 7)):
@@ -73,7 +73,7 @@ class EncodeTests(unittest.TestCase):
 
 @unittest.skipUnless(segno, "segno 가 없어 칸 비교는 건너뜀 (개발 전용: pip install segno)")
 class SegnoCompareTests(unittest.TestCase):
-    TEXTS = ["A", "https://mulgyeol.kr/futsal", "z" * 30, "w" * 50, "https://mulgyeol.kr/futsal#pair=7K3QM9XD2P&u=abandoned-unexpected-cooperative-boring",
+    TEXTS = ["A", "https://futsal.mulgyeol.kr", "z" * 30, "w" * 50, "https://futsal.mulgyeol.kr#pair=7K3QM9XD2P&u=abandoned-unexpected-cooperative-boring",
              LONGEST_PAIR, "한글 주소 시험 " * 5, "x" * 108, "x" * 150, "q" * 170, "y" * 210]
 
     def test_every_version_and_mask_matches_segno(self):

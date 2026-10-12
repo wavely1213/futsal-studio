@@ -53,7 +53,7 @@
   1. Host 가 `remote.futsal.invalid`(cloudflared 가 붙임)인지 — 개발 모드(`FUTSAL_REMOTE_DEV=1`)에서만 `127.0.0.1:<원격 포트>` 도. 브라우저는 `.invalid` Host 를 만들 수 없어 DNS 리바인딩·같은 PC 의 다른 사이트를 막는다. 본문은 `Content-Length` 로만 받는다(`Transfer-Encoding` 이 있으면 읽지 않고 411 · 잠금 횟수에 안 셈).
   2. 메서드 GET·POST·OPTIONS 만.
   3. 요청 수 제한(`Cf-Connecting-Ip` 기준, 5절)·잠금.
-  4. CORS: 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`, 개발 모드만 `FUTSAL_REMOTE_ORIGINS`)만 되돌려 줌. `/r/ping`·`/r/m/*` 를 뺀 API 는 허용 Origin 필수, POST 는 `application/json` 필수(단순 요청·폼 거절), 본문 64KB 넘으면 읽기 전에 413.
+  4. CORS: 허용 출처(휴대폰 페이지 출처 `https://futsal.mulgyeol.kr` 하나 = `remote.SITE` 에서 나옴 · 개발 모드만 `FUTSAL_REMOTE_ORIGINS`)만 되돌려 줌. 와벨리 커뮤니티 출처(`mulgyeol.kr`·`www`·`m`)는 받지 않는다(D-240). `/r/ping`·`/r/m/*` 를 뺀 API 는 허용 Origin 필수, POST 는 `application/json` 필수(단순 요청·폼 거절), 본문 64KB 넘으면 읽기 전에 413.
   5. 확인: API 는 기기 서명(`FSR2`: HMAC-SHA256(받는 곳 = PC 터널 주소의 host·메서드·경로+쿼리·시각 ±300초·nonce 10분 기억·본문 sha256), `hmac.compare_digest`) — **받은 본문 바이트로 서명을 먼저 확인하고 그 뒤에만 JSON 을 읽는다**. 기기의 nonce 기억이 꽉 차면 지우지 않고 429(지우면 붙잡은 요청을 다시 쓸 수 있음). 미디어는 표(ticket): 기기 · 목록을 받은 곳(`Cf-Connecting-Ip` 의 IPv4 /24 · IPv6 /48) · 1시간에 묶임. `/r/ping`·`/r/pair` 만 열려 있고 아주 좁게 제한한다(`/r/pair` 는 코드 증명만 받음 · JSON 깊이 폭탄은 400).
   6. 허용 동작 목록(`remote.ACTIONS`)과 인자 검사: 이름은 `editor.safe_name`+`video_path`, 완성본은 `core.OUT` 안 `.mp4`, 편집본 id·스타일·채널은 목록에 있는 것만, 받기는 YouTube 영상 주소에서 뽑은 11글자 id 만(원래 글은 yt-dlp 에 안 넘김), 학습용 채널은 다시 만든 표준 주소만.
   7. 내주는 파일은 `resolve()` 후 `core.OUT`·`core.VIDEOS`·`analysis/_remote/`(작은 미리보기)·`analysis/`(그림) 안인지, 확장자 허용 목록(mp4·jpg·png·txt·srt)인지 확인. 응답은 늘 `nosniff`·`Referrer-Policy: no-referrer`·`CSP default-src 'none'`·`Cache-Control: no-store`, 오류는 한국어 JSON(추적 없음).
@@ -88,7 +88,7 @@
   - 원격 동작은 모두 `studio.log`에 `원격 · <기기> · <동작> · <대상>`으로 남는다(기기·파일 이름은 줄바꿈·제어 글자 빼고 80자).
   - 원격 쪽 오류 추적은 `remote._trace()`(= `studiolog.trace` · D-044)로만 남긴다 — `remote.redact` 가 터널 주소·비콘/알림/짝짓기 만남 주제(`fsb`·`fsn`·`fsp` + 24자)·표(`/r/m/…`)·서명(`FSR2 …`)·연결 코드(`#pair=`·`&u=`)를 '…'로 지운다. 리스너의 `handle_error` 도 보낸 곳 주소 없이 이것만 쓴다. pythonw 에서는 이 출력이 `studio-error.log` 로 모이므로(D-034 · 예전에는 버려짐) 이 규칙을 지킨다. 합친 뒤에는 studio.log 의 모든 줄(`studiolog.write` · 영어 원문·오류 위치 포함)과 studio-error.log 의 모든 글(`app._StampedErr` · 스레드 오류·서버 요청 오류 포함)이 같은 `remote.redact` 를 거친다(D-044). 휴대폰에 보내는 기록·오류 글(`scrub`)도 같은 지우기를 거친다.
   - 휴대폰에서 온 POST 본문도 로컬 서버처럼 `core.clean_json`(반쪽 이모지 → '�')을 거치고, 응답은 쓸 수 없는 글자가 있으면 `\uXXXX` 로 보낸다.
-  - 휴대폰 페이지(`mulgyeol.kr/futsal`, 와벨리 저장소)는 엄격한 CSP(`script-src 'self'`, 연결은 `*.trycloudflare.com`·`ntfy.sh` 만), 밖에서 온 글은 `textContent` 로만, 짝짓기 QR 의 `#pair=` 는 읽자마자 주소창에서 지운다. 이미 연결된 PC 와 다른 PC 면 먼저 묻고, 새 주소에 기존 열쇠를 보내지 않는다.
+  - 휴대폰 페이지(`futsal.mulgyeol.kr`, 와벨리 저장소 `public/futsal/` · 그 출처에는 이 페이지만 있음 · D-240)는 엄격한 CSP(`script-src 'self'`, 연결은 `*.trycloudflare.com`·`ntfy.sh` 만), 밖에서 온 글은 `textContent` 로만, 짝짓기 QR 의 `#pair=` 는 읽자마자 주소창에서 지운다. 이미 연결된 PC 와 다른 PC 면 먼저 묻고, 새 주소에 기존 열쇠를 보내지 않는다.
   - **예외(문서화한 것 하나): 유튜브 로그인 결과 받기**(D-046). [유튜브 계정 연결하기]를 누를 때만 `youtube_api.LoginFlow` 가 `127.0.0.1` 의 빈 포트에 작은 서버를 연다.
     - `127.0.0.1` 에만 · 결과 한 번만 받고 닫음 · 10분 넘으면 닫음 · 새로 연결하면 앞의 것을 닫음.
     - Host 가 `127.0.0.1:<그 포트>`가 아니면 400, `/` 밖의 주소는 404, `state` 는 `hmac.compare_digest` 로 비교(다르면 400 · 기다림은 그대로), 한 번 받은 뒤에는 다시 받지 않음. PKCE(S256)라 코드를 가로채도 토큰으로 바꿀 수 없다.
@@ -139,7 +139,7 @@
   - 채널 전략은 YouTube 공개 RSS·목록만 읽는다(키·쿠키 없음). 채널 설명은 '레슨 안내·문의 경로·협찬' 표시만 저장하고 원문(이메일·전화)은 남기지 않는다. `studio.log`에는 채널 이름과 결과 종류만 남긴다.
   - 이 내용을 자동으로 전송하도록 바꾸지 않는다. 바꾸려면 소유자 결정이 필요하다.
   - **휴대폰으로 보기**(D-027, 켜 둔 동안만): 휴대폰이 부르는 API·영상·그림·작업 기록(사용자 폴더 경로는 `~` 로 바꿈)이 Cloudflare 터널을 지난다. Cloudflare 가 TLS 를 끝내므로 그 내용을 평문으로 볼 수 있다. 연결 코드·기기 열쇠·ntfy 주제는 잠겨 있어 못 본다(서명·표는 봄 — 서명은 그 PC 주소에만 맞고, 표는 받은 곳 IP 대역에서만 1시간). ntfy.sh 에는 기기마다 암호로 잠근 비콘(지금 터널 주소·작업 이름·진행률)과 정해진 알림 문장(작업 이름·걸린 시간 — 파일 이름·제목·경로·오류 글 없음), 그리고 접속 IP 가 간다. **알림 주제 이름을 아는 누구나 그 주제로 아무 알림이나 보낼 수 있다**(ntfy.sh 는 보내기 인증이 없음) — 그래서 주제는 잠가서만 보내고, 알림·화면에 '스튜디오 알림은 무엇을 설치하라고 하지 않아요'를 넣었다. cloudflared 는 처음 한 번 GitHub 릴리스에서 받는다.
-  - 휴대폰 페이지는 와벨리와 같은 출처(`mulgyeol.kr`)다. 와벨리 페이지가 불러오는 제3자 스크립트(unpkg leaflet·markercluster(SRI 없음)·네이버 지도·PortOne)나 와벨리 XSS 는 그 휴대폰 브라우저 안에서 저장된 열쇠를 **써서** 허용 동작을 시키고, 그 브라우저를 거쳐 영상·완성본을 받아 가고, 알림 주제를 읽을 수 있다(열쇠 바이트·표 주소를 다른 곳으로 가져가 쓰지는 못함). 따로 떼어 낸 출처(`futsal.mulgyeol.kr`)로 옮기는 것이 해결이다(소유자 결정 · D-027 (a) · `KNOWN_ISSUES.md` I-037).
+  - 휴대폰 페이지는 와벨리 커뮤니티와 다른 출처(`futsal.mulgyeol.kr`)에 혼자 있다(D-240 · 예전 `mulgyeol.kr/futsal` 같은 출처 위험은 없어짐). 그 출처에 다른 페이지·제3자 스크립트를 올리지 않는다 — 올리면 그 스크립트가 휴대폰에 저장된 열쇠를 **써서** PC 에 허용 동작을 시킬 수 있다.
 - 개인정보는 **로그·에러 메시지에 남기지 않는다.**
   - `studio.log`는 문제가 생기면 사용자가 관리자에게 보내는 파일이다. 쿠키·계정 정보·대사 전문을 쓰지 않는다.
     - 작업 실패의 영어 원문(`원문 · …`, 400자까지)과 오류 위치(`오류 위치 · …`)를 남긴다(D-037). 위치는 우리 파일 이름·바깥 라이브러리 '패키지/파일'만 쓰고 전체 경로는 쓰지 않는다. 원문에는 파일 경로(사용자 이름이 든 작업 폴더 등)가 들어갈 수 있다 — 지금도 studio.log 첫머리에 작업 폴더 경로가 있다. 쿠키 오류 원문은 쿠키 값이 아니라 쿠키 파일 위치·이유만 담는다.
@@ -162,7 +162,7 @@
   - 채널 전략 새로 고침(BR-016): 사용자가 누를 때만 작업 하나로, 요청 사이 0.75초·채널 사이 2초+흔들기, 목록을 받은 지 3일 안인 채널은 건너뜀, YouTube 가 막으면(봇 확인·403·429) 6시간·까닭 모를 실패가 3곳 연달아면 1시간 목록 단계를 쉼(사용자가 [지금 다시 시도]로 풀 수 있는 것은 1시간 쉼뿐), 인터넷이 끊기면 그 새로 고침만 멈춤. 자동 요청은 8단계를 열 때 우리 채널 숫자 하루 한 번뿐(설정에서 끔 · 쉬는 중이면 건너뜀). 주기적 자동 새로 고침은 만들지 않는다.
   - 받은 RSS(XML)는 2MB까지만 읽고, `<!DOCTYPE`·`<!ENTITY`가 들어 있으면 해석하지 않고 버린다(XML 폭탄·외부 개체 대비). 응답의 제목·채널 이름은 화면에 `esc()`로만 넣는다.
 - **CORS**: 로컬 서버는 CORS 헤더를 보내지 않는다. 그래서 다른 출처의 스크립트는 응답을 읽지 못한다. 로컬 서버에 `Access-Control-Allow-Origin`을 추가하지 않는다(`*` 금지).
-  - 예외는 원격 리스너 하나(D-027): 정확한 허용 출처(`https://mulgyeol.kr`·`https://www.mulgyeol.kr`)만 그대로 되돌려 주고 `Vary: Origin`, `Allow-Credentials` 없음, `*` 금지. 개발 모드에서만 `FUTSAL_REMOTE_ORIGINS` 를 더한다.
+  - 예외는 원격 리스너 하나(D-027): 정확한 허용 출처(`https://futsal.mulgyeol.kr` 하나 · D-240)만 그대로 되돌려 주고 `Vary: Origin`, `Allow-Credentials` 없음, `*` 금지. 개발 모드에서만 `FUTSAL_REMOTE_ORIGINS` 를 더한다.
 - **에러 응답**: 스택 트레이스·쿼리를 응답에 넣지 않는다.
   - 예외 메시지가 곧 화면 문구다. 사용자 문장으로 쓴다(`CODING_STANDARDS.md` 5번).
   - traceback 전체는 `studiolog.trace` 가 표준 오류에만 쓴다(비밀은 `remote.redact` 로 지움 — Google 토큰·세션 주소·로그인 코드 모양 포함 · `traceback.print_exc()`·`sys.stderr.write(traceback…)` 는 쓰지 않음 · 유튜브 작업·`_youtube_get` 도 이것 하나로 · D-049). `youtube_api` 는 위치·종류만 남긴다(D-048). 유튜브 올리기 작업(`start_job(…, ctx={"youtube": True})`)에서 빠져나온 예외도 원문 글 없이 종류·위치만 남긴다(`detail=False` · 토큰 새로 받기·저장 길이 작업 안에서도 돌아서 · D-049). `remote.redact` 는 JSON·파이썬 사전 repr·`키: 값` 꼴의 토큰 이름과 주소 밖의 로그인 코드(`4/0…`)도 지운다. 사용자 PC(pythonw)에서는 작업 폴더의 `studio-error.log` 로 모인다(`app._error_log`) — 화면·응답에는 나가지 않지만 경로에 Windows 사용자 이름이 들어갈 수 있다.

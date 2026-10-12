@@ -143,15 +143,20 @@ class BoundaryTests(Base):
         self.assertEqual(st, 403)
         self.assertNotIn("Access-Control-Allow-Origin", hd)
 
-    def test_www_origin_allowed_and_dev_origin_only_in_dev(self):
-        self.assertEqual(self.call("GET", "/r/status?since=0", origin="https://www.mulgyeol.kr")[0], 200)
+    def test_only_site_origin_allowed_and_dev_origin_only_in_dev(self):
+        self.assertEqual(self.call("GET", "/r/status?since=0", origin="https://futsal.mulgyeol.kr")[0], 200)
+        for o in ("https://mulgyeol.kr", "https://www.mulgyeol.kr", "https://m.mulgyeol.kr"):  # 와벨리 커뮤니티 출처는 더 이상 안 믿음 (D-240)
+            st, hd, _ = self.call("GET", "/r/status?since=0", origin=o)
+            self.assertEqual(st, 403, o)
+            self.assertNotIn("Access-Control-Allow-Origin", hd)
         self.assertEqual(self.call("GET", "/r/status?since=0", origin="http://127.0.0.1:8973")[0], 200)
         with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_DEV": "0"}):
             st = self.call("GET", "/r/status?since=0", origin="http://127.0.0.1:8973", headers={"Host": "remote.futsal.invalid"})[0]
         self.assertEqual(st, 403)
 
     def test_api_needs_allowed_origin(self):
-        for o in (None, "https://evil.example", "null", "https://mulgyeol.kr.evil.com", "http://mulgyeol.kr"):
+        for o in (None, "https://evil.example", "null", "https://futsal.mulgyeol.kr.evil.com", "http://futsal.mulgyeol.kr",
+                  "https://x.futsal.mulgyeol.kr", "https://futsal.mulgyeol.kr:8443", "https://FUTSAL.mulgyeol.kr.evil.com"):
             st, hd, _ = self.call("GET", "/r/status?since=0", origin=o)
             self.assertEqual(st, 403, o)
             self.assertNotIn("Access-Control-Allow-Origin", hd)
@@ -758,7 +763,7 @@ class LocalServerTests(Base):
             return e.code, dict(e.headers), json.loads(e.read() or b"{}")
 
     def test_tunnel_host_rejected_and_no_cors(self):
-        for host in ("abc-def.trycloudflare.com", "remote.futsal.invalid", "mulgyeol.kr"):
+        for host in ("abc-def.trycloudflare.com", "remote.futsal.invalid", "futsal.mulgyeol.kr"):
             self.assertEqual(self.local("GET", "/api/state", host=host)[0], 403)
             self.assertEqual(self.local("POST", "/api/remote/off", {}, host=host)[0], 403)
         st, hd, _ = self.local("GET", "/api/state", origin=ORIGIN)
@@ -774,11 +779,11 @@ class LocalServerTests(Base):
         st, _, b = self.local("POST", "/api/remote/pair", {})
         self.assertEqual(st, 200)
         self.assertTrue(b["pair"]["qr"] and all(set(r) <= {"0", "1"} for r in b["pair"]["qr"]))
-        self.assertRegex(b["pair"]["link"], r"^https://mulgyeol\.kr/futsal#pair=[0-9A-Z]{10}&u=127\.0\.0\.1:\d+$")  # 개발 모드 힌트는 포트까지
-        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973/futsal"}):
-            self.assertTrue(self.local("GET", "/api/remote")[2]["pair"]["link"].startswith("http://127.0.0.1:8973/futsal#pair="))
-        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973/futsal", "FUTSAL_REMOTE_DEV": "0"}):
-            self.assertTrue(self.local("GET", "/api/remote")[2]["site"] == "https://mulgyeol.kr/futsal")  # 개발 모드가 아니면 늘 진짜 주소
+        self.assertRegex(b["pair"]["link"], r"^https://futsal\.mulgyeol\.kr#pair=[0-9A-Z]{10}&u=127\.0\.0\.1:\d+$")  # 개발 모드 힌트는 포트까지
+        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973"}):
+            self.assertTrue(self.local("GET", "/api/remote")[2]["pair"]["link"].startswith("http://127.0.0.1:8973#pair="))
+        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973", "FUTSAL_REMOTE_DEV": "0"}):
+            self.assertTrue(self.local("GET", "/api/remote")[2]["site"] == "https://futsal.mulgyeol.kr")  # 개발 모드가 아니면 늘 진짜 주소
         st, _, s = self.local("GET", "/api/remote")
         self.assertEqual(s["pair"]["code"], b["pair"]["code"])
         self.assertEqual(s["devices"][0]["name"], "iPhone · Safari")

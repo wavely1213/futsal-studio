@@ -229,7 +229,7 @@ class NotifyTests(NotifyBase):
         for _, msg, hdr, _ in got:
             self.assertNotIn("비밀", msg + json.dumps(hdr, ensure_ascii=False))
             self.assertEqual(hdr["title"], "풋살 스튜디오")
-            self.assertEqual(hdr["click"], "https://mulgyeol.kr/futsal")
+            self.assertEqual(hdr["click"], "https://futsal.mulgyeol.kr")
         self.assertEqual(got[2][2]["priority"], 4)
         self.assertEqual(got[2][2]["tags"], ["warning"])
 

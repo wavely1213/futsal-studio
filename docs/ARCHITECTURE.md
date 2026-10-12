@@ -36,9 +36,9 @@
 **휴대폰으로 보기 (원격 접속, D-027 · 켜 둔 동안만)**
 
 ```
-[휴대폰 브라우저 / 홈 화면 앱]  https://mulgyeol.kr/futsal  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel)
+[휴대폰 브라우저 / 홈 화면 앱]  https://futsal.mulgyeol.kr  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel 프로젝트 wavely 의 뿌리 · D-240)
    │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
-   │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 mulgyeol.kr 만)
+   │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 futsal.mulgyeol.kr 만)
    │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
    │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
@@ -149,7 +149,7 @@
 | trouble | `trouble.py` | 작업 오류 → 쉬운 한 줄 + 할 일 (D-036): `explain`(규칙 `_RULES` 위에서부터 · 우리 한국어 안내는 그대로 + 환경 원인의 할 일), `Trouble`(이미 쉬운 말인 오류), `BROWSERS`·`browser`(로그인 정보를 읽을 브라우저 목록·검사), 유튜브 올리기 실패 카드 `YT_CARDS`·`youtube_card`·`youtube_kind_of`·`explain(…, youtube=True)`(정해진 문장만 · D-049) |
 | studiolog | `studiolog.py` | 오류 기록 하나로 (D-037 · D-044): `write`(studio.log · 연도 붙은 시각 · 2MB 넘으면 studio.old.log · 비밀은 `remote.redact`), `where`·`trace`(오류 위치 한 줄 → studio.log · traceback 전체 → 오류 출력 = pythonw 면 `app._error_log` 의 studio-error.log · 같은 오류는 한 번만), `install_hooks`(스레드·메인의 잡히지 않은 오류 · 파이썬 기본 출력 대신), `session_start`·`job`·`session_end`(실행 표시 `studio.running.json` → 갑자기 꺼짐) · `target`(작업 대상을 실행 표시에 → 갑자기 꺼지면 보관함 [다시 하기] · D-072) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013), 문장 단위로 나누기(`split_sentences`·`ends_sentence` — 가편집 계산·키트 문장 · 가편집은 단어 시각 있는 구간만 · D-101) · 겹쳐 쓴 그림자 문장 합치기(`merge_ghosts`) |
-| 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://mulgyeol.kr/futsal` 정적 PWA. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
+| 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://futsal.mulgyeol.kr` 정적 PWA (Vercel 프로젝트 `wavely` 가 이 페이지만 뿌리에서 냄 · 와벨리 커뮤니티는 별도 `wavely-web` → `mulgyeol.kr` · D-240). 페이지 안 경로는 상대 주소·`BASE`(app.js 위치)라 주소가 바뀌어도 그대로. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
 | 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 8단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기·채널 전략 · 5·7단계에 '전략에서 만든 할 일' 상자), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*` · 원본 `thumb_src/parts/p1~p9` — p1 렌더러(자동 보정·전술 도형·맞춤 상자), p8 'AI 추천 썸네일'(레퍼런스형 템플릿 `T_NEW` 롱폼 11·쇼츠 8 + 예전 `TPL.long` 7·`TPL.short` 5(새 템플릿이 모자랄 때만), 배경 놓기 `frameLayer`(머리 지키기·박힌 글자 피하기)·`topLayouts`·`framesBelow`, 점수 `scoreDoc`(머리 잘림·가림 게이트, 장면 품질 `frameQ`), 고르기 `recommend`, 개발용 `window.__thumbAuto`), p9 전술 그래픽 메뉴·점 핸들·스티커·브랜드 키트·검수(모바일 미리보기·OCR·클로드 평가)·A/B 묶음) |
 
 ## 5. 데이터 모델 요약

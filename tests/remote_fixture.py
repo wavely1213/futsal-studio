@@ -257,5 +257,5 @@ def dev_env(**extra):
     return env
 
 
-ORIGIN = "https://mulgyeol.kr"
+ORIGIN = "https://futsal.mulgyeol.kr"  # 휴대폰 페이지 출처 (remote.SITE · D-240)
 os.environ.pop("FUTSAL_NTFY", None)  # 시험이 진짜 ntfy.sh 로 보내지 않게 (서비스마다 가짜 주소를 줌)
