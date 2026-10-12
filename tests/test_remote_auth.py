@@ -211,7 +211,7 @@ class TicketTests(unittest.TestCase):
         self.assertRegex(a, r"^[A-Za-z0-9_-]+$")
 
     def test_ticket_bound_to_where_the_list_was_fetched(self):
-        """표는 목록을 받은 곳(IPv4 /24 · IPv6 /48)에서만 — 표 주소를 다른 곳으로 가져가면 404 (검토: 와벨리 스크립트가 표를 빼 가는 경우)."""
+        """표는 목록을 받은 곳(IPv4 /24 · IPv6 /48)에서만 — 표 주소를 다른 곳으로 가져가면 403 (검토: 와벨리 스크립트가 표를 빼 가는 경우)."""
         t = self.t.issue("dev1", "file", "/x/a.mp4", "203.0.113.7")
         self.assertIsNotNone(self.t.get(t, "203.0.113.200"))   # 같은 대역 (휴대폰 IP 가 조금 바뀜)
         self.assertIsNone(self.t.get(t, "198.51.100.7"))       # 다른 곳

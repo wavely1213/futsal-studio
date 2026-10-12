@@ -1,0 +1,613 @@
+// 풋살 스튜디오 · 밖에서 작업 심 (remote_ui.js · D-230~D-234)
+// 세션이 있을 때만 /s/remote.js 로 내주고, 화면(ui·editor·thumb)의 head 첫 스크립트로 끼워 넣는다 → 화면 스크립트보다 먼저 돎.
+// 하는 일: fetch·sendBeacon 감싸기(CSRF 머리글 · /api 45초 기다림 · 401·꺼짐(studio_off) 잠금 · 428 확인 · 끊김 안내) · 위쪽 '밖에서 작업' 줄 ·
+//          내 기기에서 올리기(조각 · 줄 세우기 · 이어 올리기 · 화면 켜 두기) · 완성본 받기 · window.FS_REMOTE.
+// 잠긴 뒤에는 화면의 같은 출처 요청을 보내지 않음(끝나지 않는 약속) — 2초마다 묻는 화면이 오류 알림을 되풀이하지 않게 (D-236).
+// 밖에서 온 글(파일 이름 등)은 늘 textContent 로만 넣는다.
+(function () {
+  "use strict";
+  if (window.FS_REMOTE) return;
+  var meta = function (n) { var m = document.querySelector('meta[name="' + n + '"]'); return m ? m.getAttribute("content") || "" : ""; };
+  var NEXT_RE = /^\/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-!'()*]{0,600})?$/;
+  var OPEN_PATHS = { "/api/open": 1, "/api/upload/open": 1, "/api/youtube/open": 1 };
+  var R = { csrf: meta("fs-csrf"), site: meta("fs-site"), device: meta("fs-device"), pc: "", locked: false, prefs: { fullRes: false },
+    expiresAt: 0, chunk: 8 << 20, chunkMax: 16 << 20, upMax: 2, net: "ok", netGen: 0, netHidden: false, ups: [], pending: [], wake: null };
+  var PROBE_MS = 30000, PROBE_STEP = 3000, DOWN_STEP = 20000;  // 끊기면 30초 동안 3초마다 다시 물어봄 → 그래도 안 되면 '끊김' (그 뒤 20초마다 조용히)
+  var CHUNK_MIN = 1 << 20, CHUNK_SECS = 8;  // 올리기 조각: 1MB 로 속도를 재고 한 조각이 약 8초 걸리게 (느린 망도 진행이 자주 움직이게 · D-237)
+  var origFetch = window.fetch.bind(window);
+  var origBeacon = navigator.sendBeacon ? navigator.sendBeacon.bind(navigator) : null;
+  var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var FRAMED = (function () { try { return window.top !== window; } catch (e) { return true; } })();  // 끝까지 자동으로의 보이지 않는 썸네일 틀
+  var CLAIM_GRACE = 8000;  // 끝까지 자동으로 썸네일: PC 화면이 먼저 맡게 기다림 (PC 가 그리면 밖으로 그림·글꼴이 오가지 않음)
+
+  function sameOrigin(u) { try { return new URL(u, location.href).origin === location.origin; } catch (e) { return false; } }
+  function pathOf(u) { try { return new URL(u, location.href).pathname; } catch (e) { return ""; } }
+  function el(tag, props) {
+    var e = document.createElement(tag);
+    Object.keys(props || {}).forEach(function (k) {
+      var v = props[k];
+      if (v == null || v === false) return;
+      if (k === "text") e.textContent = String(v);
+      else if (k === "class") e.className = v;
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v === true ? "" : String(v));
+    });
+    for (var i = 2; i < arguments.length; i++) { var c = arguments[i]; if (c != null && c !== false) e.append(c); }
+    return e;
+  }
+  function here() { var p = location.pathname + location.search; return NEXT_RE.test(p) ? p : "/"; }
+  function homeUrl(resume) { return R.site + (resume ? "#resume=" + encodeURIComponent(resume) : ""); }
+  function size(n) { return n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + "GB" : n >= 1 << 20 ? Math.round(n / (1 << 20)) + "MB" : n > 0 ? Math.max(1, Math.round(n / 1024)) + "KB" : "0KB"; }
+  function dur(s) { s = Math.max(0, Math.round(s)); return s >= 3600 ? Math.floor(s / 3600) + "시간 " + Math.floor(s % 3600 / 60) + "분" : s >= 60 ? Math.floor(s / 60) + "분 " + (s % 60) + "초" : s + "초"; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function sleepOrOnline(ms) {  // 기다리다가 인터넷이 돌아오거나(online) 화면을 다시 보면(잠금 해제 · 다른 앱에서 돌아옴) 바로 깸
+    return new Promise(function (r) {
+      var t = setTimeout(done, ms);
+      function done() { clearTimeout(t); window.removeEventListener("online", wake); document.removeEventListener("visibilitychange", vis); r(); }
+      function wake() { setTimeout(done, 500); }
+      function vis() { if (document.visibilityState === "visible") wake(); }
+      window.addEventListener("online", wake);
+      document.addEventListener("visibilitychange", vis);
+    });
+  }
+  function ready(fn) { if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn); else fn(); }
+
+  // ---------- 알림 줄 ----------
+  function toast(msg, link) {
+    ready(function () {
+      var t = document.getElementById("fsr-toast");
+      if (!t) { t = el("div", { id: "fsr-toast", role: "status" }); document.body.append(t); }
+      t.replaceChildren(el("span", { text: msg }), link ? el("a", { href: link.href, target: "_blank", rel: "noopener noreferrer", text: link.text, onclick: function () { t.classList.remove("show"); } }) : null);
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(function () { t.classList.remove("show"); }, link ? 9000 : 4000);
+    });
+  }
+
+  // ---------- 연결이 끝났을 때 (401) ----------
+  var LOCK = {
+    revoked: ["PC에서 연결을 끊었어요", "다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요"],
+    logout: ["연결을 끝냈어요", "이 브라우저에서 밖에서 작업 연결을 끝냈어요 · 다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요"],
+    studio_off: ["밖에서 작업이 꺼져 있어요", "PC의 '휴대폰으로 보기'에서 '밖에서 작업 허용'을 켜 주세요"],
+    expired: ["연결이 끝났어요", "오래 쓰지 않아 연결이 끝났어요 · 다시 연결할게요"],
+    none: ["다시 연결해 주세요", "PC와 연결이 끊겼어요 · 다시 연결할게요"]
+  };
+  function dirty() {
+    try { if (typeof FS.isDirty === "function" && FS.isDirty()) return true; } catch (e) { /* 화면 쪽 오류는 무시 */ }
+    return R.ups.some(upBusy);
+  }
+  function upBusy(u) { return u.state === "up" || u.state === "wait" || u.state === "queue" || u.state === "prep"; }
+  function lock(code, site) {
+    if (R.locked || FRAMED) return;  // 틀 안에서는 바깥 화면이 잠금을 맡음
+    R.locked = true;
+    if (site && !R.site) R.site = site;
+    var t = LOCK[code] || LOCK.none;
+    var again = code === "none" || code === "expired";  // 끊긴 것 · 시간이 지난 것만 다시 연결 (PC 가 끊었거나·꺼 두었거나·내가 끝낸 것은 아님)
+    var auto = again && !dirty();
+    var bar = document.getElementById("fsr-net");
+    if (bar) bar.classList.remove("show");
+    ready(function () {
+      var box = el("div", { class: "fsr-card" }, el("h2", { text: t[0] }),
+        el("p", { text: again && !auto ? "저장하지 않은 내용이나 올리던 파일이 있어요 · 준비되면 [다시 연결]을 눌러 주세요" : t[1] }),
+        el("div", { class: "fsr-row" },
+          again ? el("a", { class: "fsr-btn pri", href: homeUrl(here()), text: "다시 연결" })
+            : el("a", { class: "fsr-btn pri", href: homeUrl(""), text: "원격 홈으로" })));
+      document.body.append(el("div", { id: "fsr-lock", role: "alertdialog", "aria-modal": "true" }, box));
+      if (auto) setTimeout(function () { location.replace(homeUrl(here())); }, 1200);
+    });
+  }
+
+  // ---------- 끊김 (인터넷·터널) ----------
+  // ok → probing(30초 동안 3초마다 /s/session) → 살아나면 ok · 401/403 이면 잠금 · 그래도 안 되면 down.
+  // down 은 그대로 둠 (화면의 2초 묻기가 또 실패해도 '다시 잇는 중'으로 되돌리지 않음 · [닫기]도 그대로) — 터널 주소가 바뀌면(PC 다시 켬 ·
+  // 앱 업데이트 · 터널 다시 연결) 옛 주소는 영영 대답하지 않으므로: 저장 안 한 것·올리던 파일이 없으면 저절로 원격 홈(#resume)으로 →
+  // 원격 홈이 비콘으로 새 주소를 찾아 다시 넘겨줌. 있으면 [다시 연결]을 보여 주고 20초마다 조용히 다시 물어봄 (D-236).
+  function netBar() {
+    var bar = document.getElementById("fsr-net");
+    if (!bar && document.body) { bar = el("div", { id: "fsr-net", role: "status" }); document.body.append(bar); }
+    return bar;
+  }
+  function netMark(down) {
+    var b = document.getElementById("fsr-bar");
+    if (b) b.classList.toggle("off", !!down);
+    var n = document.getElementById("fsr-pc");
+    if (n) n.textContent = down ? "PC와 연결이 끊겼어요" : (R.pc || "내 PC") + " · 밖에서 작업 중";
+  }
+  function netUp() {
+    if (R.net === "ok") return;
+    var was = R.net;
+    R.net = "ok"; R.netGen++; R.netHidden = false;
+    var bar = document.getElementById("fsr-net");
+    if (bar) bar.classList.remove("show");
+    netMark(false);
+    if (was === "down" || was === "probing") toast("PC와 다시 연결됐어요");
+  }
+  async function netProbe() {  // → "ok" | "lock" | "" (아직 끊김)
+    try {
+      var r = await origFetch("/s/session", { credentials: "same-origin", cache: "no-store" });
+      if (r.status === 200) { netUp(); return "ok"; }
+      if (r.status === 401 || r.status === 403) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site); return "lock"; }
+    } catch (e) { /* 아직 끊김 */ }
+    return "";
+  }
+  function goHome() { if (!R.locked) { R.locked = true; location.replace(homeUrl(here())); } }
+  function netDown() {
+    if (FRAMED || R.locked || R.net !== "ok") return;
+    R.net = "probing";
+    var gen = ++R.netGen;
+    ready(function () {
+      var bar = netBar();
+      if (R.net !== "probing" || gen !== R.netGen || !bar) return;
+      bar.replaceChildren(el("span", { text: "PC와 연결이 잠시 끊겼어요 · 다시 잇는 중…" }));
+      bar.classList.add("show");
+      netMark(true);
+    });
+    (async function () {
+      var start = Date.now();
+      while (Date.now() - start < PROBE_MS) {
+        await sleep(PROBE_STEP);
+        if (gen !== R.netGen || R.locked) return;
+        if (await netProbe()) return;
+      }
+      if (gen !== R.netGen || R.locked) return;
+      R.net = "down";
+      ready(function () {
+        var bar = netBar();
+        if (!bar || gen !== R.netGen) return;
+        if (!navigator.onLine) {  // 이 기기 인터넷이 끊김 (지하철 등) → 원격 홈으로 가도 못 열림 · 다시 되면 이어서
+          bar.replaceChildren(el("span", { text: "이 기기가 인터넷에 연결돼 있지 않아요 · 다시 되면 이어서 할게요" }));
+          bar.classList.add("show");
+          return;
+        }
+        if (!dirty()) {  // 옛 주소는 다시 안 열릴 수 있음 → 원격 홈이 새 주소를 찾아 이 화면으로 다시
+          bar.replaceChildren(el("span", { text: "PC와 연결되지 않아요 · 원격 홈에서 PC를 다시 찾을게요…" }));
+          bar.classList.add("show");
+          setTimeout(function () { if (gen === R.netGen && R.net === "down" && !dirty() && navigator.onLine) goHome(); }, 1500);
+          return;
+        }
+        bar.replaceChildren(el("span", { text: "PC와 연결되지 않아요 · 저장하지 않은 내용이나 올리던 파일이 있어요 · PC가 켜져 있는지 확인한 뒤" }),
+          el("a", { class: "fsr-btn", href: homeUrl(here()), text: "다시 연결" }),
+          el("button", { class: "fsr-btn", type: "button", text: "닫기", onclick: function () { R.netHidden = true; bar.classList.remove("show"); } }));
+        if (!R.netHidden) bar.classList.add("show");
+      });
+      while (gen === R.netGen && R.net === "down" && !R.locked) {  // 조용히 다시 물어봄 (같은 주소가 살아나면 그대로 이어서)
+        await sleepOrOnline(DOWN_STEP);
+        if (gen !== R.netGen || R.locked) return;
+        if (await netProbe()) return;
+        if (!dirty() && navigator.onLine) return goHome();
+      }
+    })();
+  }
+
+  // ---------- fetch 감싸기 ----------
+  function isCfHtml(r) {
+    return (r.status >= 520 && r.status <= 530 || r.status === 502 || r.status === 503 || r.status === 504) &&
+      (r.headers.get("Content-Type") || "").indexOf("text/html") === 0;
+  }
+  function replayable(b) { return b == null || typeof b === "string" || b instanceof Blob || b instanceof ArrayBuffer || ArrayBuffer.isView(b) || b instanceof URLSearchParams || b instanceof FormData; }
+  async function handleOpen(r) {
+    try {
+      var j = await r.clone().json();
+      if (j.remote) FS.openFolder(j.remote === "outputs" ? "out" : j.remote === "upload" ? "videos" : "log", true);
+      if (j.openUrl) openWin(j.openUrl);
+      if (j.download) download(j.download);
+    } catch (e) { /* 글이 아님 */ }
+  }
+  function openWin(url) {
+    var w = null;
+    try { w = window.open(url, "_blank"); if (w) w.opener = null; } catch (e) { w = null; }
+    if (!w) toast("새 창이 막혔어요 · 여기를 눌러 열어 주세요", { href: url, text: "열기" });
+  }
+  var claiming = {};
+  async function claimLater(body) {
+    // 끝까지 자동으로 (D-201): 썸네일 그리기 요청은 열린 화면 하나가 맡음 — 밖의 화면은 조금 기다렸다가 아직 아무도 안 맡았을 때만
+    // (기다리는 동안 화면이 2·3초마다 또 물어도 같은 요청은 한 번만 기다림)
+    var id = ""; try { id = String(JSON.parse(body).id || ""); } catch (e) { /* */ }
+    var no = function () { return new Response(JSON.stringify({ ok: false }), { status: 409, headers: { "Content-Type": "application/json" } }); };
+    if (!id || claiming[id]) return no();
+    claiming[id] = 1;
+    try {
+      await sleep(CLAIM_GRACE);
+      var j = await (await origFetch("/api/auto/pending", { credentials: "same-origin", cache: "no-store" })).json();
+      if (j && j.want && String(j.want.id) === id) return null;
+    } catch (e) { /* 물어보지 못하면 맡지 않음 */ } finally { delete claiming[id]; }
+    return no();
+  }
+  async function fsFetch(input, init) {
+    init = init || {};
+    var url = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
+    if (!url || !sameOrigin(url)) return origFetch(input, init);
+    if (R.locked) return new Promise(function () { /* 잠긴 화면: 더 묻지 않음 (오류 알림·'vundefined' 같은 반쪽 화면이 되풀이되지 않게) */ });
+    var isReq = typeof Request !== "undefined" && input instanceof Request;
+    var method = String(init.method || (isReq ? input.method : "GET")).toUpperCase();
+    var p = pathOf(url);
+    if (p === "/api/auto/claim" && method === "POST" && typeof init.body === "string") {
+      var no = await claimLater(init.body);
+      if (no) return no;
+    }
+    var headers = new Headers(init.headers || (isReq ? input.headers : undefined));
+    if (method !== "GET" && method !== "HEAD") headers.set("X-FS-CSRF", R.csrf);
+    var timer = null, signal = init.signal;
+    if (p.indexOf("/api/") === 0 && !signal && p !== "/api/edit/file" && p !== "/api/edit/upload") {
+      var ac = new AbortController();
+      timer = setTimeout(function () { ac.abort(); }, 45000);  // 터널 너머라 끝없이 기다리지 않게 (Cloudflare 는 100초에 끊음)
+      signal = ac.signal;
+    }
+    var opts = Object.assign({}, init, { headers: headers, credentials: "same-origin" });
+    if (signal) opts.signal = signal;
+    var r;
+    try { r = await origFetch(isReq ? new Request(input, opts) : url, isReq ? undefined : opts); }
+    catch (e) { if (!(e && e.name === "AbortError" && init.signal && init.signal.aborted)) netDown(); throw e; }
+    finally { if (timer) clearTimeout(timer); }
+    if (r.status === 401) {
+      var j401 = {};
+      try { j401 = await r.clone().json(); } catch (e) { /* */ }
+      lock(j401.code || "none", j401.site);
+      if (!FRAMED) return new Promise(function () { /* 잠김: 화면 코드가 오류 답을 데이터로 읽지 않게 (잠금 창이 안내) */ });
+      return r;
+    }
+    if (r.status === 403) {
+      var j403 = {};
+      try { j403 = await r.clone().json(); } catch (e) { /* */ }
+      if (j403.code === "studio_off") {  // PC 에서 '밖에서 작업 허용'을 끔 → 묻기(GET)든 저장이든 바로 잠금
+        lock("studio_off");
+        if (!FRAMED) return new Promise(function () { /* 잠김 */ });
+        return r;
+      }
+      if (j403.code === "csrf" && method !== "GET" && replayable(init.body) && !opts._fsRetry && await refreshSession()) {  // 다른 탭이 새로 연결해 CSRF 가 바뀜 → 한 번만 다시
+        headers.set("X-FS-CSRF", R.csrf);
+        return origFetch(url, Object.assign(opts, { headers: headers, _fsRetry: true }));
+      }
+    }
+    if (r.status === 428 && replayable(init.body)) {
+      var jc = {};
+      try { jc = await r.clone().json(); } catch (e) { /* */ }
+      if (jc.confirm && jc.confirm.token) {
+        if (!window.confirm(jc.confirm.text || "계속할까요?")) {
+          return new Response(JSON.stringify({ ok: false, error: "취소했어요" }), { status: 409, headers: { "Content-Type": "application/json" } });
+        }
+        headers.set("X-FS-Confirm", jc.confirm.token);
+        return fsFetch(url, Object.assign({}, init, { headers: headers }));
+      }
+    }
+    if (isCfHtml(r)) netDown();
+    else if (R.net !== "ok") netUp();  // PC 가 대답함 → 다시 이어짐
+    if (OPEN_PATHS[p] && r.ok) handleOpen(r);
+    return r;
+  }
+  window.fetch = fsFetch;
+  if (origBeacon) {
+    navigator.sendBeacon = function (url, data) {  // 페이지를 떠날 때 저장 — 머리글을 못 붙이는 beacon 대신 keepalive fetch (CSRF)
+      if (!sameOrigin(url)) return origBeacon(url, data);
+      try {
+        origFetch(url, { method: "POST", keepalive: true, credentials: "same-origin", body: data,
+          headers: { "Content-Type": "application/json", "X-FS-CSRF": R.csrf } }).catch(function () { /* 떠나는 중 */ });
+        return true;
+      } catch (e) { return false; }
+    };
+  }
+  async function refreshSession() {
+    try {
+      var r = await origFetch("/s/session", { credentials: "same-origin", cache: "no-store" });
+      if (!r.ok) { if (r.status === 401) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site); } return false; }
+      var s = await r.json();
+      R.csrf = s.csrf; R.site = s.site || R.site; R.device = s.device || R.device; R.pc = s.pc || ""; R.prefs = s.prefs || R.prefs;
+      R.expiresAt = s.expiresAt || 0; R.chunk = s.chunk || R.chunk; R.chunkMax = s.chunkMax || R.chunkMax; R.upMax = s.upMax || R.upMax;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ---------- 위쪽 줄 ----------
+  function bar() {
+    var b = el("div", { id: "fsr-bar", role: "region", "aria-label": "밖에서 작업" });
+    var name = el("b", { id: "fsr-pc", text: (R.pc || "내 PC") + " · 밖에서 작업 중" });
+    var upPct = el("span", { id: "fsr-uppct" });
+    var full = el("input", { type: "checkbox", id: "fsr-full" });
+    full.checked = !!R.prefs.fullRes;
+    full.addEventListener("change", async function () {
+      var on = full.checked;
+      if (on && !window.confirm("원본 화질로 보면 데이터를 많이 써요 (와이파이 추천). 켤까요?")) { full.checked = false; return; }
+      var r = await fsFetch("/s/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fullRes: on }) });
+      if (r.ok) { R.prefs.fullRes = on; toast(on ? "원본 화질로 봐요 · 화면을 새로 고치면 바뀌어요" : "가벼운 미리보기 파일로 봐요"); }
+      else full.checked = !on;
+    });
+    var menu = el("div", { id: "fsr-menu", class: "fsr-acts" },
+      el("button", { class: "fsr-btn", type: "button", text: "완성본 받기", onclick: function () { FS.showOutputs(); } }),
+      el("button", { class: "fsr-btn", type: "button", text: "내 기기에서 올리기", onclick: function () { FS.showUploads(true); } }),
+      el("label", { class: "fsr-chk", title: "데이터를 많이 써요" }, full, el("span", { text: "원본 화질로 보기" })),
+      el("button", { class: "fsr-btn", type: "button", text: "연결 끝내기", onclick: logout }),
+      el("a", { class: "fsr-btn", href: homeUrl(""), text: "← 원격 홈" }));
+    var more = el("button", { class: "fsr-btn fsr-more", type: "button", "aria-expanded": "false", text: "메뉴", onclick: function () {
+      var open = b.classList.toggle("open"); more.setAttribute("aria-expanded", open ? "true" : "false");
+    } });
+    b.append(el("span", { class: "fsr-dot", "aria-hidden": "true" }), name, upPct, more, menu);
+    document.body.prepend(b);
+  }
+  async function logout() {
+    if (dirty() && !window.confirm("저장하지 않은 내용이나 올리던 파일이 있어요. 그래도 연결을 끝낼까요?")) return;
+    if (!dirty() && !window.confirm("밖에서 작업 연결을 끝낼까요? 다시 쓰려면 원격 홈에서 다시 열어요.")) return;
+    try { await fsFetch("/s/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); } catch (e) { /* 그래도 나감 */ }
+    R.locked = true;
+    location.replace(homeUrl(""));
+  }
+
+  // ---------- 창 (완성본 받기 · 올리기) ----------
+  function panel(id, title, body) {
+    var old = document.getElementById("fsr-panel");
+    if (old) old.remove();
+    var close = function () { mask.remove(); };
+    var box = el("div", { class: "fsr-card fsr-panel", role: "dialog", "aria-modal": "true", "aria-label": title, id: id },
+      el("div", { class: "fsr-head" }, el("h2", { text: title }), el("button", { class: "fsr-btn", type: "button", text: "닫기", onclick: close })), body);
+    var mask = el("div", { id: "fsr-panel", onclick: function (e) { if (e.target === mask) close(); } }, box);
+    document.body.append(mask);
+    return { box: box, close: close };
+  }
+  function download(href) {
+    var a = el("a", { href: href, download: "" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+  var KIND = { video: "영상", image: "썸네일", text: "올리기 키트", srt: "자막", xml: "편집 파일" };
+  async function showOutputs() {
+    var list = el("div", { class: "fsr-list" }, el("p", { class: "fsr-muted", text: "불러오는 중이에요…" }));
+    var pn = panel("fsr-outputs", "완성본 받기", el("div", {},
+      el("p", { class: "fsr-muted", text: "PC 완성본 폴더의 파일을 이 기기로 받아요 · 큰 영상은 와이파이에서 받는 게 좋아요" }), list,
+      el("div", { class: "fsr-row" }, el("button", { class: "fsr-btn", type: "button", text: "새로 고침", onclick: function () { fill(); } }),
+        el("a", { class: "fsr-btn", href: "/s/dl?log=1", download: "", text: "작업 기록(studio.log) 받기" }))));
+    async function fill() {
+      var j = null;
+      try { var r = await fsFetch("/s/outputs", { cache: "no-store" }); if (r.ok) j = await r.json(); } catch (e) { /* 아래 */ }
+      if (!j) { list.replaceChildren(el("p", { text: "목록을 불러오지 못했어요" })); return; }
+      if (!j.outputs.length) { list.replaceChildren(el("p", { class: "fsr-muted", text: "아직 완성본이 없어요 · 편집실에서 내보내면 여기에 생겨요" })); return; }
+      list.replaceChildren.apply(list, j.outputs.map(function (o) {
+        var slot = el("div", { class: "fsr-slot" });
+        var acts = el("div", { class: "fsr-row" }, el("a", { class: "fsr-btn pri", href: "/s/dl?f=" + encodeURIComponent(o.name), download: "", text: "받기 (" + size(o.size) + ")" }));
+        if (o.kind === "video") {
+          if (o.preview) acts.append(el("button", { class: "fsr-btn", type: "button", text: "작은 미리보기로 보기", onclick: function () {
+            slot.replaceChildren(el("video", { controls: true, playsinline: true, preload: "metadata", src: "/s/preview?f=" + encodeURIComponent(o.name) }));
+          } }));
+          else acts.append(el("button", { class: "fsr-btn", type: "button", text: "작은 미리보기 만들기", onclick: async function () {
+            var r = await fsFetch("/s/outputs/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ f: o.name }) });
+            var jj = {}; try { jj = await r.json(); } catch (e) { /* */ }
+            toast(r.ok ? "작은 미리보기를 만들기 시작했어요 · 끝나면 [새로 고침]" : (jj.error || "지금은 만들 수 없어요"));
+          } }));
+        }
+        var qa = o.qa ? el("p", { class: "fsr-muted", text: "검수 " + o.qa.score + "점 · 고칠 것 " + (o.qa.bad || 0) + " · 볼 것 " + (o.qa.warn || 0) }) : null;
+        return el("div", { class: "fsr-item" }, el("div", { class: "fsr-name", text: o.name }),
+          el("div", { class: "fsr-muted", text: (KIND[o.kind] || "") + " · " + size(o.size) + " · " + new Date(o.mtime * 1000).toLocaleString("ko-KR") }), qa, acts, slot);
+      }));
+    }
+    fill();
+    return pn;
+  }
+
+  // ---------- 내 기기에서 올리기 ----------
+  async function digest(buf) { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf)), function (b) { return b.toString(16).padStart(2, "0"); }).join(""); }
+  async function probeOf(file) {
+    var a = await file.slice(0, 1 << 20).arrayBuffer();
+    var b = await file.slice(Math.max(0, file.size - (1 << 20))).arrayBuffer();
+    var both = new Uint8Array(a.byteLength + b.byteLength);
+    both.set(new Uint8Array(a), 0); both.set(new Uint8Array(b), a.byteLength);
+    return digest(both.buffer);
+  }
+  async function jpost(path, body) {
+    var r = await fsFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    var j = {}; try { j = await r.json(); } catch (e) { /* */ }
+    return { status: r.status, ok: r.ok, j: j };
+  }
+  // 줄 세우기: 한 기기에서 동시에 R.upMax(PC 가 정함 · 2)개까지만 올리고 나머지는 '차례를 기다리는 중' → 앞의 것이 끝나면 저절로 (D-237).
+  // PC 가 아직 받을 수 없다고 하면(429 · 다른 기기·방금 그만둔 올리기가 자리를 차지) 실패가 아니라 잠시 뒤 다시 줄을 섬.
+  // 끝나는 모든 길(다 올림·실패·멈춤·그만둠)에서 upload() 의 약속을 풀어 줌 → 편집실 가져오기가 한 파일에서 멈추지 않음.
+  var UP_LABEL = { up: "올리는 중", wait: "연결을 다시 잇는 중", paused: "멈춤", done: "다 올렸어요 ✓", err: "멈췄어요", cancel: "그만둠", prep: "준비 중",
+    queue: "차례를 기다리는 중" };
+  function upView() {
+    var pc = R.ups.filter(upBusy);
+    var pct = document.getElementById("fsr-uppct");
+    if (pct) pct.textContent = pc.length ? " · 올리는 중 " + Math.floor(pc.reduce(function (a, u) { return a + u.received; }, 0) * 100 / Math.max(1, pc.reduce(function (a, u) { return a + u.size; }, 0))) + "%" : "";
+    wakeSync();
+    var list = document.getElementById("fsr-uplist");
+    if (!list) return;
+    var rows = R.ups.map(function (u) {
+      var pctv = u.size ? Math.floor(u.received * 100 / u.size) : 0;
+      var bar = el("div", { class: "fsr-bar" }, el("i", { style: "width:" + Math.max(2, pctv) + "%" }));
+      var st = UP_LABEL[u.state] || "";
+      var info = u.state === "up" ? (u.speed ? " · " + size(u.speed) + "/초 · 약 " + dur((u.size - u.received) / u.speed) + " 남음" : " · 속도 재는 중") : "";
+      var acts = el("div", { class: "fsr-row" });
+      if (u.state === "up" || u.state === "wait") acts.append(el("button", { class: "fsr-btn", type: "button", text: "잠시 멈춤", onclick: function () { u.pause = true; } }));
+      if (u.state === "paused" || u.state === "err") acts.append(el("button", { class: "fsr-btn pri", type: "button", text: "이어 올리기", onclick: function () { resume(u); } }));
+      if (u.state !== "done" && u.state !== "cancel") acts.append(el("button", { class: "fsr-btn", type: "button", text: "그만두기", onclick: function () { cancel(u); } }));
+      var note = u.state === "queue" ? u.note : u.error;
+      return el("div", { class: "fsr-item", "data-up": u.name, "data-state": u.state }, el("div", { class: "fsr-name", text: u.name }),
+        el("div", { class: "fsr-muted", text: st + " · " + pctv + "% (" + size(u.received) + " / " + size(u.size) + ")" + info + (note ? " · " + note : "") }), bar, acts);
+    });
+    var pend = R.pending.filter(function (p) { return !R.ups.some(function (u) { return u.id === p.id; }); }).map(function (p) {
+      return el("div", { class: "fsr-item fsr-pend" }, el("div", { class: "fsr-name", text: p.name }),
+        el("div", { class: "fsr-muted", text: "이어 올릴 파일이에요 · " + Math.floor(p.received * 100 / p.size) + "% 올렸어요 · 같은 파일을 다시 고르면 이어서 올려요 · 안 올릴 거면 [그만두기]" }),
+        el("div", { class: "fsr-row" }, el("button", { class: "fsr-btn pri", type: "button", text: "파일 다시 고르기", onclick: function () { pick(p.target); } }),
+          el("button", { class: "fsr-btn", type: "button", text: "그만두기", onclick: async function () {
+            await jpost("/s/upload/cancel", { id: p.id }); R.pending = R.pending.filter(function (x) { return x.id !== p.id; }); upView(); pump();
+          } })));
+    });
+    list.replaceChildren.apply(list, pend.concat(rows).length ? pend.concat(rows) : [el("p", { class: "fsr-muted", text: "올리는 파일이 없어요" })]);
+  }
+  // 올리는 동안 화면이 꺼지지 않게 (휴대폰이 잠기면 브라우저가 멈춰 올리기도 멈춤) — 되는 브라우저만 · 화면을 다시 보면 다시 잡음
+  function wakeSync() {
+    var want = R.ups.some(upBusy) && document.visibilityState === "visible";
+    if (want && !R.wake && navigator.wakeLock && navigator.wakeLock.request) {
+      R.wake = "asking";
+      navigator.wakeLock.request("screen").then(function (w) {
+        R.wake = w;
+        w.addEventListener("release", function () { if (R.wake === w) R.wake = null; });
+        if (!R.ups.some(upBusy)) { R.wake = null; w.release().catch(function () { /* */ }); }
+      }).catch(function () { R.wake = null; });
+    } else if (!want && R.wake && R.wake !== "asking" && document.visibilityState === "visible") {
+      var w = R.wake; R.wake = null;
+      w.release().catch(function () { /* */ });
+    }
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { wakeSync(); pump(); } });
+  async function loadPending() {
+    try { var r = await fsFetch("/s/upload/pending", { cache: "no-store" }); if (r.ok) R.pending = (await r.json()).uploads || []; } catch (e) { /* */ }
+    upView();
+  }
+  function pick(target) {
+    var inp = el("input", { type: "file", multiple: true, accept: target === "assets" ? "video/*,audio/*,image/*" : "video/*,.mts,.m2ts,.avi,.wmv,.mpg,.mpeg,.3gp,.mxf,.insv" });
+    inp.style.display = "none";
+    inp.addEventListener("change", function () { Array.from(inp.files || []).forEach(function (f) { upload(f, { target: target || "videos" }); }); inp.remove(); });
+    document.body.append(inp);
+    inp.click();
+  }
+  function showUploads(withPick) {
+    panel("fsr-uploads", "내 기기에서 올리기", el("div", {},
+      el("p", { class: "fsr-muted", text: "이 기기의 영상을 PC 보관함에 올려요 · 큰 파일도 조각으로 올리고, 끊기면 그 자리부터 이어 올려요 · 여러 개를 고르면 " + R.upMax + "개씩 차례로 올려요" }),
+      el("p", { class: "fsr-hint", id: "fsr-keepon", text: "올리는 동안 이 화면을 켜 두세요 · 화면이 꺼지거나 다른 앱으로 가면 잠시 멈췄다가, 이 화면으로 돌아오면 그 자리부터 이어 올려요" }),
+      IOS ? el("p", { class: "fsr-hint", text: "아이폰: '사진'에서 고르면 화질이 줄 수 있어요 · '파일' 앱에서 고르면 원본 그대로 올라가요" }) : null,
+      el("div", { class: "fsr-row" }, el("button", { class: "fsr-btn pri", type: "button", text: "파일 고르기", onclick: function () { pick("videos"); } })),
+      el("div", { class: "fsr-list", id: "fsr-uplist" })));
+    loadPending();
+    if (withPick && !R.pending.length) pick("videos");
+  }
+  function settle(u, val) {  // 이 올리기는 (지금은) 끝 → 기다리는 쪽(편집실 가져오기)에 알리고 다음 차례를 시작
+    if (u.done) { var d = u.done; u.done = null; d(val); }
+    setTimeout(pump, 0);
+  }
+  function pump() {
+    if (R.locked) return;
+    var now = Date.now(), busy = R.ups.filter(function (u) { return u.running; }).length, later = 0;
+    for (var i = 0; i < R.ups.length && busy < R.upMax; i++) {
+      var u = R.ups[i];
+      if (u.state !== "queue" || u.running) continue;
+      if (u.retryAt > now) { later = later ? Math.min(later, u.retryAt) : u.retryAt; continue; }
+      busy++;
+      run(u);
+    }
+    clearTimeout(R.pumpT);
+    if (later) R.pumpT = setTimeout(pump, Math.max(500, later - now));
+  }
+  function resume(u) { u.pause = false; u.error = ""; u.state = "queue"; u.retryAt = 0; upView(); pump(); }
+  async function cancel(u) {
+    u.pause = true; u.state = "cancel";
+    if (u.id) await jpost("/s/upload/cancel", { id: u.id });
+    upView();
+    settle(u, null);
+  }
+  function upload(file, opts) {
+    var u = { file: file, name: file.name, size: file.size, target: (opts && opts.target) || "videos", received: 0, state: "queue", id: null, speed: 0, tries: 0, retryAt: 0 };
+    R.ups.push(u);
+    var p = new Promise(function (res) { u.done = res; });
+    if (!document.getElementById("fsr-uplist") && u.target === "videos") showUploads(false);
+    upView();
+    pump();
+    return p;
+  }
+  function fail(u, state, msg, quiet) {
+    u.state = state; u.error = msg; upView();
+    if (!quiet) toast(msg);
+    settle(u, null);
+  }
+  async function run(u) {
+    if (u.running) return;
+    u.running = true;
+    try {
+      if (u.state === "queue") { u.state = "prep"; u.note = ""; upView(); }
+      if (!u.probe) u.probe = await probeOf(u.file);
+      if (!u.id) {
+        var ini = await jpost("/s/upload/init", { name: u.file.name, size: u.file.size, lastModified: u.file.lastModified || 0, probe: u.probe, target: u.target });
+        if (ini.status === 429) {  // PC 가 아직 받을 수 없음 → 잠시 뒤 다시 줄을 섬 (실패 아님)
+          u.state = "queue"; u.note = ini.j.error || "PC가 다른 파일을 받는 중이에요 · 앞의 파일이 끝나면 이어서 올려요"; u.retryAt = Date.now() + 5000;
+          upView(); return;
+        }
+        if (!ini.ok) return fail(u, "err", ini.j.error || "올리지 못했어요");
+        u.id = ini.j.id; u.received = ini.j.received; u.name = ini.j.name || u.name;
+        u.chunkMax = Math.max(CHUNK_MIN, Math.min(ini.j.chunkMax || R.chunkMax, 16 << 20));
+        R.pending = R.pending.filter(function (x) { return x.id !== u.id; });
+      }
+      if (!u.chunk) u.chunk = CHUNK_MIN;
+      u.state = "up"; upView();
+      var t0 = Date.now(), b0 = u.received;
+      while (u.received < u.size) {
+        if (u.pause) { if (u.state !== "cancel") { u.state = "paused"; upView(); settle(u, null); } return; }
+        var end = Math.min(u.size, u.received + u.chunk);
+        var buf = await u.file.slice(u.received, end).arrayBuffer();
+        var r = null, j = {}, c0 = Date.now();
+        try {
+          r = await fsFetch("/s/upload/chunk?id=" + u.id + "&offset=" + u.received, { method: "POST", body: buf,
+            headers: { "Content-Type": "application/octet-stream", "X-FS-Sha256": await digest(buf) } });
+          try { j = await r.json(); } catch (e) { j = {}; }
+        } catch (e) { r = null; }
+        if (r && r.ok) {
+          var secs = (Date.now() - c0) / 1000;
+          // 다음 조각 크기: 이번 조각 속도로 약 8초 (1MB ~ PC 가 정한 최대) · 256KB 단위
+          if (secs > 0.05) u.chunk = Math.max(CHUNK_MIN, Math.min(u.chunkMax || R.chunkMax, Math.round(buf.byteLength / secs * CHUNK_SECS / (256 << 10)) * (256 << 10)));
+          u.received = j.received; u.tries = 0;
+          var all = (Date.now() - t0) / 1000;
+          if (all > 0.5) u.speed = (u.received - b0) / all;
+          upView();
+          continue;
+        }
+        if (r && r.status === 409 && typeof j.received === "number") { u.received = j.received; continue; }
+        if (r && (r.status === 507 || r.status === 404 || r.status === 401 || r.status === 403 || r.status === 413)) {
+          return fail(u, "err", j.error || "올리지 못했어요", r.status === 401 || r.status === 403);
+        }
+        // 끊김·5xx → 잠깐 기다렸다 PC 가 받은 자리를 다시 물어 이어서 (자동) · 조각도 작게
+        u.state = "wait"; u.chunk = CHUNK_MIN; upView();
+        u.tries++;
+        if (u.tries > 40) return fail(u, "paused", "연결이 계속 끊겨요 · [이어 올리기]를 눌러 주세요", true);
+        await sleepOrOnline(Math.min(30000, 1000 * Math.pow(2, Math.min(5, u.tries - 1))));
+        try {
+          var s = await fsFetch("/s/upload/status?id=" + u.id, { cache: "no-store" });
+          if (s.ok) u.received = (await s.json()).received;
+          else if (s.status === 404) return fail(u, "err", "PC에서 올리던 파일이 사라졌어요 · 다시 골라 주세요", true);
+        } catch (e) { /* 다음 차례에 */ }
+        u.state = "up"; t0 = Date.now(); b0 = u.received;
+      }
+      var fin = await jpost("/s/upload/finish", { id: u.id });
+      if (!fin.ok) return fail(u, "err", fin.j.error || "마무리하지 못했어요");
+      u.state = "done"; upView();
+      toast(u.target === "videos" ? "보관함에 올렸어요 · " + (fin.j.name || u.name) : "가져왔어요 · " + (fin.j.file || u.name));
+      settle(u, fin.j);
+    } catch (e) {
+      fail(u, "paused", "올리다 멈췄어요 · [이어 올리기]를 눌러 주세요", true);
+    } finally { u.running = false; setTimeout(pump, 0); }
+  }
+  window.addEventListener("beforeunload", function (e) {
+    if (R.ups.some(upBusy)) { e.preventDefault(); e.returnValue = ""; }
+  });
+
+  // ---------- 화면에서 쓰는 것 ----------
+  var FS = window.FS_REMOTE = {
+    get csrf() { return R.csrf; },
+    get site() { return R.site; },
+    get device() { return R.device; },   // 이 세션의 기기 이름 (/api/state job_by '밖에서 · <기기>' 와 견줌 — 편집실이 내가 시킨 내보내기를 다시 이어받음)
+    fullRes: function () { return !!R.prefs.fullRes; },
+    isDirty: null,   // 화면이 정함 (저장 안 한 편집 등) → 끊겼을 때 저절로 원격 홈으로 가지 않음
+    dirty: dirty,
+    upload: upload,
+    pick: pick,
+    download: function (name) { download("/s/dl?f=" + encodeURIComponent(name)); },
+    showOutputs: showOutputs,
+    showUploads: showUploads,
+    toast: toast,
+    openFolder: function (which, quiet) {
+      if (which === "out") return showOutputs();
+      if (which === "videos") return showUploads(true);
+      if (which === "log") return download("/s/dl?log=1");
+      if (!quiet) toast("PC에서만 열 수 있어요");
+      return null;
+    }
+  };
+
+  ready(function () {
+    document.documentElement.setAttribute("data-remote", "1");
+    if (FRAMED) return;  // 보이지 않는 틀: 요청 감싸기만 (위 줄·올리기 창 없음)
+    bar();
+    refreshSession().then(function () {
+      netMark(R.net !== "ok");
+      var f = document.getElementById("fsr-full"); if (f) f.checked = !!R.prefs.fullRes;
+    });
+    var slot = document.getElementById("remoteLibSlot");  // 보관함 머리 (ui.html)
+    if (slot) slot.replaceChildren(el("button", { class: "btn", type: "button", text: "내 기기에서 올리기", onclick: function () { showUploads(true); } }));
+    loadPending();
+  });
+})();

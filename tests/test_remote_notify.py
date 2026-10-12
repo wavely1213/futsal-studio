@@ -49,7 +49,7 @@ class NotifyBase(unittest.TestCase):
     def _paired_pushes(self, n):
         end = time.time() + 8
         while time.time() < end:
-            if len(self.ntfy.wait(lambda p: p[1] == remote.NOTE_TEXT["paired"], 0.1)) >= n:
+            if len(self.ntfy.wait(lambda p: p[1] == remote.note_text("paired", "폰"), 0.1)) >= n:  # 이름 '폰 A' → 기기 종류 '기기' 
                 time.sleep(0.2)  # 함께 보낸 비콘까지
                 return True
         return False
@@ -361,9 +361,15 @@ class NotifyTests(NotifyBase):
         self.turn_on()
         pair_device(self.svc, "새 폰")
         texts = [p[1] for p in self.notes()]
-        self.assertIn(remote.NOTE_TEXT["paired"], texts)
-        self.assertIn("내가 한 게 아니면", remote.NOTE_TEXT["paired"])  # 소유자가 받는 유일한 보안 신호 → 할 일까지
-        self.assertIn("[끊기]", remote.NOTE_TEXT["paired"])
+        self.assertIn(remote.note_text("paired", "새 폰"), texts)
+        t = remote.note_text("paired", "새 폰")
+        self.assertIn("내가 한 게 아니면", t)  # 소유자가 받는 유일한 보안 신호 → 할 일까지
+        self.assertIn("[끊기]", t)
+        self.assertIn("[원격 접속 끄기]", t)  # 밖에 있으면 원격 홈 [더보기]에서 (D-239)
+        self.assertIn("(기기)", t)  # 이름 칸의 글('새 폰')은 알림에 넣지 않음 — 정해진 낱말만
+        pair_device(self.svc, "iPhone · Safari")
+        self.assertIn(remote.note_text("paired", "iPhone · Safari"), [p[1] for p in self.notes(2)])
+        self.assertIn("(아이폰 · Safari)", remote.note_text("paired", "iPhone · Safari"))
 
     def test_daily_budget(self):
         with mock.patch.object(remote, "DAILY_BUDGET", 6), mock.patch.object(remote, "BUDGET_SOFT", 3):

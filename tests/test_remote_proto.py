@@ -2,10 +2,15 @@
 — 저장소 폴더에서 python3 -m unittest tests.test_remote_proto
 
 node ≥ 20 과 페이지 폴더(FUTSAL_SITE_DIR, 기본 /home/user/wavely/public/futsal)가 있을 때만 돈다 (없으면 건너뜀).
+밖에서 작업(D-230 · D-233)의 페이지 쪽(nextOk·#resume·앞머리 부트스트랩)은 그 판의 페이지에서만 돈다 (예전 판이면 그 시험만 건너뜀 ·
+와벨리 저장소에 합치기 전에는 FUTSAL_SITE_DIR=$SCRATCH/wavely_remote2/public/futsal).
 파이썬이 잠근 것을 node 가 열고, node 가 서명한 것을 파이썬이 확인한다. 코드 → 만남 주제·열쇠도 같아야 한다.
 """
+import base64
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import remote  # noqa: E402
+import rstudio  # noqa: E402
 from remote_fixture import Clock, make_home, pair_device, service  # noqa: E402
 
 SITE = Path(os.environ.get("FUTSAL_SITE_DIR") or "/home/user/wavely/public/futsal")
@@ -50,6 +56,7 @@ for (const c of cmd) {
   else if (c.op === "host") out.push(P.hostOk(c.url, c.dev));
   else if (c.op === "hint") out.push(P.hintUrl(c.u, c.dev));
   else if (c.op === "hash") out.push(P.parseHash(c.h));
+  else if (c.op === "next") out.push(P.nextOk ? P.nextOk(c.p) : "missing");
   else if (c.op === "extractable") { const k = await P.importKeys(c.auth, c.beacon); out.push([k.auth.extractable, k.beacon.extractable, k.auth.usages, k.beacon.usages]); }
 }
 console.log(JSON.stringify(out));
@@ -221,6 +228,52 @@ class ProtoInteropTests(unittest.TestCase):
         hints = self.node([{"op": "hint", "u": "abc-def", "dev": False}, {"op": "hint", "u": "evil.com", "dev": False},
                            {"op": "hint", "u": "127.0.0.1:8972", "dev": False}, {"op": "hint", "u": "127.0.0.1:8972", "dev": True}])
         self.assertEqual(hints, ["https://abc-def.trycloudflare.com", None, None, "http://127.0.0.1:8972"])
+
+    def _studio_page(self):
+        if "nextOk" not in (SITE / "proto.js").read_text(encoding="utf-8"):
+            self.skipTest("예전 판 페이지 (밖에서 작업 전) · FUTSAL_SITE_DIR 로 새 판을 가리켜 주세요")
+
+    NEXT_CASES = ["/", "/editor", "/thumb", "/editor?name=20260101_a%20b.mp4", "/editor?name=a(1)!.mp4&seq=x", "/thumb?name=" + "%EC%8B%9C" * 30,
+                  "", "//evil.com", "https://evil.com", "/api/state", "/editor#x", "/editor?name=<x>", "/s/hello", "/editor?" + "a" * 601,
+                  "/editor\\..", "/editor?name=a b", "/thumbx", "/editor/", "javascript:alert(1)"]
+
+    def test_next_path_rule_same_everywhere(self):
+        """넘겨준 뒤 갈 곳: PC(rstudio.NEXT_RE) · 인사 쪽(hello.js) · 화면 심(remote_ui.js) · 휴대폰 페이지(proto.nextOk)가 같은 규칙 (열린 이동 없음)."""
+        self._studio_page()
+        out = self.node([{"op": "next", "p": p} for p in self.NEXT_CASES])
+        self.assertEqual(out, [bool(rstudio.NEXT_RE.fullmatch(p)) for p in self.NEXT_CASES])
+        src = re.search(r"NEXT_RE = (/.*?/);", (SITE / "proto.js").read_text(encoding="utf-8")).group(1)
+        for f in ("hello.js", "remote_ui.js"):
+            self.assertIn(src, (Path(__file__).resolve().parents[1] / f).read_text(encoding="utf-8"), f)
+
+    def test_resume_hash_from_lock_page(self):
+        """세션이 끝난 스튜디오 화면은 SITE#resume=<encodeURIComponent(갈 곳)> 로 돌려보냄 → 페이지가 같은 갈 곳을 읽음 (아니면 null)."""
+        self._studio_page()
+        from urllib.parse import quote
+        good = "/editor?name=20260101_a%20b%5B1%5D.mp4"
+        out = self.node([{"op": "hash", "h": "#resume=" + quote(good, safe="")}, {"op": "hash", "h": "#resume=" + quote("https://evil.com", safe="")},
+                         {"op": "hash", "h": "#resume=%2F"}, {"op": "hash", "h": "#pair=7K3Q-M9XD-2P"}])
+        self.assertEqual([o["resume"] for o in out], [good, None, "/", None])
+
+    def test_bootstrap_hash_pinned_in_csp(self):
+        """index.html 의 앞머리 부트스트랩(인라인 스크립트 하나)은 CSP 에 sha256 으로 박혀 있음 (그 밖의 인라인 스크립트는 안 돎)."""
+        html = (SITE / "index.html").read_text(encoding="utf-8")
+        scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+        if not scripts:
+            self.skipTest("예전 판 페이지 (부트스트랩 전)")
+        self.assertEqual(len(scripts), 1)
+        digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
+        csp = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]*)">', html).group(1)
+        self.assertIn(f"'sha256-{digest}'", csp)
+        self.assertNotIn("unsafe-inline", csp.split("script-src", 1)[1].split(";")[0])
+        self.assertNotIn('"/futsal', html)  # 앞머리 글자는 페이지 파일에 없음 (주소에서 읽음 · 지금은 뿌리 '/' · D-240)
+        self.assertIn('rel:"manifest",href:r+"/manifest.webmanifest",crossorigin:"use-credentials"', scripts[0])  # 로그인한 미리보기에서도 manifest
+        for f in ("app.js", "sw.js", "proto.js"):
+            code = "\n".join(ln for ln in (SITE / f).read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("//"))
+            self.assertNotIn('"/futsal', code, f)
+        man = json.loads((SITE / "manifest.webmanifest").read_text(encoding="utf-8"))
+        self.assertTrue(all(not i["src"].startswith("/") for i in man["icons"]))
+        self.assertEqual((man["start_url"], man["scope"]), ("./", "./"))  # manifest 자리 기준 (뿌리면 '/')
 
     def test_pair_link_parsed_by_page(self):
         self.svc.state, self.svc.url = "on", "https://quiet-river.trycloudflare.com"

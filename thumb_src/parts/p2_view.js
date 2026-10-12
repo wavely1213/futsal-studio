@@ -54,6 +54,7 @@ async function saveNow() {
   return true;
 }
 // 창을 닫거나 숨길 때 남은 변경을 바로 보냄 (keepalive)
+if (window.FS_REMOTE) FS_REMOTE.isDirty = () => !!saveTimer;  // 밖에서 작업: 저장이 남았으면 끊겨도 저절로 원격 홈으로 가지 않음 (D-230)
 function flushSave() { if (!D || gone || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: saveBody() }); } catch (e) {} }
 addEventListener("pagehide", flushSave); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
 

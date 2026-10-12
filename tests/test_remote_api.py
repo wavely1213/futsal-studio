@@ -366,14 +366,14 @@ class RangeTicketTests(Base):
 
     def test_ticket_expired(self):
         self.clock.tick(remote.TICKET_TTL + 5)
-        self.assertEqual(self.get("a.mp4")[0], 404)
+        self.assertEqual(self.get("a.mp4")[0], 403)  # 지난 표: 허락 안 됨 (예전 404 · D-230 정리)
 
     def test_ticket_dies_with_revoked_device(self):
         other = pair_device(self.svc, "다른 폰")
         b = self.call("GET", "/r/outputs", cred=other)[2]
         other_url = next(o["url"] for o in b["outputs"] if o["name"] == "a.mp4")
         self.svc.revoke([self.cred["device"]["id"]])
-        self.assertEqual(self.get("a.mp4")[0], 404)
+        self.assertEqual(self.get("a.mp4")[0], 403)
         self.assertEqual(self.call("GET", other_url, cred=False, origin=None)[0], 200)
 
     def test_ticket_only_works_where_the_list_was_fetched(self):
@@ -382,12 +382,12 @@ class RangeTicketTests(Base):
         url = next(o["url"] for o in b["outputs"] if o["name"] == "a.mp4")
         ok = self.call("GET", url, cred=False, origin=None, headers={"Cf-Connecting-Ip": "203.0.113.77", "Range": "bytes=0-9"})
         self.assertEqual((ok[0], ok[2]), (206, self.data[:10]))
-        self.assertEqual(self.call("GET", url, cred=False, origin=None, headers={"Cf-Connecting-Ip": "198.51.100.5"})[0], 404)
-        self.assertEqual(self.call("GET", url, cred=False, origin=None)[0], 404)  # 다른 곳(여기서는 루프백)
+        self.assertEqual(self.call("GET", url, cred=False, origin=None, headers={"Cf-Connecting-Ip": "198.51.100.5"})[0], 403)
+        self.assertEqual(self.call("GET", url, cred=False, origin=None)[0], 403)  # 다른 곳(여기서는 루프백)
 
     def test_bad_ticket_shapes(self):
         for t in ("x", "../../etc/passwd", "%2e%2e%2f", "a" * 200, ""):
-            self.assertEqual(self.call("GET", "/r/m/" + t, cred=False, origin=None)[0], 404, t)
+            self.assertEqual(self.call("GET", "/r/m/" + t, cred=False, origin=None)[0], 403, t)
 
     def test_file_deleted_or_swapped_outside_404(self):
         (self.out / "a.mp4").unlink()
@@ -795,7 +795,7 @@ class LocalServerTests(Base):
 
     def test_state_has_remote_brief(self):
         st, _, b = self.local("GET", "/api/state")
-        self.assertEqual(b["remote"], {"state": "on", "devices": 1})
+        self.assertEqual(b["remote"], {"state": "on", "devices": 1, "studio": []})
 
     def test_api_remote_status_with_qr(self):
         st, _, b = self.local("POST", "/api/remote/pair", {})

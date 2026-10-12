@@ -398,6 +398,18 @@
   .split::after { width: 44px; height: 3px; } .vsplit::after { width: 3px; height: 44px; }
   .split:hover, .vsplit:hover, .split.drag, .vsplit.drag { background: rgba(45,140,235,.22); }
   .split:hover::after, .vsplit:hover::after, .split.drag::after, .vsplit.drag::after { background: var(--accent); }
+  /* 밖에서 작업 (D-230): 미리보기 파일 만들기 안내 · 휴대폰 안내 */
+  .rmproxy { position: fixed; top: calc(var(--fsr-h, 0px) + 48px); left: 50%; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    max-width: min(92vw, 640px); background: var(--panel-2, #262626); color: var(--ink, #e8e8e8); border: 1px solid var(--line-2, #383838); border-radius: 10px; padding: 8px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.45); font-size: 13px; }
+  .rmproxy[hidden] { display: none; }
+  .rmphone { position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: flex-start; padding: 80px 16px 16px; }
+  .rmphone .box { background: var(--panel, #1f1f1f); color: var(--ink, #e8e8e8); border-radius: 12px; padding: 18px; max-width: 420px; line-height: 1.55; }
+  .rmphone .box b { font-size: 16px; }
+  .rmphone .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  /* 밖에서 작업 (D-238): PC 편집실에도 '밖에서 작업 중 · 기기 [끊기]' — 보관함 화면의 #studioPill 과 같음 (밖에서 연 화면에는 없음) */
+  .stpill { display: inline-flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; font-size: 11.5px; color: #2fbf6b; background: #12301f; border-radius: 8px; padding: 3px 8px; max-width: 420px; }
+  .stpill[hidden] { display: none; }
+  .stpill button { border: 0; background: none; color: var(--danger, #e5484d); cursor: pointer; padding: 0; font: inherit; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -408,6 +420,7 @@
     <div class="logo">FS</div>
     <div class="name" id="pname">편집실</div>
     <span class="saved" id="saved"></span>
+    <span class="stpill" id="studioPill" hidden></span>
     <div class="sp"></div>
     <span class="tg on" id="snapBtn" title="자석 (S) — 클립을 끌 때 다른 클립 끝·재생 위치에 착 붙어요"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2v6a5 5 0 0010 0V2h-3v6a2 2 0 01-4 0V2z"/></svg>자석</span>
     <span class="tg on" id="linkBtn" title="연결해서 선택 — 영상과 그 소리를 함께 고르고 옮겨요 (Alt+클릭: 한쪽만)"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 9.5l3-3M7 4.5l1.5-1.5a2.5 2.5 0 013.5 3.5L10.5 8M9 11.5L7.5 13a2.5 2.5 0 01-3.5-3.5L5.5 8"/></svg>연결 선택</span>
@@ -604,6 +617,11 @@ const dbLin = d => d <= -59.9 ? 0 : Math.pow(10, d / 20);
 const linDb = v => v > 1e-3 ? 20 * Math.log10(v) : -60;
 const fmtDb = d => d <= -59.9 ? "-∞ dB" : (d >= 0 ? "+" : "") + (+d).toFixed(1) + " dB";
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// 밖에서 작업(D-230 · remote_ui.js 가 FS_REMOTE 를 둠): 영상은 가벼운 미리보기 파일로 (원본 화질은 위 줄 '원본 화질로 보기'를 켰을 때만) ·
+// 가져오기는 조각 올리기 · 폴더 열기는 그 기기로 (완성본 받기 · 기록 받기)
+const REMOTE = !!window.FS_REMOTE;
+const proxyFirst = md => REMOTE && md.kind === "video" && !FS_REMOTE.fullRes();
+const openFolder = which => REMOTE ? FS_REMOTE.openFolder(which) : post("/api/open", { which });
 const EPS = 1e-4, HF = 0.5 / FPS;
 
 let P = null, S = null, EVENTS = [], REC = null, STYLES = null, MSGSRC = null;
@@ -1062,6 +1080,7 @@ function changed(full = true) {
 }
 // 저장: 한 번에 하나씩 차례로 · 판 번호(REV)로 다른 창이 그 사이 저장했는지 확인 (몰래 덮어쓰지 않게)
 let REV = 0, dirty = false, editSeq = 0, saving = Promise.resolve(true), conflict = false, goneMsg = "";
+if (REMOTE) FS_REMOTE.isDirty = () => dirty;  // 저장 안 한 편집이 있으면 끊겨도 저절로 원격 홈으로 가지 않음
 const CID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); // 이 창 id (저장 응답 전에 닫아도 같은 창의 저장은 이어서 받게)
 function scheduleSave() {
   dirty = true; editSeq++;
@@ -1454,7 +1473,7 @@ function nudge(d) {
 }
 
 /* ---------- 미디어 ---------- */
-const mediaUrl = md => md.proxy && md.kind === "video" ? `/api/edit/file?src=${md.src}&f=${encodeURIComponent(md.file)}&proxy=1` : md.src === "videos" ? "/media?name=" + encodeURIComponent(md.file) : `/api/edit/file?src=${md.src}&f=${encodeURIComponent(md.file)}`;
+const mediaUrl = md => (md.proxy || proxyFirst(md)) && md.kind === "video" ? `/api/edit/file?src=${md.src}&f=${encodeURIComponent(md.file)}&proxy=1` : md.src === "videos" ? "/media?name=" + encodeURIComponent(md.file) : `/api/edit/file?src=${md.src}&f=${encodeURIComponent(md.file)}`;
 // CSS url() 안에 넣는 주소: 따옴표·괄호를 %코드로 (파일 이름에 ' 가 있어도 썸네일이 보이게)
 const cssUrl = u => "url(" + String(u).replace(/['()"\\\s]/g, c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0").toUpperCase()) + ")";
 const thumbUrl = md => md.id === "main" ? "/thumbs.jpg?name=" + encodeURIComponent(NAME) : `/api/edit/thumbs.jpg?src=${md.src}&f=${encodeURIComponent(md.file)}`;
@@ -1657,8 +1676,19 @@ async function noPlay(md) {
   let missing = false;
   try { const r = await fetch(`/api/edit/media?src=${md.src}&f=${encodeURIComponent(md.file)}`); missing = !r.ok; } catch (e) {}
   if (missing) { md.missing = true; ver++; renderTimeline(); toast(`"${nm}" 파일을 찾을 수 없어요 · 보관함에서 옮기거나 지웠다면 다시 넣어 주세요`); }
+  else if (!md.proxy && proxyFirst(md)) remoteProxyBar(md, nm);
   else if (!md.proxy && md.kind === "video") toast(`"${nm}" 은(는) 이 화면에서 바로 재생이 안 되는 형식이에요 · 미디어 탭에서 "미리보기 파일 만들기"를 눌러 주세요`);
   renderMediaBin();
+}
+function remoteProxyBar(md, nm) {  // 밖에서 작업: 미리보기 파일이 없는 영상 → 만들기 (원본을 인터넷으로 흘려보내지 않음 · D-232)
+  let bar = $("rmProxy");
+  if (!bar) { bar = document.createElement("div"); bar.id = "rmProxy"; bar.className = "rmproxy"; bar.setAttribute("role", "status"); document.body.appendChild(bar); }
+  bar.innerHTML = `<span>밖에서는 가벼운 미리보기 파일로 봐요 · <b>${esc(nm)}</b></span><button class="btn pri" data-mk>미리보기 파일 만들기</button><button class="ic" data-x title="닫기" aria-label="닫기">✕</button>`;
+  bar.hidden = false;
+  const vw = (window.visualViewport && visualViewport.width) || innerWidth;
+  if (vw < 700) Object.assign(bar.style, { left: "8px", transform: "none", maxWidth: (vw - 16) + "px" });  // 휴대폰: 보이는 곳 안에
+  bar.querySelector("[data-mk]").onclick = () => { bar.hidden = true; makeProxy(md); };
+  bar.querySelector("[data-x]").onclick = () => { bar.hidden = true; };
 }
 async function makeProxy(md) {
   const r = await (await post("/api/edit/proxy", { src: md.src, file: md.file })).json();
@@ -3491,7 +3521,7 @@ function bindMsg() {
   $("msgProof").onchange = e => { MSGPROOF = e.target.checked; try { localStorage.setItem("ed_msgProof", MSGPROOF ? "1" : "0"); } catch (x) {} msgPrefs(); };
   $("msgWrite").onchange = e => { MSGWRITE = e.target.checked; try { localStorage.setItem("ed_msgWrite", MSGWRITE ? "1" : "0"); } catch (x) {} msgPrefs(); };
   $("msgGo").onclick = runMsg;
-  $("msgBgm").onclick = e => { e.preventDefault(); post("/api/open", { which: "bgm" }); toast("열린 폴더(분위기별)에 음악 파일을 넣으면 다음 MSG 후보부터 그 음악을 써요"); };
+  $("msgBgm").onclick = e => { e.preventDefault(); openFolder("bgm"); if (!REMOTE) toast("열린 폴더(분위기별)에 음악 파일을 넣으면 다음 MSG 후보부터 그 음악을 써요"); };
   root.querySelectorAll("[data-mview]").forEach(b => b.onclick = () => { switchSeq(b.dataset.mview); renderRec(); });
   root.querySelectorAll("[data-mswap]").forEach(b => b.onclick = () => msgSwap(b.dataset.mswap));
   root.querySelectorAll("[data-mlike]").forEach(b => b.onclick = () => { const [id, a] = b.dataset.mlike.split("|"); msgLike(id, a); });
@@ -4384,8 +4414,13 @@ async function importFiles(files) {
   const out = [];
   for (const f of files) {
     toast(`가져오는 중 · ${f.name}`);
-    const r = await fetch("/api/edit/upload?name=" + encodeURIComponent(f.name), { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
-    const j = await r.json(); if (!r.ok) { toast(j.error || "가져오지 못했어요"); continue; }
+    let j;
+    if (REMOTE) {  // 밖에서: 조각으로 올림 (큰 파일·끊김에도 이어서 · 진행은 위 줄)
+      j = await FS_REMOTE.upload(f, { target: "assets" }); if (!j || !j.file) continue;
+    } else {
+      const r = await fetch("/api/edit/upload?name=" + encodeURIComponent(f.name), { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+      j = await r.json(); if (!r.ok) { toast(j.error || "가져오지 못했어요"); continue; }
+    }
     const md = await addMedia(j.src, j.file); if (md) out.push(md);
   }
   LIB = null; renderMediaBin(); if (out.length) toast("가져왔어요 · 끌어서 타임라인에 놓으세요");
@@ -4472,8 +4507,8 @@ function showEdFail(s, what, again) {
   bar.querySelectorAll("[data-fa]").forEach(b => b.onclick = () => {
     const a = b.dataset.fa;
     if (a === "again") { hideEdFail(); again(); }
-    else if (a === "log") post("/api/open", { which: "log" });
-    else post("/api/open", { which: a });
+    else if (a === "log") openFolder("log");
+    else openFolder(a);
   });
 }
 const etaTxt = s => s == null ? "" : s >= 60 ? `약 ${Math.floor(s / 60)}분 ${s % 60}초 남음` : `약 ${s}초 남음`;
@@ -4520,7 +4555,7 @@ function nextFrom(url, make) {  // 썸네일·올리기로 가면 돌아올 때(
 }
 $("qaThumb").onclick = () => nextFrom("/thumb?name=" + encodeURIComponent(NAME));
 $("qaKit").onclick = () => nextFrom("/", true);
-$("qaOut").onclick = () => post("/api/open", { which: "out" });
+$("qaOut").onclick = () => openFolder("out");
 function showVideoQA(rep) {
   const file = qaRunning; qaRunning = null;
   showDone(file, rep);
@@ -4762,11 +4797,25 @@ addEventListener("beforeunload", e => {
   saveNow(); e.preventDefault(); e.returnValue = ""; // 큰 프로젝트는 신호(beacon)로 못 보내므로 잠깐 머물며 저장
 });
 $("cfReload").onclick = () => { dirty = false; location.reload(); };
+function phoneNotice() {  // 밖에서 휴대폰으로 열면 한 번 알려 줌 (편집실은 넓은 화면용 · 그래도 열 수 있음)
+  if (!REMOTE || Math.min(innerWidth, screen.width || innerWidth) >= 700) return;
+  try { if (sessionStorage.getItem("edPhoneOk")) return; } catch (e) {}
+  const m = document.createElement("div");
+  m.className = "rmphone"; m.setAttribute("role", "dialog");
+  m.innerHTML = `<div class="box"><b>편집실은 노트북·태블릿에서 쓰기 좋아요</b><p>휴대폰 화면은 좁아서 타임라인을 다루기 어려워요. 휴대폰에서는 보관함·편집점 찾기·썸네일·올리기를 쓰고, 편집은 넓은 화면에서 해 주세요.</p>
+    <div class="acts"><button class="btn pri" data-go>그래도 열기</button><button class="btn" data-back>← 스튜디오로</button></div></div>`;
+  document.body.appendChild(m);
+  const vw = (window.visualViewport && visualViewport.width) || innerWidth;  // 편집실은 넓어서 화면 밖까지 이어짐 → 보이는 너비에 맞춤
+  m.querySelector(".box").style.maxWidth = Math.max(240, vw - 32) + "px";
+  m.querySelector("[data-go]").onclick = () => { try { sessionStorage.setItem("edPhoneOk", "1"); } catch (e) {} m.remove(); };
+  m.querySelector("[data-back]").onclick = () => { location.href = "/"; };
+}
 $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conflict = false; if (await saveNow(true)) toast("이 창의 내용으로 저장했어요 · 다른 창 내용은 '기록' 탭 백업에 있어요"); };
 
 /* ---------- 시작 ---------- */
 (async () => {
   if (!NAME) { document.body.innerHTML = "<p style='padding:20px'>영상을 고르지 않았어요.</p>"; return; }
+  phoneNotice();
   $("pname").textContent = niceName(NAME);
   $("saved").textContent = "여는 중… (처음 열 땐 파형·썸네일을 만드느라 조금 걸려요)";
   renderTools();
@@ -4787,7 +4836,10 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   requestAnimationFrame(loop);
   const wantT = parseFloat(new URLSearchParams(location.search).get("t"));  // '확인할 것'의 [편집실에서 보기]: 그 시각으로
   if (wantSeq && P.active === wantSeq && isFinite(wantT) && wantT > 0) seek(Math.max(0, wantT - 1));
-  const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기" && !s.job_by) watchJob("내보내기", s.job_id);  // 휴대폰이 시킨 내보내기는 이 화면이 이어받지 않음
+  // 하던 내보내기를 다시 이어받음 (새로 고침 · 밖에서 다시 연결한 뒤) — 이 화면 쪽(PC 면 PC 가 시킨 것 · 밖이면 이 기기가 시킨 '밖에서 · <기기>')만 ·
+  // 휴대폰·다른 기기가 시킨 내보내기는 이어받지 않음 (D-236)
+  const s = await (await fetch("/api/state?since=999999")).json();
+  if (s.job === "내보내기" && (!s.job_by || (REMOTE && s.job_by === "밖에서 · " + FS_REMOTE.device))) watchJob("내보내기", s.job_id);
 })();
 /* 끝까지 자동으로 (D-201): 작업이 썸네일을 그려 달라고 하면 보이지 않는 틀로 썸네일 편집기를 열어 AI 추천 1등을 그려 줌 (ui.html autoThumb 와 같은 코드) */
 let AUTOTH = null;
@@ -4811,6 +4863,35 @@ setInterval(autoAsk, 3000);
 // 창을 내려 두었다가 다시 보면 바로 물어봄 (숨은 창은 브라우저가 타이머를 1분에 한 번까지 늦추거나 멈춤 · E7 검토)
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoAsk(); });
 window.addEventListener("focus", autoAsk); document.addEventListener("resume", autoAsk);
+/* 밖에서 작업 (D-238): 이 PC 화면(편집실·썸네일)에도 밖에서 연결된 기기를 보여 주고 [끊기] — 보관함 화면의 #studioPill 과 같은 말 ·
+   5초마다 /api/state 의 remote.studio (살아 있는 세션 모두 · 2분 안에 요청이면 '작업 중') · 밖에서 연 화면(FS_REMOTE)에는 없음 */
+if (!window.FS_REMOTE) (() => {
+  const pill = document.getElementById("studioPill"); if (!pill) return;
+  const ago = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : `${Math.floor(s / 3600)}시간 전`; };
+  const word = x => x.active !== false ? "밖에서 작업 중" : `밖에서 연결됨 · ${ago(x.lastSeen)}`;
+  async function tick() {
+    let s; try { const r = await fetch("/api/state?since=999999"); if (!r.ok) return; s = await r.json(); } catch (e) { return; }
+    const ss = s && s.remote && Array.isArray(s.remote.studio) ? s.remote.studio : [];
+    pill.hidden = !ss.length;
+    const key = ss.map(x => x.id + x.device + word(x)).join("|");
+    if (pill.dataset.key === key) return;
+    pill.dataset.key = key;
+    pill.replaceChildren(...ss.flatMap(x => {
+      const sp = document.createElement("span"), b = document.createElement("b"), k = document.createElement("button");
+      sp.append(word(x) + " · ", b); b.textContent = x.device;
+      k.type = "button"; k.textContent = "끊기"; k.dataset.stcut = x.id; k.dataset.name = x.device;
+      return [sp, k];
+    }));
+  }
+  pill.addEventListener("click", async e => {
+    const b = e.target.closest("[data-stcut]"); if (!b) return;
+    if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요 (기기 연결은 그대로라 원격 홈에서 다시 열 수 있어요)`)) return;
+    try { await fetch("/api/remote/session/revoke", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.dataset.stcut }) }); } catch (e) { /* 다음 묻기에 */ }
+    pill.dataset.key = ""; tick();
+  });
+  tick(); setInterval(tick, 5000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") tick(); });
+})();
 // 그리는 중에 이 화면을 떠나면 맡은 요청을 풀어 다른 화면이 바로 이어서 그림 (D-207 · ui.html 과 같음)
 window.addEventListener("pagehide", () => { if (AUTOTH && AUTOTH.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: AUTOTH.dataset.rid })], { type: "application/json" })); } catch (e) {} });
 </script>

@@ -1,0 +1,67 @@
+/* 풋살 스튜디오 · 밖에서 작업 심 (remote_ui.css · D-230) — 밖에서 연 화면에만 (/s/remote.css · :root[data-remote])
+   화면 색은 그 화면의 값(--brand·--accent …)을 그대로 쓰고, 없으면 스튜디오 기본 초록 */
+:root[data-remote] { --fsr-h: 34px; --fsr-brand: var(--brand, var(--accent, #0f7a3d)); --fsr-bg: var(--surface, var(--panel, #fff)); --fsr-ink: var(--ink, #111827);
+  --fsr-line: var(--line-2, var(--line, #e6e8ec)); --fsr-mut: var(--ink-2, #4b5563); }
+:root[data-remote] body { padding-top: var(--fsr-h); box-sizing: border-box; }
+:root[data-remote] .app { height: calc(100vh - var(--fsr-h)); }
+:root[data-remote] .topright { top: calc(16px + var(--fsr-h)); }
+:root[data-remote] .yt-guide { top: var(--fsr-h); }
+:root[data-remote] .cpanel { top: calc(90px + var(--fsr-h)); }
+
+#fsr-bar { position: fixed; top: 0; left: 0; right: 0; height: var(--fsr-h); z-index: 9990; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  background: #0b2a17; color: #e8f5ec; font: 13px/1.2 Pretendard, system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  box-shadow: 0 1px 0 rgba(0,0,0,.25); box-sizing: border-box; }
+#fsr-bar b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#fsr-bar #fsr-uppct { white-space: nowrap; color: #b7e4c7; }
+#fsr-bar .fsr-dot { width: 8px; height: 8px; border-radius: 50%; background: #2fbf6b; box-shadow: 0 0 0 3px rgba(47,191,107,.25); flex: none; }
+#fsr-bar.off .fsr-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.3); }  /* PC와 연결이 끊김 (D-236) */
+#fsr-bar .fsr-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+#fsr-bar .fsr-btn { background: rgba(255,255,255,.08); color: #e8f5ec; border-color: rgba(255,255,255,.18); }
+#fsr-bar .fsr-btn:hover { background: rgba(255,255,255,.16); }
+#fsr-bar .fsr-more { display: none; margin-left: auto; }
+#fsr-bar .fsr-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+
+.fsr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 3px 10px; border-radius: 8px; border: 1px solid var(--fsr-line);
+  background: var(--fsr-bg); color: var(--fsr-ink); font: inherit; font-size: 12.5px; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; box-sizing: border-box; }
+.fsr-btn.pri { background: var(--fsr-brand); border-color: var(--fsr-brand); color: #fff; }
+.fsr-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.fsr-muted { color: var(--fsr-mut); font-size: 12.5px; margin: 4px 0; }
+.fsr-hint { background: rgba(194,65,12,.1); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; margin: 8px 0; }
+
+#fsr-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(16px); z-index: 9995; max-width: min(92vw, 520px); display: flex; gap: 10px; align-items: center;
+  background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; font: 600 13px/1.4 system-ui, sans-serif; opacity: 0; pointer-events: none; transition: .2s; }
+#fsr-toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+#fsr-toast a { color: #8ee0ad; font-weight: 700; }
+
+#fsr-net { position: fixed; top: var(--fsr-h); left: 0; right: 0; z-index: 9997;  /* 열린 창(#fsr-panel 9996) 위 · 잠금(9998) 아래 — 올리기 창이 '다시 연결'을 덮지 않게 */ display: none; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px;
+  background: #7c2d12; color: #fff; font: 600 13px/1.4 system-ui, sans-serif; }
+#fsr-net.show { display: flex; }
+
+#fsr-lock, #fsr-panel { position: fixed; inset: 0; z-index: 9998; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+#fsr-panel { z-index: 9996; align-items: flex-start; padding-top: calc(var(--fsr-h) + 16px); }
+.fsr-card { background: var(--fsr-bg); color: var(--fsr-ink); border-radius: 14px; padding: 18px 20px; width: min(520px, 100%); box-sizing: border-box;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35); font: 14px/1.5 Pretendard, system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+.fsr-card h2 { font-size: 18px; margin: 0 0 6px; }
+.fsr-panel { max-height: calc(100vh - var(--fsr-h) - 32px); overflow: auto; width: min(640px, 100%); }
+.fsr-head { display: flex; align-items: center; gap: 8px; }
+.fsr-head h2 { margin: 0; flex: 1; }
+.fsr-list { display: grid; gap: 10px; margin-top: 10px; }
+.fsr-item { border: 1px solid var(--fsr-line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.fsr-name { font-weight: 700; word-break: break-all; }
+.fsr-slot video { width: 100%; max-height: 50vh; margin-top: 8px; border-radius: 8px; background: #000; }
+.fsr-bar { height: 6px; border-radius: 3px; background: var(--fsr-line); overflow: hidden; margin-top: 6px; }
+.fsr-bar i { display: block; height: 100%; background: var(--fsr-brand); transition: width .3s; }
+
+@media (max-width: 760px) {
+  #fsr-bar .fsr-more { display: inline-flex; }
+  #fsr-bar .fsr-acts { display: none; position: fixed; top: var(--fsr-h); left: 0; right: 0; flex-direction: column; align-items: stretch; padding: 10px; gap: 8px;
+    background: #0b2a17; box-shadow: 0 8px 24px rgba(0,0,0,.35); margin: 0; }
+  #fsr-bar.open .fsr-acts { display: flex; }
+  #fsr-bar .fsr-acts .fsr-btn, #fsr-bar .fsr-acts .fsr-chk { min-height: 40px; font-size: 14px; justify-content: center; }
+  .fsr-btn { min-height: 36px; font-size: 13.5px; }
+  #fsr-panel { padding: calc(var(--fsr-h) + 8px) 8px 8px; }
+  .fsr-card { padding: 14px; }
+}
+@media (max-width: 600px) {  /* 휴대폰: 진행 표시가 위 단계 단추를 덮지 않게 아래로 (ui.html 본문 아래 여백 120px) */
+  :root[data-remote] .topright { top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+}
