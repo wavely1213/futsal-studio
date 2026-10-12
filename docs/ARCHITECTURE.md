@@ -40,7 +40,7 @@
    │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
    │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 futsal.mulgyeol.kr 만)
    │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
-   │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
+   │ ⓪ 짝짓기: QR(#pair=코드 · 원격 홈에 코드 칸은 없음 · D-259) → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
 [Cloudflare 엣지 (TLS)] ⇄ 나가는 연결 ⇄ [cloudflared.exe 자식 프로세스 · core.popen(Job Object)] ── Host: remote.futsal.invalid ──┐
                                                                                                                   ▼
