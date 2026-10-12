@@ -29,18 +29,28 @@
 
 <!-- 여기서부터 최신 항목을 위에 추가 -->
 
+## D-241 | 2026-10-12 | 배포 명령(release.sh)이 먼저 휴대폰 페이지가 실제 풋살 페이지인지 확인 · Vercel 옛 배포로 되돌리기 금지 (D-240 보완)
+- **상태**: 채택
+- **맥락**: 리뷰 판정: D-240 뒤 앱은 `futsal.mulgyeol.kr` 출처 하나만 믿고, 연결 코드와 터널 힌트를 그 주소의 `#pair=…` 에 실어 QR·링크·알림으로 보낸다. 와벨리 저장소가 배포되기 전(2026-10-12 그 주소는 옛 Expo 커뮤니티 빌드 — `location.hash` 를 읽고 PortOne·네이버 지도 스크립트를 부름)에 새 앱을 배포하거나, 나중에 Vercel 에서 커뮤니티 빌드였던 옛 배포로 Instant Rollback·Promote 하면, 휴대폰이 QR 을 여는 순간 코드가 그 빌드의 스크립트 손에 들어간다. `/r/pair` 는 Origin 과 코드로 만든 증명만 보므로 그 스크립트가 10분 안에 기기 열쇠를 받아 갈 수 있다(I-037 과 같은 위협). D-240 은 이 순서를 문서로만 적었다.
+- **결정**:
+  1. `release.sh` 는 업데이트 테스트 다음, 무엇이든 커밋하기 전에 `remote.py` 의 `SITE`(맨 위 `SITE = "https://…"` 한 줄을 ast 로 읽음 · 앱 모듈을 import 하지 않음)에서 `/manifest.webmanifest`(200 · `short_name` 이 `풋살 스튜디오`)와 `/sw.js`(200 · JavaScript)를 넘기기를 따르지 않고 받아 본다. 하나라도 아니면(404·다른 앱·어디서나 HTML·다른 곳으로 넘김·배포 보호 로그인·닿지 않음) 아무것도 커밋하지 않고 멈춘다. 건너뛰는 스위치는 두지 않는다.
+  2. Vercel 프로젝트 `wavely` 에서 D-240 이전 배포(커뮤니티 빌드)를 운영으로 Instant Rollback·Promote 하지 않는다(와벨리 저장소 `docs/웹배포-Vercel.md` 맨 위에도 적음). 실수로 했다면 되돌린 뒤 그 사이에 연결한 휴대폰을 PC 에서 모두 끊는다.
+- **이유**: 배포 순서를 사람이 기억하는 대신 배포 명령이 확인한다. manifest 이름과 서비스 워커는 커뮤니티 빌드(둘 다 404)·SPA 되쓰기(둘 다 HTML)·배포 보호(302 로그인)와 구별된다. 넘기기를 따르지 않아 다른 곳의 페이지가 대신 통과하지 못한다.
+- **버린 대안**: PC 앱이 짝짓기 전에 페이지를 확인 — 휴대폰이 그 순간 받는 페이지를 PC 가 보장할 수 없고(롤백은 언제든) 앱 쪽 일만 늘어남 / 건너뛰기 환경 변수 — 급할 때 그대로 쓰게 됨 / `remote` 를 import 해서 확인 — 배포 도구가 앱 의존성(core·영상 모듈)을 불러야 함.
+- **영향/제약**: 사이트(Vercel·DNS)가 내려가 있으면 앱 배포도 멈춘다(그동안은 휴대폰 페이지도 안 되므로 기다린다). `SITE` 를 식으로 바꾸면 확인이 멈추므로 글자 그대로 한 줄로 둔다(`tests/test_update.py` 가 지킴). 되돌리기 금지는 사람 규칙으로만 남는다(`SECURITY_GUIDELINES.md` 4절).
+
 ## D-240 | 2026-10-12 | 휴대폰 페이지를 futsal.mulgyeol.kr 뿌리로 옮기고 허용 출처를 그 하나로 좁힘 (D-027 소유자 결정 (a) 실행)
 - **상태**: 채택
 - **맥락**: 소유자가 `futsal.mulgyeol.kr` 을 Vercel 프로젝트 `wavely`(와벨리 저장소)에 붙였고, 그 프로젝트의 옛 주소 `wavely-nine.vercel.app` 은 버려도 되는 예전 커뮤니티 주소라며 "갈아엎어줘" 했다. 와벨리 커뮤니티는 이미 별도 저장소 `wavely-web` → `mulgyeol.kr`(www·m)에서 돈다. D-027 은 휴대폰 페이지를 커뮤니티와 같은 출처(`mulgyeol.kr/futsal`)에 두어, 커뮤니티의 제3자 스크립트·XSS 가 휴대폰에 저장된 열쇠를 쓸 수 있었다(I-037).
 - **결정**:
   1. `remote.SITE = "https://futsal.mulgyeol.kr"` 한 줄이 원본이다. 허용 출처 `ORIGINS` 는 그 출처 하나(`mulgyeol.kr`·`www.mulgyeol.kr` 은 더는 받지 않음)이고, 연결 QR·링크·알림을 누르면 열 곳·PC 화면 안내·알림 글(`SITE_TEXT`)이 모두 여기서 나온다(PC 화면의 예비 주소 글은 없앰). 개발 모드의 `FUTSAL_REMOTE_SITE`·`FUTSAL_REMOTE_ORIGINS` 는 그대로다.
   2. Vercel 프로젝트 `wavely` 는 휴대폰 페이지 전용이다. 와벨리 저장소 `vercel.json` 은 Expo 커뮤니티 빌드(`npm install`·`expo export`) 대신 `public/futsal/` 을 `dist/` 로 복사만 하고(framework null · installCommand ""), 페이지는 뿌리 `/` 에 있다. 보안 머리글은 그대로(Permissions-Policy 는 위치·결제도 끔), `/sw.js` 는 `no-cache`.
-  3. 길: 옛 `/futsal`·`/futsal/…` → `/…`, `wavely-nine.vercel.app/…` → `https://futsal.mulgyeol.kr/…`(has host), 그 밖의 확장자 없는 모르는 경로 → `/` — 모두 307. 확장자 있는 없는 파일은 404. 미리보기 주소(`wavely-*-wavely1213s-projects.vercel.app`)는 그 자리에서 연다.
-  4. 페이지 안 경로는 상대 주소(index.html·manifest)와 `BASE`(app.js 가 놓인 곳 · 서비스 워커는 등록 범위)로 적는다 — 주소가 또 바뀌어도 페이지 파일은 그대로다. 서비스 워커는 `/` 범위·캐시 `fs-remote-v3`이고, 페이지는 다른 범위의 옛 등록(`/futsal`)을 지운다.
+  3. 길: 옛 `/futsal`·`/futsal/…` → `/…`, `wavely-nine.vercel.app/…` → `https://futsal.mulgyeol.kr/…`(has host), 그 밖의 확장자 없는 모르는 경로 → `/` — 모두 307. 확장자 있는 없는 파일은 404. 미리보기 주소(`wavely-*-wavely1213s-projects.vercel.app`)도 그 자리 뿌리에서 같은 길이지만, 이 프로젝트는 Vercel 배포 보호(Vercel Authentication)가 켜져 있어 Vercel 로그인 뒤에만 열린다(그냥 요청하면 모든 주소가 `vercel.com/sso-api` 로 302 · `futsal.mulgyeol.kr`·`wavely-nine.vercel.app` 같은 운영 도메인은 보호 밖). 미리보기는 화면만 보는 곳이고, 짝짓기는 허용 출처가 운영 주소 하나라 `futsal.mulgyeol.kr` 에서만 된다. 로그인한 미리보기에서도 manifest 가 읽히도록 manifest 링크에 `crossorigin="use-credentials"` 를 단다(manifest 요청은 기본으로 쿠키를 싣지 않음).
+  4. 페이지 안 경로는 상대 주소(index.html·manifest)와 `BASE`(app.js 가 놓인 곳 · 서비스 워커는 등록 범위)로 적는다 — 주소가 또 바뀌어도 페이지 파일은 그대로다. 서비스 워커는 `/` 범위·캐시 `fs-remote-v3`이고, 페이지는 다른 범위의 옛 등록(`/futsal`)을 지운다. 온라인에서 넘겨받은 응답(`/futsal/app.js` → `/app.js`)은 옛 주소 이름으로 캐시에 담지 않는다. 사이트에 닿지 않을 때 서비스 워커도 같은 규칙을 따른다: 캐시에 있으면 그대로, 페이지 이동이 `/` 가 아니면 `/` 로 302(질의 그대로 · vercel.json 과 같은 곳), 캐시에 없는 파일은 HTML 대신 오류 — 깊은 주소(`/futsal/`·`/a/b`)에 캐시의 페이지를 내주면 상대 경로가 그 아래(`/futsal/app.js`)로 풀려 '불러오는 중'에 멈추기 때문이다.
 - **이유**: 출처를 나누면 커뮤니티 쪽 스크립트가 열쇠를 쓸 길이 구조적으로 없어진다(I-037 해결). 모르는 페이지 주소를 index.html 로 되쓰지(rewrite) 않고 `/` 로 넘기면 페이지 주소가 하나라 상대 경로가 늘 맞고(CSP `base-uri 'none'` 이라 `<base>` 를 못 씀) 홈 화면 추가·서비스 워커 범위도 한 주소로 모인다. 없는 JS·그림까지 HTML 로 주면 MIME 오류로 원인이 가려지고 서비스 워커가 그 HTML 을 캐시에 담으므로 확장자가 있으면 404 로 둔다. 307 은 브라우저가 기억하지 않아 나중에 길을 바꿔도 된다.
 - **버린 대안**: SPA 되쓰기(`/(.*)` → `/index.html`) — 깊은 주소에서 상대 경로가 깨지고 없는 파일도 200 HTML / 308 영구 이동 — 브라우저가 오래 기억해 되돌리기 어려움 / `wavely-nine.vercel.app` 을 대시보드 도메인 넘기기로 — 소유자 손이 필요하고 저장소에 남지 않음 / `mulgyeol.kr`·`www` 를 계속 받기 — 커뮤니티 출처라 위험(I-037) / 옛 `/futsal/sw.js` 자리에 스스로 지우는 서비스 워커 — 그 주소는 공개된 적이 없어(`mulgyeol.kr/futsal` 404 · PR 미병합) 페이지 쪽 정리로 충분.
 - **영향/제약**:
-  - 배포 순서: 와벨리 저장소 변경을 먼저 병합(`futsal.mulgyeol.kr` 이 페이지가 됨)하고 그다음 이 앱을 배포한다. 그 전까지 옛 앱(v2.18.0 까지)의 QR·링크·알림은 `mulgyeol.kr/futsal`(이제 커뮤니티 · 페이지 없음)을 가리킨다 — 휴대폰에서 `futsal.mulgyeol.kr` 을 직접 열고 코드로 연결하면 된다(`KNOWN_ISSUES.md` I-240).
+  - 배포 순서: 와벨리 저장소 변경을 먼저 병합(`futsal.mulgyeol.kr` 이 페이지가 됨)하고 그다음 이 앱을 배포한다 — 반대로 하면 새 앱이 믿는 유일한 출처에 커뮤니티 빌드가 떠 있는 채 연결 코드가 그 페이지로 가므로 `release.sh` 가 막는다(D-241). 같은 까닭으로 Vercel 에서 D-240 이전 배포로 되돌리지 않는다. 와벨리 쪽 배포 전까지 옛 앱(v2.18.0 까지)의 QR·링크·알림은 `mulgyeol.kr/futsal`(이제 커뮤니티 · 페이지 없음)을 가리킨다 — 휴대폰에서 `futsal.mulgyeol.kr` 을 직접 열고 코드로 연결하면 된다(`KNOWN_ISSUES.md` I-240).
   - 이 출처(`futsal.mulgyeol.kr`)에 다른 페이지·제3자 스크립트를 올리지 않는다(`SECURITY_GUIDELINES.md` 4절).
   - e2e 는 `site_e2e`(9511~9514 · vercel.json 대로 빌드한 사이트를 뿌리에서) · 길 표 `check_vercel.py`. 예전 `remote_e2e` 는 옛 `/futsal` 판 전용이다.
 
