@@ -1039,8 +1039,37 @@ def transcribe_audio(m, audio, vocab, on_seg=None, sr=16000, stats=None):
     return segments, fixed, echoed, unheard
 
 
+SCENE_THR = {"laugh": 0.12, "cheer": 0.1}   # 소리 모델(YAMNet) 웃음·환호 점수 — msg.LAUGH_THR·CHEER_THR 와 같은 값
+SCENE_TEXT = {"laugh": "웃음이 터짐 (소리 인식)", "cheer": "환호·박수 (소리 인식)", "laugh_txt": "웃음 (받아쓰기)"}
+LAUGH_WORDS = re.compile(r"ㅋㅋ|ㅎㅎ|하하|허허|\(웃음\)|\[웃음\]")
+
+
+def sound_scenes(d, segs=()):
+    """편집점 화면용 소리 장면 (#9 · E7): MSG 가 소리 모델로 들은 웃음·환호(분석 폴더 msg_signals.json 이 있을 때 · 0.48초 칸이 이어지면 한 덩어리)
+    + 받아쓰기의 'ㅋㅋ·하하·(웃음)' → [(시작, 끝, 종류)]. 새로 듣지 않음 (MSG·끝까지 자동으로가 이미 들은 것만)."""
+    out = []
+    try:
+        sig = json.loads((Path(d) / "msg_signals.json").read_text(encoding="utf-8"))
+        tags, step = sig.get("tags") or {}, float(sig.get("tagStep") or 0.48)
+    except (OSError, ValueError, TypeError):
+        tags, step = {}, 0.48
+    for kind, thr in SCENE_THR.items():
+        run = None
+        for i, v in enumerate(list(tags.get(kind) or []) + [0.0]):
+            on = isinstance(v, (int, float)) and v >= thr
+            if on and run is None:
+                run = i
+            elif not on and run is not None:
+                out.append((round(run * step, 2), round(i * step + 0.48, 2), kind))
+                run = None
+    for s in segs:
+        if LAUGH_WORDS.search(str(s.get("text") or "")) and not any(a - 0.5 <= float(s["start"]) <= b + 0.5 for a, b, _ in out):
+            out.append((float(s["start"]), float(s["end"]), "laugh_txt"))
+    return sorted(out)
+
+
 def timeline_events(name):
-    """화면 표시용: 대사·컷 후보·하이라이트를 시간순 목록으로."""
+    """화면 표시용: 대사·컷 후보·하이라이트를 시간순 목록으로. 소리 장면(웃음·환호)을 들어 둔 영상이면 그 자리는 '소리가 갑자기 커짐' 대신 그 이름으로."""
     d = adir(name)
     if not (d / "transcript.json").exists():
         return []
@@ -1048,7 +1077,10 @@ def timeline_events(name):
     extra = json.loads((d / "analysis.json").read_text(encoding="utf-8"))
     ev = [{"t": s["start"], "end": s["end"], "type": "speech", "text": s["text"]} for s in segs]
     ev += [{"t": x["start"], "end": x["end"], "type": "silence", "text": f"{x['end'] - x['start']:.1f}초 동안 조용함"} for x in extra["silences"]]
-    ev += [{"t": p["time"], "end": p["time"] + 1, "type": "peak", "text": "소리가 갑자기 커짐 (환호·슈팅·웃음 가능성)"} for p in extra["loud_peaks"]]
+    scenes = sound_scenes(d, segs)
+    ev += [{"t": a, "end": b, "type": "peak", "text": SCENE_TEXT[k]} for a, b, k in scenes]
+    ev += [{"t": p["time"], "end": p["time"] + 1, "type": "peak", "text": "소리가 갑자기 커짐 (환호·슈팅·웃음 가능성)"} for p in extra["loud_peaks"]
+           if not any(a - 0.5 <= p["time"] <= b + 0.5 for a, b, _ in scenes)]
     return sorted(ev, key=lambda e: e["t"])
 
 

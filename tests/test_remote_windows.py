@@ -547,7 +547,7 @@ class Secrets(Home):
             self.assertNotIn(s, text)
 
     def test_redact_and_scrub(self):
-        raw = f"표 /r/m/{TICKET} · 주제 {TOPIC} · {URL}/r/status · {AUTH} · https://mulgyeol.kr/futsal#pair=PAIR-CODE7&u=quiet-river-blue-mango"
+        raw = f"표 /r/m/{TICKET} · 주제 {TOPIC} · {URL}/r/status · {AUTH} · https://futsal.mulgyeol.kr#pair=PAIR-CODE7&u=quiet-river-blue-mango"
         self.assertClean(remote.redact(raw))
         self.assertClean(remote.scrub(raw))
         self.assertIn("/r/m/", remote.redact(raw))

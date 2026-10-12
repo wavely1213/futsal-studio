@@ -428,8 +428,10 @@ class IntakeTests(unittest.TestCase):
 class PhoneCannotPickBrowserTests(RemoteBase):
     def test_browsers_and_cookies_not_reachable_from_phone(self):
         for path in ("/api/browsers", "/r/browsers", "/r/../api/browsers"):
-            st, _, _ = self.call("GET", path)
-            self.assertIn(st, (400, 404), path)
+            st, _, body = self.call("GET", path)
+            # /r/* 밖은 밖에서 작업 경계(D-230)가 길을 보기 전에 401 (세션 없음 · 길이 있는지 알려 주지 않음) — 세션이 있어도 403 pc_only (test_remote_routes)
+            self.assertIn(st, (400, 401, 404), path)
+            self.assertNotIn("firefox", json.dumps(body).lower(), path)
         got = []
         with mock.patch.object(core, "download", lambda ids, log, ck, **k: got.append(ck) or []):
             st, _, b = self.act("download", {"url": "https://youtu.be/AbCdEfGhIjK", "cookies": "firefox"})

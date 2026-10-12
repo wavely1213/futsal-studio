@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -157,7 +158,7 @@ class ServicePairTests(unittest.TestCase):
         pair = self.svc.pair_start()
         self.assertRegex(pair["code"], r"^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{2}$")
         code = pair["code"].replace("-", "")
-        self.assertEqual(pair["link"], f"https://mulgyeol.kr/futsal#pair={code}&u=quiet-river-tunnel-sample")
+        self.assertEqual(pair["link"], f"https://futsal.mulgyeol.kr#pair={code}&u=quiet-river-tunnel-sample")
         self.assertGreater(pair["expiresAt"], self.clock())
         self.svc.state = "starting"
         self.assertIsNone(self.svc.pc_status()["pair"])
@@ -258,6 +259,34 @@ class ServicePairTests(unittest.TestCase):
         s = self.svc.set_settings({"keepAwake": "always", "notify": {"done": False}})
         self.assertEqual(s["keepAwake"], "always")
         self.assertEqual(s["notify"], {"done": False, "failed": True, "attention": True})
+
+
+class SiteAddressTests(unittest.TestCase):
+    """휴대폰 페이지 주소는 remote.SITE 한 곳 (D-240) — 허용 출처·알림 글·PC 화면이 모두 거기서 나오고 옛 주소는 남지 않음."""
+
+    def test_site_is_the_only_trusted_origin(self):
+        self.assertEqual(remote.SITE, "https://futsal.mulgyeol.kr")
+        self.assertEqual(remote.ORIGINS, ("https://futsal.mulgyeol.kr",))  # mulgyeol.kr·www 는 와벨리 커뮤니티 출처
+        self.assertEqual(remote.SITE_TEXT, "futsal.mulgyeol.kr")
+        self.assertIn(f" {remote.SITE_TEXT} 에서 ", remote.NOTE_TEXT["moved"])
+
+    def test_dev_overrides_only_in_dev(self):
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        svc, _ = service(home)
+        env = {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:9513", "FUTSAL_REMOTE_ORIGINS": "http://127.0.0.1:9513, http://localhost:9513"}
+        with unittest.mock.patch.dict(os.environ, {**env, "FUTSAL_REMOTE_DEV": "1"}):
+            self.assertEqual(svc.site(), "http://127.0.0.1:9513")
+            self.assertEqual(svc.origins(), ("https://futsal.mulgyeol.kr", "http://127.0.0.1:9513", "http://localhost:9513"))
+        with unittest.mock.patch.dict(os.environ, {**env, "FUTSAL_REMOTE_DEV": "0"}):
+            self.assertEqual(svc.site(), "https://futsal.mulgyeol.kr")
+            self.assertEqual(svc.origins(), ("https://futsal.mulgyeol.kr",))
+
+    def test_no_old_address_in_shipped_files(self):
+        root = Path(remote.__file__).resolve().parent
+        files = [*root.glob("*.py"), *root.glob("*.html"), root / "README.md", root / "AGENTS.md"]
+        for f in files:
+            self.assertNotIn("mulgyeol.kr/futsal", f.read_text(encoding="utf-8"), f.name)
 
 
 if __name__ == "__main__":

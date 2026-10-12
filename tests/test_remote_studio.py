@@ -34,15 +34,16 @@ DEV = "iPhone · Safari"
 class SiteConstantTest(unittest.TestCase):
     """remote.SITE 하나가 주소의 원본 (D-233) — 허용 출처·알림 글·PC 화면 안내가 여기서 나옴."""
 
-    def test_origins_derived_from_site(self):
-        self.assertEqual(remote.ORIGINS, remote.derived_origins(remote.SITE))
-        self.assertEqual(remote.derived_origins("https://mulgyeol.kr/futsal"), ("https://mulgyeol.kr", "https://www.mulgyeol.kr"))
-        # 따로 떼어 낸 주소로 옮기면 그 출처 하나만 (와벨리 출처는 더 이상 허용하지 않음)
-        self.assertEqual(remote.derived_origins("https://futsal.mulgyeol.kr"), ("https://futsal.mulgyeol.kr",))
-        self.assertEqual(remote.derived_origins("https://www.mulgyeol.kr/futsal"), ("https://www.mulgyeol.kr",))
-        self.assertEqual(remote.derived_origins("http://127.0.0.1:8973/futsal"), ("http://127.0.0.1:8973",))
-        self.assertEqual(remote.derived_origins(""), ())
-        self.assertNotIn("https://futsal.mulgyeol.kr", remote.ORIGINS)  # 예전에 미리 허용해 둔 자리는 뺌 (옮길 때 저절로 생김)
+    def test_origins_is_site_origin_only(self):
+        """허용 출처 = SITE 의 출처 하나 (D-240) — 와벨리 커뮤니티(mulgyeol.kr·www)는 믿지 않음."""
+        self.assertEqual(remote.SITE, "https://futsal.mulgyeol.kr")
+        self.assertEqual(remote.ORIGINS, (remote.site_origin(remote.SITE),))
+        self.assertEqual(remote.ORIGINS, ("https://futsal.mulgyeol.kr",))
+        for bad in ("https://mulgyeol.kr", "https://www.mulgyeol.kr"):
+            self.assertNotIn(bad, remote.ORIGINS)
+        self.assertEqual(remote.site_origin("https://Futsal.Mulgyeol.KR/alt/fs"), "https://futsal.mulgyeol.kr")
+        self.assertEqual(remote.site_origin("http://127.0.0.1:8973/x"), "http://127.0.0.1:8973")
+        self.assertEqual(remote.site_origin(""), "")
 
     def test_moved_note_uses_site(self):
         self.assertIn(remote.SITE_TEXT, remote.NOTE_TEXT["moved"])
@@ -56,7 +57,7 @@ class SiteConstantTest(unittest.TestCase):
         docs = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
         lits = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
                 and "mulgyeol.kr" in n.value and id(n) not in docs]
-        self.assertEqual(lits, ["https://mulgyeol.kr/futsal"])  # SITE = … 한 줄 (설명 글·주석 말고는 없음)
+        self.assertEqual(lits, ["https://futsal.mulgyeol.kr"])  # SITE = … 한 줄 (설명 글·주석 말고는 없음)
 
 
 
@@ -165,7 +166,7 @@ class PageUnitTest(unittest.TestCase):
     def test_inject_nonce_on_every_script_and_meta(self):
         for f in ("ui.html", "editor.html", "thumb.html"):
             raw = (ROOT / f).read_bytes()
-            out = rstudio.inject(raw, "NONCE123", "CSRF<&>", "https://mulgyeol.kr/futsal", "폰 \"<x>\"", "j1", "c1").decode("utf-8")
+            out = rstudio.inject(raw, "NONCE123", "CSRF<&>", "https://futsal.mulgyeol.kr", "폰 \"<x>\"", "j1", "c1").decode("utf-8")
             self.assertEqual(raw.decode().count("<script>"), len(re.findall(r'<script nonce="NONCE123">', out)), f)
             self.assertNotIn("<script>", out)
             self.assertEqual(len(re.findall(r"<script\b", out)), raw.decode().count("<script") + 1)
@@ -183,8 +184,10 @@ class PageUnitTest(unittest.TestCase):
         c = rstudio.page_csp("N")
         self.assertIn("script-src 'self' 'nonce-N'", c)
         self.assertNotIn("unsafe-inline' https", c.split("script-src")[1].split(";")[0])
-        self.assertIn("frame-ancestors 'none'", c)
+        self.assertIn("frame-ancestors 'self'", c)  # 같은 출처 틀만 (끝까지 자동으로의 보이지 않는 썸네일 틀 · D-201) — 다른 출처는 못 띄움
+        self.assertNotIn("frame-ancestors *", c)
         self.assertIn("connect-src 'self'", c)
+        self.assertIn("frame-ancestors 'none'", rstudio.DEFAULT_CSP)
 
     def test_scrub_state(self):
         d = {"workspace": "/home/kim/풋살사관학교_작업", "log": ["작업 폴더 · /home/kim/x", "ok"], "n": 3,
@@ -298,7 +301,7 @@ class StudioBase(unittest.TestCase):
 
     def signed_post(self, path, body, ip=None):
         data = json.dumps(body).encode()
-        h = {"Origin": "https://mulgyeol.kr", "Content-Type": "application/json", "Authorization": signed(self.cred, "POST", path, data, clock=self.clock)}
+        h = {"Origin": remote.ORIGINS[0], "Content-Type": "application/json", "Authorization": signed(self.cred, "POST", path, data, clock=self.clock)}
         if ip:
             h["Cf-Connecting-Ip"] = ip
         st, hd, out = self.raw("POST", path, data, h)
@@ -396,7 +399,7 @@ class HandoffHttpTest(StudioBase):
         st, j = self.signed_post("/r/handoff", {"path": "/"})
         self.assertEqual(self.post_handoff(j["token"], extra={"Content-Type": "text/plain"})[0], 400)
         # 서명 없는 /r/handoff
-        st, _, _ = self.raw("POST", "/r/handoff", b'{"path": "/"}', {"Origin": "https://mulgyeol.kr", "Content-Type": "application/json"})
+        st, _, _ = self.raw("POST", "/r/handoff", b'{"path": "/"}', {"Origin": remote.ORIGINS[0], "Content-Type": "application/json"})
         self.assertEqual(st, 401)
 
     def test_handoff_rate(self):
@@ -461,7 +464,7 @@ class GateHttpTest(StudioBase):
         nonce = re.search(r"'nonce-([A-Za-z0-9_-]+)'", self.hget(hd, "Content-Security-Policy")[0]).group(1)
         self.assertTrue(all(f'nonce="{nonce}"' in t for t in re.findall(r"<script\b[^>]*>", html)))
         self.assertIn(f'<meta name="fs-csrf" content="{self.csrf}">', html)
-        for k, v in (("X-Frame-Options", "DENY"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
+        for k, v in (("X-Frame-Options", "SAMEORIGIN"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
                      ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
                      ("Cache-Control", "private, no-store")):
             self.assertEqual(self.hget(hd, k), [v], k)
@@ -472,6 +475,7 @@ class GateHttpTest(StudioBase):
         self.assertEqual((st, self.hget(hd, "Cache-Control")), (200, [rstudio.STATIC_AGE]))
         st, hd, _ = self.req("GET", "/api/state")
         self.assertEqual(self.hget(hd, "Cache-Control"), ["private, no-store"])
+        self.assertEqual(self.hget(hd, "X-Frame-Options"), ["DENY"])  # 화면이 아닌 응답은 틀에 못 넣음 (keep-alive 로 다음 요청에 남지 않음)
         self.assertFalse([k for k, _ in hd if k.lower().startswith("access-control-")])
 
     def test_state_gzip_and_scrub(self):
@@ -556,6 +560,43 @@ class GateHttpTest(StudioBase):
         self.assertIs(seen["update"], False)
         self.assertTrue(any(x.startswith(f"원격 · {DEV} · 편집점 찾기") for x in self.lines))
         self.assertIsNone(getattr(self.app._REMOTE, "who", None))  # 요청이 끝나면 표시도 끝
+
+    def test_autorun_behind_gate(self):
+        """끝까지 자동으로 (D-200~D-207): 길은 모두 세션·CSRF 뒤 · 밖에서 시작한 작업은 '밖에서 · 기기' · 엔진 스스로 고치기 없음 ·
+        썸네일 그리기 요청은 밖의 화면도 맡을 수 있음 (보이지 않는 틀 · 화면은 같은 출처 틀만 허용)."""
+        import autorun
+        self.addCleanup(lambda: autorun._RQ.update(want=None, claim=None, got={}))
+        self.assertEqual(self.jreq("GET", "/api/auto/pending")[0], 401)  # 세션 없이
+        self.login()
+        st, j = self.jreq("GET", "/api/auto?name=" + quote(NAME))
+        self.assertEqual(st, 200, j)
+        self.assertIn("shortsMax", j)
+        self.assertEqual(self.jreq("GET", "/api/auto/pending")[1], {"ok": True, "want": None})
+        self.assertEqual(self.jreq("POST", "/api/auto/claim", {"id": "r1"}, csrf=False)[0], 403)
+        self.assertEqual(self.jreq("POST", "/api/auto/claim", {"id": "r1"})[0], 409)  # 요청 없음
+        with autorun._RQC:
+            autorun._RQ.update(want={"id": "r1", "name": NAME, "fmt": "long"}, claim=None, got={})
+        self.assertEqual(self.jreq("GET", "/api/auto/pending")[1]["want"], {"id": "r1"})
+        st, j = self.jreq("POST", "/api/auto/claim", {"id": "r1"})
+        self.assertEqual((st, j["name"], j["fmt"]), (200, NAME, "long"), j)
+        self.assertTrue(self.jreq("POST", "/api/auto/release", {"id": "r1"})[1]["ok"])
+        # 보이지 않는 썸네일 틀이 여는 화면: 같은 출처 틀만
+        st, hd, _ = self.req("GET", "/thumb?name=" + quote(NAME) + "&autothumb=r1&fmt=long")
+        self.assertEqual(st, 200)
+        self.assertEqual(self.hget(hd, "X-Frame-Options"), ["SAMEORIGIN"])
+        self.assertIn("frame-ancestors 'self'", self.hget(hd, "Content-Security-Policy")[0])
+        seen = {}
+
+        def fake_run(n, opts, log, analyze, resume):
+            seen.update(name=n, resume=resume, update=core.self_update_allowed())
+            return {"status": "done"}
+        with mock.patch.object(autorun, "run", fake_run):
+            st, j = self.jreq("POST", "/api/auto", {"name": NAME, "resume": True})
+            self.assertEqual(st, 200, j)
+            self.wait_idle()
+        self.assertEqual((seen["name"], seen["resume"], seen["update"]), (NAME, True, False))
+        self.assertEqual(self.app.DONE[j["jobId"]]["by"], f"밖에서 · {DEV}")
+        self.assertTrue(any(x.startswith(f"원격 · {DEV} · 끝까지 자동으로") for x in self.lines), self.lines[-5:])
 
     def test_youtube_confirm_428(self):
         self.login()

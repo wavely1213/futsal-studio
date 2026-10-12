@@ -1,5 +1,6 @@
 """안전한 업데이트(updater.py) · 다운로드 엔진 자동 관리(core) 테스트 — 저장소 폴더에서 python3 -m unittest tests.test_update
 가짜 앱 폴더 + 이 컴퓨터 안의 http.server(포트 8851~8855)로 manifest·zip 을 내려 줌. 인터넷은 쓰지 않음."""
+import ast
 import functools
 import hashlib
 import http.server
@@ -754,6 +755,30 @@ class NetworkErrorTests(Base):
             self.core.update_app(self.logs.append)
 
 
+def fake_site(routes):
+    """이 컴퓨터 안의 가짜 휴대폰 페이지 (빈 포트): routes {경로: (상태, Content-Type, 본문, Location)} · 없는 경로는 404 → (주소, 서버)."""
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            st, ctype, body, loc = routes.get(self.path, (404, "text/plain; charset=utf-8", b"404: NOT_FOUND", None))
+            self.send_response(st)
+            self.send_header("Content-Type", ctype)
+            if loc:
+                self.send_header("Location", loc)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}", srv
+
+
+FUTSAL_MANIFEST = (200, "application/manifest+json", json.dumps({"name": "풋살사관학교 스튜디오 원격", "short_name": "풋살 스튜디오"}, ensure_ascii=False).encode(), None)
+FUTSAL_SW = (200, "text/javascript; charset=utf-8", b"self.addEventListener('fetch', () => {});", None)
+
+
 @unittest.skipUnless(shutil.which("git") and shutil.which("bash"), "git·bash 필요")
 class ReleaseScriptTests(unittest.TestCase):
     """release.sh 가 적은 지문이 GitHub zip(= git archive)과 맞는지, 그 zip 으로 실제 설치가 되는지."""
@@ -816,6 +841,64 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertEqual(self.git("rev-list", "--count", "HEAD").strip(), b"1", "아무것도 커밋하지 않음")
         self.assertEqual((self.repo / "version.txt").read_text(), "1.0.0\n")
         self.assertEqual(self.git("ls-remote", str(self.origin)).strip(), b"", "푸시하지 않음")
+
+    # ---- 휴대폰 페이지 확인 (D-241): remote.py 의 SITE 가 풋살 페이지가 아니면 배포하지 않음 ----
+    def site(self, routes):
+        url, srv = fake_site(routes)
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return url
+
+    def put_site(self, url):
+        Case._put(self.repo / "remote.py", f'SITE = "{url}"\nORIGINS = (SITE,)\n')
+
+    def test_release_stops_unless_site_is_the_futsal_page(self):
+        good = self.site({"/manifest.webmanifest": FUTSAL_MANIFEST, "/sw.js": FUTSAL_SW})
+        cases = {
+            "옛 와벨리 커뮤니티 빌드 (manifest·sw.js 404)": self.site({"/": (200, "text/html; charset=utf-8", b"<script src='/_expo/static/js/web/entry.js'></script>", None)}),
+            "다른 앱의 manifest": self.site({"/manifest.webmanifest": (200, "application/manifest+json", b'{"short_name": "wavely"}', None), "/sw.js": FUTSAL_SW}),
+            "어느 주소든 HTML (SPA 되쓰기)": self.site({"/manifest.webmanifest": (200, "text/html", b"<!doctype html>", None), "/sw.js": (200, "text/html", b"<!doctype html>", None)}),
+            "서비스 워커 없음": self.site({"/manifest.webmanifest": FUTSAL_MANIFEST}),
+            "서비스 워커가 HTML": self.site({"/manifest.webmanifest": FUTSAL_MANIFEST, "/sw.js": (200, "text/html; charset=utf-8", b"<!doctype html>", None)}),
+            "다른 곳으로 넘김 (넘긴 곳이 풋살 페이지여도)": self.site({"/manifest.webmanifest": (307, "text/plain", b"", good + "/manifest.webmanifest"), "/sw.js": FUTSAL_SW}),
+            "배포 보호 로그인으로 넘김": self.site({"/manifest.webmanifest": (302, "text/plain", b"", "https://vercel.com/sso-api?url=x"), "/sw.js": FUTSAL_SW}),
+            "닿지 않음": f"http://127.0.0.1:{free_port()}",
+        }
+        self.put_site(good)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "init")
+        for label, url in cases.items():
+            with self.subTest(label):
+                self.put_site(url)  # 커밋하지 않은 채 (확인은 git add 보다 먼저)
+                r = subprocess.run(["bash", "release.sh", "1.1.0", "테스트 배포"], cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=120)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("휴대폰 페이지가 풋살 페이지가 아니어서 배포를 멈췄어요", out)
+                self.assertIn(url, out, "어느 주소가 어떤지 알려 줌")
+                self.assertEqual(self.git("rev-list", "--count", "HEAD").strip(), b"1", "아무것도 커밋하지 않음")
+                self.assertEqual((self.repo / "version.txt").read_text(), "1.0.0\n")
+                self.assertEqual(self.git("ls-remote", str(self.origin)).strip(), b"", "푸시하지 않음")
+                self.assertEqual(self.git("tag").strip(), b"")
+
+    def test_release_goes_on_when_site_is_the_futsal_page(self):
+        url = self.site({"/manifest.webmanifest": FUTSAL_MANIFEST, "/sw.js": FUTSAL_SW})
+        self.put_site(url)
+        r = self.release()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"휴대폰 페이지 확인: {url} 는 풋살 페이지예요", r.stdout)
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.origin), self.git("rev-parse", "HEAD"), "푸시까지")
+
+    def test_real_release_script_checks_site_before_any_commit(self):
+        sh = (REPO / "release.sh").read_text(encoding="utf-8")
+        i = sh.index('echo "휴대폰 페이지 확인 중…"')
+        for later in ('echo "$VER" > version.txt', "git add -A", "git commit", "git tag", "git push"):
+            self.assertLess(i, sh.index(later), later)
+        # release.sh 는 remote.py 를 import 하지 않고 ast 로 맨 위 'SITE = "https://…"' 한 줄을 읽음 → 그 꼴이 그대로여야 확인이 돎
+        tree = ast.parse((REPO / "remote.py").read_text(encoding="utf-8"))
+        vals = [n.value.value for n in tree.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+                and any(isinstance(t, ast.Name) and t.id == "SITE" for t in n.targets)]
+        self.assertEqual(len(vals), 1, vals)
+        self.assertTrue(vals[0].startswith("https://"), vals)
 
 
 def fake_ytdlp(script):

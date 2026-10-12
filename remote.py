@@ -1,6 +1,6 @@
 """원격 접속 '휴대폰으로 보기' — 원격 경계 (D-027).
 
-PC 에서 하는 작업을 휴대폰(SITE · 지금 https://mulgyeol.kr/futsal)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
+PC 에서 하는 작업을 휴대폰(SITE · 지금 https://futsal.mulgyeol.kr)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
   - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(앱 화면 포트 창 app_ports 밖). 화면용 로컬 서버(8765)는
     터널 뒤에 두지 않는다. /r/* 는 여기서, 그 밖의 길(밖에서 작업 · PC 스튜디오 화면 · D-230)은 rstudio.gate 가 세션 쿠키로 막은 뒤
     앱의 처리 코드(app.StudioHandler)를 같은 프로세스 안에서 부른다 — 넘겨주기 표는 r_handoff.
@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+import autorun
 import core
 import editor
 import qa
@@ -49,10 +50,10 @@ import youtube_upload
 
 API = 1
 SENTINEL = "remote.futsal.invalid"  # cloudflared 가 원격 리스너로 보낼 때 쓰는 Host (.invalid 는 어떤 브라우저도 만들 수 없음)
-# 휴대폰·밖에서 작업 페이지 주소 (와벨리 저장소 public/futsal) — 이 한 줄이 하나뿐인 원본 (D-233):
-# 연결 QR·링크 · 알림 누르면 열 곳 · 허용 출처(ORIGINS) · PC 화면 안내 · 밖에서 작업 화면의 '← 원격 홈'이 모두 여기서 나옴.
-# 따로 떼어 낸 주소(예: https://futsal.mulgyeol.kr)로 옮길 때는 이 줄 + 페이지 manifest 의 start_url·scope + Vercel 도메인만 바꿈.
-SITE = "https://mulgyeol.kr/futsal"
+# 휴대폰·밖에서 작업 페이지 주소 — 이 한 줄이 하나뿐인 원본 (D-240 · D-233 · 와벨리 저장소 public/futsal 을 Vercel 프로젝트 wavely 가
+# 뿌리 '/' 에서 내줌): 연결 QR·링크 · 알림을 누르면 열 곳 · 허용 출처(ORIGINS) · PC 화면 안내 · 알림 글 · 밖에서 작업 화면의 '← 원격 홈'이
+# 모두 여기서 나온다. 다른 주소로 옮길 때는 이 줄 + Vercel 도메인만 바꿈 (페이지는 어느 앞머리에서도 같은 파일로 돎).
+SITE = "https://futsal.mulgyeol.kr"
 
 
 def site_origin(site):
@@ -61,22 +62,8 @@ def site_origin(site):
     return f"{u.scheme.lower()}://{u.netloc.lower()}" if u.scheme and u.netloc else ""
 
 
-def derived_origins(site):
-    """페이지 주소 → 원격 API 를 부를 수 있는 출처: 그 주소의 출처 + (최상위 도메인 바로 아래 주소면) www 쌍.
-    예) https://mulgyeol.kr/futsal → mulgyeol.kr · www.mulgyeol.kr  /  https://futsal.mulgyeol.kr → 그 하나만."""
-    o = site_origin(site)
-    if not o:
-        return ()
-    u = urlparse(o)
-    host = (u.hostname or "").lower()
-    out = [o]
-    if host.count(".") == 1 and not host.startswith("www.") and not host.replace(".", "").isdigit():
-        out.append(f"{u.scheme}://www.{u.netloc}")
-    return tuple(out)
-
-
-ORIGINS = derived_origins(SITE)
-SITE_TEXT = SITE.split("://", 1)[-1]  # 알림·안내 글에 쓰는 모양 (mulgyeol.kr/futsal)
+ORIGINS = (site_origin(SITE),)  # 그 페이지 출처 하나만 — mulgyeol.kr·www.mulgyeol.kr 은 와벨리 커뮤니티라 믿지 않음 (D-240)
+SITE_TEXT = SITE.split("://", 1)[-1]  # 알림·안내 글에 쓰는 모양 (futsal.mulgyeol.kr)
 NTFY_DEFAULT = "https://ntfy.sh"
 MAX_DEVICES = 5
 DEVICE_TTL = 90 * 86400      # 90일 동안 안 쓴 휴대폰은 저절로 끊음
@@ -126,7 +113,9 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # AI 추천 썸네일 (PC 썸네일 편집기에서만 시작 · 휴대폰에는 진행·알림만 · 썸네일 작업은 휴대폰 허용 목록(ACTIONS)에 없음)
               thumb.JOB_ANALYZE, thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,
               # 썸네일 버릇 배우기 (PC 스타일 카드에서만 시작 · D-130)
-              thumbstyle.JOB}
+              thumbstyle.JOB,
+              # 끝까지 자동으로 (PC 보관함·휴대폰 'auto' · D-203)
+              autorun.JOB}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 NOTE_TEXT = {
     "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
@@ -137,6 +126,7 @@ NOTE_TEXT = {
     "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
     "studio": "밖에서 PC 스튜디오를 열었어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
+    "auto": "확인이 필요해요 · 끝까지 자동으로 · 다 했지만 PC 보관함의 결과 카드에서 볼 것이 있어요",
     "moved": f"알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · {SITE_TEXT} 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
@@ -154,6 +144,11 @@ STRATEGY_MSG = {
     "stopped_check": "멈췄어요 · 그때까지 받은 숫자로 점검했어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
     "blocked": "YouTube가 잠시 막아 6시간 쉬어요 · 남은 채널은 최근 날짜·조회수만 새로 고쳤어요 · PC 8단계 '채널 전략'에서 확인해 주세요",
     "net": "PC 인터넷이 끊겨 일부 채널만 새로 고쳤어요 · 인터넷을 확인한 뒤 PC 8단계 '채널 전략'에서 다시 새로 고쳐 주세요",
+}
+# 끝까지 자동으로: 멈추거나 단계 몇 개가 안 돼도 작업은 끝까지 가서 결과(public · ok 없음)를 돌려줌 → 휴대폰에 '끝 ✓'로 보이면 안 됨 (D-207)
+AUTO_MSG = {
+    "stopped": "멈췄어요 · 만든 것은 그대로예요 · PC 보관함의 [끝까지 자동으로] → [이어서 하기]로 나머지를 해요",
+    "check": "다 했지만 확인할 것이 {n}개 있어요 · PC 보관함의 결과 카드에서 봐 주세요 (유튜브에는 아직 올리지 않았어요)",
 }
 # 유튜브 올리기 끝 — 휴대폰 '마지막 작업' 칸·알림에는 이 정해진 문장만 (영상 주소·번호·토큰·Google 오류 글은 넣지 않음 · D-048)
 YOUTUBE_JOBS = {youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}
@@ -180,6 +175,7 @@ STOPPABLE = {"내보내기", "미리보기 파일 만들기", "작은 미리보�
              "스타일 일치 점수", "클로드로 더 깊게 보기",
              strategy.JOB_REFRESH, strategy.JOB_OWN, strategy.JOB_CHECK, strategy.JOB_AI,  # 채널 전략: 모두 editor.CANCEL 을 봄 (PC 8단계 [멈추기]와 같음)
              thumbcopy.JOB_AI, thumbcopy.JOB_JUDGE,  # 클로드 문구·평가: claude_cli.run 이 editor.CANCEL 을 봄 (썸네일 분석은 장면·선수 살피기(frame_candidates)가 멈추기 신호를 안 봄 → 빠짐 · 자동 누끼 자식은 ✕ 로 꺼짐 · D-069)
+             autorun.JOB,  # 끝까지 자동으로: 단계마다·내보내기·MSG·썸네일 기다리기가 editor.CANCEL 을 봄 → 만든 것은 두고 [이어서 하기]
              youtube_upload.JOB_NAME, youtube_upload.JOB_FINISH}  # 유튜브: 조각마다 editor.CANCEL 을 보고 기다리던 응답도 끊음 → 멈춘 데부터 [이어 올리기]
 # 줄바꿈·제어·방향 바꾸는 글자 + 줄을 나누는 유니코드(NEL·줄/문단 구분)·폭 없는 글자 → 기록에 가짜 줄을 못 만들게
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
@@ -1443,6 +1439,13 @@ class Service:
                 blocked = bool(result.get("blocked"))
                 ok, warn, note = False, True, "blocked" if blocked else "net"
                 err = STRATEGY_MSG[note]
+        elif name == autorun.JOB and isinstance(result, dict):  # 멈춤 → '멈췄어요' · 못 한 단계·확인할 것 → '확인이 필요해요' (D-207)
+            n_chk = sum(1 for c in result.get("check") or [] if isinstance(c, dict) and c.get("lv") in ("bad", "warn"))
+            if result.get("status") == "stopped":
+                ok, err = False, AUTO_MSG["stopped"]
+            elif result.get("status") != "done" or result.get("redo") or n_chk:
+                ok, warn, note = False, True, "auto"
+                err = AUTO_MSG["check"].format(n=max(n_chk, 1))
         elif name == "보관함에 담기" and _missed(result):  # 받기: 못 받은 영상 id 목록 · {failed, why} 면 첫 영상의 쉬운 까닭으로
             missed = _missed(result)
             first = _first_why(result, missed)
@@ -1940,8 +1943,18 @@ def _a_preview(svc, dev, a, tok):
     return svc._go(dev, "작은 미리보기 만들기", lambda: editor.out_preview(f.name, svc.bridge.log), f.name)
 
 
+def _a_auto(svc, dev, a, tok):
+    """끝까지 자동으로 (D-203): 휴대폰에서도 같은 작업 · 받아쓰기 방식·클로드 오타 고치기·재미 자막은 PC 화면에서 마지막으로 고른 것
+    (autorun.load_prefs · E7 검토) · 유튜브에는 올리지 않음 (키트까지).
+    썸네일은 PC 의 스튜디오 화면이 그림 (화면이 없으면 그 단계만 '확인할 것')."""
+    n = _one_video(a.get("name"))
+    resume = a.get("resume") is True
+    opts = autorun.options({k: a.get(k) for k in ("intensity", "shorts", "style")})
+    return svc._go(dev, autorun.JOB, lambda: autorun.run(n, opts, svc.bridge.log, svc.bridge.analyze, resume), n)
+
+
 ACTIONS = {"download": _a_download, "analyze": _a_analyze, "add_refs": _a_add_refs, "learn_refs": _a_learn_refs, "autoseq": _a_autoseq,
-           "export": _a_export, "qa": _a_qa, "preview": _a_preview, "cancel": None}
+           "export": _a_export, "qa": _a_qa, "preview": _a_preview, "auto": _a_auto, "cancel": None}
 
 
 # ---------- 원격 리스너 (HTTP) ----------

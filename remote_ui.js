@@ -14,6 +14,8 @@
   var origFetch = window.fetch.bind(window);
   var origBeacon = navigator.sendBeacon ? navigator.sendBeacon.bind(navigator) : null;
   var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var FRAMED = (function () { try { return window.top !== window; } catch (e) { return true; } })();  // 끝까지 자동으로의 보이지 않는 썸네일 틀
+  var CLAIM_GRACE = 8000;  // 끝까지 자동으로 썸네일: PC 화면이 먼저 맡게 기다림 (PC 가 그리면 밖으로 그림·글꼴이 오가지 않음)
 
   function sameOrigin(u) { try { return new URL(u, location.href).origin === location.origin; } catch (e) { return false; } }
   function pathOf(u) { try { return new URL(u, location.href).pathname; } catch (e) { return ""; } }
@@ -69,7 +71,7 @@
     return R.ups.some(function (u) { return u.state === "up" || u.state === "wait"; });
   }
   function lock(code, site) {
-    if (R.locked) return;
+    if (R.locked || FRAMED) return;  // 틀 안에서는 바깥 화면이 잠금을 맡음
     R.locked = true;
     if (site && !R.site) R.site = site;
     var t = LOCK[code] || LOCK.none;
@@ -87,6 +89,7 @@
 
   // ---------- 끊김 (인터넷·터널) ----------
   function netDown() {
+    if (FRAMED) return;
     if (R.probing || R.locked) return;
     R.probing = true;
     var bar = document.getElementById("fsr-net");
@@ -131,6 +134,21 @@
     try { w = window.open(url, "_blank"); if (w) w.opener = null; } catch (e) { w = null; }
     if (!w) toast("새 창이 막혔어요 · 여기를 눌러 열어 주세요", { href: url, text: "열기" });
   }
+  var claiming = {};
+  async function claimLater(body) {
+    // 끝까지 자동으로 (D-201): 썸네일 그리기 요청은 열린 화면 하나가 맡음 — 밖의 화면은 조금 기다렸다가 아직 아무도 안 맡았을 때만
+    // (기다리는 동안 화면이 2·3초마다 또 물어도 같은 요청은 한 번만 기다림)
+    var id = ""; try { id = String(JSON.parse(body).id || ""); } catch (e) { /* */ }
+    var no = function () { return new Response(JSON.stringify({ ok: false }), { status: 409, headers: { "Content-Type": "application/json" } }); };
+    if (!id || claiming[id]) return no();
+    claiming[id] = 1;
+    try {
+      await sleep(CLAIM_GRACE);
+      var j = await (await origFetch("/api/auto/pending", { credentials: "same-origin", cache: "no-store" })).json();
+      if (j && j.want && String(j.want.id) === id) return null;
+    } catch (e) { /* 물어보지 못하면 맡지 않음 */ } finally { delete claiming[id]; }
+    return no();
+  }
   async function fsFetch(input, init) {
     init = init || {};
     var url = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
@@ -138,6 +156,10 @@
     var isReq = typeof Request !== "undefined" && input instanceof Request;
     var method = String(init.method || (isReq ? input.method : "GET")).toUpperCase();
     var p = pathOf(url);
+    if (p === "/api/auto/claim" && method === "POST" && typeof init.body === "string") {
+      var no = await claimLater(init.body);
+      if (no) return no;
+    }
     var headers = new Headers(init.headers || (isReq ? input.headers : undefined));
     if (method !== "GET" && method !== "HEAD") headers.set("X-FS-CSRF", R.csrf);
     var timer = null, signal = init.signal;
@@ -449,6 +471,7 @@
 
   ready(function () {
     document.documentElement.setAttribute("data-remote", "1");
+    if (FRAMED) return;  // 보이지 않는 틀: 요청 감싸기만 (위 줄·올리기 창 없음)
     bar();
     refreshSession().then(function () {
       var n = document.getElementById("fsr-pc"); if (n) n.textContent = (R.pc || "내 PC") + " · 밖에서 작업 중";

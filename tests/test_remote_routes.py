@@ -20,6 +20,15 @@ from test_remote_studio import NAME, StudioBase, quote  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 _PATH_RE = re.compile(r'\b(?:u\.)?path\s*(?:==|!=)\s*"(/[^"]*)"|\b(?:u\.)?path\s+in\s+\(([^)]*)\)|\b(?:u\.)?path\.startswith\(\s*\(?([^)]*)\)')
+# 다른 모듈의 주소 상수로 비교하는 길 (예: path == autorun.PATH · path in (…, autorun.PATH)) — 그 모듈에서 값을 읽어 옴
+_CONST_RE = re.compile(r'\b(?:u\.)?path\s*(?:==|!=)\s*([a-z_]+)\.([A-Z_]+)\b')
+_CONST_IN_RE = re.compile(r'\b([a-z_]+)\.([A-Z_]+)\b')
+
+
+def _const(mod, name):
+    m = re.search(r'^%s\s*=\s*"(/[^"]*)"' % re.escape(name), (ROOT / f"{mod}.py").read_text(encoding="utf-8"), re.M)
+    assert m, f"{mod}.{name} 주소 상수를 찾지 못함"
+    return m.group(1)
 
 
 def _body(lines, start, end):
@@ -41,6 +50,9 @@ def app_routes():
             for a, b, c in _PATH_RE.findall(t):
                 for lit in ([a] if a else re.findall(r'"(/[^"]*)"', b or c)):
                     (prefix if (c and not a) else exact).add((m, lit))
+                if b:
+                    exact |= {(m, _const(mod, nm)) for mod, nm in _CONST_IN_RE.findall(b)}
+            exact |= {(m, _const(mod, nm)) for mod, nm in _CONST_RE.findall(t)}
             if m == "POST":  # 작업 사전 jobs = {"/api/…": (이름, …)}
                 exact |= {(m, k) for k in re.findall(r'^\s+"(/api/[^"]+)":\s*\(', t, re.M)}
     # 앞머리 검사(path.startswith(("/api/edit/", …)))의 이름 검사 줄은 길이 아님 → 앞머리로만
@@ -77,7 +89,9 @@ class RouteEnumerationTest(StudioBase):
         self.assertGreater(len([1 for m, _ in self.exact if m == "GET"]), 40)
         self.assertGreater(len([1 for m, _ in self.exact if m == "POST"]), 90)
         for want in (("GET", "/"), ("GET", "/api/state"), ("POST", "/api/analyze"), ("POST", "/api/youtube/upload"),
-                     ("POST", "/api/strategy/ai_paste"), ("GET", "/api/youtube/history"), ("POST", "/api/remote/on")):
+                     ("POST", "/api/strategy/ai_paste"), ("GET", "/api/youtube/history"), ("POST", "/api/remote/on"),
+                     ("POST", "/api/auto"), ("GET", "/api/auto"), ("GET", "/api/auto/pending"), ("POST", "/api/auto/release"),
+                     ("POST", "/api/auto/claim"), ("POST", "/api/auto/thumb"), ("POST", "/api/auto/prefs"), ("POST", "/api/edit/sfx")):
             self.assertIn(want, self.exact)
         self.assertIn(("GET", "/fonts/"), self.prefix)
         self.assertNotIn(("POST", "/frame"), self.exact)  # 장면 주소 검사(src.startswith)는 길이 아님

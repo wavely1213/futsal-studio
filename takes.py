@@ -25,6 +25,7 @@ CONTRAST = re.compile(r"안|못|않\w*|안(?:돼|되|됩|해|하|좋)\w*|못(?:�
 
 # (패턴, 강함) — 강한 말은 남는 글자 3자까지('요' 등), 약한 말('처음부터', '잠깐만')은 2자까지일 때만 슬레이트로 봄
 SLATE = [(re.compile(p, re.I), strong) for p, strong in (
+    (r"다시\s*시작\s*(?:할\s*(?:게|께)|하\s*겠습|하자)", True),  # '다시 시작할게요' · '다시 시작하겠습니다' (슬레이트 말 보강 · E7 · '처음부터'보다 먼저 지움)
     (r"처음부터\s*(?:다시\s*(?:(?:할|갈|찍을|해\s*볼|가\s*볼)\s*(?:게|께)|(?:하|가|찍|해\s*보|가\s*보)\s*겠습|(?:하|가|찍)자)?"
      r"|(?:할|갈)\s*(?:게|께)|(?:하|가)\s*겠습|(?:하|가)자)", True),
     (r"다시\s*(?:한\s*번\s*)?(?:할|갈|찍을|해\s*볼|가\s*볼)\s*(?:게|께)", True),
@@ -38,6 +39,12 @@ SLATE = [(re.compile(p, re.I), strong) for p, strong in (
     (r"잘못\s*말했", True),
     (r"처음부터", False),
     (r"잠깐만|잠시만", False),
+)]
+# 다시 찍는 신호일 수도, 연습 중 선수에게 하는 말일 수도 있는 말 ('틀렸다, 다시' · '다시, 다시') — 혼자서는 지우지 않음.
+# 앞뒤로 같은 말을 다시 한 테이크 짝이 있을 때만 그 짝의 슬레이트로 셈 (짝을 지우면 함께 지워짐) · 외친 줄('!')은 연습 구령이라 아님 (E7 검토)
+REDO_CUE = [re.compile(p) for p in (
+    r"틀렸(?:다|네|어요|어|습니다)[\s,.?~…]*다시",   # '틀렸다, 다시' (뒤 '다시 …'가 없어도)
+    r"^[\s,.?~…]*다시[\s,.?~…]+다시[\s,.?~…]*$",  # 한 줄 전체가 '다시, 다시'
 )]
 # 시범을 부르는 '다시 해 볼게요' · '다시 한번 갈게요' (한 번 더 해 보는 말 · 실수 말·'아 다시'·'찍'·'처음부터' 없이) —
 # 바로 뒤에 시범(공 소리·말 없는 긴 장면)이 오면 슬레이트가 아님 (E12 · I-100) · '다시 할게요' · '아 다시 갈게요'는 그대로 슬레이트
@@ -129,6 +136,19 @@ def is_slate(text, ed=None):
     return len(left) <= (3 if strong else 2)
 
 
+def is_redo_cue(text, ed=None):
+    """'틀렸어요, 다시' · '다시, 다시' 처럼 다시 찍는 신호일 수 있는 말인지 (다른 내용이 거의 없고 외치지 않았을 때만).
+    혼자서는 슬레이트가 아님 — find_junk 가 다시 찍은 테이크 짝 사이에 있을 때만 슬레이트로 셈 (연습 중 '틀렸어, 다시!'는 내용)."""
+    if "!" in str(text or "") or not any(rx.search(text) for rx in REDO_CUE):
+        return False
+    ed = ed or _ed()
+    rest = text
+    for rx in REDO_CUE:
+        rest = rx.sub(" ", rest)
+    left = OOPS.sub("", "".join(w for w in (ed._norm(x) for x in rest.split()) if w not in ed.FILLERS and w not in SORRY))
+    return len(left) <= 3
+
+
 def is_chant(text, ed=None):
     """한 줄 전체가 숫자 세기·리듬 말·짧은 구령·환호뿐인지 ('하나, 둘, 셋!' · '왼발, 오른발,' · '나이스!' · '좋아요.' · '골!').
     받아쓰기가 이런 말을 줄마다 나눠도 말더듬·군더더기로 지우지 않으려고 씀 (앞쪽·사이 추임새는 빼고 봄).
@@ -205,10 +225,12 @@ def _demo_between(segs, i, j, silences, peaks):
     return False
 
 
-def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=()):
+def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=(), cues=None):
     """i(앞 테이크) ~ j(다시 찍은 테이크) 사이가 정말 NG 인지: 사이의 말이 다시 한 말·슬레이트·추임새뿐이고, 오래 비지 않음.
     슬레이트 말이 없으면 더 엄격히: 사이에 다른 말이 하나도 없고 뒤 테이크가 앞 말을 거의 다 다시 함 (같은 말로 감싼 팁·나란한 설명은 그대로).
-    슬레이트 말 없이 다 말한 앞 테이크 뒤에 시범(큰 소리·말 없는 긴 장면)이 있으면 '같은 설명 → 시범 → 같은 설명' 드릴이라 NG 아님."""
+    슬레이트 말 없이 다 말한 앞 테이크 뒤에 시범(큰 소리·말 없는 긴 장면)이 있으면 '같은 설명 → 시범 → 같은 설명' 드릴이라 NG 아님.
+    cues: 다시 찍는 신호일 수 있는 말('틀렸어요, 다시' · '다시, 다시' · REDO_CUE) — 사이에 있어도 '다른 말'로 세지 않을 뿐(짝과 함께 지워짐)
+    슬레이트처럼 시범·조용한 곳 확인을 건너뛰게 하지는 않음 (설명 → 시범 → '틀렸어요 다시' → 같은 설명은 드릴 그대로 · D-207)."""
     ed = _ed()
     slate = any(slates[i + 1:j])
     if not slate and (_resaid(_trimmed(segs[i]["text"], ed), cores[j]) < COVER
@@ -218,7 +240,7 @@ def _retake_ok(segs, cores, slates, i, j, silences=(), peaks=()):
         return False
     win, loose = range(j, min(len(segs), j + (j - i) + 2)), 0
     for k in range(i + 1, j):
-        if len(cores[k]) > 1 and not slates[k] and not FIX_WORDS.fullmatch(cores[k]) \
+        if len(cores[k]) > 1 and not slates[k] and not (cues and cues[k]) and not FIX_WORDS.fullmatch(cores[k]) \
                 and not any(_similar(cores[k], cores[w], 0.6) for w in win):
             loose += len(cores[k])
             if loose > (LOOSE_MAX if slate else 0):
@@ -238,22 +260,24 @@ def find_junk(segs, silences=(), peaks=()):
     cores = [_core(s["text"], ed) for s in segs]
     slates = [is_slate(s["text"], ed) for s in segs]
     chants = [is_chant(s["text"], ed) for s in segs]
+    cues = [is_redo_cue(s["text"], ed) and not slates[k] for k, s in enumerate(segs)]  # 테이크 짝 안에서만 슬레이트 (아래 짝 찾기만 봄)
     sil = [x for x in silences or () if isinstance(x, dict) and x.get("end", 0) > x.get("start", 0)]
     pk = [float(p["time"] if isinstance(p, dict) else p) for p in peaks or ()]
     for k in range(len(segs) - 1):  # '다시 해 볼게요.' → 시범 → '나이스!' : 시범을 부르는 말 (슬레이트 아님 · 문장 단위로 나누면 따로 떨어짐)
         if slates[k] and RETRY.search(segs[k]["text"]) and not NOT_RETRY.search(segs[k]["text"]) and _demo_between(segs, k, k + 1, sil, pk):
             slates[k] = False
     out, pairs = [], []
+    marks = [a or b for a, b in zip(slates, cues)]  # 테이크 기준으로 쓰지 않을 말 (슬레이트 + 다시 찍는 신호)
 
     for j, later in enumerate(segs):  # 다시 찍은 앞 테이크
-        if len(cores[j]) < MIN_CHARS or slates[j] or chants[j]:  # 슬레이트 말끼리·구령끼리는 테이크 기준으로 안 씀
+        if len(cores[j]) < MIN_CHARS or marks[j] or chants[j]:  # 슬레이트 말끼리·구령끼리는 테이크 기준으로 안 씀
             continue
         for i in range(j - 1, -1, -1):
             d = later["start"] - segs[i]["start"]
             if d > RETAKE_MAX:
                 break
-            if d >= RETAKE_MIN and not slates[i] and not chants[i] and _similar(cores[i], cores[j]):
-                if _retake_ok(segs, cores, slates, i, j, sil, pk):
+            if d >= RETAKE_MIN and not marks[i] and not chants[i] and _similar(cores[i], cores[j]):
+                if _retake_ok(segs, cores, slates, i, j, sil, pk, cues):  # 신호는 사이 말 셈에서만 (시범·조용한 곳 확인은 진짜 슬레이트로만 건너뜀)
                     pairs.append((i, j))
                 break
     keep = []  # 앞 테이크 순서로 고르되, 고른 테이크를 가로지르는 짝(여러 줄을 다시 찍었을 때 둘째 줄끼리)은 버림 · 안에 든 짝은 그대로

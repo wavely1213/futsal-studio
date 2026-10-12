@@ -621,9 +621,34 @@ def _images_of(name):
     return sorted(files, key=order, reverse=True)
 
 
-def thumbnail_check(name, fmt="long"):
-    """가장 최근에 저장한 썸네일(A/B 묶음이면 그 묶음의 A) 확인: 2MB 이하 · 1280×720(긴 영상) / 1080×1920(쇼츠)."""
-    files = _images_of(name)
+OWN_THUMB = "_썸네일_"   # 편집본 하나의 썸네일 '<영상>_<편집본 이름>_썸네일_N.jpg' (끝까지 자동으로가 저장 · autorun.save_thumb)
+
+
+def own_thumb_prefix(name, sq):
+    """이 편집본만의 썸네일 파일 이름 앞부분 (그 편집본 키트가 먼저 고름)."""
+    label = re.sub(r'[\\/:*?"<>|\x00-\x1f\ufffd]', "", core.clean_text(_seq_label(sq))).strip(" .")  # thumb.export_image 가 이름을 고치는 규칙과 같게
+    return f"{core.adir(name).name}_{label}{OWN_THUMB}"
+
+
+def pick_own_thumbs(name, files, sq):
+    """편집본 하나의 썸네일 후보 (최근 것부터): 그 편집본 이름의 것('…_<편집본 이름>_썸네일_N') + 그보다 나중에 썸네일 편집기에서
+    따로 저장한 것 — 자동 썸네일 뒤에 사람이 다시 만든 썸네일이 이김 (E7 검토). 다른 편집본 이름의 자동 썸네일은 늘 뺌 —
+    그 편집본 이름의 것이 없어도 (썸네일을 못 그린 쇼츠가 다른 쇼츠 썸네일을 '문제없음'으로 쓰지 않게 · D-207) 따로 저장한 것만."""
+    own = own_thumb_prefix(name, sq)
+    auto = re.compile(re.escape(core.adir(name).name + "_") + r".+" + re.escape(OWN_THUMB) + r"\d+\.(?:jpe?g|png)$", re.I)
+    mine = [p for p in files if p.name.startswith(own)]
+    loose = [p for p in files if not p.name.startswith(own) and not auto.match(p.name)]
+    if not mine:
+        return loose
+    newest = max(_mtime(p) for p in mine)
+    keep = set(mine) | {p for p in loose if _mtime(p) > newest}
+    return [p for p in files if p in keep]  # _images_of 차례 그대로 (A/B 묶음은 A 먼저)
+
+
+def thumbnail_check(name, fmt="long", sq=None):
+    """가장 최근에 저장한 썸네일(A/B 묶음이면 그 묶음의 A) 확인: 2MB 이하 · 1280×720(긴 영상) / 1080×1920(쇼츠).
+    sq: 편집본 — 그 편집본 이름으로 저장한 썸네일('<영상>_<편집본 이름>_썸네일_N.jpg')이 있으면 그것을 먼저 (쇼츠 여러 개가 저마다 썸네일 · E7)."""
+    files = pick_own_thumbs(name, _images_of(name), sq) if sq else _images_of(name)
     if not files:
         return {"ok": False, "file": None, "problems": ["아직 저장한 썸네일이 없어요 · 아래 '썸네일 만들기'를 눌러 편집기에서 '이미지로 저장'을 눌러 주세요"]}
     sized = [(p, image_size(p)) for p in files[:30]]
@@ -1017,7 +1042,7 @@ def build_kit(name, seq=None, save=True):
     quote_avoid = [_kit_quote(k) for k in others if k.get("name") == name]  # 같은 촬영본의 다른 키트가 쓴 첫 줄 인용
     kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur, quote_avoid), chs, kit["hashtags"], kit["title"], topics, notes=notes)
     _apply_guests(kit, kit.get("guests") or [])  # 설명 '▶ 출연' 줄·태그·해시태그 (제목 후보는 위에서)
-    kit["thumbnail"] = thumbnail_check(name, fmt)
+    kit["thumbnail"] = thumbnail_check(name, fmt, sq)
     kit["prompt"] = claude_prompt(kit, segs)
     kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
     kit["description"] = add_promo(kit["description"], kit["promo"], notes)
@@ -1107,9 +1132,24 @@ def load_kit(name, seq=None, live=False):
     if not sq and other_sources(name):  # 예전에 만들어 둔 다른 채널 영상의 '원본 그대로' 키트 (E2)
         alerts.insert(0, OTHER_ORIGINAL)
     kit["alerts"] = alerts
-    kit["thumbnail"] = thumbnail_check(name, kit.get("format", "long"))
+    kit["thumbnail"] = thumbnail_check(name, kit.get("format", "long"), sq)
     kit["counts"] = counts(kit)
     return annotate(kit) if live else kit
+
+
+def keep_kit(name, seq):
+    """저장해 둔 키트를 그대로 씀 — 사람이 고친 제목·설명·태그(edited)를 새로 만든 내용으로 덮지 않게 (끝까지 자동으로의 이어서 하기 · D-207).
+    썸네일 확인만 지금 것으로: 저장된 것과 다르면 썸네일 칸(.txt 의 썸네일 줄도)만 바꿔 다시 저장. → 키트 (저장된 키트가 없으면 None)."""
+    with _LOCK:
+        sq, _ = _target(name, seq)
+        _, saved = _find_kit(name, seq)
+        if saved is None:
+            return None
+        kit = load_kit(name, seq)
+        old, new = saved.get("thumbnail") or {}, kit.get("thumbnail") or {}
+        if any(old.get(k) != new.get(k) for k in ("file", "ok", "mtime", "problems")):
+            _store(kit, name, seq, sq)
+        return kit
 
 
 def save_edits(name, seq, title=None, desc=None, tags=None):

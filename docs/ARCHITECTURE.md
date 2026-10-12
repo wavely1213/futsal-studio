@@ -24,7 +24,7 @@
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · tactic · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
+[기능 모듈]  core · editor · autorun · tactic · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy · YouTube 공개 RSS(채널 전략)
    ▼
@@ -36,9 +36,9 @@
 **휴대폰으로 보기 (원격 접속, D-027 · 켜 둔 동안만)**
 
 ```
-[휴대폰 브라우저 / 홈 화면 앱]  https://mulgyeol.kr/futsal  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel)
+[휴대폰 브라우저 / 홈 화면 앱]  https://futsal.mulgyeol.kr  (정적 PWA · 와벨리 저장소 public/futsal/ · Vercel 프로젝트 wavely 의 뿌리 · D-240)
    │ ① PC 찾기: ntfy.sh/<비콘 주제> 마지막 글 → 기기 열쇠로 AES-GCM 풀기 → 지금 터널 주소
-   │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 mulgyeol.kr 만)
+   │ ② API: https://<무작위>.trycloudflare.com/r/*  (서명 Authorization · CORS 는 futsal.mulgyeol.kr 만)
    │ ③ 영상·그림: …/r/m/<표>  (<video>·<img> 는 머리글을 못 보냄 → 기기·받은 곳(IP 대역)에 묶인 1시간 표)
    │ ⓪ 짝짓기: 코드 → PBKDF2 → 증명만 보냄 · 기기 열쇠·주제·주소는 코드 열쇠로 잠겨 옴 (Cloudflare 는 못 읽음)
    ▼
@@ -100,8 +100,9 @@
   - `proofread` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다.
   - `msgwrite` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다(D-148).
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
+  - `autorun` → `core`, `editor`, `studiolog`(실행 표시 · 꺼짐 카드), `updater`(`write_atomic`). `msg`·`upload`·`thumb`·`qa`·`style`·`trouble`은 함수 안에서 지연 import한다(무거운 모듈을 앱이 켤 때 불러오지 않게 · `style` → `plan` 순환). `app`(작업·경로)과 `remote`(`auto` 동작 · 작업 이름)가 쓴다 (D-200~D-203).
   - `rstudio` → `core`, `editor`(`safe_name`·`video_path`·`proxy_path`·`unique_name`·`media_entry`·`out_preview`·`ASSETS`), `intake`(못 쓰는 확장자), `source`(`mark_footage`), `updater`(`replace_retry`·`write_atomic`), `upload`(`files_for`), `youtube_upload`(`plan`·`pending`·`history`·`link_of`). `app`·`remote` 는 import 하지 않는다(서비스·처리기를 인자로 받음). `remote` 와 `app` 이 이것을 쓴다.
-  - `remote` → `core`, `editor`, `qa`, `refs`, `rstudio`, `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
+  - `remote` → `autorun`(`auto` 동작 · 작업 이름 · D-203), `core`, `editor`, `qa`, `refs`, `rstudio`(밖에서 작업 경계 · D-230), `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
   - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기·`write_atomic`·자기 확인 `urlopen`). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
@@ -138,6 +139,7 @@
 | hwdec | `hwdec.py` | Windows·HDR 영상에서 확인(화소·속도 · 20초 제한 · ✕ 로 끔)이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-086) |
 | claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
+| autorun | `autorun.py` | 끝까지 자동으로 (E7 · D-200~D-207 · BR-110·BR-113): `run`(작업 하나 · 9단계 `STEPS`·`STEP_FN` · 단계마다 기록 `analysis/<영상>/auto_run.json` · 실패는 적고 다음 단계 · 편집점 찾기·가편집만 멈춤 · 멈추기 `Stopped` · 이어서 하기 `resume` — 이미 있는 키트는 `upload.keep_kit`(썸네일 칸만 새로) · 사람이 저장한 결과물 썸네일 `own_thumb` · 검수만 다시 `qaDone` · `load` 는 지금 영상 이름으로 · 새 기록 전에 `archive` · D-207), `options`(화면·휴대폰 값 정리 · 휴대폰이 안 보낸 받아쓰기·MSG 설정은 PC 화면이 남긴 작업 폴더 `auto_prefs.json` — `save_prefs`·`load_prefs` · D-206)·`default_style`, 쇼츠 제목 `short_hook`(순서 말뿐이면 예전 규칙 · D-206), 프로젝트에 더하기 `add_to_project`(꼬리표 `autoRun`·`autoKey`), 확인할 것 `checklist`·`caption_checks`, 썸네일 그리기 다리 `request_thumb`·`pending`·`claim`·`release`·`deliver`(화면이 보이지 않는 틀로 썸네일 편집기 `?autothumb=` 를 열어 그려 보냄 · 떠나는 화면은 맡기를 풂 · 저장 실패도 바로 작업에 · D-201·D-207)·그리는 화면이 받을 분석 `analysis_for`(작업이 작업 자리를 잡고 있어 새 분석을 못 띄움 · D-207), 지금 단계 `LIVE`(/api/state `auto`) · 열어 둔 편집실과 합치기는 `editor.save_project`(`AUTO_CLIENT` · BR-113) |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |
 | upload | `upload.py` | `build_kit`·`save_edits`·`load_kit`: 제목 후보·설명(템플릿)·챕터·태그·썸네일 확인 → `out/<…>_올리기.txt/.json`. `promo_lines`·`add_promo`: 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (BR-062). 유튜브 글자 수·챕터 규칙 적용. `files_for`: 올릴 영상·.srt 찾기(읽기만 · 유튜브 바로 올리기가 씀). `progress`: 4단계 카드의 영상별 단계(가편집·내보냄·썸네일(`_thumb_images` — A/B '모바일 비교' 한 장은 빼고 · 7단계 `_images_of` 와 같은 규칙 · D-078)·키트(편집본으로 만든 것만) · 읽기만 · D-075 · 유튜브는 `/api/progress` 가 더함) |
 | youtube_upload | `youtube_upload.py` | 유튜브에 바로 올리기 (D-046 · BR-023): 연결 상태 `status`(인터넷 안 씀 · 비밀 없음)·`save_client`·`start_login`·`logout`·`clear_all`, 설정 `settings.json`(화이트리스트), 미리 확인 `plan`(키트·파일·연결·채널·5000바이트·쇼츠·중복·감사·할당량), 작업 `run_upload`·`resume`(세션 파일로 이어 올리기)·`finish`(썸네일·자막·재생목록 마저 하기 · 올린 직후 5xx·404 는 다시), 처리 상태 `check`(작업 아님), 기록 `history.json`, 할당량 `quota.json`(태평양 시각 하루 · tzdata 없이), 정해진 주소 열기 `open_link`·`GUIDE_URLS` |
@@ -151,7 +153,7 @@
 | forecast | `forecast.py` | 가능성(%) (D-025): `calibrate`(반응 회귀·분류 줄이기·σ·Theil–Sen 전환·탄력성·bootstrap·DEFAULTS), `own_posterior`, `simulate`(주 단위 · 공통 난수 · 지수 누적 · 되먹임), 목표·궤적·KPI, 민감도 `variants`, 표시 `show`(BR-015), `assumptions`, 검증(`loo_coverage`·`video_reliability`·`backtest`·`brier`), `inputs_hash` |
 | remote | `remote.py` | 휴대폰으로 보기 (D-027): `Store`(`~/.futsal-studio/remote.json` · 기기 최대 5·90일 · 같은 브라우저는 바꿔 끼움), `Pairing`(10분 한 번 코드 · 증명 확인 · PBKDF2 만남 주제·잠금·증명 열쇠), `Auth`(FSR2 서명: host 포함 · nonce), `Tickets`(미디어 표: 기기·IP 대역·1시간), `Limiter`, `Publisher`(ntfy 비콘·알림·하루 한도), `Service`(켜기·끄기는 시도 번호로 · 터널 추적 · 오류 뒤 다시 켜기 · 끊기·설정·작업 끝 알림 `job_hook`(실패는 `trouble.explain` 의 쉬운 한 줄 그대로 · 일부만 실패도 '확인이 필요해요' · D-044)·자동 끄기·절전 막기), `RemoteHandler`(`/r/*` · 그 밖의 길은 `rstudio.gate` 로 · 로그인 정보 브라우저 고르기(`/api/browsers`·`cookies`)는 PC 화면에서만 · D-044), 허용 동작 `ACTIONS`, 넘겨주기 `r_handoff` · `SITE`(원격 홈 주소 한 줄 · `ORIGINS` 는 여기서 · D-233) |
 | rstudio | `rstudio.py` | 밖에서 작업 (D-230~D-232): `Sessions`(메모리 · 기기마다 하나 · 30분/12시간 · 끊은 까닭), `Handoffs`(60초 한 번 표), `Confirms`(428 확인 표), `POLICY`·`classify`(길 분류), `gate`(경계 순서), `inject`(화면에 nonce·CSRF·심), `scrub_state`, 미디어(미리보기 파일만·동시 수), 받기(`outputs_route`·`send_file` · 구간·ETag), `Uploads`(8MB 조각·이어 올리기·`WORK/uploads/` · 7일), `start`(밖에서 시킨 작업) |
-| 밖에서 작업 심 | `remote_ui.js` · `remote_ui.css` · `hello.js` | 밖에서 연 화면에만 끼워 넣음: fetch·sendBeacon 감싸기(CSRF·401 잠금·428 확인·끊김 띠·45초) · 위 띠(기기 · 받기 · 올리기 · 원본 화질 · 연결 끝내기) · 올리기·받기 창 · `window.FS_REMOTE`. `hello.js` = 넘겨주기 인사 쪽·잠금 안내 쪽(세션 없이 내주는 정적 파일) |
+| 밖에서 작업 심 | `remote_ui.js` · `remote_ui.css` · `hello.js` | 밖에서 연 화면에만 끼워 넣음: fetch·sendBeacon 감싸기(CSRF·401 잠금·428 확인·끊김 띠·45초 · 끝까지 자동으로 썸네일 맡기는 8초 뒤 아무도 안 맡았을 때만) · 위 띠(기기 · 받기 · 올리기 · 원본 화질 · 연결 끝내기) · 올리기·받기 창 · `window.FS_REMOTE` · 같은 출처 틀(끝까지 자동으로의 보이지 않는 썸네일 편집기) 안에서는 감싸기만. `hello.js` = 넘겨주기 인사 쪽·잠금 안내 쪽(세션 없이 내주는 정적 파일) |
 | tunnel | `tunnel.py` | cloudflared 고정 판 받기(`ensure`) · 빠른 터널 지킴이(`Tunnel`: 등록 줄 확인·http2 다시·다시 켜기 한 시간 6번·`core.popen`/`core.run` 으로 띄워 앱의 Job Object 하나에(따로 두지 않음 · D-034)·남은 pid 정리) · 출력 줄은 기록하지 않음 |
 | qr | `qr.py` | QR 만들기(바이트·M·버전 1~10) → 줄 문자열 (PC 창이 SVG 로 그림) |
 | intake | `intake.py` | 보관함에 들어오는 영상 (D-035 · D-042): `copying`(1초마다 본 크기·수정 시각이 5초 그대로 + Windows 쓰기 손잡이 없음), `busy`(편집점 찾기 직전), `unusable`(.MTS 등 못 쓰는 형식), `sig`·`remember`·`changed`(편집점을 찾을 때의 크기·수정 시각 `file_sig.json` · `write_atomic`), `clear_media_cache`(바뀐 파일로 다시 찾을 때 반쪽 파일 캐시 지움), `convert`(못 쓰는 형식 → MP4 · ffmpeg 경로는 부르는 쪽이 줌 · `core.run`/`core.popen` · 마지막 파일·원본 옮기기는 `replace_retry`), `annotate`(`/api/state` 목록에 copying·changed) |
@@ -159,7 +161,7 @@
 | trouble | `trouble.py` | 작업 오류 → 쉬운 한 줄 + 할 일 (D-036): `explain`(규칙 `_RULES` 위에서부터 · 우리 한국어 안내는 그대로 + 환경 원인의 할 일), `Trouble`(이미 쉬운 말인 오류), `BROWSERS`·`browser`(로그인 정보를 읽을 브라우저 목록·검사), 유튜브 올리기 실패 카드 `YT_CARDS`·`youtube_card`·`youtube_kind_of`·`explain(…, youtube=True)`(정해진 문장만 · D-049) |
 | studiolog | `studiolog.py` | 오류 기록 하나로 (D-037 · D-044): `write`(studio.log · 연도 붙은 시각 · 2MB 넘으면 studio.old.log · 비밀은 `remote.redact`), `where`·`trace`(오류 위치 한 줄 → studio.log · traceback 전체 → 오류 출력 = pythonw 면 `app._error_log` 의 studio-error.log · 같은 오류는 한 번만), `install_hooks`(스레드·메인의 잡히지 않은 오류 · 파이썬 기본 출력 대신), `session_start`·`job`·`session_end`(실행 표시 `studio.running.json` → 갑자기 꺼짐) · `target`(작업 대상을 실행 표시에 → 갑자기 꺼지면 보관함 [다시 하기] · D-072) |
 | captions | `captions.py` (2차 작업 중, 커밋 전) | 용어 사전(`dict.json` 읽기·쓰기, 받아쓰기 힌트 `prompt`·`hotwords`, 힌트를 따라 쓴 구간 찾기 `echo`), 낱말 경계 고치기(`apply_dict`·`fix_words`), 자막 나누기(`chunk`·`from_segments`, BR-013), 문장 단위로 나누기(`split_sentences`·`ends_sentence` — 가편집 계산·키트 문장 · 가편집은 단어 시각 있는 구간만 · D-101) · 겹쳐 쓴 그림자 문장 합치기(`merge_ghosts`) |
-| 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://mulgyeol.kr/futsal` 정적 PWA. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
+| 휴대폰 화면 (저장소 밖) | 와벨리 저장소 `public/futsal/` (`index.html`·`app.js`·`proto.js`·`app.css`·`sw.js`·`manifest.webmanifest`) | `https://futsal.mulgyeol.kr` 정적 PWA (Vercel 프로젝트 `wavely` 가 이 페이지만 뿌리에서 냄 · 와벨리 커뮤니티는 별도 `wavely-web` → `mulgyeol.kr` · D-240). 페이지 안 경로는 상대 주소·`BASE`(app.js 위치)라 주소가 바뀌어도 그대로. `proto.js` 는 `remote.py` 와 짝(코드 정리·PBKDF2·AES-GCM·서명 — `tests.test_remote_proto`가 node 로 맞물림 확인). 와벨리 코드와 섞지 않음 |
 | 화면 | `ui.html` · `editor.html` · `thumb.html` | 스튜디오 8단계(소재 찾기·보관함·편집점·편집실·썸네일·스타일 배우기·올리기·채널 전략 · 5·7단계에 '전략에서 만든 할 일' 상자), 편집실(`/api/edit/*`), 썸네일(`/api/thumb/*` · 원본 `thumb_src/parts/p1~p9` — p1 렌더러(자동 보정·전술 도형·맞춤 상자), p8 'AI 추천 썸네일'(레퍼런스형 템플릿 `T_NEW` 롱폼 11·쇼츠 8 + 예전 `TPL.long` 7·`TPL.short` 5(새 템플릿이 모자랄 때만), 배경 놓기 `frameLayer`(머리 지키기·박힌 글자 피하기)·`topLayouts`·`framesBelow`, 점수 `scoreDoc`(머리 잘림·가림 게이트, 장면 품질 `frameQ`), 고르기 `recommend`, 개발용 `window.__thumbAuto`), p9 전술 그래픽 메뉴·점 핸들·스티커·브랜드 키트·검수(모바일 미리보기·OCR·클로드 평가)·A/B 묶음) |
 
 ## 5. 데이터 모델 요약

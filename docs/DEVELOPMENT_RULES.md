@@ -77,7 +77,7 @@
 > 배포 절차의 기준 문서는 이 절이다. 사용자 PC 쪽 설치·되돌리기는 `ARCHITECTURE.md` 6절 '업데이트 흐름'.
 
 - 명령: `./release.sh X.Y.Z "변경 내용 한 줄"` (커밋 메시지 끝에 붙일 줄은 `RELEASE_TRAILER` 환경 변수). 소유자 승인 후에만.
-- 배포 전: 단위 테스트 전체 + 영향받는 e2e 묶음이 통과한 상태여야 한다. `release.sh` 자체는 `tests.test_update` 만 돌리고, 실패하면 아무것도 커밋하지 않고 멈춘다.
+- 배포 전: 단위 테스트 전체 + 영향받는 e2e 묶음이 통과한 상태여야 한다. `release.sh` 자체는 `tests.test_update` 만 돌리고, 실패하면 아무것도 커밋하지 않고 멈춘다. 이어서 휴대폰 페이지(`remote.py` 의 `SITE`)가 실제 풋살 페이지인지(`/manifest.webmanifest` 의 `short_name`·`/sw.js`) 보고, 아니면 역시 아무것도 커밋하지 않고 멈춘다(D-241 · 와벨리 저장소를 먼저 배포).
 - **`release.sh` 는 `git add -A` 를 한다.** 작업 트리에 커밋하지 않은 다른 작업이 있으면 그것까지 배포된다 → 그럴 때는 깨끗한 클론에서 배포한다.
 - 하는 일: `version.txt` 올림 → `git add -A` → 파일마다 sha256 을 적은 `manifest.json`(`tests/`·`manifest.json`·링크 제외) 과 함께 **배포 커밋** `release vX.Y.Z: <설명>` → zip 주소(`https://github.com/wavely1213/futsal-studio/archive/<배포 커밋>.zip`)와 `commit` 을 더한 **두 번째 커밋** `manifest vX.Y.Z` → `main` 푸시. 태그 `vX.Y.Z` 푸시는 403 으로 실패하지만 업데이트와 무관하다 (D-011, `KNOWN_ISSUES.md` I-010).
 - 모든 `.py` 는 설치 전에 사용자 PC 의 Python 으로 문법 확인을 받고, 새 `updater.py` 는 `--selftest` 를 통과해야 설치된다. `updater.py` 는 표준 라이브러리만 쓰고, 최신 Python 에서만 되는 문법(예: 3.12 의 따옴표 겹친 f-string)은 어떤 `.py` 에도 쓰지 않는다.

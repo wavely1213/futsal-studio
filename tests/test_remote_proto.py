@@ -266,12 +266,14 @@ class ProtoInteropTests(unittest.TestCase):
         csp = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]*)">', html).group(1)
         self.assertIn(f"'sha256-{digest}'", csp)
         self.assertNotIn("unsafe-inline", csp.split("script-src", 1)[1].split(";")[0])
-        self.assertNotIn('"/futsal', html)  # 앞머리 글자는 페이지 파일에 없음 (주소에서 읽음 · manifest 의 start_url·scope 만)
+        self.assertNotIn('"/futsal', html)  # 앞머리 글자는 페이지 파일에 없음 (주소에서 읽음 · 지금은 뿌리 '/' · D-240)
+        self.assertIn('rel:"manifest",href:r+"/manifest.webmanifest",crossorigin:"use-credentials"', scripts[0])  # 로그인한 미리보기에서도 manifest
         for f in ("app.js", "sw.js", "proto.js"):
             code = "\n".join(ln for ln in (SITE / f).read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("//"))
             self.assertNotIn('"/futsal', code, f)
         man = json.loads((SITE / "manifest.webmanifest").read_text(encoding="utf-8"))
         self.assertTrue(all(not i["src"].startswith("/") for i in man["icons"]))
+        self.assertEqual((man["start_url"], man["scope"]), ("./", "./"))  # manifest 자리 기준 (뿌리면 '/')
 
     def test_pair_link_parsed_by_page(self):
         self.svc.state, self.svc.url = "on", "https://quiet-river.trycloudflare.com"

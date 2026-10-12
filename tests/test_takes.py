@@ -277,6 +277,52 @@ class FindJunkTest(unittest.TestCase):
         for t in no:
             self.assertFalse(takes.is_slate(t), t)
 
+    def test_more_slate_words_e7(self):
+        """슬레이트 말 보강 (E7 · 백로그 P3): '다시 시작할게요/하겠습니다' · '틀렸다, 다시' · '다시, 다시' — 연습 안내는 그대로."""
+        yes = ["다시 시작할게요", "아 다시 시작하겠습니다", "처음부터 다시 시작할게요", "아 틀렸어요 다시 할게요"]
+        no = ["천천히 다시 시작할게요", "이번엔 왼발로 다시 시작할게요", "다시 시작하면 이렇게 공을 받아요", "이 자세는 틀렸어요 다시 보세요",
+              "틀렸어요", "다시!", "공을 다시 받아요",
+              # E7 검토: 연습 중 선수에게 하는 말은 혼자서 슬레이트가 아님 (테이크 짝 안에서만 · test_redo_cue_only_inside_retake)
+              "틀렸다 다시", "틀렸네, 다시", "틀렸어, 다시!", "틀렸어요 다시", "다시, 다시", "다시 다시", "다시, 다시!"]
+        for t in yes:
+            self.assertTrue(takes.is_slate(t), t)
+        for t in no:
+            self.assertFalse(takes.is_slate(t), t)
+        for t in ("틀렸다 다시", "틀렸네, 다시", "틀렸어요 다시", "다시, 다시", "다시 다시"):
+            self.assertTrue(takes.is_redo_cue(t), t)
+        for t in ("틀렸어, 다시!", "다시, 다시!", "틀렸어요 다시 몸을 열고 받아 보세요", "공을 다시 받아요"):
+            self.assertFalse(takes.is_redo_cue(t), t)
+
+    def test_redo_cue_only_inside_retake(self):
+        """'틀렸어요, 다시' · '다시, 다시'는 앞뒤로 같은 말을 다시 한 테이크 짝이 있을 때만 지움 — 연습 중 교정은 그대로 (E7 검토)."""
+        take = "퍼스트 터치는 발 안쪽으로 공을 받아요"
+        # 끊긴 앞 테이크 → '틀렸다, 다시' → 다시 한 테이크: 앞 테이크와 신호를 함께 지움
+        segs = [{"start": 0.0, "end": 2.0, "text": "퍼스트 터치는 발 안쪽으로"}, {"start": 2.5, "end": 3.5, "text": "틀렸다, 다시"},
+                {"start": 4.5, "end": 8.0, "text": take}]
+        self.assertEqual(takes.find_junk(segs), [(0.0, 4.5, "다시 찍은 앞 테이크")])
+        # 다 말한 같은 말 두 번: 사이가 '좋아요'면 그대로 · '틀렸다, 다시'면 짝의 슬레이트 노릇을 해 앞 테이크와 함께 지움
+        two = [{"start": 0.0, "end": 4.0, "text": take}, {"start": 4.5, "end": 5.5, "text": "좋아요"}, {"start": 6.0, "end": 10.0, "text": take}]
+        self.assertEqual(takes.find_junk(two), [])
+        two[1]["text"] = "틀렸다, 다시"
+        self.assertEqual(takes.find_junk(two), [(0.0, 6.0, "다시 찍은 앞 테이크")])
+        drill = [{"start": 0.0, "end": 3.0, "text": "자 패스 받고 바로 돌아요"}, {"start": 9.0, "end": 10.0, "text": "틀렸어요 다시"},
+                 {"start": 13.0, "end": 16.0, "text": "몸을 열고 받아야 해요"}, {"start": 20.0, "end": 21.0, "text": "다시, 다시"},
+                 {"start": 24.0, "end": 25.0, "text": "틀렸어, 다시!"}, {"start": 28.0, "end": 31.0, "text": "좋아요 이제 됐어요"}]
+        self.assertEqual(takes.find_junk(drill), [], "연습 중 교정 말은 지우지 않음")
+
+    def test_redo_cue_does_not_skip_demo_guard(self):
+        """D-207 (E7 재검토 · 회귀): 설명 → 시범(공 소리 · 말 없는 8초) → '틀렸어요 다시'(선수 교정) → 같은 설명은 드릴 —
+        신호는 사이 말 셈에서만 빠지고 시범·조용한 곳 확인을 건너뛰게 하지 않음 (예전: 첫 설명과 시범을 통째로 지움)."""
+        take = "퍼스트 터치는 발 안쪽으로 공을 받아요"
+        for cue in ("틀렸어요 다시", "다시, 다시", "틀렸어, 다시", "틀렸다, 다시"):
+            segs = [{"start": 0.0, "end": 3.0, "text": take}, {"start": 11.0, "end": 12.0, "text": cue}, {"start": 13.0, "end": 16.0, "text": take}]
+            self.assertEqual(takes.find_junk(segs, [], [{"time": 6.0}]), [], cue)
+            self.assertEqual(takes.find_junk(segs, [{"start": 3.2, "end": 10.8}], [{"time": 6.0}, {"time": 8.0}]), [], cue + " (조용한 곳까지)")
+            self.assertEqual(takes.find_junk(segs), [], cue + " (시범 소리를 못 들었어도 8초 빈 곳)")
+        # 진짜 슬레이트 말은 그대로 시범 확인을 건너뜀 (찍다가 '다시 할게요' → 같은 설명)
+        segs = [{"start": 0.0, "end": 3.0, "text": take}, {"start": 3.5, "end": 4.5, "text": "아 다시 할게요"}, {"start": 5.5, "end": 8.5, "text": take}]
+        self.assertEqual(takes.find_junk(segs, [], [{"time": 3.2}]), [(0.0, 5.5, "다시 찍은 앞 테이크")])
+
     def test_polite_and_spaced_slates(self):
         # 검수: 존댓말·띄어 쓴 슬레이트 말도 알아봄 · 연습 안내는 그대로
         yes = ["다시 하겠습니다", "아 다시 가겠습니다", "다시 해 볼게요", "다시 가 볼게요", "다시 한 번 할게요", "다시 한번 갈게요",

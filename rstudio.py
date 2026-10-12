@@ -301,7 +301,8 @@ POLICY = {
         "/api/upload/kit", "/api/upload/thumb",
         "/api/strategy", "/api/strategy/forecast", "/api/strategy/prompt", "/api/strategy/todos", "/api/strategy/remind",
         "/api/strategy/preview", "/api/youtube/status", "/api/youtube/plan", "/api/youtube/history", "/api/dict",
-        "/frame", "/thumbs.jpg", "/api/edit/thumbs.jpg", "/api/edit/poster.jpg", "/api/edit/revaudio")},
+        "/frame", "/thumbs.jpg", "/api/edit/thumbs.jpg", "/api/edit/poster.jpg", "/api/edit/revaudio",
+        "/api/auto", "/api/auto/pending")},  # 끝까지 자동으로: 마지막 기록·기본 설정 · 그려 줄 썸네일 요청
     (_G, "/media"): MEDIA, (_G, "/api/edit/file"): MEDIA,
     # 바꾸기·작업 시작 (POST · CSRF)
     **{(_P, p): WRITE for p in (
@@ -320,7 +321,9 @@ POLICY = {
         "/api/strategy/draft", "/api/strategy/save", "/api/strategy/channels", "/api/strategy/refresh", "/api/strategy/pause",
         "/api/strategy/checkup", "/api/strategy/todo", "/api/strategy/takeaway", "/api/strategy/settings", "/api/strategy/ai",
         "/api/strategy/ai_paste",
-        "/api/youtube/settings", "/api/youtube/playlists", "/api/youtube/check", "/api/youtube/discard", "/api/youtube/pause")},
+        "/api/youtube/settings", "/api/youtube/playlists", "/api/youtube/check", "/api/youtube/discard", "/api/youtube/pause",
+        # 끝까지 자동으로 (D-200~D-207): 시작·이어서 하기 · 편집실 MSG 설정 · 썸네일 그리기 맡기/풀기/보내기 · 효과음 꺼내기
+        "/api/auto", "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb", "/api/edit/sfx")},
     # 유튜브에 실제로 올리는 것: PC 가 만든 확인 문장 (428) 을 한 번 더
     (_P, "/api/youtube/upload"): CONFIRM, (_P, "/api/youtube/resume"): CONFIRM, (_P, "/api/youtube/finish"): CONFIRM,
     # 여기서 대신 답함 (PC 에서 폴더·브라우저를 열지 않음)
@@ -334,14 +337,16 @@ POLICY = {
 PREFIX = ((_G, "/fonts/", STATIC), (_G, "/stickers/", STATIC), (_G, "/asset/", READ), (_P, "/api/remote/", PC_ONLY))
 # 상태를 바꾸지만 기록(studio.log)에는 남기지 않는 것 (자주 저절로 저장됨)
 QUIET = {"/api/edit/save", "/api/thumb/save", "/api/strategy/draft", "/api/whisper/estimate", "/api/edit/oneline", "/api/thumb/ocr",
-         "/api/youtube/check", "/s/upload/chunk", "/s/upload/init", "/s/prefs", "/api/crash/dismiss"}
+         "/api/youtube/check", "/s/upload/chunk", "/s/upload/init", "/s/prefs", "/api/crash/dismiss",
+         "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb"}
 LABELS = {"/api/analyze": "편집점 찾기", "/api/bundle": "한 영상으로 묶기", "/api/convert": "MP4로 바꾸기", "/api/download": "보관함에 담기",
           "/api/list": "채널 불러오기", "/api/edit/export": "내보내기", "/api/edit/proxy": "미리보기 파일 만들기", "/api/edit/qa": "영상 검수",
           "/api/edit/msg": "MSG 후보 만들기", "/api/thumb/export": "썸네일 내보내기", "/api/thumb/ab": "A/B 썸네일",
           "/api/upload/kit": "올리기 키트", "/api/youtube/upload": "유튜브에 올리기", "/api/youtube/resume": "유튜브 이어 올리기",
           "/api/youtube/finish": "유튜브 마무리", "/api/rename": "이름 바꾸기", "/api/style/learn": "스타일 배우기",
           "/api/refs/add": "학습용 영상 받기", "/api/strategy/refresh": "채널 전략 새로 고침", "/api/strategy/save": "채널 전략 저장",
-          "/s/upload/finish": "보관함에 올림", "/s/outputs/preview": "작은 미리보기 만들기", "/s/logout": "연결 끝내기"}
+          "/s/upload/finish": "보관함에 올림", "/s/outputs/preview": "작은 미리보기 만들기", "/s/logout": "연결 끝내기",
+          "/api/auto": "끝까지 자동으로", "/api/edit/sfx": "효과음 꺼내기"}
 
 
 def classify(method, path):
@@ -366,7 +371,8 @@ def bucket_of(path):
 def hardening(h):
     """스튜디오 응답에 늘 붙는 머리글 (app.StudioHandler.end_headers 가 아직 안 보낸 것만 붙임)."""
     vary = "Cookie, Accept-Encoding" if getattr(h, "_studio_vary_ae", False) else "Cookie"
-    return [("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
+    return [("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
+            ("X-Frame-Options", "SAMEORIGIN" if getattr(h, "_studio_frame_self", False) else "DENY"),
             ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
             ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
             ("Cache-Control", getattr(h, "_studio_cache", None) or NO_STORE), ("Vary", vary),
@@ -453,7 +459,7 @@ PAGES = {"/": "ui.html", "/editor": "editor.html", "/thumb": "thumb.html"}
 def page_csp(nonce):
     return ("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://i.ytimg.com; media-src 'self' blob:; "
-            "connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'") % nonce
+            "connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'") % nonce
 
 
 def inject(raw, nonce, csrf, site, device, js_ver, css_ver):
@@ -542,6 +548,7 @@ def gate(h, method, svc, ip):
     """/r/* 가 아닌 모든 요청 (remote.RemoteHandler._handle 가 Host·Transfer-Encoding·잠금·요청 수를 본 뒤 부름)."""
     st = svc.studio
     h._studio_req, h._studio_sent, h._studio_cache, h._studio_csp, h._studio_vary_ae = True, set(), None, None, False
+    h._studio_frame_self = False
     h.close_connection = True
     u = urlparse(h.path)
     path = u.path
@@ -696,6 +703,7 @@ def _page(h, svc, sess, path):
     nonce = secrets.token_urlsafe(18)
     data = inject(raw, nonce, sess["csrf"], svc.site(), sess["name"], jsv, cssv)
     h._studio_csp = page_csp(nonce)
+    h._studio_frame_self = True  # 화면만 같은 출처 틀 허용 (끝까지 자동으로의 보이지 않는 썸네일 틀 · ui·편집실·썸네일 화면이 띄움 · D-201)
     return send(h, 200, data, "text/html; charset=utf-8", gz=True)
 
 

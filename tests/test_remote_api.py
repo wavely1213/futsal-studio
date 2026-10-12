@@ -143,15 +143,20 @@ class BoundaryTests(Base):
         self.assertEqual(st, 403)
         self.assertNotIn("Access-Control-Allow-Origin", hd)
 
-    def test_www_origin_allowed_and_dev_origin_only_in_dev(self):
-        self.assertEqual(self.call("GET", "/r/status?since=0", origin="https://www.mulgyeol.kr")[0], 200)
+    def test_only_site_origin_allowed_and_dev_origin_only_in_dev(self):
+        self.assertEqual(self.call("GET", "/r/status?since=0", origin="https://futsal.mulgyeol.kr")[0], 200)
+        for o in ("https://mulgyeol.kr", "https://www.mulgyeol.kr", "https://m.mulgyeol.kr"):  # 와벨리 커뮤니티 출처는 더 이상 안 믿음 (D-240)
+            st, hd, _ = self.call("GET", "/r/status?since=0", origin=o)
+            self.assertEqual(st, 403, o)
+            self.assertNotIn("Access-Control-Allow-Origin", hd)
         self.assertEqual(self.call("GET", "/r/status?since=0", origin="http://127.0.0.1:8973")[0], 200)
         with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_DEV": "0"}):
             st = self.call("GET", "/r/status?since=0", origin="http://127.0.0.1:8973", headers={"Host": "remote.futsal.invalid"})[0]
         self.assertEqual(st, 403)
 
     def test_api_needs_allowed_origin(self):
-        for o in (None, "https://evil.example", "null", "https://mulgyeol.kr.evil.com", "http://mulgyeol.kr"):
+        for o in (None, "https://evil.example", "null", "https://futsal.mulgyeol.kr.evil.com", "http://futsal.mulgyeol.kr",
+                  "https://x.futsal.mulgyeol.kr", "https://futsal.mulgyeol.kr:8443", "https://FUTSAL.mulgyeol.kr.evil.com"):
             st, hd, _ = self.call("GET", "/r/status?since=0", origin=o)
             self.assertEqual(st, 403, o)
             self.assertNotIn("Access-Control-Allow-Origin", hd)
@@ -545,6 +550,28 @@ class ActionTests(Base):
         self.assertIn("빠른컷 스타일 가편집 2", [q["name"] for q in editor.load_project(NAME)["sequences"]])
         self.assertGreater(after["rev"], before["rev"])
 
+    def test_auto_action_starts_whole_run(self):
+        """끝까지 자동으로 (D-203): 휴대폰도 같은 작업 · 정해 둔 값만 · 멈출 수 있는 작업 · 알림에 이름."""
+        import autorun
+        got = []
+        with mock.patch.object(autorun, "run", lambda n, o, log, an, resume: got.append((n, o, resume, an)) or {"status": "done"}):
+            st, _, b = self.act("auto", {"name": NAME, "intensity": "듬뿍", "shorts": 9, "resume": True, "preset": "small", "model": "tiny"})
+            self.assertEqual((st, b), (200, {"ok": True, "job": autorun.JOB}))
+            self.assertTrue(self.fb.wait_idle(10))
+        n, o, resume, an = got[0]
+        self.assertEqual((n, o["intensity"], o["shorts"], resume, o["preset"]), (NAME, "듬뿍", autorun.SHORTS_MAX, True, "youtube"))
+        self.assertEqual(an, self.fb.analyze)
+        self.assertIn(autorun.JOB, remote.STOPPABLE)
+        self.assertIn(autorun.JOB, remote.JOB_LABELS)
+        self.assertEqual((o["proofread"], o["writer"]), (False, False))
+        autorun.save_prefs({"proofread": True, "writer": True})  # PC 편집실에서 MSG 체크를 켬 → 휴대폰에서 시작해도 같은 설정 (E7 검토)
+        with mock.patch.object(autorun, "run", lambda n, o, log, an, resume: got.append((n, o, resume, an)) or {"status": "done"}):
+            self.assertEqual(self.act("auto", {"name": NAME, "proofread": False})[0], 200)
+            self.assertTrue(self.fb.wait_idle(10))
+        self.assertEqual((got[1][1]["proofread"], got[1][1]["writer"]), (True, True), "휴대폰이 보낸 다른 값은 안 받음 · PC 설정")
+        self.assertIn(self.act("auto", {"name": "없는 영상.mp4"})[0], (400, 404))
+        self.assertEqual(self.act("auto", {"name": ["a"]})[0], 400)
+
     def test_autoseq_needs_analysis(self):
         (self.work / "styles" / "빠른컷.json").write_text("{}", encoding="utf-8")
         self.assertIn("편집점 찾기", self.act("autoseq", {"name": NAME, "style": "빠른컷"})[2]["error"])
@@ -758,7 +785,7 @@ class LocalServerTests(Base):
             return e.code, dict(e.headers), json.loads(e.read() or b"{}")
 
     def test_tunnel_host_rejected_and_no_cors(self):
-        for host in ("abc-def.trycloudflare.com", "remote.futsal.invalid", "mulgyeol.kr"):
+        for host in ("abc-def.trycloudflare.com", "remote.futsal.invalid", "futsal.mulgyeol.kr"):
             self.assertEqual(self.local("GET", "/api/state", host=host)[0], 403)
             self.assertEqual(self.local("POST", "/api/remote/off", {}, host=host)[0], 403)
         st, hd, _ = self.local("GET", "/api/state", origin=ORIGIN)
@@ -774,11 +801,11 @@ class LocalServerTests(Base):
         st, _, b = self.local("POST", "/api/remote/pair", {})
         self.assertEqual(st, 200)
         self.assertTrue(b["pair"]["qr"] and all(set(r) <= {"0", "1"} for r in b["pair"]["qr"]))
-        self.assertRegex(b["pair"]["link"], r"^https://mulgyeol\.kr/futsal#pair=[0-9A-Z]{10}&u=127\.0\.0\.1:\d+$")  # 개발 모드 힌트는 포트까지
-        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973/futsal"}):
-            self.assertTrue(self.local("GET", "/api/remote")[2]["pair"]["link"].startswith("http://127.0.0.1:8973/futsal#pair="))
-        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973/futsal", "FUTSAL_REMOTE_DEV": "0"}):
-            self.assertTrue(self.local("GET", "/api/remote")[2]["site"] == "https://mulgyeol.kr/futsal")  # 개발 모드가 아니면 늘 진짜 주소
+        self.assertRegex(b["pair"]["link"], r"^https://futsal\.mulgyeol\.kr#pair=[0-9A-Z]{10}&u=127\.0\.0\.1:\d+$")  # 개발 모드 힌트는 포트까지
+        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973"}):
+            self.assertTrue(self.local("GET", "/api/remote")[2]["pair"]["link"].startswith("http://127.0.0.1:8973#pair="))
+        with mock.patch.dict(os.environ, {"FUTSAL_REMOTE_SITE": "http://127.0.0.1:8973", "FUTSAL_REMOTE_DEV": "0"}):
+            self.assertTrue(self.local("GET", "/api/remote")[2]["site"] == "https://futsal.mulgyeol.kr")  # 개발 모드가 아니면 늘 진짜 주소
         st, _, s = self.local("GET", "/api/remote")
         self.assertEqual(s["pair"]["code"], b["pair"]["code"])
         self.assertEqual(s["devices"][0]["name"], "iPhone · Safari")

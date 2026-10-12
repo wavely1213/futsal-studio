@@ -16,6 +16,50 @@ if [ -f tests/test_update.py ]; then
   echo "업데이트 테스트 중…"
   python3 -m unittest -q tests.test_update || { echo "업데이트 테스트가 실패해서 배포를 멈췄어요 (아무것도 커밋하지 않았어요)"; exit 1; }
 fi
+# 휴대폰 페이지 확인 (D-241): 앱은 remote.py 의 SITE 출처 하나만 믿고 연결 코드를 그 주소(#pair=…)에 실어 QR·링크·알림으로 보내요.
+#  그 자리에 풋살 페이지가 아닌 것(옛 와벨리 커뮤니티 빌드·롤백한 옛 배포 등)이 떠 있으면 배포하지 않아요 — manifest 이름과 서비스 워커를 봐요.
+if [ -f remote.py ]; then
+  echo "휴대폰 페이지 확인 중…"
+  python3 - <<'PY' || { echo "휴대폰 페이지가 풋살 페이지가 아니어서 배포를 멈췄어요 (아무것도 커밋하지 않았어요) — 와벨리 저장소(Vercel 프로젝트 wavely)를 먼저 배포해 주세요 (D-241)"; exit 1; }
+import ast, json, sys, urllib.error, urllib.request
+tree = ast.parse(open("remote.py", encoding="utf-8").read())
+site = next((n.value.value for n in tree.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+             and any(isinstance(t, ast.Name) and t.id == "SITE" for t in n.targets)), None)
+if not isinstance(site, str) or not site.startswith(("https://", "http://")):
+    sys.exit("remote.py 에서 SITE = \"https://…\" 한 줄을 찾지 못했어요")
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a):
+        return None  # 다른 곳으로 넘기면 그대로 실패로 봄
+
+opener = urllib.request.build_opener(NoRedirect)
+
+def get(path):
+    url = site.rstrip("/") + path
+    req = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "User-Agent": "futsal-studio-release-check"})
+    try:
+        with opener.open(req, timeout=20) as r:
+            return url, r.status, r.headers.get("Content-Type", ""), r.read(1 << 20)
+    except urllib.error.HTTPError as e:
+        return url, e.code, "", b""
+    except Exception as e:  # noqa: BLE001
+        sys.exit(f"{url} 에 닿지 못했어요 ({type(e).__name__}: {e})")
+
+url, st, ctype, body = get("/manifest.webmanifest")
+if st != 200:
+    sys.exit(f"{url} 가 {st} 예요 (풋살 페이지면 200)")
+try:
+    name = json.loads(body.decode("utf-8")).get("short_name")
+except Exception:  # noqa: BLE001
+    name = None
+if name != "풋살 스튜디오":
+    sys.exit(f"{url} 가 풋살 스튜디오 manifest 가 아니에요 (short_name {name!r})")
+url, st, ctype, body = get("/sw.js")
+if st != 200 or "javascript" not in ctype:
+    sys.exit(f"{url} 가 {st} {ctype or '-'} 예요 (풋살 페이지면 200 JavaScript)")
+print(f"휴대폰 페이지 확인: {site} 는 풋살 페이지예요")
+PY
+fi
 # manifest.json 쓰기: write_manifest <index|커밋> <버전> <설명> [zip 주소]
 #  파일 목록 = 그 트리의 파일 지문 (manifest.json 자신과 tests/, 링크·하위 저장소는 뺌)
 write_manifest() {
