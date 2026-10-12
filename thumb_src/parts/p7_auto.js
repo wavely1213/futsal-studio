@@ -279,7 +279,7 @@ async function exportImg() {
     // 7단계 썸네일 확인·스튜디오 직접 올리기는 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음 · 바로 올리기는 50MB · I-062)
     if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
   } else data = jpg();
-  const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: `${D.name}${H > W ? "_쇼츠" : ""}` });
+  const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: SAVE_LABEL || `${D.name}${H > W ? "_쇼츠" : ""}` });
   if (j.gone) return markGone(j.error);
   if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
 }
@@ -411,8 +411,8 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
 
 /* ---------- 시작 ---------- */
 (async () => {
-  if (!NAME) return;
-  $("pname").textContent = niceName(NAME) + " · 썸네일";
+  if (!NAME || AUTO_RUN) return;  // 끝까지 자동으로의 보이지 않는 틀은 autoThumbRun 만 (디자인 문서를 열거나 저장하지 않음)
+  $("pname").textContent = niceName(NAME) + " · 썸네일" + (SAVE_LABEL ? ` · '${SAVE_LABEL.replace(/_썸네일$/, "")}' 것으로 저장` : "");
   // 글꼴을 받는 동안 문서·장면 목록도 같이 받음 (차례로 기다리지 않게)
   const openP = fetch("/api/thumb/open?name=" + encodeURIComponent(NAME)).then(r => r.json());
   const framesP = post("/api/thumb/frames", { name: NAME });
@@ -428,6 +428,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   await new Promise(r => setTimeout(r, 0));  // 받기 요청이 실제로 나가게 한 번 쉼
   DOCS = j.docs; DOCS.designs.forEach(d => { d.doc.w = d.doc.w || 1280; d.doc.h = d.doc.h || 720; d.doc.layers.forEach(normLayer); }); HOOKS = j.hooks || []; KEYWORDS = j.keywords || []; if (j.info) INFO = j.info;
   if (INFO.width && INFO.height && INFO.height > INFO.width) AUTO_FMT = "short";
+  const qf = new URLSearchParams(location.search).get("fmt"); if (qf === "short" || qf === "long") AUTO_FMT = qf;  // 결과 카드 [썸네일]: 그 결과물 형식
   if (!DOCS.designs.length) DOCS.designs.push({ id: nid(), name: "디자인 1", doc: { w: 1280, h: 720, bg: "#111111", layers: [] } });
   openDesign(0); renderAuto(); setTool("move");
   $("saved").textContent = "저장됨";

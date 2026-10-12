@@ -24,7 +24,7 @@
    │     ├─ 바로 응답: 저장·목록·열기·스타일 적용 가편집 …
    │     └─ start_job(이름, fn) → 백그라운드 스레드 1개 ──core.set_progress──▶ /api/state (화면이 폴링)
    ▼
-[기능 모듈]  core · editor · tactic · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
+[기능 모듈]  core · editor · autorun · tactic · thumb · face · detect · thumbcopy · style · plan · msg · sfxlib · proofread · msgwrite · refs · source · qa · bundle · upload · hooks · strategy · forecast · takes(2차 작업 중)
    ▼
 [외부 도구]  ffmpeg(imageio-ffmpeg) · yt-dlp(+Deno) · faster-whisper · onnxruntime · Pillow/numpy · YouTube 공개 RSS(채널 전략)
    ▼
@@ -93,7 +93,8 @@
   - `proofread` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다.
   - `msgwrite` → (표준 라이브러리만). `claude_cli`는 함수 안에서 지연 import한다. `msg`가 함수 안에서 쓴다(D-148).
   - `bundle` → `core`. `editor`는 함수 안에서 지연 import한다.
-  - `remote` → `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
+  - `autorun` → `core`, `editor`, `studiolog`(실행 표시 · 꺼짐 카드), `updater`(`write_atomic`). `msg`·`upload`·`thumb`·`qa`·`style`·`trouble`은 함수 안에서 지연 import한다(무거운 모듈을 앱이 켤 때 불러오지 않게 · `style` → `plan` 순환). `app`(작업·경로)과 `remote`(`auto` 동작 · 작업 이름)가 쓴다 (D-200~D-203).
+  - `remote` → `autorun`(`auto` 동작 · 작업 이름 · D-203), `core`, `editor`, `qa`, `refs`, `source`, `strategy`(작업 이름만 · D-028), `style`, `thumb`·`thumbcopy`(썸네일 작업 이름만 · D-067), `tunnel`, `updater`(`write_atomic`·`urlopen`·`UA`·`NET_ERRORS`·`_why`). 리스너는 앱 화면 포트 창(`app_ports`)을 쓰지 않는다(D-034). 암호 부품(`Cryptodome`)은 함수 안에서만 (없어도 import 는 됨). `app`이 쓰고 `Bridge`(log·start_job·작업 모습·기록·`_analyze`·`_refs_job`)를 넘긴다.
   - `tunnel` → `core`, `updater` (받기·sha256·바꿔 끼우기·`write_atomic`·자기 확인 `urlopen`). `qr` → (표준 라이브러리만). `app`이 `qr`로 연결 QR 줄을 만든다.
   - 지연 import는 순환을 피하려는 기존 예외다. 새로 추가하면 이유를 주석으로 남긴다.
 - 하위 레이어는 상위 레이어를 import 하지 않는다.
@@ -130,6 +131,7 @@
 | hwdec | `hwdec.py` | Windows·HDR 영상에서 확인(화소·속도 · 20초 제한 · ✕ 로 끔)이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-086) |
 | claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
+| autorun | `autorun.py` | 끝까지 자동으로 (E7 · D-200~D-207 · BR-110·BR-113): `run`(작업 하나 · 9단계 `STEPS`·`STEP_FN` · 단계마다 기록 `analysis/<영상>/auto_run.json` · 실패는 적고 다음 단계 · 편집점 찾기·가편집만 멈춤 · 멈추기 `Stopped` · 이어서 하기 `resume` — 이미 있는 키트는 `upload.keep_kit`(썸네일 칸만 새로) · 사람이 저장한 결과물 썸네일 `own_thumb` · 검수만 다시 `qaDone` · `load` 는 지금 영상 이름으로 · 새 기록 전에 `archive` · D-207), `options`(화면·휴대폰 값 정리 · 휴대폰이 안 보낸 받아쓰기·MSG 설정은 PC 화면이 남긴 작업 폴더 `auto_prefs.json` — `save_prefs`·`load_prefs` · D-206)·`default_style`, 쇼츠 제목 `short_hook`(순서 말뿐이면 예전 규칙 · D-206), 프로젝트에 더하기 `add_to_project`(꼬리표 `autoRun`·`autoKey`), 확인할 것 `checklist`·`caption_checks`, 썸네일 그리기 다리 `request_thumb`·`pending`·`claim`·`release`·`deliver`(화면이 보이지 않는 틀로 썸네일 편집기 `?autothumb=` 를 열어 그려 보냄 · 떠나는 화면은 맡기를 풂 · 저장 실패도 바로 작업에 · D-201·D-207)·그리는 화면이 받을 분석 `analysis_for`(작업이 작업 자리를 잡고 있어 새 분석을 못 띄움 · D-207), 지금 단계 `LIVE`(/api/state `auto`) · 열어 둔 편집실과 합치기는 `editor.save_project`(`AUTO_CLIENT` · BR-113) |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |
 | upload | `upload.py` | `build_kit`·`save_edits`·`load_kit`: 제목 후보·설명(템플릿)·챕터·태그·썸네일 확인 → `out/<…>_올리기.txt/.json`. `promo_lines`·`add_promo`: 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (BR-062). 유튜브 글자 수·챕터 규칙 적용. `files_for`: 올릴 영상·.srt 찾기(읽기만 · 유튜브 바로 올리기가 씀). `progress`: 4단계 카드의 영상별 단계(가편집·내보냄·썸네일(`_thumb_images` — A/B '모바일 비교' 한 장은 빼고 · 7단계 `_images_of` 와 같은 규칙 · D-078)·키트(편집본으로 만든 것만) · 읽기만 · D-075 · 유튜브는 `/api/progress` 가 더함) |
 | youtube_upload | `youtube_upload.py` | 유튜브에 바로 올리기 (D-046 · BR-023): 연결 상태 `status`(인터넷 안 씀 · 비밀 없음)·`save_client`·`start_login`·`logout`·`clear_all`, 설정 `settings.json`(화이트리스트), 미리 확인 `plan`(키트·파일·연결·채널·5000바이트·쇼츠·중복·감사·할당량), 작업 `run_upload`·`resume`(세션 파일로 이어 올리기)·`finish`(썸네일·자막·재생목록 마저 하기 · 올린 직후 5xx·404 는 다시), 처리 상태 `check`(작업 아님), 기록 `history.json`, 할당량 `quota.json`(태평양 시각 하루 · tzdata 없이), 정해진 주소 열기 `open_link`·`GUIDE_URLS` |

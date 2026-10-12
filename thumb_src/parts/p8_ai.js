@@ -2119,11 +2119,20 @@ async function copyAi() {
   renderAI(); toast("클로드 문구를 더했어요 · 다시 추천을 눌러 보세요");
 }
 // 개발·판정용: 추천 문서 + 그림(dataURL). opts: {fmt: 'long'|'short', n, seed, noData, quality}
+// within: [a, b] 원본 구간 — 그 안의 장면만으로 추천 (끝까지 자동으로의 쇼츠 · 구간 안 장면이 없으면 전체 · 결과 within=false)
 window.__thumbAuto = async (opts = {}) => {
-  if (opts.fmt && opts.fmt !== AUTO_FMT) { AUTO_FMT = opts.fmt; renderAuto(); }
+  if (opts.fmt && opts.fmt !== AUTO_FMT) { AUTO_FMT = opts.fmt; if (!AUTO_RUN) renderAuto(); }
   if (opts.pick !== undefined) AI.pick = opts.pick;
   if (opts.copy !== undefined) AI.copySel = opts.copy;
-  const res = await aiRun(opts.seed || 0); if (!res) return { ok: false, error: $("aiStat") ? $("aiStat").textContent : "실패" };
+  let all = null, within = true;
+  if (opts.within && opts.within.length === 2 && opts.within[0] != null) {
+    if (!(await ensureAnalysis())) return { ok: false, error: $("aiStat") ? $("aiStat").textContent : "장면을 분석하지 못했어요" };
+    const [a, b] = opts.within, inside = AI.frames.filter(f => f.t >= a - 0.5 && f.t <= b + 0.5);
+    if (inside.length) { all = AI.frames; AI.frames = inside; } else within = false;
+  }
+  let res;
+  try { res = await aiRun(opts.seed || 0); } finally { if (all) AI.frames = all; }
+  if (!res) return { ok: false, error: $("aiStat") ? $("aiStat").textContent : "실패" };
   await document.fonts.ready;
   const out = [];
   for (const x of res.slice(0, opts.n || 6)) {
@@ -2137,5 +2146,63 @@ window.__thumbAuto = async (opts = {}) => {
       vague: !!x.copy.vague, stock: !!x.copy.stock, detail: !!x.copy.detail, q: x.copy.q || "" }, score: x.score, raw: x.raw, why: x.why, gates: x.gates, hpx: x.hpx, bigH: x.bigH, blurFill: x.blurFill,
       frame: AI.frames.find(f => f.t === x.t), doc: clone(x.doc), data });
   }
-  return { ok: true, items: out, frames: AI.frames.length, copies: AI.copy.length };
+  return { ok: true, items: out, frames: AI.frames.length, copies: AI.copy.length, weak: !!AI.weak, within };
 };
+// 끝까지 자동으로 (D-201): ?autothumb=<요청 번호>&fmt=&a=&b= 로 열린 보이지 않는 틀 — 글꼴·영상 정보만 받고 AI 추천 1등을 그려 /api/auto/thumb 로
+async function autoThumbRun() {
+  const q = new URLSearchParams(location.search), fmt = q.get("fmt") === "short" ? "short" : "long";
+  const a = q.get("a"), b = q.get("b"), within = a !== null && a !== "" && b !== null && b !== "" ? [+a, +b] : null;
+  const done = body => post("/api/auto/thumb", Object.assign({ id: AUTO_RUN }, body)).catch(() => {}).finally(() => { try { parent.postMessage({ autothumb: AUTO_RUN }, "*"); } catch (e) {} });
+  try {
+    const openP = fetch("/api/thumb/open?name=" + encodeURIComponent(NAME)).then(r => r.json());
+    await Promise.all(FONT_FILES.map(async ([, w, f]) => { try { const ff = new FontFace(w, `url(/fonts/${f})`); await ff.load(); document.fonts.add(ff); } catch (e) {} }));
+    FONT_VER++;
+    const j = await openP; if (j.info) INFO = j.info; HOOKS = j.hooks || []; KEYWORDS = j.keywords || [];
+    AUTO_FMT = fmt;
+    let avoid = []; try { avoid = JSON.parse(q.get("avoid") || "[]"); } catch (e) {}
+    const key = c => [c.l1, c.l2].filter(Boolean).join("/");
+    let r = await window.__thumbAuto({ fmt, n: avoid.length ? 6 : 1, within, noData: !!avoid.length });
+    let items = (r && r.ok && r.items) || [];
+    let x = items.find(i => !avoid.includes(key(i.copy)));  // 앞 결과물(롱폼·다른 쇼츠)과 다른 문구 중 가장 높은 것
+    if (!x && items.length) {  // 약한 영상은 추천이 2개뿐이라 모두 앞 문구일 수 있음 → 아직 안 쓴 문구 중 점수가 가장 높은 것으로 다시
+      const c = [...AI.copy].sort((a2, b2) => (b2.score || 0) - (a2.score || 0)).find(c2 => !avoid.includes(key(c2)));
+      if (c) { const r2 = await window.__thumbAuto({ fmt, n: 1, within, copy: c }); if (r2 && r2.ok && r2.items && r2.items.length) { r = Object.assign({}, r2, { weak: r.weak, within: r.within }); items = r2.items; x = items[0]; } }
+      AI.copySel = null;
+    }
+    x = x || items[0];
+    if (!x) return done({ error: (r && r.error) || "추천 썸네일을 만들지 못했어요" });
+    let data = x.data;
+    if (!data) {
+      await Promise.all(x.doc.layers.filter(l => l.type === "image" && l.src).map(l => imgReady(l.src)));
+      const cv = newCanvas(x.doc.w, x.doc.h); renderDoc(cv.getContext("2d"), x.doc, 1);
+      let qq = 0.93; do { data = cv.toDataURL("image/jpeg", qq); qq -= 0.07; } while (data.length * 0.75 > 1.95e6 && qq > 0.5);
+    }
+    return done({ data, score: x.score, gates: x.gates || [], weak: !!r.weak, within: r.within !== false, tpl: x.tpl, copy: key(x.copy), t: x.t });
+  } catch (e) { return done({ error: "썸네일을 그리다 문제가 생겼어요 · " + String(e && e.message || e).slice(0, 120) }); }
+}
+if (AUTO_RUN && NAME) autoThumbRun();
+// 끝까지 자동으로 (D-207): 썸네일 만들기 화면에 머물러 있어도 작업의 썸네일 요청을 맡아 보이지 않는 틀로 그림
+// (스튜디오·편집실의 autoThumb 와 같은 코드 · 예전엔 이 화면에서는 아무도 안 맡아 10분 뒤 '그릴 화면이 없어요'로 건너뜀)
+if (!AUTO_RUN) {
+  let autoFrame = null;
+  const autoClaim = async rq => {
+    if (!rq || autoFrame) return;
+    let c; try { c = await (await fetch("/api/auto/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rq.id }) })).json(); } catch (e) { return; }
+    if (!c || !c.ok || autoFrame) return;
+    const f = document.createElement("iframe"); autoFrame = f; f.dataset.rid = c.id;
+    f.setAttribute("aria-hidden", "true"); f.tabIndex = -1;
+    f.style.cssText = "position:fixed;left:-30000px;top:0;width:1400px;height:900px;border:0;opacity:0;pointer-events:none";
+    let tm = 0;
+    const onMsg = e => { if (e.source === f.contentWindow && e.data && e.data.autothumb === c.id) end(); };
+    const end = () => { window.removeEventListener("message", onMsg); clearTimeout(tm); f.remove(); autoFrame = null; };
+    tm = setTimeout(end, 330000);
+    window.addEventListener("message", onMsg);
+    f.src = `/thumb?name=${encodeURIComponent(c.name)}&autothumb=${encodeURIComponent(c.id)}&fmt=${c.fmt}` + (c.a != null ? `&a=${c.a}&b=${c.b}` : "") + (c.avoid && c.avoid.length ? `&avoid=${encodeURIComponent(JSON.stringify(c.avoid))}` : "");
+    document.body.appendChild(f);
+  };
+  const autoPoll = async () => { if (autoFrame) return; try { const j = await (await fetch("/api/auto/pending")).json(); if (j.want) autoClaim(j.want); } catch (e) {} };
+  setInterval(autoPoll, 3000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoPoll(); });
+  window.addEventListener("focus", autoPoll);
+  window.addEventListener("pagehide", () => { if (autoFrame && autoFrame.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: autoFrame.dataset.rid })], { type: "application/json" })); } catch (e) {} });
+}

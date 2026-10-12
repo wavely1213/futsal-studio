@@ -550,6 +550,28 @@ class ActionTests(Base):
         self.assertIn("빠른컷 스타일 가편집 2", [q["name"] for q in editor.load_project(NAME)["sequences"]])
         self.assertGreater(after["rev"], before["rev"])
 
+    def test_auto_action_starts_whole_run(self):
+        """끝까지 자동으로 (D-203): 휴대폰도 같은 작업 · 정해 둔 값만 · 멈출 수 있는 작업 · 알림에 이름."""
+        import autorun
+        got = []
+        with mock.patch.object(autorun, "run", lambda n, o, log, an, resume: got.append((n, o, resume, an)) or {"status": "done"}):
+            st, _, b = self.act("auto", {"name": NAME, "intensity": "듬뿍", "shorts": 9, "resume": True, "preset": "small", "model": "tiny"})
+            self.assertEqual((st, b), (200, {"ok": True, "job": autorun.JOB}))
+            self.assertTrue(self.fb.wait_idle(10))
+        n, o, resume, an = got[0]
+        self.assertEqual((n, o["intensity"], o["shorts"], resume, o["preset"]), (NAME, "듬뿍", autorun.SHORTS_MAX, True, "youtube"))
+        self.assertEqual(an, self.fb.analyze)
+        self.assertIn(autorun.JOB, remote.STOPPABLE)
+        self.assertIn(autorun.JOB, remote.JOB_LABELS)
+        self.assertEqual((o["proofread"], o["writer"]), (False, False))
+        autorun.save_prefs({"proofread": True, "writer": True})  # PC 편집실에서 MSG 체크를 켬 → 휴대폰에서 시작해도 같은 설정 (E7 검토)
+        with mock.patch.object(autorun, "run", lambda n, o, log, an, resume: got.append((n, o, resume, an)) or {"status": "done"}):
+            self.assertEqual(self.act("auto", {"name": NAME, "proofread": False})[0], 200)
+            self.assertTrue(self.fb.wait_idle(10))
+        self.assertEqual((got[1][1]["proofread"], got[1][1]["writer"]), (True, True), "휴대폰이 보낸 다른 값은 안 받음 · PC 설정")
+        self.assertIn(self.act("auto", {"name": "없는 영상.mp4"})[0], (400, 404))
+        self.assertEqual(self.act("auto", {"name": ["a"]})[0], 400)
+
     def test_autoseq_needs_analysis(self):
         (self.work / "styles" / "빠른컷.json").write_text("{}", encoding="utf-8")
         self.assertIn("편집점 찾기", self.act("autoseq", {"name": NAME, "style": "빠른컷"})[2]["error"])
