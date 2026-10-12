@@ -3,7 +3,7 @@
 // 넘겨주기 표는 주소의 # 뒤(#t=…)로만 오고(서버·Cloudflare 기록·Referer 에 안 남음) 읽자마자 주소창에서 지운다.
 (function () {
   "use strict";
-  var NEXT_RE = /^\/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-]{0,600})?$/;  // rstudio.NEXT_RE · 휴대폰 페이지 proto.nextOk 와 같음
+  var NEXT_RE = /^\/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-!'()*]{0,600})?$/;  // rstudio.NEXT_RE · 휴대폰 페이지 proto.nextOk 와 같음
   var TEXT = {
     none: ["다시 연결해 주세요", "PC와 연결이 끊겼어요 · 원격 홈으로 가서 다시 열어요"],
     expired: ["연결이 끝났어요", "오래 쓰지 않아 연결이 끝났어요 · 원격 홈으로 가서 다시 열어요"],

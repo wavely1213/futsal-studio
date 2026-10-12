@@ -223,6 +223,29 @@
   .mobprev { margin-top: 12px; padding: 10px; background: #000; border-radius: 8px; }
   .mobprev canvas { border-radius: 6px; }
   details.oldc > summary { padding: 8px 12px; cursor: pointer; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+  /* 밖에서 작업 (D-230 · :root[data-remote] 만): 휴대폰 너비는 위에서 아래로 — 그림 → 자동 제작·속성 → 장면 줄 → 레이어 · 저장·AI 추천·내보내기가 손에 닿게 */
+  @media (max-width: 760px) {
+    :root[data-remote] body { overflow: auto; }
+    :root[data-remote] body > .app { height: auto; min-height: calc(100vh - var(--fsr-h, 0px)); grid-template-columns: 1fr; grid-template-rows: auto auto auto min(60vw, 340px) auto auto; }
+    :root[data-remote] .top { grid-column: 1; flex-wrap: wrap; row-gap: 6px; padding: 6px 8px; }
+    :root[data-remote] .top .name { max-width: 60vw; }
+    :root[data-remote] .top .hint#saved { order: 9; width: 100%; }
+    :root[data-remote] .opts { grid-column: 1; min-height: 38px; }
+    :root[data-remote] .tools { grid-column: 1; grid-row: auto; flex-direction: row; overflow-x: auto; padding: 4px 6px; }
+    :root[data-remote] .tools hr { width: 1px; height: 24px; border-top: 0; border-left: 1px solid var(--line-2); margin: 0 4px; }
+    :root[data-remote] .stage { grid-column: 1; grid-row: auto; min-height: 220px; }
+    :root[data-remote] .stage .ruler, :root[data-remote] .stage .rcorner { display: none; }
+    :root[data-remote] .right { grid-column: 1; grid-row: auto; grid-template-rows: auto auto; }
+    :root[data-remote] .right > .panel { max-height: none; }
+    :root[data-remote] .right .body { flex: none; overflow: visible; }
+    :root[data-remote] .layers .body { max-height: 40vh; overflow: auto; }
+    :root[data-remote] .film { grid-column: 1; grid-row: auto; }
+    :root[data-remote] .film .ph { flex-wrap: wrap; height: auto; padding: 4px 6px; }
+    :root[data-remote] .film .fr { height: 60px; }
+    :root[data-remote] .btn, :root[data-remote] .ic { min-height: 32px; }
+    :root[data-remote] .cpanel { position: fixed; left: 8px; right: 8px; width: auto; top: calc(var(--fsr-h, 0px) + 50px); }
+    :root[data-remote] .modal .box { max-width: 96vw; }
+  }
 </style>
 </head>
 <body>

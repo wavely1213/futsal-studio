@@ -216,6 +216,7 @@ class PageUnitTest(unittest.TestCase):
         self.assertIsNone(rstudio.classify("GET", "/fonts/"))
         self.assertIsNone(rstudio.classify("POST", "/api/state"))
         self.assertEqual(rstudio.bucket_of("/s/handoff"), "open")
+        self.assertEqual(rstudio.bucket_of("/s/hello"), "studio")
         self.assertEqual(rstudio.bucket_of("/api/state"), "studio")
 
     def test_redact_new_secrets(self):

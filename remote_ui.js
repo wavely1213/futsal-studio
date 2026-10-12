@@ -7,7 +7,7 @@
   "use strict";
   if (window.FS_REMOTE) return;
   var meta = function (n) { var m = document.querySelector('meta[name="' + n + '"]'); return m ? m.getAttribute("content") || "" : ""; };
-  var NEXT_RE = /^\/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-]{0,600})?$/;
+  var NEXT_RE = /^\/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-!'()*]{0,600})?$/;
   var OPEN_PATHS = { "/api/open": 1, "/api/upload/open": 1, "/api/youtube/open": 1 };
   var R = { csrf: meta("fs-csrf"), site: meta("fs-site"), device: meta("fs-device"), pc: "", locked: false, prefs: { fullRes: false },
     expiresAt: 0, chunk: 8 << 20, net: true, probing: false, ups: [], pending: [] };

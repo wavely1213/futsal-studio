@@ -372,6 +372,22 @@
   #rmDot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
   #rmDot.wait { background: var(--peak); opacity: 1; }
   #rmDot.err { background: var(--danger); opacity: 1; }
+  /* 밖에서 작업 (D-230~D-234): PC 에서만 하는 것은 밖에서 숨기고 짧은 안내 · PC 화면에는 '밖에서 작업 중 · 기기 [끊기]' */
+  :root[data-remote] [data-pc-only] { display: none !important; }
+  .rm-note { display: none; }
+  :root[data-remote] .rm-note { display: block; color: var(--ink-3); font-size: 12.5px; margin: 4px 0; }
+  .stpill { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; font-size: 12px; color: var(--brand); background: var(--brand-soft); border-radius: 10px; padding: 6px 9px; }
+  .stpill[hidden] { display: none; }
+  .stpill .linkbtn { font-size: 12px; padding: 0; color: var(--danger); }
+  @media (max-width: 600px) {  /* 밖에서 휴대폰으로 열었을 때 (보관함·편집점·편집실 목록·썸네일·올리기·진행·기록) */
+    :root[data-remote] .main { padding: 16px 12px 120px; }
+    :root[data-remote] .bar { flex-wrap: wrap; }
+    :root[data-remote] .bar .sel, :root[data-remote] .bar .inp { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+    :root[data-remote] .topright { left: 8px; right: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    :root[data-remote] .topright .pill { max-width: 100%; }
+    :root[data-remote] .drawer pre { max-height: 50vh; }
+    :root[data-remote] .up-in, :root[data-remote] textarea { max-width: 100%; }
+  }
   .rmask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 8; padding: 20px; }
   .rmask.show { display: flex; }
   .rbox { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 24px; }
@@ -824,9 +840,10 @@
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
-      <button class="linkbtn" id="btnRemote" title="PC 작업을 휴대폰에서 보고 시키기"><i class="rdot" id="rmDot"></i>휴대폰으로 보기</button>
-      <button class="linkbtn" id="btnUpdate">업데이트 확인</button>
-      <button class="linkbtn" id="workspace" title="">작업 폴더</button>
+      <button class="linkbtn" id="btnRemote" data-pc-only title="PC 작업을 휴대폰에서 보고 시키기"><i class="rdot" id="rmDot"></i>휴대폰으로 보기</button>
+      <span class="stpill" id="studioPill" hidden></span>
+      <button class="linkbtn" id="btnUpdate" data-pc-only>업데이트 확인</button>
+      <button class="linkbtn" id="workspace" data-pc-only title="">작업 폴더</button>
     </div>
   </aside>
 
@@ -848,7 +865,7 @@
           <li><b>3 편집점</b>에서 대사·컷 후보를 훑어보고 <b>4 편집실</b>에서 다듬은 뒤 [내보내기]</li>
           <li><b>5 썸네일</b> 저장 → <b>7 올리기</b>에서 제목·설명·챕터를 만들어 유튜브에 올려요</li></ol>
         <div class="acts"><button class="btn primary" id="guideFootage">촬영 원본 넣기</button><button class="btn" id="guideLib">보관함 보기</button><button class="btn" id="guideOff">다시 안 보기</button></div></div>
-      <details class="note" id="ckNote"><summary>다운로드가 계속 실패하나요?</summary>
+      <details class="note" id="ckNote" data-pc-only><summary>다운로드가 계속 실패하나요?</summary>
         왼쪽 아래 <b>업데이트 확인</b>을 먼저 눌러 보세요. 그래도 안 되면 YouTube에 로그인해 둔 브라우저를 골라 다시 담아 보세요.<br>
         <label>로그인 정보로 받기 <select class="sel" id="cookies" title="고른 브라우저의 YouTube 로그인 정보로 받아요 (내 PC 안에서만 쓰여요)"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select> (내 PC 안에서만 쓰여요)</label>
         <span class="cktip">파이어폭스가 가장 잘 돼요. 엣지·웨일·크롬은 창을 모두 닫고(화면 오른쪽 아래 숨겨진 아이콘까지) 받아 주세요. 최신 크롬은 새 보안 기능 때문에 안 될 수 있어요.</span>
@@ -861,7 +878,8 @@
     <section class="panel" id="p-library">
       <div class="phead"><div><h1>보관함</h1><p>받은 영상과 직접 찍은 원본이 모이는 곳이에요. 편집점 찾기를 돌리면 대사와 컷 후보를 정리해 드려요.</p></div></div>
       <div class="bar">
-        <button class="btn" id="btnOpenVideos">촬영 원본 넣기</button>
+        <button class="btn" id="btnOpenVideos" data-pc-only>촬영 원본 넣기</button>
+        <span id="remoteLibSlot"></span>
         <div class="sp"></div>
         <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
         <button class="btn" id="btnBundle" disabled title="휴대폰·카메라가 여러 파일로 나눠 찍은 촬영본을 찍은 순서대로 이어 한 영상으로 만들어요 (2개 이상 고르기)">한 영상으로 묶기</button>
@@ -904,14 +922,14 @@
     <!-- 4. 러프컷 -->
     <section class="panel" id="p-cut">
       <div class="phead"><div><h1>편집실</h1><p>열면 1차 가편집이 이미 세팅돼 있어요. 롱폼 가편집 1개와 쇼츠 편집본(추천 구간)이 자동으로 만들어져요.</p></div></div>
-      <div class="bar"><div class="sp"></div><button class="btn" id="btnOpenOut">완성본 폴더</button></div>
+      <div class="bar"><div class="sp"></div><button class="btn" id="btnOpenOut" data-pc-only>완성본 폴더</button></div>
       <div class="grid" id="edList"></div>
       <div class="card empty" id="edEmpty"><b>편집할 수 있는 영상이 없어요</b>보관함에서 영상을 고르고 "편집점 찾기"를 먼저 해 주세요.</div>
     </section>
     <section class="panel" id="p-style">
       <div class="phead"><div><h1>스타일 배우기</h1><p>따라 하고 싶은 유튜버 채널의 인기 영상을 '학습용 영상'에 담아 고르면, 그 채널의 공식(인트로 구성·장르·형식·자막 처리·재미 요소)을 판단하고 컷 리듬 같은 편집 습관까지 배워 "스타일"로 저장해요. 편집실의 자동 가편집이 그 스타일대로 잘라 줘요. 학습용 영상은 편집할 영상(보관함)과 따로 보관돼요.</p></div></div>
       <details class="card ccard" id="claudeCard"><summary>🤖 클로드 계정으로 쓰기 <span class="st8" id="claudeState">확인 중…</span></summary><div class="cbody" id="claudeBody"></div></details>
-      <div class="shbar"><h2 class="sh">학습용 영상</h2><span class="hint" id="refDisk"></span><div class="sp"></div><button class="btn" id="refOpen">폴더 열기</button><button class="btn" id="refAddBtn">채널 추가</button></div>
+      <div class="shbar"><h2 class="sh">학습용 영상</h2><span class="hint" id="refDisk"></span><div class="sp"></div><button class="btn" id="refOpen" data-pc-only>폴더 열기</button><button class="btn" id="refAddBtn">채널 추가</button></div>
       <div class="failslot"></div>
       <div class="card refadd" id="refAdd" hidden>
         <div class="row1"><input class="inp" id="refUrl" placeholder="채널 주소나 @핸들 (예: @shootforlovekorea)" title="예) https://www.youtube.com/@채널이름 · @채널이름">
@@ -920,7 +938,7 @@
           <button class="btn primary" id="refGo">인기 영상 받기</button></div>
         <div class="opts"><label><input type="checkbox" id="refLearn" checked> 받은 뒤 '채널 이름 스타일'로 배우기</label>
           <label title="영상 파일만 지우고 배운 기록은 남겨요. 스타일은 그대로 쓰고, 다시 배울 때도 그 기록을 써요"><input type="checkbox" id="refPrune"> 배운 뒤 영상 파일 지우기 (디스크 아끼기)</label>
-          <label title="받기가 계속 실패할 때만 골라 주세요. 그 브라우저에서 YouTube에 로그인해 두면 돼요 (내 PC 안에서만 쓰여요) · 파이어폭스가 가장 잘 돼요 · 엣지·웨일·크롬은 창을 모두 닫은 뒤 받아 주세요">로그인 정보로 받기 <select class="sel" id="refCookies"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select></label></div>
+          <label data-pc-only title="받기가 계속 실패할 때만 골라 주세요. 그 브라우저에서 YouTube에 로그인해 두면 돼요 (내 PC 안에서만 쓰여요) · 파이어폭스가 가장 잘 돼요 · 엣지·웨일·크롬은 창을 모두 닫은 뒤 받아 주세요">로그인 정보로 받기 <select class="sel" id="refCookies"><option value="">안 씀</option><option value="firefox">파이어폭스</option><option value="edge">엣지</option><option value="whale">웨일</option><option value="chrome">크롬 (최신 크롬은 안 될 수 있어요)</option></select></label></div>
         <h3>추천 채널</h3>
         <div class="filters" id="recoGroups"></div>
         <div class="reco" id="reco"></div>
@@ -956,7 +974,7 @@
         <select class="sel" id="upVid" title="올릴 영상"></select>
         <select class="sel" id="upSrc" title="원본 영상을 그대로 올릴지, 편집실에서 만든 편집본을 올릴지 골라요"></select>
         <div class="sp"></div>
-        <button class="btn" id="upTpl" title="설명에 매번 들어가는 틀(출연 소개·링크 등)을 메모장으로 열어 고쳐요">설명 틀 고치기</button>
+        <button class="btn" id="upTpl" data-pc-only title="설명에 매번 들어가는 틀(출연 소개·링크 등)을 메모장으로 열어 고쳐요">설명 틀 고치기</button>
         <button class="btn primary" id="upMake">올리기 키트 만들기</button>
       </div>
       <div class="up-meta" id="upMeta"></div>
@@ -989,13 +1007,14 @@
         </div>
         <div class="up-col">
           <div class="card up-card yt-card" id="ytCard">
-            <h3>유튜브에 바로 올리기<span class="sp"></span><button class="linkbtn" id="ytGuideOpen">설정 안내</button></h3>
-            <div class="yt-sec" id="ytSetup" hidden>
+            <h3>유튜브에 바로 올리기<span class="sp"></span><button class="linkbtn" id="ytGuideOpen" data-pc-only>설정 안내</button></h3>
+            <p class="rm-note" id="ytPcNote">Google 설정·유튜브 계정 연결·연결 끊기는 PC에서 해 주세요 · 연결해 두면 여기서 올릴 수 있어요</p>
+            <div class="yt-sec" id="ytSetup" data-pc-only hidden>
               <p class="yt-muted" style="font-size:13px">처음 한 번만 Google 설정(약 15분)을 하면 제목·설명·태그·썸네일·자막·재생목록까지 이 화면에서 한 번에 올라가요.
                 단, <b>공개로 올리려면 Google 감사(걸리는 기간은 Google도 정해 두지 않음)</b>를 받아야 해요 · 그 전에 올린 영상은 비공개로 잠겨서 시험용이에요 · 공개할 영상은 지금처럼 키트를 복사해 스튜디오에서 올려 주세요</p>
               <button class="btn primary" id="ytGuideGo">설정 안내 열기</button>
             </div>
-            <div class="yt-sec" id="ytConnect" hidden>
+            <div class="yt-sec" id="ytConnect" data-pc-only hidden>
               <p class="yt-muted" style="font-size:13px" id="ytConnMsg"></p>
               <div class="yt-red" id="ytConnErr" hidden></div>
               <div class="yt-note" id="ytRevokeNote" hidden>Google 쪽 연결은 끊지 못했어요 (인터넷이 끊겼거나 Google이 대답하지 않음) · <button class="linkbtn" data-ytopen="permissions">Google 권한 화면</button>에서 '풋살 스튜디오'를 직접 지워 주세요</div>
@@ -1248,6 +1267,8 @@ const libChecked = () => [...libSel];
 try { srcFilter = localStorage.getItem("libSrcFilter") || "all"; } catch (e) {}
 let events = [], filter = "all";
 
+// 폴더·파일 열기: PC 에서는 탐색기, 밖에서 작업(D-230)에서는 그 기기로 (완성본 받기 · 내 기기에서 올리기 · 기록 받기 · 그 밖은 'PC에서만')
+function openFolder(which) { return window.FS_REMOTE ? FS_REMOTE.openFolder(which) : api("/api/open", { which }); }
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json();
@@ -1271,7 +1292,7 @@ function browserOpts(sel, keep) {  // 로그인 정보 고르기 칸: 이 PC 에
   const cur = keep !== undefined ? keep : sel.value, list = Object.keys(BROWSERS).filter(b => HAVE.includes(b) || b === cur);
   sel.innerHTML = (sel.dataset.fck !== undefined ? "" : `<option value="">안 씀</option>`) + list.map(b => `<option value="${b}"${b === cur ? " selected" : ""}>${BROWSERS[b]}${BROWSER_NOTE[b] || ""}</option>`).join("");
 }
-fetch("/api/browsers").then(r => r.json()).then(j => { if (j.browsers && j.browsers.length) HAVE = j.browsers; ["cookies", "refCookies"].forEach(id => browserOpts($(id))); }).catch(() => {});
+if (!window.FS_REMOTE) fetch("/api/browsers").then(r => r.json()).then(j => { if (j.browsers && j.browsers.length) HAVE = j.browsers; ["cookies", "refCookies"].forEach(id => browserOpts($(id))); }).catch(() => {});
 const YT_JOBS = ["/api/list", "/api/download", "/api/refs/add", "/api/refs/direction"];  // YouTube 를 쓰는 작업 (로그인 정보·주소 버튼)
 const FOLDER_OF = { "/api/download": "videos", "/api/analyze": "videos", "/api/bundle": "videos", "/api/convert": "videos", "/api/refs/add": "refs", "/api/refs/direction": "refs",
   "/api/refs/learn": "refs", "/api/refs/move": "videos", "/api/refs/restore": "refs", "/api/style/learn": "videos" };
@@ -1321,9 +1342,9 @@ function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · 
     const a = b.dataset.fa;
     if (jb.on && jb.on[a]) { jb.on[a](); return; }  // 그 화면이 정한 할 일 (7단계: 이어 올리기·다시 연결하기·채널 인증·썸네일 다시 올리기·마저 하기)
     if (a === "log") { $("drawer").classList.add("open"); return; }
-    if (a === "logfile") { api("/api/open", { which: "log" }); return; }
+    if (a === "logfile") { openFolder("log"); return; }
     if (a === "update") { checkUpdate(true); return; }
-    if (a === "folder") { api("/api/open", { which: folder }); return; }
+    if (a === "folder") { openFolder(folder); return; }
     if (a === "url") {
       slot.innerHTML = "";
       if (jb.path === "/api/list") { $("chUrl").focus(); $("chUrl").select(); }
@@ -1541,7 +1562,7 @@ function fillSelect(id, list) {
   $(id).innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${srcNote(v)}</option>`).join("") : `<option value="">(영상 없음)</option>`;
   if (list.some(v => v.name === cur)) $(id).value = cur;
 }
-$("btnOpenVideos").onclick = () => { api("/api/open", { which: "videos" }); toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요 · 복사가 끝날 때까지 '복사 중'으로 보여요"); };
+$("btnOpenVideos").onclick = () => { openFolder("videos"); if (!window.FS_REMOTE) toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요 · 복사가 끝날 때까지 '복사 중'으로 보여요"); };
 $("btnAnalyze").onclick = () => analyzeNames(libChecked());
 function analyzeNames(names, changedFile) {
   if (state.job || !names.length) return;
@@ -1780,7 +1801,7 @@ function renderReco() {
   sync();
 }
 $("refAddBtn").onclick = () => { $("refAdd").hidden = !$("refAdd").hidden; if (!$("refAdd").hidden) { loadReco(); $("refUrl").focus(); } };
-$("refOpen").onclick = () => api("/api/open", { which: "refs" });
+$("refOpen").onclick = () => openFolder("refs");
 $("refUrl").oninput = () => renderReco();
 $("refUrl").onkeydown = e => { if (e.key === "Enter") $("refGo").click(); };
 $("refGo").onclick = () => {
@@ -2142,9 +2163,9 @@ const CLAUDE_TXT = {
 function renderClaude() {
   const v = claude.state || {}, t = CLAUDE_TXT[v.state] || ["확인 중…", "클로드 프로그램을 확인하고 있어요…"];
   $("claudeState").textContent = t[0];
-  const btn = v.state === "missing" ? `<button class="btn primary" id="cInstall">설치하기</button>` : v.state === "ready" ? "" : `<button class="btn primary" id="cLogin">로그인</button>`;
-  $("claudeBody").innerHTML = `<div>${esc(t[1])}</div><div class="cbtns">${btn}<button class="btn" id="cCheck">다시 확인</button></div>
-    ${v.state && v.state !== "missing" ? `<details class="adv"><summary>고급: 로그인 코드 붙여 넣기 (claude setup-token)</summary><div class="row2"><input class="inp" id="cToken" type="password" autocomplete="off" placeholder="sk-ant-oat… (이 PC의 사용자 폴더에만 저장돼요)"><button class="btn" id="cTokSave">저장</button>${v.hasToken ? `<button class="btn" id="cTokClear">지우기</button>` : ""}</div></details>` : ""}
+  const btn = v.state === "missing" ? `<button class="btn primary" id="cInstall" data-pc-only>설치하기</button>` : v.state === "ready" ? "" : `<button class="btn primary" id="cLogin" data-pc-only>로그인</button>`;
+  $("claudeBody").innerHTML = `<div>${esc(t[1])}</div><div class="cbtns">${btn}<button class="btn" id="cCheck">다시 확인</button>${btn ? `<span class="rm-note">설치·로그인은 PC에서 해 주세요</span>` : ""}</div>
+    ${v.state && v.state !== "missing" ? `<details class="adv" data-pc-only><summary>고급: 로그인 코드 붙여 넣기 (claude setup-token)</summary><div class="row2"><input class="inp" id="cToken" type="password" autocomplete="off" placeholder="sk-ant-oat… (이 PC의 사용자 폴더에만 저장돼요)"><button class="btn" id="cTokSave">저장</button>${v.hasToken ? `<button class="btn" id="cTokClear">지우기</button>` : ""}</div></details>` : ""}
     <div class="up-hint" style="margin:0">클로드 판단은 버튼을 누를 때만, 레퍼런스 영상의 대사 일부와 장면 그림 몇 장을 내 클로드 계정으로 보내요. 무료로 쓰려면 카드의 [Claude에게 물어볼 내용 복사]로 claude.ai 에 붙여 넣어도 돼요.</div>`;
   const on = (id, f) => { const e = $(id); if (e) e.onclick = f; };
   on("cInstall", async () => {
@@ -2333,7 +2354,7 @@ function renderGuide() { $("startGuide").hidden = guideOff() || !state.loaded ||
 $("guideFootage").onclick = () => { go("library"); $("btnOpenVideos").click(); };
 $("guideLib").onclick = () => go("library");
 $("guideOff").onclick = () => { try { localStorage.setItem("startGuideOff", "1"); } catch (e) {} renderGuide(); };
-$("btnOpenOut").onclick = () => api("/api/open", { which: "out" });
+$("btnOpenOut").onclick = () => openFolder("out");
 
 /* 공통: 작업 실행 · 상태 */
 /* 2-0. 받아쓰기 모델: 처음엔 이 PC 사양에 맞게(메모리 8GB 이하·4코어 이하면 '빠르게') · 고른 값은 기억 · 누르기 전에 예상 시간·메모리 */
@@ -2483,7 +2504,7 @@ async function poll() {
 }
 
 $("btnLog").onclick = () => $("drawer").classList.toggle("open");
-$("workspace").onclick = () => api("/api/open", { which: "work" });
+$("workspace").onclick = () => openFolder("work");
 $("btnLogClose").onclick = () => $("drawer").classList.remove("open");
 async function checkUpdate(manual) {
   const u = await api("/api/update/check");
@@ -2520,9 +2541,12 @@ try {  // 편집실 '← 스튜디오'로 오면 4 편집실 (영상 카드의 �
   sessionStorage.removeItem("edReturn");
   if (r && Date.now() - (r.t || 0) < 6 * 3600e3) { window.landedOn = "cut"; go("cut"); }
 } catch (e) {}
-setInterval(poll, 1000);
-poll().then(() => { renderEvents(); renderEdList(); loadRefs(); });
-checkUpdate();
+// 1초마다 상태 (밖에서 작업은 2초) — 앞의 묻기가 끝난 뒤에만 다음 (터널 너머로 느려도 요청이 쌓이지 않게 · D-230)
+let pollBusy = null;
+function pollOnce() { if (!pollBusy) pollBusy = poll().catch(() => {}).finally(() => { pollBusy = null; }); return pollBusy; }
+(function pollLoop() { setTimeout(() => pollOnce().finally(pollLoop), window.FS_REMOTE ? 2000 : 1000); })();
+pollOnce().then(() => { renderEvents(); renderEdList(); loadRefs(); });
+if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에서 작업 화면은 묻지 않음)
 </script>
 <script>
 /* 7. 올리기 (올리기 키트: 제목 후보·설명·챕터·태그) */
@@ -2881,7 +2905,7 @@ checkUpdate();
     // 연결된 채널
     if (s.connected) {
       const ch = s.channel || {};
-      let h = `<div class="yt-ch"><span>연결된 채널 · <b>${esc(ch.title || ch.id || "")}</b>${s.match === true ? ' <span class="yt-ok">✓</span>' : ""}</span><span class="sp"></span><button class="linkbtn" id="ytLogout"${run ? ' disabled title="올리는 중에는 끊을 수 없어요 · 먼저 [멈추기]"' : ""}>연결 끊기</button></div>`;
+      let h = `<div class="yt-ch"><span>연결된 채널 · <b>${esc(ch.title || ch.id || "")}</b>${s.match === true ? ' <span class="yt-ok">✓</span>' : ""}</span><span class="sp"></span><button class="linkbtn" id="ytLogout" data-pc-only${run ? ' disabled title="올리는 중에는 끊을 수 없어요 · 먼저 [멈추기]"' : ""}>연결 끊기</button></div>`;
       if (s.match === false) h += `<div class="yt-red">⚠ 설정한 풋살사관학교 채널이 아니에요 (연결: ${esc(ch.title || ch.id || "")}) · 다른 계정으로 [연결 끊기] 뒤 다시 연결하거나, 이 채널이 맞으면 <button class="linkbtn" id="ytChanOk">이 채널에 올릴게요</button></div>`;
       if (s.testingWarn) h += `<div class="yt-note">${esc(s.testingWarn)} <button class="linkbtn" data-ytstep="5">5단계 보기</button></div>`;
       $("ytChan").innerHTML = h;
@@ -4064,7 +4088,21 @@ function remoteDot(r) {
   const d = $("rmDot"); if (!d || !r) return;
   d.className = "rdot " + ({ on: "on", error: "err", off: "" }[r.state] ?? "wait");
   d.title = { on: `켜져 있어요 · 휴대폰 ${r.devices}대`, error: "문제가 생겼어요", off: "꺼져 있어요" }[r.state] || "준비하는 중";
+  const pill = $("studioPill"), ss = (!window.FS_REMOTE && r.studio) || [];  // 밖에서 작업 중인 기기 (2분 안에 요청 · PC 화면에만)
+  if (!pill || !Array.isArray(r.studio)) return;
+  pill.hidden = !ss.length;
+  const key = ss.map(x => x.id + x.device).join("|");
+  if (pill.dataset.key !== key) {
+    pill.dataset.key = key;
+    pill.innerHTML = ss.map(x => `<span>밖에서 작업 중 · <b>${esc(x.device)}</b></span><button class="linkbtn" data-stcut="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button>`).join("");
+  }
 }
+$("studioPill").addEventListener("click", async e => {
+  const b = e.target.closest("[data-stcut]"); if (!b) return;
+  if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요 (기기 연결은 그대로라 원격 홈에서 다시 열 수 있어요)`)) return;
+  await api("/api/remote/session/revoke", { id: b.dataset.stcut });
+  $("studioPill").dataset.key = ""; toast("끊었어요");
+});
 const rmAgo = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; };
 const rmClock = t => new Date(t * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
 const rmDate = t => new Date(t * 1000).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
@@ -4076,7 +4114,9 @@ function rmQr(rows) {  // 서버가 준 '0'·'1' 줄 → SVG (글자를 그대�
 }
 function rmRender(d) {
   const st = d.state, set = d.settings || {}, nt = set.notify || {};
-  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.pairNote, d.retryAt, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen), x.stale]), set, d.notify.topic]);
+  const sd = d.studio || { available: false, allowed: false, sessions: [] };
+  const key = JSON.stringify([st, d.error, d.prep, d.pair && d.pair.code, d.pairNote, d.retryAt, d.devices.map(x => [x.id, x.name, rmAgo(x.lastSeen), x.stale]), set, d.notify.topic,
+    sd.allowed, sd.sessions.map(x => [x.id, x.active, rmAgo(x.lastSeen), x.uploads])]);
   if (key === RM.key) return;
   RM.key = key;
   let h = `<h2>휴대폰으로 보기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
@@ -4109,6 +4149,15 @@ function rmRender(d) {
     h += `<div class="rsec"><h3>연결된 휴대폰</h3>` + (d.devices.length ? d.devices.map(x =>
         `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
         + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 휴대폰 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
+    if (sd.available) {  // 밖에서 작업 (D-234): 연결한 기기에서 PC 스튜디오 화면 그대로 · 처리는 이 PC
+      const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
+      h += `<div class="rsec"><h3>밖에서 작업</h3>
+        <div class="rrow"><label><input type="checkbox" data-rm="studio"${sd.allowed ? " checked" : ""}> 밖에서 작업 허용</label></div>
+        <div class="small">연결한 휴대폰·노트북에서 <b>${site}</b> 을 열고 [PC 스튜디오 열기]를 누르면 이 PC 화면 그대로 밖에서 작업해요 · 처리는 이 PC가 해요 · 끄면 휴대폰으로 보기만 돼요</div>`
+        + (sd.sessions.length ? sd.sessions.map(x => `<div class="rdev"><b title="${esc(x.device)}">${esc(x.device)}</b><span>${esc(rmClock(x.startedAt))} 시작 · ${x.active ? "지금 쓰는 중" : esc(rmAgo(x.lastSeen))}${x.uploads ? ` · 올리는 파일 ${esc(x.uploads)}개` : ""}</span><button class="btn sm" data-rm="scut" data-id="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button></div>`).join("")
+          + `<div class="rbtns"><button class="btn sm" data-rm="scutAll">모두 끊기</button></div>` : `<div class="small">지금 밖에서 작업 중인 기기는 없어요</div>`)
+        + `<div class="small">[끊기]는 지금 연결만 끝내요 · 그 기기를 아예 못 쓰게 하려면 위 '연결된 휴대폰'에서 [끊기]를 눌러 주세요 (열쇠까지 지워요)</div></div>`;
+    }
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
     h += `<div class="rsec"><h3>설정</h3>
@@ -4148,12 +4197,18 @@ $("rmBox").addEventListener("click", async e => {
   if (a === "revoke") { if (!confirm(`'${b.dataset.name}' 연결을 끊을까요?\n그 휴대폰에서는 더 이상 이 PC를 볼 수 없어요.`)) return; return rmPost("/api/remote/revoke", { id: b.dataset.id }); }
   if (a === "revokeAll") { if (!confirm("연결된 휴대폰을 모두 끊을까요?\n다시 쓰려면 휴대폰마다 다시 연결해야 해요.")) return; return rmPost("/api/remote/revoke", { all: true }); }
   if (a === "awake") return rmPost("/api/remote/settings", { keepAwake: b.dataset.v });
+  if (a === "scut") { if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요`)) return; return rmPost("/api/remote/session/revoke", { id: b.dataset.id }); }
+  if (a === "scutAll") { if (!confirm("밖에서 작업 중인 연결을 모두 끊을까요?")) return; return rmPost("/api/remote/session/revoke", { all: true }); }
   if (a === "test") { const r = await rmPost("/api/remote/test"); if (r.ok) toast("알림을 보냈어요 · 휴대폰을 확인해 주세요"); return; }
   if (a === "copyTopic") { await copyText(RM.d.notify.topic); toast("주제 이름을 복사했어요"); }
 });
 $("rmBox").addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.rm === "autoOff") rmPost("/api/remote/settings", { autoOffHours: +t.value });
+  if (t.dataset.rm === "studio") {
+    if (!t.checked && RM.d && RM.d.studio && RM.d.studio.sessions.length && !confirm("끄면 밖에서 작업 중인 화면이 바로 잠겨요. 끌까요?")) { t.checked = true; return; }
+    rmPost("/api/remote/settings", { studio: t.checked });
+  }
   if (t.dataset.rm === "notify") { const n = {}; $("rmBox").querySelectorAll('[data-rm="notify"]').forEach(c => n[c.dataset.k] = c.checked); rmPost("/api/remote/settings", { notify: n }); }
 });
 </script>

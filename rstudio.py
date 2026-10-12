@@ -16,6 +16,7 @@ import hmac
 import html
 import io
 import json
+import os
 import re
 import secrets
 import shutil
@@ -52,7 +53,7 @@ MEDIA_WAIT = 15.0              # 미디어 동시 수가 꽉 찼으면 이만큼
 STATIC_AGE = "private, max-age=604800"
 NO_STORE = "private, no-store"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
-NEXT_RE = re.compile(r"^/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-]{0,600})?$")   # 넘겨준 뒤 갈 곳 (휴대폰 페이지 proto.nextOk 와 같음)
+NEXT_RE = re.compile(r"^/(editor|thumb)?(\?[A-Za-z0-9%._~&=+\-!'()*]{0,600})?$")   # 넘겨준 뒤 갈 곳 (휴대폰 페이지 proto.nextOk 와 같음)
 DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 HELLO_CSP = ("default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; "
              "base-uri 'none'; form-action 'none'")
@@ -355,8 +356,9 @@ def classify(method, path):
 
 
 def bucket_of(path):
-    """요청 수 바구니: 넘겨주기·인사 쪽은 열린 길 바구니(좁게), 그 밖은 스튜디오 바구니."""
-    return "open" if POLICY.get((_G, path)) == PUBLIC or POLICY.get((_P, path)) == PUBLIC else "studio"
+    """요청 수 바구니: 넘겨주기(표 바꾸기)는 열린 길 바구니(좁게) · 그 밖은 스튜디오 바구니 — 정적인 인사 쪽(/s/hello·hello.js)도
+    스튜디오 바구니 (다시 연결할 때마다 열린 길 몫을 셋씩 쓰면 몇 번 만에 막힘)."""
+    return "open" if path == "/s/handoff" else "studio"
 
 
 # ---------- 응답 ----------
@@ -1090,7 +1092,10 @@ class Uploads:
         """다른 올리기가 아직 받을 양 + 이번에 받을 양 + 남겨 둘 여유 (2GB 또는 디스크의 3% 중 큰 것)."""
         du = disk_free(self.root() if self.root().exists() else core.WORK)
         others = sum(max(0, x["size"] - x["received"]) for x in self.items.values())
-        return du.free, extra_left + others + max(2 << 30, int(du.total * 0.03))
+        reserve = max(2 << 30, int(du.total * 0.03))
+        if self.svc.dev() and os.environ.get("FUTSAL_UPLOAD_RESERVE", "").isdigit():  # 시험 PC 용 (개발 모드에서만 · 거의 찬 개발 디스크)
+            reserve = int(os.environ["FUTSAL_UPLOAD_RESERVE"])
+        return du.free, extra_left + others + reserve
 
     def init(self, sess, b):
         name, size, lm, probe, target = b.get("name"), b.get("size"), b.get("lastModified"), b.get("probe"), b.get("target") or "videos"
