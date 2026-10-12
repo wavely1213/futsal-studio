@@ -4093,7 +4093,7 @@ function rmRender(d) {
       + (d.retryAt ? `<div class="small">${esc(rmClock(d.retryAt))}쯤 저절로 다시 켜 볼게요 · 지금 하려면 [다시 시도]</div>` : "")
       + `<div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
   } else {
-    const site = esc(String(d.site || "https://mulgyeol.kr/futsal").replace(/^https?:\/\//, ""));
+    const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));  // 주소는 서버(remote.SITE) 하나에서만
     h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰에서 <b>${site}</b> 을 열어 주세요</p>`;
     if (d.pair) {
       h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">또는 휴대폰 화면에서 코드로 연결</div>

@@ -1,6 +1,6 @@
 """원격 접속 '휴대폰으로 보기' — 원격 경계 (D-027).
 
-PC 에서 하는 작업을 휴대폰(https://mulgyeol.kr/futsal)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
+PC 에서 하는 작업을 휴대폰(SITE · 지금 https://mulgyeol.kr/futsal)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
   - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(/r/* 만 · 앱 화면 포트 창 app_ports 밖). 화면용 로컬 서버(8765)는
     터널 뒤에 두지 않는다.
   - 확인 순서: Host(remote.futsal.invalid) → 메서드 → 요청 수 제한 → CORS·Origin → 서명/표(ticket) → JSON → 허용 동작 목록 → 파일 이름·허용 폴더.
@@ -47,8 +47,34 @@ import youtube_upload
 
 API = 1
 SENTINEL = "remote.futsal.invalid"  # cloudflared 가 원격 리스너로 보낼 때 쓰는 Host (.invalid 는 어떤 브라우저도 만들 수 없음)
+# 휴대폰·밖에서 작업 페이지 주소 (와벨리 저장소 public/futsal) — 이 한 줄이 하나뿐인 원본 (D-233):
+# 연결 QR·링크 · 알림 누르면 열 곳 · 허용 출처(ORIGINS) · PC 화면 안내 · 밖에서 작업 화면의 '← 원격 홈'이 모두 여기서 나옴.
+# 따로 떼어 낸 주소(예: https://futsal.mulgyeol.kr)로 옮길 때는 이 줄 + 페이지 manifest 의 start_url·scope + Vercel 도메인만 바꿈.
 SITE = "https://mulgyeol.kr/futsal"
-ORIGINS = ("https://mulgyeol.kr", "https://www.mulgyeol.kr", "https://futsal.mulgyeol.kr")  # 마지막은 따로 떼어 낼 자리 (D-027 소유자 결정 a)
+
+
+def site_origin(site):
+    """주소 → 출처 (scheme://host[:port], 작은 글자)."""
+    u = urlparse(str(site or ""))
+    return f"{u.scheme.lower()}://{u.netloc.lower()}" if u.scheme and u.netloc else ""
+
+
+def derived_origins(site):
+    """페이지 주소 → 원격 API 를 부를 수 있는 출처: 그 주소의 출처 + (최상위 도메인 바로 아래 주소면) www 쌍.
+    예) https://mulgyeol.kr/futsal → mulgyeol.kr · www.mulgyeol.kr  /  https://futsal.mulgyeol.kr → 그 하나만."""
+    o = site_origin(site)
+    if not o:
+        return ()
+    u = urlparse(o)
+    host = (u.hostname or "").lower()
+    out = [o]
+    if host.count(".") == 1 and not host.startswith("www.") and not host.replace(".", "").isdigit():
+        out.append(f"{u.scheme}://www.{u.netloc}")
+    return tuple(out)
+
+
+ORIGINS = derived_origins(SITE)
+SITE_TEXT = SITE.split("://", 1)[-1]  # 알림·안내 글에 쓰는 모양 (mulgyeol.kr/futsal)
 NTFY_DEFAULT = "https://ntfy.sh"
 MAX_DEVICES = 5
 DEVICE_TTL = 90 * 86400      # 90일 동안 안 쓴 휴대폰은 저절로 끊음
@@ -108,7 +134,7 @@ NOTE_TEXT = {
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
     "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
-    "moved": "알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · mulgyeol.kr/futsal 에서 새 주제로 다시 구독해 주세요 "
+    "moved": f"알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · {SITE_TEXT} 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
 MISSED_MSG = ("받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 "
