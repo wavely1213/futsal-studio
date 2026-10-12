@@ -924,6 +924,47 @@ class GuestStudioTest(StudioBase):
         self.assertEqual((st, j["code"]), (401, "logout"))
         self.assertIsNotNone(self.svc.store.device(self.cred["device"]["id"]))   # QR 기기는 그대로
 
+    def test_guest_lock_texts_say_relogin_not_open_studio(self):
+        """검토 고침: 이번만 기기는 원격 홈에 [PC 스튜디오 열기]가 남지 않음 → 끝난 뒤 문장은 '아이디·비밀번호로 다시 연결' (JSON·잠금 쪽·스크립트)."""
+        relogin = "아이디·비밀번호로 다시 연결해 주세요"
+        g, gc = self.guest()
+        self.cookie = self.hget(self.guest_login(gc), "Set-Cookie")[0].split(";")[0]
+        st, j = self.jreq("GET", "/s/session")
+        self.csrf = j["csrf"]
+        self.assertEqual(self.jreq("POST", "/s/logout", {})[0], 200)
+        st, j = self.jreq("GET", "/api/state")
+        self.assertEqual((st, j["code"], j.get("guest")), (401, "logout", True))
+        self.assertIn(relogin, j["error"])
+        st, hd, out = self.raw("GET", "/editor?name=x", headers={"Cookie": self.cookie, "Sec-Fetch-Dest": "document"})
+        self.assertEqual(st, 401)
+        self.assertIn(b'name="fs-guest" content="1"', out)
+        self.assertIn(relogin.encode(), out)
+        self.assertNotIn("[PC 스튜디오 열기]".encode(), out)
+        # PC 가 이번만 기기를 버림 (주소 바뀜·비밀번호 바꿈·끊기) → 'revoked' 도 같은 문장
+        g2, gc2 = self.guest()
+        self.cookie = self.hget(self.guest_login(gc2), "Set-Cookie")[0].split(";")[0]
+        self.svc._drop_guests({g2["id"]}, "revoked", "시험")
+        st, j = self.jreq("GET", "/api/state")
+        self.assertEqual((st, j["code"], j.get("guest")), (401, "revoked", True))
+        self.assertIn(relogin, j["error"])
+        # QR 기기의 연결 끝내기는 예전 문장 그대로 (guest 칸 없음)
+        self.cookie = self.csrf = None
+        self.login()
+        self.assertEqual(self.jreq("POST", "/s/logout", {})[0], 200)
+        st, j = self.jreq("GET", "/api/state")
+        self.assertEqual((st, j["code"]), (401, "logout"))
+        self.assertNotIn("guest", j)
+        self.assertNotIn(relogin, j["error"])
+        js = (ROOT / "remote_ui.js").read_text(encoding="utf-8")
+        hello = (ROOT / "hello.js").read_text(encoding="utf-8")
+        self.assertIn("LOCK_GUEST", js)
+        self.assertIn("(R.guest || guest) && LOCK_GUEST[code]", js)
+        self.assertIn('meta("fs-guest") === "1" && TEXT_GUEST[key]', hello)
+        for src in (js, hello):
+            self.assertIn(relogin, src)
+        self.assertIn('getElementById("fsr-logout")', js)   # 이번만 기기: [연결 끝내기] 를 뺌 ([이 기기에서 나가기] 와 같은 일)
+        self.assertIn("if (o) o.remove();", js)
+
 
 if __name__ == "__main__":
     unittest.main()

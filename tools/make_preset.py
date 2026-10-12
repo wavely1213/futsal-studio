@@ -4,6 +4,9 @@
 출력: rlogin.py 의 `PRESET = None` 자리에 붙여 넣을 한 줄 (SRP 검증값·salt·횟수만 · 비밀번호는 들어 있지 않음).
 
     FUTSAL_PRESET_PW='…' python3 tools/make_preset.py
+
+넣는 곳은 한 곳: rlogin.py 의 `PRESET = None` 줄을 출력 줄로 바꾼다 (PRESET_ID·PRESET_CHANNEL 은 그대로).
+PC 에 넣는 조건은 remote.Service._apply_preset (D-258): 로그인을 정한 적 없음 · 채널 · 소유자 PC 표시 · 같은 아이디를 쓰는 PC 없음 · 한 번만.
 """
 import os
 import sys

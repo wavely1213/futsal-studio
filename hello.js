@@ -15,6 +15,11 @@
     net: ["PC와 연결하지 못했어요", "인터넷 연결을 확인한 뒤 원격 홈에서 다시 열어 주세요"],
     start: ["원격 홈에서 열어 주세요", "원격 홈(아래 주소)의 [PC 스튜디오 열기]로 들어와 주세요 · 이 쪽은 즐겨찾기로 바로 열 수 없어요"]
   };
+  // '이번만' 연결한 기기 (서버가 fs-guest 로 알려 줌 · rstudio.MSG_GUEST · remote_ui.js LOCK_GUEST 와 같음)
+  var TEXT_GUEST = {
+    revoked: ["PC에서 연결을 끊었어요", "다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요"],
+    logout: ["연결을 끝냈어요", "이 기기에서 나갔어요 · 다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요"]
+  };
 
   function meta(n) { var m = document.querySelector('meta[name="' + n + '"]'); return m ? m.getAttribute("content") || "" : ""; }
   function siteOk(s) {
@@ -47,7 +52,7 @@
     }
   }
   function say(key, site, resume) {
-    var t = TEXT[key] || TEXT.none;
+    var t = (meta("fs-guest") === "1" && TEXT_GUEST[key]) || TEXT[key] || TEXT.none;
     var box = document.getElementById("box");
     if (!box) return;
     box.textContent = "";

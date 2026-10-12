@@ -187,9 +187,15 @@ def _is_common(c):
     return False
 
 
+def hangul_syllables(s):
+    """친 글 속 한글 음절(가~힣) 수 (NFKC 뒤) — '한글 5글자 이상이면 숫자 없어도 돼요'를 셀 때만 (맞춘 꼴에는 한글이 없음)."""
+    return sum(1 for ch in unicodedata.normalize("NFKC", str(s or "")) if 0xAC00 <= ord(ch) <= 0xD7A3)
+
+
 def pw_problems(pw, id_canon=None, pw2=None):
     """비밀번호 → 문제 코드 목록 (차례: 글자 · R1 길이 · R2 숫자만 · R3 아이디 · R4 흔함 · R5 반복·줄 · R6 전화·생일 · 두 번 다름).
-    문장은 PW_MSG. 모두 맞춘 꼴(canon_pw)로 본다."""
+    문장은 PW_MSG. 모두 맞춘 꼴(canon_pw)로 본다 — 다만 R1 의 '글쇠만(숫자·기호 없이)은 12글쇠 이상'은 한글 음절을 5개 이상 친
+    비밀번호에는 묻지 않음 (화면 문장 '한글 5글자 이상이면 숫자 없어도 돼요'와 같게 · 받침 없는 다섯 글자는 10글쇠뿐이라)."""
     c = canon_pw(pw)
     if not c:
         return ["empty"]
@@ -200,7 +206,7 @@ def pw_problems(pw, id_canon=None, pw2=None):
         out.append("short")
     elif len(c) > 64:
         out.append("long")
-    elif re.fullmatch(r"[a-z]+", c) and len(c) < 12:
+    elif re.fullmatch(r"[a-z]+", c) and len(c) < 12 and hangul_syllables(pw) < 5:
         out.append("letters")
     if c.isdigit():
         out.append("digits")
@@ -762,7 +768,8 @@ def valid_login(b):
 
 
 # 미리 정해 둔 로그인 (D-258): 공개 저장소에는 비밀번호가 아니라 SRP 검증값만 둔다 · tools/make_preset.py 가 만든 것을 붙여 넣음.
-# None 이면 끔. 정해진 채널(최경진 풋살사관학교) PC 에서, 아직 로그인을 정한 적이 없을 때 한 번만 쓴다 (remote.Service._apply_preset).
+# None 이면 끔. 정해진 채널(최경진 풋살사관학교 · 모든 설치의 기본값이라 그것만으로는 안 됨) + 소유자 PC 표시(이 판 전에 QR 로 연결해 둔 기기 ·
+# 그 채널로 연결한 유튜브)가 있고, 아직 로그인을 정한 적이 없고, 같은 아이디를 쓰는 PC 가 없을 때 한 번만 쓴다 (remote.Service._apply_preset).
 PRESET_ID = "wavely1213"
 PRESET_CHANNEL = "UCRYziLOw2T6BF6fXtpUby-g"
 PRESET = None

@@ -72,16 +72,21 @@
     expired: ["연결이 끝났어요", "오래 쓰지 않아 연결이 끝났어요 · 다시 연결할게요"],
     none: ["다시 연결해 주세요", "PC와 연결이 끊겼어요 · 다시 연결할게요"]
   };
+  // '이번만' 연결한 기기 (아이디·비밀번호 · D-256): 원격 홈에 연결이 남지 않아 [PC 스튜디오 열기]가 없음 → 아이디·비밀번호로 다시 (rstudio.MSG_GUEST)
+  var LOCK_GUEST = {
+    revoked: ["PC에서 연결을 끊었어요", "다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요"],
+    logout: ["연결을 끝냈어요", "이 기기에서 나갔어요 · 다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요"]
+  };
   function dirty() {
     try { if (typeof FS.isDirty === "function" && FS.isDirty()) return true; } catch (e) { /* 화면 쪽 오류는 무시 */ }
     return R.ups.some(upBusy);
   }
   function upBusy(u) { return u.state === "up" || u.state === "wait" || u.state === "queue" || u.state === "prep"; }
-  function lock(code, site) {
+  function lock(code, site, guest) {
     if (R.locked || FRAMED) return;  // 틀 안에서는 바깥 화면이 잠금을 맡음
     R.locked = true;
     if (site && !R.site) R.site = site;
-    var t = LOCK[code] || LOCK.none;
+    var t = ((R.guest || guest) && LOCK_GUEST[code]) || LOCK[code] || LOCK.none;
     var again = code === "none" || code === "expired";  // 끊긴 것 · 시간이 지난 것만 다시 연결 (PC 가 끊었거나·꺼 두었거나·내가 끝낸 것은 아님)
     var auto = again && !dirty();
     var bar = document.getElementById("fsr-net");
@@ -126,7 +131,7 @@
     try {
       var r = await origFetch("/s/session", { credentials: "same-origin", cache: "no-store" });
       if (r.status === 200) { netUp(); return "ok"; }
-      if (r.status === 401 || r.status === 403) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site); return "lock"; }
+      if (r.status === 401 || r.status === 403) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site, j.guest); return "lock"; }
     } catch (e) { /* 아직 끊김 */ }
     return "";
   }
@@ -242,7 +247,7 @@
     if (r.status === 401) {
       var j401 = {};
       try { j401 = await r.clone().json(); } catch (e) { /* */ }
-      lock(j401.code || "none", j401.site);
+      lock(j401.code || "none", j401.site, j401.guest);
       if (!FRAMED) return new Promise(function () { /* 잠김: 화면 코드가 오류 답을 데이터로 읽지 않게 (잠금 창이 안내) */ });
       return r;
     }
@@ -289,7 +294,7 @@
   async function refreshSession() {
     try {
       var r = await origFetch("/s/session", { credentials: "same-origin", cache: "no-store" });
-      if (!r.ok) { if (r.status === 401) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site); } return false; }
+      if (!r.ok) { if (r.status === 401) { var j = {}; try { j = await r.json(); } catch (e) { /* */ } lock(j.code || "none", j.site, j.guest); } return false; }
       var s = await r.json();
       R.csrf = s.csrf; R.site = s.site || R.site; R.device = s.device || R.device; R.pc = s.pc || ""; R.prefs = s.prefs || R.prefs;
       R.expiresAt = s.expiresAt || 0; R.chunk = s.chunk || R.chunk; R.chunkMax = s.chunkMax || R.chunkMax; R.upMax = s.upMax || R.upMax;
@@ -316,7 +321,7 @@
       el("button", { class: "fsr-btn", type: "button", text: "완성본 받기", onclick: function () { FS.showOutputs(); } }),
       el("button", { class: "fsr-btn", type: "button", text: "내 기기에서 올리기", onclick: function () { FS.showUploads(true); } }),
       el("label", { class: "fsr-chk", title: "데이터를 많이 써요" }, full, el("span", { text: "원본 화질로 보기" })),
-      el("button", { class: "fsr-btn", type: "button", text: "연결 끝내기", onclick: logout }),
+      el("button", { class: "fsr-btn", id: "fsr-logout", type: "button", text: "연결 끝내기", onclick: logout }),
       el("a", { class: "fsr-btn", id: "fsr-home", href: homeUrl(""), text: "← 원격 홈" }));
     var more = el("button", { class: "fsr-btn fsr-more", type: "button", "aria-expanded": "false", text: "메뉴", onclick: function () {
       var open = b.classList.toggle("open"); more.setAttribute("aria-expanded", open ? "true" : "false");
@@ -324,10 +329,13 @@
     b.append(el("span", { class: "fsr-dot", "aria-hidden": "true" }), name, upPct, more, menu);
     document.body.prepend(b);
   }
-  // '이번만' 연결한 기기 (아이디·비밀번호 · D-256): 원격 홈에는 연결 정보가 남지 않으므로 [← 원격 홈] 대신 [이 기기에서 나가기]
+  // '이번만' 연결한 기기 (아이디·비밀번호 · D-256): 원격 홈에는 연결 정보가 남지 않으므로 [← 원격 홈] 대신 [이 기기에서 나가기] ·
+  // [연결 끝내기]도 뺌 (이번만 기기에서는 같은 일 — 세션과 함께 기기 열쇠까지 버림 · 둘이 다른 것처럼 보이지 않게)
   function guestBar() {
-    var a = document.getElementById("fsr-home");
-    if (!R.guest || !a || a.tagName === "BUTTON") return;
+    var a = document.getElementById("fsr-home"), o = document.getElementById("fsr-logout");
+    if (!R.guest || !a) return;
+    if (o) o.remove();
+    if (a.tagName === "BUTTON") return;
     a.replaceWith(el("button", { class: "fsr-btn", id: "fsr-home", type: "button", text: "이 기기에서 나가기", onclick: guestExit }));
   }
   async function guestExit() {

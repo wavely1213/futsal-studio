@@ -387,7 +387,8 @@ class StartFinishHttpTests(LoginBase):
         codes = [self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "203.0.113.50"})[0] for _ in range(14)]
         self.assertEqual(codes[:12], [400] * 12)
         self.assertEqual(codes[12], 429)
-        self.assertEqual(self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "203.0.113.51"})[0], 400)
+        self.assertEqual(self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "203.0.113.51"})[0], 429)   # 같은 /24 는 한 바구니
+        self.assertEqual(self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "203.0.114.51"})[0], 400)   # 다른 대역은 그대로
 
     def test_ip_lockout_429(self):
         ip = "203.0.113.60"
@@ -858,6 +859,296 @@ class RevocationTests(LoginBase):
         self.assertIsNone(self.svc.store.device(r["device"]["id"]))
 
 
+def beacon_slot(body, dev_id, beacon_b64):
+    """비콘 글(fsb1.) → 그 기기 몫을 그 기기 비콘 열쇠로 풀어 낸 속 (휴대폰 proto.openBeacon 과 같음)."""
+    outer = json.loads(unb64u(body[5:]))
+    it = next((x for x in outer["items"] if x["d"] == dev_id), None)
+    if it is None:
+        return {}
+    return json.loads(remote.gcm_open(unb64u(beacon_b64), it["c"], f"fsb1|{outer['pc']}|{dev_id}|{outer['seq']}"))
+
+
+class NotifyTopicTests(LoginBase):
+    """검토 고침 (D-255·D-256): 아이디로 연결한 기기는 알림 주제(= [끊기] 표가 든 보안 알림)를 어느 길로도 받지 못하고, 그 기기를 끊어도
+    소유자의 알림 주제는 그대로."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_login()
+
+    def test_moved_beacon_has_no_notify_for_login_device(self):
+        _, r = self.login(remember=True)
+        new = dict(self.svc.store.data["topics"])
+        body = self.svc.beacon_body(moved=new)
+        lslot = beacon_slot(body, r["device"]["id"], r["keys"]["beacon"])
+        self.assertEqual(lslot["moved"], {"beacon": new["beacon"]})
+        cslot = beacon_slot(body, self.code["device"]["id"], self.code["keys"]["beacon"])
+        self.assertEqual(cslot["moved"], new)   # QR 기기는 그대로 (새 알림 주제로 다시 구독 안내)
+        self.assertNotIn(new["notify"], json.dumps(lslot))
+
+    def test_revoke_other_phone_moved_beacon_leaks_nothing(self):
+        """다른 휴대폰을 끊을 때 옛 비콘 주제로 가는 '옮겼어요' 비콘 → 아이디 기기 몫에는 새 알림 주제가 없음 (ntfy 를 듣는 쪽 그대로)."""
+        _, r = self.login(remember=True)
+        other = pair_device(self.svc, "Galaxy · Chrome")
+        old_beacon = self.svc.store.data["topics"]["beacon"]
+        self.svc.revoke([other["device"]["id"]])
+        new = self.svc.store.data["topics"]
+        hit = self.ntfy.wait(lambda p: p[0] == old_beacon and p[1].startswith("fsb1.")
+                             and "moved" in beacon_slot(p[1], r["device"]["id"], r["keys"]["beacon"]))
+        self.assertTrue(hit)
+        lslot = beacon_slot(hit[-1][1], r["device"]["id"], r["keys"]["beacon"])
+        self.assertEqual(lslot["moved"], {"beacon": new["beacon"]})
+        cslot = beacon_slot(hit[-1][1], self.code["device"]["id"], self.code["keys"]["beacon"])
+        self.assertEqual(cslot["moved"]["notify"], new["notify"])
+
+    def test_login_device_forget_keeps_notify_topic(self):
+        _, r = self.login(remember=True)
+        notify, beacon = self.svc.store.data["topics"]["notify"], self.svc.store.data["topics"]["beacon"]
+        st, j = self.signed_call(as_cred(r, self.svc.host()), "POST", "/r/forget", {})
+        self.assertEqual(st, 200)
+        self.assertIsNone(self.svc.store.device(r["device"]["id"]))
+        self.assertEqual(self.svc.store.data["topics"]["notify"], notify)
+        self.assertNotEqual(self.svc.store.data["topics"]["beacon"], beacon)   # 비콘 주제는 바꿈 (끊은 기기가 못 읽게)
+        time.sleep(0.3)
+        self.assertEqual([p for p in self.ntfy.posts if p[0] == notify and "알림 주제가 바뀌었어요" in p[1]], [])
+
+    def test_pc_revoke_login_device_keeps_notify_code_device_rotates(self):
+        _, r = self.login(remember=True)
+        notify = self.svc.store.data["topics"]["notify"]
+        self.svc.revoke([r["device"]["id"]])      # PC '연결된 기기'의 [끊기] (app /api/remote/revoke 와 같은 부름)
+        self.assertEqual(self.svc.store.data["topics"]["notify"], notify)
+        self.svc.revoke([self.code["device"]["id"]])   # QR 기기를 끊으면 예전처럼 알림 주제도 바꿈
+        self.assertNotEqual(self.svc.store.data["topics"]["notify"], notify)
+        self.assertTrue(self.ntfy.wait(lambda p: p[0] == notify and "알림 주제가 바뀌었어요" in p[1]))
+
+    def test_alerts_still_reach_owner_topic_after_login_device_forget(self):
+        _, r = self.login(remember=True)
+        notify = self.svc.store.data["topics"]["notify"]
+        self.signed_call(as_cred(r, self.svc.host()), "POST", "/r/forget", {})
+        self.login(remember=False, ip="198.51.100.20")
+        self.assertTrue(self.ntfy.wait(lambda p: p[0] == notify and "아이디로 새 기기가" in p[1]))
+
+
+class StartFloodTests(LoginBase):
+    """검토 고침 (L13): /r/login/start 의 요청 수는 인터넷 대역(/24·/48)으로 세고, PC 하나에 모두 합친 수도 거듭제곱 전에 막음."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_login()
+
+    def test_ipv6_rotation_in_one_64_shares_bucket(self):
+        codes = [self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": f"2001:db8:1:2::{i + 1:x}"})[0] for i in range(14)]
+        self.assertEqual(codes[:12], [400] * 12)
+        self.assertEqual(codes[12:], [429, 429])
+        self.assertEqual(self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "2001:db8:99::1"})[0], 400)   # 다른 /48
+
+    def test_global_start_budget_before_modexp(self):
+        with mock.patch.object(rlogin, "server_start", wraps=rlogin.server_start) as ss:
+            codes = []
+            for i in range(remote.BUCKETS["login_start"][0] + 2):
+                st, j = self.call("/r/login/start", Client(self.svc).start_body(), headers={"Cf-Connecting-Ip": f"10.{i // 200}.{i % 200}.1"})
+                codes.append((st, j.get("code")))
+        cap = remote.BUCKETS["login_start"][0]
+        self.assertEqual([c for c, _ in codes[:cap]], [200] * cap)
+        self.assertEqual(codes[cap:], [(429, "busy"), (429, "busy")])
+        self.assertEqual(ss.call_count, cap)   # 막힌 요청은 거듭제곱을 하지 않음
+
+    def test_lockout_by_net_and_fails_counted_per_net(self):
+        net = remote.net_of("203.0.113.61")
+        self.svc.limiter.locked_until[net] = self.clock() + 900
+        self.assertEqual(self.call("/r/login/start", {"v": 1}, headers={"Cf-Connecting-Ip": "203.0.113.99"})[0], 429)
+        self.svc.limiter.locked_until.pop(net)
+        c = Client(self.svc)
+        st, j = self.call("/r/login/start", c.start_body(), headers={"Cf-Connecting-Ip": "2001:db8:5::1"})
+        self.call("/r/login/finish", c.proof(j, pw="틀린비밀번호1234"), headers={"Cf-Connecting-Ip": "2001:db8:5::1"})
+        self.assertEqual(len(self.svc.limiter.fails.get(remote.net_of("2001:db8:5::1")) or []), 1)
+        self.assertEqual(len(self.svc.limiter.fails.get("2001:db8:5::1") or []), 1)
+
+
+class ControlFloodTests(LoginBase):
+    """검토 고침 (D-255): [끊기] 주제에 가짜 'fsk1.…'를 쏟아부어도 진짜 [끊기]는 밀려나지 않음."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_login()
+
+    def token(self):
+        self.assertTrue(self.wait(lambda: self.notes("아이디로 새 기기가")))
+        return self.notes("아이디로 새 기기가")[-1][2]["actions"][0]["body"]
+
+    def test_junk_then_genuine_direct(self):
+        _, g = self.login(remember=False)
+        body = self.token()
+        for i in range(200):
+            self.svc._control_message(json.dumps({"event": "message", "message": "fsk1." + f"{i:024d}"}))
+        self.assertIsNone(self.svc.store.login()["suspended"])
+        self.svc._control_message(json.dumps({"event": "message", "message": body}))
+        self.assertIsNone(self.svc.store.device(g["device"]["id"]))
+        self.assertEqual(self.svc.store.login()["suspended"]["why"], "kick")
+
+    def test_cached_junk_before_genuine_on_stream(self):
+        """듣는 스레드가 꺼져 있는 사이 쌓인 가짜 30개 + 진짜 → 다시 들을 때 (ntfy 가 옛것부터) 진짜를 처리."""
+        _, g = self.login(remember=False)
+        body = self.token()
+        self.svc._ctl_stop.set()
+        self.assertTrue(self.wait(lambda: not (self.svc._ctl and self.svc._ctl.is_alive()), 10))
+        control = self.svc.store.login()["control"]
+        for i in range(40):
+            self.ntfy.seed(control, "fsk1." + "A" * 24)
+        self.ntfy.seed(control, body)
+        self.svc._ctl_stop.clear()
+        self.svc._control_ensure()
+        self.assertTrue(self.wait(lambda: self.svc.store.device(g["device"]["id"]) is None, 10))
+        self.assertEqual(self.svc.store.login()["suspended"]["why"], "kick")
+
+
+class ReviewFixTests(LoginBase):
+    """검토 고침: 앱 끄기 기록 · 50번째 틀림 · 이번만 기기의 원격 끄기."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_login()
+
+    def test_shutdown_after_user_or_idle_off_keeps_reason(self):
+        for why in ("user", "idle"):
+            if self.svc.state != "on":
+                self.svc.turn_on()
+                self.assertTrue(self.wait(lambda: self.svc.state == "on"))
+            self.svc.turn_off(why)
+            self.assertTrue(self.wait(lambda: self.lookup_records()[-1]["reason"] == why))
+            n = len(self.lookup_records())
+            self.svc._ctl_stop.clear()
+            self.svc.shutdown(timeout=1.0)
+            time.sleep(0.3)
+            recs = self.lookup_records()
+            self.assertEqual(len(recs), n, why)                 # 이미 꺼 둔 PC: '앱을 껐어요' 기록을 올리지 않음
+            self.assertEqual(recs[-1]["reason"], why)
+            svc2 = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)   # 앱을 다시 켬
+            svc2.init(FakeBridge().bridge())
+            self.addCleanup(svc2._ctl_stop.set)
+            svc2._collision_at = self.clock() + 1e9
+            svc2.tick()
+            self.assertTrue(self.wait(lambda: len(self.lookup_records()) == n + 1))
+            self.assertEqual((self.lookup_records()[-1]["state"], self.lookup_records()[-1]["reason"]), ("off", why))
+            self.svc = svc2
+            self.svc.turn_on()
+            self.assertTrue(self.wait(lambda: self.svc.state == "on"))
+            self.port = self.svc.port()
+
+    def test_shutdown_while_on_still_posts_app(self):
+        self.wait(lambda: self.lookup_records())
+        self.svc.shutdown(timeout=1.5)
+        rec = self.lookup_records()[-1]
+        self.assertEqual((rec["state"], rec["reason"]), ("off", "app"))
+
+    def test_fiftieth_failure_answers_suspended(self):
+        self.svc.store.login()["guard"]["total"] = rlogin.TOTAL_STOP - 1
+        c = Client(self.svc)
+        ip = "198.51.100.77"
+        st, j = self.call("/r/login/start", c.start_body(), headers={"Cf-Connecting-Ip": ip})
+        st, j = self.call("/r/login/finish", c.proof(j, pw="틀린비밀번호1234"), headers={"Cf-Connecting-Ip": ip})
+        self.assertEqual((st, j["code"], j["why"]), (423, "suspended", "fails"))
+        self.assertNotIn("left", j)
+        self.assertEqual(self.svc.store.login()["suspended"]["why"], "fails")
+        self.assertEqual(len(self.svc.limiter.fails.get(ip) or []), 1)   # 그래도 틀린 시도로 셈
+        self.assertTrue(self.wait(lambda: self.notes("비밀번호가 너무 많이 틀려서")))
+        st, j = self.call("/r/login/start", c.start_body(), headers={"Cf-Connecting-Ip": ip})
+        self.assertEqual((st, j["code"]), (423, "suspended"))
+
+    def test_guest_cannot_turn_remote_off_login_device_can(self):
+        _, g = self.login(remember=False)
+        st, j = self.signed_call(as_cred(g, self.svc.host()), "POST", "/r/remote-off", {})
+        self.assertEqual((st, j.get("code")), (403, "not_allowed"))
+        self.assertIn("이 기기에서 나가기", j["error"])
+        time.sleep(0.5)
+        self.assertEqual(self.svc.state, "on")
+        _, r = self.login(remember=True, ip="198.51.100.8")
+        st, j = self.signed_call(as_cred(r, self.svc.host()), "POST", "/r/remote-off", {})
+        self.assertEqual(st, 200)
+        self.assertTrue(self.wait(lambda: self.svc.state == "off"))
+
+
+class HangulPasswordTests(LoginBase):
+    """검토 고침: '한글 5글자 이상이면 숫자 없어도 돼요' — 받침 없는 다섯 글자(10글쇠)도 저장됨."""
+
+    def test_five_syllables_save(self):
+        for pw in ("소나기바다", "바다나라소", "나는코치다", "모래사자고", "가자우리팀"):
+            self.assertEqual(self.svc.login_check(ID, pw)["problems"], [], pw)
+            self.svc.login_set(ID if not self.svc.store.login() else None, pw, pw, force=True, ack=True)
+            fin, _ = self.login(pw=rlogin.canon_pw(pw))   # 영문 자판으로 친 같은 글쇠로도
+            self.assertTrue(fin["remembered"])
+        with self.assertRaises(ValueError) as cm:
+            self.svc.login_set(None, "소나기비", "소나기비", force=True, ack=True)   # 네 글자는 여전히 짧음
+        self.assertEqual(str(cm.exception), rlogin.PW_MSG["letters"])
+
+
+NODE = shutil.which("node")
+UI_RUNNER = r"""
+const src = require("fs").readFileSync(process.argv[2], "utf8");
+const pick = re => { const m = src.match(re); if (!m) throw new Error("missing " + re); return m[0]; };
+const fn = name => { const i = src.indexOf("function " + name + "("); let d = 0, j = src.indexOf("{", i);
+  for (let k = j; k < src.length; k++) { if (src[k] === "{") d++; else if (src[k] === "}") { d--; if (!d) return src.slice(i, k + 1); } } };
+eval([pick(/const esc = .*\n/), pick(/const rmClock = .*\n/), pick(/const rlDay = .*\n/), pick(/const rlUntil = [\s\S]*?\n};\n/),
+  pick(/const rlKeys = .*\n/), fn("rlSection"), fn("rlOffNote")].join("\n") + "\nglobalThis.T = { rlSection, rlOffNote, rlUntil, rlKeys };");
+const cases = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(JSON.stringify(cases.map(c => c.op === "until" ? T.rlUntil(c.t) : c.op === "off" ? T.rlOffNote(c.d) : T.rlSection(c.d))));
+"""
+
+
+@unittest.skipUnless(NODE, "node 가 없어 건너뜀")
+class PcUiTextTests(unittest.TestCase):
+    """PC '휴대폰으로 보기'의 아이디·비밀번호 칸 문장 (ui.html 의 함수를 node 로 그대로)."""
+
+    def run_ui(self, cases):
+        import subprocess
+        with tempfile.TemporaryDirectory() as td:
+            r = Path(td) / "ui.js"
+            r.write_text(UI_RUNNER, encoding="utf-8")
+            out = subprocess.run([NODE, str(r), str(Path(__file__).resolve().parents[1] / "ui.html")], input=json.dumps(cases),
+                                 capture_output=True, text=True, timeout=60, env=dict(os.environ, TZ="Asia/Seoul"))
+        self.assertEqual(out.returncode, 0, out.stderr[-1500:])
+        return json.loads(out.stdout)
+
+    def view(self, **kw):
+        L = {"set": True, "enabled": True, "idShow": "김코치77", "idKeys": "rlazhcl77", "setAt": int(time.time()), "codeDevices": 1,
+             "autoOffHours": 0, "events": [], "failsToday": 0, "lock": None, "suspended": None}
+        L.update(kw)
+        return {"site": "https://futsal.mulgyeol.kr", "devices": [{}], "maxDevices": 5, "login": L}
+
+    def test_keys_parenthetical_only_for_hangul_ids(self):
+        out = self.run_ui([{"d": self.view()}, {"d": self.view(idShow="wavely1213", idKeys="wavely1213")},
+                           {"d": self.view(idShow="WAVELY1213", idKeys="wavely1213")}, {"d": self.view(idShow="Kim.Coach77", idKeys="kimcoach77")}])
+        self.assertIn("(영문 자판으로는 rlazhcl77)", out[0])
+        self.assertNotIn("영문 자판으로는", out[1])
+        self.assertNotIn("영문 자판으로는", out[2])
+        self.assertIn("(영문 자판으로는 kimcoach77)", out[3])
+
+    def test_no_code_phone_warns_instead_of_promising_alerts(self):
+        promise, warn = "새 기기가 연결되면 휴대폰 알림이 와요", remote.LOGIN_ACK_MSG
+        out = self.run_ui([{"d": self.view(codeDevices=0, preset=True)}, {"d": self.view(codeDevices=2)},
+                           {"op": "off", "d": self.view(codeDevices=0, preset=True)}, {"op": "off", "d": self.view(codeDevices=1)}])
+        self.assertNotIn(promise, out[0])
+        self.assertIn(warn, out[0])
+        self.assertIn('data-rm="pair"', out[0])   # [휴대폰 연결하기]
+        self.assertIn(promise, out[1])
+        self.assertNotIn(warn, out[1])
+        self.assertIn(warn, out[2])
+        self.assertNotIn(warn, out[3])
+
+    def test_lock_until_names_the_day(self):
+        now = time.time()
+        lt = time.localtime(now)
+        tomorrow = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1, 15, 40, 0, 0, 0, -1))
+        later = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 3, 9, 5, 0, 0, 0, -1))
+        out = self.run_ui([{"op": "until", "t": int(now) + 60}, {"op": "until", "t": int(tomorrow)}, {"op": "until", "t": int(later)},
+                           {"d": self.view(lock={"scope": "net", "until": int(tomorrow)})}])
+        self.assertFalse(out[0].startswith("내일") or "월" in out[0])
+        self.assertTrue(out[1].startswith("내일 "), out[1])
+        lt3 = time.localtime(later)
+        self.assertTrue(out[2].startswith(f"{lt3.tm_mon}월 {lt3.tm_mday}일 "), out[2])
+        self.assertIn("내일 ", out[3])
+
+
 class SecretsTests(LoginBase):
     def test_redact_new_patterns(self):
         cases = [('{"password": "노을축구공바다4827"}', "노을축구공바다4827"), ("{'password2': 'qq77'}", "qq77"), ('{"verifier": "xyz9"}', "xyz9"),
@@ -890,7 +1181,9 @@ class SecretsTests(LoginBase):
 
 
 class PresetTests(LoginBase):
-    """미리 정해 둔 로그인 (D-258) — 가짜 비밀번호로만 (저장소의 PRESET 은 None)."""
+    """미리 정해 둔 로그인 (D-258) — 가짜 비밀번호로만 (저장소의 PRESET 은 None).
+    채널 조건은 배포한 기본 config 그대로 (모든 설치가 그 채널 → 그것만으로는 소유자 PC 를 못 가림 · 검토 고침) —
+    소유자 PC 표시(이 판 전에 QR 로 연결해 둔 옛 기기 · 그 채널로 연결한 유튜브) · 같은 아이디를 쓰는 PC · 파일 밖 표까지."""
     http_listener = False
 
     def make_preset(self):
@@ -898,40 +1191,83 @@ class PresetTests(LoginBase):
         import make_preset
         return make_preset.make(FAKE_PRESET_PW, iters=100_000)
 
-    def fresh(self, preset, channel="https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g", home=None):
+    def seed_owner(self, home, owner):
+        """소유자 PC 처럼: 'paired' = 이 판 전에 QR 로 연결해 둔 기기(via 칸 없음) · 'youtube' = 그 채널로 연결한 유튜브 ·
+        'new_phone' = 이 판에서 연결한 기기(via=code · 소유자 표시 아님) · 'other_yt' = 다른 채널 유튜브."""
+        home.mkdir(parents=True, exist_ok=True)
+        if owner in ("paired", "new_phone"):  # 파일만 (서비스를 띄우면 뒤늦은 비콘 저장이 시험의 remote.json 을 덮을 수 있음)
+            st = remote.Store(home / "remote.json", self.clock)
+            dev, _ = st.add_device("Galaxy · 삼성 인터넷")
+            if owner == "paired":
+                dev.pop("via", None)
+                st.save()
+        if owner in ("youtube", "other_yt"):
+            ch = rlogin.PRESET_CHANNEL if owner == "youtube" else "UC" + "x" * 22
+            remote.yt_api.save_secret(home / "youtube" / "token.bin", {"refresh_token": "가짜", "channel": {"id": ch, "title": "채널"}})
+
+    def fresh(self, preset, channel=None, home=None, owner=None):
         home = home or (self.tmp / "다른 PC")
-        with mock.patch.object(rlogin, "PRESET", preset), mock.patch.dict(core.CONFIG, {"channel_url": channel}):
+        if owner:
+            self.seed_owner(home, owner)
+        cfg = {"channel_url": channel} if channel is not None else {}
+        with mock.patch.object(rlogin, "PRESET", preset), mock.patch.dict(core.CONFIG, cfg):
             svc = remote.Service(home=home, clock=self.clock, ntfy=self.ntfy.url)
             fb = FakeBridge()
             svc.init(fb.bridge())
             self.addCleanup(svc.turn_off)
             self.addCleanup(svc._ctl_stop.set)
+            if svc._preset_thread:
+                svc._preset_thread.join(15)
         return svc, fb
 
+    def marker(self, home):
+        return home / remote.PRESET_MARK
+
+    def test_shipped_default_config_is_the_owner_channel(self):
+        """그래서 채널만으로는 가리지 못함 (모든 설치의 기본값)."""
+        self.assertIn(rlogin.PRESET_CHANNEL, core.CONFIG_DEFAULT["channel_url"])
+        shipped = json.loads((Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
+        self.assertIn(rlogin.PRESET_CHANNEL, shipped["channel_url"])
+        self.assertIn(rlogin.PRESET_CHANNEL, core.CONFIG["channel_url"])
+
     def test_preset_none_does_nothing(self):
-        svc, _ = self.fresh(None)
+        svc, _ = self.fresh(None, owner="paired")
         self.assertIsNone(svc.store.login())
         self.assertNotIn("presetApplied", svc.store.data)
         self.assertEqual(svc.login_view()["idHint"], "wavely1213")
 
-    def test_preset_applied_on_matching_channel_once(self):
+    def test_stranger_install_with_default_config_not_applied(self):
+        """공개 앱을 새로 깐 PC (기본 config · 옛 기기 없음 · 유튜브 없음 · 이 판에서 휴대폰을 연결한 PC 도) → 넣지 않음."""
         p = self.make_preset()
-        svc, fb = self.fresh(p)
-        lg = svc.store.login()
-        self.assertEqual((lg["id"], lg["idShow"], lg["enabled"], lg["preset"]), ("wavely1213", "wavely1213", True, True))
-        self.assertTrue(svc.store.data["presetApplied"])
-        v = svc.login_view()
-        self.assertTrue(v["preset"] and v["set"] and v["enabled"])
-        self.assertEqual(svc.state, "off")   # 원격 접속은 켜지 않음
-        self.assertFalse(svc.store.data.get("enabled"))
-        raw = (self.tmp / "다른 PC" / "remote.json").read_text(encoding="utf-8")
-        for form in (FAKE_PRESET_PW, rlogin.canon_pw(FAKE_PRESET_PW)):
-            self.assertNotIn(form, raw)
-        self.assertTrue(any("미리 정해 둔 아이디·비밀번호" in x for x in fb.lines))
+        for owner in (None, "new_phone", "other_yt"):
+            home = self.tmp / f"남의 PC {owner}"
+            svc, _ = self.fresh(p, home=home, owner=owner)
+            self.assertIsNone(svc._preset_thread, owner)
+            self.assertIsNone(svc.store.login(), owner)
+            self.assertNotIn("presetApplied", svc.store.data)
+            self.assertFalse(self.marker(home).exists())
+
+    def test_preset_applied_on_owner_pc_once(self):
+        p = self.make_preset()
+        for owner in ("paired", "youtube"):
+            home = self.tmp / f"소유자 PC {owner}"
+            svc, fb = self.fresh(p, home=home, owner=owner)
+            lg = svc.store.login()
+            self.assertEqual((lg["id"], lg["idShow"], lg["enabled"], lg["preset"]), ("wavely1213", "wavely1213", True, True), owner)
+            self.assertTrue(svc.store.data["presetApplied"])
+            self.assertEqual(json.loads(self.marker(home).read_text(encoding="utf-8"))["result"], "applied")
+            v = svc.login_view()
+            self.assertTrue(v["preset"] and v["set"] and v["enabled"])
+            self.assertEqual(svc.state, "off")   # 원격 접속은 켜지 않음
+            self.assertFalse(svc.store.data.get("enabled"))
+            raw = (home / "remote.json").read_text(encoding="utf-8") + self.marker(home).read_text(encoding="utf-8")
+            for form in (FAKE_PRESET_PW, rlogin.canon_pw(FAKE_PRESET_PW)):
+                self.assertNotIn(form, raw)
+            self.assertTrue(any("미리 정해 둔 아이디·비밀번호" in x for x in fb.lines))
 
     def test_preset_login_works_with_fake_password(self):
         p = self.make_preset()
-        svc, _ = self.fresh(p)
+        svc, _ = self.fresh(p, owner="paired")
         svc.turn_on()
         self.assertTrue(self.wait(lambda: svc.state == "on"))
         c = Client(svc, "wavely1213", FAKE_PRESET_PW)
@@ -946,21 +1282,20 @@ class PresetTests(LoginBase):
     def test_preset_wrong_channel_not_applied(self):
         p = self.make_preset()
         for ch in ("https://www.youtube.com/@other", "", "https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx"):
-            svc, _ = self.fresh(p, ch, home=self.tmp / f"채널 {len(ch)}")
+            svc, _ = self.fresh(p, ch, home=self.tmp / f"채널 {len(ch)}", owner="paired")
             self.assertIsNone(svc.store.login(), ch)
             self.assertNotIn("presetApplied", svc.store.data)
 
     def test_preset_not_applied_when_configured(self):
         self.set_login()   # 이 PC 는 이미 김코치77
         p = self.make_preset()
-        svc, _ = self.fresh(p, home=self.tmp / ".futsal-studio")
+        svc, _ = self.fresh(p, home=self.tmp / ".futsal-studio", owner="youtube")
         self.assertEqual(svc.store.login()["id"], CID)
         self.assertNotIn("presetApplied", svc.store.data)
 
     def test_preset_not_applied_over_bad_block(self):
         home = self.tmp / "깨진 PC"
-        home.mkdir()
-        svc0, _ = self.fresh(None, home=home)
+        svc0, _ = self.fresh(None, home=home, owner="paired")
         svc0.store.data["login"] = {"v": 1, "broken": True}
         svc0.store.save()
         svc, _ = self.fresh(self.make_preset(), home=home)
@@ -970,7 +1305,7 @@ class PresetTests(LoginBase):
     def test_preset_applied_once_never_reapplied_after_change_or_off(self):
         p = self.make_preset()
         home = self.tmp / "다른 PC"
-        svc, _ = self.fresh(p, home=home)
+        svc, _ = self.fresh(p, home=home, owner="youtube")
         svc.login_set(None, "소유자가바꾼비번6153", "소유자가바꾼비번6153", force=True, ack=True)
         svc2, _ = self.fresh(p, home=home)
         lg = svc2.store.login()
@@ -983,6 +1318,54 @@ class PresetTests(LoginBase):
         svc3.store.save()
         svc4, _ = self.fresh(p, home=home)
         self.assertIsNone(svc4.store.login())
+
+    def test_store_reset_or_deleted_does_not_reapply(self):
+        """검토 고침: remote.json 이 깨져(.bad) 새로 만들어지거나 지워져도 공개된 미리 정한 비밀번호로 되돌아가지 않음 (파일 밖 표)."""
+        p = self.make_preset()
+        home = self.tmp / "소유자 PC"
+        svc, _ = self.fresh(p, home=home, owner="youtube")   # 유튜브 표시는 remote.json 이 새로 만들어져도 남음
+        svc.login_set(None, "소유자가바꾼비번6153", "소유자가바꾼비번6153", force=True, ack=True)
+        path = home / "remote.json"
+        raw = path.read_bytes()
+        path.write_bytes(raw[: len(raw) // 2])             # 반쯤 잘린 파일 (전원이 나감 · OneDrive)
+        svc2, _ = self.fresh(p, home=home)
+        self.assertTrue((home / "remote.json.bad").exists())
+        self.assertIsNone(svc2.store.login())
+        self.assertIsNone(svc2._preset_thread)
+        path.unlink(missing_ok=True)   # 지워진 remote.json
+        svc3, _ = self.fresh(p, home=home)
+        self.assertIsNone(svc3.store.login())
+        # (예전 판처럼) remote.json 에만 presetApplied 가 있으면 파일 밖 표도 남김
+        home2 = self.tmp / "예전 표"
+        svc4, _ = self.fresh(None, home=home2, owner="youtube")
+        svc4.store.data["presetApplied"] = 1
+        svc4.store.save()
+        svc5, _ = self.fresh(p, home=home2)
+        self.assertTrue(self.marker(home2).exists())
+        self.assertIsNone(svc5.store.login())
+
+    def test_taken_by_other_pc_not_applied_and_marked(self):
+        """같은 아이디(wavely1213)를 12시간 안에 쓴 다른 PC 가 있으면 넣지 않고 다시도 넣지 않음 (밖에서 아무 PC 에나 붙지 않게)."""
+        d = rlogin.derive_login("wavely1213")
+        rec = {"v": 1, "pc": "ab" * 8, "seq": 1, "ts": int(self.clock()) - 60, "state": "on", "reason": None, "url": "https://a-b.trycloudflare.com"}
+        self.ntfy.seed(d["topic"], rlogin.seal_lookup(d["bkey"], d["topic"], rec, remote.gcm_seal))
+        home = self.tmp / "둘째 PC"
+        svc, fb = self.fresh(self.make_preset(), home=home, owner="paired")
+        self.assertIsNone(svc.store.login())
+        self.assertTrue(svc.store.data["presetApplied"])
+        self.assertEqual(json.loads(self.marker(home).read_text(encoding="utf-8"))["result"], "taken")
+        self.assertTrue(any("다른 PC가 쓰고 있어서" in x for x in fb.lines))
+
+    def test_ntfy_unreachable_retried_next_start(self):
+        p = self.make_preset()
+        home = self.tmp / "인터넷 없는 PC"
+        self.ntfy.down = True
+        svc, _ = self.fresh(p, home=home, owner="paired")
+        self.assertIsNone(svc.store.login())
+        self.assertFalse(self.marker(home).exists())
+        self.ntfy.down = False
+        svc2, _ = self.fresh(p, home=home)
+        self.assertTrue(svc2.store.login()["preset"])
 
 
 class PcApiTests(LoginBase):

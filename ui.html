@@ -4444,6 +4444,13 @@ $("rmBox").addEventListener("change", e => {
    따로 뜨는 창 #rlMask/#rlBox (열 때 한 번만 그리고 rmLoad 가 건드리지 않음 · 열기 전에는 비어 있어 이 화면에 비밀번호 칸이 없음) */
 const RL = { kind: null, t: null, busy: false };
 const rlDay = t => { const d = new Date(t * 1000); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+// 막힌 때까지: 오늘이면 시각만 · 내일이면 '내일 오후 3:40' · 그 뒤면 '10월 14일 오후 3:40' (24시간 막힘이 '벌써 지난 시각'처럼 읽히지 않게)
+const rlUntil = t => {
+  const d = new Date(t * 1000), n = new Date(), tm = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1);
+  return (d.toDateString() === n.toDateString() ? "" : d.toDateString() === tm.toDateString() ? "내일 " : rlDay(t) + " ") + rmClock(t);
+};
+// 영문 자판 꼴: 한글이 든 아이디만 (영문 아이디는 같은 글이 두 번 나오지 않게 · 점·- 를 뺀 꼴이 다르면 보여 줌)
+const rlKeys = L => String(L.idShow || "").toLowerCase() === String(L.idKeys || "") ? "" : ` (영문 자판으로는 ${esc(L.idKeys)})`;
 async function rlPost(path, body) {  // 오류는 알림 글 대신 창 안에 (api() 는 오류를 알림으로 띄움)
   try {
     const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -4465,16 +4472,19 @@ function rlSection(d) {
   const s = L.suspended, again = `<div class="rbtns"><button class="btn primary" data-rl="pw">비밀번호 바꾸기</button><button class="btn" data-rl="resume">그대로 다시 켜기</button></div>`;
   if (s && s.why === "kick") h += `<p class="rerr">밖에서 [끊기]를 눌러 아이디 연결을 잠갔어요 · 비밀번호가 새어 나갔을 수 있으니 바꿔 주세요</p>` + again;
   else if (s) h += `<p class="rerr">비밀번호가 ${esc(L.total)}번 틀려서 아이디 연결을 잠갔어요 · 누가 맞히려 했을 수 있어요 · 새 비밀번호로 바꾸는 걸 권해요</p>` + again;
-  else if (L.lock) h += `<p class="rerr">비밀번호가 여러 번 틀려서 ${esc(rmClock(L.lock.until))}까지 아이디 연결을 막았어요 · 내가 아니라면 비밀번호를 바꿔 주세요</p>
+  else if (L.lock) h += `<p class="rerr">비밀번호가 여러 번 틀려서 ${esc(rlUntil(L.lock.until))}까지 아이디 연결을 막았어요 · 내가 아니라면 비밀번호를 바꿔 주세요</p>
       <div class="rbtns"><button class="btn" data-rl="unlock">지금 풀기</button></div>`;
   if (L.collision) h += `<p class="rerr">다른 PC가 같은 아이디를 쓰고 있어요 · 아이디를 바꿔 주세요</p><div class="rbtns"><button class="btn" data-rl="id">아이디 바꾸기</button></div>`;
   if (!L.enabled) {
     return h + `<p>꺼져 있어요 · 아이디 <b>${esc(L.idShow)}</b></p>
       <div class="rbtns"><button class="btn primary" data-rl="on">다시 켜기</button><button class="btn" data-rl="set">아이디·비밀번호 바꾸기</button></div></div>`;
   }
-  h += `<p><span class="rok">켜져 있어요 ✓</span> · 아이디 <b>${esc(L.idShow)}</b> (영문 자판으로는 ${esc(L.idKeys)}) · ${esc(rlDay(L.setAt))}에 정함</p>`;
+  h += `<p><span class="rok">켜져 있어요 ✓</span> · 아이디 <b>${esc(L.idShow)}</b>${rlKeys(L)} · ${esc(rlDay(L.setAt))}에 정함</p>`;
   if (L.preset) h += `<div class="rnote">미리 정해 둔 비밀번호예요 · 바꾸기를 권해요 <button class="btn sm primary" data-rl="pw">비밀번호 바꾸기</button></div>`;
-  h += `<div class="small">밖에서 <b>${site}</b> → '아이디·비밀번호로 연결' · 이 주소가 아닌 곳에는 비밀번호를 넣지 마세요 · 새 기기가 연결되면 휴대폰 알림이 와요</div>`;
+  // QR 로 연결한 휴대폰이 없으면 새 기기 알림·[끊기]를 받을 곳이 없음 → '알림이 와요' 대신 그 경고와 [휴대폰 연결하기] (미리 정한 로그인은 정하기 창의 확인을 안 거침)
+  h += `<div class="small">밖에서 <b>${site}</b> → '아이디·비밀번호로 연결' · 이 주소가 아닌 곳에는 비밀번호를 넣지 마세요${L.codeDevices === 0 ? "" : " · 새 기기가 연결되면 휴대폰 알림이 와요"}</div>`;
+  if (L.codeDevices === 0) h += `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>
+    <div class="rbtns"><button class="btn sm" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button></div>`;
   if (L.autoOffHours > 0) h += `<div class="small">자동으로 끄기가 ${esc(L.autoOffHours)}시간이라, ${esc(L.autoOffHours)}시간 동안 안 쓰면 원격 접속이 꺼져 밖에서 연결할 수 없어요 <button class="btn sm" data-rl="autooff">안 함으로 바꾸기</button></div>`;
   const ev = L.events || [];
   if (ev.length) {
@@ -4490,7 +4500,8 @@ function rlOffNote(d) {  // 원격 접속이 꺼져 있을 때: 준비된 아이
   const L = d.login || {};
   if (!L.set || !L.enabled) return "";
   return `<div class="rnote">아이디·비밀번호로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b>${L.preset ? " · 미리 정해 둔 비밀번호예요 · 바꾸기를 권해요" : ""} · 밖에서 쓰려면 위 [원격 접속 켜기]를 눌러 주세요`
-    + (L.preset ? ` <button class="btn sm" data-rl="pw">비밀번호 바꾸기</button>` : "") + `</div>`;
+    + (L.preset ? ` <button class="btn sm" data-rl="pw">비밀번호 바꾸기</button>` : "") + `</div>`
+    + (L.codeDevices === 0 ? `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>` : "");
 }
 function rlPwFields(L) {
   return `<div class="rrow"><span>비밀번호</span><input class="inp" id="rlPw" type="password" autocomplete="new-password" maxlength="128" style="min-width:0;flex:1 1 200px">
@@ -4626,11 +4637,15 @@ $("rlBox").addEventListener("click", async e => {
     ["rlPw", "rlPw2"].forEach(id => { $(id).type = "text"; });
     const sb = $("rlBox").querySelector('[data-rlx="show"]'); if (sb) sb.textContent = "숨기기";
     $("rlSugg").hidden = false;
+    rlErr("");   // 앞서 저장할 때의 오류 글은 지움 (추천 비밀번호까지 거절된 것처럼 보이지 않게)
     return rlCheck();
   }
   if (a === "test") { const r = await rlPost("/api/remote/test", {}); toast(r.j.ok ? "알림을 보냈어요 · 휴대폰을 확인해 주세요" : (r.j.error || "보내지 못했어요")); }
 });
-$("rlBox").addEventListener("input", e => { if (e.target.id === "rlPw" || e.target.id === "rlId") rlCheck(); });
+$("rlBox").addEventListener("input", e => {
+  if (e.target.id === "rlPw" || e.target.id === "rlPw2" || e.target.id === "rlId") rlErr("");  // 고치기 시작하면 앞서의 오류 글은 지움
+  if (e.target.id === "rlPw" || e.target.id === "rlId") rlCheck();
+});
 $("rlBox").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "checkbox") rlSave(false); });
 $("rlMask").addEventListener("click", e => { if (e.target === $("rlMask")) rlClose(); });
 </script>

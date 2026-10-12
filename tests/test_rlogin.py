@@ -124,6 +124,16 @@ class PwRuleTests(unittest.TestCase):
         self.assertEqual(rlogin.pw_problems("goalkeeperxy"), [])       # 12
         self.assertEqual(rlogin.pw_problems("노을축구공바다"), [])       # 한글만 (shdmfcnrrnrhdqkek 17)
 
+    def test_five_hangul_syllables_need_no_digits(self):
+        """화면 문장 '한글 5글자 이상이면 숫자 없어도 돼요' 그대로 (받침 없는 다섯 글자는 10~11글쇠 · 검토 고침)."""
+        for pw in ("소나기바다", "나무가지바", "하루바다꽃", "바다나라소", "나는코치다", "코치최고야", "모래사자고", "가자우리팀", "도레미파솔"):
+            self.assertLess(len(rlogin.canon_pw(pw)), 12, pw)
+            self.assertEqual(rlogin.pw_problems(pw, "rlazhcl77"), [], pw)
+            self.assertEqual(rlogin.hangul_syllables(pw), 5)
+        self.assertEqual(rlogin.pw_problems("소나기비"), ["letters"])        # 네 글자는 여전히 짧음 (문장도 '한글은 5글자 이상')
+        self.assertEqual(rlogin.pw_problems("thskrlqkek"), ["letters"])     # 같은 글쇠를 영문으로 정할 때는 12글쇠 규칙 (로그인은 같은 꼴)
+        self.assertIn("한글은 5글자 이상", rlogin.PW_MSG["letters"])
+
     def test_common_with_trailing_digits(self):
         for pw in ("qwer1234!", "password12", "Password!!", "사랑해요1234", "1q2w3e4r!"):
             self.assertIn("common", rlogin.pw_problems(pw), pw)

@@ -81,6 +81,9 @@ MSG = {
 }
 LOCK_TITLE = {"none": "다시 연결해 주세요", "expired": "연결이 끝났어요", "revoked": "PC에서 연결을 끊었어요",
               "studio_off": "밖에서 작업이 꺼져 있어요", "handoff": "다시 연결해 주세요", "logout": "연결을 끝냈어요"}
+# '이번만' 연결한 기기 (아이디·비밀번호 · D-256): 원격 홈에 [PC 스튜디오 열기]가 남지 않음 → 아이디·비밀번호로 다시 (remote_ui.js·hello.js 와 같은 문장)
+MSG_GUEST = {"revoked": "PC에서 연결을 끊었어요 · 다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요",
+             "logout": "이 기기에서 나갔어요 · 다시 쓰려면 원격 홈에서 아이디·비밀번호로 다시 연결해 주세요"}
 CONFIRM_YT = "유튜브에 올릴까요?\n\n제목: {title}\n공개 범위: {privacy}\n편집본: {video}\n\n밖에서 누른 올리기예요 · 맞으면 [확인]을 눌러 주세요"
 CONFIRM_RESUME = "멈춘 유튜브 올리기를 이어 할까요?\n\n제목: {title}\n공개 범위: {privacy}\n파일: {video}\n\n밖에서 누른 올리기예요 · 맞으면 [확인]을 눌러 주세요"
 CONFIRM_FINISH = "유튜브에 올린 영상의 남은 것(썸네일·자막·재생목록)을 마저 할까요?\n\n제목: {title}\n\n밖에서 누른 마무리예요 · 맞으면 [확인]을 눌러 주세요"
@@ -113,7 +116,7 @@ class Sessions:
         self.clock = clock
         self.lock = threading.Lock()
         self.items = {}                          # 토큰 해시 → 세션
-        self.gone = collections.OrderedDict()    # 끝난 토큰 해시 → (까닭 코드, 시각)
+        self.gone = collections.OrderedDict()    # 끝난 토큰 해시 → (까닭 코드, 시각, 이번만 기기였는지)
         self.seen = {}                           # 기기 → 마지막으로 세션이 있던 때 (새 세션 알림을 30분에 한 번만)
 
     def _expired(self, rec, now):
@@ -121,7 +124,7 @@ class Sessions:
 
     def _forget(self, rec, code, why):
         self.items.pop(rec["hash"], None)
-        _lru_put(self.gone, rec["hash"], (code, self.clock()), GONE_MAX)
+        _lru_put(self.gone, rec["hash"], (code, self.clock(), bool(rec.get("guest"))), GONE_MAX)
         rec["endedWhy"] = why
         self.seen[rec["device"]] = self.clock()
 
@@ -159,6 +162,14 @@ class Sessions:
             if g and now - g[1] < GONE_KEEP:
                 return None, g[0]
         return None, "none"
+
+    def gone_guest(self, tok):
+        """끝난 쿠키가 '이번만' 기기의 것이었는지 (잠금 쪽 문장을 '아이디·비밀번호로 다시 연결'로)."""
+        if not tok or not TOKEN_RE.fullmatch(tok):
+            return False
+        with self.lock:
+            g = self.gone.get(_h(tok))
+        return bool(g and len(g) > 2 and g[2])
 
     def touch(self, rec, net):
         """요청마다: 마지막 시각 · 새 인터넷 대역이면 True (기록에 한 번)."""
@@ -459,13 +470,15 @@ def _navigation(h):
     return h.command == "GET" and "text/html" in (h.headers.get("Accept") or "")
 
 
-def lock_page(h, svc, code, status=401):
-    """세션 없이 화면을 열었을 때: 정적 안내 쪽 (스크립트는 /s/hello.js 하나 · 원격 홈으로 · none·expired 는 저절로 다시 연결)."""
+def lock_page(h, svc, code, status=401, guest=False):
+    """세션 없이 화면을 열었을 때: 정적 안내 쪽 (스크립트는 /s/hello.js 하나 · 원격 홈으로 · none·expired 는 저절로 다시 연결).
+    guest: 끝난 세션이 '이번만' 기기의 것 → 문장을 '아이디·비밀번호로 다시 연결'로 (fs-guest 로 hello.js 에도)."""
     site = svc.site()
     title = LOCK_TITLE.get(code, LOCK_TITLE["none"])
-    msg = MSG.get(code, MSG["none"])
+    msg = (guest and MSG_GUEST.get(code)) or MSG.get(code, MSG["none"])
     page = (f'<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<meta name="referrer" content="no-referrer"><meta name="fs-lock" content="{html.escape(code)}">'
+            + ('<meta name="fs-guest" content="1">' if guest else '') +
             f'<meta name="fs-site" content="{html.escape(site)}"><title>풋살 스튜디오 · {html.escape(title)}</title>'
             f'<script src="/s/hello.js"></script></head><body><main id="box"><h1>{html.escape(title)}</h1><p id="msg">{html.escape(msg)}</p>'
             f'<p><a id="home" href="{html.escape(site)}">원격 홈으로 가기</a></p></main></body></html>').encode("utf-8")
@@ -614,13 +627,17 @@ def gate(h, method, svc, ip):
     tok = read_cookie(h, cookie_name(svc))
     sess, why = st.sessions.lookup(tok)
     if not sess:  # 모르는·지난 쿠키는 잠금 횟수에 세지 않음 (열어 둔 탭의 1초 묻기가 스스로를 잠그지 않게)
+        guest = st.sessions.gone_guest(tok)
         if _navigation(h) and method == _G:
-            return lock_page(h, svc, why)
-        return send(h, 401, {"ok": False, "code": why, "error": MSG[why], "site": svc.site()})
+            return lock_page(h, svc, why, guest=guest)
+        return send(h, 401, dict({"ok": False, "code": why, "error": (guest and MSG_GUEST.get(why)) or MSG[why], "site": svc.site()},
+                                 **({"guest": True} if guest else {})))
     dev = svc.store.device(sess["device"])
     if not dev:  # 기기 연결을 끊었으면 (열쇠가 없음) 세션도 끝
         st.sessions.end(lambda r: r is sess, "revoked", "기기 연결 끊음")
-        return send(h, 401, {"ok": False, "code": "revoked", "error": MSG["revoked"], "site": svc.site()})
+        guest = bool(sess.get("guest"))
+        return send(h, 401, dict({"ok": False, "code": "revoked", "error": MSG_GUEST["revoked"] if guest else MSG["revoked"], "site": svc.site()},
+                                 **({"guest": True} if guest else {})))
     if st.sessions.touch(sess, net):
         svc.log(f"밖에서 작업 · {sess['name']} · 인터넷 연결이 바뀌었어요")
     svc.touch(dev)
