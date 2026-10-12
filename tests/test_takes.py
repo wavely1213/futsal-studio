@@ -504,6 +504,8 @@ class RecommendTest(unittest.TestCase):
                     sh.pop("score")
                     self.assertEqual(set(sh.pop("point")), {"n", "unit", "phrase"})  # BR-120: 이 쇼츠 포인트 · 첫머리 주제 줄 (더해지기만)
                     self.assertIsInstance(sh.pop("topic"), str)
+                    self.assertIsInstance(sh.pop("topicText"), str)   # D-221: 설정과 상관없이 고른 주제 줄 글 · 큰 제목이 대사 그대로인지
+                    self.assertIsInstance(sh.pop("hookSaid"), bool)
                 c = dict(c, before=dict(c["before"], shorts=[{k: v for k, v in sh.items() if k != "score"} for sh in c["before"]["shorts"]]))
                 if c["input"].startswith("코치"):
                     self.assertEqual(junk_list, [])

@@ -179,7 +179,7 @@ class EditorWiringTest(Work):
         self.assertTrue(all(q["captionsOn"] for q in shorts))  # 쇼츠는 자막 위
         self.assertTrue(all(q["auto"] == "style" for q in seqs))
         import re
-        strip = lambda qs: re.sub(r'"(id|link)": "[0-9a-f]{8}"', '"\\1": "-"', json.dumps(qs, sort_keys=True, ensure_ascii=False))  # noqa: E731
+        strip = lambda qs: re.sub(r'"(id|link|under)": "[0-9a-f]{8}"', '"\\1": "-"', json.dumps(qs, sort_keys=True, ensure_ascii=False))  # noqa: E731 (under: 주제 줄이 맞춘 큰 제목 id · BR-120)
         self.assertEqual(strip(long_), strip(alone_long))  # 롱폼 = 긴 영상 값만으로 만든 것과 똑같음
         self.assertEqual(strip(shorts), strip(alone_short))  # 쇼츠 = 쇼츠 값만으로 만든 것과 똑같음
 

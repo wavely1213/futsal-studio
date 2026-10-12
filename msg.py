@@ -3382,32 +3382,15 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             refs["sfx"] = [len(B.sfx) - 1]
         B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
 
-    topic_line = ""
+    topic_line = opening = ""
     if shorts_hook and B.pos > 3.0:
-        hlook = dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop")
-        vt, topic_on = rec.get("videoTopic") or "", editor.shorts_topic_on()
-        main = _shorts_main(vt, short_r) if topic_on else None   # 첫머리 = 이 쇼츠 포인트 + 그 위 주제 줄 (BR-120)
-        if main:
-            htxt = main
-        else:
-            lim = 14   # 쇼츠 한 줄 14자 — 문장 부호·글꼴에 없어 바꾼 '...'까지 셈 (판정 U6: '퍼스트 터치 레슨, 이것만 알면...' 16자)
-            htxt = _short_text(hook, lim)
-            head = re.split(r"[,.?!]", str(hook))[0].strip()
-            if htxt != hook and 4 <= len(head.replace(" ", "")) <= lim and head != str(hook).strip():
-                htxt = head   # 잘라야 하면 앞 구절에서 ('퍼스트 터치 레슨, 이것만…' 대신 '퍼스트 터치 레슨')
-            while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
-                lim -= 1
-                htxt = _short_text(hook, lim)
-        hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
-        ids = [hk["id"]]
-        kick = editor.topic_line(vt, (short_r or {}).get("point"), htxt) if topic_on else ""
-        kt = _topic_kicker(B, kick, hk, st, cap_y, fmt) if kick else None
-        if kt:
-            ids.append(kt["id"])
-            topic_line = kt["text"]
+        hk, kt, opening = _shorts_intro(B, hook, short_r, rec.get("videoTopic") or "", editor.shorts_topic_on(), looks, st, cap_y, fmt, caps)
+        topic_line = kt["text"] if kt else ""
         B.sfx.append((0.0, pal.get("title", "짠"), None, "title"))
         B.event("hook", 0.0, f"{kt['text']} · {hk['text']}" if kt else hk["text"], "쇼츠 첫 2.5초 주제 줄 + 포인트" if kt else "쇼츠 첫 2.5초 훅 자막",
-                refs={"titles": ids, "sfx": [len(B.sfx) - 1]})
+                refs={"titles": [hk["id"]] + ([kt["id"]] if kt else []), "sfx": [len(B.sfx) - 1]})
+        # 첫머리가 이미 말한 순서('동작 2' · '두 번째 포인트')를 바로 뒤 상황 자막이 또 띄우면 뺌 (검토: 2.6초에 '동작 2'가 다시 뜸)
+        _drop_said_order(B, hk, kt)
 
     # --- 몽타주 (마무리 말이 없으면 끝나기 전) ---
     if mont and fmt == "long" and not mont_done:
@@ -3473,7 +3456,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     seq["auto"] = "msg"
     summ = summary_of(B.events, sections, total, seq_items_audio)
     seq["msg"] = {"v": 1, "style": {"label": st.get("label"), "kind": st.get("kind"), "sources": st.get("sources")}, "intensity": intensity, "seed": seed,
-                  "events": B.events, "thumb": thumbs, "summary": summ, "notes": st.get("notes") or [], "hook": hook, "topic": topic, "topicLine": topic_line,
+                  "events": B.events, "thumb": thumbs, "summary": summ, "notes": st.get("notes") or [], "hook": hook, "topic": topic, "topicLine": topic_line, "opening": opening,
                   "bgm": [{"a": round(a, 2), "b": round(b, 2), "mood": md} for a, b, md in sections]}
     return seq, list(B.media.values()), len(visual_events(B.items, B.titles, B.shapes, total)), B.lost
 
@@ -3923,26 +3906,102 @@ def _is_term(t):
     return bool(k) and any(hooks._compact(x) == k for x in editor._point_terms())
 
 
-def _shorts_main(vt, r):
-    """MSG 쇼츠 첫 2.5초 큰 줄 = 이 쇼츠의 포인트 (BR-120 · 그 위 주제 줄은 editor.topic_line) → 글 또는 None(예전 훅 그대로).
-    가편집 쇼츠의 위 큰 제목(추천 구간 hook · BR-093) 중 용어 사전 말로 만든 것만 씀 ('트래핑 꿀팁' · '디딤발!' · 영상 주제 vt 를 주제 줄에
-    쓰면 '패스\n두 번째 동작' → '두 번째 동작'). 그 제목이 영상 주제와 같은 말뿐이면('슈팅 챌린지') 이 쇼츠의 요점 말('디딤발 방향'),
-    그것도 없으면 None — 예전 훅(첫 질문)이 큰 줄, 영상 주제가 주제 줄. 문장·질문 제목은 받아쓰기 헛말일 수 있어 안 씀."""
+def _shorts_openings(vt, r):
+    """MSG 쇼츠 첫 2.5초 큰 줄 후보 [(글 | None=예전 훅, 주제 줄이 꼭 있어야 하는지)] — 앞에서부터 씀 (BR-120 · 그 위 주제 줄은
+    editor.topic_line). 다 안 되면 예전 훅(첫 질문)만. 가편집 쇼츠의 위 큰 제목(추천 구간 hook · BR-093) 중 용어 사전 말로 만든 것
+    ('트래핑 꿀팁' · '디딤발!') · 그 제목이 영상 주제와 같은 말뿐이면('슈팅 챌린지') 이 쇼츠의 요점 말('디딤발 방향') → 예전 훅 —
+    둘 다 무엇에 대한 쇼츠인지는 주제 줄이 말하므로 주제 줄을 실제로 놓았을 때만 · 못 놓으면 주제를 말하는 그 제목 그대로 (검토:
+    위쪽 말 자막·확대한 첫 장면에서 주제 낱말이 빠진 큰 줄만 남음). '패스 / 두 번째 동작'처럼 영상 주제 + 순서면 요점 말 → 영상 주제
+    ('패스 앤 무브 드릴' · 순서는 주제 줄 '동작 2') — 순서 말뿐인 줄('두 번째 동작')은 같은 때 말 자막('두번째 동작은 …')을 되풀이하고
+    무엇의 동작인지 말하지 않아 안 씀 (검토). 문장·질문 제목은 받아쓰기 헛말일 수 있어 큰 줄로 안 씀 (요점 말이 있으면 그것)."""
     if not r:
-        return None
+        return []
     h = str(r.get("hook") or "").strip()
     p = (r.get("point") or {}).get("phrase")
+    pt = [(p, True)] if p and not (vt and editor._shares_word(p, vt)) else []
     if "\n" in h:
         first, second = (x.strip() for x in h.split("\n", 1))
         if editor.ORD_ANY.search(second) and _is_term(first):
-            return second if vt and editor._shares_word(first, vt) else h
-        return p or None
+            if not (vt and editor._shares_word(first, vt)):
+                return [(h, False)]
+            return pt + ([(vt, False)] if len(re.sub(r"\s", "", vt)) <= editor.TOPIC_MAX and "\n" not in vt else [])
+        return pt
     m = re.fullmatch(r"(.+?)(?: 꿀팁| 챌린지|!)", h)
     if m and _is_term(m.group(1)):
         if vt and editor._shares_word(m.group(1), vt):  # 영상 주제와 같은 말뿐 ('슈팅 챌린지' · '슈팅 꿀팁')
-            return p if p and not editor._shares_word(p, vt) else None
-        return h
-    return p or None
+            return pt + [(None, True), (h, False)]
+        return [(h, False)]
+    return pt
+
+
+def _shorts_main(vt, r):
+    """MSG 쇼츠 첫 2.5초 큰 줄의 첫 후보 (_shorts_openings) → 글 또는 None(예전 훅)."""
+    c = _shorts_openings(vt, r)
+    return c[0][0] if c else None
+
+
+def _ord_num(text):
+    """글 속 순서 번호 ('두 번째 동작' · '동작 ②' · '동작 2' · '포인트 3' → 2·2·2·3) — 없으면 None."""
+    t = str(text or "")
+    m = re.search(r"(첫|두|세|네|다섯|여섯|일곱)\s?번째", t)
+    if m:
+        return ORD[m[1]]
+    m = re.search(r"[①-⑦]", t)
+    if m:
+        return CIRCLED.index(m[0]) + 1
+    m = re.search(r"(?:포인트|동작|기술|방법|팁|단계|도전|슛)\s?(\d)(?!\d)", t)
+    return int(m[1]) if m else None
+
+
+def _shown_cap_dup(B, text, caps, t1=SHORTS_HOOK_SEC):
+    """text 가 타임라인 [0, t1] 동안 보이는 말 자막을 되풀이하는지 (_cap_dup · 본편 클립으로 원본 시각을 찾아 봄)."""
+    for it in B.main:
+        a, b = max(0.0, float(it["start"])), min(t1, editor.i_end(it))
+        if b <= a:
+            continue
+        sp = editor.i_sp(it)
+        if _cap_dup(text, float(it["in"]) + (a - float(it["start"])) * sp, float(it["in"]) + (b - float(it["start"])) * sp, caps):
+            return True
+    return False
+
+
+def _shorts_intro(B, hook, short_r, vt, topic_on, looks, st, cap_y, fmt, caps):
+    """MSG 쇼츠 첫 2.5초 (BR-120) → (큰 줄 title, 주제 줄 title|None, 큰 줄을 이 쇼츠 포인트로 바꿨으면 그 글 · 아니면 '').
+    큰 줄 후보(_shorts_openings)를 차례로: 같은 때 말 자막을 되풀이하는 줄은 건너뛰고, 주제 낱말을 뺀 줄('디딤발 방향')은 그 위 주제 줄을
+    실제로 놓았을 때만 (못 놓으면 다음 후보 — 검토: 위쪽 말 자막·확대한 첫 장면에서 주제 없는 '두 번째 동작'만 남음) · 끝은 예전 훅(첫 질문)."""
+    hlook = dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop")
+    point = (short_r or {}).get("point")
+    caps_on = st["captions"].get("on", True)
+    for main, need in (_shorts_openings(vt, short_r) if topic_on else []) + [(None, False)]:
+        if main and caps_on and _shown_cap_dup(B, main, caps):
+            continue
+        if main:
+            htxt = main
+        else:
+            lim = 14   # 쇼츠 한 줄 14자 — 문장 부호·글꼴에 없어 바꾼 '...'까지 셈 (판정 U6: '퍼스트 터치 레슨, 이것만 알면...' 16자)
+            htxt = _short_text(hook, lim)
+            head = re.split(r"[,.?!]", str(hook))[0].strip()
+            if htxt != hook and 4 <= len(head.replace(" ", "")) <= lim and head != str(hook).strip():
+                htxt = head   # 잘라야 하면 앞 구절에서 ('퍼스트 터치 레슨, 이것만…' 대신 '퍼스트 터치 레슨')
+            while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
+                lim -= 1
+                htxt = _short_text(hook, lim)
+        hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
+        kick = editor.topic_line(vt, point, htxt) if topic_on else ""
+        kt = _topic_kicker(B, kick, hk, st, cap_y, fmt) if kick else None
+        if kt or not need:
+            return hk, kt, (hk["text"] if main else "")
+        B.titles.remove(hk)
+    return hk, kt, ""   # (끝 후보는 늘 위에서 돌아감)
+
+
+def _drop_said_order(B, hk, kt):
+    """첫머리(큰 줄·주제 줄)가 말한 순서 번호와 같은 번호의 상황 자막이 첫머리 바로 뒤(SHORTS_HOOK_SEC + 1.5초 안)에 뜨면 뺌 → 뺀 사건 수."""
+    on = _ord_num(hk["text"]) or (_ord_num(kt["text"]) if kt else None)
+    dup = [e["id"] for e in B.events if on and e["kind"] == "situ" and float(e["t"]) <= SHORTS_HOOK_SEC + 1.5 and _ord_num(e.get("text")) == on]
+    if dup:
+        _drop(B, event_ids=dup)
+    return len(dup)
 
 
 TOPIC_KICK = (64, 56)   # MSG 쇼츠 주제 줄 글자 크기 (큰 것부터 · 큰 줄 96 · 휴대폰에서 읽히는 크기)
@@ -3958,6 +4017,8 @@ def _topic_kicker(B, text, hk, st, cap_y, fmt="shorts"):
     base = dict(hl, fill="#FFFFFF" if hl.get("bgOn") else (c.get("emphColor") or "#FFE14D"))
     if not hl.get("bgOn"):
         base["strokeW"] = min(int(hl.get("strokeW") or 8), 8)
+    if "·" in text and "·" in (_NO_GLYPH.get(base.get("font")) or {}):  # 사이 점이 없는 글꼴(검은고딕·도현)은 '|' — 사이 점 하나로 큰 줄과 글꼴이 달라지지 않게 (검토)
+        text = re.sub(r"\s*·\s*", " | ", text)
     if glyph_safe(text, base.get("font")) != text:
         base.pop("font", None)
         base["weight"] = "Black"
@@ -3996,7 +4057,7 @@ def _topic_kicker(B, text, hk, st, cap_y, fmt="shorts"):
                 hl["y"] = round(float(hl["y"]) + d / H, 4)
             yk = math.floor(y / H * 10000) / 10000 if where == "above" else math.ceil(y / H * 10000) / 10000   # 틈이 줄지 않게
             kt = B.title(text, 0.0, float(hk["dur"]), dict(look, y=yk))
-            kt["plan"] = "topic"
+            kt["plan"], kt["under"] = "topic", hk["id"]
             return kt
     return None
 

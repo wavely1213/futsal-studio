@@ -724,6 +724,13 @@ function moveItem(it, f) {
   if (len < iLen(it) - EPS) { if (it.rev) n.in = r6(it.out - len * sp(it)); else n.out = r6(it.in + len * sp(it)); }
   return n;
 }
+// 쇼츠 첫머리 주제 줄(BR-120)을 옮기는 규칙 (군더더기 정리·잘라내기·MSG 빼기가 같이 씀): 맨 앞 주제 줄은 맨 앞 그대로 · 바꿔 끼운 큰 제목은 주제 줄 뒤부터
+const r3 = t => Math.round(t * 1000) / 1000;
+function swapIn(top, k) { // 바꿔 끼운 주제 줄(k) 뒤로 큰 제목(top)을 옮김 — 주제 줄이 끝난 때부터 원래 끝까지
+  if (k && k.swap && top.start < k.start + k.dur - 1e-6) { const e = top.start + top.dur; top.start = r3(k.start + k.dur); top.dur = r3(e - top.start); }
+}
+const headTopic = g => g.plan === "topic" && g.start < 0.05;  // 쇼츠 맨 앞 주제 줄 — 앞을 잘라도(Q·대사 잘라내기·군더더기 정리) 맨 앞 그대로
+function topicAfter(titles) { for (const k of titles) if (k.plan === "topic" && k.swap) { const top = titles.find(x => x.id === k.under); if (top) swapIn(top, k); } }
 function remapSeq(q, cut, ins, extra) {
   const f = tlRemap(cut, ins), links = new Map(), first = new Map(), last = new Map(), items = [];
   const inCut = t => cut.some(([a, b]) => t >= a - EPS && t < b - EPS);
@@ -740,7 +747,7 @@ function remapSeq(q, cut, ins, extra) {
   items.push(...extra(f));
   const end0 = Math.max(0, ...q.items.map(iEnd));
   const span = x => { // 늘어나는 건 끝까지 덮던 것만 (쇼츠 내내 뜨는 제목) · 강조 글씨 같은 짧은 글씨는 원래 길이까지만
-    if (x.full) return { ...x };
+    if (x.full || headTopic(x)) return { ...x }; // 쇼츠 맨 앞 주제 줄은 앞이 줄거나 늘어도 맨 앞 그대로 (BR-120)
     const s = f(x.start, false), m = r6(f(x.start + x.dur, true) - s), d = x.start + x.dur >= end0 - 0.05 ? m : Math.min(m, x.dur);
     if (x.plan === "emphasis" && inCut(x.start)) return null; // 그 말이 잘려 나감
     if (!(d >= Math.min(0.3, x.dur) - EPS)) return null;
@@ -754,7 +761,8 @@ function remapSeq(q, cut, ins, extra) {
     return { ...x, start: s, dur: d, follow: tacRefollow(x, s, pairs) };
   };
   const trans = (q.trans || []).map(tr => ({ ...tr, a: tr.a ? last.get(tr.a) || null : null, b: tr.b ? first.get(tr.b) || null : null })).filter(tr => tr.a || tr.b);
-  return { items, trans, titles: (q.titles || []).map(span).filter(Boolean), shapes: (q.shapes || []).map(span).filter(Boolean), tactics: (q.tactics || []).map(span).filter(Boolean),
+  const titles = (q.titles || []).map(span).filter(Boolean); topicAfter(titles);
+  return { items, trans, titles, shapes: (q.shapes || []).map(span).filter(Boolean), tactics: (q.tactics || []).map(span).filter(Boolean),
     markers: (q.markers || []).map(m => ({ ...m, t: f(m.t, false) })), cut: r6(cut.reduce((a, [x, y]) => a + y - x, 0)), added: r6(ins.reduce((a, x) => a + x.len, 0)) };
 }
 // 군더더기 정리: 원본 keep([{in,out}]) 밖에 있는 V1 원본 구간을 타임라인에서 뺌 — 쇼츠는 자기 구간 안에서만 줄어듦
@@ -937,9 +945,10 @@ function capFit(text, st, W) {
   const k = Math.floor(avail / need * 100) / 100;
   return k >= 0.7 ? k : 1;
 }
-// 쇼츠 첫머리 주제 줄 (BR-120 · editor.py topic_title·text_box·_one_line·_topic_fill 과 같은 규칙 — 한쪽을 고치면 다른 쪽도):
-// 위 큰 제목 바로 위 · 한 줄 · 위쪽 안전 영역(TOP) 안 · 처음 SEC 초 · 색은 말 자막 색(어두우면 흰 테두리) · 자리가 없으면 null
-const TOPIC = { SEC: 2.5, TOP: 0.07, ONE: 0.9, SIZES: [72, 64], LINE: 1.25, GAP: 0.012 };
+// 쇼츠 첫머리 주제 줄 (BR-120 · editor.py topic_title·video_top·swap_in·text_box·_one_line·_topic_fill·_cap_band 과 같은 규칙 — 한쪽을 고치면 다른 쪽도):
+// 처음 SEC 초 · 한 줄 · 위쪽 안전 영역(TOP) 안 · 말 자막 띠(+틈)와 안 겹침 · 영상 위 끝 위 — ① 위 큰 제목 바로 위 작은 머리 줄(말 자막 색 · 어두우면 흰 테두리)
+// ② 큰 제목이 두 줄·대사 그대로(said)·위에 자리가 없으면 큰 제목 자리·모양으로 바꿔 끼우기(swap · 큰 제목은 그 뒤부터 · swapIn) · 자리가 없으면 null
+const TOPIC = { SEC: 2.5, TOP: 0.07, ONE: 0.9, SIZES: [72, 64], SWAP: [100, 90, 80, 72], LINE: 1.25, GAP: 0.012 };
 const TOPIC_STYLE = { weight: "Black", size: 72, fill: "#FFFFFF", stroke: "#111111", strokeW: 8, bgOn: false, bg: "#000000", bgOpacity: 0.55, y: 0.22, effect: "pop", highlight: "#FFD400" };
 function txtBox(text, st, W, H) {  // 글 상자 [왼, 위, 오른, 아래] 화면 비율 · y 는 글 아래 끝 (editor.py text_box)
   const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", avail = 0.92 * W - 2 * stroke, sp = emOf(" ") * size, widths = [];
@@ -962,27 +971,73 @@ function topicFill(cap) {
   const lum = [[0.299, 1], [0.587, 3], [0.114, 5]].reduce((a, [k, i]) => a + k * parseInt(f.slice(i, i + 2), 16) / 255, 0);
   return [f, lum >= 0.4 ? "#111111" : "#FFFFFF"];
 }
-function topicTitle(text, top, cap, len) {
+function capBand(cap) { const h = (TOPIC.LINE * (+cap.size || 0) + 2 * (+cap.strokeW || 0)) / 1920, y = +(cap.y ?? 0.85); return [y - h, y]; }  // 한 줄 말 자막 (위, 아래)
+function videoTop(lay, items, sw, sh) {  // 위아래 박스·흐린 배경에서 처음 SEC 초 동안 본 영상이 닿는 가장 위 (확대 컷은 기준점 둘레로 키움) · 꽉 채우기는 null
+  lay = { mode: "box", bar: "#000000", zoom: 1, vpos: 0.5, cropTop: 0, cropBottom: 0, ...(lay || {}) };
+  if (lay.mode !== "box" && lay.mode !== "blur") return null;
+  const W = 1080, H = 1920, keep = Math.max(0.2, 1 - (+lay.cropTop || 0) - (+lay.cropBottom || 0));
+  const ch = Math.min((+sh || 1080) * keep * W * Math.max(1, +lay.zoom || 1) / (+sw || 1920), H), by = (H - ch) * +(lay.vpos ?? 0.5);
+  let top = by;
+  for (const it of items || []) {
+    if (it.track !== "V1" || (+it.start || 0) >= TOPIC.SEC || (it.fit || "auto") !== "auto") continue;
+    const sc = prm(it, "scale"), s = Math.max(+sc.v, ...sc.k.map(k => +k.v)) / 100;
+    if (s > 1) top = Math.min(top, by + (+prm(it, "anchor").v[1]) * ch * (1 - s));
+  }
+  return top / H;
+}
+function topicTitle(text, top, cap, len, said, vtop) {
   const W = 1080, H = 1920;
-  if (!text || !top || !oneLine(top.text, top.style || {}, W)) return null;
-  const tb = txtBox(top.text, top.style, W, H), [fill, stroke] = topicFill(cap);
-  for (const size of TOPIC.SIZES) {
-    const st = { ...TOPIC_STYLE, size, fill, stroke, x: top.style.x ?? 0.5, align: top.style.align || "center" };
-    if (!oneLine(text, st, W)) continue;
-    st.y = Math.floor((tb[1] - TOPIC.GAP) * 1000 + 1e-6) / 1000;  // 내림: 틈이 줄지 않게
-    if (txtBox(text, st, W, H)[1] >= TOPIC.TOP - 1e-9) return { id: nid(), text, start: 0, dur: Math.round(Math.max(0.5, Math.min(TOPIC.SEC, +len)) * 100) / 100, style: st, plan: "topic" };
+  if (!text || !top) return null;
+  const ts = top.style || {}, cb = cap ? capBand(cap) : null;
+  const clear = b => b[1] >= TOPIC.TOP - 1e-9 && !(cb && cb[0] < b[3] + TOPIC.GAP && b[1] < cb[1] + TOPIC.GAP) && !(vtop != null && b[3] > vtop + 1e-9);
+  const dur = Math.round(Math.max(0.5, Math.min(TOPIC.SEC, +len)) * 100) / 100;
+  if (!said && oneLine(top.text, ts, W)) {
+    const tb = txtBox(top.text, ts, W, H), [fill, stroke] = topicFill(cap);
+    for (const size of TOPIC.SIZES) {
+      const st = { ...TOPIC_STYLE, size, fill, stroke, x: ts.x ?? 0.5, align: ts.align || "center" };
+      if (!oneLine(text, st, W)) continue;
+      st.y = Math.floor((tb[1] - TOPIC.GAP) * 1000 + 1e-6) / 1000;  // 내림: 틈이 줄지 않게
+      if (clear(txtBox(text, st, W, H))) return { id: nid(), text, start: 0, dur, style: st, plan: "topic", under: top.id };
+    }
+  }
+  if (+len < TOPIC.SEC + 1) return null;
+  for (const size of TOPIC.SWAP) {  // 바꿔 끼우기: 큰 제목 자리·모양 (한 줄로 들어가는 크기)
+    if (size > (+ts.size || TOPIC.SWAP[0]) + 1e-9) continue;
+    const st = { ...ts, size, effect: "pop" };
+    if (oneLine(text, st, W) && clear(txtBox(text, st, W, H))) return { id: nid(), text, start: 0, dur: TOPIC.SEC, style: st, plan: "topic", under: top.id, swap: true };
   }
   return null;
 }
-// 레이아웃 틀을 바꾼 뒤 주제 줄 다시 놓기: 위 큰 제목 바로 위 (자리가 없으면 바로 아래) · 글·시간은 그대로
+// 주제 줄이 맞춘 큰 제목: under(id) → 없으면(예전 판) 그때 떠 있는 가장 긴 타이틀 (MSG 쇼츠 끝의 '다시 보기 ▶' 같은 짧은 글자 말고)
+function topicUnder(t, titles = S.titles) {
+  const k = titles.find(x => x.id === t.under && x.plan !== "topic"); if (k) return k;
+  const end = t.start + t.dur;
+  return titles.filter(x => x.plan !== "topic" && x.start <= (t.swap ? end : t.start) + 0.05 && x.start + x.dur >= end - 0.05).sort((a, b) => b.dur - a.dur)[0] || null;
+}
+function topicGone(k) { // 바꿔 끼운 주제 줄을 지우면 뒤의 큰 제목을 다시 그 자리부터 (첫머리가 비지 않게)
+  if (!k || k.plan !== "topic" || !k.swap) return;
+  const top = S.titles.find(x => x.id === k.under);
+  if (top && Math.abs(top.start - (k.start + k.dur)) < 0.05) { top.dur = r3(top.dur + top.start - k.start); top.start = k.start; }
+}
+// 레이아웃 틀을 바꾼 뒤 주제 줄 다시 놓기 (글·시간은 그대로): 바꿔 끼운 것은 큰 제목 자리·모양 · 아니면 큰 제목 바로 위 → 자리가 없으면 바로 아래
+// (말 자막 띠·영상과 안 겹칠 때) → 그래도 안 되면 바꿔 끼우기 (큰 제목은 주제 줄 뒤부터)
 function placeTopic(t, top) {
   if (!top) return;
-  const k = topicTitle(t.text, top, S.captionStyle, t.dur);
-  if (k) { Object.assign(t.style, k.style); return; }
-  const W = 1080, H = 1920, tb = txtBox(top.text, top.style, W, H), [fill, stroke] = topicFill(S.captionStyle);
-  const st = { ...t.style, fill, stroke, x: top.style.x ?? 0.5, align: top.style.align || "center" };
-  st.y = Math.ceil((tb[3] + TOPIC.GAP + (TOPIC.LINE * st.size + 2 * st.strokeW) / H) * 1000 - 1e-6) / 1000;
-  Object.assign(t.style, st);
+  const W = 1080, H = 1920, vt = videoTop(S.layout, S.items, (P.info || {}).width, (P.info || {}).height), L = Math.max(total(), TOPIC.SEC + 1);
+  t.under = top.id;
+  if (!t.swap) {
+    const k = topicTitle(t.text, top, S.captionStyle, L, false, vt);
+    if (k && !k.swap) { Object.assign(t.style, k.style); return; }
+    const tb = txtBox(top.text, top.style, W, H), [fill, stroke] = topicFill(S.captionStyle), cb = capBand(S.captionStyle);
+    const st = { ...t.style, fill, stroke, x: top.style.x ?? 0.5, align: top.style.align || "center" };
+    st.y = Math.ceil((tb[3] + TOPIC.GAP + (TOPIC.LINE * st.size + 2 * st.strokeW) / H) * 1000 - 1e-6) / 1000;
+    const b = txtBox(t.text, st, W, H), ok = !(cb[0] < b[3] + TOPIC.GAP && b[1] < cb[1] + TOPIC.GAP) && !(vt != null && b[3] > vt + 1e-9) && b[3] <= 1;
+    if (ok || !k) { Object.assign(t.style, st); return; }
+    t.swap = true;
+  }
+  const size = TOPIC.SWAP.find(z => z <= (+top.style.size || 100) + 1e-9 && oneLine(t.text, { ...top.style, size: z }, W)) || Math.min(...TOPIC.SWAP);
+  Object.assign(t.style, { ...top.style, size, effect: "pop" });
+  swapIn(top, t);
 }
 function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
@@ -1239,15 +1294,16 @@ function renderMarkers() {
     row.querySelector("[data-mx]").onclick = () => { commit("마커 지우기"); S.markers.splice(S.markers.indexOf(m), 1); changed(false); };
   });
 }
-function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기
+function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기 (쇼츠 맨 앞 주제 줄은 그대로 맨 앞 · BR-120)
   for (const g of [...S.titles, ...S.shapes.filter(x => !x.full), ...S.tactics]) {
     const s = g.start, e = g.start + g.dur;
-    if (e <= a || s >= b) continue;
+    if (e <= a || s >= b || headTopic(g)) continue;
     const keep = Math.max(0, a - s) + Math.max(0, e - b);
     if (g.follow && g.follow.length) g.follow = tacFollowCut(g, a, b).follow;  // 따라가는 전술 그림: 잘린 만큼 기록도 당김
     g.start = Math.min(s, a); g.dur = keep;
   }
   S.titles = S.titles.filter(g => g.dur > 0.15); S.shapes = S.shapes.filter(g => g.full || g.dur > 0.15); S.tactics = S.tactics.filter(g => g.dur > 0.15);
+  topicAfter(S.titles);
 }
 // 구간 잘라내기·들어내기가 적용될 트랙: 대상 트랙 + 그 구간 클립의 연결된 짝 (Ctrl+K·Q/W 와 같은 규칙).
 // 대상이 아닌 트랙은 그 구간에 걸친 클립이 있으면 그대로 두고(배경음악이 끊기지 않게), 없으면 같이 당겨 싱크를 맞춤.
@@ -1357,7 +1413,7 @@ function deleteGfx() {
   if (selX.k === "trans" && S.trans.some(t => t.id === selX.id && !unlocked(t.track))) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
   commit("지우기");
   if (selX.k === "caption") P.captions = P.captions.filter(c => c.id !== selX.id);
-  if (selX.k === "title") S.titles = S.titles.filter(t => t.id !== selX.id);
+  if (selX.k === "title") { const g = S.titles.find(t => t.id === selX.id); S.titles = S.titles.filter(t => t.id !== selX.id); topicGone(g); }
   if (selX.k === "shape") S.shapes = S.shapes.filter(t => t.id !== selX.id);
   if (selX.k === "tact") S.tactics = S.tactics.filter(t => t.id !== selX.id);
   if (selX.k === "trans") S.trans = S.trans.filter(t => t.id !== selX.id);
@@ -3090,8 +3146,8 @@ const TEMPLATES = {
 function tplTitle(st) {
   if (!S.titles.some(t => t.plan !== "topic")) S.titles.unshift({ id: nid(), text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
   S.titles.forEach(t => { if (t.plan !== "topic") Object.assign(t.style, st); });
-  const top = S.titles.find(t => t.plan !== "topic");  // 첫머리 주제 줄(BR-120)은 위 큰 제목에 맞춰 다시 놓음 (같은 자리·색으로 겹치지 않게)
-  S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, top));
+  // 첫머리 주제 줄(BR-120)은 자기가 맞춘 큰 제목(under — MSG 쇼츠는 첫 2.5초 큰 줄 · 끝의 '다시 보기 ▶' 같은 다른 글자 말고)에 맞춰 다시 놓음
+  S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, topicUnder(t) || S.titles.find(x => x.plan !== "topic")));
 }
 const SHAPES = {
   "사각형": () => ({ x: 0.1, y: 0.42, w: 0.8, h: 0.16, color: "#000000", opacity: 0.6, radius: 24, full: false }),
@@ -3222,9 +3278,23 @@ function showCapBan(n) {
 
 /* ---------- 추천 · 자동 편집 ---------- */
 const OFF_KIND = { pre: "촬영 준비 말", post: "촬영 끝 말", cta: "구독 부탁", promo: "레슨 홍보" };  // editor.recommend offscript (E12)
+// 쇼츠 첫머리 주제 줄 설정 (스타일 화면 · 기본 켬) — 편집실을 연 뒤 바꿔도 바로 따르게 그때그때 물어봄 (못 읽으면 켬)
+async function topicSetting() { try { const j = await (await fetch("/api/style/shorts_topic")).json(); return j.on !== false; } catch (e) { return true; } }
+// 추천 쇼츠의 첫머리 주제 줄 — 추천 카드 표시와 '새 쇼츠 편집본으로 추가'가 같은 셈 (설정을 끄면·자리가 없으면 null)
+function recTopic(s, on, top, cap, layout, items) {
+  const txt = on ? (s.topicText ?? s.topic ?? "") : "";
+  return txt && top ? topicTitle(txt, top, cap, s.length, !!s.hookSaid, videoTop(layout, items, (P.info || {}).width, (P.info || {}).height)) : null;
+}
+function recBase() {  // 새 쇼츠의 바탕: 첫 쇼츠 편집본의 큰 제목 모양·자막 모양 (위쪽 자막이면 큰 제목 아래로 · editor.py _stack_below 와 같은 뜻 · E4③)
+  const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic") || null;
+  const cap = JSON.parse(JSON.stringify(base.captionStyle)); if (top0 && cap && (cap.y ?? 0.8) < 0.3) cap.y = 0.3;
+  return { base, top0, cap };
+}
 async function renderRec() {
   const r = REC || { shorts: [], tidy: [] };
   const m = t => mmss(t).slice(0, 5);
+  const tOn = await topicSetting(), rb = recBase();
+  const recK = s => recTopic(s, tOn, rb.top0 && { ...rb.top0, text: s.hook || cutText(s.title, 16) }, rb.cap, rb.base.layout, itemsFromCuts(s.cuts));
   const noMain = S.format === "shorts" && !S.items.some(i => i.track === "V1" && isMainAV(i)); // 원본 클립이 없는 쇼츠: 영상 전체를 깔면 쇼츠가 아니게 됨
   if (STYLES === null) { STYLES = []; try { STYLES = (await (await fetch("/api/style/list")).json()).styles || []; } catch (e) {} }
   if (MSGSRC === null) { MSGSRC = { presets: [], learned: [], mixes: [] }; try { MSGSRC = await (await fetch("/api/style/presets")).json(); } catch (e) {} }
@@ -3241,7 +3311,7 @@ async function renderRec() {
     <div class="sec"><h4>쇼츠 추천 구간 <span class="hint">(AI 없이 PC에서 계산)</span></h4>
       ${r.shorts.map((s, i) => `<div class="rec"><b>${i + 1}. ${esc(s.title)}…</b>
         <div class="m">${m(s.start)}~${m(s.end)} · 다듬은 길이 ${s.length}초 · 컷 ${s.cuts.length}개</div>
-        <div style="margin-bottom:6px">${s.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>${s.topic ? `<div class="m">첫머리 주제 줄 · ${esc(s.topic)}</div>` : ""}
+        <div style="margin-bottom:6px">${s.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>${(k => k ? `<div class="m">첫머리 주제 줄 · ${esc(k.text)}${k.swap ? " (처음 2.5초는 큰 제목 자리에)" : ""}</div>` : "")(recK(s))}
         <button class="btn" data-rec="${i}">새 쇼츠 편집본으로 추가</button></div>`).join("") || `<div class="hint">추천할 구간을 찾지 못했어요. 대사가 있는 영상인지 확인해 주세요.</div>`}
     </div>
     <div class="sec"><h4>1차 가편집</h4>
@@ -3275,9 +3345,9 @@ async function renderRec() {
     } catch (e) { toast("자동 편집을 못 했어요 · " + e.message); }
     renderRec();
   };
-  document.querySelectorAll("[data-rec]").forEach(b => b.onclick = () => {
-    const s = r.shorts[+b.dataset.rec];
-    const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic");
+  document.querySelectorAll("[data-rec]").forEach(b => b.onclick = async () => {
+    const s = r.shorts[+b.dataset.rec], on = await topicSetting();  // 설정은 누를 때 다시 봄 (편집실을 연 뒤 스타일 화면에서 꺼도 따름)
+    const { base, top0 } = recBase();
     commit("쇼츠 편집본 추가");
     const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${cutText(s.title, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
       captionStyle: JSON.parse(JSON.stringify(base.captionStyle)), master: { volume: 1, normalize: true, lufs: -14 }, duck: { on: true, amount: -14 },
@@ -3288,8 +3358,8 @@ async function renderRec() {
     const lastA = q.items.filter(i => i.track === "A1").pop(); if (lastA) lastA.fadeOut = 0.3;
     // 위쪽 자막 스타일이면 쇼츠 내내 떠 있는 큰 제목(y 0.22) 아래로 (editor.py auto_sequences 의 _stack_below 와 같은 뜻 · E4③)
     if (q.titles.length && q.captionStyle && (q.captionStyle.y ?? 0.8) < 0.3) q.captionStyle.y = 0.3;
-    // 첫머리 주제 줄 (BR-120 · editor.py auto_sequences 와 같게) — 서버가 고른 글 (설정 '쇼츠 첫머리에 주제 한 줄 넣기'를 끄면 없음)
-    const tk = q.titles.length && s.topic ? topicTitle(s.topic, q.titles[0], q.captionStyle, s.length) : null; if (tk) q.titles.push(tk);
+    // 첫머리 주제 줄 (BR-120 · editor.py auto_sequences 와 같게) — 서버가 고른 글 (설정 '쇼츠 첫머리에 주제 한 줄 넣기'를 끄면 없음) · 바꿔 끼우면 큰 제목은 그 뒤부터
+    const tk = q.titles.length ? recTopic(s, on, q.titles[0], q.captionStyle, q.layout, q.items) : null; if (tk) { swapIn(q.titles[0], tk); q.titles.push(tk); }
     ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {
@@ -3504,6 +3574,7 @@ function msgRemove(evId) {
     }
     for (const t of [...q.titles, ...q.shapes, ...(q.tactics || [])]) {
       const e = t.start + t.dur;
+      if (headTopic(t)) continue; // 쇼츠 맨 앞 주제 줄은 그대로 (BR-120)
       if (t.start < a - 1e-3 && e > a + 1e-3 && t.follow && t.follow.length) t.follow = tacFollowCut(t, a, b).follow; // 따라가는 전술 그림: 빠진 장면만큼 기록도 당김
       if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
     }
@@ -3511,6 +3582,7 @@ function msgRemove(evId) {
     for (const t of q.titles) t.start = fr(sh(t.start)); for (const t of q.shapes) if (!t.full) t.start = fr(sh(t.start)); for (const t of q.tactics || []) t.start = fr(sh(t.start));
     for (const mk of q.markers) mk.t = fr(sh(mk.t));
     for (const e of m.events) { e.t = sh(e.t); if (e.ins) e.ins.start = sh(e.ins.start); }
+    topicAfter(q.titles);
   }
   m.events = m.events.filter(e => e.id !== evId);
   const k = {}; for (const e of m.events) k[e.kind] = (k[e.kind] || 0) + 1;

@@ -476,6 +476,33 @@ class KitBuildTests(KitBase):
         self.assertIn("디딤발 꿀팁", kit["titles"])
         self.assertFalse([t for t in kit["titles"] if "포인트 2" in t], kit["titles"])
 
+    def test_msg_shorts_kit_uses_on_screen_opening(self):
+        """검토: MSG 쇼츠 첫머리를 이 쇼츠 포인트로 바꾼 뒤에도 키트 제목은 예전 훅(받아쓰기 헛말 '처치')이었음 → 화면의 큰 줄
+        (편집실에서 고쳤으면 고친 글 · 주제 줄 말고) · 그 '훅' 사건을 뺐으면 예전 훅도 안 씀 · 첫머리를 안 바꾼 MSG 쇼츠는 예전처럼 훅."""
+        segs = [{"start": 0.0, "end": 3.0, "text": "자, 세 번째 포인트는 트래핑이에요."}, {"start": 3.5, "end": 7.0, "text": "공을 몸 앞에 멈춰 두세요."},
+                {"start": 8.0, "end": 11.0, "text": "트래핑은 발바닥으로 살짝 눌러 주세요."}]
+        name = self.add_video(self.NAME, segs=segs)
+        ttl = [{"id": "m", "text": "트래핑 꿀팁", "start": 0, "dur": 2.5, "msg": True},
+               {"id": "k", "text": "퍼스트 터치 레슨 · 포인트 3", "start": 0, "dur": 2.5, "plan": "topic", "under": "m", "msg": True}]
+        self.project(name, [("s1", "MSG 후보 A · 쇼츠", "shorts", 0.0, 12.0, ttl)], segs)
+        proj = json.loads(editor._ppath(name).read_text(encoding="utf-8"))
+        q = proj["sequences"][0]
+        q["msg"] = {"hook": "왜 다들 처치에서 공을 놓칠까요?", "opening": "트래핑 꿀팁", "topicLine": "퍼스트 터치 레슨 · 포인트 3",
+                    "events": [{"id": "e1", "kind": "hook", "t": 0.0, "text": "", "refs": {"titles": ["m", "k"]}}]}
+
+        def kit():
+            editor._ppath(name).write_text(json.dumps(proj, ensure_ascii=False), encoding="utf-8")
+            return upload.build_kit(name, "s1")
+        k = kit()
+        self.assertEqual(k["titles"][0], "트래핑 꿀팁")
+        self.assertFalse([t for t in k["titles"] if "처치" in t or "포인트 3" in t], k["titles"])
+        q["titles"][0]["text"] = "트래핑 이렇게 하세요"                      # 편집실에서 고친 큰 줄
+        self.assertEqual(kit()["titles"][0], "트래핑 이렇게 하세요")
+        q["msg"]["events"], q["titles"] = [], []                           # MSG '빼기'로 훅 사건을 뺌
+        self.assertFalse([t for t in kit()["titles"] if "처치" in t])
+        q["msg"] = {"hook": "과연 몇 개나 들어갈까요?", "topicLine": "슈팅 챌린지", "events": []}   # 첫머리를 안 바꾼 MSG 쇼츠 (예전 훅 + 주제 줄)
+        self.assertEqual(kit()["titles"][0], "과연 몇 개나 들어갈까요?")
+
     def test_same_source_kits_differ(self):
         name = self.add_video(self.NAME)
         self.project(name, [("s1", "쇼츠 1", "shorts", 0.0, 45.0, []), ("s2", "쇼츠 2", "shorts", 60.0, 105.0, [])])

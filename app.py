@@ -571,6 +571,8 @@ class Handler(BaseHTTPRequestHandler):
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
                                     "shortsTopic": style.shorts_topic_on()})
+        if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
+            return self._send(200, {"on": style.shorts_topic_on()})
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
             return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
