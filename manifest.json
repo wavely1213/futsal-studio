@@ -1,6 +1,8 @@
 {
   "version": "2.18.1",
   "notes": "휴대폰 연결 주소가 futsal.mulgyeol.kr 로 바뀌었어요 (QR·알림·안내 모두) · 커뮤니티 사이트에서는 PC 에 연결할 수 없게 막았어요",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/18dcd7970228790d43bf550754ba84a88c085f00.zip",
+  "commit": "18dcd7970228790d43bf550754ba84a88c085f00",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "72eed93f69f011b13864d8e33e12fc59a805d68a46f7a8b2c193980e21ea40bc",
