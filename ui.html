@@ -78,6 +78,10 @@
   .styles .st .kv .tempo input { vertical-align: -2px; margin: 0 3px 0 0; }
   .styles .st h3 .rough { font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; color: var(--ink-2); margin-right: 10px; }
   .styles .st h3 .rough input { vertical-align: -2px; margin: 0 3px 0 0; }
+  .autoset { padding: 14px 16px; }
+  .autoset label { font-size: 14px; font-weight: 600; cursor: pointer; }
+  .autoset label input { vertical-align: -2px; margin: 0 6px 0 0; }
+  .autoset p { margin: 6px 0 0 22px; color: var(--ink-2, #555); font-size: 13px; line-height: 1.55; }
   /* 스타일 일치 점수 */
   .styles .st .score { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .styles .st .score select.sel { flex: 1 1 120px; min-width: 0; padding: 6px 8px; font-size: 12px; }
@@ -959,6 +963,9 @@
       <div class="card rows" id="styleSrc"></div>
       <h2 class="sh">배운 스타일</h2>
       <div class="grid styles" id="styleList"></div>
+      <h2 class="sh">쇼츠 자동 편집</h2>
+      <div class="card autoset" id="autoSet"><label title="자동으로 만든 쇼츠(가편집·재미있게 자동 편집)의 처음 2.5초에 영상 주제와 이 쇼츠의 포인트를 한 줄로 띄워요"><input type="checkbox" id="shortsTopic" checked> 쇼츠 첫머리에 주제 한 줄 넣기</label>
+        <p>자동으로 만드는 쇼츠의 처음 2.5초에 '영상 주제 + 이 쇼츠 포인트'를 한 줄로 띄워요 (예: 퍼스트 터치 레슨 · 포인트 2). 소리·길이는 그대로예요. 편집실에서 글자를 고치거나 옮기거나 지울 수 있어요. 끄면 다음에 만드는 쇼츠부터 넣지 않아요.</p></div>
       <h2 class="sh">MSG 자동 편집 스타일 <span class="sub" style="font-weight:500;font-size:13px;color:var(--ink-2)">· 편집실 '추천' 탭의 '재미있게 자동 편집'에서 골라요</span></h2>
       <div class="grid msgstyles" id="msgStyles"></div>
       <div class="card empty" id="styleEmpty"><b>아직 배운 스타일이 없어요</b>1) 위의 '채널 추가'에서 따라 하고 싶은 채널을 넣거나 추천 채널을 고르면 인기 영상을 받아 바로 배워요. 2) 이미 받은 영상은 목록에서 골라 "스타일 배우기"를 누르세요. 2~3개를 함께 배우면 더 정확해요.</div>
@@ -2043,6 +2050,17 @@ function relearnable(p) {  // 같은 영상이 보관함이나 학습용 영상�
 }
 async function loadStyles() {
   const j = await (await fetch("/api/style/list")).json(), list = j.styles || [], thAct = j.thumbActive || "", rough = j.rough || "";
+  const stc = $("shortsTopic");  // 쇼츠 첫머리 주제 줄 (BR-120 · 기본 켬)
+  if (stc) {
+    stc.checked = j.shortsTopic !== false;
+    stc.onchange = async () => {
+      stc.disabled = true;
+      const r = await api("/api/style/shorts_topic", { on: stc.checked }).catch(() => ({}));
+      stc.disabled = false;
+      if (r.ok) toast(r.on ? "다음에 만드는 쇼츠부터 첫머리에 주제 한 줄을 넣어요" : "쇼츠 첫머리 주제 줄을 넣지 않아요 (이미 만든 편집본은 그대로예요)");
+      else { stc.checked = !stc.checked; toast(r.error || "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); }
+    };
+  }
   $("styleEmpty").style.display = list.length ? "none" : "block"; state.styles = list.map(s => s.name);
   const pos = { bottom: "아래", middle: "가운데", top: "위" }, open = {};
   document.querySelectorAll(".styles .st details.fold[open]").forEach(d => (open[d.closest(".st").dataset.sname + "|" + d.dataset.fold] = 1));  // 다시 그려도 펼친 칸은 그대로

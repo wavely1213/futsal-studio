@@ -899,6 +899,28 @@ def set_rough_default(name):
     return name or None
 
 
+def _shorts_topic_file():
+    return STYLES / ROUGH_DIR_NAME / "쇼츠 주제 줄.json"
+
+
+def shorts_topic_on():
+    """'쇼츠 첫머리에 주제 한 줄 넣기' (BR-120 · 스타일 화면) — 자동으로 만든 쇼츠(가편집·MSG)의 처음 2.5초 주제 줄.
+    기본 켬 (파일이 없거나 못 읽으면 켬 · 끈 적이 있을 때만 끔)."""
+    try:
+        d = json.loads(_shorts_topic_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return not (isinstance(d, dict) and d.get("on") is False)
+
+
+def set_shorts_topic(on):
+    """쇼츠 주제 줄 켜기/끄기 (styles/설정/쇼츠 주제 줄.json) → 바뀐 값."""
+    f = _shorts_topic_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"on": bool(on), "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    return bool(on)
+
+
 def rough_params():
     """(이름, edit_params) — 첫 가편집에 쓸 스타일이 없거나 못 읽으면 (None, None)."""
     n = rough_default()

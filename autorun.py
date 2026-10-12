@@ -459,10 +459,19 @@ def _step_rough(c):
     pts = []
     if n:
         rec = editor.recommend(c.name, keep_pause=_shorts_keep(), n=n)
+        vt, segs = rec.get("videoTopic") or "", None
         for r in sorted(rec["shorts"], key=lambda r: r["start"]):
             hook, check = short_hook(r)
-            pts.append({"start": round(float(r["start"]), 2), "end": round(float(r["end"]), 2), "hook": hook, "hookCheck": check,
-                        "title": r.get("title") or "", "keywords": r.get("keywords") or [], "cuts": r["cuts"]})
+            pt = {"start": round(float(r["start"]), 2), "end": round(float(r["end"]), 2), "hook": hook, "hookCheck": check,
+                  "title": r.get("title") or "", "keywords": r.get("keywords") or [], "cuts": r["cuts"], "point": dict(r.get("point") or {})}
+            # 첫머리 주제 줄 (BR-120): 이 구간의 포인트(MSG 쇼츠도 씀 · msg._win_short) · 가편집 쇼츠의 주제 줄 글은 이 작업이 고른 제목에
+            # 없는 것으로 — 제목을 바꿨으면 그 제목으로 다시 셈 (설정은 가편집 쇼츠를 만들 때 봄 · _rough_short)
+            if hook == r.get("hook"):
+                pt.update(topic=r.get("topicText") or "", hookSaid=bool(r.get("hookSaid")))
+            else:
+                segs = editor._segments_of(c.name) if segs is None else segs
+                pt.update(topic=editor.topic_line(vt, pt["point"], hook), hookSaid=editor.hook_said(r, segs, hook))
+            pts.append(pt)
         seen = {}
         for pt in pts:  # 쇼츠끼리 같은 제목이면 사람이 고르게
             seen.setdefault(pt["hook"], []).append(pt)
@@ -539,6 +548,8 @@ def _rough_short(c, i, pt):
     """MSG 를 못 넣은 쇼츠 포인트 → 그 구간 그대로의 가편집 쇼츠 (첫 가편집 스타일)."""
     info = editor.media_info(c.name)
     r = {k: pt[k] for k in ("start", "end", "cuts", "hook", "title", "keywords")}
+    if pt.get("topic") and editor.shorts_topic_on():  # 첫머리 주제 줄 (BR-120 · 지금 설정대로 · 합치기 전에 고른 포인트에는 없음)
+        r.update(topic=pt["topic"], hookSaid=bool(pt.get("hookSaid")))
     seqs = editor.auto_sequences(c.name, info, editor.default_style_params(), ("shorts",), rec={"shorts": [r], "tidy": []})
     if not seqs:
         return None
@@ -584,6 +595,8 @@ def _step_msg_shorts(c):
         o = _out(c.st, f"short{i + 1}")
         if i in got:
             _set_seq(o, got[i]["id"], got[i]["name"], True)  # 가편집이었으면 그 완성본·썸네일·키트 기록은 버림 (MSG 로 다시 만들게)
+            # 첫머리 큰 줄을 이 쇼츠 포인트로 바꿨으면 그 글 (BR-120 · msg.opening — 키트 제목도 이것 · 아니면 위 제목 hook 그대로)
+            o["opening"] = str((got[i].get("msg") or {}).get("opening") or "")
             continue
         if i in rough_have:  # 이미 만든 가편집 쇼츠 그대로 (또 더하지 않음)
             kept.append(i)
@@ -597,6 +610,7 @@ def _step_msg_shorts(c):
         for (i, _), q in zip(rough, added):
             o = _out(c.st, f"short{i + 1}")
             _set_seq(o, q["id"], q["name"], False)
+            o.pop("opening", None)
             o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
     if rough or kept:
         return "fail", f"쇼츠 {len(rough) + len(kept)}개는 MSG 를 넣지 못해 가편집 그대로예요" + (f" · {err}" if err else "")
@@ -901,7 +915,7 @@ def checklist(st):
         if o.get("thumb") and o["kind"] == "shorts" and ti.get("within") is False:
             add("thumb", "warn", f"{nm} · 이 쇼츠 구간에는 썸네일로 쓸 장면이 없어 다른 장면으로 만들었어요", key)
         if o.get("seq") and o.get("hookCheck"):
-            add("title", "warn", f"{nm} · 위 큰 제목·키트 제목: '{o.get('hook') or ''}' · 추천 제목이 순서 말뿐이거나 다른 쇼츠와 같아 바꿨어요. "
+            add("title", "warn", f"{nm} · 위 큰 제목·키트 제목: '{o.get('opening') or o.get('hook') or ''}' · 추천 제목이 순서 말뿐이거나 다른 쇼츠와 같아 바꿨어요. "
                 "내용이 드러나는지 편집실(제목)과 7 올리기(키트 제목)에서 확인해 주세요", key)
         kit = o.get("kit") or {}
         if o.get("seq") and not kit and tried("kits"):

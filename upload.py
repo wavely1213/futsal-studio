@@ -955,6 +955,18 @@ def _credit(text, others, main_other):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(rows)).strip() + "\n"
 
 
+def _msg_opening(sq):
+    """MSG 쇼츠 첫머리 큰 줄 (BR-120 · msg.opening) — 지금 편집본에 있는 '훅' 사건의 큰 줄 글 (주제 줄 말고 · 편집실에서 고친 글),
+    그 사건을 뺐으면 ''. 예전 훅(msg.hook)은 첫머리를 이 쇼츠 포인트로 바꾼 뒤에는 화면에 없는 글이고 받아쓰기 헛말('처치')이 남아 있을 수 있음 (검토)."""
+    m = sq.get("msg") or {}
+    ev = next((e for e in m.get("events") or [] if e.get("kind") == "hook"), None)
+    if not ev:
+        return ""
+    ids = set((ev.get("refs") or {}).get("titles") or [])
+    t = next((t for t in sq.get("titles") or [] if t.get("id") in ids and t.get("plan") != "topic"), None)
+    return str(t.get("text") or "") if t else ""
+
+
 def build_kit(name, seq=None, save=True):
     """올리기 키트 만들기. seq: 편집실 편집본 id (없으면 원본 영상 그대로)."""
     editor.video_path(name)
@@ -1004,11 +1016,13 @@ def build_kit(name, seq=None, save=True):
     flow = hooks.in_order(topics[:3], texts)
     if topics and topics[0] in hooks.BASIC_PHRASES:  # '기본 자세'는 대사에 그대로 없어도 맨 앞
         flow = [topics[0]] + [t for t in flow if t != topics[0]]
-    hook = None
-    if sq and (sq.get("msg") or {}).get("hook"):  # MSG 편집본: 맨 앞 훅 자막이 곧 제목 후보
-        hook = _oneline(sq["msg"]["hook"], 40) or None
-    if sq and fmt == "shorts" and not hook:  # 쇼츠 편집본의 큰 제목 글자가 곧 훅 (자동으로 자른 첫 문장 조각·인사·순서 말은 빼고)
-        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text"))), None)
+    hook, mg = None, (sq or {}).get("msg") or {}
+    if mg.get("opening"):  # MSG 쇼츠 첫머리가 이 쇼츠 포인트(BR-120): 화면의 그 큰 줄 (편집실에서 고쳤으면 고친 글 · 그 사건을 뺐으면 아래 기본 제목)
+        hook = _oneline(_msg_opening(sq), 40) or None
+    elif mg.get("hook"):  # MSG 편집본: 맨 앞 훅 자막이 곧 제목 후보
+        hook = _oneline(mg["hook"], 40) or None
+    if sq and fmt == "shorts" and not hook and not mg.get("opening"):  # 쇼츠 편집본의 큰 제목 글자가 곧 훅 (자동으로 자른 첫 문장 조각·인사·순서 말은 빼고)
+        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text")) and t.get("plan") != "topic"), None)  # 첫머리 주제 줄(BR-120)은 빼고
         hook = _overlay_hook(hook, texts)
     if not hook and segs:
         try:

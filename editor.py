@@ -939,6 +939,295 @@ def _old_hook(rec_item):
     return _hook_cut(first)
 
 
+# ---------- 쇼츠 첫머리 주제 줄 (BR-120 · D-220) ----------
+# 자동으로 만든 쇼츠의 처음 TOPIC_SEC 초에 '영상 주제 + 이 쇼츠 포인트'를 한 줄로 (글자만 · 소리·길이는 그대로).
+# 가편집 쇼츠: 내내 떠 있는 위 큰 제목(BR-093) 바로 위에 작은 머리 줄 — 위 큰 제목과 같은 낱말은 넣지 않아 두 줄이 한 소개로 읽힘.
+# 영상 주제·포인트는 사용자가 붙인 영상 이름·용어 사전에 있는 말·순서 말만 씀 (받아쓰기 헛말·문장 조각은 안 씀) · 없으면 넣지 않음.
+TOPIC_SEC = 2.5        # 주제 줄 시간(초) — MSG 쇼츠 첫 훅 글자(msg.SHORTS_HOOK_SEC)와 같음
+TOPIC_MAX = 14         # 주제 줄 글자 수 (띄어쓰기·'·' 빼고) — 휴대폰에서 한 줄
+TOPIC_NAME_MAX = 12    # 영상 이름을 주제로 쓸 수 있는 길이 (msg._topic 과 같음)
+TOPIC_TOP = 0.07       # 쇼츠 위쪽 안전 영역 (유튜브 쇼츠 위 메뉴 아래)
+TOPIC_ONE = 0.9        # 한 줄로 확실히 들어가는 폭 (어림 글자 폭이 실제보다 조금 좁아도 두 줄로 넘치지 않게)
+TOPIC_SIZES = (72, 64)  # 주제 줄 글자 크기 (큰 것부터 · 위 큰 제목 100 · 말 자막 72)
+TOPIC_SWAP_SIZES = (100, 90, 80, 72)  # 바꿔 끼울 때(위 큰 제목 자리에 처음 TOPIC_SEC 초) 글자 크기 — 위 큰 제목 크기부터
+TOPIC_STYLE = dict(TITLE_STYLE, size=TOPIC_SIZES[0], fill="#FFFFFF", stroke="#111111", strokeW=8, effect="pop")
+ORD_N = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7}
+POINT_AT = re.compile(r"(첫|두|세|네|다섯|여섯|일곱)\s?번째\s?(포인트|동작|기술|방법|팁|단계)(?:는|은|가|이)?[\s,.:!]*")
+ORD_ANY = re.compile(r"(?:첫|두|세|네|다섯|여섯|일곱)\s?번째")
+# 요점 말 뒤에 붙어 하나의 요점이 되는 낱말 ('디딤발 방향' · '패스 방향') — 이 목록 밖의 낱말은 받아쓰기가 잘못 들은 말일 수 있어 안 붙임
+POINT_NOUNS = ("방향", "거리", "위치", "각도", "타이밍", "자세", "높이", "속도", "세기", "시선", "중심", "체중", "모양", "순서", "리듬", "간격")
+KEY_AT = re.compile(r"(?<![가-힣A-Za-z0-9])([가-힣A-Za-z0-9]{1,8}(?:\s[가-힣]{2,5})?)(?:이|가|은|는)\s?(?:진짜\s|정말\s|제일\s|가장\s)?(?:핵심|생명|포인트|중요)")
+TOPIC_NAME_JUNK = re.compile(r"IMG|DSC|MOV|VID|GOPR|PXL|KakaoTalk|\d{3,}|\d+\s?(?:월|일|시|분)(?![가-힣])|촬영|녹화|원본|편집|최종|클립|복사본|"
+                             r"^새\s|무제|제목\s?없음|테스트", re.I)
+TOPIC_NAME_PLAIN = {"오늘", "연습", "영상", "레슨", "풋살", "축구", "수업", "훈련", "클래스", "브이로그", "쇼츠", "기초", "강의", "꿀팁", "챌린지"}
+TOPIC_SAME = {"슛": "슈팅"}   # 같은 말로 보는 낱말 (위 큰 제목 '슛!' 과 주제 줄 '슈팅 챌린지')
+
+
+def _topic_words(t):
+    """같은 낱말 비교용 낱말 (조사 뗌 · 두 글자 이상 · '슛'='슈팅') — '패스'·'공' 같은 흔한 말(HOOK_NOT_TOPIC)은 뺌."""
+    import hooks
+    out = set()
+    for w in re.findall(r"[가-힣A-Za-z0-9]+", str(t or "")):
+        w = hooks._strip_josa(w).lower()
+        w = TOPIC_SAME.get(w, w)
+        if len(w) >= 2 and w not in HOOK_NOT_TOPIC:
+            out.add(w)
+    return out
+
+
+def _letters(t):
+    """글자만 이은 글 (띄어쓰기·줄바꿈·문장 부호·'·' 뺌 · 소문자)."""
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", str(t or "")).lower()
+
+
+def _shares_word(a, b):
+    """두 글이 같은 말을 하는지 — 한쪽 글 전체가 다른 쪽에 그대로 들어 있거나('패스' ↔ '2대1 패스!' · '슈팅 챌린지' ↔ '슈팅 챌린지'),
+    흔한 말이 아닌 같은 낱말이 있음('퍼스트 터치 레슨' ↔ '퍼스트 터치\\n첫 번째 포인트' · '슛'='슈팅' · '드리블' ↔ '드리블하고' 처럼
+    한쪽이 다른 쪽으로 시작해도 같은 낱말). '패스'·'슛' 같은 흔한 말 하나만 같으면 다른 말 ('2대1 패스' ↔ '리턴 패스' ·
+    '패스 앤 무브 드릴' ↔ '패스하고 그 자리에 …' — 검토: 흔한 말 하나로 영상 주제가 이미 있다고 보면 주제 줄이 빠지거나 '포인트 2'만 남음)."""
+    ca, cb = _letters(a), _letters(b)
+    if min(len(ca), len(cb)) >= 2 and (ca in cb or cb in ca):
+        return True
+    A, B = _topic_words(a), _topic_words(b)
+    return any(x == y or x.startswith(y) or y.startswith(x) for x in A for y in B)
+
+
+def _has_term(words, term):
+    """낱말 목록(조사 뗀)에 용어가 낱말 그대로 이어서 있는지 ('퍼스트 터치' ⊂ ['퍼스트', '터치', '레슨'] · '원터치'의 '터치'는 아님)."""
+    import hooks
+    tw = [hooks._strip_josa(w).lower() for w in re.findall(r"[가-힣A-Za-z0-9]+", term)]
+    return bool(tw) and any(words[i:i + len(tw)] == tw for i in range(len(words) - len(tw) + 1))
+
+
+def _name_topic(name, texts, ranked):
+    """사용자가 붙인 영상 이름이 영상 주제로 쓸 만하면 그 이름 ('20261008_MSGRAW01_퍼스트 터치 레슨.mp4' → '퍼스트 터치 레슨'), 아니면 ''.
+    12자 안 한국어 · 카메라·날짜·'촬영' 같은 이름 빼고 · 이름이 대사와 맞을 때만 — 대사에서 가장 많이 나온 용어(흔한 말이 아니면 3위까지)가
+    이름에 낱말 그대로 있거나, 이름의 낱말('오늘'·'연습'·'패스' 같은 흔한 말 말고)이 대사에 낱말 그대로 두 번 넘게 나옴
+    (검토: 낱말 속 글자로만 보면 '슈팅 연습'이 '바로 슈팅까지' 한 번으로 · '…퍼스트 터치 레슨'이 '원터치'로 2대1 패스 영상의 주제가 됨)."""
+    import hooks
+    import msg
+    t = re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]|\([^)]*\)|【[^】]*】", " ", msg._title_of(name))).strip(" -_.,")
+    if not (t and re.search(r"[가-힣]", t) and 2 <= len(_norm(t)) <= TOPIC_NAME_MAX and not TOPIC_NAME_JUNK.search(t)
+            and re.fullmatch(r"[가-힣A-Za-z0-9 &+'!?-]+", t)):
+        return ""
+    words = [hooks._strip_josa(w).lower() for w in re.findall(r"[가-힣A-Za-z0-9]+", t)]
+    if any(_has_term(words, term) and (k == 0 or hooks._compact(term) not in HOOK_NOT_TOPIC) for k, term in enumerate(ranked or ())):
+        return t
+    from collections import Counter
+    said = Counter(hooks._strip_josa(w).lower() for w in re.findall(r"[가-힣A-Za-z0-9]+", " ".join(texts)))
+    return t if any(said[w] >= 2 for w in words if len(w) >= 2 and w not in TOPIC_NAME_PLAIN and w not in HOOK_NOT_TOPIC) else ""
+
+
+def video_topic(name, segs):
+    """쇼츠 주제 줄의 영상 주제 (BR-120) — 못 정하면 ''.
+    ① 사용자가 붙인 짧은 한국어 영상 이름이 대사와 맞으면 그 이름 (_name_topic)
+    ② 대사에서 가장 많이 나온 풋살 용어 (용어 사전에 있는 말만 — 받아쓰기 헛말·조각은 안 씀) · '챌린지' 영상이면 '슈팅 챌린지'
+       ('패스'·'슛' 같은 흔한 말 하나는 챌린지일 때만)."""
+    import hooks
+    texts = [str(s.get("text") or "") for s in segs or ()]
+    try:
+        ranked = hooks._ranked_terms(texts, hooks.topic_terms(), 3) or hooks._ranked_terms(texts, hooks.LESSON_SKILLS, 3)
+    except Exception:  # noqa: BLE001 — 용어 사전을 못 읽으면 영상 이름(대사에 두 번 넘게 나온 낱말)으로만 · 그것도 아니면 주제 없음
+        ranked = []
+    if name:
+        t = _name_topic(name, texts, ranked)
+        if t:
+            return t
+    challenge = any("챌린지" in x for x in texts)
+    if not ranked:
+        return ""
+    t = ranked[0]
+    if hooks._compact(t) in HOOK_NOT_TOPIC:
+        return f"{t} 챌린지" if challenge else ""
+    return f"{t} 챌린지" if challenge and "챌린지" not in t else t
+
+
+def _point_terms():
+    import hooks
+    return tuple(sorted(set(hooks.topic_terms()) | set(hooks.LESSON_SKILLS), key=lambda w: -len(hooks._compact(w))))
+
+
+def _point_phrase(txt, terms=None):
+    """글 머리가 용어 사전의 말로 시작하면 그 말 (+ 바로 뒤 '방향'·'거리' 같은 요점 낱말) — '디딤발 방향' · '트래핑' · '리턴 패스'.
+    '패스'·'슛' 같은 흔한 말 하나뿐이면 요점이 아님 ('패스 방향'은 요점) · 아니면 None."""
+    import hooks
+    t = re.sub(r"^(?:자|어|음|아|네|그|이제|그리고)[,.\s]+", "", str(txt or "").strip())
+    if not t:
+        return None
+    hit = next(((a, b, term) for a, b, term in hooks._find_terms(t, terms or _point_terms()) if a == 0), None)
+    if not hit:
+        return None
+    a, b, term = hit
+    nxt = re.match(r"\s+([가-힣]+)", t[b:])
+    noun = nxt and hooks._strip_josa(re.sub(r"(?:이에요|예요|입니다|이죠|이고|이랑|으로|에서)$", "", nxt.group(1)))
+    if noun in POINT_NOUNS and not re.match(r"[가-힣]", t[b:]):
+        return f"{term} {noun}"
+    if hooks._compact(term) in HOOK_NOT_TOPIC:
+        return None
+    return term
+
+
+def short_point(r, segs):
+    """이 쇼츠의 포인트 (BR-120) → {"n": 순서 번호|None, "unit": '포인트'·'동작' 같은 순서 낱말, "phrase": 요점 말|None}.
+    순서: 쇼츠 첫 두 문장의 '두 번째 포인트는 디딤발이에요'(번호 + 그 뒤 요점 말) → 쇼츠 안 'X이 핵심이에요'의 X('디딤발 방향')
+    → 첫 두 문장에서 소개한 풋살 용어(BR-093 ① 과 같음). 모두 용어 사전에 있는 말만 ('고개 들기'처럼 사전에 없는 말은 못 씀 · I-161)."""
+    import hooks
+    inside = texts_in(segs, float(r["start"]), float(r["end"]))
+    terms = _point_terms()
+    n = phrase = None
+    unit = "포인트"
+    for t in inside[:2]:
+        m = POINT_AT.search(t)
+        if m and (m.start() == 0 or re.fullmatch(r"(?:자|그리고|마지막,?|이제)[,\s]*", t[:m.start()])):
+            n, unit = ORD_N[m.group(1)], m.group(2)
+            phrase = _point_phrase(t[m.end():], terms)
+            break
+    if not phrase:
+        for t in inside:
+            for m in KEY_AT.finditer(t):
+                ws = [w for w in m.group(1).split() if len(w) >= 2]
+                p = _point_phrase(" ".join(ws), terms) if ws else None
+                if p and len(p.split()) == len(ws):  # 'X' 전체가 요점 말일 때만 ('이 차이가 중요' · '월패스는 이 타이밍이' 는 아님)
+                    phrase = p
+                    break
+            if phrase:
+                break
+    if not phrase:
+        head = " ".join(inside[:2])
+        try:
+            own = [t for t in hooks.topic_keywords(inside[:2], n=3, lesson=False) if hooks._compact(t) not in HOOK_NOT_TOPIC]
+        except Exception:  # noqa: BLE001
+            own = []
+        phrase = next((t for t in own if len(hooks._compact(t)) >= 2 and hooks._compact(t) in hooks._compact(head) and t in terms), None)
+    return {"n": n, "unit": unit, "phrase": phrase}
+
+
+def topic_line(vt, point, main=""):
+    """주제 줄 글 (BR-120) — 영상 주제 vt + 이 쇼츠 포인트(short_point) 중 위 큰 줄(main)에 없는 것만:
+    '퍼스트 터치 레슨 · 포인트 2'(위 큰 제목 '디딤발 꿀팁') · '슈팅 챌린지 · 디딤발 방향' · '디딤발 방향'(위 큰 제목 '슈팅 꿀팁') ·
+    '2대1 패스 · 포인트 2'(위 큰 제목 '리턴 패스 꿀팁' — '패스' 하나 같은 것은 같은 말이 아님 · _shares_word).
+    순서 번호는 영상 주제에만 붙임 (번호 하나는 뜻이 없음 · 동그라미 숫자 '②'는 휴대폰에서 뭉개져 안 씀 — MSG 판정 round5) —
+    번호만('포인트 1')은 큰 줄에 영상 주제가 그대로 있을 때만('첫 터치 레슨' 위) · 넣을 것이 없으면 '' (위 큰 제목이 이미 주제·포인트를 말함)."""
+    point = point or {}
+    n, p = point.get("n"), point.get("phrase")
+    shown = bool(vt) and _shares_word(vt, main)          # 큰 줄이 이미 영상 주제를 말함
+    v = vt if vt and not shown else ""
+    whole = bool(vt) and len(_letters(vt)) >= 2 and _letters(vt) in _letters(main)   # 큰 줄에 영상 주제가 글자 그대로
+    mark = f"{point.get('unit') or '포인트'} {n}" if n and (v or whole) and not ORD_ANY.search(str(main or "")) else ""
+    p = p if p and not _shares_word(p, main) and not (v and _shares_word(p, v)) else ""
+    cands = ([f"{v} · {p}"] if v and p else []) + ([f"{v} · {mark}"] if v and mark else []) + ([v] if v else []) + ([p] if p else []) + \
+        ([mark] if mark and not v else [])
+    return next((c for c in cands if 2 <= len(_norm(c.replace("·", ""))) <= TOPIC_MAX and not _shares_word(c, main)), "")
+
+
+def hook_said(r, segs, hook=None):
+    """위 큰 제목(hook)이 쇼츠 첫머리(처음 TOPIC_SEC + 1초)에 하는 말을 그대로 옮긴 글인지 ('패스하고 그 자리에 서 있으면 왜 안될까요?') —
+    그러면 주제 줄을 그 위에 더하지 않고 처음 TOPIC_SEC 초 동안 바꿔 끼움 (큰 제목·말 자막·주제 줄이 같은 때 같은 말을 하지 않게 · 판정 pair_20)."""
+    h = _norm(str(hook if hook is not None else r.get("hook") or ""))
+    if len(h) < 5:
+        return False
+    a = float(r["start"])
+    return h in _norm(" ".join(texts_in(segs, a, a + TOPIC_SEC + 1.0)))
+
+
+def shorts_topic_on():
+    """'쇼츠 첫머리에 주제 한 줄 넣기' 설정 (스타일 화면 · 기본 켬) — 못 읽으면 켬."""
+    try:
+        import style as _style
+        return _style.shorts_topic_on()
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _text_w(text, st):
+    """글 한 줄 폭 어림 (화소 · text_box 와 같은 글자 폭 · 테두리 포함)."""
+    black = st.get("weight") == "Black"
+    return max([sum(_em(ch, black) for ch in ln) for ln in str(text or "").replace("\r", "").split("\n")] or [0.0]) * float(st.get("size") or 0) \
+        + 2 * float(st.get("strokeW") or 0)
+
+
+def _one_line(text, st, W):
+    """줄바꿈 없이 화면 폭(글 상자 92%) 안에 넉넉히 한 줄로 들어가는지 (어림이 조금 틀려도 두 줄로 넘치지 않게 TOPIC_ONE)."""
+    return "\n" not in str(text or "") and _text_w(text, st) <= TOPIC_ONE * 0.92 * W
+
+
+def _topic_fill(cap_style):
+    """주제 줄 색: 말 자막 색(배운 스타일 색) · 어두운 색이면 흰 테두리 (위 큰 제목은 노랑 그대로)."""
+    fill = str((cap_style or {}).get("fill") or "#FFFFFF").upper()
+    if not re.fullmatch(r"#[0-9A-F]{6}", fill):
+        fill = "#FFFFFF"
+    lum = sum(k * int(fill[i:i + 2], 16) / 255 for k, i in ((0.299, 1), (0.587, 3), (0.114, 5)))
+    return fill, ("#111111" if lum >= 0.4 else "#FFFFFF")
+
+
+def video_top(layout, items, src_w=None, src_h=None, until=TOPIC_SEC, fmt="shorts"):
+    """쇼츠 위아래 박스·흐린 배경 배치에서 처음 until 초 동안 본 영상(얼굴)이 닿는 가장 위 (화면 높이 비율) — 확대 컷이면 그만큼 위로
+    (기준점(anchor) 둘레로 키움 · 키프레임은 가장 큰 값). 꽉 채우기(영상이 화면 전체)·가로 화면이면 None (검사 안 함).
+    _fit 의 위아래 박스 셈과 같음 · editor.html videoTop 과 같은 셈."""
+    lay = dict(BOX_LAYOUT, **(layout or {}))
+    if fmt != "shorts" or lay.get("mode") not in ("box", "blur"):
+        return None
+    W, H = frame_size(fmt)
+    sw, sh = float(src_w or 1920), float(src_h or 1080)
+    keep = max(0.2, 1 - float(lay.get("cropTop") or 0) - float(lay.get("cropBottom") or 0))
+    ch = min(sh * keep * W * max(1.0, float(lay.get("zoom") or 1)) / sw, H)
+    by = (H - ch) * float(lay.get("vpos", 0.5))
+    top = by
+    for it in items or ():
+        if it.get("track") != "V1" or float(it.get("start") or 0) >= until or (it.get("fit") or "auto") != "auto":
+            continue
+        sc = param(it, "scale")
+        s = max([float(sc["v"])] + [float(k["v"]) for k in sc["k"]]) / 100
+        if s > 1:
+            top = min(top, by + float(param(it, "anchor")["v"][1]) * ch * (1 - s))
+    return top / H
+
+
+def topic_title(text, top, cap_style=None, length=TOPIC_SEC, fmt="shorts", said=False, vtop=None):
+    """주제 줄 title (BR-120) — 처음 TOPIC_SEC 초 · 한 줄 · 위쪽 안전 영역(TOPIC_TOP) 안 · 말 자막 띠(+틈)와 안 겹침 ·
+    영상 위 끝(vtop · video_top) 위. 놓는 곳:
+    ① 위 큰 제목(top)이 한 줄이고 대사를 그대로 옮긴 글이 아니면(said 아님) 그 바로 위 작은 머리 줄 (72 · 안 들어가면 64 · 말 자막 색)
+    ② 아니면(두 줄·긴 질문·대사 그대로 · 위에 자리가 없음) 바꿔 끼우기: 위 큰 제목 자리·모양으로 처음 TOPIC_SEC 초 ("swap": True —
+       부르는 쪽이 위 큰 제목을 그 뒤부터로 옮김 · 쇼츠가 TOPIC_SEC + 1초보다 짧으면 안 함 · 검토: 두 줄 큰 제목 쇼츠는 주제 줄이 없었음)
+    자리가 없으면 None (위 큰 제목만). "under": 맞춘 위 큰 제목 id. editor.html topicTitle 과 같은 규칙."""
+    if not text or not top:
+        return None
+    W, H = frame_size(fmt)
+    ts = top.get("style") or {}
+    cb = _cap_band(cap_style, H) if cap_style else None
+
+    def clear(b):
+        return b[1] >= TOPIC_TOP - 1e-9 and not (cb and _overlap(cb, (b[1], b[3]), TXT_GAP)) and not (vtop is not None and b[3] > vtop + 1e-9)
+    dur = round(max(0.5, min(TOPIC_SEC, float(length))), 2)
+    if not said and _one_line(top.get("text"), ts, W):
+        tb = text_box(top["text"], ts, W, H)
+        fill, stroke = _topic_fill(cap_style)
+        for size in TOPIC_SIZES:
+            st = dict(TOPIC_STYLE, size=size, fill=fill, stroke=stroke, x=float(ts.get("x", 0.5)), align=ts.get("align", "center"))
+            if not _one_line(text, st, W):
+                continue
+            st["y"] = math.floor((tb[1] - TXT_GAP) * 1000 + 1e-6) / 1000  # 내림: 반올림으로 틈이 줄지 않게
+            if clear(text_box(text, st, W, H)):
+                return {"id": _nid(), "text": text, "start": 0.0, "dur": dur, "style": st, "plan": "topic", "under": top.get("id")}
+    if float(length) < TOPIC_SEC + 1.0:
+        return None
+    for size in TOPIC_SWAP_SIZES:
+        if size > float(ts.get("size") or TOPIC_SWAP_SIZES[0]) + 1e-9:
+            continue
+        st = dict(ts, size=size, effect="pop")
+        if _one_line(text, st, W) and clear(text_box(text, st, W, H)):
+            return {"id": _nid(), "text": text, "start": 0.0, "dur": TOPIC_SEC, "style": st, "plan": "topic", "under": top.get("id"), "swap": True}
+    return None
+
+
+def swap_in(top, kt):
+    """바꿔 끼운 주제 줄(kt · swap) 뒤로 위 큰 제목(top)을 옮김 — 주제 줄이 끝난 때부터 원래 끝까지."""
+    if kt and kt.get("swap") and float(top["start"]) < float(kt["start"]) + float(kt["dur"]):
+        end = float(top["start"]) + float(top["dur"])
+        top["start"] = round(float(kt["start"]) + float(kt["dur"]), 3)
+        top["dur"] = round(end - top["start"], 3)
+
+
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
 TXT_LINE = 1.25   # 글 상자 한 줄 높이 = 글자 크기 × 1.25 (editor.html .txt line-height · 내보내기 ASS 도 같은 크기)
 TXT_GAP = 0.012   # 자동으로 놓는 글 상자끼리 띄울 틈 (화면 높이 비율)
@@ -1442,8 +1731,15 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
             tb = text_box(hook["text"], hook["style"], W, H)
             if _overlap(_cap_band(cs, H), (tb[1], tb[3]), TXT_GAP):  # 위쪽 자막 스타일: 쇼츠 내내 떠 있는 훅 제목 아래(영상 위 칸)로
                 cs["y"] = _stack_below(tb[3], cs, H)
+            titles = [hook]
+            if r.get("topic"):  # 첫머리 주제 줄 (BR-120 · 위 큰 제목 바로 위 · 자리가 없거나 대사 그대로인 큰 제목이면 처음 2.5초 바꿔 끼우기)
+                kt = topic_title(r["topic"], hook, cs, length, said=bool(r.get("hookSaid")),
+                                 vtop=video_top(BOX_LAYOUT, items, info.get("width"), info.get("height")))
+                if kt:
+                    swap_in(hook, kt)
+                    titles.append(kt)
             seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs,
-                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on, titles=[hook]))
+                                 layout=dict(BOX_LAYOUT), master=dict(master), captionsOn=caps_on, titles=titles))
     for q in seqs:  # 자동으로 만든 가편집 표시 ('가편집 다시 만들기'는 이것만 바꿈 · 스타일 가편집은 app.py 에서 따로 표시)
         q["auto"] = "style" if style and not (style or {}).get("styleName") else "rough"
         if (style or {}).get("styleName"):  # 첫 가편집에 쓰는 스타일로 만든 1차 가편집 (E2) — 다시 만들기 대상 그대로
@@ -2492,6 +2788,14 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     by_time = sorted(picked, key=lambda r: r["start"])  # 제목은 영상 순서대로 고름 (앞 쇼츠가 '주제 챌린지' · 뒤 쇼츠가 그다음 후보)
     for r, h in zip(by_time, short_hooks(by_time, segs)):
         r["hook"] = h
+    # 쇼츠 첫머리 주제 줄 (BR-120): 영상 주제·이 쇼츠 포인트(MSG 쇼츠도 씀) → 위 큰 제목(hook)에 없는 것만 topic · 설정을 끄면 ''
+    topic_on = shorts_topic_on()
+    vt = video_topic(name, segs) if by_time else ""
+    for r in by_time:
+        r["point"] = short_point(r, segs)
+        r["topicText"] = topic_line(vt, r["point"], r["hook"])   # 설정과 상관없이 (편집실 '새 쇼츠 편집본으로 추가'가 그때 설정을 다시 봄)
+        r["topic"] = r["topicText"] if topic_on else ""
+        r["hookSaid"] = hook_said(r, segs)
 
     # 롱폼용: 전체에서 군더더기·긴 무음 정리한 컷 (반응 말 앞 시범은 남김 · 같은 받아쓰기 구간 안 빈 곳은 예전처럼 그대로)
     tidy, cur, held = [], None, []
@@ -2521,7 +2825,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     if post_a is not None and tidy and post_a - 0.6 <= tidy[-1]["out"] < post_a:  # 마지막 끝인사는 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리가 잘리지 않게)
         tidy[-1] = dict(tidy[-1], out=round(post_a, 2))
     lj = line_junk + hallu_iv + hallu_show
-    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv) + len(lj), "segments": len(segs),
+    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv) + len(lj), "segments": len(segs), "videoTopic": vt,
             "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + edge_iv + fill_iv + lj + maybe_show, key=lambda x: (x[0], -x[1]))],
             "demos": [[round(a, 2), round(b, 2)] for a, b in demos],
             # 영상 밖 말 (추천 탭에 보여 줌) · cut: long 은 가편집(롱폼)에서도 자른 것, shorts 는 쇼츠·티저에서만 뺀 것 (롱폼은 표시만)

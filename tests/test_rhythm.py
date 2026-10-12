@@ -278,7 +278,8 @@ class TestTempo(RhythmBase):
         for q in shorts:
             items = [it for it in q["items"] if it["track"] == "V1"]
             self.assertTrue(all(1.0 <= float(it.get("speed") or 1.0) <= 1.12 for it in items))
-            self.assertAlmostEqual(q["titles"][0]["dur"], round(editor.seq_total(q), 2), delta=0.01, msg="제목은 끝까지")
+            t0 = q["titles"][0]   # (첫머리 주제 줄을 바꿔 끼운 쇼츠는 큰 제목이 2.5초부터 · BR-120 D-221)
+            self.assertAlmostEqual(t0["start"] + t0["dur"], round(editor.seq_total(q), 2), delta=0.01, msg="제목은 끝까지")
 
     def test_no_style_flips_only_at_jump_cuts(self):
         """스타일 없이 만든 가편집(그냥 가편집): 나누지 않고 빠르기 1 · 잘라 낸 자리마다 원래 크기 ↔ 살짝(1.08배) (E6 — 예전엔 확대 0)."""

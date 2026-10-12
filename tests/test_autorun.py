@@ -658,6 +658,46 @@ class Pieces(unittest.TestCase):
         self.assertEqual(seqs[0]["titles"][0]["text"], "디딤발 꿀팁")
         self.assertAlmostEqual(editor.seq_total(seqs[0]), 22.0, delta=0.5)
 
+    def test_points_keep_topic_line_of_their_own_window(self):
+        """쇼츠 첫머리 주제 줄 (BR-120 · 합침): 포인트마다 그 구간의 포인트(MSG 쇼츠가 씀)·주제 줄 글(가편집 쇼츠가 씀)을 남김 —
+        제목을 바꾼 포인트는 바꾼 제목으로 다시 셈 · MSG 를 못 넣은 가편집 쇼츠에도 주제 줄 (설정을 끄면 없음) · 확인할 것은 화면 큰 줄."""
+        r1 = {"start": 1.0, "end": 25.0, "cuts": [{"in": 1.0, "out": 25.0}], "hook": "디딤발 첫 번째 포인트", "title": "자, 첫 번째 포인트는 디딤발이에요.",
+              "keywords": ["디딤발", "포인트"], "point": {"n": 1, "unit": "포인트", "phrase": "디딤발"}, "topicText": "슈팅 챌린지", "hookSaid": False}
+        r2 = {"start": 30.0, "end": 55.0, "cuts": [{"in": 30.0, "out": 55.0}], "hook": "트래핑 꿀팁", "title": "트래핑은 이렇게 해요.",
+              "keywords": ["트래핑"], "point": {"n": 2, "unit": "포인트", "phrase": "트래핑"}, "topicText": "슈팅 챌린지 · 포인트 2", "hookSaid": True}
+        rec = {"videoTopic": "슈팅 챌린지", "shorts": [r2, r1], "tidy": []}
+        segs = [{"start": 1.0, "end": 3.0, "text": "디딤발 꿀팁 하나 알려 드릴게요."}]
+        st = autorun.new_state(self.w.name, autorun.options({"shorts": 2}))
+        c = autorun._Ctx(st, lambda m: None, None)
+        with mock.patch.object(editor, "load_project", return_value={"sequences": []}), mock.patch.object(editor, "recommend", return_value=rec), \
+                mock.patch.object(editor, "_segments_of", return_value=segs):
+            autorun._step_rough(c)
+        p1, p2 = st["points"]
+        self.assertEqual((p1["hook"], p1["hookCheck"]), ("디딤발 꿀팁", True))   # 순서 말뿐인 추천 제목 → 바꿈
+        self.assertEqual(p1["point"], r1["point"])
+        self.assertEqual(p1["topic"], editor.topic_line("슈팅 챌린지", r1["point"], "디딤발 꿀팁"))
+        self.assertEqual(p1["topic"], "슈팅 챌린지 · 포인트 1", "바꾼 제목에 없는 번호까지 (추천 제목 기준 글 '슈팅 챌린지' 아님)")
+        self.assertTrue(p1["hookSaid"], "바꾼 제목을 첫머리에 그대로 말함")
+        self.assertEqual((p2["hook"], p2["point"], p2["topic"], p2["hookSaid"]), ("트래핑 꿀팁", r2["point"], "슈팅 챌린지 · 포인트 2", True))
+        json.dumps(st)   # 기록 파일에 그대로 저장됨
+        info = {"duration": 60.0, "width": 1920, "height": 1080, "fps": 30.0}
+        with mock.patch.object(editor, "media_info", return_value=info), mock.patch.object(editor, "recommend", side_effect=AssertionError("추천을 다시 하면 안 됨")), \
+                mock.patch.object(editor, "_segments_of", return_value=[]), mock.patch.object(editor, "silences_of", return_value=[]), \
+                mock.patch.object(editor, "default_style_params", return_value=None):
+            with mock.patch.object(editor, "shorts_topic_on", return_value=True):
+                q = autorun._rough_short(c, 0, p1)
+            with mock.patch.object(editor, "shorts_topic_on", return_value=False):
+                q_off = autorun._rough_short(c, 0, p1)
+        tops = [t for t in q["titles"] if t.get("plan") == "topic"]
+        self.assertEqual([t["text"] for t in tops], ["슈팅 챌린지 · 포인트 1"])
+        self.assertTrue(tops[0].get("swap"), "첫머리에 말하는 제목이면 처음 2.5초 바꿔 끼우기")
+        self.assertFalse([t for t in q_off["titles"] if t.get("plan") == "topic"])
+        o = {"key": "short1", "kind": "shorts", "name": "자동 쇼츠 1 · 디딤발 꿀팁", "seq": "a", "msg": True, "export": "a.mp4", "qa": [],
+             "thumb": "a.jpg", "thumbInfo": {"score": 90}, "kit": {"txt": "a"}, "hook": "디딤발 꿀팁", "hookCheck": True, "opening": "디딤발 방향"}
+        with mock.patch.object(autorun, "caption_checks", return_value=[]):
+            items = autorun.checklist({"name": "x.mp4", "status": "done", "steps": {"rough": {"state": "done"}}, "outputs": [o]})
+        self.assertIn("'디딤발 방향'", items[0]["text"], "MSG 첫머리 큰 줄(= 키트 제목)을 이 쇼츠 포인트로 바꿨으면 그 글")
+
     def test_shorts_window_uses_given_window(self):
         rec = {"shorts": [{"start": 50.0, "end": 80.0, "cuts": [{"in": 50.0, "out": 80.0}]}], "tidy": []}
         moms = [{"t": 60.0, "score": 9, "kind": "play", "a": 59, "b": 61}]
@@ -792,7 +832,10 @@ class MsgWindows(unittest.TestCase):
         self.assertEqual(sorted(q["msgWin"] for q in res["sequences"]), [0, 1])
         for q in res["sequences"]:
             hook = next(e for e in q["msg"]["events"] if e["kind"] == "hook")
-            self.assertEqual(hook["text"].replace("\n", " "), wins[q["msgWin"]]["hook"])
+            # 첫머리 '훅' 사건 = 큰 줄 (+ 그 위 주제 줄 · BR-120) — 큰 줄은 그 구간의 제목 (주제 줄은 tests.test_shorts_topic 이 봄)
+            main = next(t for t in q["titles"] if t["id"] in hook["refs"]["titles"] and t.get("plan") != "topic")
+            self.assertEqual(main["text"].replace("\n", " "), wins[q["msgWin"]]["hook"])
+            self.assertEqual(q["msg"]["hook"], wins[q["msgWin"]]["hook"])
         self.assertNotEqual(*[editor.seq_total(q) for q in res["sequences"]])
 
 
