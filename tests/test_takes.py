@@ -498,9 +498,12 @@ class RecommendTest(unittest.TestCase):
                 junk_list = now.pop("junk_list")
                 off = now.pop("offscript")  # E12: 영상 밖 말 목록이 더해짐
                 self.assertEqual(now.pop("demos"), [])  # E2: 말 없는 틈의 시범 구간 (낱말 시각이 없는 받아쓰기는 없음)
+                self.assertIsInstance(now.pop("videoTopic"), str)  # BR-120: 쇼츠 주제 줄의 영상 주제 (더해지기만)
                 for sh in now["shorts"]:  # E2: 쇼츠 위 큰 제목 (editor.short_hooks) · 점수는 한 글자 추임새 줄 감점이 빠져 조금 다름(순서·구간은 그대로)
                     self.assertTrue(sh.pop("hook"))
                     sh.pop("score")
+                    self.assertEqual(set(sh.pop("point")), {"n", "unit", "phrase"})  # BR-120: 이 쇼츠 포인트 · 첫머리 주제 줄 (더해지기만)
+                    self.assertIsInstance(sh.pop("topic"), str)
                 c = dict(c, before=dict(c["before"], shorts=[{k: v for k, v in sh.items() if k != "score"} for sh in c["before"]["shorts"]]))
                 if c["input"].startswith("코치"):
                     self.assertEqual(junk_list, [])

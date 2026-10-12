@@ -465,6 +465,17 @@ class KitBuildTests(KitBase):
         kit = upload.build_kit(name, "s1")
         self.assertNotIn("아이고, 공이 조금 뒤로 갔네", kit["titles"])
 
+    def test_topic_line_is_not_kit_title(self):
+        """쇼츠 첫머리 주제 줄(BR-120 · plan 'topic')은 키트 제목 후보로 쓰지 않음 — 위 큰 제목이 훅 (주제 줄이 먼저 있어도)."""
+        segs = [{"start": 0.0, "end": 3.0, "text": "자, 두 번째 포인트는 디딤발이에요."}, {"start": 3.5, "end": 7.0, "text": "디딤발은 공 옆으로 한 뼘 떨어뜨려 주세요."},
+                {"start": 8.0, "end": 11.0, "text": "그래야 몸이 공을 덮을 수 있어요."}]
+        name = self.add_video(self.NAME, segs=segs)
+        ttl = [{"id": "k", "text": "퍼스트 터치 레슨 · 포인트 2", "start": 0, "dur": 2.5, "plan": "topic"}, {"id": "t", "text": "디딤발 꿀팁", "start": 0, "dur": 12}]
+        self.project(name, [("s1", "쇼츠 1", "shorts", 0.0, 12.0, ttl)], segs)
+        kit = upload.build_kit(name, "s1")
+        self.assertIn("디딤발 꿀팁", kit["titles"])
+        self.assertFalse([t for t in kit["titles"] if "포인트 2" in t], kit["titles"])
+
     def test_same_source_kits_differ(self):
         name = self.add_video(self.NAME)
         self.project(name, [("s1", "쇼츠 1", "shorts", 0.0, 45.0, []), ("s2", "쇼츠 2", "shorts", 60.0, 105.0, [])])

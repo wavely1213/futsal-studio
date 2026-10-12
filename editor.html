@@ -937,6 +937,53 @@ function capFit(text, st, W) {
   const k = Math.floor(avail / need * 100) / 100;
   return k >= 0.7 ? k : 1;
 }
+// 쇼츠 첫머리 주제 줄 (BR-120 · editor.py topic_title·text_box·_one_line·_topic_fill 과 같은 규칙 — 한쪽을 고치면 다른 쪽도):
+// 위 큰 제목 바로 위 · 한 줄 · 위쪽 안전 영역(TOP) 안 · 처음 SEC 초 · 색은 말 자막 색(어두우면 흰 테두리) · 자리가 없으면 null
+const TOPIC = { SEC: 2.5, TOP: 0.07, ONE: 0.9, SIZES: [72, 64], LINE: 1.25, GAP: 0.012 };
+const TOPIC_STYLE = { weight: "Black", size: 72, fill: "#FFFFFF", stroke: "#111111", strokeW: 8, bgOn: false, bg: "#000000", bgOpacity: 0.55, y: 0.22, effect: "pop", highlight: "#FFD400" };
+function txtBox(text, st, W, H) {  // 글 상자 [왼, 위, 오른, 아래] 화면 비율 · y 는 글 아래 끝 (editor.py text_box)
+  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", avail = 0.92 * W - 2 * stroke, sp = emOf(" ") * size, widths = [];
+  for (const para of String(text ?? "").replace(/\r/g, "").split("\n")) {
+    let cur = 0;
+    for (const w of para.split(" ")) {
+      const ww = Array.from(w).reduce((a, ch) => a + emOf(ch, black), 0) * size;
+      if (cur && cur + sp + ww > avail) { widths.push(cur); cur = ww; } else cur = cur + (cur ? sp : 0) + ww;
+    }
+    widths.push(cur);
+  }
+  const wd = Math.min(avail, Math.max(0, ...widths)) + 2 * stroke, h = widths.length * TOPIC.LINE * size + 2 * stroke;
+  const x = (st.x ?? 0.5) * W, al = st.align || "center", left = al === "left" ? x : al === "right" ? x - wd : x - wd / 2, y = (+st.y) * H;
+  return [left / W, (y - h) / H, (left + wd) / W, y / H];
+}
+const textW = (text, st) => Math.max(0, ...String(text ?? "").replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, st.weight === "Black"), 0))) * (+st.size || 0) + 2 * (+st.strokeW || 0);
+const oneLine = (text, st, W) => !String(text ?? "").includes("\n") && textW(text, st) <= TOPIC.ONE * 0.92 * W;
+function topicFill(cap) {
+  let f = String((cap || {}).fill || "#FFFFFF").toUpperCase(); if (!/^#[0-9A-F]{6}$/.test(f)) f = "#FFFFFF";
+  const lum = [[0.299, 1], [0.587, 3], [0.114, 5]].reduce((a, [k, i]) => a + k * parseInt(f.slice(i, i + 2), 16) / 255, 0);
+  return [f, lum >= 0.4 ? "#111111" : "#FFFFFF"];
+}
+function topicTitle(text, top, cap, len) {
+  const W = 1080, H = 1920;
+  if (!text || !top || !oneLine(top.text, top.style || {}, W)) return null;
+  const tb = txtBox(top.text, top.style, W, H), [fill, stroke] = topicFill(cap);
+  for (const size of TOPIC.SIZES) {
+    const st = { ...TOPIC_STYLE, size, fill, stroke, x: top.style.x ?? 0.5, align: top.style.align || "center" };
+    if (!oneLine(text, st, W)) continue;
+    st.y = Math.floor((tb[1] - TOPIC.GAP) * 1000 + 1e-6) / 1000;  // 내림: 틈이 줄지 않게
+    if (txtBox(text, st, W, H)[1] >= TOPIC.TOP - 1e-9) return { id: nid(), text, start: 0, dur: Math.round(Math.max(0.5, Math.min(TOPIC.SEC, +len)) * 100) / 100, style: st, plan: "topic" };
+  }
+  return null;
+}
+// 레이아웃 틀을 바꾼 뒤 주제 줄 다시 놓기: 위 큰 제목 바로 위 (자리가 없으면 바로 아래) · 글·시간은 그대로
+function placeTopic(t, top) {
+  if (!top) return;
+  const k = topicTitle(t.text, top, S.captionStyle, t.dur);
+  if (k) { Object.assign(t.style, k.style); return; }
+  const W = 1080, H = 1920, tb = txtBox(top.text, top.style, W, H), [fill, stroke] = topicFill(S.captionStyle);
+  const st = { ...t.style, fill, stroke, x: top.style.x ?? 0.5, align: top.style.align || "center" };
+  st.y = Math.ceil((tb[3] + TOPIC.GAP + (TOPIC.LINE * st.size + 2 * st.strokeW) / H) * 1000 - 1e-6) / 1000;
+  Object.assign(t.style, st);
+}
 function src2tl(src) { return S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps && src >= i.in && src < i.out).map(i => tlOf(i, src)).sort((a, b) => a - b); }
 
 /* ---------- 기록(되돌리기) · 저장 ---------- */
@@ -3041,8 +3088,10 @@ const TEMPLATES = {
   "꽉 채우기": () => { Object.assign(S.layout, { mode: "fill" }); Object.assign(S.captionStyle, { y: 0.72, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false }); tplTitle({ y: 0.15, fill: "#FFE14D", stroke: "#111111", strokeW: 9 }); },
 };
 function tplTitle(st) {
-  if (!S.titles.length) S.titles.push({ id: nid(), text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
-  S.titles.forEach(t => Object.assign(t.style, st));
+  if (!S.titles.some(t => t.plan !== "topic")) S.titles.unshift({ id: nid(), text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
+  S.titles.forEach(t => { if (t.plan !== "topic") Object.assign(t.style, st); });
+  const top = S.titles.find(t => t.plan !== "topic");  // 첫머리 주제 줄(BR-120)은 위 큰 제목에 맞춰 다시 놓음 (같은 자리·색으로 겹치지 않게)
+  S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, top));
 }
 const SHAPES = {
   "사각형": () => ({ x: 0.1, y: 0.42, w: 0.8, h: 0.16, color: "#000000", opacity: 0.6, radius: 24, full: false }),
@@ -3192,7 +3241,7 @@ async function renderRec() {
     <div class="sec"><h4>쇼츠 추천 구간 <span class="hint">(AI 없이 PC에서 계산)</span></h4>
       ${r.shorts.map((s, i) => `<div class="rec"><b>${i + 1}. ${esc(s.title)}…</b>
         <div class="m">${m(s.start)}~${m(s.end)} · 다듬은 길이 ${s.length}초 · 컷 ${s.cuts.length}개</div>
-        <div style="margin-bottom:6px">${s.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>
+        <div style="margin-bottom:6px">${s.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>${s.topic ? `<div class="m">첫머리 주제 줄 · ${esc(s.topic)}</div>` : ""}
         <button class="btn" data-rec="${i}">새 쇼츠 편집본으로 추가</button></div>`).join("") || `<div class="hint">추천할 구간을 찾지 못했어요. 대사가 있는 영상인지 확인해 주세요.</div>`}
     </div>
     <div class="sec"><h4>1차 가편집</h4>
@@ -3228,17 +3277,19 @@ async function renderRec() {
   };
   document.querySelectorAll("[data-rec]").forEach(b => b.onclick = () => {
     const s = r.shorts[+b.dataset.rec];
-    const base = P.sequences.find(q => q.format === "shorts") || S;
+    const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic");
     commit("쇼츠 편집본 추가");
     const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${cutText(s.title, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
       captionStyle: JSON.parse(JSON.stringify(base.captionStyle)), master: { volume: 1, normalize: true, lufs: -14 }, duck: { on: true, amount: -14 },
       layout: JSON.parse(JSON.stringify(base.layout || {})),
-      titles: base.titles.length ? [{ ...JSON.parse(JSON.stringify(base.titles[0])), id: nid(), text: s.hook || cutText(s.title, 16), start: 0, dur: s.length }] : [],
+      titles: top0 ? [{ ...JSON.parse(JSON.stringify(top0)), id: nid(), text: s.hook || cutText(s.title, 16), start: 0, dur: s.length }] : [],
       items: itemsFromCuts(s.cuts) };
     // 끝 0.3초 소리 줄이기 · 제목은 서버가 고른 것(editor.short_hooks) — 자동 가편집 쇼츠와 같게 (E2)
     const lastA = q.items.filter(i => i.track === "A1").pop(); if (lastA) lastA.fadeOut = 0.3;
     // 위쪽 자막 스타일이면 쇼츠 내내 떠 있는 큰 제목(y 0.22) 아래로 (editor.py auto_sequences 의 _stack_below 와 같은 뜻 · E4③)
     if (q.titles.length && q.captionStyle && (q.captionStyle.y ?? 0.8) < 0.3) q.captionStyle.y = 0.3;
+    // 첫머리 주제 줄 (BR-120 · editor.py auto_sequences 와 같게) — 서버가 고른 글 (설정 '쇼츠 첫머리에 주제 한 줄 넣기'를 끄면 없음)
+    const tk = q.titles.length && s.topic ? topicTitle(s.topic, q.titles[0], q.captionStyle, s.length) : null; if (tk) q.titles.push(tk);
     ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {

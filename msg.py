@@ -3094,8 +3094,9 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     rec = _recommend(name, segs, rh.get("keepPause") or None, sig)
     junk = [(j["a"], j["b"], j["why"]) for j in rec.get("junk_list") or []]
     pace = dict(PACE[intensity], cuts=knobs["cuts"])
+    short_r = None   # 쇼츠로 고른 추천 구간 (첫머리 주제 줄 · BR-120)
     if fmt == "shorts":
-        base = _shorts_window(rec, moms, dur, sig.get("demo") or [])
+        base, short_r = _shorts_window(rec, moms, dur, sig.get("demo") or []), _shorts_best(rec, moms)
     else:
         base = keep_cuts(rec["tidy"], sig.get("demo")) or [{"in": 0.0, "out": dur}]
         base = editor._minus(base, junk) or base  # 시범 장면으로 살린 곳에 걸친 군말·NG 도 뺌
@@ -3381,19 +3382,32 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             refs["sfx"] = [len(B.sfx) - 1]
         B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
 
+    topic_line = ""
     if shorts_hook and B.pos > 3.0:
         hlook = dict(looks["emphasis"], y=0.22, size=96, fill="#FFFFFF", effect="pop")
-        lim = 14   # 쇼츠 한 줄 14자 — 문장 부호·글꼴에 없어 바꾼 '...'까지 셈 (판정 U6: '퍼스트 터치 레슨, 이것만 알면...' 16자)
-        htxt = _short_text(hook, lim)
-        head = re.split(r"[,.?!]", str(hook))[0].strip()
-        if htxt != hook and 4 <= len(head.replace(" ", "")) <= lim and head != str(hook).strip():
-            htxt = head   # 잘라야 하면 앞 구절에서 ('퍼스트 터치 레슨, 이것만…' 대신 '퍼스트 터치 레슨')
-        while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
-            lim -= 1
+        vt, topic_on = rec.get("videoTopic") or "", editor.shorts_topic_on()
+        main = _shorts_main(vt, short_r) if topic_on else None   # 첫머리 = 이 쇼츠 포인트 + 그 위 주제 줄 (BR-120)
+        if main:
+            htxt = main
+        else:
+            lim = 14   # 쇼츠 한 줄 14자 — 문장 부호·글꼴에 없어 바꾼 '...'까지 셈 (판정 U6: '퍼스트 터치 레슨, 이것만 알면...' 16자)
             htxt = _short_text(hook, lim)
+            head = re.split(r"[,.?!]", str(hook))[0].strip()
+            if htxt != hook and 4 <= len(head.replace(" ", "")) <= lim and head != str(hook).strip():
+                htxt = head   # 잘라야 하면 앞 구절에서 ('퍼스트 터치 레슨, 이것만…' 대신 '퍼스트 터치 레슨')
+            while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
+                lim -= 1
+                htxt = _short_text(hook, lim)
         hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
+        ids = [hk["id"]]
+        kick = editor.topic_line(vt, (short_r or {}).get("point"), htxt) if topic_on else ""
+        kt = _topic_kicker(B, kick, hk, st, cap_y, fmt) if kick else None
+        if kt:
+            ids.append(kt["id"])
+            topic_line = kt["text"]
         B.sfx.append((0.0, pal.get("title", "짠"), None, "title"))
-        B.event("hook", 0.0, hk["text"], "쇼츠 첫 2.5초 훅 자막", refs={"titles": [hk["id"]], "sfx": [len(B.sfx) - 1]})
+        B.event("hook", 0.0, f"{kt['text']} · {hk['text']}" if kt else hk["text"], "쇼츠 첫 2.5초 주제 줄 + 포인트" if kt else "쇼츠 첫 2.5초 훅 자막",
+                refs={"titles": ids, "sfx": [len(B.sfx) - 1]})
 
     # --- 몽타주 (마무리 말이 없으면 끝나기 전) ---
     if mont and fmt == "long" and not mont_done:
@@ -3459,7 +3473,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     seq["auto"] = "msg"
     summ = summary_of(B.events, sections, total, seq_items_audio)
     seq["msg"] = {"v": 1, "style": {"label": st.get("label"), "kind": st.get("kind"), "sources": st.get("sources")}, "intensity": intensity, "seed": seed,
-                  "events": B.events, "thumb": thumbs, "summary": summ, "notes": st.get("notes") or [], "hook": hook, "topic": topic,
+                  "events": B.events, "thumb": thumbs, "summary": summ, "notes": st.get("notes") or [], "hook": hook, "topic": topic, "topicLine": topic_line,
                   "bgm": [{"a": round(a, 2), "b": round(b, 2), "mood": md} for a, b, md in sections]}
     return seq, list(B.media.values()), len(visual_events(B.items, B.titles, B.shapes, total)), B.lost
 
@@ -3902,13 +3916,104 @@ def _settle_titles(B):
             t["style"]["effect"] = "none"
 
 
-def _shorts_window(rec, moms, dur, sig_demo=()):
-    """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳 (없으면 앞쪽 정리 구간 50초)."""
+def _is_term(t):
+    """용어 사전(풋살 용어·기본 레슨 기술)에 있는 말인지 (띄어쓰기 무시)."""
+    import hooks
+    k = hooks._compact(t)
+    return bool(k) and any(hooks._compact(x) == k for x in editor._point_terms())
+
+
+def _shorts_main(vt, r):
+    """MSG 쇼츠 첫 2.5초 큰 줄 = 이 쇼츠의 포인트 (BR-120 · 그 위 주제 줄은 editor.topic_line) → 글 또는 None(예전 훅 그대로).
+    가편집 쇼츠의 위 큰 제목(추천 구간 hook · BR-093) 중 용어 사전 말로 만든 것만 씀 ('트래핑 꿀팁' · '디딤발!' · 영상 주제 vt 를 주제 줄에
+    쓰면 '패스\n두 번째 동작' → '두 번째 동작'). 그 제목이 영상 주제와 같은 말뿐이면('슈팅 챌린지') 이 쇼츠의 요점 말('디딤발 방향'),
+    그것도 없으면 None — 예전 훅(첫 질문)이 큰 줄, 영상 주제가 주제 줄. 문장·질문 제목은 받아쓰기 헛말일 수 있어 안 씀."""
+    if not r:
+        return None
+    h = str(r.get("hook") or "").strip()
+    p = (r.get("point") or {}).get("phrase")
+    if "\n" in h:
+        first, second = (x.strip() for x in h.split("\n", 1))
+        if editor.ORD_ANY.search(second) and _is_term(first):
+            return second if vt and editor._shares_word(first, vt) else h
+        return p or None
+    m = re.fullmatch(r"(.+?)(?: 꿀팁| 챌린지|!)", h)
+    if m and _is_term(m.group(1)):
+        if vt and editor._shares_word(m.group(1), vt):  # 영상 주제와 같은 말뿐 ('슈팅 챌린지' · '슈팅 꿀팁')
+            return p if p and not editor._shares_word(p, vt) else None
+        return h
+    return p or None
+
+
+TOPIC_KICK = (64, 56)   # MSG 쇼츠 주제 줄 글자 크기 (큰 것부터 · 큰 줄 96 · 휴대폰에서 읽히는 크기)
+
+
+def _topic_kicker(B, text, hk, st, cap_y, fmt="shorts"):
+    """MSG 쇼츠 주제 줄 title (BR-120) — 큰 줄(hk) 바로 위 (말 자막이 위쪽이면 큰 줄 바로 아래부터) · 스타일 강조 색·글꼴
+    (그 글꼴에 없는 글자('①' 등)가 있으면 기본 글꼴) · 한 줄 · 위쪽 안전 영역(editor.TOPIC_TOP) 안 · 말 자막 띠·영상(흐린 배경 위 본 화면)과
+    안 겹침. 위에 자리가 모자라면 큰 줄을 조금 내림(영상 위까지) · 그래도 없으면 None (큰 줄만)."""
+    W, H = (1080, 1920) if fmt == "shorts" else (1920, 1080)
+    hl = hk["style"]
+    c = st["captions"]
+    base = dict(hl, fill="#FFFFFF" if hl.get("bgOn") else (c.get("emphColor") or "#FFE14D"))
+    if not hl.get("bgOn"):
+        base["strokeW"] = min(int(hl.get("strokeW") or 8), 8)
+    if glyph_safe(text, base.get("font")) != text:
+        base.pop("font", None)
+        base["weight"] = "Black"
+    if len(re.sub(r"\s", "", text)) > editor.TOPIC_MAX + 2:
+        return None
+    pad = (max(6, base.get("strokeW", 0)) if base.get("bgOn") else base.get("strokeW", 0))
+    gap, top_ok = editor.TXT_GAP * H, editor.TOPIC_TOP * H
+    lay = seq_layout(fmt)
+    zoomed = any(it["track"] == "V1" and float(it["start"]) < editor.TOPIC_SEC and (_zoom_of(it)[0] > 100.5 or _zoom_of(it)[1]) for it in B.items)
+    vtop = H * (1 - min(1.0, W * float(lay.get("zoom") or 1) * 9 / 16 / H)) / 2   # 흐린 배경 위 본 화면 위 끝 (확대 안 했을 때)
+    cb = text_box("가나다라", dict(_caption_style(st, fmt, cap_y)), W, H) if st["captions"].get("on", True) else None
+    mb = text_box(hk["text"], hl, W, H)
+
+    def clear(b):
+        return b[1] >= top_ok - 1e-6 and not (cb and min(b[3], cb[3]) - max(b[1], cb[1]) > -gap)
+    for size in TOPIC_KICK:
+        look = dict(base, size=size)
+        kb = text_box(text, dict(look, y=0.5), W, H)
+        if kb[2] - kb[0] > editor.TOPIC_ONE * (W - 80):
+            continue
+        kh = kb[3] - kb[1]                      # 상자 높이 (테두리·여백 포함)
+        tries = [("below", 0.0)] if cap_y < 0.5 and not zoomed else []   # 말 자막이 위쪽: 큰 줄 아래 (영상 위 끝까지만 · 확대한 장면이면 안 씀)
+        tries.append(("above", 0.0))
+        deficit = top_ok - (mb[1] - gap - kh)
+        if deficit > 0 and not zoomed:   # 위에 자리가 모자람: 큰 줄을 그만큼 내림 (영상 위 끝까지만)
+            tries.append(("above", deficit))
+        for where, d in tries:
+            m = [mb[0], mb[1] + d, mb[2], mb[3] + d]
+            if d and (m[3] > vtop - gap or (cb and min(m[3], cb[3]) - max(m[1], cb[1]) > -gap)):
+                continue
+            y = m[1] - gap - pad if where == "above" else m[3] + gap + kh - pad   # 글 아래 끝 (상자 아래 = y + pad)
+            b = text_box(text, dict(look, y=y / H), W, H)
+            if not clear(b) or (where == "below" and b[3] > vtop):
+                continue
+            if d:
+                hl["y"] = round(float(hl["y"]) + d / H, 4)
+            yk = math.floor(y / H * 10000) / 10000 if where == "above" else math.ceil(y / H * 10000) / 10000   # 틈이 줄지 않게
+            kt = B.title(text, 0.0, float(hk["dur"]), dict(look, y=yk))
+            kt["plan"] = "topic"
+            return kt
+    return None
+
+
+def _shorts_best(rec, moms):
+    """쇼츠로 쓸 추천 구간: 재미 순간이 가장 많은 곳 (없으면 None)."""
     best, bs = None, -1.0
     for r in rec.get("shorts") or []:
         sc = sum(m["score"] for m in moms if r["start"] <= m["t"] <= r["end"] and m["kind"] in ("play", "punchline", "success", "emphasis", "surprise"))
         if sc > bs:
             best, bs = r, sc
+    return best
+
+
+def _shorts_window(rec, moms, dur, sig_demo=()):
+    """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳(_shorts_best · 없으면 앞쪽 정리 구간 50초)의 컷 목록."""
+    best = _shorts_best(rec, moms)
     if best:  # 그 구간 안의 시범 장면도 살림 (말 정리만 하면 시범이 빠짐)
         demo = [d for d in sig_demo if best["start"] <= d[0] and d[1] <= best["end"]]
         # 구간이 시범 바로 뒤 반응('아이고, 공이 조금 뒤로 갔네요')으로 시작하면 그 시범부터 (판정 round5 최종: 쇼츠가 무엇에 대한

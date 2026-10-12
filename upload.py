@@ -983,7 +983,7 @@ def build_kit(name, seq=None, save=True):
     if sq and (sq.get("msg") or {}).get("hook"):  # MSG 편집본: 맨 앞 훅 자막이 곧 제목 후보
         hook = _oneline(sq["msg"]["hook"], 40) or None
     if sq and fmt == "shorts" and not hook:  # 쇼츠 편집본의 큰 제목 글자가 곧 훅 (자동으로 자른 첫 문장 조각·인사·순서 말은 빼고)
-        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text"))), None)
+        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text")) and t.get("plan") != "topic"), None)  # 첫머리 주제 줄(BR-120)은 빼고
         hook = _overlay_hook(hook, texts)
     if not hook and segs:
         try:
