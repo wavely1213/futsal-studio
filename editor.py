@@ -2339,6 +2339,9 @@ GREETING = re.compile(r"안녕하세요|안녕하십니까|반갑습니다|사�
                       r"][가-힣]{1,2}\s?)?(?:감독|코치|선생님?|강사)?" + _GREET_END)
 # 인사·자기소개만 ('안녕하세요' · '풋살사관학교 최경진입니다' · '저는 김민수 코치예요') — '오늘의 핵심입니다' · '여기는 디딤발이에요' ·
 # '제가 시범 보여줄 거예요' 같은 레슨 말은 아님 (E2 검토)
+# 포인트를 여는 말 ('자, 첫 번째 포인트' · '마지막으로') — SECTION 에서 마무리 정리 말을 뺀 것 · 쇼츠 수를 정함 (D-260)
+POINT_OPEN = re.compile(r"^(?:자[,\s]*)?(?:(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱) ?번째|(?:그리고\s)?마지막으로)")
+ORDINAL_OPEN = re.compile(r"^(?:자[,\s]*)?(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱) ?번째")   # 'N번째'로 세어 나가는 영상일 때만 쇼츠 수를 포인트 수로
 SECTION_CROSS = 4.0    # 쇼츠 후보가 장 나눔 말을 하나 넘을 때마다 뺄 점수 (포인트 하나 = 쇼츠 하나)
 SECTION_START = 3.0    # 장 나눔 말로 시작하는 후보에 더할 점수
 SHORT_EDGE = 0.25      # 첫 인사는 영상 앞 이 비율 안, 끝인사는 뒤 이 비율 안에서만 찾음
@@ -2607,9 +2610,12 @@ def _keep_demos(cuts, demos):
     return [{"in": round(a, 3), "out": round(b, 3)} for a, b in out if b - a >= 0.2]
 
 
-def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None):
+def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None, points=False):
     """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초).
-    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일."""
+    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일.
+    points: segs 를 줄 때도 쇼츠 = 포인트 하나(BR-092 · 인사·끝인사 빼기 · 장 나눔 점수 · 뺄 말로 끝나지 않기 · 여담) — MSG 가 켜는 것
+    (msg.SHORTS_POINTS · D-260). 받아쓰기 파일을 읽을 때(segs 없음)는 늘 켬.
+    쇼츠 수 = 포인트를 연 말('N번째'·'마지막으로') 수 (없으면 n · 많으면 n 까지 · BR-092 규칙이 켜졌을 때만 · D-260)."""
     if keep_pause:
         kp = max(0.08, float(keep_pause))
         pre, post = min(0.15, kp * 0.4), min(0.25, kp * 0.6)
@@ -2620,6 +2626,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
     word_mode, hallu, line_junk, demos, maybe = segs is None, [], [], [], []
+    pt = word_mode or bool(points)   # 쇼츠 = 포인트 하나 규칙 (BR-092)
     if segs is not None:
         segs = [s for s in segs if str(s.get("text") or "").strip()]
     else:
@@ -2686,19 +2693,23 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
     fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
     sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
-    aside = ASIDE if word_mode else ASIDE_OLD
+    aside = ASIDE if pt else ASIDE_OLD
     sjunk |= {i for i, s in enumerate(segs) if aside.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
     # 쇼츠 = 포인트 하나 (E2 · BR-092): 영상 첫머리 인사·자기소개와 끝인사(그 뒤 모두)는 쇼츠에서 빼고 ('오늘은 … 알려 드릴게요' 주제 소개는 둠),
     # 장 나눔 말('자, 두 번째 포인트는 …')을 넘어가는 후보는 점수를 덜 줌 · 장 나눔 말로 시작하면 조금 더
-    # MSG(segs 를 줌)는 v2.16.0 그대로 — MSG 쇼츠는 따로 판정하며 다듬는 중이라 새 점수 규칙은 기본 가편집(word_mode)에만 (E2 검토)
-    if segs and word_mode:
+    # MSG(segs 를 줌)는 points 를 켤 때만 (D-260 · 예전에는 v2.16.0 그대로 — MSG 쇼츠는 따로 판정하며 다듬는 중이라 E2 검토)
+    if segs and pt:
         t_end = float(segs[-1]["end"])
         sjunk |= {i for i, s in enumerate(segs) if float(s["start"]) <= SHORT_EDGE * t_end and GREETING.search(s["text"])
                   and len(_norm(s["text"])) <= GREET_LEN}
         bye = next((i for i, s in enumerate(segs) if float(s["start"]) >= (1 - SHORT_EDGE) * t_end and takes.CLOSING.search(s["text"])), None)
         if bye is not None:
             sjunk |= set(range(bye, len(segs)))
-    section = [word_mode and bool(SECTION.match(str(s["text"]).strip())) for s in segs]
+    section = [pt and bool(SECTION.match(str(s["text"]).strip())) for s in segs]
+    if pt and segs:  # 쇼츠 수 = 포인트 수 (포인트를 여는 말 · 정리 말·같은 말 되풀이는 안 셈) — 'N번째'로 둘 이상 세어 나갈 때만 · 아니면 예전처럼 n (D-260)
+        opens = {_norm(s["text"])[:12] for i, s in enumerate(segs) if i not in sjunk and POINT_OPEN.match(str(s["text"]).strip())}
+        if len(opens) >= 2 and any(ORDINAL_OPEN.match(str(s["text"]).strip()) for s in segs):
+            n = min(n, len(opens))
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
@@ -2720,12 +2731,12 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         j, sc, chars, junk_n = i, 0.0, 0, 0
         while j < len(segs) and segs[j]["end"] - start <= max_len:
             if j in sjunk:
-                junk_n += 0 if word_mode and len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
+                junk_n += 0 if pt and len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
             else:
                 sc += seg_score(segs[j])
                 chars += len(_norm(segs[j]["text"]))
             end = segs[j]["end"]
-            if end - start >= min_len and not (word_mode and j in sjunk):  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
+            if end - start >= min_len and not (pt and j in sjunk):  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
                 dur = end - start
                 score = sc + 2.5 * sum(1 for p in peaks if start <= p <= end) + 2.0 * (chars / dur) - 1.5 * junk_n
                 # 첫 문장이 강한 말로 시작하면 가산 (훅)
