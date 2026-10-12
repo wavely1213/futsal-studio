@@ -252,3 +252,32 @@ const AB_TAGS = "ABCDEF";
 $("ovMenu").onclick = e => openTacMenu(e.currentTarget);
 $("stkBtn").onclick = () => toggleStk();
 $("brandBtn").onclick = openBrand;
+/* 밖에서 작업 (D-238): 이 PC 화면(편집실·썸네일)에도 밖에서 연결된 기기를 보여 주고 [끊기] — 보관함 화면의 #studioPill 과 같은 말 ·
+   5초마다 /api/state 의 remote.studio (살아 있는 세션 모두 · 2분 안에 요청이면 '작업 중') · 밖에서 연 화면(FS_REMOTE)에는 없음 */
+if (!window.FS_REMOTE && window.top === window) (() => {  // 끝까지 자동으로의 보이지 않는 틀 안에서는 묻지 않음
+  const pill = document.getElementById("studioPill"); if (!pill) return;
+  const ago = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : `${Math.floor(s / 3600)}시간 전`; };
+  const word = x => x.active !== false ? "밖에서 작업 중" : `밖에서 연결됨 · ${ago(x.lastSeen)}`;
+  async function tick() {
+    let s; try { const r = await fetch("/api/state?since=999999"); if (!r.ok) return; s = await r.json(); } catch (e) { return; }
+    const ss = s && s.remote && Array.isArray(s.remote.studio) ? s.remote.studio : [];
+    pill.hidden = !ss.length;
+    const key = ss.map(x => x.id + x.device + word(x)).join("|");
+    if (pill.dataset.key === key) return;
+    pill.dataset.key = key;
+    pill.replaceChildren(...ss.flatMap(x => {
+      const sp = document.createElement("span"), b = document.createElement("b"), k = document.createElement("button");
+      sp.append(word(x) + " · ", b); b.textContent = x.device;
+      k.type = "button"; k.textContent = "끊기"; k.dataset.stcut = x.id; k.dataset.name = x.device;
+      return [sp, k];
+    }));
+  }
+  pill.addEventListener("click", async e => {
+    const b = e.target.closest("[data-stcut]"); if (!b) return;
+    if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요 (기기 연결은 그대로라 원격 홈에서 다시 열 수 있어요)`)) return;
+    try { await fetch("/api/remote/session/revoke", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.dataset.stcut }) }); } catch (e) { /* 다음 묻기에 */ }
+    pill.dataset.key = ""; tick();
+  });
+  tick(); setInterval(tick, 5000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") tick(); });
+})();

@@ -14,6 +14,7 @@
 #fsr-bar b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #fsr-bar #fsr-uppct { white-space: nowrap; color: #b7e4c7; }
 #fsr-bar .fsr-dot { width: 8px; height: 8px; border-radius: 50%; background: #2fbf6b; box-shadow: 0 0 0 3px rgba(47,191,107,.25); flex: none; }
+#fsr-bar.off .fsr-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.3); }  /* PC와 연결이 끊김 (D-236) */
 #fsr-bar .fsr-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 #fsr-bar .fsr-btn { background: rgba(255,255,255,.08); color: #e8f5ec; border-color: rgba(255,255,255,.18); }
 #fsr-bar .fsr-btn:hover { background: rgba(255,255,255,.16); }
@@ -32,7 +33,7 @@
 #fsr-toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
 #fsr-toast a { color: #8ee0ad; font-weight: 700; }
 
-#fsr-net { position: fixed; top: var(--fsr-h); left: 0; right: 0; z-index: 9989; display: none; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px;
+#fsr-net { position: fixed; top: var(--fsr-h); left: 0; right: 0; z-index: 9997;  /* 열린 창(#fsr-panel 9996) 위 · 잠금(9998) 아래 — 올리기 창이 '다시 연결'을 덮지 않게 */ display: none; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px;
   background: #7c2d12; color: #fff; font: 600 13px/1.4 system-ui, sans-serif; }
 #fsr-net.show { display: flex; }
 

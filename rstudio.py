@@ -22,6 +22,7 @@ import secrets
 import shutil
 import threading
 import time
+import unicodedata
 from email.utils import formatdate
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -66,6 +67,7 @@ MSG = {
     "none": "PC와 연결이 끊겼어요 · 원격 홈에서 다시 열어 주세요",
     "expired": "오래 쓰지 않아 연결이 끝났어요 · 원격 홈에서 다시 열어 주세요",
     "revoked": "PC에서 연결을 끊었어요 · 다시 쓰려면 원격 홈에서 다시 열어 주세요",
+    "logout": "이 브라우저에서 연결을 끝냈어요 · 다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요",
     "studio_off": "PC에서 '밖에서 작업 허용'이 꺼져 있어요 · PC의 '휴대폰으로 보기'에서 켜 주세요",
     "pc_only": "PC에서만 할 수 있어요",
     "not_remote": "아직 밖에서 쓸 수 없는 기능이에요 · PC에서 해 주세요",
@@ -78,7 +80,7 @@ MSG = {
     "open_pc": "PC에서만 열 수 있어요",
 }
 LOCK_TITLE = {"none": "다시 연결해 주세요", "expired": "연결이 끝났어요", "revoked": "PC에서 연결을 끊었어요",
-              "studio_off": "밖에서 작업이 꺼져 있어요", "handoff": "다시 연결해 주세요"}
+              "studio_off": "밖에서 작업이 꺼져 있어요", "handoff": "다시 연결해 주세요", "logout": "연결을 끝냈어요"}
 CONFIRM_YT = "유튜브에 올릴까요?\n\n제목: {title}\n공개 범위: {privacy}\n편집본: {video}\n\n밖에서 누른 올리기예요 · 맞으면 [확인]을 눌러 주세요"
 CONFIRM_RESUME = "멈춘 유튜브 올리기를 이어 할까요?\n\n제목: {title}\n공개 범위: {privacy}\n파일: {video}\n\n밖에서 누른 올리기예요 · 맞으면 [확인]을 눌러 주세요"
 CONFIRM_FINISH = "유튜브에 올린 영상의 남은 것(썸네일·자막·재생목록)을 마저 할까요?\n\n제목: {title}\n\n밖에서 누른 마무리예요 · 맞으면 [확인]을 눌러 주세요"
@@ -360,6 +362,36 @@ def classify(method, path):
     return None
 
 
+YT_GUARD = ("/api/download", "/api/list", "/api/refs/add")
+YT_IDS_MAX = 2000
+_YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
+
+
+def yt_guard(svc, path, b):
+    """밖에서 온 YouTube 받기(/api/download ids)·채널 불러오기(/api/list url)·학습용 영상 받기(/api/refs/add url) →
+    휴대폰 원격과 같은 규칙(remote.youtube_id · remote.listing_url)으로 YouTube 영상 id·표준 주소로만 바꾼 본문 · 그 밖은 ValueError.
+    앱(core.download·core._listing_target)은 'http…' 를 그대로 yt-dlp 에 넘기므로, 밖에서 온 주소가 PC 에서 집 안 공유기·내부망·
+    클라우드 메타데이터 같은 곳으로 요청을 보내지 못하게 (SSRF · D-235). 다른 칸은 그대로 둠."""
+    b = dict(b)
+    if path == "/api/download":
+        ids = b.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > YT_IDS_MAX:
+            raise ValueError("받을 영상을 골라 주세요")
+        out = []
+        for v in ids:
+            if not isinstance(v, str):
+                raise ValueError("YouTube 영상만 받을 수 있어요")
+            v = v.strip()
+            out.append(v if _YT_ID_RE.fullmatch(v) else svc.youtube_id(v))
+        b["ids"] = out
+        return b
+    url = b.get("url")
+    if url is not None and not isinstance(url, str):
+        raise ValueError("YouTube 채널·영상·재생목록 주소만 넣을 수 있어요")
+    b["url"] = svc.listing_url(url or "")
+    return b
+
+
 def bucket_of(path):
     """요청 수 바구니: 넘겨주기(표 바꾸기)는 열린 길 바구니(좁게) · 그 밖은 스튜디오 바구니 — 정적인 인사 쪽(/s/hello·hello.js)도
     스튜디오 바구니 (다시 연결할 때마다 열린 길 몫을 셋씩 쓰면 몇 번 만에 막힘)."""
@@ -435,9 +467,12 @@ def lock_page(h, svc, code, status=401):
     send(h, status, page, "text/html; charset=utf-8")
 
 
-HELLO_PAGE = ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
-              '<meta name="referrer" content="no-referrer"><title>풋살 스튜디오 · 연결 중</title><script src="/s/hello.js"></script></head>'
-              '<body><main id="box"><h1>PC 스튜디오에 연결하는 중이에요…</h1><p id="msg">잠시만 기다려 주세요</p></main></body></html>').encode("utf-8")
+def hello_page(site):
+    """연결 쪽 (/s/hello): 원격 홈 주소(svc.site())를 meta 로 — 표가 없거나·쿠키가 막혔거나·끊겼을 때도 [원격 홈으로 가기]와 그 주소를 보여 줌."""
+    return ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<meta name="referrer" content="no-referrer"><meta name="fs-site" content="{html.escape(site)}"><title>풋살 스튜디오 · 연결 중</title>'
+            '<script src="/s/hello.js"></script></head>'
+            '<body><main id="box"><h1>PC 스튜디오에 연결하는 중이에요…</h1><p id="msg">잠시만 기다려 주세요</p></main></body></html>').encode("utf-8")
 
 
 def _static_file(st, name):
@@ -623,6 +658,13 @@ def gate(h, method, svc, ip):
                 return send(h, 400, {"ok": False, "error": "잘못된 요청이에요"})
             if b.get("cookies"):  # 로그인 정보(쿠키) 브라우저 읽기는 PC 화면에서만 (D-009 · D-044)
                 return err(h, "pc_only", None, 403)
+            if path in YT_GUARD:  # YouTube 받기·불러오기: YouTube 주소만 · 표준 주소로 다시 쓴 본문을 앱에 (D-235)
+                try:
+                    b = yt_guard(svc, path, b)
+                except ValueError as e:
+                    return send(h, 400, {"ok": False, "code": "yt_only", "error": str(e)})
+                body = json.dumps(b, ensure_ascii=False).encode("utf-8")
+                h.headers.replace_header("Content-Length", str(len(body)))
             h.rfile = io.BytesIO(body)  # 앱 처리기가 같은 본문을 다시 읽음 (_body)
     if kind == OWN:
         return own(h, svc, sess, method, path, u, b)
@@ -666,7 +708,7 @@ def _public(h, svc, method, path, ip, net):
     st = svc.studio
     if path == "/s/hello":
         h._studio_csp = HELLO_CSP
-        return send(h, 200, HELLO_PAGE, "text/html; charset=utf-8")
+        return send(h, 200, hello_page(svc.site()), "text/html; charset=utf-8")
     if path == "/s/hello.js":
         h._studio_cache = STATIC_AGE
         data, _ = _static_file(st, "hello.js")
@@ -710,7 +752,7 @@ def _page(h, svc, sess, path):
 def session_view(svc, sess):
     return {"ok": True, "device": sess["name"], "pc": svc.store.data["pc"]["name"], "csrf": sess["csrf"], "expiresAt": int(sess["created"] + ABSOLUTE),
             "idleSec": IDLE, "site": svc.site(), "pcOnly": PC_ONLY_LIST, "features": FEATURES, "prefs": dict(sess["prefs"]),
-            "chunk": CHUNK, "editUploadMax": EDIT_UPLOAD_MAX}
+            "chunk": CHUNK, "chunkMax": CHUNK_MAX, "upMax": UP_PER_DEVICE, "editUploadMax": EDIT_UPLOAD_MAX}
 
 
 def own(h, svc, sess, method, path, u, b):
@@ -719,9 +761,11 @@ def own(h, svc, sess, method, path, u, b):
     if path == "/s/session":
         return send(h, 200, session_view(svc, sess))
     if path == "/s/logout":
-        st.sessions.end(lambda r: r is sess, "none", "밖에서 연결 끝냄")
+        # 'logout' 으로 끝냄 · 쿠키는 지우지 않음 (서버에서 이미 죽은 표) → 같은 브라우저의 다른 탭도 다음 요청에 'logout' 을 받아
+        # 저절로 다시 연결하지 않고 '연결을 끝냈어요'로 잠김 (쿠키를 지우면 'none' 이라 원격 홈이 다시 넘겨줘 버림 · D-236)
+        st.sessions.end(lambda r: r is sess, "logout", "밖에서 연결 끝냄")
         svc.studio_ended([sess])
-        return send(h, 200, {"ok": True, "site": svc.site()}, extra={"Set-Cookie": set_cookie(svc, "", 0)})
+        return send(h, 200, {"ok": True, "site": svc.site()})
     if path == "/s/prefs":
         if "fullRes" in b:
             if not isinstance(b["fullRes"], bool):
@@ -1014,11 +1058,15 @@ def start(svc, sess, label, fn):
 
 UP_MAX = 100 * (1 << 30)     # 한 파일 100GB 까지
 UP_PER_DEVICE, UP_TOTAL = 2, 4
-UP_ACTIVE = 30 * 60          # 30분 안에 조각이 온 올리기만 '올리는 중'으로 셈 (멈춰 둔 것은 수에 안 셈)
+UP_ACTIVE = 5 * 60           # 5분 안에 조각이 온 올리기만 '올리는 중'으로 셈 (멈춰 두거나 그만 둔 것은 곧 수에서 빠짐 · 아주 느린 망도
+                             # 조각 하나(기기가 속도에 맞춰 1~16MB · 약 8초)는 5분 안에 옴 · D-237)
 UP_KEEP = 7 * 86400          # 7일 안 이어 올리면 지움
 UP_RECHECK = 64 << 20        # 이만큼 받을 때마다 디스크 남은 곳을 다시 봄
 _UP_NAME_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+UP_BUSY_MSG = "PC가 다른 파일을 받는 중이에요 · 앞의 파일이 끝나면 이어서 올려요 (안 올릴 파일은 [그만두기])"
 
 
 class UploadError(Exception):
@@ -1028,8 +1076,10 @@ class UploadError(Exception):
 
 
 def upload_name(name):
-    """올린 파일 이름 → 보관함에 쓸 이름 (디렉터리 없이 · 못 쓰는 글자·제어 글자 · 예약 이름 · 길이)."""
-    n = _UP_NAME_BAD.sub("_", clean(core.clean_text(Path(str(name or "").replace("\\", "/")).name), 200)).strip(" .")
+    """올린 파일 이름 → 보관함에 쓸 이름 (디렉터리 없이 · 못 쓰는 글자·제어 글자 · 예약 이름 · 길이).
+    맥·아이폰은 한글 이름을 풀어 쓴(NFD) 글자로 보냄 → 모아 쓴(NFC) 글자로 (탐색기에서 자모가 갈라져 보이거나 같은 제목이 둘이 되지 않게)."""
+    n = unicodedata.normalize("NFC", core.clean_text(Path(str(name or "").replace("\\", "/")).name))
+    n = _UP_NAME_BAD.sub("_", clean(n, 200)).strip(" .")
     stem, ext = Path(n).stem.strip(" ."), Path(n).suffix.lower()
     if not stem or not ext:
         raise UploadError("파일 이름을 읽지 못했어요 · 이름을 바꾼 뒤 다시 올려 주세요")
@@ -1094,7 +1144,7 @@ class Uploads:
 
     def view(self, r):
         return {"id": r["id"], "name": r["name"], "size": r["size"], "received": r["received"], "target": r["target"],
-                "lastModified": r.get("lastModified"), "chunk": CHUNK, "updated": int(r.get("updated") or 0)}
+                "lastModified": r.get("lastModified"), "chunk": CHUNK, "chunkMax": CHUNK_MAX, "updated": int(r.get("updated") or 0)}
 
     def _need_free(self, extra_left):
         """다른 올리기가 아직 받을 양 + 이번에 받을 양 + 남겨 둘 여유 (2GB 또는 디스크의 3% 중 큰 것)."""
@@ -1131,7 +1181,7 @@ class Uploads:
             now = time.time()
             live = [r for r in self.items.values() if now - (r.get("updated") or 0) < UP_ACTIVE]
             if len([r for r in live if r["device"] == sess["device"]]) >= UP_PER_DEVICE or len(live) >= UP_TOTAL:
-                raise UploadError("한 번에 올릴 수 있는 파일 수를 넘었어요 · 올리던 것이 끝난 뒤 다시 해 주세요", 429)
+                raise UploadError(UP_BUSY_MSG, 429, code="queue")
             free, need = self._need_free(size)
             if free < need:
                 raise UploadError(f"PC 저장 공간이 모자라요 · {round((need - free) / (1 << 30), 1)}GB 더 비워 주세요", 507, code="disk")

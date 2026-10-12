@@ -353,7 +353,8 @@ def unique_name(folder, name):
 def save_upload(name, stream, length):
     """가져오기: 음악·이미지·영상 파일을 그대로 받아 저장. 끝까지 받은 뒤에만 제 이름으로 (끊기거나 디스크가 차면
     반쪽 파일이 미디어 목록에 남아 내보내기가 깨졌음 · Windows 는 끊김이 ConnectionAbortedError)."""
-    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", core.clean_text(Path(name).name)).strip(" .") or "media"
+    name = unicodedata.normalize("NFC", core.clean_text(Path(name).name))  # 맥·아이폰의 풀어 쓴 한글(NFD) → 모아 쓴 글자 (rstudio.upload_name 과 같음)
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name).strip(" .") or "media"
     if Path(name).suffix.lower() not in MEDIA_EXTS:
         raise ValueError("영상·음악·이미지 파일만 가져올 수 있어요")
     dest = unique_name(ASSETS, name)

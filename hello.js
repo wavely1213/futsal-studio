@@ -8,11 +8,12 @@
     none: ["다시 연결해 주세요", "PC와 연결이 끊겼어요 · 원격 홈으로 가서 다시 열어요"],
     expired: ["연결이 끝났어요", "오래 쓰지 않아 연결이 끝났어요 · 원격 홈으로 가서 다시 열어요"],
     revoked: ["PC에서 연결을 끊었어요", "다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요"],
+    logout: ["연결을 끝냈어요", "이 브라우저에서 밖에서 작업 연결을 끝냈어요 · 다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요"],
     studio_off: ["밖에서 작업이 꺼져 있어요", "PC의 '휴대폰으로 보기'에서 '밖에서 작업 허용'을 켜 주세요"],
     handoff: ["다시 열어 주세요", "연결 표가 맞지 않거나 시간이 지났어요 · 원격 홈에서 [PC 스튜디오 열기]를 다시 눌러 주세요"],
     cookie: ["브라우저가 쿠키를 막고 있어요", "이 브라우저 설정에서 쿠키(사이트 데이터)를 허용한 뒤 원격 홈에서 다시 열어 주세요 · 시크릿·개인 정보 보호 모드라면 일반 창에서 열어 주세요"],
     net: ["PC와 연결하지 못했어요", "인터넷 연결을 확인한 뒤 원격 홈에서 다시 열어 주세요"],
-    start: ["원격 홈에서 열어 주세요", "휴대폰 원격 페이지의 [PC 스튜디오 열기]로 들어와 주세요"]
+    start: ["원격 홈에서 열어 주세요", "원격 홈(아래 주소)의 [PC 스튜디오 열기]로 들어와 주세요 · 이 쪽은 즐겨찾기로 바로 열 수 없어요"]
   };
 
   function meta(n) { var m = document.querySelector('meta[name="' + n + '"]'); return m ? m.getAttribute("content") || "" : ""; }
@@ -53,10 +54,13 @@
     var h1 = document.createElement("h1"); h1.textContent = t[0];
     var p = document.createElement("p"); p.id = "msg"; p.textContent = t[1];
     box.appendChild(h1); box.appendChild(p);
-    site = siteOk(site);
+    site = siteOk(site) || siteOk(meta("fs-site"));  // 이 쪽을 낸 PC 가 meta 로 알려 준 원격 홈 (표 없음·쿠키 막힘·끊김에도 막다른 쪽이 되지 않게)
     if (site) {
+      var addr = site.replace(/^https?:\/\//, "").replace(/\/$/, "");
       var a = document.createElement("a"); a.id = "home"; a.href = homeUrl(site, resume); a.textContent = "원격 홈으로 가기";
       var w = document.createElement("p"); w.appendChild(a); box.appendChild(w);
+      var q = document.createElement("p"); q.id = "addr"; q.textContent = "원격 홈 주소 · " + addr; q.style.opacity = ".75"; q.style.fontSize = "13px";
+      box.appendChild(q);
     }
     paint();
   }
@@ -79,8 +83,8 @@
 
   function lock(code) {
     var site = meta("fs-site"), resume = here();
-    say(code, site, code === "revoked" || code === "studio_off" ? "" : resume);
-    // 시간이 지났거나 쿠키가 없음 → 원격 홈이 다시 넘겨줌 (PC 가 끊었거나 꺼 둔 것은 저절로 돌아가지 않음)
+    say(code, site, code === "none" || code === "expired" ? resume : "");
+    // 시간이 지났거나 쿠키가 없음 → 원격 홈이 다시 넘겨줌 (PC 가 끊었거나·꺼 두었거나·이 브라우저에서 끝낸(logout) 것은 저절로 돌아가지 않음)
     if ((code === "none" || code === "expired") && siteOk(site)) {
       setTimeout(function () { location.replace(homeUrl(siteOk(site), resume)); }, 1500);
     }

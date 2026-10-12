@@ -163,13 +163,48 @@ class UploadTest(UploadBase):
             st, j = self.init(name=f"{i}.mp4", data=b"d" * 10)
             self.assertEqual(st, 200)
             ids.append(j["id"])
-        self.assertEqual(self.init(name="2.mp4", data=b"d" * 10)[0], 429)  # 기기마다 2개
+        st, j = self.init(name="2.mp4", data=b"d" * 10)
+        self.assertEqual((st, j["code"]), (429, "queue"))  # 기기마다 2개 → 화면은 실패가 아니라 '차례를 기다리는 중' (D-237)
+        self.assertIn("[그만두기]", j["error"])
         self.jreq("POST", "/s/upload/cancel", {"id": ids[0]})
         self.assertEqual(self.init(name="2.mp4", data=b"d" * 10)[0], 200)
         up = self.svc.studio.uploads
-        for r in up.items.values():  # 30분 넘게 멈춰 둔 것은 수에 안 셈
+        self.assertEqual(rstudio.UP_ACTIVE, 5 * 60)  # 멈춰 두거나 그만 둔 올리기는 5분이면 수에서 빠짐 (예전 30분)
+        for r in up.items.values():
             r["updated"] -= rstudio.UP_ACTIVE + 1
         self.assertEqual(self.init(name="3.mp4", data=b"d" * 10)[0], 200)
+        st, j = self.jreq("GET", "/s/session")
+        self.assertEqual((j["upMax"], j["chunkMax"]), (rstudio.UP_PER_DEVICE, rstudio.CHUNK_MAX))  # 화면이 줄 세우기·조각 크기에 씀
+
+    def test_nfd_name_stored_nfc(self):
+        """맥·아이폰의 풀어 쓴 한글(NFD) 이름 → 모아 쓴(NFC) 이름으로 보관함에 (같은 제목이 둘이 되지 않게 · 편집실 가져오기도)."""
+        import unicodedata
+        data = b"n" * 3000
+        nfd = unicodedata.normalize("NFD", "퍼스트터치연습.mp4")
+        self.assertNotEqual(nfd, "퍼스트터치연습.mp4")
+        st, j = self.init(name=nfd, data=data)
+        self.assertEqual((st, j["name"]), (200, "퍼스트터치연습.mp4"))
+        self.assertEqual(j["chunkMax"], rstudio.CHUNK_MAX)
+        self.send_all(j["id"], data)
+        with mock.patch.object(source, "mark_footage"):
+            st, j = self.jreq("POST", "/s/upload/finish", {"id": j["id"]})
+        self.assertEqual(j["name"], "퍼스트터치연습.mp4")
+        names = [x.name for x in core.VIDEOS.iterdir() if x.name.endswith(".mp4") and "퍼" in unicodedata.normalize("NFC", x.name)]
+        self.assertEqual(names, ["퍼스트터치연습.mp4"])
+        self.assertTrue(unicodedata.is_normalized("NFC", names[0]))
+        # 같은 제목을 NFC 로 다시 올리면 같은 이름으로 보고 _1 을 붙임 (둘이 똑같이 보이는 다른 파일이 되지 않음)
+        st, j = self.init(name="퍼스트터치연습.mp4", data=data, lm=5)
+        self.send_all(j["id"], data)
+        with mock.patch.object(source, "mark_footage"):
+            self.assertEqual(self.jreq("POST", "/s/upload/finish", {"id": j["id"]})[1]["name"], "퍼스트터치연습_1.mp4")
+        # 편집실 가져오기(작은 파일 · /api/edit/upload)도 같은 규칙
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 6), (0, 0, 200)).save(buf, "PNG")
+        png = buf.getvalue()
+        e = editor.save_upload(unicodedata.normalize("NFD", "로고 그림.png"), io.BytesIO(png), len(png))
+        self.assertEqual(e["file"], "로고 그림.png")
+        self.assertTrue((editor.ASSETS / "로고 그림.png").exists())
 
     def test_assets_finish_returns_media_entry(self):
         from PIL import Image

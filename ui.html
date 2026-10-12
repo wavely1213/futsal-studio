@@ -2480,7 +2480,12 @@ function showBusy() {
 async function poll() {
   let s;
   const want = pendingId;
-  try { s = await api(`/api/state?since=${logSince}${want ? "&job=" + want : ""}`); } catch (e) { return; }
+  try {  // 오류 답(밖에서 작업이 꺼짐 등)은 알림·화면 칸에 쓰지 않음 ('vundefined' · 2초마다 같은 알림 · D-236) — 잠금은 심(remote_ui.js)이 맡음
+    const r = await fetch(`/api/state?since=${logSince}${want ? "&job=" + want : ""}`);
+    if (!r.ok) return;
+    s = await r.json();
+  } catch (e) { return; }
+  if (!s || s.workspace == null) return;
   $("ver").textContent = `v${s.version}`;
   $("workspace").textContent = "작업 폴더 " + s.workspace.split(/[\\/]/).slice(-1)[0];
   $("workspace").title = `${s.workspace}\n누르면 작업 폴더를 열어요 (문제가 생기면 보낼 studio.log 도 여기에 있어요)`;
@@ -4289,13 +4294,14 @@ function remoteDot(r) {
   const d = $("rmDot"); if (!d || !r) return;
   d.className = "rdot " + ({ on: "on", error: "err", off: "" }[r.state] ?? "wait");
   d.title = { on: `켜져 있어요 · 휴대폰 ${r.devices}대`, error: "문제가 생겼어요", off: "꺼져 있어요" }[r.state] || "준비하는 중";
-  const pill = $("studioPill"), ss = (!window.FS_REMOTE && r.studio) || [];  // 밖에서 작업 중인 기기 (2분 안에 요청 · PC 화면에만)
+  const pill = $("studioPill"), ss = (!window.FS_REMOTE && r.studio) || [];  // 밖에서 작업 세션 (끊기 전까지 모두 · PC 화면에만 · D-238)
   if (!pill || !Array.isArray(r.studio)) return;
   pill.hidden = !ss.length;
-  const key = ss.map(x => x.id + x.device).join("|");
+  const word = x => x.active !== false ? "밖에서 작업 중" : `밖에서 연결됨 · ${rmAgo(x.lastSeen)}`;  // 2분 안에 요청 → '작업 중' · 아니면 마지막으로 쓴 때
+  const key = ss.map(x => x.id + x.device + word(x)).join("|");
   if (pill.dataset.key !== key) {
     pill.dataset.key = key;
-    pill.innerHTML = ss.map(x => `<span>밖에서 작업 중 · <b>${esc(x.device)}</b></span><button class="linkbtn" data-stcut="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button>`).join("");
+    pill.innerHTML = ss.map(x => `<span>${esc(word(x))} · <b>${esc(x.device)}</b></span><button class="linkbtn" data-stcut="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button>`).join("");
   }
 }
 $("studioPill").addEventListener("click", async e => {
@@ -4337,19 +4343,20 @@ function rmRender(d) {
       + `<div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
   } else {
     const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));  // 주소는 서버(remote.SITE) 하나에서만
-    h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰에서 <b>${site}</b> 을 열어 주세요</p>`;
+    h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰·노트북에서 <b>${site}</b> 을 열어 주세요</p>`;
     if (d.pair) {
-      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">또는 휴대폰 화면에서 코드로 연결</div>
+      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">노트북·태블릿은 그 기기에서 <b>${site}</b> 을 열고 이 코드를 넣어 주세요</div>
         <div class="rcode">${esc(d.pair.code)}</div><div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
         <div class="rbtns"><button class="btn sm" data-rm="pcancel">취소</button></div></div></div>`;
     } else {
       if (d.pairNote) h += `<p class="rnote">${esc(d.pairNote)}</p>`;
       h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button>`
-        + (d.devices.length >= d.maxDevices ? `<div class="small">휴대폰은 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 휴대폰을 먼저 끊어 주세요</div>` : "");
+        + `<div class="small">노트북·태블릿도 같은 단추로 연결해요 (휴대폰 대신 그 기기에서 코드를 넣어요)</div>`
+        + (d.devices.length >= d.maxDevices ? `<div class="small">기기는 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 기기를 먼저 끊어 주세요</div>` : "");
     }
-    h += `<div class="rsec"><h3>연결된 휴대폰</h3>` + (d.devices.length ? d.devices.map(x =>
+    h += `<div class="rsec"><h3>연결된 기기 (휴대폰·노트북)</h3>` + (d.devices.length ? d.devices.map(x =>
         `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
-        + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 휴대폰 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
+        + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 기기 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
     if (sd.available) {  // 밖에서 작업 (D-234): 연결한 기기에서 PC 스튜디오 화면 그대로 · 처리는 이 PC
       const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
       h += `<div class="rsec"><h3>밖에서 작업</h3>
@@ -4357,7 +4364,7 @@ function rmRender(d) {
         <div class="small">연결한 휴대폰·노트북에서 <b>${site}</b> 을 열고 [PC 스튜디오 열기]를 누르면 이 PC 화면 그대로 밖에서 작업해요 · 처리는 이 PC가 해요 · 끄면 휴대폰으로 보기만 돼요</div>`
         + (sd.sessions.length ? sd.sessions.map(x => `<div class="rdev"><b title="${esc(x.device)}">${esc(x.device)}</b><span>${esc(rmClock(x.startedAt))} 시작 · ${x.active ? "지금 쓰는 중" : esc(rmAgo(x.lastSeen))}${x.uploads ? ` · 올리는 파일 ${esc(x.uploads)}개` : ""}</span><button class="btn sm" data-rm="scut" data-id="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button></div>`).join("")
           + `<div class="rbtns"><button class="btn sm" data-rm="scutAll">모두 끊기</button></div>` : `<div class="small">지금 밖에서 작업 중인 기기는 없어요</div>`)
-        + `<div class="small">[끊기]는 지금 연결만 끝내요 · 그 기기를 아예 못 쓰게 하려면 위 '연결된 휴대폰'에서 [끊기]를 눌러 주세요 (열쇠까지 지워요)</div></div>`;
+        + `<div class="small">[끊기]는 지금 연결만 끝내요 · 그 기기를 아예 못 쓰게 하려면 위 '연결된 기기'에서 [끊기]를 눌러 주세요 (열쇠까지 지워요)</div></div>`;
     }
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
@@ -4395,8 +4402,8 @@ $("rmBox").addEventListener("click", async e => {
   if (a === "off") { if (RM.d && RM.d.state === "on" && !confirm("원격 접속을 끌까요? 휴대폰에서는 PC를 볼 수 없게 돼요.")) return; return rmPost("/api/remote/off"); }
   if (a === "pair") return rmPost("/api/remote/pair");
   if (a === "pcancel") return rmPost("/api/remote/pair/cancel");
-  if (a === "revoke") { if (!confirm(`'${b.dataset.name}' 연결을 끊을까요?\n그 휴대폰에서는 더 이상 이 PC를 볼 수 없어요.`)) return; return rmPost("/api/remote/revoke", { id: b.dataset.id }); }
-  if (a === "revokeAll") { if (!confirm("연결된 휴대폰을 모두 끊을까요?\n다시 쓰려면 휴대폰마다 다시 연결해야 해요.")) return; return rmPost("/api/remote/revoke", { all: true }); }
+  if (a === "revoke") { if (!confirm(`'${b.dataset.name}' 연결을 끊을까요?\n그 기기에서는 더 이상 이 PC를 볼 수 없어요.`)) return; return rmPost("/api/remote/revoke", { id: b.dataset.id }); }
+  if (a === "revokeAll") { if (!confirm("연결된 기기를 모두 끊을까요?\n다시 쓰려면 기기마다 다시 연결해야 해요.")) return; return rmPost("/api/remote/revoke", { all: true }); }
   if (a === "awake") return rmPost("/api/remote/settings", { keepAwake: b.dataset.v });
   if (a === "scut") { if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요`)) return; return rmPost("/api/remote/session/revoke", { id: b.dataset.id }); }
   if (a === "scutAll") { if (!confirm("밖에서 작업 중인 연결을 모두 끊을까요?")) return; return rmPost("/api/remote/session/revoke", { all: true }); }

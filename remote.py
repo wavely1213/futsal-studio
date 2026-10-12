@@ -117,19 +117,47 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # 끝까지 자동으로 (PC 보관함·휴대폰 'auto' · D-203)
               autorun.JOB}
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
+# 밖에 있을 때 할 수 있는 것: 휴대폰 원격 홈의 [더보기] → [원격 접속 끄기] (모든 연결·밖에서 작업이 바로 끝남) · PC 앞이면 [끊기] (D-239)
+NOT_ME = "내가 한 게 아니면 휴대폰 원격 홈의 [더보기] → [원격 접속 끄기]를 누르거나, PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요"
 NOTE_TEXT = {
-    "paired": "새 휴대폰이 연결됐어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
+    "paired": "새 기기가 연결됐어요 ({kind}) · " + NOT_ME,
     "test": "알림 시험이에요 · 잘 받았다면 준비 끝!",
     "tunnel": "확인이 필요해요 · 원격 연결이 자꾸 끊겨요",
     "blocked": "확인이 필요해요 · YouTube가 막았어요",
     "missed": "확인이 필요해요 · 받지 못한 영상이 있어요",
     "partial": "확인이 필요해요 · 편집점을 찾지 못한 영상이 있어요",
     "net": "확인이 필요해요 · PC 인터넷이 끊겨 다 끝내지 못했어요",
-    "studio": "밖에서 PC 스튜디오를 열었어요 · 내가 한 게 아니면 PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요",
+    "studio": "밖에서 PC 스튜디오를 열었어요 ({kind}) · " + NOT_ME,
     "auto": "확인이 필요해요 · 끝까지 자동으로 · 다 했지만 PC 보관함의 결과 카드에서 볼 것이 있어요",
     "moved": f"알림 주제가 바뀌었어요 · 이 주제로는 더 이상 알림이 오지 않아요 · {SITE_TEXT} 에서 새 주제로 다시 구독해 주세요 "
              "(스튜디오 알림은 무엇을 설치하라고 하지 않아요)",
 }
+# 알림에 넣는 기기 종류: 정해진 낱말만 (기기가 보낸 이름 칸은 짝지은 쪽이 아무 글이나 넣을 수 있어 알림에 그대로 넣지 않음 · D-239)
+DEV_KINDS = {"iPhone": "아이폰", "iPad": "아이패드", "Galaxy": "갤럭시", "Android": "안드로이드", "Mac": "Mac",
+             "Windows 노트북": "Windows 노트북", "Windows": "Windows 노트북", "PC": "Windows 노트북", "컴퓨터": "컴퓨터"}
+DEV_BROWSERS = {"Safari": "Safari", "Chrome": "Chrome", "Edge": "Edge", "Firefox": "Firefox", "삼성 인터넷": "삼성 인터넷"}
+
+
+def dev_name(name):
+    """기기 이름 저장 꼴: 예전 휴대폰 페이지는 Windows 노트북을 'PC · Chrome' 으로 지었음 → PC 화면의 '밖에서 작업 중 · PC · Chrome' 이
+    이 PC 처럼 읽힘 → 'Windows 노트북 · Chrome' (지금 페이지 deviceName 과 같음 · D-239)."""
+    n = clean(name, 40) or "휴대폰"
+    return "Windows 노트북" + n[2:] if re.match(r"PC(\s*·|$)", n) else n
+
+
+def device_kind(name):
+    """기기 이름('iPhone · Safari · 홈 화면' 꼴 · 휴대폰 페이지 deviceName) → 알림용 정해진 낱말 ('아이폰 · Safari' · 모르면 '기기')."""
+    parts = [x.strip() for x in str(name or "").split("·")]
+    k = DEV_KINDS.get(parts[0], "기기")
+    b = next((DEV_BROWSERS[x] for x in parts[1:] if x in DEV_BROWSERS), "")
+    return f"{k} · {b}" if b else k
+
+
+def note_text(kind, name=None):
+    """정해진 알림 문장 (기기 종류 칸이 있으면 device_kind 로만 채움)."""
+    return NOTE_TEXT[kind].replace("{kind}", device_kind(name))
+
+
 MISSED_MSG = ("받지 못한 영상이 {n}개 있어요 · YouTube가 막았을 수 있어요 · PC에서 '로그인 정보로 받기'에서 YouTube에 로그인해 둔 "
               "브라우저를 골라 다시 받아 주세요")
 MISSED_WHY_MSG = "받지 못한 영상이 {n}개 있어요 · {why}"  # 까닭을 아는 받기 (trouble.explain · 막힘이면 PC 에서 할 일까지 들어 있음)
@@ -454,6 +482,39 @@ def channel_url(s):
     raise ValueError("YouTube 채널 주소만 받을 수 있어요")
 
 
+LISTING_BAD = "YouTube 채널·영상·재생목록 주소만 넣을 수 있어요"
+
+
+def listing_url(s):
+    """밖에서 작업(D-235)의 '채널 불러오기'·'학습용 영상 받기' 주소 → 새로 만든 YouTube 표준 주소 ('' 는 우리 채널).
+    YouTube 영상 하나(youtube_id) · 재생목록(youtube.com/playlist?list=) · 채널(channel_url · PC 화면처럼 @ 없는 핸들도)만 —
+    그 밖(다른 사이트·집 안 공유기·내부망 주소 등)은 ValueError. 원래 글은 yt-dlp 에 넘기지 않는다 (PC 가 엉뚱한 곳에 요청하지 않게)."""
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    if len(s) > 300:
+        raise ValueError(LISTING_BAD)
+    try:
+        return "https://www.youtube.com/watch?v=" + youtube_id(s)
+    except ValueError:
+        pass
+    scheme = re.match(r"^https?://", s, re.I)
+    if not scheme and not re.match(r"(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/", s, re.I):
+        s = s if s.startswith("@") else "@" + s  # 핸들 (core._listing_target 과 같은 해석)
+    else:
+        u = urlparse(s if scheme else "https://" + s)
+        if u.path.rstrip("/") == "/playlist":
+            lid = (parse_qs(u.query).get("list") or [""])[0]
+            if ((u.hostname or "").lower() not in _YT_HOSTS or u.username or u.password or u.port not in (None, 80, 443)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{2,80}", lid)):
+                raise ValueError(LISTING_BAD)
+            return "https://www.youtube.com/playlist?list=" + lid
+    try:
+        return channel_url(s)
+    except ValueError:
+        raise ValueError(LISTING_BAD) from None
+
+
 # ---------- 저장 (~/.futsal-studio/remote.json) ----------
 
 def _fresh():
@@ -503,6 +564,8 @@ class Store:
         base = _fresh()
         base["settings"].update({k: v for k, v in d["settings"].items() if k in base["settings"]})
         d["settings"] = base["settings"]
+        for x in d["devices"]:  # 예전 페이지가 'PC · …' 로 지은 노트북 이름 (D-239)
+            x["name"] = dev_name(x.get("name"))
         return d
 
     def save(self):
@@ -519,7 +582,7 @@ class Store:
         """새 기기 → (기기, 바꿔 끼운 옛 기기들). 같은 브라우저(install)가 다시 연결하면 옛 항목을 지우고 새것으로."""
         with self.lock:
             now = int(self.clock())
-            dev = {"id": secrets.token_hex(8), "name": clean(name, 40) or "휴대폰", "created": now, "lastSeen": now,
+            dev = {"id": secrets.token_hex(8), "name": dev_name(name), "created": now, "lastSeen": now,
                    "auth": _b64u(secrets.token_bytes(32)), "beacon": _b64u(secrets.token_bytes(32))}
             old = []
             if install and INSTALL_RE.fullmatch(install):
@@ -1019,6 +1082,8 @@ class Service:
         return _dev()
 
     net_of = staticmethod(net_of)
+    youtube_id = staticmethod(youtube_id)    # 밖에서 작업 경계(rstudio.yt_guard)가 휴대폰과 같은 규칙으로 (rstudio 는 remote 를 import 하지 않음)
+    listing_url = staticmethod(listing_url)
 
     def handler_class(self):
         """원격 리스너의 처리기: 앱이 화면 처리기(StudioHandler)를 넘겨줬으면 RemoteHandler 와 묶음 (RemoteHandler 가 앞 →
@@ -1045,7 +1110,7 @@ class Service:
         if not replaced:
             self.log(f"밖에서 작업 시작 · {clean(rec['name'], 40)}")
         if rec.get("quietBefore"):  # 그 기기가 30분 넘게 세션이 없었음 → 내가 한 게 아니면 알 수 있게 (정해진 문장)
-            self._note("studio", NOTE_TEXT["studio"])
+            self._note("studio", note_text("studio", rec.get("name")))
 
     def studio_ended(self, recs):
         for r in recs or []:
@@ -1085,10 +1150,13 @@ class Service:
 
     # ----- PC 화면 (/api/remote*) -----
     def brief(self):
-        """PC 화면 1초 상태(/api/state)용 짧은 모습 · studio: 지금 밖에서 작업 중인 세션 (2분 안에 요청이 있었던 것)."""
-        act = self.studio.sessions.active() if self.studio else []
+        """PC 화면 상태(/api/state)용 짧은 모습 · studio: 살아 있는 밖에서 작업 세션 모두 (끊기 전까지 · 30분 안 쓰면 끝) —
+        active 는 2분 안에 요청이 있었던 것 ('지금 쓰는 중' · 아니면 lastSeen 으로 'N분 전') · 보관함·편집실·썸네일 PC 화면이 같이 씀 (D-238)."""
+        now = self.clock()
+        ss = sorted(self.studio.sessions.all(), key=lambda r: r["created"]) if self.studio else []
         return {"state": self.state, "devices": len(self.store.data["devices"]) if self.store else 0,
-                "studio": [{"id": r["id"], "device": r["name"]} for r in act]}
+                "studio": [{"id": r["id"], "device": r["name"], "active": now - r["last"] <= rstudio.ACTIVE_SECS, "lastSeen": int(r["last"])}
+                           for r in ss]}
 
     def pc_status(self):
         d = self.store.data
@@ -1538,9 +1606,17 @@ class Service:
             self.revoke(old, why="90일 동안 안 씀", rotate_notify=False)
 
     def _awake_wanted(self):
-        return self.state in ("on", "restarting") and (bool((self.bridge.job() or {}).get("name"))
-                                                       or self.store.data["settings"].get("keepAwake") == "always"
-                                                       or bool(self.studio and self.studio.sessions.active()))  # 밖에서 작업 중
+        """PC 잠들지 않게: 원격이 켜져 있을 때(on·restarting) — 그리고 켜 두기로 한(enabled) 원격이 터널 오류 뒤 저절로 다시 켜 보는 사이
+        (error 에 다음 시도가 잡혀 있음 · 그 시도 중 preparing·starting)에도. 집 인터넷이 30분 넘게 끊긴 사이 PC 가 잠들면 다음 시도를 못 해
+        밖에서 다시 못 들어옴 (D-238). 그중 작업 중 · '켜 둔 동안 항상' · 밖에서 작업 세션이 살아 있을 때만."""
+        st = self.state
+        if st not in ("on", "restarting"):
+            retrying = st in ("preparing", "starting") or (st == "error" and self._err_kind in ("tunnel", "start")
+                                                            and self._retry.get("at") is not None)
+            if not (retrying and self.store.data.get("enabled")):
+                return False
+        return (bool((self.bridge.job() or {}).get("name")) or self.store.data["settings"].get("keepAwake") == "always"
+                or bool(self.studio and self.studio.sessions.all()))  # 밖에서 작업 세션 (2분 넘게 조용해도 30분 동안은 살아 있음)
 
     def _keep_awake(self):
         """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기 (remote-awake 스레드)."""
@@ -1626,7 +1702,7 @@ class Service:
         self.last_auth = self.clock()
         d = self.store.data
         self.log(f"휴대폰이 {'다시 ' if old else ''}연결됐어요 · {clean(dev['name'], 40)}")
-        self._note("paired", NOTE_TEXT["paired"])
+        self._note("paired", note_text("paired", dev.get("name")))
         self.pub.beacon(important=True)
         inner = {"v": 2, "url": self.url, "pc": d["pc"], "device": {"id": dev["id"], "name": dev["name"]},
                  "keys": {"auth": dev["auth"], "beacon": dev["beacon"]},

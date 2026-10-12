@@ -230,6 +230,134 @@ class PageUnitTest(unittest.TestCase):
         self.assertIn("t=12.5", remote.redact("/frame?name=a.mp4&t=12.5"))
 
 
+class YoutubeOnlyUnitTest(unittest.TestCase):
+    """밖에서 온 YouTube 받기·불러오기 주소 (D-235 · SSRF): YouTube 표준 주소로만 · 그 밖은 ValueError."""
+
+    GOOD = {"": "", "@futsal_school": "https://www.youtube.com/@futsal_school", "futsal_school": "https://www.youtube.com/@futsal_school",
+            "youtube.com/@futsal/videos": "https://www.youtube.com/@futsal", "https://m.youtube.com/@futsal/shorts": "https://www.youtube.com/@futsal",
+            "https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g": "https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g",
+            "https://youtu.be/AbCdEfGhIjK?si=x": "https://www.youtube.com/watch?v=AbCdEfGhIjK",
+            "https://www.youtube.com/watch?v=AbCdEfGhIjK&list=PLx": "https://www.youtube.com/watch?v=AbCdEfGhIjK",
+            "https://www.youtube.com/shorts/AbCdEfGhIjK": "https://www.youtube.com/watch?v=AbCdEfGhIjK",
+            "https://www.youtube.com/playlist?list=PLabc_DEF-123": "https://www.youtube.com/playlist?list=PLabc_DEF-123",
+            "youtube.com/playlist?list=PLabc": "https://www.youtube.com/playlist?list=PLabc",
+            "169.254.169.254": "https://www.youtube.com/@169.254.169.254"}  # 점이 든 글은 핸들 (YouTube 로만 감)
+    BAD = ("http://169.254.169.254/latest/meta-data/", "http://169.254.169.254/playlist", "http://10.0.0.1/playlist?list=PLx",
+           "https://evil.example/playlist?list=PLx", "http://127.0.0.1:9497/playlist?probe=list", "https://www.youtube.com.evil.example/@x",
+           "https://user@www.youtube.com/playlist?list=PLx", "https://www.youtube.com:8443/playlist?list=PLx", "file:///etc/passwd",
+           "ftp://youtube.com/@x", "localhost:8080", "https://www.youtube.com/playlist?list=", "https://www.youtube.com/playlist?list=a/b",
+           "http://[::1]/playlist", "https://youtube.com/redirect?q=http://10.0.0.1", "x" * 301)
+
+    def test_listing_url(self):
+        for raw, want in self.GOOD.items():
+            self.assertEqual(remote.listing_url(raw), want, raw)
+        for raw in self.BAD:
+            with self.assertRaises(ValueError, msg=raw):
+                remote.listing_url(raw)
+        for raw in self.GOOD:
+            out = remote.listing_url(raw)
+            self.assertTrue(out == "" or out.startswith("https://www.youtube.com/"), raw)
+
+    def test_yt_guard(self):
+        svc = remote.Service  # 정적 함수만 씀 (youtube_id · listing_url)
+        b = rstudio.yt_guard(svc, "/api/download", {"ids": ["AbCdEfGhIjK", " https://youtu.be/AbCdEfGhIjK "], "sources": {"x": 1}})
+        self.assertEqual(b, {"ids": ["AbCdEfGhIjK", "AbCdEfGhIjK"], "sources": {"x": 1}})
+        for bad in ({"ids": ["http://169.254.169.254/latest/meta-data/"]}, {"ids": ["http://127.0.0.1:1/x"]}, {"ids": "AbCdEfGhIjK"},
+                    {"ids": []}, {"ids": [5]}, {}, {"ids": ["../etc/passwd"]}, {"ids": ["AbCdEfGhIjK"] * (rstudio.YT_IDS_MAX + 1)}):
+            with self.assertRaises(ValueError, msg=bad):
+                rstudio.yt_guard(svc, "/api/download", bad)
+        self.assertEqual(rstudio.yt_guard(svc, "/api/list", {"url": "@futsal", "kind": "shorts"}),
+                         {"url": "https://www.youtube.com/@futsal", "kind": "shorts"})
+        self.assertEqual(rstudio.yt_guard(svc, "/api/list", {"kind": "videos"})["url"], "")  # 비우면 우리 채널
+        for path in ("/api/list", "/api/refs/add"):
+            for bad in ({"url": "http://10.0.0.1/playlist"}, {"url": ["x"]}, {"url": 5}):
+                with self.assertRaises(ValueError, msg=(path, bad)):
+                    rstudio.yt_guard(svc, path, bad)
+
+
+class DeviceWordsUnitTest(unittest.TestCase):
+    def test_device_kind_fixed_words_only(self):
+        """알림에 넣는 기기 종류는 정해진 낱말만 (기기가 보낸 이름 칸의 글은 알림에 그대로 들어가지 않음 · D-239)."""
+        for name, want in (("iPhone · Safari · 홈 화면", "아이폰 · Safari"), ("PC · Chrome", "Windows 노트북 · Chrome"),
+                           ("Windows 노트북 · Edge", "Windows 노트북 · Edge"), ("Galaxy · 삼성 인터넷", "갤럭시 · 삼성 인터넷"),
+                           ("Mac · Safari", "Mac · Safari"), ("컴퓨터 · Chrome", "컴퓨터 · Chrome"), ("iPad · 카카오톡", "아이패드"),
+                           ("지금 http://evil.example 에서 설치하세요 · Chrome", "기기 · Chrome"), ("", "기기"), (None, "기기")):
+            self.assertEqual(remote.device_kind(name), want, name)
+        words = set(remote.DEV_KINDS.values()) | set(remote.DEV_BROWSERS.values()) | {"기기"}
+        for name in ("evil · 설치 · http://x", "<script> · Chrome", "PC · Chrome"):
+            k = remote.device_kind(name)
+            self.assertTrue(all(part in words for part in k.split(" · ")), k)
+
+    def test_legacy_pc_name_becomes_windows_laptop(self):
+        """예전 페이지가 'PC · Chrome' 으로 지은 노트북 → 'Windows 노트북 · Chrome' (새 연결 · 저장된 이름 모두 · PC 표시가 이 PC 와 헷갈리지 않게)."""
+        self.assertEqual(remote.dev_name("PC · Chrome"), "Windows 노트북 · Chrome")
+        self.assertEqual(remote.dev_name("PCX · a"), "PCX · a")
+        self.assertEqual(remote.dev_name(""), "휴대폰")
+        tmp = Path(tempfile.mkdtemp(prefix="기기 이름 "))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        st = remote.Store(tmp / "remote.json", Clock())
+        dev, _ = st.add_device("PC · Chrome")
+        self.assertEqual(dev["name"], "Windows 노트북 · Chrome")
+        d = json.loads((tmp / "remote.json").read_text(encoding="utf-8"))
+        d["devices"][0]["name"] = "PC · Edge"  # 예전 판이 저장한 이름
+        (tmp / "remote.json").write_text(json.dumps(d), encoding="utf-8")
+        self.assertEqual(remote.Store(tmp / "remote.json", Clock()).data["devices"][0]["name"], "Windows 노트북 · Edge")
+
+    def test_alert_says_what_to_do_from_outside(self):
+        """새 기기·새 밖에서 작업 알림: 밖에서 할 수 있는 것(원격 홈 [더보기] → [원격 접속 끄기])과 PC 의 [끊기] · 기기 종류."""
+        for kind in ("studio", "paired"):
+            t = remote.note_text(kind, "iPhone · Safari")
+            self.assertIn("(아이폰 · Safari)", t)
+            self.assertIn("내가 한 게 아니면", t)
+            self.assertIn("[더보기] → [원격 접속 끄기]", t)
+            self.assertIn("[끊기]", t)
+            self.assertNotIn("{", t)
+            self.assertIn("기기", remote.note_text(kind, "evil http://x"))
+            self.assertNotIn("evil", remote.note_text(kind, "evil http://x"))
+        pwa = Path(os.environ.get("FUTSAL_SITE_DIR") or "/nonexistent") / "app.js"
+        if pwa.is_file():  # 그 단추 이름이 원격 홈에 그대로 있는지
+            self.assertIn('"원격 접속 끄기")', pwa.read_text(encoding="utf-8"))
+
+
+class AwakeUnitTest(unittest.TestCase):
+    """PC 잠들지 않게 (D-238): 켜 둔 원격이 터널 오류 뒤 다시 켜 보는 사이에도 · 살아 있는 밖에서 작업 세션이 있으면 (2분 넘게 조용해도)."""
+
+    def make(self, state, enabled=True, keep="always", err="tunnel", at=100.0, job=None, sessions=0, quiet=0):
+        svc = remote.Service.__new__(remote.Service)
+        svc.state, svc._err_kind, svc._retry = state, err, {"n": 1, "at": at}
+        svc.store = mock.Mock()
+        svc.store.data = {"enabled": enabled, "settings": {"keepAwake": keep}}
+        svc.bridge = mock.Mock()
+        svc.bridge.job.return_value = {"name": job}
+        clock = Clock(1000.0)
+        svc.studio = mock.Mock()
+        svc.studio.sessions = rstudio.Sessions(clock)
+        for i in range(sessions):
+            svc.studio.sessions.create({"id": f"d{i}", "name": "iPhone · Safari"}, "n")
+        clock.tick(quiet)
+        return svc
+
+    def test_retrying_keeps_awake(self):
+        self.assertTrue(self.make("on")._awake_wanted())
+        self.assertTrue(self.make("restarting")._awake_wanted())
+        self.assertTrue(self.make("error")._awake_wanted())           # 다음 다시 켜기가 잡혀 있음
+        self.assertTrue(self.make("starting")._awake_wanted())        # 다시 켜 보는 중
+        self.assertTrue(self.make("preparing")._awake_wanted())
+        self.assertTrue(self.make("error", err="start")._awake_wanted())
+        self.assertFalse(self.make("error", enabled=False)._awake_wanted())  # 꺼 둔 원격
+        self.assertFalse(self.make("error", at=None)._awake_wanted())        # 다시 켜기 없음
+        self.assertFalse(self.make("error", err="crypto")._awake_wanted())   # 고칠 수 없는 오류
+        self.assertFalse(self.make("off")._awake_wanted())
+        self.assertFalse(self.make("starting", enabled=False)._awake_wanted())
+
+    def test_job_or_sessions_when_keep_is_job(self):
+        self.assertFalse(self.make("on", keep="job")._awake_wanted())
+        self.assertTrue(self.make("on", keep="job", job="내보내기")._awake_wanted())
+        self.assertTrue(self.make("error", keep="job", job="내보내기")._awake_wanted())
+        self.assertTrue(self.make("on", keep="job", sessions=1, quiet=rstudio.ACTIVE_SECS + 300)._awake_wanted())  # 조용해도 세션은 살아 있음
+        self.assertFalse(self.make("on", keep="job", sessions=1, quiet=rstudio.IDLE + 5)._awake_wanted())   # 30분 지나면 세션도 끝
+
+
 # ---------- HTTP (개발 모드 원격 리스너 + app.StudioHandler) ----------
 
 class StudioBase(unittest.TestCase):
@@ -365,7 +493,8 @@ class HandoffHttpTest(StudioBase):
         self.assertEqual(self.hget(hd, "Cache-Control"), ["private, no-store"])
         self.assertTrue(any("밖에서 작업 시작 · " + DEV in x for x in self.lines))
         studio_notes = lambda: [t for k, t in self.notes if k == "studio"]  # noqa: E731
-        self.assertEqual(studio_notes(), [remote.NOTE_TEXT["studio"]])  # 새 세션 알림 (정해진 문장)
+        self.assertEqual(studio_notes(), [remote.note_text("studio", DEV)])  # 새 세션 알림 (정해진 문장 + 정해진 낱말의 기기 종류)
+        self.assertIn("(아이폰 · Safari)", studio_notes()[0])
         self.handoff("/")
         self.assertEqual(len(studio_notes()), 1)  # 30분 안에 다시 열면 또 알리지 않음
 
@@ -414,6 +543,7 @@ class HandoffHttpTest(StudioBase):
         self.assertIn("script-src 'self'", csp)
         self.assertNotIn("unsafe", csp)
         self.assertIn(b'<script src="/s/hello.js">', out)
+        self.assertIn(f'<meta name="fs-site" content="{self.svc.site()}">'.encode(), out)  # 표가 없어도 원격 홈으로 가는 길·주소 (D-236)
         st, hd, js = self.raw("GET", "/s/hello.js")
         self.assertEqual(st, 200)
         self.assertIn("javascript", self.hget(hd, "Content-Type")[0])
@@ -437,11 +567,23 @@ class HandoffHttpTest(StudioBase):
             self.svc.set_settings({"studio": "yes"})
 
     def test_logout(self):
+        """연결 끝내기: 'logout' 으로 끝 · 쿠키는 그대로(죽은 표) → 같은 브라우저의 다른 탭도 'logout' 을 받아 저절로 다시 연결하지 않음 (D-236)."""
         self.login()
         st, hd, out = self.req("POST", "/s/logout")
         self.assertEqual(st, 200)
-        self.assertIn("Max-Age=0", self.hget(hd, "Set-Cookie")[0])
-        self.assertEqual(self.jreq("GET", "/api/state")[1]["code"], "none")
+        self.assertEqual(self.hget(hd, "Set-Cookie"), [])
+        self.assertEqual(self.svc.studio.sessions.all(), [])
+        st, j = self.jreq("GET", "/api/state")  # 다른 탭 (같은 쿠키)
+        self.assertEqual((st, j["code"]), (401, "logout"))
+        self.assertIn("연결을 끝냈어요", j["error"])
+        st, hd, out = self.raw("GET", "/editor?name=x", headers={"Cookie": self.cookie, "Sec-Fetch-Dest": "document"})
+        self.assertEqual(st, 401)
+        self.assertIn(b'name="fs-lock" content="logout"', out)
+        self.assertIn("연결을 끝냈어요".encode(), out)
+        js = (ROOT / "hello.js").read_text(encoding="utf-8") + (ROOT / "remote_ui.js").read_text(encoding="utf-8")
+        self.assertIn('code === "none" || code === "expired"', js)  # 저절로 다시 연결하는 것은 끊김·시간 지남뿐
+        self.assertIn("logout:", js)
+        self.assertTrue(any("밖에서 작업 끝냄" in x and "밖에서 연결 끝냄" in x for x in self.lines))
 
 
 class GateHttpTest(StudioBase):
@@ -486,6 +628,12 @@ class GateHttpTest(StudioBase):
         j = json.loads(out)
         self.assertEqual(j["workspace"], "~/작업 폴더")
         self.assertEqual(j["remote"]["studio"][0]["device"], DEV)
+        self.assertIs(j["remote"]["studio"][0]["active"], True)
+        # 2분 넘게 조용해도 세션이 살아 있는 동안은 PC 표시에 남음 ('밖에서 연결됨 · N분 전' · D-238)
+        self.clock.tick(rstudio.ACTIVE_SECS + 60)
+        b = self.svc.brief()["studio"]
+        self.assertEqual([(x["device"], x["active"]) for x in b], [(DEV, False)])
+        self.assertLessEqual(b[0]["lastSeen"], self.clock() - rstudio.ACTIVE_SECS)
 
     def test_post_needs_csrf_origin_and_same_origin(self):
         self.login()
@@ -597,6 +745,58 @@ class GateHttpTest(StudioBase):
         self.assertEqual((seen["name"], seen["resume"], seen["update"]), (NAME, True, False))
         self.assertEqual(self.app.DONE[j["jobId"]]["by"], f"밖에서 · {DEV}")
         self.assertTrue(any(x.startswith(f"원격 · {DEV} · 끝까지 자동으로") for x in self.lines), self.lines[-5:])
+
+    def test_youtube_only_no_ssrf(self):
+        """밖에서 온 받기·채널 불러오기·학습용 받기 주소는 YouTube 만 (D-235 · SSRF): 내부망·다른 사이트 주소는 400 yt_only 이고
+        PC 가 그곳에 요청하지 않음(작업도 안 시작) · YouTube 주소는 표준 주소·영상 id 로 바꿔 앱에 넘김."""
+        import http.server
+        import threading
+        hits = []
+
+        class Sink(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Sink)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        sink = f"http://127.0.0.1:{srv.server_address[1]}"
+        self.login()
+        jobs0 = self.app.JOB["id"]
+        for path, body in (("/api/download", {"ids": [sink + "/meta?probe=dl"]}),
+                           ("/api/download", {"ids": ["AbCdEfGhIjK", "http://169.254.169.254/latest/meta-data/"]}),
+                           ("/api/list", {"url": sink + "/playlist?probe=list"}), ("/api/list", {"url": "http://10.0.0.1/playlist"}),
+                           ("/api/refs/add", {"url": sink + "/playlist?probe=refs"}), ("/api/refs/add", {"url": "https://evil.example/@x"})):
+            st, j = self.jreq("POST", path, body)
+            self.assertEqual((st, j.get("code")), (400, "yt_only"), (path, body, j))
+            self.assertIn("YouTube", j["error"])
+        time.sleep(0.8)
+        self.assertEqual(hits, [])
+        self.assertEqual(self.app.JOB["id"], jobs0)  # 작업이 시작되지 않음
+        seen = {}
+
+        def lv(kind, ck, url, log):
+            seen.setdefault("list", []).append(url)
+            return []
+
+        def dl(ids, log, ck, why=None):
+            seen["dl"] = list(ids)
+            return []
+        with mock.patch.object(core, "list_videos", lv), mock.patch.object(core, "download", dl):
+            for path, body in (("/api/download", {"ids": ["AbCdEfGhIjK", "https://youtu.be/ZyXwVuTsRqP?si=1"]}),
+                               ("/api/list", {"url": "youtube.com/@futsal/videos", "kind": "videos"}), ("/api/list", {"url": ""}),
+                               ("/api/refs/add", {"url": "https://www.youtube.com/playlist?list=PLx1", "learn": False})):
+                st, j = self.jreq("POST", path, body)
+                self.assertEqual(st, 200, (path, j))
+                self.wait_idle()
+        self.assertEqual(seen["dl"], ["AbCdEfGhIjK", "ZyXwVuTsRqP"])
+        self.assertEqual(seen["list"], ["https://www.youtube.com/@futsal", "", "https://www.youtube.com/playlist?list=PLx1"])
+        self.assertEqual(hits, [])
 
     def test_youtube_confirm_428(self):
         self.login()

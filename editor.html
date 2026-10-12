@@ -406,6 +406,10 @@
   .rmphone .box { background: var(--panel, #1f1f1f); color: var(--ink, #e8e8e8); border-radius: 12px; padding: 18px; max-width: 420px; line-height: 1.55; }
   .rmphone .box b { font-size: 16px; }
   .rmphone .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  /* 밖에서 작업 (D-238): PC 편집실에도 '밖에서 작업 중 · 기기 [끊기]' — 보관함 화면의 #studioPill 과 같음 (밖에서 연 화면에는 없음) */
+  .stpill { display: inline-flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; font-size: 11.5px; color: #2fbf6b; background: #12301f; border-radius: 8px; padding: 3px 8px; max-width: 420px; }
+  .stpill[hidden] { display: none; }
+  .stpill button { border: 0; background: none; color: var(--danger, #e5484d); cursor: pointer; padding: 0; font: inherit; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -416,6 +420,7 @@
     <div class="logo">FS</div>
     <div class="name" id="pname">편집실</div>
     <span class="saved" id="saved"></span>
+    <span class="stpill" id="studioPill" hidden></span>
     <div class="sp"></div>
     <span class="tg on" id="snapBtn" title="자석 (S) — 클립을 끌 때 다른 클립 끝·재생 위치에 착 붙어요"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2v6a5 5 0 0010 0V2h-3v6a2 2 0 01-4 0V2z"/></svg>자석</span>
     <span class="tg on" id="linkBtn" title="연결해서 선택 — 영상과 그 소리를 함께 고르고 옮겨요 (Alt+클릭: 한쪽만)"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 9.5l3-3M7 4.5l1.5-1.5a2.5 2.5 0 013.5 3.5L10.5 8M9 11.5L7.5 13a2.5 2.5 0 01-3.5-3.5L5.5 8"/></svg>연결 선택</span>
@@ -4708,7 +4713,10 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   requestAnimationFrame(loop);
   const wantT = parseFloat(new URLSearchParams(location.search).get("t"));  // '확인할 것'의 [편집실에서 보기]: 그 시각으로
   if (wantSeq && P.active === wantSeq && isFinite(wantT) && wantT > 0) seek(Math.max(0, wantT - 1));
-  const s = await (await fetch("/api/state?since=999999")).json(); if (s.job === "내보내기" && !s.job_by) watchJob("내보내기", s.job_id);  // 휴대폰이 시킨 내보내기는 이 화면이 이어받지 않음
+  // 하던 내보내기를 다시 이어받음 (새로 고침 · 밖에서 다시 연결한 뒤) — 이 화면 쪽(PC 면 PC 가 시킨 것 · 밖이면 이 기기가 시킨 '밖에서 · <기기>')만 ·
+  // 휴대폰·다른 기기가 시킨 내보내기는 이어받지 않음 (D-236)
+  const s = await (await fetch("/api/state?since=999999")).json();
+  if (s.job === "내보내기" && (!s.job_by || (REMOTE && s.job_by === "밖에서 · " + FS_REMOTE.device))) watchJob("내보내기", s.job_id);
 })();
 /* 끝까지 자동으로 (D-201): 작업이 썸네일을 그려 달라고 하면 보이지 않는 틀로 썸네일 편집기를 열어 AI 추천 1등을 그려 줌 (ui.html autoThumb 와 같은 코드) */
 let AUTOTH = null;
@@ -4732,6 +4740,35 @@ setInterval(autoAsk, 3000);
 // 창을 내려 두었다가 다시 보면 바로 물어봄 (숨은 창은 브라우저가 타이머를 1분에 한 번까지 늦추거나 멈춤 · E7 검토)
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") autoAsk(); });
 window.addEventListener("focus", autoAsk); document.addEventListener("resume", autoAsk);
+/* 밖에서 작업 (D-238): 이 PC 화면(편집실·썸네일)에도 밖에서 연결된 기기를 보여 주고 [끊기] — 보관함 화면의 #studioPill 과 같은 말 ·
+   5초마다 /api/state 의 remote.studio (살아 있는 세션 모두 · 2분 안에 요청이면 '작업 중') · 밖에서 연 화면(FS_REMOTE)에는 없음 */
+if (!window.FS_REMOTE) (() => {
+  const pill = document.getElementById("studioPill"); if (!pill) return;
+  const ago = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "방금" : s < 3600 ? `${Math.floor(s / 60)}분 전` : `${Math.floor(s / 3600)}시간 전`; };
+  const word = x => x.active !== false ? "밖에서 작업 중" : `밖에서 연결됨 · ${ago(x.lastSeen)}`;
+  async function tick() {
+    let s; try { const r = await fetch("/api/state?since=999999"); if (!r.ok) return; s = await r.json(); } catch (e) { return; }
+    const ss = s && s.remote && Array.isArray(s.remote.studio) ? s.remote.studio : [];
+    pill.hidden = !ss.length;
+    const key = ss.map(x => x.id + x.device + word(x)).join("|");
+    if (pill.dataset.key === key) return;
+    pill.dataset.key = key;
+    pill.replaceChildren(...ss.flatMap(x => {
+      const sp = document.createElement("span"), b = document.createElement("b"), k = document.createElement("button");
+      sp.append(word(x) + " · ", b); b.textContent = x.device;
+      k.type = "button"; k.textContent = "끊기"; k.dataset.stcut = x.id; k.dataset.name = x.device;
+      return [sp, k];
+    }));
+  }
+  pill.addEventListener("click", async e => {
+    const b = e.target.closest("[data-stcut]"); if (!b) return;
+    if (!confirm(`'${b.dataset.name}'의 밖에서 작업 연결을 끊을까요?\n그 기기의 스튜디오 화면이 바로 잠겨요 (기기 연결은 그대로라 원격 홈에서 다시 열 수 있어요)`)) return;
+    try { await fetch("/api/remote/session/revoke", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.dataset.stcut }) }); } catch (e) { /* 다음 묻기에 */ }
+    pill.dataset.key = ""; tick();
+  });
+  tick(); setInterval(tick, 5000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") tick(); });
+})();
 // 그리는 중에 이 화면을 떠나면 맡은 요청을 풀어 다른 화면이 바로 이어서 그림 (D-207 · ui.html 과 같음)
 window.addEventListener("pagehide", () => { if (AUTOTH && AUTOTH.dataset.rid) try { navigator.sendBeacon("/api/auto/release", new Blob([JSON.stringify({ id: AUTOTH.dataset.rid })], { type: "application/json" })); } catch (e) {} });
 </script>

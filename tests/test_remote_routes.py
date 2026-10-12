@@ -116,6 +116,26 @@ class RouteEnumerationTest(StudioBase):
             if p.startswith("/api/remote/"):
                 self.assertEqual(rstudio.classify(m, p), rstudio.PC_ONLY, p)
 
+    def test_outbound_url_routes_guarded(self):
+        """yt-dlp 에 화면이 보낸 주소·영상 id 를 넘기는 작업 길(jobs 사전에서 b.get("url")·_download(b …))은 모두
+        rstudio.YT_GUARD 에 있음 (D-235 · 새 길을 만들면 여기서 걸림) — 세션이 있어도 YouTube 아닌 주소는 400."""
+        lines = (ROOT / "app.py").read_text(encoding="utf-8").splitlines()
+        post = _body(lines, "def do_POST", "def _strategy_get")
+        jobs = post[post.index("jobs = {"):post.index("if path == \"/api/convert\"")]
+        outbound = set()
+        for m in re.finditer(r'^\s+"(/api/[^"]+)":\s*\((.*?)(?=^\s+"/api/|\Z)', jobs, re.M | re.S):
+            if 'b.get("url")' in m.group(2) or "_download(b" in m.group(2):
+                outbound.add(m.group(1))
+        self.assertEqual(outbound, {"/api/list", "/api/download", "/api/refs/add"})
+        self.assertTrue(outbound <= set(rstudio.YT_GUARD), outbound - set(rstudio.YT_GUARD))
+        for p in rstudio.YT_GUARD:
+            self.assertEqual(rstudio.classify("POST", p), rstudio.WRITE, p)
+        self.login()
+        for p in rstudio.YT_GUARD:
+            body = {"ids": ["http://127.0.0.1:1/x"]} if p == "/api/download" else {"url": "http://127.0.0.1:1/playlist"}
+            self.assertEqual(self.jreq("POST", p, body)[1].get("code"), "yt_only", p)
+        self.assertIsNone(self.app.JOB["name"])
+
     def _snapshot(self):
         return sorted(str(p.relative_to(self.work)) for p in self.work.rglob("*") if p.name != "studio.log")
 

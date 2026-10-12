@@ -246,6 +246,10 @@
     :root[data-remote] .cpanel { position: fixed; left: 8px; right: 8px; width: auto; top: calc(var(--fsr-h, 0px) + 50px); }
     :root[data-remote] .modal .box { max-width: 96vw; }
   }
+  /* 밖에서 작업 (D-238): PC 썸네일 편집기에도 '밖에서 작업 중 · 기기 [끊기]' — 보관함 화면의 #studioPill 과 같음 (밖에서 연 화면에는 없음) */
+  .stpill { display: inline-flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; font-size: 11.5px; color: #2fbf6b; background: #12301f; border-radius: 8px; padding: 3px 8px; max-width: 420px; }
+  .stpill[hidden] { display: none; }
+  .stpill button { border: 0; background: none; color: var(--danger, #e5484d); cursor: pointer; padding: 0; font: inherit; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -255,6 +259,7 @@
     <div class="logo">FS</div>
     <div class="name" id="pname">썸네일</div>
     <span class="hint" id="saved"></span>
+    <span class="stpill" id="studioPill" hidden></span>
     <div class="sp"></div>
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)">↶</button>
     <button class="ic" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
