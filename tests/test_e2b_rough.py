@@ -426,6 +426,27 @@ class OtherChannelKitTest(WorkMixin, unittest.TestCase):
         keep = upload._credit(desc, [dict(o[0], main=False)], False)
         self.assertIn("▶ 출연", keep)
 
+    def test_credit_keeps_guest_block(self):
+        """D-271: 원본이 다른 채널 영상이면 감독님 줄만 빼고 '▶ 출연' + 게스트는 남김 (예전엔 머리 없는 게스트 줄이 떠돎)."""
+        desc = "첫 줄\n\n▶ 출연\n이한울 (강원FS)\n최경진 감독 (풋살사관학교)\n\n#풋살 #풋살사관학교\n"
+        o = [{"channel": "쌈바 풋살 클래스", "url": "", "main": True}]
+        out = upload._credit(desc, o, True)
+        self.assertNotIn("최경진 감독", out)
+        self.assertIn("▶ 출연\n이한울 (강원FS)\n\n▶ 출처\n쌈바 풋살 클래스\n\n#풋살", out)
+
+    def test_insert_cast_without_coach(self):
+        """D-271 · I-161(1): 다른 채널 원본 키트에 게스트를 넣어도 감독님 '▶ 출연' 줄은 다시 생기지 않음 · 게스트를 다 빼면 '▶ 출연'도 빠짐."""
+        desc = "첫 줄\n\n▶ 출처\n쌈바 풋살 클래스\n\n#풋살 #풋살사관학교"
+        out = upload._insert_cast(desc, ["이한울 (강원FS)"], coach=False)
+        self.assertNotIn("최경진", out)
+        self.assertIn("▶ 출연\n이한울 (강원FS)\n\n▶ 출처", out)
+        self.assertEqual(upload._insert_cast(upload._drop_line(out, "이한울 (강원FS)"), [], coach=False), desc)
+        own = "첫 줄\n\n#풋살"  # 우리 영상은 그대로 감독님 줄과 함께
+        self.assertIn("▶ 출연\n최경진 감독 (풋살사관학교)\n이한울", upload._insert_cast(own, ["이한울"]))
+        self.assertEqual(upload._insert_cast(own, []), own)
+        typed = "첫 줄\n\n▶ 출연\n해설: 내가 쓴 줄\n\n#풋살"  # 손으로 쓴 줄이 있으면 '▶ 출연'은 그대로
+        self.assertEqual(upload._insert_cast(typed, [], coach=False), typed)
+
 
 if __name__ == "__main__":
     unittest.main()

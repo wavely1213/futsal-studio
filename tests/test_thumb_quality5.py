@@ -3,7 +3,7 @@
 - 글자(p8_ai.js, node): 두 줄 크기 비율은 문장이면 같은 크기·꼬리표면 확실히 작게 · 위계 점수는 1.0~1.25·2.2 넘게가 만점 · 프리텐다드 블랙은 얇은 외곽선 ·
   작은 검은고딕은 도현이 아니라 프리텐다드 블랙으로 (D-090)
 - 구도(p8_ai.js, node): 쇼츠 꽉 찬 장면은 원본 1080p 가로·세로 영상만 (720p 는 예전 칸) · 다른 사람 머리도 지킴 · 발·공 클로즈업은 발 이야기 문구에만 (D-090·D-091)
-- 예전 템플릿 칸을 얼굴·머리에 맞춰 자르기(anchorSlot·anchorTpl · P1, D-092)
+- 예전 템플릿 칸을 얼굴·머리에 맞춰 자르기(anchorSlot·anchorTpl · P1, D-092) · 배경과 짝이 아닌 누끼도 그 누끼 장면의 머리로(anchorCut · D-270)
 - 장면(thumb·face): 레슨 가산은 머리가 보일 때만 · 주인공 흔들림 배율 · 머리 쪽 작은 얼굴 찾기 · 채도 절대 목표 (D-092·D-093)
 - 문구(thumbcopy): 유튜버 말투 훅 · 말하듯 끝나는 줄 가산·라벨 감산 · 근거 인용은 대사에 있는지·숫자·이력만 · 새 클로드 질문 (D-094)
 - 브랜드 키트: 예전 기본값(검은고딕) 저장본은 새 기본 글꼴로, 고른 글꼴(fontV 2)은 그대로
@@ -27,7 +27,7 @@ HAS_NODE = shutil.which("node") is not None
 JS = ("PRED_END", "LINK_END", "lineRatio", "hierOf", "THIN_FONTS", "THIN_SW", "thinFont", "swOf", "SMALL_FONT_PX", "readableFont",
       "bandCrop", "arEff", "srcW", "SHORT_FULL_CAP", "coverUp", "fullOk", "imgRect", "f2c", "boxC", "clipTo", "areaOf", "interArea",
       "mainBox", "mainFace", "headBox", "srcHeadCut", "footClose", "LOUD", "loud", "FOOT_COPY", "footCopy", "footOk", "headsOf",
-      "slotFocus", "anchorSlot", "frameT", "frameMeta", "anchorTpl")
+      "slotFocus", "anchorPt", "anchorSlot", "frameT", "frameMeta", "anchorTpl", "anchorCut")
 NODE_RUN = r"""
 const fs = require('fs'); const src = fs.readFileSync(process.argv[1], 'utf8');
 const pick = n => {  // 함수 (기본값 '= {}' 매개변수 건너뜀) 또는 한 문장 상수 (줄 끝 주석 빼고 ';' 로 끝나는 줄까지)
@@ -125,6 +125,136 @@ class ScreenMath5Tests(unittest.TestCase):
         slot = {"type": "image", "src": "/frame?name=x&t=1", "x": 0, "y": 0, "w": 100, "h": 720, "fit": "cover", "fx": 0.5, "fy": 0.5, "cropL": 0, "cropR": 0, "cropT": 0, "cropB": 0}
         out = self.run_js([["setFrames", [[wide, ok]]], ["anchorTpl", [[slot], [1, 2]]]])
         self.assertEqual(out[1][0]["src"], "/frame?name=x&t=2", "머리를 칸에 못 담으면 다음 장면으로")
+
+
+    # ----- D-270: 배경과 짝(twin)이 아닌 누끼 — '인물 누끼 넣어서 만들기'(CUT_AUTO) · 둘째 후보 묶음(k=1) -----
+    LEFT = {"t": 1, "persons": [[0.09, 0.11, 0.15, 0.8, 0.9]], "main": 0, "faces": [{"box": [0.13, 0.13, 0.06, 0.1]}]}  # 왼쪽에 선 감독님 (얼굴 0.13~0.19)
+    MID = {"t": 3, "persons": [[0.45, 0.2, 0.1, 0.6, 0.9]], "main": 0, "faces": [{"box": [0.48, 0.22, 0.04, 0.07]}]}
+
+    def cut(self, **o):
+        return dict({"type": "image", "name": "누끼", "src": "/assets/cut_1.png", "orig": "/frame?name=x&t=1", "fit": "cover", "fx": 0.5, "fy": 0.5,
+                     "cropL": 0, "cropR": 0, "cropT": 0, "cropB": 0}, **o)
+
+    def bg(self, t, w, h):
+        return {"type": "image", "name": "배경", "src": f"/frame?name=x&t={t}", "x": 0, "y": 0, "w": w, "h": h, "fit": "cover", "fx": 0.5, "fy": 0.5,
+                "cropL": 0, "cropR": 0, "cropT": 0, "cropB": 0}
+
+    def head_in_canvas(self, l, W, H, f=None):
+        """누끼 레이어에서 머리(이마까지 얼굴 상자)가 화면·레이어 안에 보이는 비율 (anchorSlot 과 같은 계산을 파이썬으로)."""
+        f = f or self.LEFT
+        ar = 16 / 9
+        a = ar  # 자르기 없음
+        if l["w"] / l["h"] > a:
+            dw, dh = l["w"], l["w"] / a
+        else:
+            dh, dw = l["h"], l["h"] * a
+        dx, dy = (l["w"] - dw) * l["fx"], (l["h"] - dh) * l["fy"]
+        fc = f["faces"][0]["box"]
+        hb = [fc[0] - fc[2] * 0.12, max(0, fc[1] - fc[3] * 0.6), fc[2] * 1.24, fc[3] * 1.65]
+        x0, y0 = l["x"] + dx + hb[0] * dw, l["y"] + dy + hb[1] * dh
+        x1, y1 = x0 + hb[2] * dw, y0 + hb[3] * dh
+        vx0, vy0, vx1, vy1 = max(0, l["x"]), max(0, l["y"]), min(W, l["x"] + l["w"]), min(H, l["y"] + l["h"])
+        iw, ih = max(0, min(x1, vx1) - max(x0, vx0)), max(0, min(y1, vy1) - max(y0, vy0))
+        return iw * ih / ((x1 - x0) * (y1 - y0)), (x0 + x1) / 2
+
+    def test_cutout_person_emphasis_keeps_off_center_coach(self):
+        """'쇼츠 · 인물 강조' 누끼(x −540 · 폭 2160 · cover)는 가운데 자르기면 원본 0.32~0.68 만 보여 왼쪽 감독님 머리가 화면 밖 → 화면 가운데로."""
+        W, H = 1080, 1920
+        cut = self.cut(x=-540, y=260, w=2160, h=H - 260)
+        before = self.head_in_canvas(cut, W, H)
+        self.assertEqual(before[0], 0, "고치기 전: 머리가 화면에 하나도 안 보임")
+        out = self.run_js([["setFrames", [[self.LEFT, self.MID]]], ["anchorTpl", [[self.bg(1, W, H), cut], [1, 3], {"w": W, "h": H}]]])
+        bg, c = out[1]
+        vis, cx = self.head_in_canvas(c, W, H)
+        self.assertGreaterEqual(vis, 0.95, c)
+        self.assertAlmostEqual(cx, W / 2, delta=W * 0.05, msg="템플릿이 사람을 두려던 화면 가운데")
+        self.assertEqual(c["fx"], 0, "fx 로 갈 수 있는 데까지 → 남은 만큼 레이어를 옮김")
+        self.assertEqual(c["y"], 260, "머리가 화면 안이면 위아래는 그대로")
+        self.assertLess(bg["fx"], 0.2, "배경 칸도 얼굴 쪽으로 (D-092 그대로)")
+
+    def test_cutout_on_other_scene_uses_its_own_face(self):
+        """둘째 후보 묶음(k=1): 배경은 다른 장면(t=3)이라 짝이 아님 → 화면 전체 쇼츠 누끼(위아래 큰 글씨·네온)도 누끼 장면(t=1) 얼굴에 맞춤."""
+        W, H = 1080, 1920
+        cut = self.cut(x=0, y=0, w=W, h=H)
+        self.assertEqual(self.head_in_canvas(cut, W, H)[0], 0, "고치기 전: 가운데 자르기면 머리가 화면 밖")
+        out = self.run_js([["setFrames", [[self.LEFT, self.MID]]], ["anchorTpl", [[self.bg(3, W, H), cut], [3, 1], {"w": W, "h": H}]]])
+        bg, c = out[1]
+        self.assertAlmostEqual(bg["fx"], 0.5, delta=0.05, msg="배경은 자기 장면(가운데 감독님)")
+        self.assertLess(c["fx"], 0.1, "누끼는 왼쪽 얼굴 쪽")
+        self.assertEqual((c["x"], c["y"]), (0, 0), "fx 만으로 들어오면 옮기지 않음")
+        self.assertGreaterEqual(self.head_in_canvas(c, W, H)[0], 0.95)
+
+    def test_twin_and_contain_cutouts_unchanged(self):
+        """배경과 같은 자리·같은 장면 누끼(twin)는 배경 fx·fy 그대로 · contain 누끼('3분할 사선')와 장면 정보가 없는 누끼는 건드리지 않음."""
+        W, H = 1080, 1920
+        twin = self.cut(x=0, y=0, w=W, h=H)
+        box = self.cut(x=240, y=30, w=800, h=450, fit="contain")
+        lost = self.cut(x=-540, y=260, w=2160, h=H - 260, orig="/assets/up.png")
+        out = self.run_js([["setFrames", [[self.LEFT, self.MID]]], ["anchorTpl", [[self.bg(1, W, H), twin, box, lost], [1, 3], {"w": W, "h": H}]]])
+        bg, t, b, lo = out[1]
+        self.assertEqual((t["fx"], t["fy"], t["x"]), (bg["fx"], bg["fy"], 0))
+        self.assertEqual((b["fx"], b["x"], b["y"]), (0.5, 240, 30))
+        self.assertEqual((lo["fx"], lo["x"]), (0.5, -540))
+
+    def test_cutout_shifted_left_template(self):
+        """'두 장면 겹치기' 누끼는 x −200 (16:9 그대로라 fx 로는 못 옮김) → 왼쪽 끝 감독님 머리가 화면 밖이면 칸 가운데 쪽으로 옮김."""
+        W, H = 1280, 720
+        edge = {"t": 1, "persons": [[0.02, 0.15, 0.12, 0.8, 0.9]], "main": 0, "faces": [{"box": [0.05, 0.17, 0.05, 0.1]}]}
+        cut = self.cut(x=-200, y=0, w=W, h=H)
+        self.assertLess(self.head_in_canvas(cut, W, H, edge)[0], 0.5)
+        out = self.run_js([["setFrames", [[edge]]], ["anchorTpl", [[self.bg(1, W, H), cut], [1], {"w": W, "h": H}]]])
+        c = out[1][1]
+        vis, cx = self.head_in_canvas(c, W, H, edge)
+        self.assertGreaterEqual(vis, 0.95)
+        self.assertAlmostEqual(cx, -200 + W / 2, delta=2, msg="템플릿이 가운데 사람을 두던 자리")
+        out = self.run_js([["setFrames", [[self.MID]]], ["anchorTpl", [[self.bg(3, W, H), self.cut(x=-200, y=0, w=W, h=H, orig="/frame?name=x&t=3")], [3], {"w": W, "h": H}]]])
+        self.assertEqual(out[1][1]["x"], -200, "머리가 화면 안이면 템플릿 자리 그대로")
+
+    def test_cutout_person_emphasis_edge_coach_centered(self):
+        """시험 영상 005(2.7초): 주인공이 오른쪽 끝(0.84~0.95) → fx 1 이면 머리는 들어와도 화면 옆 끝(8% 안)에 걸침 → '인물 강조'답게 가운데로 옮김."""
+        W, H = 1080, 1920
+        right = {"t": 1, "persons": [[0.82, 0.15, 0.15, 0.8, 0.9]], "main": 0, "faces": [{"box": [0.86, 0.18, 0.06, 0.1]}]}
+        out = self.run_js([["setFrames", [[right, self.MID]]], ["anchorTpl", [[self.bg(1, W, H), self.cut(x=-540, y=260, w=2160, h=H - 260)], [1, 3], {"w": W, "h": H}]]])
+        c = out[1][1]
+        vis, cx = self.head_in_canvas(c, W, H, right)
+        self.assertGreaterEqual(vis, 0.95)
+        self.assertAlmostEqual(cx, W / 2, delta=W * 0.05)
+        self.assertEqual(c["fx"], 1)
+
+    def test_headless_cutout_left_as_template(self):
+        """시험 영상 003(40초): 주인공은 머리가 원본 위로 잘린 다리 · 얼굴로 찾은 것은 공 → 지킬 머리가 없으니 누끼는 템플릿 그대로."""
+        W, H = 1080, 1920
+        leg = {"t": 1, "persons": [[0.5961, 0.0033, 0.4039, 0.9965, 0.87]], "main": 0, "faces": [{"box": [0.1465, 0.1214, 0.1442, 0.2728]}]}
+        out = self.run_js([["setFrames", [[leg, self.MID]]], ["anchorTpl", [[self.bg(3, W, H), self.cut(x=-540, y=260, w=2160, h=H - 260)], [3, 1], {"w": W, "h": H}]]])
+        c = out[1][1]
+        self.assertEqual((c["x"], c["y"], c["fx"], c["fy"]), (-540, 260, 0.5, 0.5))
+
+    def test_cutout_focus_on_main_head_not_other_face(self):
+        """시험 영상 004(18.6초): 주인공(오른쪽) 얼굴을 못 찾고 다른 사람(왼쪽) 얼굴만 있음 → 초점은 남의 얼굴인데 지킬 머리는 주인공 →
+        누끼는 주인공 머리 쪽으로 다시 맞춤 (레이어를 옮겨 화면 밖 칸을 만들지 않음)."""
+        W, H = 1080, 1920
+        f = {"t": 1, "persons": [[0.2656, 0.2841, 0.0663, 0.3612, 0.8], [0.6404, 0.3165, 0.0674, 0.3254, 0.78]], "main": 1, "faces": [{"box": [0.3111, 0.298, 0.0154, 0.0401]}]}
+        out = self.run_js([["setFrames", [[f, self.MID]]], ["anchorTpl", [[self.bg(3, W, H), self.cut(x=0, y=0, w=W, h=H)], [3, 1], {"w": W, "h": H}]]])
+        c = out[1][1]
+        self.assertEqual((c["x"], c["y"]), (0, 0), "화면 전체 누끼는 옮기지 않고 자르는 자리로")
+        dw = H * 16 / 9
+        hx = (W - dw) * c["fx"] + (0.6404 + 0.0674 / 2) * dw
+        self.assertAlmostEqual(hx, W / 2, delta=W * 0.05, msg="주인공 머리가 화면 가운데")
+
+    def test_cutout_big_face_kept_whole(self):
+        """세로 영상(006) 큰 얼굴을 롱폼 칸에: 얼굴 가운데를 칸 위 1/3 에 두면 머리(이마·머리카락)가 칸 위로 넘침 → 머리가 다 들게 조금 내림."""
+        W, H = 1280, 720
+        f = {"t": 1, "persons": [[0.0034, 0.0648, 0.7311, 0.901, 0.9]], "main": 0, "faces": [{"box": [0.2013, 0.172, 0.1682, 0.1299]}]}
+        out = self.run_js([["setInfo", [1080, 1920]], ["setFrames", [[f, self.MID]]],
+                           ["anchorTpl", [[self.bg(3, W, H), self.cut(x=0, y=0, w=W, h=H)], [3, 1], {"w": W, "h": H}]]])
+        c = out[2][1]
+        dh = W / (1080 / 1920)
+        fc = f["faces"][0]["box"]
+        top = (H - dh) * c["fy"] + max(0, fc[1] - fc[3] * 0.6) * dh
+        bottom = (H - dh) * c["fy"] + (max(0, fc[1] - fc[3] * 0.6) + fc[3] * 1.65) * dh
+        seen = (min(bottom, H) - max(top, 0)) / (bottom - top)
+        self.assertGreaterEqual(seen, 0.95, f"머리가 칸에 95% 넘게 ({top:.0f}~{bottom:.0f})")
+        self.assertEqual(c["y"], 0)
 
 
 class FrameChoice5Tests(unittest.TestCase):
