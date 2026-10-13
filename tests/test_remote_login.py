@@ -224,7 +224,7 @@ class SetupTests(LoginBase):
         self.svc._collision_at = 0
         self.svc.tick()
         self.assertTrue(self.wait(lambda: self.svc.login_view().get("collision")))
-        self.assertTrue(any("다른 PC가 같은 아이디를 쓰고 있어요" in x for x in self.lines))
+        self.assertTrue(self.wait(lambda: any("다른 PC가 같은 아이디를 쓰고 있어요" in x for x in self.lines)))   # 기록 줄은 표시 뒤에 (바쁜 PC)
 
     def test_check_route_problem_codes(self):
         self.assertEqual(self.svc.login_check(ID, "qwer1234")["problems"], ["common"])

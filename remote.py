@@ -594,7 +594,8 @@ def listing_url(s):
 def _fresh():
     return {"v": 1, "pc": {"id": secrets.token_hex(8), "name": "내 PC"}, "enabled": False,
             # PC 잠들지 않게: 기본은 '켜 둔 동안 항상' (잠들면 밖에서 새 작업을 못 시킴 · 원격 접속 자체가 소유자가 켜는 것)
-            "settings": {"autoOffHours": 12, "keepAwake": "always", "notify": {"done": True, "failed": True, "attention": True},
+            # 늘 켜기 (D-295 · 소유자 결정): 스튜디오가 켜져 있으면 원격 접속도 켬 (앱을 켤 때 저절로) · 자동으로 끄기는 기본 '안 함'
+            "settings": {"alwaysOn": True, "autoOffHours": 0, "keepAwake": "always", "notify": {"done": True, "failed": True, "attention": True},
                          # 밖에서 작업 허용 (D-234): 기본 켜짐 — 기기를 연결해야 쓸 수 있으므로 사실상 '연결하면 켜짐' · 끄면 휴대폰으로 보기만
                          "studio": True},
             "devices": [], "topics": {"beacon": "fsb" + secrets.token_hex(12), "notify": "fsn" + secrets.token_hex(12)}, "seq": 0}
@@ -641,6 +642,8 @@ class Store:
             return _fresh()
         base = _fresh()
         base["settings"].update({k: v for k, v in d["settings"].items() if k in base["settings"]})
+        if "alwaysOn" not in d["settings"]:  # 늘 켜기가 생기기 전 기록 (D-295): 한 번만 늘 켜기 + 자동으로 끄기 안 함 (소유자 PC 가 업데이트만으로)
+            base["settings"]["alwaysOn"], base["settings"]["autoOffHours"] = True, 0
         d["settings"] = base["settings"]
         for x in d["devices"]:  # 예전 페이지가 'PC · …' 로 지은 노트북 이름 (D-239)
             x["name"] = dev_name(x.get("name"))
@@ -1558,7 +1561,13 @@ class Service:
             if not isinstance(b["studio"], bool):
                 raise ValueError("밖에서 작업 설정을 다시 골라 주세요")
             s["studio"] = b["studio"]
+        if "alwaysOn" in b:
+            if not isinstance(b["alwaysOn"], bool):
+                raise ValueError("늘 켜기 설정을 다시 골라 주세요")
+            s["alwaysOn"] = b["alwaysOn"]
         self.store.set(settings=s)
+        if b.get("alwaysOn") is True and self.state in ("off", "error"):  # 늘 켜기를 켜면 지금도 켬 (D-295)
+            self.turn_on()
         if "studio" in b and self.studio:
             if not b["studio"]:  # 끄면 열려 있던 밖에서 작업도 바로 끝 (휴대폰으로 보기는 그대로)
                 self.studio.handoffs.drop()
@@ -3208,6 +3217,6 @@ SVC = Service()
 
 def init(bridge):
     SVC.init(bridge)
-    if SVC.store.data.get("enabled"):
-        SVC.turn_on()  # 켜 둔 채로 앱을 껐거나 업데이트로 다시 켜졌으면 이어서 켬
+    if SVC.store.data.get("enabled") or SVC.store.data["settings"].get("alwaysOn"):
+        SVC.turn_on()  # 켜 둔 채로 앱을 껐거나 업데이트로 다시 켜졌으면 · 늘 켜기(D-295 · 기본)면 스튜디오를 켤 때마다 이어서 켬
     return SVC

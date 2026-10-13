@@ -4349,7 +4349,8 @@ function rmRender(d) {
   if (st === "off") {
     h += `<p class="lead">PC에서 하는 작업을 휴대폰으로 보고, 밖에서도 영상 받기·편집점 찾기·내보내기를 시킬 수 있어요. 켜 둔 동안에는 PC를 켜 두세요.</p>
       <button class="btn primary" data-rm="on">원격 접속 켜기</button>
-      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>` + rlOffNote(d);
+      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>`
+      + (set.alwaysOn ? `<div class="small" id="rmAlwaysOff">늘 켜기: 스튜디오를 다시 켜면 원격 접속도 저절로 켜져요 (지금은 꺼 둔 상태)</div>` : "") + rlOffNote(d);
   } else if (st === "preparing") {
     h += `<p class="lead">연결 도구 받는 중${d.prep != null ? " · " + esc(d.prep) + "%" : "…"}</p><div class="rbar"><i style="width:${Math.max(3, +d.prep || 0)}%"></i></div>
       <div class="rbtns"><button class="btn" data-rm="off">그만두기</button></div>`;
@@ -4389,6 +4390,8 @@ function rmRender(d) {
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
     h += `<div class="rsec"><h3>설정</h3>
+      <div class="rrow"><label><input type="checkbox" data-rm="alwaysOn"${set.alwaysOn ? " checked" : ""}> 스튜디오가 켜져 있으면 원격 접속도 늘 켜기</label></div>
+      <div class="small">${set.alwaysOn ? "스튜디오를 켤 때마다 원격 접속도 저절로 켜져요 · 밖에서 언제든 들어올 수 있어요 (PC와 스튜디오는 켜 두세요)" : "끄면 원격 접속은 [원격 접속 켜기]를 눌렀을 때만 켜져요"}</div>
       <div class="rrow"><span>자동으로 끄기</span><select class="inp" style="min-width:0;padding:5px 8px" data-rm="autoOff">${offOpt}</select></div>
       <div class="rrow"><span>PC 잠들지 않게</span><div class="seg"><button data-rm="awake" data-v="always" class="${set.keepAwake !== "job" ? "on" : ""}">켜 둔 동안 항상</button><button data-rm="awake" data-v="job" class="${set.keepAwake === "job" ? "on" : ""}">작업할 때만</button></div></div>
       <div class="small">${set.keepAwake === "job" ? "작업할 때만: 작업이 끝나면 PC가 잠들 수 있어서, 그 뒤에는 밖에서 새 작업을 못 시켜요" : "원격 접속을 켜 둔 동안 PC가 잠들지 않아요 · 밖에서 언제든 새 작업을 시킬 수 있어요"}</div>
@@ -4420,7 +4423,11 @@ $("rmBox").addEventListener("click", async e => {
   const a = b.dataset.rm;
   if (a === "close") return rmClose();
   if (a === "on") return rmPost("/api/remote/on");
-  if (a === "off") { if (RM.d && RM.d.state === "on" && !confirm("원격 접속을 끌까요? 휴대폰에서는 PC를 볼 수 없게 돼요.")) return; return rmPost("/api/remote/off"); }
+  if (a === "off") {
+    const always = RM.d && RM.d.settings && RM.d.settings.alwaysOn;
+    if (RM.d && RM.d.state === "on" && !confirm("원격 접속을 끌까요? 휴대폰에서는 PC를 볼 수 없게 돼요." + (always ? "\n(늘 켜기라서 스튜디오를 다시 켜면 다시 켜져요 · 아예 끄려면 설정의 '늘 켜기'를 꺼 주세요)" : ""))) return;
+    return rmPost("/api/remote/off");
+  }
   if (a === "pair") return rmPost("/api/remote/pair");
   if (a === "pcancel") return rmPost("/api/remote/pair/cancel");
   if (a === "revoke") { if (!confirm(`'${b.dataset.name}' 연결을 끊을까요?\n그 기기에서는 더 이상 이 PC를 볼 수 없어요.`)) return; return rmPost("/api/remote/revoke", { id: b.dataset.id }); }
@@ -4434,6 +4441,7 @@ $("rmBox").addEventListener("click", async e => {
 $("rmBox").addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.rm === "autoOff") rmPost("/api/remote/settings", { autoOffHours: +t.value });
+  if (t.dataset.rm === "alwaysOn") rmPost("/api/remote/settings", { alwaysOn: t.checked });
   if (t.dataset.rm === "studio") {
     if (!t.checked && RM.d && RM.d.studio && RM.d.studio.sessions.length && !confirm("끄면 밖에서 작업 중인 화면이 바로 잠겨요. 끌까요?")) { t.checked = true; return; }
     rmPost("/api/remote/settings", { studio: t.checked });
