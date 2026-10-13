@@ -3368,8 +3368,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         # 시범 장면으로 살린 곳에 걸친 군말·NG 도 뺌 — 롱폼과 같게 (판정 round7: S2 쇼츠에 '어,' · S1 쇼츠 첫머리 '어' 가 남음 · U7 · D-265)
         hits = list(sig.get("onsets") or ()) + list(sig.get("hits") or ())
         base = snap_edges(editor._minus(base, junk) or base, sig.get("blobs") or [], words, junk, hits, sig.get("demo") or ())
-        # 앞뒤가 다 잘린 짧은 조각(SLIVER)은 빼기 — 롱폼과 같게 (판정 검토: 점프 컷 두 번 사이 0.6초 '그렇죠.' · D-268)
-        base = drop_slivers(base, moms, _cheers(sig)) or base
+        # (앞뒤가 다 잘린 짧은 조각을 롱폼처럼 빼지는 않음 — 쇼츠는 쉼 컷이 촘촘해 '공이 조금 뒤로 갔네요'·'하나,' 같은 말 조각이 빠짐 ·
+        #  판정 검토 고침 렌더 r7r · 0.6초 '그렇죠.' 조각은 공 소리를 군말로 자른 탓이라 hits 로 고침 · D-268)
         # 첫머리 주제 줄은 이 쇼츠가 실제로 보여 주는 구간의 포인트로 — 정해 준 구간(끝까지 자동으로)이면 그 구간
         # (MSG 가 고르는 구간(_shorts_best)은 다른 포인트일 수 있음 · 그러면 다른 쇼츠의 주제 줄이 붙음)
         short_r = _win_short(win, segs, sig) if win else _shorts_best(rec, moms)

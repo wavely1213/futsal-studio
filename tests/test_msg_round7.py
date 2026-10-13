@@ -577,13 +577,13 @@ class SnapKickTest(unittest.TestCase):
             msg._recommend("v.mp4", [{"start": 0.0, "end": 1.0, "text": "안녕"}], sig={"blobs": blobs, "onsets": [1.0], "hits": [172.33]})
         self.assertEqual(got["on"], [1.0, 172.33])
 
-    def test_shorts_drop_slivers(self):
-        """쇼츠도 앞뒤가 다 잘린 짧은 조각을 뺌 (점프 컷 두 번 사이 0.6초 '그렇죠.' · 롱폼과 같음)."""
+    def test_slivers_keep_laughs(self):
+        """짧은 조각 빼기(롱폼): 웃음·환호 소리 · 펀치라인 반응 조각은 남김 · 쇼츠에는 걸지 않음 (말 조각 '공이 조금 뒤로 갔네요'·'하나,'가 빠짐 · D-268)."""
         cuts = [{"in": 165.29, "out": 172.29}, {"in": 173.41, "out": 174.03}, {"in": 174.89, "out": 177.0}]
         self.assertEqual(len(msg.drop_slivers(cuts, [])), 2)
         import inspect
         src = inspect.getsource(msg._compile_once)
-        self.assertIn("base = drop_slivers(base, moms, _cheers(sig)) or base", src.split('if fmt == "shorts":')[1].split("else:")[0])
+        self.assertNotIn("drop_slivers(", src.split('if fmt == "shorts":')[1].split("else:")[0])
         # 펀치라인 말 끝 1초 안에 시작하는 웃음 조각·웃음 소리 구간과 겹치는 조각은 남김 (S2 68.12~69.05 웃음 · 빼면 농담이 웃음 없이 끝남)
         cuts = [{"in": 66.73, "out": 67.74}, {"in": 68.12, "out": 69.05}, {"in": 70.37, "out": 79.54}]
         self.assertEqual(len(msg.drop_slivers(cuts, [M("punchline", 67.4, "저도 처음엔 잘 못했어요.", 65.5, 67.5)])), 3)
