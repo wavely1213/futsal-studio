@@ -139,10 +139,9 @@ class ScreenMath5Tests(unittest.TestCase):
         return {"type": "image", "name": "배경", "src": f"/frame?name=x&t={t}", "x": 0, "y": 0, "w": w, "h": h, "fit": "cover", "fx": 0.5, "fy": 0.5,
                 "cropL": 0, "cropR": 0, "cropT": 0, "cropB": 0}
 
-    def head_in_canvas(self, l, W, H, f=None):
+    def head_in_canvas(self, l, W, H, f=None, ar=16 / 9):
         """누끼 레이어에서 머리(이마까지 얼굴 상자)가 화면·레이어 안에 보이는 비율 (anchorSlot 과 같은 계산을 파이썬으로)."""
         f = f or self.LEFT
-        ar = 16 / 9
         a = ar  # 자르기 없음
         if l["w"] / l["h"] > a:
             dw, dh = l["w"], l["w"] / a
@@ -157,6 +156,26 @@ class ScreenMath5Tests(unittest.TestCase):
         iw, ih = max(0, min(x1, vx1) - max(x0, vx0)), max(0, min(y1, vy1) - max(y0, vy0))
         return iw * ih / ((x1 - x0) * (y1 - y0)), (x0 + x1) / 2
 
+    def edges_kept(self, before, after, W, H):
+        """D-273: 템플릿 누끼가 화면 끝까지 덮던 쪽은 옮긴 뒤에도 덮음 (레이어 끝 = 원본 테두리·자른 선이 화면 안으로 들어오지 않음)."""
+        if before["x"] <= 0:
+            self.assertLessEqual(after["x"], 1e-6, "왼쪽 끝이 화면 안으로")
+        if before["x"] + before["w"] >= W:
+            self.assertGreaterEqual(after["x"] + after["w"], W - 1e-6, "오른쪽 끝이 화면 안으로")
+        if before["y"] <= 0:
+            self.assertLessEqual(after["y"], 1e-6, "위 끝이 화면 안으로")
+        if before["y"] + before["h"] >= H:
+            self.assertGreaterEqual(after["y"] + after["h"], H - 1e-6, "아래 끝이 화면 안으로")
+
+    def off_edge_band(self, l, W, H, f, ar=16 / 9):
+        """머리가 화면 옆 끝 8% 밖인지 (anchorCut 의 '옆 끝' 기준)."""
+        vis, cx = self.head_in_canvas(l, W, H, f, ar)
+        fc = f["faces"][0]["box"]
+        a = ar
+        dw = l["w"] if l["w"] / l["h"] > a else l["h"] * a
+        hw = fc[2] * 1.24 * dw
+        return cx - hw / 2 >= 0.08 * W - 1e-6 and cx + hw / 2 <= W * 0.92 + 1e-6
+
     def test_cutout_person_emphasis_keeps_off_center_coach(self):
         """'쇼츠 · 인물 강조' 누끼(x −540 · 폭 2160 · cover)는 가운데 자르기면 원본 0.32~0.68 만 보여 왼쪽 감독님 머리가 화면 밖 → 화면 가운데로."""
         W, H = 1080, 1920
@@ -167,8 +186,11 @@ class ScreenMath5Tests(unittest.TestCase):
         bg, c = out[1]
         vis, cx = self.head_in_canvas(c, W, H)
         self.assertGreaterEqual(vis, 0.95, c)
-        self.assertAlmostEqual(cx, W / 2, delta=W * 0.05, msg="템플릿이 사람을 두려던 화면 가운데")
+        self.assertTrue(self.off_edge_band(c, W, H, self.LEFT), c)
+        self.assertLess(abs(cx - W / 2), abs(before[1] - W / 2), "템플릿이 사람을 두려던 화면 가운데 쪽으로")
         self.assertEqual(c["fx"], 0, "fx 로 갈 수 있는 데까지 → 남은 만큼 레이어를 옮김")
+        self.assertEqual(c["x"], 0, "왼쪽 끝은 화면 끝까지만 (D-273)")
+        self.edges_kept(cut, c, W, H)
         self.assertEqual(c["y"], 260, "머리가 화면 안이면 위아래는 그대로")
         self.assertLess(bg["fx"], 0.2, "배경 칸도 얼굴 쪽으로 (D-092 그대로)")
 
@@ -197,16 +219,19 @@ class ScreenMath5Tests(unittest.TestCase):
         self.assertEqual((lo["fx"], lo["x"]), (0.5, -540))
 
     def test_cutout_shifted_left_template(self):
-        """'두 장면 겹치기' 누끼는 x −200 (16:9 그대로라 fx 로는 못 옮김) → 왼쪽 끝 감독님 머리가 화면 밖이면 칸 가운데 쪽으로 옮김."""
+        """'두 장면 겹치기' 누끼는 x −200 (16:9 그대로라 fx 로는 못 옮김) → 왼쪽 끝 감독님 머리가 화면 밖이면 오른쪽으로 옮기되,
+        레이어 왼쪽 끝(= 원본 왼쪽 테두리)은 화면 왼쪽 끝까지만 (D-273 · 테두리에 닿은 사람이 곧은 선으로 잘려 보이지 않게)."""
         W, H = 1280, 720
         edge = {"t": 1, "persons": [[0.02, 0.15, 0.12, 0.8, 0.9]], "main": 0, "faces": [{"box": [0.05, 0.17, 0.05, 0.1]}]}
         cut = self.cut(x=-200, y=0, w=W, h=H)
         self.assertLess(self.head_in_canvas(cut, W, H, edge)[0], 0.5)
         out = self.run_js([["setFrames", [[edge]]], ["anchorTpl", [[self.bg(1, W, H), cut], [1], {"w": W, "h": H}]]])
-        c = out[1][1]
+        bg, c = out[1]
         vis, cx = self.head_in_canvas(c, W, H, edge)
         self.assertGreaterEqual(vis, 0.95)
-        self.assertAlmostEqual(cx, -200 + W / 2, delta=2, msg="템플릿이 가운데 사람을 두던 자리")
+        self.assertEqual(c["x"], 0, "왼쪽 테두리는 화면 왼쪽 끝까지만 → 같은 장면 배경과 꼭 겹침")
+        self.assertEqual((c["fx"], c["fy"]), (bg["fx"], bg["fy"]))
+        self.edges_kept(cut, c, W, H)
         out = self.run_js([["setFrames", [[self.MID]]], ["anchorTpl", [[self.bg(3, W, H), self.cut(x=-200, y=0, w=W, h=H, orig="/frame?name=x&t=3")], [3], {"w": W, "h": H}]]])
         self.assertEqual(out[1][1]["x"], -200, "머리가 화면 안이면 템플릿 자리 그대로")
 
@@ -218,8 +243,9 @@ class ScreenMath5Tests(unittest.TestCase):
         c = out[1][1]
         vis, cx = self.head_in_canvas(c, W, H, right)
         self.assertGreaterEqual(vis, 0.95)
-        self.assertAlmostEqual(cx, W / 2, delta=W * 0.05)
+        self.assertTrue(self.off_edge_band(c, W, H, right), c)
         self.assertEqual(c["fx"], 1)
+        self.assertEqual(c["x"] + c["w"], W, "오른쪽 끝은 화면 오른쪽 끝까지만 (D-273)")
 
     def test_headless_cutout_left_as_template(self):
         """시험 영상 003(40초): 주인공은 머리가 원본 위로 잘린 다리 · 얼굴로 찾은 것은 공 → 지킬 머리가 없으니 누끼는 템플릿 그대로."""
@@ -255,6 +281,58 @@ class ScreenMath5Tests(unittest.TestCase):
         seen = (min(bottom, H) - max(top, 0)) / (bottom - top)
         self.assertGreaterEqual(seen, 0.95, f"머리가 칸에 95% 넘게 ({top:.0f}~{bottom:.0f})")
         self.assertEqual(c["y"], 0)
+
+
+    # ----- D-273 (검토): 레이어를 옮겨도 템플릿이 덮던 화면 끝은 계속 덮음 — 원본 테두리에 닿은 사람이 흰 테두리 친 곧은 선으로 잘려 보이지 않게 -----
+    F006 = {"t": 1, "persons": [[0.0034, 0.0648, 0.7311, 0.901, 0.908]], "main": 0, "faces": [{"box": [0.2013, 0.172, 0.1682, 0.1299]}]}  # 시험 영상 006 19.9초 (세로 · 사람이 왼쪽 테두리에 닿음)
+    F004 = {"t": 1, "persons": [[0.0155, 0.0, 0.9842, 0.9837, 0.862]], "main": 0, "faces": [{"box": [0.7754, 0.0925, 0.1431, 0.287]}]}  # 시험 영상 004 47.1초 (머리가 오른쪽)
+
+    def test_shifted_cutout_never_exposes_source_border(self):
+        """검토(006 · 롱폼 '두 장면 겹치기' k0·k1): 세로 원본은 이미지 폭 = 레이어 폭이라 왼쪽 레이어 끝이 곧 원본 왼쪽 테두리 →
+        예전엔 x −200 → 75 로 옮겨 테두리에 닿은 팔·주먹이 x 75 에서 곧은 흰 선으로 잘림. 이제 이미지 왼쪽 끝은 화면 왼쪽 끝(≤ 0)까지만."""
+        W, H = 1280, 720
+        for bg_t in (1, 3):  # k0: 배경도 같은 장면 · k1: 배경은 다른 장면
+            cut = self.cut(x=-200, y=0, w=W, h=H)
+            out = self.run_js([["setInfo", [1080, 1920]], ["setFrames", [[self.F006, self.MID]]],
+                               ["anchorTpl", [[self.bg(bg_t, W, H), cut], [bg_t, 1 if bg_t == 3 else 3], {"w": W, "h": H}]]])
+            bg, c = out[2]
+            dw = H * (1080 / 1920) if W / H <= 1080 / 1920 else W  # cover: 세로 원본은 레이어 폭 그대로
+            self.assertEqual(dw, W)
+            self.assertLessEqual(c["x"] + (W - dw) * c["fx"], 1e-6, "이미지(원본 테두리) 왼쪽 끝이 화면 안으로 들어오지 않음")
+            self.edges_kept(cut, c, W, H)
+            self.assertGreater(c["x"], -200, "머리 쪽으로는 옮김")
+            self.assertGreaterEqual(self.head_in_canvas(c, W, H, self.F006, 1080 / 1920)[0], 0.95)
+            if bg_t == 1:  # 누끼와 같은 장면 배경과 꼭 겹침 (옆·위아래로 비껴 머리가 두 번 보이지 않음) — 배경도 누끼처럼 머리가 다 들게
+                self.assertEqual((c["x"], c["y"], c["fx"], c["fy"]), (bg["x"], bg["y"], bg["fx"], bg["fy"]))
+            else:
+                self.assertEqual(bg["src"], "/frame?name=x&t=3", "다른 장면 배경은 그대로 자기 장면")
+
+    def test_full_canvas_cutout_side_band_does_not_move(self):
+        """검토(004 47.1초 · 롱폼 '큰 글씨 2줄'·'네온 강조' k1): 머리는 다 보이고 오른쪽 8% 띠에만 걸림 → 예전엔 x 0 → −444 · y 0 → +22 로 옮겨
+        든 팔 위가 흰 막대로, 다리가 x 836 에서 잘림. 화면 전체 누끼는 이제 옮기지 않음 (머리 아래로 내리는 여백도)."""
+        W, H = 1280, 720
+        cut = self.cut(x=0, y=0, w=W, h=H)
+        out = self.run_js([["setFrames", [[self.F004, self.MID]]], ["anchorTpl", [[self.bg(3, W, H), cut], [3, 1], {"w": W, "h": H}]]])
+        c = out[1][1]
+        self.assertEqual((c["x"], c["y"]), (0, 0))
+        self.assertGreaterEqual(self.head_in_canvas(c, W, H, self.F004)[0], 0.95)
+        SW, SH = 1080, 1920  # 쇼츠 화면 전체 누끼도 같음
+        out = self.run_js([["setFrames", [[self.F004, self.MID]]], ["anchorTpl", [[self.bg(3, SW, SH), self.cut(x=0, y=0, w=SW, h=SH)], [3, 1], {"w": SW, "h": SH}]]])
+        self.assertEqual((out[1][1]["x"], out[1][1]["y"]), (0, 0))
+
+    def test_person_emphasis_right_head_stops_at_canvas_edge(self):
+        """검토(004 47.1초 · 쇼츠 '인물 강조'): 예전엔 x −540 → −1168 로 옮겨 머리는 들어와도 오른쪽 레이어 끝(x 992)에서 다리가 잘림 →
+        오른쪽 끝은 화면 오른쪽 끝까지만(x −1080) · 머리는 그래도 화면 안·옆 끝 밖."""
+        W, H = 1080, 1920
+        cut = self.cut(x=-540, y=260, w=2160, h=H - 260)
+        self.assertEqual(self.head_in_canvas(cut, W, H, self.F004)[0], 0, "고치기 전: 머리가 화면 밖")
+        out = self.run_js([["setFrames", [[self.F004, self.MID]]], ["anchorTpl", [[self.bg(1, W, H), cut], [1, 3], {"w": W, "h": H}]]])
+        c = out[1][1]
+        self.assertEqual(c["x"], W - 2160)
+        self.assertEqual(c["y"], 260)
+        self.edges_kept(cut, c, W, H)
+        self.assertGreaterEqual(self.head_in_canvas(c, W, H, self.F004)[0], 0.95)
+        self.assertTrue(self.off_edge_band(c, W, H, self.F004), c)
 
 
 class FrameChoice5Tests(unittest.TestCase):

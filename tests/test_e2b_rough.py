@@ -447,6 +447,32 @@ class OtherChannelKitTest(WorkMixin, unittest.TestCase):
         typed = "첫 줄\n\n▶ 출연\n해설: 내가 쓴 줄\n\n#풋살"  # 손으로 쓴 줄이 있으면 '▶ 출연'은 그대로
         self.assertEqual(upload._insert_cast(typed, [], coach=False), typed)
 
+    def test_coach_rows_only_exact(self):
+        """D-272 (검토): 빼는 감독님 줄은 감독님 이름으로 시작하는 줄과 머리 줄의 감독님 이름뿐 — 이력에 '풋살사관학교'·'최경진 감독'이 든
+        게스트 줄은 남김 · '▶ 출연: 최경진 감독 (풋살사관학교)' 한 줄 머리는 '▶ 출연'으로 (게스트가 없으면 통째로 빠짐)."""
+        o = [{"channel": "쌈바 풋살 클래스", "url": "", "main": True}]
+        desc = "첫 줄\n\n▶ 출연: 최경진 감독 (풋살사관학교)\n박지훈 (풋살사관학교 코치)\n이한울 (최경진 감독 제자)\n\n#풋살"
+        out = upload._credit(desc, o, True, ["박지훈 (풋살사관학교 코치)", "이한울 (최경진 감독 제자)"])
+        self.assertIn("▶ 출연\n박지훈 (풋살사관학교 코치)\n이한울 (최경진 감독 제자)\n\n▶ 출처\n쌈바 풋살 클래스\n\n#풋살", out)
+        only = "첫 줄\n\n▶ 출연: 최경진 감독 (풋살사관학교)\n\n#풋살"
+        self.assertNotIn("▶ 출연", upload._credit(only, o, True))
+        self.assertEqual(upload._insert_cast(only, ["이한울"], coach=False), "첫 줄\n\n▶ 출연\n이한울\n\n#풋살")
+        self.assertEqual(upload._insert_cast(only, [], coach=False), "첫 줄\n\n#풋살")
+        # 예전 판(v2.18·v2.19)이 게스트와 함께 다시 넣은 감독님 줄도 게스트를 바꾸거나 빼면 빠짐 (I-161(1))
+        old = "첫 줄\n\n▶ 출처\n쌈바 풋살 클래스\n\n▶ 출연\n최경진 감독 (풋살사관학교)\n\n#풋살"
+        self.assertEqual(upload._insert_cast(old, ["박민수"], coach=False), "첫 줄\n\n▶ 출연\n박민수\n\n▶ 출처\n쌈바 풋살 클래스\n\n#풋살")
+        self.assertEqual(upload._insert_cast(old, [], coach=False), "첫 줄\n\n▶ 출처\n쌈바 풋살 클래스\n\n#풋살")
+        own = "첫 줄\n\n▶ 출연\n최경진 감독 (풋살사관학교)\n\n#풋살"  # 우리 영상은 그대로
+        self.assertEqual(upload._insert_cast(own, []), own)
+        self.assertIn("▶ 출연\n최경진 감독 (풋살사관학교)\n박민수", upload._insert_cast(own, ["박민수"]))
+
+    def test_drop_cast_takes_whole_template_block(self):
+        """D-272 (검토): 다른 채널 원본 키트는 설명 틀의 '▶ 출연' 묶음(감독님 아래 소개 줄까지)을 통째로 뺌 · {레슨 문의} 자리는 남김."""
+        desc = "훅\n\n▶ 출연\n최경진 감독 (풋살사관학교)\n前 풋살 국가대표 · 레슨 문의는 인스타 DM\n{레슨 문의}\n\n{챕터}"
+        self.assertEqual(upload._drop_cast(desc), "훅\n\n{레슨 문의}\n\n{챕터}")
+        self.assertEqual(upload._drop_cast("훅\n\n▶ 출연: 최경진 감독 (풋살사관학교)\n\n#풋살"), "훅\n\n#풋살")
+        self.assertEqual(upload._drop_cast("훅\n\n#풋살"), "훅\n\n#풋살")
+
 
 if __name__ == "__main__":
     unittest.main()

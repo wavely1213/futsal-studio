@@ -3846,7 +3846,12 @@ function anchorTpl(layers, ts, cv) {  // layers: 예전 템플릿이 만든 레�
   // 둘째 후보 묶음(배경은 다른 장면)의 화면 전체 누끼 → 그 누끼를 딴 장면(orig)의 얼굴·머리로 자르는 자리를 정함
   for (const c of layers) {
     if (c.type !== "image" || c.fit === "contain" || twins.has(c) || frameT(c.src) != null) continue;
-    const t = frameT(c.orig); if (t != null) anchorCut(c, frameMeta(t), ar, cv);
+    const t = frameT(c.orig); if (t == null) continue;
+    anchorCut(c, frameMeta(t), ar, cv);
+    // 화면 끝까지만 옮긴 누끼가 같은 장면 배경과 같은 자리에 꼭 놓이면('두 장면 겹치기' x −200 → 0) 배경도 누끼와 같은 곳을 잘라 짝으로
+    // (누끼만 머리 쪽으로 다시 맞춰 위아래로 비껴 같은 사람 머리가 두 번 보이지 않게 · D-273)
+    const same = g => g !== c && g.type === "image" && g.src === c.orig && ["x", "y", "w", "h", "fit", "cropL", "cropR", "cropT", "cropB", "flipX"].every(k => (g[k] || 0) === (c[k] || 0));
+    for (const g of layers) if (same(g)) Object.assign(g, { fx: c.fx, fy: c.fy });
   }
   return layers;
 }
@@ -3868,11 +3873,13 @@ function anchorCut(l, f, ar, cv) {  // 따로 놓인 누끼: 칸과 같은 규�
   if (s.p < 0.95 && r.dh > l.h + 1 && s.b.h <= s.v.h - 2 * m) l.fy = clamp(l.fy + over(s.b.y, s.b.y + s.b.h, s.v.y, s.v.y + s.v.h, m) / (l.h - r.dh), 0, 1);  // 큰 얼굴: 머리가 다 들게
   if (s.p < 0.95 && r.dw > l.w + 1 && s.b.w <= s.v.w - 2 * m) l.fx = clamp(l.fx + over(s.b.x, s.b.x + s.b.w, s.v.x, s.v.x + s.v.w, m) / (l.w - r.dw), 0, 1);
   s = look(); if (s.ok || !cv) return s.ok;
-  // 자르는 자리로는 더 못 옮김 → 머리가 누끼 레이어 안(잘라 낸 곳이 아님)이면 레이어를 옮김 (투명 누끼라 빈 곳이 안 보임)
+  // 자르는 자리로는 더 못 옮김 → 머리가 누끼 레이어 안(잘라 낸 곳이 아님)이면 레이어를 옮김 — 단 템플릿 레이어가 화면 끝까지 덮던 쪽은 옮긴 뒤에도 덮게 (D-273):
+  // 레이어 끝(원본 테두리·자른 선)이 화면 안으로 들어오면 그 끝에 닿은 사람 팔·다리가 흰 테두리 친 곧은 선으로 잘려 보임 (투명한 곳만 있는 게 아님)
   const { b, box } = s, mm = 0.03 * Math.min(cv.w, cv.h);
-  if (b.x >= box.x && b.x + b.w <= box.x + box.w && (b.x < edge || b.x + b.w > cv.w - edge))  // 화면 밖·옆 끝: 템플릿이 가운데 사람을 두려던 자리(레이어 가운데, 화면 안)로
-    l.x += clamp(box.x + box.w / 2, edge + b.w / 2, cv.w - edge - b.w / 2) - (b.x + b.w / 2);
-  if (b.y >= box.y && b.y + b.h <= box.y + box.h) l.y += over(b.y, b.y + b.h, 0, cv.h, mm);  // 위·아래: 화면 안까지만
+  const room = (p, n, N, d) => clamp(d, p + n >= N ? N - n - p : -Infinity, p <= 0 ? -p : Infinity);  // 옮길 만큼 d → 덮던 화면 끝을 드러내지 않는 만큼
+  if (b.x >= box.x && b.x + b.w <= box.x + box.w && (b.x < edge || b.x + b.w > cv.w - edge))  // 화면 밖·옆 끝: 템플릿이 가운데 사람을 두려던 자리(레이어 가운데, 화면 안) 쪽으로
+    l.x += room(l.x, l.w, cv.w, clamp(box.x + box.w / 2, edge + b.w / 2, cv.w - edge - b.w / 2) - (b.x + b.w / 2));
+  if (b.y >= box.y && b.y + b.h <= box.y + box.h) l.y += room(l.y, l.h, cv.h, over(b.y, b.y + b.h, 0, cv.h, mm));  // 위·아래: 화면 안까지만
   return look().ok;
 }
 // 예전 템플릿(TPL)은 fn(장면 시각들, 첫 줄, 둘째 줄, 누끼)이라 어댑터로 감싸 같이 씀 (예전 후보 화면·e2e 는 그대로)
