@@ -3566,7 +3566,9 @@ function msgAdd(res) {
   const capNote = msgCaps(res);
   for (const q of res.sequences) { ensureSeq(q); q.name = uniqSeqName(q.name); P.sequences.push(q); }
   ver++; switchSeq(res.sequences[0].id); renderBin(); renderRec(); if (capNote) renderCaps();
-  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote} · 숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
+  // 만들지 않은 후보(쇼츠가 15초 안 됨)는 그 까닭도 (예전: 로그에만 남아 쇼츠를 골랐는데 롱폼만 생긴 까닭을 모름 · D-267)
+  const skipNote = (res.notes || []).length ? ` · ${res.notes[0].why}` : "";
+  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote}${skipNote} · 숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
 }
 // 같은 원본 장면으로 다른 후보 보기: 지금 화면의 원본 시각 → 그 후보의 타임라인 시각 (다시 보기·티저 같은 noCaps 클립은 빼고)
 function srcAtT(q, t) { const it = q.items.find(i => i.track === "V1" && i.media === "main" && !i.noCaps && t >= i.start - 1e-6 && t < iEnd(i)); return it ? mt(it, t) : null; }

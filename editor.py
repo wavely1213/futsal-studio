@@ -2339,6 +2339,11 @@ GREETING = re.compile(r"안녕하세요|안녕하십니까|반갑습니다|사�
                       r"][가-힣]{1,2}\s?)?(?:감독|코치|선생님?|강사)?" + _GREET_END)
 # 인사·자기소개만 ('안녕하세요' · '풋살사관학교 최경진입니다' · '저는 김민수 코치예요') — '오늘의 핵심입니다' · '여기는 디딤발이에요' ·
 # '제가 시범 보여줄 거예요' 같은 레슨 말은 아님 (E2 검토)
+# 포인트를 여는 말 ('자, 첫 번째 포인트' · '그럼 두 번째는' · '네, 세 번째' · '그리고 마지막으로') — SECTION 에서 마무리 정리 말을 뺀 것 ·
+# 쇼츠 수·쇼츠마다 포인트 하나를 정함 (D-260) · 앞 이음말은 short_point 처럼 '자'·'그럼'·'이제'·'네'·'좋아요'… 세 개까지 (D-267 — '자'만 받으면
+# '그럼 두 번째 포인트는'을 못 세어 그 포인트가 쇼츠에서 빠짐) · group(1) = 순서 낱말('마지막으로'는 None)
+POINT_LEAD = r"(?:(?:자|그럼|그러면|이제|네|예|좋아요|좋습니다|그리고|그\s?다음(?:에|으로)?|다음(?:으로)?)[,.!\s]*){0,3}"
+POINT_OPEN = re.compile(r"^" + POINT_LEAD + r"(?:(?:마지막,?\s*)?(첫|두|세|네|다섯|여섯|일곱)\s?번째|마지막으로)")
 SECTION_CROSS = 4.0    # 쇼츠 후보가 장 나눔 말을 하나 넘을 때마다 뺄 점수 (포인트 하나 = 쇼츠 하나)
 SECTION_START = 3.0    # 장 나눔 말로 시작하는 후보에 더할 점수
 SHORT_EDGE = 0.25      # 첫 인사는 영상 앞 이 비율 안, 끝인사는 뒤 이 비율 안에서만 찾음
@@ -2607,9 +2612,45 @@ def _keep_demos(cuts, demos):
     return [{"in": round(a, 3), "out": round(b, 3)} for a, b in out if b - a >= 0.2]
 
 
-def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None):
+def _point_opens(segs, sjunk):
+    """포인트를 여는 줄 [(줄 번호, 순서 번호)] (BR-092 · D-260 · D-267) · 포인트 수(top) · 셈이 비었는지(gap).
+    'N번째'로 둘 이상 세어 나가는 영상일 때만 — 아니면 ([], None, False) (한 번만 나온 '마지막으로'·'N번째'는 포인트로 세는 영상이 아님).
+    같은 번호를 되풀이하거나 앞 번호로 돌아간 줄(정리하며 다시 부름)은 새 포인트가 아님 · '마지막으로'는 지금까지 센 다음 번호 ·
+    '마지막으로 정리해 볼게요'·끝인사는 포인트가 아님. top: 들은 가장 큰 번호 (줄 가운데의 'N번째 포인트'도 셈 — 줄 첫머리에서 못 찾은 포인트가 있으면
+    gap=True · 그때는 포인트를 줄로 나눌 수 없어 쇼츠를 점수로 고름 · 셈이 모자라 포인트 하나가 쇼츠에서 빠지지 않게 · D-267)."""
+    opens, last, ordn = [], 0, False
+    for i, s in enumerate(segs):
+        t = str(s.get("text") or "").strip()
+        m = POINT_OPEN.match(t) if i not in sjunk else None
+        if not m:
+            continue
+        if m.group(1):
+            k = ORD_N[m.group(1)]
+        elif re.search(r"정리|오늘\s?배운", t) or takes.CLOSING.search(t):
+            continue
+        else:
+            k = last + 1
+        if k <= last:
+            continue
+        ordn = ordn or bool(m.group(1))
+        opens.append((i, k))
+        last = k
+    if len(opens) < 2 or not ordn:
+        return [], None, False
+    top = last
+    for i, s in enumerate(segs):
+        if i not in sjunk:
+            top = max([top] + [ORD_N[x.group(1)] for x in POINT_AT.finditer(str(s.get("text") or ""))])
+    return opens, top, [k for _, k in opens] != list(range(1, top + 1))
+
+
+def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None, points=False):
     """keep_pause: 말 사이 이보다 길게 쉬면 자름 (스타일). 없으면 기본(약 1.2초).
-    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일."""
+    segs: 받아쓰기 대신 쓸 말 목록 (MSG 는 문장 단위로 나누고 깨진 말을 뺀 것을 줌). 없으면 받아쓰기 파일.
+    points: segs 를 줄 때도 쇼츠 = 포인트 하나(BR-092 · 인사·끝인사 빼기 · 장 나눔 점수 · 뺄 말로 끝나지 않기 · 여담) — MSG 가 켜는 것
+    (msg.SHORTS_POINTS · D-260). 받아쓰기 파일을 읽을 때(segs 없음)는 늘 켬.
+    쇼츠 수 = 포인트 수 ('N번째'·'마지막으로'로 센 가장 큰 번호 · 없으면 n · 많으면 n 까지 · BR-092 규칙이 켜졌을 때만 · D-260) ·
+    포인트가 줄로 다 나뉘면 쇼츠마다 다른 포인트 하나 (_point_opens · D-267)."""
     if keep_pause:
         kp = max(0.08, float(keep_pause))
         pre, post = min(0.15, kp * 0.4), min(0.25, kp * 0.6)
@@ -2620,6 +2661,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     extra = json.loads(extra_p.read_text(encoding="utf-8")) if extra_p.exists() else {"silences": [], "loud_peaks": []}
     peaks = [p["time"] for p in extra.get("loud_peaks", [])]
     word_mode, hallu, line_junk, demos, maybe = segs is None, [], [], [], []
+    pt = word_mode or bool(points)   # 쇼츠 = 포인트 하나 규칙 (BR-092)
     if segs is not None:
         segs = [s for s in segs if str(s.get("text") or "").strip()]
     else:
@@ -2686,19 +2728,32 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
     fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
     sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
-    aside = ASIDE if word_mode else ASIDE_OLD
+    aside = ASIDE if pt else ASIDE_OLD
     sjunk |= {i for i, s in enumerate(segs) if aside.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
     # 쇼츠 = 포인트 하나 (E2 · BR-092): 영상 첫머리 인사·자기소개와 끝인사(그 뒤 모두)는 쇼츠에서 빼고 ('오늘은 … 알려 드릴게요' 주제 소개는 둠),
     # 장 나눔 말('자, 두 번째 포인트는 …')을 넘어가는 후보는 점수를 덜 줌 · 장 나눔 말로 시작하면 조금 더
-    # MSG(segs 를 줌)는 v2.16.0 그대로 — MSG 쇼츠는 따로 판정하며 다듬는 중이라 새 점수 규칙은 기본 가편집(word_mode)에만 (E2 검토)
-    if segs and word_mode:
+    # MSG(segs 를 줌)는 points 를 켤 때만 (D-260 · 예전에는 v2.16.0 그대로 — MSG 쇼츠는 따로 판정하며 다듬는 중이라 E2 검토)
+    if segs and pt:
         t_end = float(segs[-1]["end"])
         sjunk |= {i for i, s in enumerate(segs) if float(s["start"]) <= SHORT_EDGE * t_end and GREETING.search(s["text"])
                   and len(_norm(s["text"])) <= GREET_LEN}
         bye = next((i for i, s in enumerate(segs) if float(s["start"]) >= (1 - SHORT_EDGE) * t_end and takes.CLOSING.search(s["text"])), None)
         if bye is not None:
             sjunk |= set(range(bye, len(segs)))
-    section = [word_mode and bool(SECTION.match(str(s["text"]).strip())) for s in segs]
+    section = [pt and bool(SECTION.match(str(s["text"]).strip()) or POINT_OPEN.match(str(s["text"]).strip())) for s in segs]
+    # 쇼츠 수 = 포인트 수 (들은 가장 큰 번호 · 'N번째'로 둘 이상 세어 나갈 때만 · 아니면 예전처럼 n · D-260) · 쇼츠마다 포인트 하나 (D-267):
+    # 포인트가 줄로 다 나뉘고(번호가 비지 않음) 반 넘게 쇼츠 길이를 채우면 포인트마다 그 안에서 가장 좋은 구간 하나씩 —
+    # 점수로만 고르면 강조 말이 많은 포인트에서 둘을 뽑고 다른 포인트는 빠짐 (n 을 포인트 수로 줄였을 때 · 검토)
+    opens, n_pts, gap = _point_opens(segs, sjunk) if pt and segs else ([], None, False)
+    pidx, per_point = [], False
+    if n_pts:
+        n = min(n, n_pts)
+        firsts = [i for i, _ in opens]
+        pidx = [sum(1 for f in firsts if f <= x) - 1 for x in range(len(segs))]   # 줄마다 포인트 번호 (첫 포인트 앞 = -1)
+        tail = next((x for x in sorted(sjunk) if x > firsts[-1] and all(y in sjunk for y in range(x, len(segs)))), len(segs))
+        ends = [float(segs[f]["start"]) for f in firsts[1:]] + [float(segs[tail - 1]["end"]) if tail > firsts[-1] else float(segs[firsts[-1]]["end"])]
+        long_pts = sum(1 for f, e in zip(firsts, ends) if e - float(segs[f]["start"]) >= min_len)
+        per_point = not gap and 2 * long_pts >= len(firsts)
 
     def seg_score(s):
         sc = sum(w for k, w in KEYWORDS.items() if k in s["text"])
@@ -2720,12 +2775,12 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
         j, sc, chars, junk_n = i, 0.0, 0, 0
         while j < len(segs) and segs[j]["end"] - start <= max_len:
             if j in sjunk:
-                junk_n += 0 if word_mode and len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
+                junk_n += 0 if pt and len(_norm(segs[j]["text"])) <= 1 else 1  # 한 글자 추임새 줄('다'·'음')은 감점 없이 빼기만
             else:
                 sc += seg_score(segs[j])
                 chars += len(_norm(segs[j]["text"]))
             end = segs[j]["end"]
-            if end - start >= min_len and not (word_mode and j in sjunk):  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
+            if end - start >= min_len and not (pt and j in sjunk):  # 뺄 말(추임새·헛것 줄)에서 끝나는 후보는 안 셈 (E2)
                 dur = end - start
                 score = sc + 2.5 * sum(1 for p in peaks if start <= p <= end) + 2.0 * (chars / dur) - 1.5 * junk_n
                 # 첫 문장이 강한 말로 시작하면 가산 (훅)
@@ -2744,53 +2799,80 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
             j += 1
     cands.sort(reverse=True)
     picked = []
-    for score, s0, e0, i, j in cands:
-        if not all(e0 <= p["start"] or s0 >= p["end"] for p in picked):
-            continue
+
+    def owns(i, j):  # 후보 [i..j] 가 걸친 포인트 번호 (첫 포인트 앞 소개 말은 안 셈)
+        return {pidx[x] for x in range(i, j + 1) if x not in sjunk} - {-1}
+
+    def make(score, i, j, only=None):
+        """후보 하나 → 쇼츠 {start, end, cuts, …} (안 되면 None) · only: 이 포인트 안에만 (문장 경계를 맞춘 뒤에도)."""
         # 문장 경계 맞추기 (E12 · BR-061): 끝은 문장 끝까지 늘리거나 앞 문장 끝에서 자름(예고·여담 끝은 줄임) · 반응 말로 시작하면 앞 시범부터
         i, j, lead = _short_edges(segs, sjunk, i, j, peaks, sil, min_len)
         s0, e0 = (lead[0] if lead else segs[i]["start"]), segs[j]["end"]
-        if all(e0 <= p["start"] or s0 >= p["end"] for p in picked):
-            # 구간 안에서 군더더기·긴 무음을 빼고 컷 목록 생성
-            cuts, cur, held = [], None, []
-            for k in range(i, j + 1):
-                s = segs[k]
-                if k in sjunk:
-                    if cur and s.get("cont"):  # 같은 받아쓰기 구간 안의 뺄 문장: 컷은 이어 두고 그 문장만 뺌 (뒤 시범·빈 곳은 예전처럼 남김)
-                        held.append(k)
-                        continue
-                    if cur:
-                        cuts.append(cur)
-                        cur = None
+        if only is not None and owns(i, j) != {only}:
+            return None
+        if not all(e0 <= p["start"] or s0 >= p["end"] for p in picked):
+            return None
+        # 구간 안에서 군더더기·긴 무음을 빼고 컷 목록 생성
+        cuts, cur, held = [], None, []
+        for k in range(i, j + 1):
+            s = segs[k]
+            if k in sjunk:
+                if cur and s.get("cont"):  # 같은 받아쓰기 구간 안의 뺄 문장: 컷은 이어 두고 그 문장만 뺌 (뒤 시범·빈 곳은 예전처럼 남김)
+                    held.append(k)
                     continue
-                a, b = max(0.0, s["start"] - pre), s["end"] + min(0.2, post)
-                demo = lead if k == i else (_demo_before(segs, k, peaks, sil) if k > i else None)  # 원인 → 반응 ('두 번째 슛.' → 공 소리 → '들어갔어요.')
-                if k == j and k + 1 < len(segs):  # 끝 문장 바로 뒤에 이어 붙은 말(같은 받아쓰기 구간의 다음 문장)은 안 들어가게
-                    b = min(b, max(s["end"], (s["end"] + segs[k + 1]["start"]) / 2))
-                if k == i and k and demo is None:
-                    a = max(a, min(s["start"], (segs[k - 1]["end"] + s["start"]) / 2))
-                if demo:
-                    if demo[1] >= s["start"] - 0.05:
-                        a = min(a, demo[0])
-                    else:  # 시범 뒤 오래 빈 곳은 자르고 시범만
-                        cur = _join(cuts, cur, demo[0], demo[1], 0.2)
-                elif cur is None and k > i and s.get("cont") and k - 1 in sjunk:  # 구간 첫 문장만 뺄 말: 그 뒤 같은 구간 안 빈 곳(시범)은 남김
-                    a = min(a, segs[k - 1]["end"])
-                cur = _join(cuts, cur, a, b, float("inf") if cur and s.get("cont") else gap_s)  # 같은 받아쓰기 구간 안의 문장 사이는 예전처럼 그대로
-            if cur:
-                cuts.append(cur)
-            cuts = _keep_demos(cuts, [d for d in demos if s0 - 0.05 <= d[0] and d[1] <= e0 + 0.05])  # 쇼츠 안 말 없는 시범·환호 (E2)
-            cuts = _minus(_minus(_minus(cuts, junk_iv + off_iv + line_junk + hallu_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
-            if cuts and post_a is not None and post_a - 0.6 <= cuts[-1]["out"] < post_a:  # 끝인사로 끝나면 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리)
-                cuts[-1] = dict(cuts[-1], out=round(post_a, 2))
-            if not cuts or e0 - s0 - _covered(junk_iv + off_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
+                if cur:
+                    cuts.append(cur)
+                    cur = None
                 continue
-            hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
-            hits.sort(key=lambda k: (k in GENERIC, -KEYWORDS[k], -len(k)))  # 주제어 먼저
-            picked.append({"start": s0, "end": e0, "score": round(score, 1), "title": _short_title(segs, sjunk, i, j), "keywords": hits[:4],
-                           "cuts": cuts, "length": round(sum(c["out"] - c["in"] for c in cuts), 1)})
-        if len(picked) >= n:
-            break
+            a, b = max(0.0, s["start"] - pre), s["end"] + min(0.2, post)
+            demo = lead if k == i else (_demo_before(segs, k, peaks, sil) if k > i else None)  # 원인 → 반응 ('두 번째 슛.' → 공 소리 → '들어갔어요.')
+            if k == j and k + 1 < len(segs):  # 끝 문장 바로 뒤에 이어 붙은 말(같은 받아쓰기 구간의 다음 문장)은 안 들어가게
+                b = min(b, max(s["end"], (s["end"] + segs[k + 1]["start"]) / 2))
+            if k == i and k and demo is None:
+                a = max(a, min(s["start"], (segs[k - 1]["end"] + s["start"]) / 2))
+            if demo:
+                if demo[1] >= s["start"] - 0.05:
+                    a = min(a, demo[0])
+                else:  # 시범 뒤 오래 빈 곳은 자르고 시범만
+                    cur = _join(cuts, cur, demo[0], demo[1], 0.2)
+            elif cur is None and k > i and s.get("cont") and k - 1 in sjunk:  # 구간 첫 문장만 뺄 말: 그 뒤 같은 구간 안 빈 곳(시범)은 남김
+                a = min(a, segs[k - 1]["end"])
+            cur = _join(cuts, cur, a, b, float("inf") if cur and s.get("cont") else gap_s)  # 같은 받아쓰기 구간 안의 문장 사이는 예전처럼 그대로
+        if cur:
+            cuts.append(cur)
+        cuts = _keep_demos(cuts, [d for d in demos if s0 - 0.05 <= d[0] and d[1] <= e0 + 0.05])  # 쇼츠 안 말 없는 시범·환호 (E2)
+        cuts = _minus(_minus(_minus(cuts, junk_iv + off_iv + line_junk + hallu_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
+        if cuts and post_a is not None and post_a - 0.6 <= cuts[-1]["out"] < post_a:  # 끝인사로 끝나면 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리)
+            cuts[-1] = dict(cuts[-1], out=round(post_a, 2))
+        if not cuts or e0 - s0 - _covered(junk_iv + off_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
+            return None
+        hits = [k for k in KEYWORDS if k != "?" and any(k in segs[x]["text"] for x in range(i, j + 1))]
+        hits.sort(key=lambda k: (k in GENERIC, -KEYWORDS[k], -len(k)))  # 주제어 먼저
+        return {"start": s0, "end": e0, "score": round(score, 1), "title": _short_title(segs, sjunk, i, j), "keywords": hits[:4],
+                "cuts": cuts, "length": round(sum(c["out"] - c["in"] for c in cuts), 1)}
+
+    if per_point:
+        by_pt = {}
+        for c in cands:
+            o = owns(c[3], c[4])
+            if len(o) == 1:
+                by_pt.setdefault(next(iter(o)), []).append(c)
+        for q in sorted(by_pt, key=lambda q: -by_pt[q][0][0]):  # 가장 좋은 구간 점수가 높은 포인트부터 (n 이 포인트 수보다 적으면)
+            for score, s0, e0, i, j in by_pt[q]:
+                r = make(score, i, j, q) if all(e0 <= x["start"] or s0 >= x["end"] for x in picked) else None
+                if r:
+                    picked.append(r)
+                    break
+            if len(picked) >= n:
+                break
+    else:
+        for score, s0, e0, i, j in cands:
+            if all(e0 <= x["start"] or s0 >= x["end"] for x in picked):
+                r = make(score, i, j)
+                if r:
+                    picked.append(r)
+            if len(picked) >= n:
+                break
     picked.sort(key=lambda p: -p["score"])
     by_time = sorted(picked, key=lambda r: r["start"])  # 제목은 영상 순서대로 고름 (앞 쇼츠가 '주제 챌린지' · 뒤 쇼츠가 그다음 후보)
     for r, h in zip(by_time, short_hooks(by_time, segs)):
@@ -2832,11 +2914,14 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None)
     if post_a is not None and tidy and post_a - 0.6 <= tidy[-1]["out"] < post_a:  # 마지막 끝인사는 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리가 잘리지 않게)
         tidy[-1] = dict(tidy[-1], out=round(post_a, 2))
     lj = line_junk + hallu_iv + hallu_show
-    return {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv) + len(lj), "segments": len(segs), "videoTopic": vt,
+    out = {"shorts": picked, "tidy": tidy, "junk": len(junk) + len(fill_iv) + len(edge_iv) + len(lj), "segments": len(segs), "videoTopic": vt,
             "junk_list": [{"a": a, "b": b, "why": why} for a, b, why in sorted(junk_iv + edge_iv + fill_iv + lj + maybe_show, key=lambda x: (x[0], -x[1]))],
             "demos": [[round(a, 2), round(b, 2)] for a, b in demos],
             # 영상 밖 말 (추천 탭에 보여 줌) · cut: long 은 가편집(롱폼)에서도 자른 것, shorts 는 쇼츠·티저에서만 뺀 것 (롱폼은 표시만)
             "offscript": [dict(o, cut="long" if o["kind"] in ("pre", "post") else "shorts") for o in off]}
+    if per_point:  # 포인트 수 — 포인트마다 쇼츠 하나로 고를 때만 (끝까지 자동으로가 '포인트 N개 중 M개만' 안내 · D-267)
+        out["points"] = n_pts   # (챌린지의 'N번째 슛'처럼 짧은 시도로 센 영상·셈이 빈 영상은 없음)
+    return out
 
 
 # ---------- 타임라인 계산 (editor.html 과 같은 규칙) ----------
