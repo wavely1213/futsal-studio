@@ -554,7 +554,7 @@ class CancelAndInputTest(TmpWork):
     def test_tiny_shorts_is_not_offered(self):
         w = MsgWork()
         try:
-            with mock.patch.object(msg, "_shorts_window", lambda rec, moms, dur, demo=(), win=None, points=None: [{"in": 10.0, "out": 14.0}]):
+            with mock.patch.object(msg, "_shorts_window", lambda rec, moms, dur, demo=(), win=None, points=None, **kw: [{"in": 10.0, "out": 14.0}]):
                 logs = []
                 r = msg.build_variants(w.name, [{"kind": "preset", "name": "예능 MSG형"}], "보통", ("long", "shorts"), logs.append)
             self.assertEqual([q["format"] for q in r["sequences"]], ["long"])

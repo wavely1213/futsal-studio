@@ -28,7 +28,7 @@ import sfxlib
 import tactic
 import takes
 
-SIG_VER = 15   # 15: 장면 바뀜으로 찾는 시범(_cutaway) · 정리 전 시범 구간으로 시범 예고 · 13: 목소리 보정을 거친 말소리 최대 크기(voicePk) — 효과음 크기 기준 · 14: 소리 크기를 한 번에 조금씩 읽어 잼(48kHz)
+SIG_VER = 16   # 16: 말하는 중이라도 탁 하고 끝나는 소리(hits) — 공 소리를 군말로 보지 않게 (D-268) · 15: 장면 바뀜으로 찾는 시범(_cutaway) · 정리 전 시범 구간으로 시범 예고 · 13: 목소리 보정을 거친 말소리 최대 크기(voicePk) — 효과음 크기 기준 · 14: 소리 크기를 한 번에 조금씩 읽어 잼(48kHz)
 MIX_DIR_NAME = "섞기"           # styles/섞기/<이름>.json — 배운 스타일 목록(list_styles)에 섞이지 않게 따로
 DRAFT_NAME = "풋살사관학교 스타일(초안)"
 ASPECTS = ("intro", "rhythm", "captions", "fun", "sound")
@@ -532,7 +532,7 @@ def _recommend(name, segs, keep_pause=None, sig=None, points=None):
         rec["tidy"] = keep_cuts(rec["tidy"] + [{"in": max(0.0, a - 0.15), "out": b + 0.25} for a, b, _ in back], [])
     if sig and sig.get("blobs"):
         old = [(j["a"], j["b"]) for j in rec.get("junk_list") or []] + [(a, b) for a, b, _ in extra]
-        fill = [f for f in blob_fillers(sig["blobs"], _words(segs), sig.get("onsets") or ())
+        fill = [f for f in blob_fillers(sig["blobs"], _words(segs), list(sig.get("onsets") or ()) + list(sig.get("hits") or ()))
                 if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in old)]
         if fill:
             rec["tidy"] = editor._minus(rec["tidy"], fill)
@@ -562,9 +562,12 @@ def _demo_calls(extra, words, starts, onsets, demos=()):
     return out
 
 
-def _onsets(wave, words, sr=16000):
+HIT_DB = 4.0   # 말하는 중에도 공 소리로 보는 탁 하고 끝나는 소리: 말소리 최대 크기보다 이만큼(dB) 넘게 클 때 (짧은 말 '자,'는 아님 · D-268)
+
+
+def _onsets(wave, words, sr=16000, min_db=None):
     """순간 큰 소리 (공 차는 소리·부딪힘): 10ms 소리 세기가 0.1초 전보다 ONSET_DB 넘게 커졌다가 0.15초 안에 다시 줄어듦(탁 하고 끝나는 소리)
-    · 말하는 중이 아닐 때 (말 첫소리는 이어지므로 빠짐)."""
+    · 말하는 중이 아닐 때 (말 첫소리는 이어지므로 빠짐) · min_db: 그 소리 최대 크기가 이보다 클 때만."""
     np = _np()
     hop = sr // 100
     n = len(wave) // hop
@@ -583,6 +586,8 @@ def _onsets(wave, words, sr=16000):
         if t - last < 0.25:
             continue
         pk = float(db[i:i + 4].max())
+        if min_db is not None and pk < min_db:
+            continue
         tail = db[i + 12:i + 20]
         if len(tail) and float(tail.mean()) > pk - 8.0:  # 소리가 이어짐 (말·음악) → 공 소리 아님
             continue
@@ -770,25 +775,43 @@ SNAP_PRE = 0.12    # 말로 시작하는 컷: 첫 소리 앞 여유(초) · SNAP
 SNAP_POST = 0.15   # (둘을 합쳐 문장 사이 숨 0.3초 남짓 — 0.2초면 NG 를 뺀 자리에서 두 문장이 숨 없이 붙어 한 자막처럼 보임 · 판정)
 
 
-def snap_edges(cuts, blobs, words, junk):
+JUNK_TAIL = 0.6    # 뺀 군말 소리가 컷 시작 뒤로 이만큼까지 이어질 때만 그 소리를 마저 뺌 (더 길면 군말이 아닌 소리(공 소리·시범)가 붙은 덩어리 · D-268)
+
+
+def snap_edges(cuts, blobs, words, junk, hits=(), demos=()):
     """컷 가장자리를 실제 말소리에 맞춤: 말로 시작하는 컷은 첫 낱말 소리 덩어리 바로 앞에서 (앞에 붙은 추임새·숨소리·NG 끝은 뺌) ·
-    정리할 곳(NG·군말) 바로 앞에서 끝나는 컷은 마지막 낱말 소리 덩어리 바로 뒤에서."""
+    정리할 곳(NG·군말) 바로 앞에서 끝나는 컷은 마지막 낱말 소리 덩어리 바로 뒤에서.
+    hits: 탁 하고 끝나는 소리 시각(공 소리 · sig onsets+hits) · demos: 시범 구간 — 군말 소리를 마저 뺄 때 이것은 자르지 않음 (D-268)."""
     if not blobs or not words:
         return cuts
     out = []
     for c in cuts:
         a, b = float(c["in"]), float(c["out"])
         first = next((w for w in words if a - 0.05 <= w[0] <= a + 0.5), None)
-        if first is None and any(abs(float(j[1]) - a) < 0.1 for j in junk):
+        jj = next((j for j in junk if abs(float(j[1]) - a) < 0.1), None) if first is None else None
+        if jj is not None:
             # 뺀 군말·NG 바로 뒤에서 시작하는 컷인데 그 소리 덩어리가 컷 시작 뒤까지 이어짐 — 받아쓰기가 추임새 시각을 앞당겨 적어
             # 남은 '어'가 들림 (판정 round7 S2 '어,' 받아쓰기 69.05~69.62 · 실제 소리 69.5~70.1 · U7) → 다음 낱말 소리 바로 앞에서 시작
-            # (그 사이에 다른 소리 덩어리(공 소리·시범)가 없고 1.5초 안일 때만 · D-265)
+            # (그 사이에 다른 소리 덩어리가 없고 1.5초 안일 때만 · D-265) · 덩어리가 컷 시작 뒤로 JUNK_TAIL 넘게 이어지거나 그 안·옮길 자리까지에
+            # 공 소리·시범이 있으면 그대로 (군말에 바로 붙은 공 소리를 함께 잘라 냄 · 검토 · D-268)
             bl_a = _blob_at(blobs, a)
             nxt = next((w for w in words if a + 0.5 < w[0] <= a + 1.5), None)
             nb = (_blob_at(blobs, nxt[0] + 0.02) or _blob_at(blobs, nxt[1] - 0.02)) if nxt is not None else None
             if (bl_a is not None and nb is not None and bl_a[0] < a - 0.05 and bl_a[1] < nb[0] and nb[0] - a < 1.5
-                    and not any(bl_a[1] < x[0] < nb[0] for x in blobs)):
-                a = max(bl_a[1] + 0.03, nb[0] - SNAP_PRE)
+                    and bl_a[1] - a <= JUNK_TAIL and not any(bl_a[1] < x[0] < nb[0] for x in blobs)):
+                a2 = max(bl_a[1] + 0.03, nb[0] - SNAP_PRE)
+                if not any(a - 0.05 <= float(h) <= a2 for h in hits) and not any(float(d[0]) < a2 and a < float(d[1]) for d in demos):
+                    a = a2
+                    j0, j1 = float(jj[0]), float(jj[1])
+                    # 앞 조각 끝도 받아쓰기의 군말 시작(앞당겨 적힘)이 아니라 진짜 군말 소리 바로 앞까지 — 군말 앞의 웃음·말꼬리를 소리 한가운데에서
+                    # 끊지 않게 (판정 검토 S2: 웃음이 69.05초에서 잘림 · 진짜 '어'는 69.5초 · D-268). 진짜 군말 소리 시작 = 받아쓰기 군말을 소리 덩어리
+                    # 끝까지 민 자리 (웃음과 군말이 한 덩어리여도) · 따로 떨어진 덩어리면 그 덩어리 시작 · 사이에 다른 낱말·공 소리가 없고 0.8초 안일 때만
+                    gb = max(bl_a[0], j0 + (bl_a[1] - j1)) - 0.03
+                    if out and abs(float(out[-1]["out"]) - j0) < 0.1 and gb > float(out[-1]["out"]) + 0.05:
+                        pb = float(out[-1]["out"])
+                        if (gb - pb <= 0.8 and not any(pb + 0.02 < w[0] < gb and not (j0 - 0.05 <= w[0] <= j1) for w in words)
+                                and not any(pb <= float(h) <= gb for h in hits)):
+                            out[-1] = dict(out[-1], out=round(gb, 3))
         bl = _blob_at(blobs, a)
         if first is not None and _collapsed(first) and bl is None:
             # 컷이 조용한 틈에서 시작하는데 첫 낱말이 뭉개짐: 받아쓰기 구간이 바뀌는 곳에서 몰아 적은 말('하나, 둘, 셋에')의 진짜 소리는
@@ -926,6 +949,7 @@ def signals(name, log=print, use_faces=True):
     core.set_progress(label=LABEL, item=name, pct=33, detail="말소리 덩어리 찾는 중")
     rms_db, peak_db = _levels(wave, segs)
     speech_pk = _speech_peak(wave, words)
+    pk16 = speech_pk
     blobs = _blobs(wave, speech_pk)  # 소리 덩어리는 같은 흑백 소리 기준으로
     segs = respread(segs, blobs)     # 구간 첫머리에 몰아 적은 낱말 (build_variants 와 같은 받아쓰기로)
     words = _words(segs)
@@ -943,16 +967,20 @@ def signals(name, log=print, use_faces=True):
     noisy += _spans((tags or {}).get("speech"), 0.48, 0.6, 0.3)  # 받아쓰기가 놓친 말(짧은 말·작은 소리)의 첫소리도 공 소리가 아님
     core.set_progress(label=LABEL, item=name, pct=62, detail="공 차는 소리 찾는 중")
     onsets = [t for t in _onsets(wave, words) if not any(a - 0.2 <= t <= b + 0.2 for a, b in noisy)]  # 웃음·환호 소리는 공 소리가 아님
+    # 말소리보다 큰(HIT_DB) 탁 하고 끝나는 소리 (말하는 중·웃음 곁이어도 · 받아쓰기 시각이 틀려 말 사이 공 소리가 onsets 에서 빠진 것도) — 시범 찾기에는
+    # 안 쓰고 소리 덩어리 추임새·컷 가장자리가 공 소리를 군말로 잘라 내지 않게만 씀 (판정 검토: S1 172.3초 공 소리(-5.5dB · 말 최대 -14dB)를
+    # '추임새'로 빼 쇼츠에 0.6초 조각 · 짧은 말 '자,'(-28dB)는 아님 · D-268)
+    hits = _onsets(wave, [], min_db=(pk16 + HIT_DB) if pk16 is not None else -10.0)
     _check()
     # 말 없는 시범 구간(앞 정리 전 · 정리할 곳 거르기 없이)도 함께 — '다시 한번 해볼게요.' 바로 뒤 말 없는 시범을 시범 예고로 알아보게
     # (예전에는 시범 구간을 정리 뒤에야 셈 → 그 말이 다시 찍기 신호로 빠짐 · 판정 round6 S1)
     pre = {"duration": float(info["duration"]), "motion": ev.get("motion") or [], "motionStep": 1.0 / float(ev.get("fps") or 2),
            "cuts": ev.get("cuts") or [], "onsets": onsets, "tags": tags, "tagStep": 0.48, "junk": []}
-    rec = _recommend(name, segs, sig={"blobs": blobs, "onsets": onsets, "tags": tags, "tagStep": 0.48, "demo": demo_windows(pre, words)})
+    rec = _recommend(name, segs, sig={"blobs": blobs, "onsets": onsets, "hits": hits, "tags": tags, "tagStep": 0.48, "demo": demo_windows(pre, words)})
     sig = {"v": SIG_VER, "sig": fsig, "tsig": tsig, "name": name, "duration": float(info["duration"]),
            "w": info["width"], "h": info["height"], "fps": info.get("fps", 30.0),
            "motion": ev.get("motion") or [], "motionStep": 1.0 / float(ev.get("fps") or 2), "cuts": ev.get("cuts") or [],
-           "onsets": onsets, "dialogDb": rms_db, "peakDb": peak_db, "speechPk": speech_pk, "voicePk": voice_pk, "blobs": blobs, "tags": tags, "tagStep": 0.48,
+           "onsets": onsets, "hits": hits, "dialogDb": rms_db, "peakDb": peak_db, "speechPk": speech_pk, "voicePk": voice_pk, "blobs": blobs, "tags": tags, "tagStep": 0.48,
            "junk": [[j["a"], j["b"], j["why"]] for j in rec.get("junk_list") or []], "tidy": rec.get("tidy") or [],
            "faces": {}}
     sig["demo"] = demo_windows(sig, words)
@@ -1185,19 +1213,34 @@ def _recap_items(lines, k):
 RECAP_LINES = 2   # 정리 카드 한 장의 줄 수 (판정 도구 글자 배치 규칙: 화면 글자 한 장 2줄까지 · D-263)
 
 
+def _recap_said(items, words, a, b):
+    """정리 목록 항목마다 말하기 시작한 원본 시각 (못 찾으면 None) — 항목 순서대로, 앞 항목을 찾은 낱말 뒤에서만 찾음 (항목 첫 낱말의 앞 두 글자 ·
+    한 글자 낱말('발 안쪽으로')은 그 글자) — 뒤 항목이 앞 항목과 같은 낱말로 시작해도('디딤발 위치' · '디딤발 방향') 앞 것을 잡지 않게 (검토 · D-269)."""
+    ws = sorted([(float(w[0]), re.sub(r"[^\w]", "", str(w[2]))) for w in words if a <= float(w[0]) <= b], key=lambda w: w[0])
+    out, k = [], 0
+    for it in items:
+        toks = re.sub(r"^[①-⑦]\s*", "", it).split()
+        head = re.sub(r"[^\w]", "", toks[0])[:2] if toks else ""
+        j = next((j for j in range(k, len(ws)) if head and ws[j][1].startswith(head)), None)
+        out.append(ws[j][0] if j is not None else None)
+        if j is not None:
+            k = j + 1
+    return out
+
+
 def _recap_cards(m, words):
     """정리 말 순간(목록 '① …\n② …\n③ …') → 카드 [(글, 원본 시각, 길이)] — 2줄씩 나누고, 다음 장은 그 장 첫 항목을 말하기 시작할 때
-    (낱말 시각에서 그 항목 첫 두 글자 · 못 찾으면 목록 말 시간을 줄 수로 나눔) · 마지막 장은 다 말한 뒤 1.5초까지 (예전 한 장과 같음)."""
+    (_recap_said · 못 찾으면 목록 말 시간을 줄 수로 나눔) · 마지막 장은 다 말한 뒤 1.5초까지 (예전 한 장과 같음)."""
     items = [x for x in str(m.get("text") or "").split("\n") if x.strip()]
     t0 = float(m["t"]) + 0.3
     end = t0 + min(7.0, max(2.5, float(m["b"]) - float(m["t"]) + 1.5))
     if len(items) <= RECAP_LINES:
         return [(m["text"], t0, end - t0)]
     groups = [items[i:i + RECAP_LINES] for i in range(0, len(items), RECAP_LINES)]
+    said = _recap_said(items, words, float(m["t"]), float(m["b"]) + 0.5)
     starts = [t0]
-    for g in groups[1:]:
-        head = re.sub(r"^[①-⑦]\s*", "", g[0])[:2]
-        at = next((float(w[0]) for w in words if float(m["t"]) <= float(w[0]) <= float(m["b"]) + 0.5 and str(w[2]).replace(" ", "").startswith(head)), None)
+    for gi in range(1, len(groups)):
+        at = said[gi * RECAP_LINES]
         prev = starts[-1]
         starts.append(max(prev + MIN_TEXT + 0.6, at - 0.1) if at is not None else prev + (end - t0) * len(groups[len(starts) - 1]) / len(items))
     out = []
@@ -1316,10 +1359,14 @@ def moments(sig, segs=None):
             if items:
                 add("recap", a, items[1], items[2], 2.0, items[0], "오늘 배운 것 정리")
         j_txt, j_b = txt, b
-        for x in segs[k + 1:k + 3]:  # 쉼에서 쪼개진 문장('저도 처음엔' / '잘 못했어요.')은 문장 끝까지 이어서 봄 (판정 round6: S2 펀치라인을 못 찾음 · D-262)
+        # 쉼에서 쪼개진 문장('저도 처음엔' / '잘 못했어요.')은 문장 끝까지 이어서 봄 (판정 round6: S2 펀치라인을 못 찾음 · D-262) — 그 줄만으로
+        # 농담이면 잇지 않고(이으면 펀치라인이 다음 포인트 말 위로 감 · 검토 · D-269), 이어서 농담이 되면 그 줄에서 멈춤
+        for x in ([] if JOKE.search(txt) else segs[k + 1:k + 3]):
             if re.search(r"[.?!…]$", j_txt) or float(x["start"]) - j_b > 1.6:
                 break
             j_txt, j_b = j_txt + " " + str(x.get("text") or "").strip(), float(x["end"])
+            if JOKE.search(j_txt):
+                break
         if JOKE.search(j_txt):
             add("punchline", a, j_b, j_b - 0.1, 2.0, j_txt, "농담 말")  # (말 끝 바로 앞 · 정리 컷이 말 끝에서 끝나도 남음)
         for la, lb in laughs:  # 말이 끝나고 1.5초 안에 웃음 → 그 말이 펀치라인
@@ -2040,17 +2087,27 @@ SLIVER_KEEP = ("play", "punchline", "emphasis", "success", "fail", "surprise", "
                "aside")   # 딴소리('자, 공 좀 가져올게요')도 말한 문장 — 빼면 판정이 '빠진 말'로 봄 (round5)
 
 
-def drop_slivers(cuts, moms):
-    """앞뒤가 다 잘린 짧은 조각(SLIVER 초 미만) 빼기 — 재미 순간·장 나눔·마무리 말이 든 조각은 남김 ('물 좀 마시고 할게요' 같은 혼잣말 조각)."""
+def drop_slivers(cuts, moms, keep=()):
+    """앞뒤가 다 잘린 짧은 조각(SLIVER 초 미만) 빼기 — 재미 순간·장 나눔·마무리 말이 든 조각은 남김 ('물 좀 마시고 할게요' 같은 혼잣말 조각).
+    keep: 남길 소리 구간 [(a, b)] (웃음·환호 — 조각의 절반 넘게 겹치면 남김) · 펀치라인 말이 끝나고 1초 안에 시작하는 조각(웃음·반응)도 남김
+    (빼면 농담이 웃음 없이 끝남 · 판정 검토 S2 68.1~69.5초 웃음 · D-268)."""
     out = []
     for k, c in enumerate(cuts):
         a, b = float(c["in"]), float(c["out"])
         cut_before = k > 0 and a - float(cuts[k - 1]["out"]) > 0.05
         cut_after = k + 1 < len(cuts) and float(cuts[k + 1]["in"]) - b > 0.05
-        if b - a < SLIVER and cut_before and cut_after and not any(m["kind"] in SLIVER_KEEP and a - 0.1 <= m["t"] <= b + 0.1 for m in moms):
+        if b - a < SLIVER and cut_before and cut_after and not any(m["kind"] in SLIVER_KEEP and a - 0.1 <= m["t"] <= b + 0.1 for m in moms) \
+                and not any(min(b, float(y)) - max(a, float(x)) > 0.5 * (b - a) for x, y in keep) \
+                and not any(m["kind"] == "punchline" and 0.0 <= a - float(m["b"]) <= 1.0 for m in moms):
             continue
         out.append(c)
     return out
+
+
+def _cheers(sig):
+    """웃음·환호 소리 구간 [(a, b)] (소리 모델 점수 · moments 와 같은 기준)."""
+    tg, step = sig.get("tags") or {}, sig.get("tagStep", 0.48)
+    return _spans(tg.get("laugh"), step, LAUGH_THR) + _spans(tg.get("cheer"), step, CHEER_THR)
 
 
 def _zoom_of(it):
@@ -2113,6 +2170,27 @@ def _drop(B, title_ids=(), event_ids=()):
 
 DROP_ORDER = ("inner", "fx", "shake", "punch", "emphasis", "situ", "score")   # 뺄 수 있는 사건 종류 (빼는 차례는 스타일 무게 _keep_value)
 ACCENT_KEY = {"emphasis": "emphasis", "success": "success", "fail": "fail", "punchline": "punchline", "play": "kick", "surprise": "surprise"}   # 소리만 남길 때 쓸 소리 (D-262)
+# 재미 순간 지키기(순간마다 사건 하나 · 양 맞추기에서 지키기 · 못 지키면 소리만 · D-262)를 하는 양 — 듬뿍만 (D-269: 보통에서는 화면 사건 양 범위가
+# 좁아 지키려고 숫자 세기·상황 자막을 먼저 빼고 순간을 소리만 남겨, 화면에 보이는 순간이 예전보다 줄고 말 위에 효과음만 늘어남 · 판정 검토)
+VITAL_LEVELS = ("듬뿍",)
+ACCENT_GAP = 0.35   # 소리만 남길 효과음은 말이 이만큼(초) 쉬는 틈에서만 (말 첫소리·한가운데 위 '팡'은 엉뚱 · 판정 round7 · D-269)
+
+
+def _accent_slot(B, words, m, src):
+    """소리만 남길 효과음 자리 (타임라인 시각 · 없으면 None): 그 순간(앞 0.3초 ~ 뒤 0.8초) 안에서 말이 ACCENT_GAP 초 넘게 쉬는 곳 중
+    원본 시각 src 에 가장 가까운 곳 (src 자리가 비었으면 그대로 · 낱말이 끝난 0.05초 뒤 · 편집본에 남은 곳만) (D-269)."""
+    lo, hi = float(m["a"]) - 0.3, float(m["b"]) + 0.8
+    ws = [(float(w[0]), float(w[1])) for w in words or () if float(w[1]) > lo - 1.0 and float(w[0]) < hi + 1.0]
+    cands = [float(src)] + [e + 0.05 for _, e in ws if lo <= e + 0.05 <= hi]
+    for g in sorted(cands, key=lambda g: abs(g - float(src))):
+        if any(a - 0.05 < g + ACCENT_GAP and g < b for a, b in ws):
+            continue
+        tl = B.src_to_tl(g)
+        if tl is not None:
+            return round(tl, 3)
+    return None
+
+
 STILL_WHY = "오래 멈춰 보이지 않게 살짝 확대"
 
 
@@ -2190,7 +2268,7 @@ SRC_CUT_SNAP = 0.45  # …다만 이만큼 안이면 바로 그 장면 바뀜 �
 ZOOM_GAP = 1.6       # 확대가 바뀐 뒤 이만큼 안에 화면이 또 바뀌면(확대·컷) 덜컹거림 → 마지막에 덜어 냄 (govern.space)
 
 
-def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, protect=True):
+def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, protect=None):
     """양에 맞춰 화면 사건 수 맞추기 (DENSITY):
     1) 너무 많으면 덜 중요한 것부터 뺌 — 속마음·효과 글자·흔들기 → 컷 리듬으로 번갈아 바꾼 확대 → 확대 → 강조·상황 자막
     2) 오래(한도 초 넘게) 아무것도 안 바뀌는 곳은 본편 클립을 나눠 살짝 확대/원래 크기로 (그 안에 재미 순간이 있으면 그 자리에서)
@@ -2200,10 +2278,13 @@ def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, pro
     빼는 차례: 같은 종류면 사건이 몰린 곳부터 (예전처럼 뒤쪽부터 빼면 영상 끝부분의 재미 순간만 빠짐 · 판정: 순간 재현율).
     protect: 재미 순간(시범·펀치라인·강조·성공·실패·놀람)을 혼자 보여 주는 사건은 빼지 않음 — 그래도 양 범위를 넘으면 넘은 채로 두고
     compile_seq 가 구성(쉼 컷·숫자 세기·다시 보기 수)을 줄여 다시 만듦 · 그래도 안 되면 protect=False: 그런 사건은 화면 부분만 빼고
-    소리(그 순간의 효과음)는 남김 — 화면 사건 양은 지키고 순간은 귀로 살림 (보통·듬뿍 · 소리 양 범위는 _audio_items 가 맞춤 · D-262).
+    소리(그 순간의 효과음)는 남김 — 화면 사건 양은 지키고 순간은 귀로 살림 (VITAL_LEVELS(듬뿍)만 · 없으면 그 양이면 켬 · 소리는 말이 쉬는 틈에서만 ·
+    양 범위는 _audio_items 가 맞춤 · D-262 · D-269). 확대 간격 규칙(space)은 protect 여도 지킴 (그런 사건은 소리만 · D-269).
     나누는 자리: 말과 말 사이를 먼저 · 다른 사건·원본의 장면 바뀜(src_cuts · 원본 시각)과 떨어진 곳 (판정: 0.7초 간격 확대 두 번 ·
     일정한 간격의 확대는 기계적)."""
     lo, hi, still = DENSITY[intensity]
+    vital = intensity in VITAL_LEVELS
+    protect = vital if protect is None else (bool(protect) and vital)
     mins = max(0.25, total / 60.0)
     kind_rank = {k: i for i, k in enumerate(DROP_ORDER)}
     rv = _rhythm_value(st)
@@ -2268,9 +2349,9 @@ def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, pro
     def covers(e, m):
         return e.get("src") is not None and float(m["a"]) - 1.0 <= float(e["src"]) <= float(m["b"]) + 1.0
 
-    def lone(e):  # 이 사건만 보여 주는 재미 순간 (없으면 None)
-        return next((m for m in key_moms if covers(e, m) and not any(o is not e and o["kind"] not in ("bgm", "chapters") and covers(o, m)
-                                                                      for o in B.events)), None)
+    def lone(e):  # 이 사건만 보여 주는 재미 순간 (없으면 None) — 화면에 보이는 사건만 셈 (소리만 남긴 사건은 그 순간을 보여 주지 않음 · D-269)
+        return next((m for m in key_moms if covers(e, m) and not any(o is not e and o["kind"] not in ("bgm", "chapters") and not o.get("accent")
+                                                                      and covers(o, m) for o in B.events)), None)
 
     def sole(e):  # 이 사건만 보여 주는 재미 순간이 있음 → 맨 나중에 뺌 (빼면 그 순간이 영상에서 사라짐)
         return lone(e) is not None
@@ -2279,25 +2360,34 @@ def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, pro
 
     def accent(e, keep_items=False, why="화면 사건 양"):
         """재미 순간을 혼자 보여 주는 사건을 소리만 남김 (글자·확대를 빼고 · 소리가 없던 사건은 그 순간 효과음을 더함) → 바꿨으면 True.
-        담백은 하지 않음 (소리도 깔끔한 것만 · 순간 재현율을 보지 않는 양). keep_items: 조각 크기는 그대로 둠 (이미 화면이 안 바뀌는 확대 · D-266)."""
+        VITAL_LEVELS(듬뿍)만 · 소리는 그 순간 안에서 말이 쉬는 틈에만 (_accent_slot · 틈이 없으면 소리도 안 남김) · 그 순간에 맞는 소리가
+        팔레트에 없으면(위로하는 말 등) 안 남김 — 예전에는 장 넘김 '딸깍'을 대신 붙여 말 위에 뜻 없는 소리가 났음 (판정 검토 · D-269).
+        keep_items: 조각 크기는 그대로 둠 (이미 화면이 안 바뀌는 확대 · D-266)."""
         m = lone(e)
-        if m is None or intensity == "담백" or e["kind"] not in ("emphasis", "situ", "inner", "fx", "punch", "shake"):
+        if m is None or not vital or e["kind"] not in ("emphasis", "situ", "inner", "fx", "punch", "shake") or e.get("src") is None:
             return False
         r = e.get("refs") or {}
         snd = [k for k in r.get("sfx") or [] if k < len(B.sfx) and B.sfx[k]]
+        slot = _accent_slot(B, words, m, float(e["src"]))
+        consol = m["kind"] == "punchline" and any(f["kind"] == "fail" and 0 <= float(m["t"]) - float(f["t"]) <= 10.0 for f in key_moms)
+        name = B.sfx[snd[0]][1] if snd else (None if consol else pal.get(ACCENT_KEY.get(m["kind"])))
+        if slot is None or not name:
+            return False
         tids = set(r.get("titles") or [])
         if e["kind"] in ("punch", "shake") and not keep_items:
             for it in B.items:
                 if it["id"] in set(r.get("items") or []):
                     it["fx"] = {k: v for k, v in (it.get("fx") or {}).items() if k not in ("scale", "pos", "anchor")}
         B.titles = [t for t in B.titles if t["id"] not in tids]
-        if not snd:
-            # (실수 뒤 위로하는 말에는 놀리는 소리 대신 가벼운 소리 · plan_events 의 펀치라인 규칙과 같음)
-            consol = m["kind"] == "punchline" and any(f["kind"] == "fail" and 0 <= float(m["t"]) - float(f["t"]) <= 10.0 for f in key_moms)
-            name = (None if consol else pal.get(ACCENT_KEY.get(m["kind"]))) or pal.get("section") or "딸깍"
-            B.sfx.append((_gap_time(B, words or (), float(e["src"]), float(e["t"])), name, -1.0, "accent"))
+        if snd:  # 사건의 소리 하나만 · 말이 쉬는 틈으로 옮김
+            B.sfx[snd[0]] = (slot,) + tuple(B.sfx[snd[0]][1:])
+            for k in snd[1:]:
+                B.sfx[k] = None
+            snd = snd[:1]
+        else:
+            B.sfx.append((slot, name, -1.0, "accent"))
             snd = [len(B.sfx) - 1]
-        e.update(kind="sfx", text=B.sfx[snd[0]][1], why=f"{e.get('why') or ''} · 소리만 ({why})", refs={"sfx": snd}, accent=True)
+        e.update(kind="sfx", t=round(slot, 2), text=B.sfx[snd[0]][1], why=f"{e.get('why') or ''} · 소리만 ({why})", refs={"sfx": snd}, accent=True)
         return True
 
     def trim():
@@ -2443,7 +2533,8 @@ def govern(B, intensity, fc, total, moms=(), words=(), src_cuts=(), st=None, pro
             y = v1[k]
             if _zoom_of(y)[1] or _zoom_of(y)[2]:  # 쾅 확대·흔들기
                 e = next((e for e in B.events if e["kind"] in ("punch", "shake") and y["id"] in ((e.get("refs") or {}).get("items") or [])), None)
-                if e is not None and not (protect and sole(e)) and without(e):
+                if e is not None and without(e):
+                    # (protect 여도 확대 간격이 먼저 — 그 순간의 하나뿐인 사건이면 소리만 · 판정 round4 확대 간격 고친 것이 되살아남 · D-269)
                     if not accent(e):
                         _drop(B, event_ids=[e["id"]])
                     continue
@@ -2531,17 +2622,23 @@ def _audio_target(intensity, w):
 
 
 DEMO_TXT = ("실전 시범", "한 번 더!")   # 시범 상황 자막 (시간 순서대로 · 다 쓰면 더 붙이지 않음 — 같은 글자 되풀이·예고 말을 시범 중간에 붙이지 않게)
+AGAIN_TALK = 6.0   # 앞 시범 뒤 이보다 오래(초 · 낱말 길이 합) 설명했으면 다음 시범은 새 설명의 시범이라 '한 번 더!'가 아님 (판정 round7 · D-269)
 
 
-def _demo_labels(plays, moms):
+def _demo_labels(plays, moms, words=()):
     """시범마다 상황 자막 글자 {id(시범): 글자}: 바로 앞(앞 시범이 끝난 뒤 · 20초 안)에 실패가 있었을 때만 '다시 도전' —
-    실패 없이 이어지는 시범에 '다시 도전'을 붙이면 엉뚱함(판정: 리듬 시범에 '다시 도전'). 나머지는 DEMO_TXT 를 차례로."""
+    실패 없이 이어지는 시범에 '다시 도전'을 붙이면 엉뚱함(판정: 리듬 시범에 '다시 도전'). 나머지는 DEMO_TXT 를 차례로.
+    words: 앞 시범과 이 시범 사이에 AGAIN_TALK 초 넘게 설명했으면 '한 번 더!'를 붙이지 않음 (판정 round7 S2: '하나, 둘, 셋 리듬으로
+    움직여 보세요' 설명 뒤 시범에 '한 번 더!' · D-269)."""
     out, n_plain, prev_b = {}, 0, -1e9
     for m in sorted(plays, key=lambda m: m["t"]):
+        talk = sum(max(0.0, min(float(w[1]), float(m["a"])) - max(float(w[0]), prev_b)) for w in words or ())
         if any(x["kind"] == "fail" and prev_b - 1.0 <= x["t"] <= m["a"] + 0.5 and m["a"] - x["t"] <= 20.0 for x in moms):
             out[id(m)] = "다시 도전"
         elif n_plain and any(x["kind"] == "section" and prev_b <= x["t"] <= m["a"] for x in moms):
             out[id(m)] = None  # 앞 시범 뒤에 새 순서('두 번째 동작은…')를 알렸으면 같은 동작을 '한 번 더' 하는 게 아님 (판정: 엉뚱)
+        elif n_plain and talk > AGAIN_TALK:
+            out[id(m)] = None  # 앞 시범 뒤에 새 설명을 길게 했으면 같은 동작을 '한 번 더' 하는 게 아님
         else:
             out[id(m)] = DEMO_TXT[n_plain] if n_plain < len(DEMO_TXT) else None
             n_plain += 1
@@ -2615,6 +2712,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
     if knobs.get("count") is False:
         B["count"] = 0
     cands = []
+    n_cards = {}   # 정리 말 순간마다 카드 장 수 (한 덩어리 · D-269)
 
     def cand(kind, m, pri, **kw):
         t = kw.pop("t", m["t"])
@@ -2704,7 +2802,9 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             cand("inner", m, 1.5 + sc, text=ai_txt(m, "inner") or pick([m["text"]]), dur=1.6, t=m["t"])
         elif k == "recap":  # 정리 말 → 번호 목록 카드 (말하는 동안 · 다 말한 뒤 1.5초)
             # 한 장은 2줄까지 — 목록이 셋·넷이면 두 장으로 나눠 셋째 것을 말할 때 둘째 장 (판정 round6: S1 정리 카드 3줄 · D-263)
-            for k2, (txt2, t2, d2) in enumerate(_recap_cards(m, words)):
+            cards = _recap_cards(m, words)
+            n_cards[id(m)] = len(cards)
+            for k2, (txt2, t2, d2) in enumerate(cards):
                 cand("situ", m, 3.0, text=txt2, dur=d2, t=t2, look="recap", cont=k2 > 0)
         elif k == "talk" and ai.get(moment_key(m)):  # 클로드가 쓴, 말 자막만 이어지는 긴 설명 위 속마음·상황 글자
             x = ai[moment_key(m)]
@@ -2714,7 +2814,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             # 강조 글자가 말 자막과 같아 빠졌으면 그 순간은 확대가 맡음 — 강조 글자 자리의 우선순위로 (D-154 뒤 강조 순간이 통째로 빠지던 것 ·
             # 판정 round6 순간 재현율: S1 강조 6개 중 3개)
             cand("punch", m, (2.0 if len(cands) == n_before else 1.2) + sc, dur=2.4, t=m["t"])
-    demo_label = _demo_labels(plays, moms)
+    demo_label = _demo_labels(plays, moms, words)
     for i, m in enumerate(plays):
         ons = [o for o in onsets if m["a"] <= o <= m["b"]]
         after = [x for x in moms if x["kind"] in ("fail", "success") and m["b"] - 0.5 <= x["t"] <= m["b"] + 5.0]
@@ -2786,7 +2886,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
         bk = "fx" if c["kind"] == "fx" else c["kind"]
         used[bk] = used.get(bk, 0) + 1
         if c["kind"] in TEXT_KINDS:
-            texts.append((c["t"], c["t"] + c["dur"], c["kind"]))
+            texts.append((c["t"], c["t"] + c["dur"], c["kind"], c.get("mid")))
 
     for c in cands:
         k = c["kind"]
@@ -2797,14 +2897,23 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             continue
         if fits(c):
             take(c)
-    if not mild and knobs.get("vital", True):
+    # 정리 카드는 한 덩어리 (D-269): 장 하나라도 못 고르면(말 자막과 같아 뺌 · 자리 없음) 모두 뺌 — '①②'만 뜨고 셋째 항목을 말할 때 사라지면
+    # 오늘 배운 것이 둘뿐인 것처럼 보임 (검토)
+    for mid in {c["mid"] for c in picked if c.get("look") == "recap"}:
+        if sum(1 for c in picked if c.get("look") == "recap" and c["mid"] == mid) < n_cards.get(mid, 1):
+            used["situ"] = used.get("situ", 0) - sum(1 for c in picked if c.get("look") == "recap" and c["mid"] == mid)
+            picked[:] = [c for c in picked if not (c.get("look") == "recap" and c["mid"] == mid)]
+            texts[:] = [x for x in texts if x[3] != mid]
+    if not mild and knobs.get("vital", intensity in VITAL_LEVELS):
         # 중요한 재미 순간(시범·펀치라인·강조·성공·실패·놀람)마다 사건 하나는 — 종류별 예산(글자·확대 수)에 걸려 아무 사건도 못 받은 순간에
         # 그 순간의 후보 중 자리가 맞는 가장 높은 것 (끼워 넣는 장면·흔들기는 빼고) · 양 범위는 govern 이 이 사건들을 지키며 맞춤
         # (판정 round6 순간 재현율 F5 16/45 — 강조·성공 순간이 예산·양 맞추기에서 빠짐 · D-262)
         for m in sorted([m for m in moms if m["kind"] in MOMENT_KINDS and kept_at(m["t"])], key=lambda m: -m["score"]):
             if any(float(m["a"]) - 1.0 <= p["t"] <= float(m["b"]) + 1.0 for p in picked):
                 continue
-            mine = [c for c in cands if c.get("mid") == id(m) and c["kind"] not in ("replay", "freeze", "shake") and c not in picked]
+            # (시범 상황 자막 '실전 시범'·'한 번 더!'는 순서대로 붙이는 글이라 예산 밖으로 더하지 않음 — 엉뚱한 '한 번 더!'가 퍼짐 · 검토 · D-269)
+            mine = [c for c in cands if c.get("mid") == id(m) and c["kind"] not in ("replay", "freeze", "shake") and c not in picked
+                    and not (c["kind"] == "situ" and c.get("text") in DEMO_TXT)]
             # 스타일의 글자 양은 지킴: 예산이 남은 종류 먼저 · 개그 글자(속마음·효과 글자)는 예산을 넘겨 더하지 않고 확대·강조로 (스타일 섞기 판정)
             room = lambda c: used.get("fx" if c["kind"] == "fx" else c["kind"], 0) < B.get(c["kind"], 0)  # noqa: E731
             for c in [c for c in mine if room(c)] + [c for c in mine if not room(c) and c["kind"] not in ("inner", "fx")]:
@@ -3128,8 +3237,9 @@ def _sfx_level(sig, name, kind, file_pk=None):
 
 # 양 범위(DENSITY)를 넘으면 차례로 줄이는 구성: 쉼 자르기 → 몽타주 → 정지 화면 → 숫자 세기 → 다시 보기 1개 → 티저 장면 → 다시 보기 0개
 def _knobs(intensity):
+    v = intensity in VITAL_LEVELS   # 재미 순간 지키기 (순간마다 사건 하나 · 양 맞추기에서 지킴 · D-262 · 듬뿍만 · D-269)
     return {"cuts": PACE[intensity]["cuts"], "montage": MONTAGE_N.get(intensity, 0), "teaser": TEASER_N[intensity], "freeze": None, "replay": None,
-            "count": True}
+            "count": True, "vital": v, "protect": v}
 
 
 def _reduce(k, have=None, keep=(), light=False):
@@ -3217,16 +3327,21 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
         kinds = dict((seq.get("msg") or {}).get("summary", {}).get("kinds") or {})
         kinds["teaser"] = sum(1 for e in seq["msg"]["events"] if e["kind"] == "teaser" and "명장면" in (e.get("why") or ""))
         if fmt != "long" or not over:
+            if fmt == "shorts" and tot < MIN_SHORTS and knobs.get("pointStop", True) and _shorts_points(moms):
+                # 다음 포인트 앞에서 끊었더니 정리 컷·쉼 컷 뒤 MIN_SHORTS 초가 안 됨 → 끊지 않고 다시 (쇼츠가 아예 빠지지 않게 · D-267)
+                knobs["pointStop"] = False
+                best = None
+                continue
             break
         if prev is not None and prev[0] != knobs["cuts"] and prev[1:] == (round(tot, 2), n_ev):
             knobs["cuts"] = min(knobs["cuts"], 0.7)  # 쉼 컷을 줄여도 바뀌지 않음 → 그 단계는 건너뜀 (다시 만드는 데 한 번에 몇 초씩)
         prev = (knobs["cuts"], round(tot, 2), n_ev)
-        if not _reduce(knobs, kinds, keep, light=knobs.get("protect", True)):
-            if knobs.get("protect", True):
+        if not _reduce(knobs, kinds, keep, light=knobs.get("protect", False)):
+            if knobs.get("protect", False):
                 # 재미 순간을 지킨 채로는 더 줄일 구성이 없음 → 양 범위에 맞춰 순간 사건은 소리만 남김 (양 범위가 먼저 · D-262)
                 knobs["protect"] = False
                 continue
-            if knobs.get("vital", True):
+            if knobs.get("vital", False):
                 # 그래도 넘으면 순간마다 사건 하나 더하기(plan_events)도 끄고 예전처럼 (스타일 얼굴보다는 먼저 · D-262)
                 knobs["vital"] = False
                 continue
@@ -3249,17 +3364,21 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     pace = dict(PACE[intensity], cuts=knobs["cuts"])
     short_r = None   # 쇼츠로 고른 추천 구간 (첫머리 주제 줄 · BR-120)
     if fmt == "shorts":
-        base = _shorts_window(rec, moms, dur, sig.get("demo") or [], win, points=pts)
+        base = _shorts_window(rec, moms, dur, sig.get("demo") or [], win, points=pts, stop=knobs.get("pointStop", True))
         # 시범 장면으로 살린 곳에 걸친 군말·NG 도 뺌 — 롱폼과 같게 (판정 round7: S2 쇼츠에 '어,' · S1 쇼츠 첫머리 '어' 가 남음 · U7 · D-265)
-        base = snap_edges(editor._minus(base, junk) or base, sig.get("blobs") or [], words, junk)
+        hits = list(sig.get("onsets") or ()) + list(sig.get("hits") or ())
+        base = snap_edges(editor._minus(base, junk) or base, sig.get("blobs") or [], words, junk, hits, sig.get("demo") or ())
+        # 앞뒤가 다 잘린 짧은 조각(SLIVER)은 빼기 — 롱폼과 같게 (판정 검토: 점프 컷 두 번 사이 0.6초 '그렇죠.' · D-268)
+        base = drop_slivers(base, moms, _cheers(sig)) or base
         # 첫머리 주제 줄은 이 쇼츠가 실제로 보여 주는 구간의 포인트로 — 정해 준 구간(끝까지 자동으로)이면 그 구간
         # (MSG 가 고르는 구간(_shorts_best)은 다른 포인트일 수 있음 · 그러면 다른 쇼츠의 주제 줄이 붙음)
         short_r = _win_short(win, segs, sig) if win else _shorts_best(rec, moms)
     else:
         base = keep_cuts(rec["tidy"], sig.get("demo")) or [{"in": 0.0, "out": dur}]
         base = editor._minus(base, junk) or base  # 시범 장면으로 살린 곳에 걸친 군말·NG 도 뺌
-        base = snap_edges(pace_pauses(base, junk, pace["cuts"], sig.get("blobs") or ()), sig.get("blobs") or [], words, junk)
-        base = drop_slivers(base, moms)
+        base = snap_edges(pace_pauses(base, junk, pace["cuts"], sig.get("blobs") or ()), sig.get("blobs") or [], words, junk,
+                          list(sig.get("onsets") or ()) + list(sig.get("hits") or ()), sig.get("demo") or ())
+        base = drop_slivers(base, moms, _cheers(sig))
     intro = st["intro"]
     mild = intensity == "담백"
     hk_m = next((m for m in moms if m["kind"] == "hook_line"), None)
@@ -3540,7 +3659,10 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             st_t = _gap_time(B, words, c["t"], st_t)
             B.sfx.append((st_t, c["sfx"], None, c["kind"]))
             refs["sfx"] = [len(B.sfx) - 1]
-        B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
+        ev = B.event(c["kind"] if c["kind"] in TEXT_KINDS else "sfx", tl, text or c.get("sfx") or "", c["why"], src=c["t"], refs=refs)
+        if c.get("look") == "recap":
+            ev["_recap"] = c["mid"]
+    _join_recap(B, picked)
 
     topic_line = opening = ""
     if shorts_hook and B.pos > 3.0:
@@ -3579,9 +3701,9 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         for y in (0.0, 1.0 - LETTERBOX):
             B.shape(0.0, y, 1.0, LETTERBOX, "#000000", 0.0, total, 1.0, 0, "검은 띠 (영화 화면)")["full"] = True
     caps_tl = editor.timeline_captions({"items": B.items, "captions": caps, "format": fmt}) if st["captions"].get("on", True) else []
-    layout_titles(B, caps_tl, _caption_style(st, fmt, cap_y), total, face_box(sig), () if mild else moms)
+    layout_titles(B, caps_tl, _caption_style(st, fmt, cap_y), total, face_box(sig), moms if intensity in VITAL_LEVELS else (), words)
     if fmt == "long":
-        govern(B, intensity, fc, total, moms, words, sig.get("cuts") or (), st, knobs.get("protect", True))
+        govern(B, intensity, fc, total, moms, words, sig.get("cuts") or (), st, knobs.get("protect", False))
         _smooth_zoom_joins(B)
     _check()
     _settle_titles(B)
@@ -3920,12 +4042,13 @@ def _overlap(a, b):
 FACE_FREE = ("end", "title", "montage", "freeze")   # 얼굴을 가려도 되는 글자 (엔드·제목 카드·정지 화면 위)
 
 
-def layout_titles(B, caps_tl, cap_style, total, face=None, moms=()):
+def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=()):
     """MSG 화면 글자 자리 정리: 안전 영역(5%) 안으로 · 말 자막과 같은 줄·같은 때는 피함 · 같은 때 겹치는 글자는 위아래로 옮기고,
     자리가 없으면 겹치지 않게 늦게 띄우거나 뺌 (점수판·상황 자막처럼 앞 순서인 것은 그대로) · 적어도 MIN_TEXT 초.
     face: 주인공 얼굴 자리 [x0, y0, x1, y1] (0~1 · 롱폼만) — 되도록 얼굴을 안 가리는 자리로 (판정: 티저 글자 상자가 이마·눈을 가림 ·
     얼굴을 피할 자리가 없으면 가리더라도 띄움).
-    moms: 재미 순간 — 자리가 없어 글자가 다 빠진 사건이 그 순간을 혼자 보여 주던 것이면 효과음은 남김 (소리만 · D-262).
+    moms: 재미 순간 — 자리가 없어 글자가 다 빠진 사건이 그 순간을 혼자 보여 주던 것이면 효과음은 남김 (소리만 · D-262 · 듬뿍만 넘겨 줌 ·
+    한 순간의 사건이 함께 다 빠졌으면 그중 하나(효과음 차례가 높은 것)만 · 말이 쉬는 틈에서만(words · _accent_slot) · D-269).
     → 뺀 글자 id 집합."""
     W, H = (1080, 1920) if B.fmt == "shorts" else (1920, 1080)
     fpx = None
@@ -3988,34 +4111,80 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=()):
             continue
         st["y"] = y
         placed.append((a, a + t["dur"], text_box(t["text"], st, W, H)))
+    for e in B.events:   # 한 덩어리 사건(정리 카드 두 장)은 글자 하나라도 빠지면 모두 (D-269)
+        ids = (e.get("refs") or {}).get("titles") or []
+        if e.get("unit") and any(x in gone for x in ids):
+            gone |= set(ids)
     if gone:
         B.titles = [t for t in B.titles if t["id"] not in gone]
-        keep = []
+        keep, lost = [], []
         for e in B.events:
             r = e.get("refs") or {}
             if r.get("titles"):
                 r["titles"] = [x for x in r["titles"] if x not in gone]
-                if not r["titles"] and e["kind"] in TEXT_KINDS:  # 글자가 다 빠진 사건은 그 효과음도 뺌
-                    snd = [k for k in r.get("sfx") or [] if k < len(B.sfx) and B.sfx[k]]
-                    if snd and e.get("src") is not None and _lone_moment(e, moms, B.events):
-                        # 그 순간을 혼자 보여 주던 사건: 소리만 남김 (D-262)
-                        e.update(kind="sfx", text=B.sfx[snd[0]][1], why=f"{e.get('why') or ''} · 소리만 (글자 자리 없음)", refs={"sfx": snd}, accent=True)
-                        keep.append(e)
-                        continue
-                    for k in r.get("sfx") or []:
-                        B.sfx[k] = None
+                if not r["titles"] and e["kind"] in TEXT_KINDS:  # 글자가 다 빠진 사건은 그 효과음도 뺌 (아래: 순간을 혼자 보여 주던 것은 소리만)
+                    lost.append(e)
                     continue
             keep.append(e)
-        B.events = keep
+        # 남은 사건으로 셈 — 한 순간의 사건 둘이 함께 빠지면 서로를 '아직 있음'으로 보고 둘 다 소리까지 빠졌음 (검토 · D-269)
+        saved = set()
+        for m in [m for m in moms or () if m["kind"] in MOMENT_KINDS]:
+            mine = [e for e in lost if id(e) not in saved and _covers(e, m) and any(k < len(B.sfx) and B.sfx[k] for k in (e.get("refs") or {}).get("sfx") or [])]
+            if not mine or any(_covers(o, m) and o["kind"] not in ("bgm", "chapters") and not o.get("accent") for o in keep):
+                continue
+            e = max(mine, key=lambda e: max(SFX_PRI.get(B.sfx[k][3], 4) for k in e["refs"]["sfx"] if k < len(B.sfx) and B.sfx[k]))
+            snd = [k for k in e["refs"]["sfx"] if k < len(B.sfx) and B.sfx[k]][:1]
+            slot = _accent_slot(B, words, m, float(e["src"]))
+            if slot is None:
+                continue
+            for k in e["refs"]["sfx"]:
+                if k not in snd and k < len(B.sfx):
+                    B.sfx[k] = None
+            B.sfx[snd[0]] = (slot,) + tuple(B.sfx[snd[0]][1:])
+            e.update(kind="sfx", t=round(slot, 2), text=B.sfx[snd[0]][1], why=f"{e.get('why') or ''} · 소리만 (글자 자리 없음)", refs={"sfx": snd},
+                     accent=True)
+            saved.add(id(e))
+        for e in lost:
+            if id(e) not in saved:
+                for k in (e.get("refs") or {}).get("sfx") or []:
+                    if k < len(B.sfx):
+                        B.sfx[k] = None
+        ok = {id(e) for e in keep} | saved
+        B.events = [e for e in B.events if id(e) in ok]
     return gone
 
 
-def _lone_moment(e, moms, events):
-    """사건 e 만 보여 주는 재미 순간(시범·펀치라인·강조·성공·실패·놀람 · 원본 시각 앞뒤 1초)이 있는지 (govern 의 sole 과 같은 셈)."""
-    def cov(x, m):
-        return x.get("src") is not None and float(m["a"]) - 1.0 <= float(x["src"]) <= float(m["b"]) + 1.0
-    return any(cov(e, m) and not any(o is not e and o["kind"] not in ("bgm", "chapters") and cov(o, m) for o in events)
-               for m in moms or () if m["kind"] in MOMENT_KINDS)
+def _join_recap(B, picked):
+    """정리 카드 두 장을 MSG 사건 하나로 (글자 모두 refs · 목록 [빼기] 한 번에 정리 전체가 빠짐) · 한 장이라도 못 만들었으면(말 자막과 같음 ·
+    편집본에서 잘린 곳) 모두 뺌 — 한 덩어리 (D-269). event['unit'] = True: 글자 자리 정리(layout_titles)도 하나라도 빠지면 모두 뺌."""
+    want = {}
+    for c in picked:
+        if c.get("look") == "recap":
+            want[c["mid"]] = want.get(c["mid"], 0) + 1
+    for mid, n in want.items():
+        evs = sorted([e for e in B.events if e.get("_recap") == mid], key=lambda e: e["t"])
+        if len(evs) < n:
+            _drop(B, event_ids=[e["id"] for e in evs])
+            continue
+        if len(evs) > 1:
+            head = evs[0]
+            for e in evs[1:]:
+                head["refs"]["titles"] = list(head["refs"].get("titles") or []) + list(e["refs"].get("titles") or [])
+                if e["refs"].get("sfx"):
+                    for k in e["refs"]["sfx"]:
+                        if k < len(B.sfx):
+                            B.sfx[k] = None
+            head["text"] = "\n".join(e["text"] for e in evs)
+            head["unit"] = True
+            gone = {e["id"] for e in evs[1:]}
+            B.events = [e for e in B.events if e["id"] not in gone]
+    for e in B.events:
+        e.pop("_recap", None)
+
+
+def _covers(e, m):
+    """사건 e(원본 시각 src)가 재미 순간 m 을 보여 주는지 (앞뒤 1초 · govern 의 covers 와 같음)."""
+    return e.get("src") is not None and float(m["a"]) - 1.0 <= float(e["src"]) <= float(m["b"]) + 1.0
 
 
 def _small_title(st, topic, compact=False, big=False):
@@ -4271,15 +4440,19 @@ def _win_short(win, segs, sig=None):
 
 
 def _point_mark(m):
-    """포인트를 나누는 분명한 장 나눔 말인 순간 (editor.SECTION · '그 다음'·'이번엔'은 한 동작 안 순서 말이라 아님 · D-168)."""
-    return m["kind"] == "section" and bool(editor.SECTION.match(str(m.get("text") or "").strip()))
+    """포인트를 나누는 분명한 장 나눔 말인 순간 (editor.SECTION · '그럼 두 번째는'처럼 이음말 뒤의 순서도 — editor.POINT_OPEN · D-267 ·
+    '그 다음'·'이번엔'은 한 동작 안 순서 말이라 아님 · D-168)."""
+    t = str(m.get("text") or "").strip()
+    return m["kind"] == "section" and bool(editor.SECTION.match(t) or editor.POINT_OPEN.match(t))
 
 
-def _shorts_window(rec, moms, dur, sig_demo=(), win=None, points=None):
+def _shorts_window(rec, moms, dur, sig_demo=(), win=None, points=None, stop=True):
     """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳(_shorts_best · 없으면 앞쪽 정리 구간 50초)의 컷 목록.
     win: 정해 준 구간 (끝까지 자동으로 · 포인트 하나 = 쇼츠 하나) — 고르지 않고 그 구간을 씀 (시범 살리기·끝 다듬기는 같음).
     points: 쇼츠 = 포인트 하나(BR-092 · 없으면 SHORTS_POINTS) — 포인트를 여는 말로 시작하는 구간에 앞 포인트의 시범을 붙이지 않고,
-    정리 말('오늘 배운 거')·끝인사·다음 포인트 앞에서 끝냄 (D-260)."""
+    정리 말('오늘 배운 거')·끝인사·다음 포인트 앞에서 끝냄 (D-260) — 그 앞까지 남는 컷이 MIN_SHORTS 초 넘을 때만 (원본 시간이 아니라
+    남는 컷 길이로 · D-267) · stop=False 면 다음 포인트 앞에서 끊지 않음 (끊어서 쇼츠가 너무 짧아졌을 때 compile_seq 가 다시 만듦 ·
+    포인트를 넘는 쇼츠가 쇼츠 없음보다 나음 · D-267)."""
     pts = SHORTS_POINTS if points is None else points
     best = _win_best(win) if win else _shorts_best(rec, moms)
     if best:  # 그 구간 안의 시범 장면도 살림 (말 정리만 하면 시범이 빠짐)
@@ -4297,12 +4470,14 @@ def _shorts_window(rec, moms, dur, sig_demo=(), win=None, points=None):
         # (끝 8초 안의 딴소리('물 좀 마시고 할게요')로 끝나도 그 앞에서 — 마무리 없이 흐지부지 · 판정 round6)
         sec = [float(m["a"]) for m in moms if (m["kind"] == "section" and end - 15.0 < float(m["a"]) < end - 0.5)
                or (m["kind"] == "aside" and end - 8.0 < float(m["a"]) < end - 0.5)]
-        if pts:  # 포인트 하나: 시작 뒤의 다음 포인트·정리 말·끝인사 앞에서 (얼마나 남든 · 앞 15초 넘게 남을 때)
+        if pts and stop:  # 포인트 하나: 시작 뒤의 다음 포인트·정리 말·끝인사 앞에서 (얼마나 남든 · 앞에 남는 컷이 MIN_SHORTS 초 넘을 때)
             a0 = float(cuts[0]["in"]) if cuts else float(best["start"])
             sec += [float(m["a"]) for m in moms if (_point_mark(m) or m["kind"] in ("recap", "closing")) and a0 + 3.0 < float(m["a"]) < end - 0.5]
-        if sec and min(sec) - 0.2 - float(cuts[0]["in"]) >= (15.0 if pts else 20.0):
-            stop = min(sec) - 0.2
-            cuts = [dict(c, out=min(float(c["out"]), stop)) for c in cuts if float(c["in"]) < stop - 0.3]
+        if sec:
+            at = min(sec) - 0.2
+            kept = sum(max(0.0, min(float(c["out"]), at) - float(c["in"])) for c in cuts)
+            if (kept >= MIN_SHORTS) if pts and stop else (at - float(cuts[0]["in"]) >= 20.0):
+                cuts = [dict(c, out=min(float(c["out"]), at)) for c in cuts if float(c["in"]) < at - 0.3]
         return cuts
     out, tot = [], 0.0
     for c in rec.get("tidy") or [{"in": 0.0, "out": min(dur, 50.0)}]:
@@ -5066,7 +5241,8 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
     60분 원본 세 후보에서 결과가 3MB 가까이 됨).
     captionsOld: MSG 가 다시 듣기 전 받아쓰기로 만든 자막 (프로젝트 자막을 사용자가 고쳤는지 보려고 · 다시 들은 적이 없으면 None).
     windows: 쇼츠 구간 목록 (끝까지 자동으로 · editor.recommend 쇼츠) — 주면 쇼츠 형식은 구간마다 하나씩 (결과 편집본 seq['msgWin'] = 그 번호).
-    없으면 쇼츠는 하나 (MSG 가 고른 구간 · v2.16.0 그대로)."""
+    없으면 쇼츠는 하나 (MSG 가 고른 구간 · v2.16.0 그대로).
+    결과 notes: 만들지 않은 후보와 그 까닭 [{label, why, win}] (쇼츠가 MIN_SHORTS 초 안 될 때 · 편집실 알림에 보임 · D-267)."""
     if intensity != "모두" and intensity not in INTENSITY:
         raise ValueError("MSG 양은 담백·보통·듬뿍 중에서 골라 주세요")
     specs = [s for s in (specs or []) if isinstance(s, dict) and s.get("name")][:3]
@@ -5097,7 +5273,7 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
         ai, talk = _ai_lines(name, moms, segs, log, sig.get("junk") or ())
         moms = sorted(moms + talk, key=lambda m: m["t"])
     _check()
-    seqs, media = [], {}
+    seqs, media, notes = [], {}, []
     jobs = [(spec, lv) for spec in specs for lv in levels]
     n = 0
     for k, (spec, lv) in enumerate(jobs):
@@ -5112,7 +5288,10 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
             seq, md = compile_seq(name, info, sig, segs, moms, st, lv, fmt, seed, label, log, caps, ai, windows[wi] if wi is not None else None)
             _check()
             if fmt == "shorts" and editor.seq_total(seq) < MIN_SHORTS:
-                log(f"  쇼츠 후보는 만들지 않았어요 · 재미 순간이 모인 구간이 {editor.seq_total(seq):.0f}초뿐이에요 ({MIN_SHORTS:.0f}초 넘어야 해요)")
+                # (초는 내림 — 14.6초를 '15초뿐이에요 (15초 넘어야 해요)'로 쓰지 않게) · 결과 notes 로도 돌려줌 (편집실 알림·끝까지 자동으로 · D-267)
+                why = f"쇼츠 후보는 만들지 않았어요 · 재미 순간이 모인 구간이 {int(editor.seq_total(seq))}초뿐이에요 ({MIN_SHORTS:.0f}초 넘어야 해요)"
+                log("  " + why)
+                notes.append({"label": label, "why": why, "win": wi})
                 continue
             if wi is not None:
                 seq["msgWin"] = wi
@@ -5124,4 +5303,4 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
     _check()  # 마지막 후보를 만드는 동안 멈추기(✕)를 눌렀으면 후보를 돌려주지 않음 (편집실이 넣지 않게)
     if not seqs:
         raise MsgError("MSG 후보를 만들 재료가 모자라요 (재미 순간이 있는 구간이 너무 짧아요)")
-    return {"sequences": seqs, "media": list(media.values()), "moments": len(moms), "captions": caps, "captionsOld": old}
+    return {"sequences": seqs, "media": list(media.values()), "moments": len(moms), "captions": caps, "captionsOld": old, "notes": notes}

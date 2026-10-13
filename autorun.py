@@ -456,9 +456,10 @@ def _step_rough(c):
     rough = next((q for q in proj.get("sequences") or [] if q.get("format") == "long" and q.get("auto") in ("rough", "style")), None)
     c.st["rough"] = {"long": rough["id"] if rough else None}
     n = int(c.opts["shorts"])
-    pts = []
+    pts, n_pts = [], None
     if n:
         rec = editor.recommend(c.name, keep_pause=_shorts_keep(), n=n)
+        n_pts = rec.get("points")   # 'N번째'로 센 포인트 수 (쇼츠 수를 그만큼으로 줄였을 때만 · D-267)
         vt, segs = rec.get("videoTopic") or "", None
         for r in sorted(rec["shorts"], key=lambda r: r["start"]):
             hook, check = short_hook(r)
@@ -483,8 +484,19 @@ def _step_rough(c):
     if not n:
         return "done", "쇼츠는 만들지 않아요"
     if len(pts) < n:
-        return "done", f"쇼츠로 쓸 포인트가 {len(pts)}개라 쇼츠도 {len(pts)}개만 만들어요"
+        return "done", _short_count_note(len(pts), n_pts)
     return "done", f"쇼츠 포인트 {len(pts)}개"
+
+
+def _short_count_note(got, n_pts):
+    """고른 쇼츠 수보다 적게 만들 때 그 까닭 (있는 그대로 · D-267): 포인트 수만큼 다 만들었으면 '포인트가 N개라' ·
+    포인트 하나가 쇼츠 길이(20초)도 안 되면 '포인트 N개 중 M개만' · 포인트로 세지 않은 영상이면 '쓸 만한 구간이 M개라'
+    (예전: 늘 '쇼츠로 쓸 포인트가 M개라' — 짧아서 빠진 포인트가 있어도 영상의 포인트가 M개라고 말함 · 검토)."""
+    if n_pts and got >= n_pts:
+        return f"포인트가 {n_pts}개라 쇼츠도 {got}개만 만들어요"
+    if n_pts:
+        return f"포인트 {n_pts}개 중 {got}개만 쇼츠로 만들 만큼 길어요 (나머지 포인트는 너무 짧아요)"
+    return f"쇼츠로 쓸 만한 구간이 {got}개라 쇼츠도 {got}개만 만들어요"
 
 
 def _msg_args(c):
@@ -577,9 +589,10 @@ def _step_msg_shorts(c):
         todo.append(i)
     if not todo:
         return "done", "이미 만들었어요"
-    err, got = None, {}
+    err, got, why = None, {}, {}
     try:
         res = msg.build_variants(c.name, [c.opts["style"]], c.opts["intensity"], ("shorts",), windows=[pts[i] for i in todo], **_msg_args(c))
+        why = {todo[int(x["win"])]: x["why"] for x in res.get("notes") or [] if x.get("win") is not None}   # 만들지 않은 쇼츠의 까닭 (D-267)
         for q in res["sequences"]:
             i = todo[int(q.get("msgWin") or 0)]
             q.update(name=_short_name(i, pts[i]), autoRun=c.st["id"], autoKey=f"short{i + 1}")
@@ -600,7 +613,7 @@ def _step_msg_shorts(c):
             continue
         if i in rough_have:  # 이미 만든 가편집 쇼츠 그대로 (또 더하지 않음)
             kept.append(i)
-            o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
+            o["msgFail"] = err or why.get(i) or "재미 순간이 모인 구간이 너무 짧아요"
             continue
         q = _rough_short(c, i, pts[i])
         if q:
@@ -611,7 +624,7 @@ def _step_msg_shorts(c):
             o = _out(c.st, f"short{i + 1}")
             _set_seq(o, q["id"], q["name"], False)
             o.pop("opening", None)
-            o["msgFail"] = err or "재미 순간이 모인 구간이 너무 짧아요"
+            o["msgFail"] = err or why.get(i) or "재미 순간이 모인 구간이 너무 짧아요"
     if rough or kept:
         return "fail", f"쇼츠 {len(rough) + len(kept)}개는 MSG 를 넣지 못해 가편집 그대로예요" + (f" · {err}" if err else "")
     return "done", f"쇼츠 {len(todo)}개"
