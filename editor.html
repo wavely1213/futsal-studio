@@ -72,6 +72,7 @@
   .caprow.out { opacity: .38; }
   .caprow .tc { color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: pointer; font-size: 11.5px; line-height: 1.3; padding-top: 3px; }
   .caprow .tc:hover { color: var(--accent); }
+  .caprow .ctag { display: inline-block; margin-top: 2px; font-size: 10px; padding: 0 4px; border-radius: 3px; background: #5a3610; color: #fff; }  /* C1 이 아닌 자막 줄 (D-296) */
   .caprow textarea { field-sizing: content; width: 100%; resize: none; border: 1px solid transparent; background: none; border-radius: 4px; padding: 2px 4px; line-height: 1.4; overflow: hidden; -webkit-user-select: text; user-select: text; }
   .caprow textarea:focus { outline: none; border-color: var(--accent); background: var(--panel-2); }
 
@@ -133,8 +134,11 @@
   .dip { position: absolute; inset: 0; display: none; pointer-events: none; }
   .tgrp { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
   .ov { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
-  #shp { z-index: 55; }
-  #tac { z-index: 57; width: 100%; height: 100%; }
+  /* 영상 트랙 묶음(.tgrp z = 1 + 10·k)은 #layers 안에만 → 글자·그림(#ov)은 늘 영상 위 (예전: V6 이 자막을, V5 디졸브가 도형을 덮음 · I-292) */
+  #layers { position: absolute; inset: 0; z-index: 1; }
+  /* 글자·그림 줄마다 한 겹 (D-296) — z-index = 줄 차례 (아래 줄 = 뒤) · 내보내기 ASS 층과 같은 차례 */
+  .olay { position: absolute; inset: 0; pointer-events: none; }
+  .olay > .shp, .olay > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #tacH { position: absolute; inset: 0; z-index: 71; pointer-events: none; display: none; }
   #tacH i { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; border: 2px solid #111; pointer-events: auto; cursor: move; z-index: 2; }
   #tacH i.sz { background: #ffe14d; cursor: ew-resize; }
@@ -311,6 +315,14 @@
   .aclip .fd { position: absolute; top: 0; bottom: 0; pointer-events: none; }
   .clip .kfs { position: absolute; left: 0; right: 0; bottom: 2px; height: 7px; pointer-events: none; z-index: 1; }
   .clip .kfs i { position: absolute; width: 6px; height: 6px; margin-left: -3px; background: var(--kf); transform: rotate(45deg); }
+  .row.off .clip { opacity: .4; }  /* 숨긴 글자·그림 줄 (내보낼 때도 빠짐) */
+  .row.osel .hd { box-shadow: inset 3px 0 0 #ffe14d; }
+  .row.otgt { box-shadow: inset 0 0 0 2px #ffe14d; }  /* 끌어 옮길 줄 */
+  .hd .bdg[data-omove] { cursor: grab; flex: none; color: #fff; }
+  .hd .ogear { font-size: 12px; padding: 0 3px; }
+  .hd [data-oset].hint { cursor: default; min-width: 0; }
+  .hd input.oname { width: 70px; font-size: 11px; padding: 1px 3px; }
+  .otline { position: absolute; left: 0; right: 0; height: 2px; background: #ffe14d; z-index: 9; pointer-events: none; display: none; }
   .c1 .clip { background: var(--cap); cursor: pointer; }
   .c1 .clip.ocap { opacity: .7; border-style: dashed; }  /* 다른 영상(보관함)의 자막 · 여기서는 못 고침 */
   .gt .clip { background: var(--title); }
@@ -391,6 +403,7 @@
   .cmenu button:hover { background: var(--accent); color: #fff; }
   .cmenu button span { margin-left: auto; color: var(--ink-3); font-size: 11px; }
   .cmenu button:hover span { color: #dbe9ff; }
+  .cmenu button.dim { color: var(--ink-3); }
   .cmenu hr { border: 0; border-top: 1px solid var(--line-2); margin: 3px 0; }
   .ghost { position: fixed; z-index: 49; pointer-events: none; background: var(--accent); color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 11.5px; display: none; opacity: .9; }
   /* 패널 사이 손잡이: 가운데 짧은 막대로 보이고 올리면 파랗게 (끌어서 크기 · 두 번 누르면 처음 크기) */
@@ -467,7 +480,7 @@
         <button class="btn sm pri" id="sOver" title="프로그램 재생 위치에 덮어쓰기 ( . )">덮어쓰기</button>
         <div class="sp"></div><span class="tcdim" id="sDur"></span></div>
     </div>
-    <div class="mon" id="mon"><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="shp"></div><canvas class="ov" id="tac"></canvas><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i></div><div id="tacH"></div></div></div>
+    <div class="mon" id="mon"><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i></div><div id="tacH"></div></div></div>
     <div class="scrub" id="scrub"><div class="io" id="scrubIO"></div><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
     <div class="ctl" id="pctl">
       <span class="tcbig" id="tcNow">00:00:00:00</span>
@@ -590,6 +603,7 @@
     <kbd>Ctrl+D</kbd><span>재생 위치 편집점에 기본 장면 전환 (Ctrl+Shift+D: 소리, Shift+D: 선택 클립)</span><kbd>Ctrl+R</kbd><span>속도 · 길이</span>
     <kbd>G</kbd><span>소리 크기(게인)</span><kbd>M</kbd><span>마커 (Shift+M 다음 · Ctrl+Shift+M 이전)</span>
     <kbd>T</kbd><span>타이틀 추가</span><kbd>Ctrl+A</kbd><span>모두 선택 (Ctrl+Shift+A: 선택 해제)</span>
+    <kbd>줄 머리 끌기</kbd><span>줄 머리(C1·T1·G1 표시)를 위아래로 끌면 앞뒤 순서가 바뀌어요 · 위 줄이 화면 앞</span>
     <kbd>Shift+I · O</kbd><span>시작점 · 끝점으로 가기 (Ctrl+Shift+I · O: 지우기)</span><kbd>Delete</kbd><span>효과 컨트롤에서 고른 키프레임 지우기</span>
     <kbd>Ctrl+Z</kbd><span>되돌리기 (Ctrl+Shift+Z 다시 실행)</span><kbd>Ctrl+M</kbd><span>내보내기</span>
     <h5>소스 모니터 (미디어를 두 번 클릭)</h5>
@@ -687,11 +701,145 @@ function ensureSeq(q) {
   q.duck = q.duck || { on: true, amount: -14 }; q.master = Object.assign({ volume: 1, normalize: true, lufs: -14 }, q.master || {});
   if (!q.tracks) q.tracks = defaultTracks();
   q.items = q.items || [];
+  ensureOt(q);
 }
 function defaultTracks() {
   return [1, 2, 3].map(i => ({ id: "V" + i, k: "v", lock: false, hide: false, target: i === 1, h: 1 }))
     .concat([1, 2, 3].map(i => ({ id: "A" + i, k: "a", lock: false, mute: false, solo: false, target: i === 1, h: 1, vol: 0, role: i === 1 ? "dialog" : "music" })));
 }
+// 글자·그림 줄 (D-296) — 자막(C)·타이틀(T)·도형과 전술 그림(G) 줄을 종류마다 9개까지 · 편집본마다 q.otracks (아래 → 위 = 뒤 → 앞)
+// 목록 차례 하나가 타임라인 줄 차례(위 줄 = 화면 앞) · 미리보기 겹침(.olay z-index) · 내보내기 ASS 층을 정함 (editor.py overlay_tracks 와 같은 규칙)
+// 항목(자막·타이틀·도형·전술 그림)의 trk 가 없으면 그 종류 첫 줄(C1·T1·G1) — 첫 줄 이름은 저장하지 않음 → 예전 프로젝트·MSG·자동 가편집은 그대로
+// 자막 줄(trk)은 자막 글처럼 프로젝트 전체 · 줄 모양·차례·숨기기는 편집본마다 (D-298)
+// 이 블록은 화면(DOM)을 쓰지 않음 — S · P 만 (tests/test_overlay_tracks.py 가 잘라 node 로 그대로 실행해 파이썬과 견줌)
+const OT_BASE = [{ id: "G1", k: "g" }, { id: "C1", k: "c" }, { id: "T1", k: "t" }], OT_MAX = 9, OT_EPS = 1e-3;
+const OT_NAME = { c: "자막", t: "타이틀", g: "도형" }, OT_ID = /^[CTG][1-9]$/, OT_CN = /^C[2-9]$/;
+const otCap = c => c && typeof c.trk === "string" && OT_CN.test(c.trk) ? c.trk : "C1";  // 원본 자막이 놓인 줄 (editor.py cap_trk)
+const otCaps = q => q.msgCaps && q.msgCaps.length ? q.msgCaps : (P && P.captions) || [];  // editor.py: seq.msgCaps or captions
+const otBaseId = id => /^[CTG]1$/.test(id);
+// 새 줄 넣기: at 자리 · at 이 없으면 같은 종류 맨 위 줄 바로 위 (그 종류가 없으면 맨 위)
+function otIns(ls, o, at) {
+  if (at == null) { at = ls.length; for (let i = ls.length - 1; i >= 0; i--) if (ls[i].k === o.k) { at = i + 1; break; } }
+  ls.splice(at, 0, o); return o;
+}
+// 줄 목록 정리 (q 는 바꾸지 않음): 틀린 줄·겹친 id 는 버림 · C1 의 style/hide 는 뺌(C1 = captionStyle·captionsOn) · 빠진 기본 줄(G1 맨 아래 · C1 · T1 맨 위) ·
+// 자막이 가리키는 C 줄이 없으면 맨 위 C 줄 바로 위에 (숨김은 captionsOn 따라) · 줄 목록이 있을 때만 타이틀·도형·전술 그림이 가리키는 없는 줄도
+function otList(q, caps) {
+  const out = [], seen = new Set(), raw = q.otracks;
+  for (const o of Array.isArray(raw) ? raw : []) {
+    const id = o && typeof o === "object" ? o.id : null;
+    if (typeof id !== "string" || !OT_ID.test(id) || o.k !== id[0].toLowerCase() || seen.has(id)) continue;
+    seen.add(id); const c = { ...o }; if (id === "C1") { delete c.style; delete c.hide; } out.push(c);
+  }
+  if (!seen.has("G1")) out.unshift({ ...OT_BASE[0] });
+  for (const b of OT_BASE.slice(1)) if (!seen.has(b.id)) out.push({ ...b });
+  const have = new Set(out.map(o => o.id));
+  const cn = [...new Set((caps || []).filter(c => c && typeof c.trk === "string" && OT_CN.test(c.trk)).map(c => c.trk))].filter(id => !have.has(id)).sort();
+  for (const id of cn) { otIns(out, { id, k: "c", hide: !(q.captionsOn ?? true) }); have.add(id); }
+  if (Array.isArray(raw)) {
+    const want = new Set();
+    for (const [K, ls] of [["T", q.titles], ["G", q.shapes], ["G", q.tactics]]) for (const x of ls || []) { const id = x && x.trk; if (typeof id === "string" && OT_ID.test(id) && id[0] === K) want.add(id); }
+    for (const id of [...want].filter(id => !have.has(id)).sort()) otIns(out, { id, k: id[0].toLowerCase() });
+  }
+  return out;
+}
+const OTK = id => ((S && S.otracks) || []).find(o => o.id === id) || null;
+// 타이틀·도형·전술 그림이 놓인 줄 — trk 가 이 편집본 줄이고 종류가 맞으면 그 줄, 아니면 그 종류 첫 줄 (editor.py track_of)
+const trkOf = (x, k, q = S) => { const K = k.toUpperCase(), id = x && x.trk; return typeof id === "string" && id[0] === K && (q.otracks || []).some(o => o.id === id) ? id : K + "1"; };
+function setTrk(x, id) { if (otBaseId(id)) delete x.trk; else x.trk = id; }
+// 아직 모양을 안 정한 자막 줄(Cn)의 높이: C1 에서 자막 한 줄 높이씩 (n-1)번 — C1 이 아래쪽(y ≥ 0.5)이면 위로(0.1 까지), 위쪽이면 아래로(0.95 까지)
+// 반올림 없이 editor.py cap_track_default 와 같은 계산 차례 (두 쪽 값이 비트까지 같음)
+function capTrackDefault(c1, n, fmt) {
+  const H = fmt === "shorts" ? 1920 : 1080, band = (1.25 * +c1.size + 2 * +c1.strokeW) / H + 0.012, y = +c1.y;
+  return y >= 0.5 ? Math.max(0.1, y - (n - 1) * band) : Math.min(0.95, y + (n - 1) * band);
+}
+// 자막 줄 글자 모양 — C1 은 captionStyle · 다른 줄은 자기 style(빠진 값은 C1) · 아직 안 정했으면 C1 모양을 한 줄씩 옮긴 높이 (editor.py cap_style_of)
+const capStyleOf = (o, q = S) => o.id === "C1" ? q.captionStyle : o.style && typeof o.style === "object" && Object.keys(o.style).length ? { ...q.captionStyle, ...o.style }
+  : { ...q.captionStyle, y: capTrackDefault(q.captionStyle, +o.id[1], q.format) };
+const otVisible = (o, q = S) => o.id === "C1" ? !!q.captionsOn : !o.hide;  // 숨긴 줄은 미리보기·내보내기에서 빠짐 (SRT 는 다 남음)
+const otUsable = (o, k, q = S) => o.k === k && !o.lock && otVisible(o, q);
+// 처음 열 때 한 번 (줄 목록이 없던 편집본): 시간이 겹친 타이틀을 줄로 나눔 — 앞서 나온 겹친 타이틀보다 한 줄 위 (9줄까지 · 같은 줄은 배열 차례)
+// → 겹친 두 타이틀의 앞뒤(뒤에 있는 것이 앞)가 예전 내보내기와 같음 · 도형·자막은 나누지 않음 (줄 수를 적게 · D-043)
+function spreadTitles(q) {
+  const placed = []; let top = 1;
+  for (const g of q.titles) {
+    const s = +g.start || 0, e = s + (+g.dur || 0); let n = 1;
+    for (const p of placed) if (p[0] < e - OT_EPS && s < p[1] - OT_EPS) n = Math.max(n, p[2] + 1);
+    n = Math.min(n, OT_MAX); placed.push([s, e, n]); top = Math.max(top, n);
+    if (n > 1) g.trk = "T" + n; else delete g.trk;
+  }
+  for (let n = 2; n <= top; n++) if (!q.otracks.some(o => o.id === "T" + n)) otIns(q.otracks, { id: "T" + n, k: "t" });
+}
+function ensureOt(q) {
+  const fresh = !Array.isArray(q.otracks);
+  if (fresh) for (const g of [...q.titles, ...q.shapes, ...q.tactics]) if (g && typeof g === "object") delete g.trk; // 다른 편집본에서 베껴 온 줄 표시는 버림
+  const old = new Map((fresh ? [] : q.otracks).filter(o => o && typeof o === "object").map(o => [o.id, o]));
+  q.otracks = otList(q, otCaps(q)).map(o => { const x = old.get(o.id); if (!x) return o; old.delete(o.id); for (const k of Object.keys(x)) if (!(k in o)) delete x[k]; return Object.assign(x, o); }); // 같은 줄은 같은 객체
+  if (fresh) spreadTitles(q);
+}
+// [a,b] 와 겹치는 같은 종류 항목 (self 빼고) → [{ id: 그 항목의 줄, sub }] · 자막은 원본 시각 (프로젝트 자막 · 모든 편집본에서 같음)
+function otHits(k, a, b, self, q = S) {
+  const ov = (s, e) => s < b - OT_EPS && a < e - OT_EPS, out = [];
+  if (k === "t") { for (const g of q.titles) if (g !== self && ov(+g.start, +g.start + +g.dur)) out.push({ id: trkOf(g, "t", q), sub: "title" }); }
+  else if (k === "g") {
+    for (const g of q.shapes) if (g !== self && (g.full ? ov(0, Infinity) : ov(+g.start, +g.start + +g.dur))) out.push({ id: trkOf(g, "g", q), sub: "shape" });
+    for (const g of q.tactics) if (g !== self && ov(+g.start, +g.start + +g.dur)) out.push({ id: trkOf(g, "g", q), sub: g.kind === "spot" ? "spot" : "tact" });
+  } else for (const c of (P && P.captions) || []) if (c !== self && ov(+c.start, +c.end)) out.push({ id: otCap(c), sub: "cap" });
+  return out;
+}
+// 새 줄 번호: 이 편집본에 없는 가장 작은 번호 (자막은 프로젝트 전체에서 안 겹치게 — 자막 줄은 모든 편집본이 함께 씀) · 9개면 null
+function otNewId(k, q = S) {
+  const K = k.toUpperCase(), used = new Set((q.otracks || []).map(o => o.id));
+  if (k === "c") { for (const c of (P && P.captions) || []) used.add(otCap(c)); for (const x of (P && P.sequences) || []) for (const o of x.otracks || []) used.add(o.id); }
+  for (let n = 2; n <= OT_MAX; n++) if (!used.has(K + n)) return K + n;
+  return null;
+}
+const otNew = (k, q = S) => { const id = otNewId(k, q); return id && (k === "c" ? { id, k, hide: !(q.captionsOn ?? true) } : { id, k }); };
+// 새 항목을 놓을 줄 (D-299): 겹치는 같은 종류 항목의 앞에 (나중에 넣은 타이틀·자막이 위 · 예전과 같음) — 도형은 겹친 전술 그림 아래 ·
+// 스포트라이트는 도형·스포트라이트 위, 다른 전술 그림 아래 · 그 사이에서 가장 아래 빈 줄 → 없으면 새 줄 → 9개면 겹쳐 넣음 (full)
+// opts: { prefer: 고른 줄, self: 옮기는 항목, sub: "shape"|"tact"|"spot" } → { id, made?, full? } (줄은 q.otracks 에 바로 넣음)
+function otPlace(k, span, opts = {}, q = S) {
+  const ls = q.otracks, hits = otHits(k, span[0], span[1], opts.self, q), idx = id => ls.findIndex(o => o.id === id);
+  const pref = opts.prefer ? ls.find(o => o.id === opts.prefer && otUsable(o, k, q)) : null;
+  if (!hits.length) {
+    const o = pref || ls.find(o => otUsable(o, k, q)); if (o) return { id: o.id };
+    if (k === "c" && !q.captionsOn) return { id: "C1" }; // 자막을 끈 편집본: 숨은 새 줄을 만들지 않음
+  }
+  const sub = opts.sub, front = h => k === "g" && (sub === "shape" ? h.sub !== "shape" : sub === "spot" ? h.sub === "tact" : false);
+  let lo = -1, hi = Infinity;
+  for (const h of hits) { const i = idx(h.id); if (front(h)) hi = Math.min(hi, i); else lo = Math.max(lo, i); }
+  if (lo >= hi) hi = Infinity; // 코치가 줄 차례를 바꿔 앞뒤가 엇갈리면 '앞에 있어야 할 것'은 따지지 않음
+  const busy = new Set(hits.map(h => h.id)), ok = (o, i) => otUsable(o, k, q) && i > lo && i < hi && !busy.has(o.id);
+  if (pref && ok(pref, idx(pref.id))) return { id: pref.id };
+  const free = ls.find(ok); if (free) return { id: free.id };
+  const o = otNew(k, q);
+  if (o) { otIns(ls, o, lo >= 0 && hi < Infinity ? lo + 1 : lo < 0 && hi < Infinity ? hi : null); return { id: o.id, made: true }; }
+  return { id: lo >= 0 ? ls[lo].id : hi < Infinity ? ls[hi].id : k.toUpperCase() + "1", full: true };
+}
+// 끌어 옮긴 뒤 자기 줄에서 겹치면: 위쪽(앞) 가장 가까운 빈 줄 → 없으면 바로 위 새 줄 → 9개면 그대로 (full) · 안 겹치면 null
+function otSettle(x, k, q = S) {
+  const ls = q.otracks, cur = k === "c" ? otCap(x) : trkOf(x, k, q);
+  const s = k === "c" ? +x.start : x.full ? 0 : +x.start, e = k === "c" ? +x.end : x.full ? Infinity : +x.start + +x.dur;
+  const busy = new Set(otHits(k, s, e, x, q).map(h => h.id));
+  if (!busy.has(cur)) return null;
+  const i0 = ls.findIndex(o => o.id === cur);
+  for (let i = i0 + 1; i < ls.length; i++) if (otUsable(ls[i], k, q) && !busy.has(ls[i].id)) { setTrk(x, ls[i].id); return { id: ls[i].id }; }
+  const o = otNew(k, q); if (!o) return { id: cur, full: true };
+  otIns(ls, o, i0 + 1); setTrk(x, o.id); return { id: o.id, made: true };
+}
+// 빈 줄: 그 줄에 든 것이 없음 (자막 줄은 프로젝트의 모든 자막 기준)
+function otEmpty(o, q = S) {
+  if (o.k === "c") return !((P && P.captions) || []).some(c => otCap(c) === o.id);
+  if (o.k === "t") return !q.titles.some(g => trkOf(g, "t", q) === o.id);
+  return !q.shapes.some(g => trkOf(g, "g", q) === o.id) && !q.tactics.some(g => trkOf(g, "g", q) === o.id);
+}
+// 줄 차례 바꾸기: id 줄을 목록의 to 자리로 (글자·그림 줄끼리만 · 영상 트랙보다는 늘 앞)
+function otMove(id, to, q = S) {
+  const ls = q.otracks, i = ls.findIndex(o => o.id === id); if (i < 0) return false;
+  to = Math.max(0, Math.min(ls.length - 1, to)); if (to === i) return false;
+  const [o] = ls.splice(i, 1); ls.splice(to, 0, o); return true;
+}
+// 글자·그림 줄 끝
 function bindS() { S = P.sequences.find(q => q.id === P.active) || P.sequences[0]; P.active = S.id; ensureSeq(S); }
 function newPair(a, b, start, media = "main", extra = {}) {
   const link = nid(), base = { media, start, in: a, out: b, speed: 1, rev: false, link };
@@ -931,6 +1079,8 @@ function capItems() {
   }
   return out.sort((a, b) => a.start - b.start);
 }
+// 자막이 놓인 줄 — 원본 자막의 trk(C2~C9) · 보관함의 다른 영상 자막·MSG 후보 자막도 자기 trk 가 없으면 C1 (editor.py cap_trk 와 같은 규칙 · D-296)
+const capTrk = (c, mid) => mid === "main" && c && typeof c.trk === "string" && /^C[2-9]$/.test(c.trk) ? c.trk : "C1";
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
   const out = [], tot = total(), shorts = S.format === "shorts", groups = new Map(); // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
@@ -953,19 +1103,19 @@ function capsTL() {
           // 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말이 자막에 남지 않게 · editor.py timeline_captions 와 같은 규칙)
           const ws = q.words, mid2 = w => (+w.s + +w.e) / 2, keep = ws ? ws.map((w, k) => (it.in <= mid2(w) && mid2(w) < it.out) ? k : -1).filter(k => k >= 0) : null;
           if (keep && !keep.length) continue;
-          out.push({ cap, q, s, e, mid, n: ws ? ws.length : 0, kt: keep ? new Map(keep.map(k => [k, tlOf(it, +ws[k].s)])) : null });
+          out.push({ cap, q, s, e, mid, trk: capTrk(cap, mid), n: ws ? ws.length : 0, kt: keep ? new Map(keep.map(k => [k, tlOf(it, +ws[k].s)])) : null });
         }
       }
     }
   }
   out.sort((a, b) => a.s - b.s);
   // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · 겹친 같은 자막도 · editor.py timeline_captions 와 같은 규칙)
-  const joined = [];
+  const joined = [], last = {}; // last: 자막 줄마다 마지막 조각 (다른 줄 자막이 사이에 있어도 같은 자막은 이어 붙임 · editor.py 와 같은 규칙)
   for (const c of out) {
-    const p = joined[joined.length - 1];
+    const p = last[c.trk];
     if (p && p.q === c.q && Math.abs(c.s - p.e) <= 0.06) { p.e = Math.max(p.e, c.e); if (p.kt && c.kt) for (const [k, v] of c.kt) p.kt.set(k, v); }
     else if (p && p.q === c.q && c.s < p.e) { p.e = Math.max(p.e, c.e); if (p.kt && c.kt) for (const [k, v] of c.kt) if (!p.kt.has(k)) p.kt.set(k, v); } // 같은 소리를 두 대사 트랙에 겹쳐 둠: 아직 없는 낱말만
-    else joined.push({ ...c });
+    else { const n = { ...c }; joined.push(n); last[c.trk] = n; }
   }
   for (const c of joined) {
     const toks = String(c.q.text || "").split(/\s+/).filter(Boolean), ks = c.kt ? [...c.kt.keys()].sort((x, y) => x - y) : null;
@@ -975,8 +1125,10 @@ function capsTL() {
   // 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막 전까지 CAP_MIN 초는 보이게 (editor.py timeline_captions 와 같은 규칙)
   // (바로 이어지는 다음 자막이 넉넉하면 그 시작을 조금 늦춰 자리를 만듦)
   // 글자가 많으면 1초에 CAP_CPS 글자를 넘지 않게 읽을 시간도 (다음 자막 전까지)
-  for (let k = 0; k < joined.length; k++) {
-    const c = joined[k], n = joined[k + 1], need = Math.max(CAP_MIN, String(c.text || "").replace(/\s+/g, "").length / CAP_CPS); if (c.e - c.s >= need) continue;
+  // 자막 줄마다 따로 — 다른 줄의 짧은 자막이 이 줄 자막을 줄이거나 늦추지 않음
+  const lanes = {}; for (const c of joined) (lanes[c.trk] = lanes[c.trk] || []).push(c);
+  for (const lane of Object.values(lanes)) for (let k = 0; k < lane.length; k++) {
+    const c = lane[k], n = lane[k + 1], need = Math.max(CAP_MIN, String(c.text || "").replace(/\s+/g, "").length / CAP_CPS); if (c.e - c.s >= need) continue;
     if (n && n.s - c.s < need && n.e - c.s >= need + CAP_MIN) n.s = c.s + need;
     c.e = Math.max(c.e, Math.min(c.s + need, n ? n.s : tot));
   }
@@ -1102,6 +1254,7 @@ function commit(label) { pushHist(label, JSON.stringify(P)); }
 function uncommit() { hist.pop(); if (histDropped) { hist.unshift(histDropped); histDropped = null; } } // 방금 commit 한 것 취소 (할 일이 없었을 때)
 function changed(full = true) {
   S.items = S.items.filter(i => iLen(i) > 0.01); // 너무 짧아진 조각 정리
+  ensureOt(S); // 자막·타이틀·도형이 가리키는 줄이 늘 있게 (다른 편집본에서 자막 줄을 옮겼을 때 등 · 같은 줄은 같은 객체 · D-296)
   refitMusic();
   if (selX && selX.k === "gap") selX = null; // 내용이 바뀌면 예전 빈 곳 선택은 풀기
   ver++; fixTrans(); scheduleSave(); frameDirty = true;
@@ -1487,6 +1640,7 @@ function deleteGap(g) {
 }
 function deleteGfx() {
   if (!selX) return;
+  if (selX.k === "otrack") return deleteOtrack(selX.id); // 줄: 첫 줄이 아닌 빈 줄만 (D-302)
   if (selX.k === "trans" && S.trans.some(t => t.id === selX.id && !unlocked(t.track))) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
   commit("지우기");
   if (selX.k === "caption") P.captions = P.captions.filter(c => c.id !== selX.id);
@@ -2124,29 +2278,49 @@ function effect(el, st, e, r, scale, text, kw) {
   } else if (el._t !== text) { el.textContent = text; }
   el._t = st.effect === "karaoke" ? null : text;
 }
-let ovEls = {}, shpKey = "";
-function drawOverlays(t) {
-  drawTactics(t);
-  const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, scale = fh / BH(), tot = total();
-  const shs = S.shapes.filter(sh => shapeOn(sh, t) && t < tot + 0.01);
-  const key = fw + "|" + fh + "|" + JSON.stringify(shs) + (selX && selX.k === "shape" ? selX.id : "");
-  if (key !== shpKey) {
-    shpKey = key;
-    $("shp").innerHTML = shs.map(sh => {
-      const w = sh.w * fw, h = sh.h * fh, r = (sh.radius || 0) / 100 * Math.min(w, h) / 2;
-      return `<div style="position:absolute;left:${sh.x * fw}px;top:${sh.y * fh}px;width:${w}px;height:${h}px;background:${hexA(sh.color, sh.opacity)};border-radius:${r}px;${selX && selX.k === "shape" && selX.id === sh.id ? "outline:1px dashed #fff" : ""}"></div>`;
-    }).join("");
+let ovEls = {}, OLAY = {};
+// 글자·그림 줄 한 겹: div.olay[data-ot] (#ov 안) · 도형 줄은 .shp 와 (전술 그림이 있으면) canvas
+function olayEl(o) {
+  let L = OLAY[o.id];
+  if (!L) {
+    const el = document.createElement("div"); el.className = "olay"; el.dataset.ot = o.id; $("ov").appendChild(el);
+    L = OLAY[o.id] = { el, shp: null, cv: null, shpKey: "", tacKey: "" };
   }
-  const want = {};
-  if (S.captionsOn) for (const c of capsTL()) if (t >= c.s && t < c.e) want["c" + c.cap.id] = { st: S.captionStyle, s: c.s, e: c.e, text: c.text, kw: c.kw, fit: true };
-  for (const g of S.titles) if (t >= g.start && t < g.start + g.dur && t < tot + 0.01) want["t" + g.id] = { st: g.style, s: g.start, e: g.start + g.dur, text: g.text };
+  if (o.k === "g" && !L.shp) { L.shp = document.createElement("div"); L.shp.className = "shp"; L.el.insertBefore(L.shp, L.el.firstChild); }
+  return L;
+}
+// 줄마다 아래(뒤)부터: 도형 → 전술 그림 · 자막(capsTL 차례) · 타이틀(배열 차례) — 줄 안 차례도 내보내기(editor.py build_ass)와 같음 (D-296)
+function drawOverlays(t) {
+  const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, scale = fh / BH(), tot = total(), ots = S.otracks || [], live = new Set(), want = {};
+  let caps = null;
+  ots.forEach((o, i) => {
+    const L = olayEl(o), vis = otVisible(o); live.add(o.id);
+    css(L.el, "zIndex", String(i + 1)); css(L.el, "display", vis ? "block" : "none");
+    if (!vis) return;
+    if (o.k === "g") { drawShapes(o, L, t, fw, fh, tot); drawTactics(o, L, t); }
+    else if (o.k === "c") { caps = caps || capsTL(); const st = capStyleOf(o); let z = 0; for (const c of caps) if (c.trk === o.id && t >= c.s && t < c.e) want["c" + c.cap.id] = { L, z: z++, st, s: c.s, e: c.e, text: c.text, kw: c.kw, fit: true }; }
+    else { let z = 0; for (const g of S.titles) if (trkOf(g, "t") === o.id && t >= g.start && t < g.start + g.dur && t < tot + 0.01) want["t" + g.id] = { L, z: z++, st: g.style, s: g.start, e: g.start + g.dur, text: g.text }; }
+  });
+  for (const id of Object.keys(OLAY)) if (!live.has(id)) { OLAY[id].el.remove(); delete OLAY[id]; }
   for (const k of Object.keys(ovEls)) if (!want[k]) { ovEls[k].remove(); delete ovEls[k]; }
   for (const [k, w] of Object.entries(want)) {
     let el = ovEls[k];
-    if (!el) { el = document.createElement("div"); el.className = "txt"; $("ov").appendChild(el); ovEls[k] = el; }
+    if (!el) { el = document.createElement("div"); el.className = "txt"; ovEls[k] = el; }
+    if (el.parentNode !== w.L.el) w.L.el.appendChild(el); // 줄을 옮긴 글자는 그 줄 겹으로 (같은 div · #ov .txt 로 찾을 수 있음)
+    css(el, "zIndex", String(w.z));
     styleText(el, w.st, scale, w.fit ? capFit(w.text, w.st, BW()) : 1);
     effect(el, w.st, t - w.s, w.e - t, scale, w.text, w.kw);
   }
+}
+function drawShapes(o, L, t, fw, fh, tot) {
+  const shs = S.shapes.filter(sh => trkOf(sh, "g") === o.id && shapeOn(sh, t) && t < tot + 0.01);
+  const key = fw + "|" + fh + "|" + JSON.stringify(shs) + (selX && selX.k === "shape" ? selX.id : "");
+  if (key === L.shpKey) return;
+  L.shpKey = key;
+  L.shp.innerHTML = shs.map(sh => {
+    const w = sh.w * fw, h = sh.h * fh, r = (sh.radius || 0) / 100 * Math.min(w, h) / 2;
+    return `<div style="position:absolute;left:${sh.x * fw}px;top:${sh.y * fh}px;width:${w}px;height:${h}px;background:${hexA(sh.color, sh.opacity)};border-radius:${r}px;${selX && selX.k === "shape" && selX.id === sh.id ? "outline:1px dashed #fff" : ""}"></div>`;
+  }).join("");
 }
 /* ---------- 전술 그림: 모양 계산 (tactic.py ops_at 과 짝 — 한쪽을 고치면 다른 쪽도 · 미리보기 = 내보내기) ---------- */
 const TAC_KINDS = ["arrow", "curve", "pass", "ring", "spot", "label"];
@@ -2325,18 +2499,20 @@ function tacOps(tc, t, W, H) {
 /* ---------- 전술 그림: 모양 계산 끝 ---------- */
 /* ---------- 전술 그림: 미리보기 그리기 · 넣기 · 화면에서 점 끌기 · 선수 따라가기 ---------- */
 const TAC_TEXT_DY = 0;  // 이름표 글자 세로 보정 (글자 크기 배 · tactic.TEXT_DY 와 같은 값)
-let tacKey = "";
-function drawTactics(t) {
-  const cv = $("tac"), F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, dpr = window.devicePixelRatio || 1, W = BW(), H = BH();
-  const list = t < total() + 0.01 ? tacOrder(S.tactics).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
-  const key = list.length ? `${fw}|${fh}|${dpr}|${W}|${t}|${JSON.stringify(list)}` : `${fw}|${fh}|none`;
-  if (key === tacKey) return;
-  tacKey = key;
+// 그 줄의 전술 그림만 그 줄 겹의 canvas 에 (스포트라이트 먼저 · tacOrder = tactic.ordered)
+function drawTactics(o, L, t) {
+  const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, dpr = window.devicePixelRatio || 1, W = BW(), H = BH();
+  const list = t < total() + 0.01 ? tacOrder(S.tactics.filter(g => trkOf(g, "g") === o.id)).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
+  if (!list.length && !L.cv) return;
+  if (!L.cv) { L.cv = document.createElement("canvas"); L.el.appendChild(L.cv); } // 도형(.shp) 위
+  const cv = L.cv, key = list.length ? `${fw}|${fh}|${dpr}|${W}|${t}|${JSON.stringify(list)}` : `${fw}|${fh}|none`;
+  if (key === L.tacKey) return;
+  L.tacKey = key;
   const pw = Math.max(1, Math.round(fw * dpr)), ph = Math.max(1, Math.round(fh * dpr));
   if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
   const g = cv.getContext("2d"); g.clearRect(0, 0, pw, ph);
   const k = pw / W;  // 미리보기도 1920×1080(쇼츠 1080×1920) 기준으로 계산한 모양을 그대로 줄여 그림 (내보내기 ASS 와 같은 기준)
-  for (const tc of list) for (const o of tacOps(tc, t, W, H)) tacPaint(g, o, k);
+  for (const tc of list) for (const op of tacOps(tc, t, W, H)) tacPaint(g, op, k);
 }
 function tacPaint(g, o, k) {
   g.save(); g.globalAlpha = o.a; g.fillStyle = o.col; g.filter = o.b > 0 ? `blur(${o.b * k}px)` : "none";
@@ -2360,8 +2536,10 @@ function addTactic(kind, at) {
   if ("size" in d) tc.size = d.size;
   if (kind === "spot") tc.dim = d.dim;
   if (kind === "label") tc.text = d.text;
+  // 겹친 도형 위 · 스포트라이트는 다른 전술 그림 아래 (예전 그리는 차례와 같음 · D-299)
+  const r = otPlace("g", [tc.start, tc.start + tc.dur], { prefer: otPrefer("g"), sub: kind === "spot" ? "spot" : "tact" }); setTrk(tc, r.id);
   S.tactics.push(tc); selX = { k: "tact", id: tc.id }; selI.clear(); setRtab("fx", true); changed(false);
-  toast(`${TAC_NAMES[kind]}을(를) 넣었어요 · 화면의 흰 점을 끌어 자리를 잡아요`);
+  toast(`${TAC_NAMES[kind]}을(를) 넣었어요 · 화면의 흰 점을 끌어 자리를 잡아요` + (otNote(r, "g") ? " · " + otNote(r, "g") : ""));
 }
 // 지금 화면에 보이는 점들 (따라가기로 옮긴 만큼 포함 · 0~1) — tacOps 와 같은 규칙: 화살표·패스는 출발점만(휘는 곳은 반만) 따라감
 function tacShown(n, t) {
@@ -2372,8 +2550,11 @@ function tacShown(n, t) {
 function tacHit(t, x, y) {  // x, y = 화면 비율 0~1
   const W = BW(), H = BH(), u = Math.min(W, H) / TC.BASE, px = x * W, py = y * H, pad = 24 * u;
   const segD = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, k = l ? clamp(((px - a[0]) * dx + (py - a[1]) * dy) / l, 0, 1) : 0; return Math.hypot(px - a[0] - k * dx, py - a[1] - k * dy); };
-  const list = t < total() + 0.01 ? tacOrder(S.tactics).filter(tc => t >= tc.start && t < tc.start + tc.dur) : [];
-  for (const n of list.reverse()) {
+  // 보이고 잠기지 않은 도형 줄을 앞(위 줄)부터 · 줄 안에서는 나중에 그린 것부터 (D-296)
+  const list = [];
+  if (t < total() + 0.01) for (const o of (S.otracks || []).slice().reverse()) if (o.k === "g" && !o.lock && otVisible(o))
+    list.push(...tacOrder(S.tactics.filter(g => trkOf(g, "g") === o.id)).filter(tc => t >= tc.start && t < tc.start + tc.dur).reverse());
+  for (const n of list) {
     const P = tacShown(n, t).map(([a, b]) => [a * W, b * H]);
     if (n.kind === "ring" || n.kind === "spot") { const ry = n.kind === "ring" ? TC.RING_RY : 1; if (Math.hypot(px - P[0][0], (py - P[0][1]) / ry) <= n.size * u + pad) return n.id; }
     else if (n.kind === "label") { const s = n.size * u, w = tacEm(n.text) * s / 2 + pad; if (Math.abs(px - P[0][0]) <= w && py <= P[0][1] + pad && py >= P[0][1] - s * 2.2 - pad) return n.id; }
@@ -2391,7 +2572,7 @@ $("frame").addEventListener("mousedown", ev => {
 let tacHKey = "";
 function drawTacHandles() {
   const box = $("tacH"), tc = tacSel(), n = tc && tacNorm(tc);
-  if (!n || playing || T < n.start || T >= n.start + n.dur) { if (tacHKey !== "") { css(box, "display", "none"); tacHKey = ""; } return; }
+  if (!n || playing || T < n.start || T >= n.start + n.dur || otLockedX(tc, "g")) { if (tacHKey !== "") { css(box, "display", "none"); tacHKey = ""; } return; } // 잠긴·숨긴 줄은 손잡이 없음 (D-300)
   const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, P = tacShown(n, T), k = fw / BW(), u = Math.min(BW(), BH()) / TC.BASE;
   const hs = P.map(([x, y], i) => ({ p: String(i), x: x * fw, y: y * fh }));
   if (n.kind === "ring") hs.push({ p: "sz", x: P[0][0] * fw + n.size * u * k, y: P[0][1] * fh });
@@ -2506,7 +2687,7 @@ function renderTacPanel(el, tc) {
     <div class="f"><label>빛 번짐</label><label class="tog"><input type="checkbox" id="tcGlow" ${n.glow ? "checked" : ""}> 형광처럼 빛나게</label><span></span></div></div>
     <div class="pg"><h4>선수 따라가기</h4><div class="hint" style="margin-bottom:8px">${n.follow ? `선수를 따라 움직여요 (${n.follow.length}곳) · 그림 자리를 옮겼으면 다시 따라가기를 눌러요` : TAC_FOLLOW_HINT[k]}</div>
     <button class="btn" id="tcFollow">${n.follow ? "다시 따라가기" : "이 선수 따라가기"}</button>${n.follow ? ' <button class="btn" id="tcUnfollow">따라가기 끄기</button>' : ""}</div>
-    <div class="pg"><button class="btn" id="tcDel">삭제</button></div>`;
+    <div class="pg">${otSelectHTML("g", trkOf(tc, "g"), "도형 줄")}<button class="btn" id="tcDel">삭제</button></div>`;
   el.querySelectorAll("[data-tcc]").forEach(b => b.onclick = () => { commit("전술 그림 색"); tc.color = b.dataset.tcc; changed(false); });
   { const c = $("tcColor"); let before = null; c.oninput = () => { if (!before) before = JSON.stringify(P); tc.color = c.value.toUpperCase(); ver++; frameDirty = true; }; c.onchange = () => { if (before) { pushHist("전술 그림 색", before); before = null; changed(false); } }; }
   if ($("tcText")) { const ta = $("tcText"); let before = null; ta.oninput = () => { if (!before) before = JSON.stringify(P); tc.text = cutText(ta.value, 30); ver++; frameDirty = true; scheduleSave(); }; ta.onblur = () => { if (before) { pushHist("이름표 글자", before); before = null; renderTimeline(); } }; }
@@ -2518,6 +2699,7 @@ function renderTacPanel(el, tc) {
   $("tcFollow").onclick = () => tacFollow(tc);
   if ($("tcUnfollow")) $("tcUnfollow").onclick = () => { commit("따라가기 끄기"); tc.follow = null; changed(false); };
   $("tcDel").onclick = deleteGfx;
+  bindOtSelect(tc, "g");
 }
 /* ---------- 전술 그림 끝 ---------- */
 let lastCapOn = null;
@@ -2589,8 +2771,9 @@ function renderTools() {
   const t = TOOLS.find(x => x[0] === tool); $("toolHint").textContent = t ? t[2].split(" — ")[0] : "";
 }
 function setTool(t) { tool = t; renderTools(); $("tracks").className = "tracks t-" + t; }
-function rowList() {
-  const rows = [{ tk: "ruler" }, { tk: "C1" }, { tk: "T" }, { tk: "G" }];
+function rowList() {  // 위에서부터: 시간 · 글자·그림 줄(위 줄 = 화면 앞 · D-296) · 영상 트랙(V 큰 번호 먼저) · 소리 트랙
+  const rows = [{ tk: "ruler" }];
+  for (const o of (S.otracks || []).slice().reverse()) rows.push({ tk: o.id, ot: o });
   for (const tr of vTracks().slice().reverse()) rows.push({ tk: tr.id, tr });
   for (const tr of aTracks()) rows.push({ tk: tr.id, tr });
   return rows;
@@ -2612,6 +2795,37 @@ function headHTML(tr) {
         : `<button class="ic ${tr.hide ? "" : "on"}" data-hide="${tr.id}" title="${tr.hide ? "보이기" : "숨기기 (내보낼 때도 빠져요)"}">${tr.hide ? ICON.eyeoff : ICON.eye}</button>`}
     <button class="ic ${tr.h > 1 ? "on" : ""}" data-ht="${tr.id}" title="트랙 높이 바꾸기">${ICON.height}</button>
     <span class="hint">${lbl(tr)}</span></div>`;
+}
+// 글자·그림 줄 머리 (D-296): [C2 ⠿] [눈] [자물쇠] 이름 … [⚙] — .tb·data-lock·data-hide·data-tgt 는 영상·소리 트랙만 (예전 검사·단축키가 그 이름으로 찾음)
+const OT_BG = { c: "#5a3610", t: "#3c2457", g: "#1f3f22" }, OT_CLS = { c: "c1", t: "gt", g: "gs" };
+const otLabel = o => o.name || `${OT_NAME[o.k]} ${o.id.slice(1)}`;
+function otHeadHTML(o) {
+  const vis = otVisible(o);
+  return `<div class="hd"><span class="bdg" data-omove="${o.id}" style="background:${OT_BG[o.k]}" title="끌어서 앞뒤 순서 바꾸기 · 위 줄이 화면 앞">${o.id}</span>
+    <button class="ic ${vis ? "on" : ""}"${o.id === "C1" ? ' id="hCap"' : ""} data-ohide="${o.id}" title="${vis ? "숨기기 (내보낼 때도 빠져요)" : "보이기"}">${vis ? ICON.eye : ICON.eyeoff}</button>
+    <button class="ic ${o.lock ? "on" : ""}" data-olock="${o.id}" title="${o.lock ? "잠금 풀기" : "잠그기 (실수로 안 바뀌게)"}">${o.lock ? ICON.lock : ICON.unlock}</button>
+    <span class="hint" data-oset="${o.id}" title="${esc(`${OT_NAME[o.k]} ${o.id.slice(1)}${o.name ? " · " + o.name : ""}`)} · 두 번 눌러 이름 바꾸기">${esc(otLabel(o))}</span><div class="sp"></div>
+    <button class="ic ogear" data-oset="${o.id}" title="이 줄 설정">⚙</button></div>`;
+}
+// 글자·그림 줄 칸: 자막은 그 줄 자막만 (멀리서 본 작은 자막은 한 덩어리 · 다른 영상 자막은 늘 C1) · 타이틀 · 도형+전술 그림
+function otLaneHTML(o, v0, v1, tot) {
+  const isSel = (k, id) => selX && selX.k === k && selX.id === id;
+  if (o.k === "c") {
+    let h = "", run = null;
+    const flush = () => { if (run) h += `<div class="clip caprun" style="left:${run.a * zoom}px;width:${Math.max(3, (run.b - run.a) * zoom)}px"></div>`; run = null; };
+    for (const c of capsTL()) {
+      if (c.trk !== o.id || c.e < v0 || c.s > v1) continue;
+      const w = (c.e - c.s) * zoom, sel = isSel("caption", c.cap.id);
+      if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
+      flush();
+      h += c.mid !== "main" ? `<div class="clip ocap" data-ocap="${esc(c.mid)}" title="${esc(otherCapNote(c.mid))}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`
+        : `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`;
+    }
+    flush(); return h;
+  }
+  if (o.k === "t") return S.titles.filter(g => trkOf(g, "t") === o.id).map(g => `<div class="clip ${isSel("title", g.id) ? "sel" : ""}" data-gk="title" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px"><div class="eh l"></div><div class="lbl">${esc(g.text)}</div><div class="eh r"></div></div>`).join("");
+  return S.shapes.filter(g => trkOf(g, "g") === o.id).map(g => { const s0 = g.full ? 0 : g.start, d = g.full ? tot : g.dur; return `<div class="clip ${isSel("shape", g.id) ? "sel" : ""}" data-gk="shape" data-gid="${g.id}" style="left:${s0 * zoom}px;width:${Math.max(4, d * zoom)}px">${g.full ? "" : '<div class="eh l"></div>'}<div class="lbl">${esc(g.name || "도형")}${g.full ? " · 전체" : ""}</div>${g.full ? "" : '<div class="eh r"></div>'}</div>`; }).join("")
+    + S.tactics.filter(g => trkOf(g, "g") === o.id).map(g => `<div class="clip tacc ${isSel("tact", g.id) ? "sel" : ""}" data-gk="tact" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px" title="전술 그림 · ${esc(TAC_NAMES[g.kind] || "")}"><div class="eh l"></div><div class="lbl">${esc(g.kind === "label" && g.text ? `${TAC_NAMES.label} · ${g.text}` : g.name || TAC_NAMES[g.kind] || "전술 그림")}${g.follow ? " · 따라감" : ""}</div><div class="eh r"></div></div>`).join("");
 }
 function hasFx(it) {
   const f = it.fx || {};
@@ -2662,28 +2876,10 @@ function renderTimeline() {
   for (const ev of EVENTS) if (ev.type !== "speech") for (const t of src2tl(ev.t)) if (t >= v0 && t <= v1) { const px = ev.type + Math.round(t * zoom); if (mkPx.has(px)) continue; mkPx.add(px); marks.push(`<div class="mk ${ev.type}" style="left:${t * zoom}px" title="${ev.type === "peak" ? "하이라이트 후보" : "컷 후보"}"></div>`); }
   S.markers.forEach((m, i) => marks.push(`<div class="umk" data-mk="${i}" style="left:${m.t * zoom}px" title="마커${m.name ? " · " + esc(m.name) : ""} (두 번 클릭: 이름 · 오른쪽 클릭: 지우기)"></div>`));
   const lane = inner => `<div class="lane" style="width:${Wd}px">${inner}</div>`;
-  let caps = "";
-  if (S.captionsOn) { // 자막 칸: 너무 작아진(멀리서 본) 자막은 이어진 것끼리 한 덩어리로 (누르면 그 자리 자막이 골라짐)
-    let run = null;
-    const flush = () => { if (run) caps += `<div class="clip caprun" style="left:${run.a * zoom}px;width:${Math.max(3, (run.b - run.a) * zoom)}px"></div>`; run = null; };
-    for (const c of capsTL()) {
-      if (c.e < v0 || c.s > v1) continue;
-      const w = (c.e - c.s) * zoom, sel = selX && selX.k === "caption" && selX.id === c.cap.id;
-      if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
-      flush();
-      caps += c.mid !== "main" ? `<div class="clip ocap" data-ocap="${esc(c.mid)}" title="${esc(otherCapNote(c.mid))}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`
-        : `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`;
-    }
-    flush();
-  }
-  const tit = S.titles.map(g => `<div class="clip ${selX && selX.k === "title" && selX.id === g.id ? "sel" : ""}" data-gk="title" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px"><div class="eh l"></div><div class="lbl">${esc(g.text)}</div><div class="eh r"></div></div>`).join("");
-  const shp = S.shapes.map(g => { const s0 = g.full ? 0 : g.start, d = g.full ? tot : g.dur; return `<div class="clip ${selX && selX.k === "shape" && selX.id === g.id ? "sel" : ""}" data-gk="shape" data-gid="${g.id}" style="left:${s0 * zoom}px;width:${Math.max(4, d * zoom)}px">${g.full ? "" : '<div class="eh l"></div>'}<div class="lbl">${esc(g.name || "도형")}${g.full ? " · 전체" : ""}</div>${g.full ? "" : '<div class="eh r"></div>'}</div>`; }).join("");
-  const tcs = S.tactics.map(g => `<div class="clip tacc ${selX && selX.k === "tact" && selX.id === g.id ? "sel" : ""}" data-gk="tact" data-gid="${g.id}" style="left:${g.start * zoom}px;width:${Math.max(4, g.dur * zoom)}px" title="전술 그림 · ${esc(TAC_NAMES[g.kind] || "")}"><div class="eh l"></div><div class="lbl">${esc(g.kind === "label" && g.text ? `${TAC_NAMES.label} · ${g.text}` : g.name || TAC_NAMES[g.kind] || "전술 그림")}${g.follow ? " · 따라감" : ""}</div><div class="eh r"></div></div>`).join("");
-  const rows = [["ruler", `<div class="row ruler" data-tk="ruler"><div class="hd"><span class="hint" style="margin-left:4px">시간</span><div class="sp"></div><button class="btn sm" id="addTrk" title="영상·오디오 트랙 추가 / 빈 트랙 지우기" style="padding:0 6px">+ 트랙</button></div>${lane(ticks + marks.join(""))}</div>`],
-    ["C1", `<div class="row c1" data-tk="C1"><div class="hd"><span class="bdg" style="background:#5a3610">C1</span><button class="ic ${S.captionsOn ? "on" : ""}" id="hCap" title="자막 보이기/숨기기">${S.captionsOn ? ICON.eye : ICON.eyeoff}</button><span class="hint">자막</span></div>${lane(caps)}</div>`],
-    ["T", `<div class="row gt" data-tk="T"><div class="hd"><span class="bdg" style="background:#3c2457">T</span><span class="hint" style="margin-left:26px">타이틀</span></div>${lane(tit)}</div>`],
-    ["G", `<div class="row gs" data-tk="G"><div class="hd"><span class="bdg" style="background:#1f3f22">G</span><span class="hint" style="margin-left:26px">도형</span></div>${lane(shp + tcs)}</div>`]];
-  for (const r of rowList().slice(4)) {
+  const rows = [["ruler", `<div class="row ruler" data-tk="ruler"><div class="hd"><span class="hint" style="margin-left:4px">시간</span><div class="sp"></div><button class="btn sm" id="addTrk" title="영상·오디오·자막·타이틀·도형 트랙 추가 / 빈 트랙 지우기" style="padding:0 6px">+ 트랙</button></div>${lane(ticks + marks.join(""))}</div>`]];
+  for (const o of (S.otracks || []).slice().reverse()) // 글자·그림 줄 (위 줄 = 화면 앞 · 숨긴 줄도 클립은 흐리게 보임)
+    rows.push([o.id, `<div class="row ${OT_CLS[o.k]} ${o.lock ? "lock" : ""} ${otVisible(o) ? "" : "off"} ${selX && selX.k === "otrack" && selX.id === o.id ? "osel" : ""}" data-tk="${o.id}" data-ok="${o.k}">${otHeadHTML(o)}${lane(otLaneHTML(o, v0, v1, tot))}</div>`]);
+  for (const r of rowList().filter(x => x.tr)) {
     const tr = r.tr, its = S.items.filter(i => i.track === tr.id).map(i => itemHTML(i, v0, v1)).join("");
     const trs = S.trans.filter(x => x.track === tr.id).map(x => { const rg = trRange(x); if (!rg || rg[1] < v0 || rg[0] > v1) return "";
       return `<div class="trn ${selX && selX.k === "trans" && selX.id === x.id ? "sel" : ""}" data-tr="${x.id}" style="left:${rg[0] * zoom}px;width:${Math.max(6, (rg[1] - rg[0]) * zoom)}px" title="${TRN[x.type] || ""} · ${(rg[1] - rg[0]).toFixed(2)}초"><div class="teh l"></div>${TRN[x.type] || ""}<div class="teh r"></div></div>`; }).join("");
@@ -2696,7 +2892,11 @@ function renderTimeline() {
   if (!$("playhead")) tk.innerHTML = `<div class="playhead" id="playhead"></div><div class="snapline" id="snapline"></div><div class="marquee" id="marquee"></div><div class="inout" id="inoutBox" style="display:none"></div>`;
   const cur = [...tk.children].filter(x => x.classList.contains("row")), mk = h => { const t = document.createElement("template"); t.innerHTML = h; const el = t.content.firstElementChild; el._h = h; return el; };
   if (cur.length !== rows.length || cur.some((r, i) => r.dataset.tk !== rows[i][0])) {
+    // 줄이 생기거나 빠짐: 굴려 둔 타임라인이면 보던 줄이 그 자리에 그대로 (위쪽에 줄이 생겨도 아래로 밀리지 않게 · D-296)
+    const sc2 = $("tlscroll"), ru = cur.find(r => r.dataset.tk === "ruler"), lim = sc2.getBoundingClientRect().top + (ru ? ru.offsetHeight : 0);
+    const an = sc2.scrollTop > 0 ? cur.find(r => r.dataset.tk !== "ruler" && r.getBoundingClientRect().bottom > lim + 1) : null, at = an ? [an.dataset.tk, an.getBoundingClientRect().top] : null;
     cur.forEach(r => r.remove()); const ph = $("playhead"); for (const [, h] of rows) tk.insertBefore(mk(h), ph);
+    const nr = at && tk.querySelector(`.row[data-tk="${at[0]}"]`); if (nr) sc2.scrollTop += nr.getBoundingClientRect().top - at[1];
   } else rows.forEach(([, h], i) => { if (cur[i]._h !== h) tk.replaceChild(mk(h), cur[i]); });
   css($("playhead"), "left", HD + T * zoom + "px");
   const iob = $("inoutBox");
@@ -2815,20 +3015,18 @@ $("tracks").addEventListener("mousedown", ev => {
   if (ev.button !== 0) return;
   hideMenu(); selKf = null;
   const t = ev.target;
+  if (t.closest("[data-omove]")) return otDrag(ev, t.closest("[data-omove]").dataset.omove); // 글자·그림 줄 머리 배지: 위아래로 끌어 앞뒤 순서 (D-296)
   if (t.closest(".hd")) return;
   const row = t.closest(".row"); if (!row) return;
   const rk = row.dataset.tk, tAt = xToT(ev);
   if (rk === "ruler") { const mv = e => { const m = snapTo([xToT(e)], new Set()); seek(xToT(e) + (e.shiftKey ? m.adj : 0)); }; mv(ev); dragSeek(mv); return; }
   if (tool === "hand") return handDrag(ev);
   if (tool === "zoom") return setZoom(zoom * (ev.altKey ? 1 / 1.6 : 1.6), tAt);
-  if (rk === "C1") {
-    const run = t.closest(".caprun") ? capsTL().find(x => tAt >= x.s && tAt < x.e) : null;
-    const om = t.closest("[data-ocap]") ? t.closest("[data-ocap]").dataset.ocap : run && run.mid !== "main" ? run.mid : null;
-    if (om) { seek(tAt); return toast(otherCapNote(om)); } // D-284 · 어느 영상인지 이름으로
-    const c = t.closest("[data-cap]"), hit = c ? c.dataset.cap : run ? run.cap.id : null;
-    if (hit) { selX = { k: "caption", id: hit }; selI.clear(); seek(tAt); renderTimeline(); renderPanels(); focusCap(hit, false); } else emptyDown(ev, rk, tAt); return;
+  const ot = OTK(rk);
+  if (ot) { // 글자·그림 줄: 잠긴 줄은 고르지도 옮기지도 않음 (영상·소리 트랙과 같은 안내)
+    if (ot.lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
+    return ot.k === "c" ? capDown(ev, rk, tAt) : gfxDown(ev, rk, tAt);
   }
-  if (rk === "T" || rk === "G") return gfxDown(ev, rk, tAt);
   if (TRK(rk).lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); // 클립·장면 전환 모두
   const trn = t.closest(".trn");
   if (trn) return trnDown(ev, trn);
@@ -3105,25 +3303,93 @@ function slideDrag(ev, it) {
   const up = e => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); draw.cancel(); dtip(e, null); if (!moved) { renderTimeline(); renderPanels(); return; } apply(e); pushHist("밀기", before); changed(false); };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
+// 끄는 동안 놓을 줄 표시 (노란 테두리)
+function otTarget(id) { document.querySelectorAll("#tracks .row.otgt").forEach(r => { if (r.dataset.tk !== id) r.classList.remove("otgt"); }); const r = id && document.querySelector(`#tracks .row[data-tk="${id}"]`); if (r) r.classList.add("otgt"); }
+const otFullNote = "줄은 종류마다 9개까지예요 · 맨 위 줄에 겹쳐 넣었어요";
+// 자막 줄 (D-296): 누르면 그 자막을 고름 (예전과 같음 · 다른 영상 자막은 안내) · 위아래로 끌면 다른 자막 줄로 (시간은 그대로)
+// 자막 줄은 모든 편집본이 함께 씀 → 옮긴 자막은 모든 편집본에서 그 줄 · 같은 때 자막이 있는 줄에는 못 놓음
+function capDown(ev, rk, tAt) {
+  const t = ev.target, run = t.closest(".caprun") ? capsTL().find(x => x.trk === rk && tAt >= x.s && tAt < x.e) : null;
+  const om = t.closest("[data-ocap]") ? t.closest("[data-ocap]").dataset.ocap : run && run.mid !== "main" ? run.mid : null;
+  if (om) { seek(tAt); return toast(otherCapNote(om)); } // D-284 · 어느 영상인지 이름으로
+  const c = t.closest("[data-cap]"), hit = c ? c.dataset.cap : run ? run.cap.id : null;
+  if (!hit) return emptyDown(ev, rk, tAt);
+  selX = { k: "caption", id: hit }; selI.clear(); seek(tAt); renderTimeline(); renderPanels(); focusCap(hit, false);
+  const cap = P.captions.find(x => x.id === hit); if (!cap) return;
+  const y0 = ev.clientY; let to = null, on = false;
+  const mv = e => {
+    if (!on && Math.abs(e.clientY - y0) < 6) return; on = true;
+    const r = rowAtY(e.clientY), o = OTK(r); to = o && o.k === "c" && !o.lock ? o.id : null; otTarget(to);
+    dtip(e, to ? (to === otCap(cap) ? "같은 줄" : `${otLabel(o)} 줄로`) : "자막 줄 위에 놓아요");
+  };
+  const up = e => {
+    removeEventListener("mousemove", mv); removeEventListener("mouseup", up); otTarget(null); dtip(e, null);
+    if (!on || !to || to === otCap(cap)) return;
+    if (otHits("c", +cap.start, +cap.end, cap).some(h => h.id === to)) return toast("그 줄에는 같은 때 자막이 있어요");
+    commit("자막 줄 옮기기"); setTrk(cap, to); P.sequences.forEach(ensureSeq); capKey = ""; changed();
+    toast("모든 편집본에서 이 줄에 보여요");
+  };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+// 줄 머리 배지를 위아래로 끌어 앞뒤 순서 바꾸기 — 글자·그림 줄끼리만 (영상 트랙 사이·아래로는 못 감) · 한 번에 되돌리기 한 단계
+function otDrag(ev, id) {
+  ev.preventDefault();
+  const rows = () => [...document.querySelectorAll("#tracks .row[data-ok]")], y0 = ev.clientY;
+  let on = false, at = null, line = $("otline");
+  if (!line) { line = document.createElement("div"); line.id = "otline"; line.className = "otline"; $("tracks").appendChild(line); }
+  const mv = e => {
+    if (!on && Math.abs(e.clientY - y0) < 4) return; on = true;
+    const rs = rows(), tr = $("tracks").getBoundingClientRect(); if (!rs.length) return;
+    let k = rs.length; for (let i = 0; i < rs.length; i++) { const b = rs[i].getBoundingClientRect(); if (e.clientY < b.top + b.height / 2) { k = i; break; } }
+    at = k; const y = k < rs.length ? rs[k].getBoundingClientRect().top : rs[rs.length - 1].getBoundingClientRect().bottom;
+    css(line, "display", "block"); css(line, "top", y - tr.top - 1 + "px");
+    dtip(e, "위에 있는 줄이 화면 앞에 보여요");
+  };
+  const up = e => {
+    removeEventListener("mousemove", mv); removeEventListener("mouseup", up); css(line, "display", "none"); dtip(e, null);
+    if (!on || at == null) { selX = { k: "otrack", id }; selI.clear(); setRtab("fx", true); renderTimeline(); return; } // 누르기만: 이 줄 설정
+    const n = S.otracks.length, from = S.otracks.findIndex(o => o.id === id), top = rows().findIndex(r => r.dataset.tk === id); // 화면 줄 k = 목록 n-1-k
+    let to = n - at; if (at > top) to = n - at; else to = n - at - 1; // 위에서 at 번째 틈 → 목록 자리 (자기 자리 빼고)
+    to = clamp(to, 0, n - 1);
+    if (to === from) return;
+    commit("트랙 순서"); otMove(id, to); changed(false); toast("위에 있는 줄이 화면 앞에 보여요");
+  };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+// 줄 차례 한 단계 바꾸기 (메뉴·줄 설정 단추): front 맨 앞 · up 앞으로 · down 뒤로 · back 맨 뒤
+function otOrder(id, how) {
+  const n = S.otracks.length, i = S.otracks.findIndex(o => o.id === id); if (i < 0) return;
+  const to = how === "front" ? n - 1 : how === "back" ? 0 : how === "up" ? i + 1 : i - 1;
+  if (to < 0 || to >= n || to === i) return toast(how === "front" || how === "up" ? "이미 맨 앞 줄이에요" : "이미 맨 뒤 줄이에요");
+  commit("트랙 순서"); otMove(id, to); changed(false); toast("위에 있는 줄이 화면 앞에 보여요");
+}
 function gfxDown(ev, rk, tAt) {
   const ce = ev.target.closest(".clip"); if (!ce) return emptyDown(ev, rk, tAt);
   const k = ce.dataset.gk, id = ce.dataset.gid, g = (k === "title" ? S.titles : k === "tact" ? S.tactics : S.shapes).find(x => x.id === id);
+  if (!g) return;
   selX = { k, id }; selI.clear(); setRtab("fx");
   if (!g.full && (T < g.start || T >= g.start + g.dur)) seek(Math.min(g.start + Math.min(0.5, g.dur / 2), g.start + g.dur - 0.05));
   if (g.full) { renderTimeline(); renderPanels(); return; }
-  const edge = ev.target.classList.contains("eh") ? (ev.target.classList.contains("l") ? "l" : "r") : null;
-  const before = JSON.stringify(P), o = { start: g.start, dur: g.dur }, x0 = ev.clientX; let moved = false;
+  const edge = ev.target.classList.contains("eh") ? (ev.target.classList.contains("l") ? "l" : "r") : null, K = k === "title" ? "t" : "g";
+  const before = JSON.stringify(P), o = { start: g.start, dur: g.dur }, x0 = ev.clientX, y0 = ev.clientY; let moved = false;
   const mv = e => {
-    const d = (e.clientX - x0) / zoom; moved = moved || Math.abs(e.clientX - x0) > 3; if (!moved) return;
+    const d = (e.clientX - x0) / zoom; moved = moved || Math.abs(e.clientX - x0) > 3 || (!edge && Math.abs(e.clientY - y0) > 6); if (!moved) return;
     const ig = new Set([id]);
     if (edge === "l") { let ns = o.start + d; ns += snapTo([ns], ig).adj; ns = clamp(fr(ns), 0, o.start + o.dur - 0.3); g.dur = o.dur - (ns - o.start); g.start = ns; }
     else if (edge === "r") { let ne = o.start + o.dur + d; ne += snapTo([ne], ig).adj; g.dur = Math.max(0.3, fr(ne) - g.start); }
-    else { let ns = Math.max(0, o.start + d); const sn = snapTo([ns, ns + o.dur], ig); g.start = fr(Math.max(0, ns + sn.adj)); mv.at = sn.at; }
+    else {
+      let ns = Math.max(0, o.start + d); const sn = snapTo([ns, ns + o.dur], ig); g.start = fr(Math.max(0, ns + sn.adj)); mv.at = sn.at;
+      const r = OTK(rowAtY(e.clientY)); if (r && r.k === K && !r.lock && trkOf(g, K) !== r.id) setTrk(g, r.id); // 위아래: 같은 종류의 잠기지 않은 줄로 (타이틀 ↔ 도형은 안 됨)
+    }
     rd(e); frameDirty = true;
   };
   const rd = dragFrame(() => { renderTimeline(); showSnap(mv.at); });
   const up = () => { removeEventListener("mousemove", mv); removeEventListener("mouseup", up); rd.cancel(); showSnap(null);
-    if (moved) { pushHist(k === "title" ? "타이틀 옮기기" : k === "tact" ? "전술 그림 옮기기" : "도형 옮기기", before); changed(false); } else { renderTimeline(); renderPanels(); } };
+    if (!moved) { renderTimeline(); renderPanels(); return; }
+    const st = otSettle(g, K); // 자기 줄에서 겹치면 위쪽 빈 줄로 (없으면 새 줄 · D-299)
+    pushHist(k === "title" ? "타이틀 옮기기" : k === "tact" ? "전술 그림 옮기기" : "도형 옮기기", before); changed(false);
+    if (st) toast(st.full ? "줄은 종류마다 9개까지예요 · 겹친 채로 두었어요" : `겹쳐서 ${OT_NAME[K]} ${st.id.slice(1)} 줄로 옮겼어요`);
+  };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
 function trnDown(ev, el) {
@@ -3182,8 +3448,56 @@ function addTrack(k) {
 function removeEmptyTracks() {
   const rm = [];
   for (const k of ["v", "a"]) { const l = S.tracks.filter(t => t.k === k); for (let i = l.length - 1; i >= 3; i--) { if (S.items.some(x => x.track === l[i].id)) break; rm.push(l[i].id); } }
-  if (!rm.length) return toast("지울 빈 트랙이 없어요 (기본 3개씩은 남겨요)");
-  commit("빈 트랙 지우기"); S.tracks = S.tracks.filter(t => !rm.includes(t.id)); changed(false); toast(`${rm.join(", ")} 트랙을 지웠어요`);
+  // 글자·그림 줄: 첫 줄(C1·T1·G1)이 아닌 빈 줄 모두 · 빈 자막 줄은 모든 편집본에서 (자막 줄은 함께 씀 · D-296)
+  const orm = S.otracks.filter(o => !otBaseId(o.id) && otEmpty(o)).map(o => o.id), crm = new Set(orm.filter(id => id[0] === "C"));
+  if (!rm.length && !orm.length) return toast("지울 빈 트랙이 없어요 (기본 3개씩은 남겨요)");
+  commit("빈 트랙 지우기"); S.tracks = S.tracks.filter(t => !rm.includes(t.id));
+  S.otracks = S.otracks.filter(o => !orm.includes(o.id));
+  for (const q of P.sequences) if (q !== S && q.otracks) q.otracks = q.otracks.filter(o => !crm.has(o.id));
+  if (selX && selX.k === "otrack" && orm.includes(selX.id)) selX = null;
+  changed(false); toast(`${[...rm, ...orm].join(", ")} 트랙을 지웠어요`);
+}
+// '+ 트랙 → 자막·타이틀·도형 트랙 추가': 같은 종류 맨 위 줄 바로 위에 새 줄 · 고르고 설정을 엶 (D-302)
+function addOtrack(k) {
+  if (!otNewId(k)) return toast("줄은 종류마다 9개까지예요");
+  commit(`${OT_NAME[k]} 트랙 추가`); const o = otNew(k); otIns(S.otracks, o);
+  selX = { k: "otrack", id: o.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`${otLabel(o)} 줄을 만들었어요 · 위에 있는 줄이 화면 앞에 보여요`);
+}
+// 줄 지우기: 첫 줄이 아니고 빈 줄만 (자막 줄은 이 편집본에서만 빠짐 · 다른 편집본 모양은 그대로)
+function deleteOtrack(id) {
+  const o = OTK(id); if (!o) return;
+  if (otBaseId(id) || !otEmpty(o)) return toast(otBaseId(id) ? "첫 줄(C1·T1·G1)은 지울 수 없어요" : "줄이 비어야 지울 수 있어요");
+  commit("줄 지우기"); S.otracks = S.otracks.filter(x => x !== o); if (selX && selX.k === "otrack" && selX.id === id) selX = null; changed(false); toast(`${otLabel(o)} 줄을 지웠어요`);
+}
+// 고른 것(자막·타이틀·도형·전술 그림·줄)이 놓인 줄
+function otSelRow() {
+  if (!selX) return null;
+  if (selX.k === "otrack") return selX.id;
+  if (selX.k === "caption") { const c = P.captions.find(x => x.id === selX.id); return c ? otCap(c) : null; }
+  const ls = selX.k === "title" ? S.titles : selX.k === "shape" ? S.shapes : selX.k === "tact" ? S.tactics : null, g = ls && ls.find(x => x.id === selX.id);
+  return g ? trkOf(g, selX.k === "title" ? "t" : "g") : null;
+}
+const otLockedX = (x, k) => { const o = OTK(k === "c" ? otCap(x) : trkOf(x, k)); return !!(o && (o.lock || !otVisible(o))); }; // 화면에서 옮기기·손잡이를 숨길 줄 (잠금·숨김)
+function otRename(id, el) {
+  const o = OTK(id); if (!o) return;
+  const inp = document.createElement("input"); inp.className = "oname"; inp.value = o.name || ""; inp.placeholder = `${OT_NAME[o.k]} ${id.slice(1)}`; inp.maxLength = 30;
+  el.replaceWith(inp); inp.focus(); inp.select();
+  let done = false;
+  const fin = ok => { if (done) return; done = true; const n = cutText(inp.value.trim(), 30), row = inp.closest(".row"); if (row) row._h = ""; // 그 줄을 다시 그림 (입력 칸 → 이름)
+    if (ok && n !== (o.name || "")) { commit("줄 이름"); if (n) o.name = n; else delete o.name; changed(false); } else renderTimeline(); };
+  inp.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") fin(true); if (e.key === "Escape") fin(false); };
+  inp.onblur = () => fin(true);
+  inp.onmousedown = e => e.stopPropagation();
+}
+function otMenu(ev, id) {
+  const o = OTK(id); if (!o) return;
+  const canDel = !otBaseId(id) && otEmpty(o);
+  showMenu(ev, [["맨 앞으로", () => otOrder(id, "front")], ["앞으로 한 칸", () => otOrder(id, "up")], ["뒤로 한 칸", () => otOrder(id, "down")], ["맨 뒤로", () => otOrder(id, "back")], null,
+    ["이 줄 설정", () => { selX = { k: "otrack", id }; selI.clear(); setRtab("fx", true); renderTimeline(); }],
+    ["이름 바꾸기…", () => { const el = document.querySelector(`#tracks .row[data-tk="${id}"] .hd span[data-oset]`); if (el) otRename(id, el); }],
+    ["같은 종류 줄 추가", () => addOtrack(o.k)], null,
+    ["이 줄 지우기", () => deleteOtrack(id), canDel ? "" : otBaseId(id) ? "첫 줄은 못 지워요" : "줄이 비어야 지울 수 있어요"]]);
+  if (!canDel) { const bs = $("cmenu").querySelectorAll("[data-mi]"), last = bs[bs.length - 1]; if (last) last.classList.add("dim"); }
 }
 function jumpMarker(dir) { const ts = S.markers.map(m => m.t).sort((a, b) => a - b); const n = dir < 0 ? ts.filter(t => t < T - HF).pop() : ts.find(t => t > T + HF); if (n === undefined) return toast(dir < 0 ? "앞쪽에 마커가 없어요" : "뒤쪽에 마커가 없어요"); pause(); seek(n); autoscroll(); }
 async function freezeFrame() {
@@ -3290,8 +3604,8 @@ $("sIns").onclick = () => srcPlace("insert"); $("sOver").onclick = () => srcPlac
 function drawGfxBox() {
   const box = $("gbox"), F = $("frame"), fr_ = F.getBoundingClientRect();
   let r = null;
-  if (selX && selX.k === "title") { const el = ovEls["t" + selX.id]; if (el) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; } }
-  if (selX && selX.k === "shape") { const sh = S.shapes.find(x => x.id === selX.id); if (sh && shapeOn(sh, T)) r = { l: sh.x * fr_.width, t: sh.y * fr_.height, w: sh.w * fr_.width, h: sh.h * fr_.height }; }
+  if (selX && selX.k === "title") { const el = ovEls["t" + selX.id], g = S.titles.find(x => x.id === selX.id); if (el && g && !otLockedX(g, "t")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; } }
+  if (selX && selX.k === "shape") { const sh = S.shapes.find(x => x.id === selX.id); if (sh && shapeOn(sh, T) && !otLockedX(sh, "g")) r = { l: sh.x * fr_.width, t: sh.y * fr_.height, w: sh.w * fr_.width, h: sh.h * fr_.height }; } // 잠긴·숨긴 줄은 화면에서 안 옮김
   if (!r || playing) return css(box, "display", "none");
   css(box, "display", "block"); css(box, "left", r.l + "px"); css(box, "top", r.t + "px"); css(box, "width", r.w + "px"); css(box, "height", r.h + "px");
 }
@@ -3321,6 +3635,7 @@ const TEMPLATES = {
 function tplTitle(st) {
   if (!S.titles.some(t => t.plan !== "topic")) S.titles.unshift({ id: nid(), text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: total(), style: { ...S.captionStyle, weight: "Black", size: 100, effect: "pop" } });
   S.titles.forEach(t => { if (t.plan !== "topic") Object.assign(t.style, st); });
+  for (const o of S.otracks || []) if (o.k === "t" && o.style) for (const k in st) if (!["x", "y", "align", "rot"].includes(k)) o.style[k] = st[k]; // 타이틀 줄 기본 모양도 글자 모양만 (D-302)
   // 첫머리 주제 줄(BR-120)은 자기가 맞춘 큰 제목(under — MSG 쇼츠는 첫 2.5초 큰 줄 · 끝의 '다시 보기 ▶' 같은 다른 글자 말고)에 맞춰 다시 놓음
   S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, topicUnder(t) || S.titles.find(x => x.plan !== "topic")));
 }
@@ -3330,16 +3645,28 @@ const SHAPES = {
   "하단 띠": () => ({ x: 0, y: 0.72, w: 1, h: 0.12, color: "#000000", opacity: 0.7, radius: 0, full: true }),
   "둥근 라벨": () => ({ x: 0.3, y: 0.06, w: 0.4, h: 0.05, color: "#E5484D", opacity: 1, radius: 100, full: true }),
 };
+// 새 항목을 놓은 줄 안내 (D-299): 새 줄을 만들었거나 9줄이 다 차서 겹쳐 넣었을 때 · 자막은 다른 자막 줄에 넣었을 때도 (모든 편집본에서 그 줄)
+function otNote(r, k) {
+  if (r.full) return otFullNote;
+  const nm = `${OT_NAME[k]} ${r.id.slice(1)}`;
+  if (k === "c" && r.id !== "C1") return `${r.made ? `겹쳐서 ${nm} 줄을 만들어 넣었어요` : `${nm} 줄에 넣었어요`} · 이 자막은 모든 편집본에서 이 줄에 보여요`;
+  return r.made ? `겹쳐서 ${nm} 줄을 만들어 넣었어요` : "";
+}
+// 새로 넣을 줄로 먼저 볼 줄: 고른 줄 · 고른 것이 놓인 줄 (같은 종류일 때)
+function otPrefer(k) { const id = otSelRow(); return id && id[0] === k.toUpperCase() ? id : null; }
 function addShape(kind) {
   commit("도형 추가");
   const sh = { id: nid(), name: kind, start: fr(T), dur: Math.min(5, Math.max(1, total() - T)), ...SHAPES[kind]() };
-  S.shapes.push(sh); selX = { k: "shape", id: sh.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`${kind}을(를) 넣었어요 · 오른쪽에서 위치·크기·색 조절`);
+  const r = otPlace("g", sh.full ? [0, Infinity] : [sh.start, sh.start + sh.dur], { prefer: otPrefer("g"), sub: "shape" }); setTrk(sh, r.id); // 겹친 전술 그림 아래 · 겹친 도형 위
+  S.shapes.push(sh); selX = { k: "shape", id: sh.id }; selI.clear(); setRtab("fx", true); changed(false); toast(otNote(r, "g") || `${kind}을(를) 넣었어요 · 오른쪽에서 위치·크기·색 조절`);
 }
 const baseTitle = () => ({ ...S.captionStyle, weight: "Black", size: 104, y: 0.2, fill: "#FFD400", stroke: "#000000", strokeW: 8, bgOn: false, effect: "pop", x: 0.5, align: "center" });
 function addTitle() {
   commit("타이틀 추가");
-  const t = { id: nid(), text: "제목을 입력하세요", start: fr(T), dur: 3, style: baseTitle() };
-  S.titles.push(t); selX = { k: "title", id: t.id }; selI.clear(); setRtab("fx"); changed(false);
+  const t0 = fr(T), r = otPlace("t", [t0, t0 + 3], { prefer: otPrefer("t") }), o = OTK(r.id); // 겹치는 타이틀이 있으면 그 앞(위) 줄 (D-299)
+  const t = { id: nid(), text: "제목을 입력하세요", start: t0, dur: 3, style: { ...baseTitle(), ...((o && o.style) || {}) } }; // 줄 기본 모양이 있으면 그 모양으로 (D-302)
+  setTrk(t, r.id); S.titles.push(t); selX = { k: "title", id: t.id }; selI.clear(); setRtab("fx"); changed(false);
+  const note = otNote(r, "t"); if (note) toast(note);
   setTimeout(() => { const el = $("pTitleText"); if (el) { showPanel("r"); el.focus(); el.select(); } }, 50);  // 접어 둔 오른쪽 패널은 펴서 글자 칸을 보여 줌
 }
 // 에센셜 그래픽 프리셋
@@ -3356,13 +3683,14 @@ const GFX = {
   "큰 제목": { hint: "위쪽에 영상 제목", make: () => ({ shapes: [], titles: [{ text: cutText(S.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", style: { ...baseTitle(), size: 100, y: 0.2 } }], dur: Math.max(2, Math.min(total() - T, 6)) }) },
   "말풍선 박스": { hint: "검은 상자 위 흰 글씨", make: () => ({ shapes: [], titles: [{ text: "여기가 포인트!", style: { ...baseTitle(), size: 64, fill: "#FFFFFF", bgOn: true, bg: "#000000", bgOpacity: 0.75, strokeW: 10, effect: "fade", y: 0.45 } }], dur: 3 }) },
 };
-function addGfx(name, at) {
-  const g = GFX[name].make(), t0 = fr(at ?? T);
+function addGfx(name, at, row) {  // row: 끌어다 놓은 줄 (같은 종류면 그 줄부터 봄)
+  const g = GFX[name].make(), t0 = fr(at ?? T), pref = k => row && row[0] === k.toUpperCase() && OTK(row) ? row : otPrefer(k);
   commit(name);
-  let last = null;
-  for (const s of g.shapes) { const sh = { id: nid(), start: t0, dur: g.dur, ...s }; S.shapes.push(sh); }
-  for (const tt of g.titles) { last = { id: nid(), start: t0, dur: g.dur, ...tt }; S.titles.push(last); }
-  if (last) selX = { k: "title", id: last.id }; selI.clear(); setRtab("fx", true); changed(false); toast(`"${name}"을(를) 넣었어요 · 글자는 오른쪽에서 바꿔요`);
+  let last = null; const notes = [];
+  for (const s of g.shapes) { const sh = { id: nid(), start: t0, dur: g.dur, ...s }, r = otPlace("g", sh.full ? [0, Infinity] : [t0, t0 + g.dur], { prefer: pref("g"), sub: "shape" }); setTrk(sh, r.id); S.shapes.push(sh); notes.push(otNote(r, "g")); }
+  for (const tt of g.titles) { last = { id: nid(), start: t0, dur: g.dur, ...tt }; const r = otPlace("t", [t0, t0 + g.dur], { prefer: pref("t") }); setTrk(last, r.id); S.titles.push(last); notes.push(otNote(r, "t")); }
+  if (last) selX = { k: "title", id: last.id }; selI.clear(); setRtab("fx", true); changed(false);
+  toast(`"${name}"을(를) 넣었어요 · 글자는 오른쪽에서 바꿔요` + notes.filter(Boolean).map(n => " · " + n).join(""));
 }
 
 /* ---------- 자막 목록 ---------- */
@@ -3377,7 +3705,7 @@ function refreshCapOut() { // 목록은 그대로 두고 흐림만 다시 (chang
 function renderCaps() {
   const q = $("capSearch").value.trim();
   const inSeq = capInSeq();
-  const key = q + "|" + P.captions.map(c => c.id + c.start + c.end + c.text).join("|");
+  const key = q + "|" + P.captions.map(c => c.id + c.start + c.end + c.text + (c.trk || "")).join("|");
   if (key === capKey && document.activeElement && document.activeElement.closest("#capList") == null) {
     const byCap = new Map(P.captions.map(c => [c.id, c]));
     for (const r of $("capList").children) { const c = r.dataset.id && byCap.get(r.dataset.id); if (!c) continue;
@@ -3388,7 +3716,7 @@ function renderCaps() {
   $("capList").innerHTML = P.captions.filter(c => !q || c.text.includes(q)).map(c => `
     <div class="caprow ${selX && selX.k === "caption" && selX.id === c.id ? "sel" : ""} ${inSeq(c) ? "" : "out"}" data-id="${c.id}">
       <div class="bar"></div>
-      <div class="tc" data-seek="${c.id}">${mmss(c.start)}<br>${mmss(c.end)}</div>
+      <div class="tc" data-seek="${c.id}">${mmss(c.start)}<br>${mmss(c.end)}${c.trk && /^C[2-9]$/.test(c.trk) ? `<br><span class="ctag" title="이 자막이 놓인 줄 (모든 편집본 공용)">자막 ${c.trk.slice(1)}</span>` : ""}</div>
       <textarea rows="${Math.max(1, Math.ceil(c.text.length / 20))}" data-cap="${c.id}" spellcheck="false">${esc(c.text)}</textarea>
       <button class="cx" data-cx="${c.id}" title="이 대사 구간을 영상에서 잘라내기">✂</button>
     </div>`).join("") || `<div class="hint" style="padding:12px">자막이 없어요. 스튜디오의 보관함에서 "편집점 찾기"를 먼저 해 주세요.</div>`;
@@ -3435,7 +3763,10 @@ $("capAdd").onclick = () => { // 자막이 따라가는 원본 클립이 있는 
       : dl.rev ? "거꾸로 재생하는 클립에는 자막이 안 나와요" : "다시 보기·티저 클립에는 자막이 안 나와요");
   }
   const src = mt(it, T); commit("자막 추가"); const c = { id: nid(), start: src, end: Math.min(src + 2, it.out), text: "새 자막" };
-  P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); selX = { k: "caption", id: c.id }; changed();
+  // 같은 때(원본 시각) 자막이 있으면 다른 자막 줄 (없으면 새 줄 · 자막 줄은 모든 편집본이 함께 씀 · D-298·D-299)
+  const r = otPlace("c", [c.start, c.end], { prefer: otPrefer("c") }); setTrk(c, r.id);
+  P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); if (r.id !== "C1") P.sequences.forEach(ensureSeq);
+  selX = { k: "caption", id: c.id }; changed(); const note = otNote(r, "c"); if (note) toast(note);
   setTimeout(() => focusCap(c.id, true), 30);
 };
 
@@ -3480,6 +3811,12 @@ async function topicSetting() { try { const j = await (await fetch("/api/style/s
 function recTopic(s, on, top, cap, layout, items) {
   const txt = on ? (s.topicText ?? s.topic ?? "") : "";
   return txt && top ? topicTitle(txt, top, cap, s.length, !!s.hookSaid, videoTop(layout, items, (P.info || {}).width, (P.info || {}).height)) : null;
+}
+// 새 쇼츠의 자막 줄은 바탕 편집본의 자막 줄(이름·모양·차례) 그대로 (D-298) — 타이틀·도형 줄은 ensureOt 가 정함 (베낀 큰 제목의 trk 는 버림)
+function otCopyCaps(q, base) {
+  const cs = (base.otracks || []).filter(o => o.k === "c").map(o => JSON.parse(JSON.stringify(o))); if (!cs.length) return;
+  const at = q.otracks.findIndex(o => o.k === "c"), rest = q.otracks.filter(o => o.k !== "c");
+  rest.splice(at < 0 ? rest.length : Math.min(at, rest.length), 0, ...cs); q.otracks = rest; ensureSeq(q);
 }
 function recBase() {  // 새 쇼츠의 바탕: 첫 쇼츠 편집본의 큰 제목 모양·자막 모양 (위쪽 자막이면 큰 제목 아래로 · editor.py _stack_below 와 같은 뜻 · E4③)
   const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic") || null;
@@ -3556,7 +3893,7 @@ async function renderRec() {
     if (q.titles.length && q.captionStyle && (q.captionStyle.y ?? 0.8) < 0.3) q.captionStyle.y = 0.3;
     // 첫머리 주제 줄 (BR-120 · editor.py auto_sequences 와 같게) — 서버가 고른 글 (설정 '쇼츠 첫머리에 주제 한 줄 넣기'를 끄면 없음) · 바꿔 끼우면 큰 제목은 그 뒤부터
     const tk = q.titles.length ? recTopic(s, on, q.titles[0], q.captionStyle, q.layout, q.items) : null; if (tk) { swapIn(q.titles[0], tk); q.titles.push(tk); }
-    ensureSeq(q); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
+    ensureSeq(q); otCopyCaps(q, base); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {
     // 자동으로 만든 가편집(표시 rough)만 바꿈 · 복제·이름 바꾼 것은 'user', 예전 프로젝트는 열 때 editor.py 가 표시
@@ -3702,7 +4039,7 @@ async function runMsg() {
 }
 // MSG 가 받아쓰기를 다시 듣거나(새 방식) 클로드로 다듬었으면 그 자막을 프로젝트 자막으로 (직접 고친 자막이 있으면 물어봄) · 후보의 msgCaps 는 지움
 function msgCaps(res) {
-  const txt = cs => (cs || []).map(c => c.text).join("\n"), neu = res.captions;
+  const txt = cs => (cs || []).map(c => c.text + (c.trk ? "\t" + c.trk : "")).join("\n"), neu = res.captions; // 줄(trk)만 옮긴 자막도 고친 것 (editor.py _cap_text 와 같은 서명 · D-304)
   for (const q of res.sequences) delete q.msgCaps;
   if (!neu || !neu.length) return "";
   const cur = txt(P.captions);
@@ -3861,7 +4198,7 @@ function bindDrags(root) {
 }
 async function dropOn(kind, name, e, mode, atT) {
   const t = atT != null ? atT : e ? xToT(e) : T, rk = e ? rowAtY(e.clientY) : null;
-  if (kind === "gfx") return addGfx(name, e ? t : T);
+  if (kind === "gfx") return addGfx(name, e ? t : T, rk);
   if (kind === "media") {
     const [src, ...f] = name.split("|"), md = await addMedia(src, f.join("|")); if (!md) return;
     const t0 = fr(e || atT != null ? t : T), len = md.kind === "image" ? 5 : md.dur || 5, rt = rk && TRK(rk);
@@ -3913,8 +4250,8 @@ const PRESETS = {
   "박스형": { weight: "Bold", size: 58, fill: "#FFFFFF", bgOn: true, bg: "#000000", bgOpacity: 0.6, strokeW: 10, effect: "fade" },
   "강조 하이라이트": { weight: "Black", size: 70, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false, effect: "karaoke", highlight: "#FFD400" },
 };
-function styleEditor(prefix, st, title) {
-  return `<div class="pg"><h4><span class="dot" style="background:${title ? "var(--title)" : "var(--cap)"}"></span>${title ? "타이틀 스타일" : "자막 스타일 · 전체 적용"}</h4>
+function styleEditor(prefix, st, title, head) {  // head: 제목 글 (줄 설정 · D-302)
+  return `<div class="pg"><h4><span class="dot" style="background:${title ? "var(--title)" : "var(--cap)"}"></span>${head || (title ? "타이틀 스타일" : "자막 스타일 · 전체 적용")}</h4>
     ${title ? "" : `<div class="presets">${Object.keys(PRESETS).map(k => `<button class="btn" data-preset="${k}">${k}</button>`).join("")}</div>`}
     <div class="f"><label>굵기</label><div class="seg" id="${prefix}weight"><button data-v="Bold" class="${st.weight === "Bold" ? "on" : ""}">굵게</button><button data-v="Black" class="${st.weight === "Black" ? "on" : ""}">아주 굵게</button></div><span></span></div>
     ${slider(prefix + "size", "크기", st.size, 30, 160, 1, v => v + "px")}
@@ -3931,23 +4268,94 @@ function styleEditor(prefix, st, title) {
     <div class="f"><label>강조색</label><input type="color" id="${prefix}highlight" value="${st.highlight || "#FFD400"}"><span class="hint">노래방 효과용</span></div>
   </div>`;
 }
-function bindStyle(prefix, getSt, root) {
+function bindStyle(prefix, getSt, root, after) {  // after(k, v): 값을 바꾼 뒤 (타이틀 줄 기본 모양 → 그 줄 타이틀에도 · D-302)
   const $ = id => root.querySelector("#" + CSS.escape(id)); // 이 패널 안의 것만 (다른 탭에 같은 이름이 있어도 헷갈리지 않게)
   const live = () => { ver++; frameDirty = true; };
   let before = null;
   const start = () => { if (!before) before = JSON.stringify(P); };
   const end = () => { if (before && before !== JSON.stringify(P)) { pushHist("글자 스타일", before); scheduleSave(); renderTimeline(); } before = null; };
+  const set = (k, v) => { const st = getSt(); if (v === undefined) delete st[k]; else st[k] = v; if (after) after(k, v); };
   for (const k of ["size", "strokeW", "bgOpacity", "y", "x", "rot"]) {
     const el = $(prefix + k); if (!el) continue;
-    el.oninput = () => { start(); getSt()[k] = +el.value; $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : k === "rot" ? el.value + "°" : el.value + "px"; live(); };
+    el.oninput = () => { start(); set(k, +el.value); $(prefix + k + "V").textContent = ["bgOpacity", "y", "x"].includes(k) ? Math.round(el.value * 100) + "%" : k === "rot" ? el.value + "°" : el.value + "px"; live(); };
     el.onchange = end;
   }
-  for (const k of ["fill", "stroke", "bg", "highlight"]) { const el = $(prefix + k); el.oninput = () => { start(); getSt()[k] = el.value; live(); }; el.onchange = end; }
-  $(prefix + "bgOn").onchange = e => { start(); getSt().bgOn = e.target.checked; live(); end(); };
-  $(prefix + "effect").onchange = e => { start(); getSt().effect = e.target.value; live(); end(); };
-  if ($(prefix + "font")) $(prefix + "font").onchange = e => { start(); const st = getSt(); if (e.target.value) st.font = e.target.value; else delete st.font; live(); end(); };
-  $(prefix + "weight").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().weight = b.dataset.v; end(); renderPanels(); });
-  if ($(prefix + "align")) $(prefix + "align").querySelectorAll("button").forEach(b => b.onclick = () => { start(); getSt().align = b.dataset.v; live(); end(); renderPanels(); });
+  for (const k of ["fill", "stroke", "bg", "highlight"]) { const el = $(prefix + k); el.oninput = () => { start(); set(k, el.value); live(); }; el.onchange = end; }
+  $(prefix + "bgOn").onchange = e => { start(); set("bgOn", e.target.checked); live(); end(); };
+  $(prefix + "effect").onchange = e => { start(); set("effect", e.target.value); live(); end(); };
+  if ($(prefix + "font")) $(prefix + "font").onchange = e => { start(); set("font", e.target.value || undefined); live(); end(); };
+  $(prefix + "weight").querySelectorAll("button").forEach(b => b.onclick = () => { start(); set("weight", b.dataset.v); end(); renderPanels(); });
+  if ($(prefix + "align")) $(prefix + "align").querySelectorAll("button").forEach(b => b.onclick = () => { start(); set("align", b.dataset.v); live(); end(); renderPanels(); });
+}
+// 줄 설정 (D-302): 이름 · 보이기 · 잠그기 · 앞뒤 순서 · 빈 줄 지우기 · 자막 줄은 자막 모양 전체 · 타이틀 줄은 기본 모양 (글자 모양은 그 줄 타이틀에도)
+const OT_LOOK = ["weight", "size", "fill", "stroke", "strokeW", "bgOn", "bg", "bgOpacity", "effect", "highlight", "font"];
+const otRowStyle = o => o.style || ((S.titles.find(t => trkOf(t, "t") === o.id && t.plan !== "topic") || {}).style) || baseTitle(); // T 줄 기본 모양 (없으면 그 줄 첫 타이틀)
+// 자막 줄 모양을 고칠 대상: C1 은 captionStyle · 다른 줄은 처음 고칠 때 지금 보이는 모양(정하지 않았으면 C1 한 줄 위) 전체를 그 줄 style 로
+const capStyleTarget = o => o.id === "C1" ? S.captionStyle : (o.style && Object.keys(o.style).length ? o.style : (o.style = { ...capStyleOf(o) }));
+function bindCapStyle(o, el) {
+  bindStyle("cs_", () => capStyleTarget(o), el);
+  el.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { commit("자막 스타일"); Object.assign(capStyleTarget(o), PRESETS[b.dataset.preset]); changed(false); toast(`"${b.dataset.preset}" 스타일을 ${otLabel(o)} 줄에 적용했어요`); });
+}
+function bindRowTitleStyle(o, el) {
+  bindStyle("ts_", () => (o.style = o.style || { ...otRowStyle(o) }), el, (k, v) => {
+    if (!OT_LOOK.includes(k)) return; // 자리(가로·세로·정렬·기울기)는 새로 넣는 타이틀부터
+    for (const t of S.titles) if (trkOf(t, "t") === o.id && t.plan !== "topic") { if (v === undefined) delete t.style[k]; else t.style[k] = v; }
+    S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, topicUnder(t) || S.titles.find(x => x.plan !== "topic"))); // 첫머리 주제 줄은 큰 제목에 다시 맞춤 (tplTitle 과 같음)
+  });
+}
+function otCounts(o) {
+  if (o.k === "c") return `자막 ${P.captions.filter(c => otCap(c) === o.id).length}개 (모든 편집본 공용)`;
+  if (o.k === "t") return `타이틀 ${S.titles.filter(g => trkOf(g, "t") === o.id).length}개`;
+  return `도형 ${S.shapes.filter(g => trkOf(g, "g") === o.id).length}개 · 전술 그림 ${S.tactics.filter(g => trkOf(g, "g") === o.id).length}개`;
+}
+function renderOtPanel(el) {
+  const o = OTK(selX.id); if (!o) { selX = null; return renderFx(); }
+  const i = S.otracks.indexOf(o), canDel = !otBaseId(o.id) && otEmpty(o);
+  let h = `<div class="pg"><h4><span class="dot" style="background:${OT_BG[o.k]}"></span>${OT_NAME[o.k]} 줄 · ${o.id}</h4>
+    <div class="hint" style="margin-bottom:8px">${otCounts(o)}</div>
+    <div class="f"><label>이름</label><input class="s" id="otName" maxlength="30" placeholder="${OT_NAME[o.k]} ${o.id.slice(1)}" value="${esc(o.name || "")}"><span></span></div>
+    <div class="f"><label>보이기</label><label class="tog"><input type="checkbox" id="otVis" ${otVisible(o) ? "checked" : ""}> 화면·영상에 보이기</label><span></span></div>
+    ${o.k === "c" ? `<div class="hint" style="margin:-4px 0 8px">숨기면 내보낼 때도 빠져요 (SRT 자막 파일에는 남아요)</div>` : ""}
+    <div class="f"><label>잠그기</label><label class="tog"><input type="checkbox" id="otLock" ${o.lock ? "checked" : ""}> 실수로 안 바뀌게</label><span></span></div>
+    <div class="f"><label>앞뒤 순서</label><div class="nud"><button class="btn sm" data-oord="front">맨 앞</button><button class="btn sm" data-oord="up">앞으로</button><button class="btn sm" data-oord="down">뒤로</button><button class="btn sm" data-oord="back">맨 뒤</button></div><span></span></div>
+    <div class="hint" style="margin-bottom:8px">지금 위에서 ${S.otracks.length - i}번째 · 위 줄이 화면 앞 · 영상(V) 트랙보다는 늘 앞이에요</div>
+    ${canDel ? `<button class="btn" id="otDel">이 줄 지우기</button>` : otBaseId(o.id) ? "" : `<div class="hint">줄이 비어야 지울 수 있어요</div>`}</div>`;
+  if (o.k === "c") h += styleEditor("cs_", capStyleOf(o), false, `자막 스타일 · ${esc(otLabel(o))} 줄 전체`)
+    + `<div class="pg"><div class="hint" style="margin-bottom:6px">자막 글은 모든 편집본이 함께 써요 · 이 줄 모양은 이 편집본만</div>${o.id !== "C1" ? `<button class="btn sm" id="otReset">자막 1 기준으로 다시 맞추기</button>` : ""}</div>`;
+  if (o.k === "t") h += styleEditor("ts_", otRowStyle(o), true, "이 줄 타이틀 기본 모양")
+    + `<div class="pg hint">글자 모양(굵기·크기·색·테두리·배경·효과·글꼴)을 바꾸면 이 줄 타이틀이 모두 바뀌어요 (첫머리 주제 줄은 빼고) · 자리(가로·세로·정렬·기울기)는 이 줄에 새로 넣는 타이틀부터 써요</div>`;
+  el.innerHTML = h;
+  const nm = $("otName");
+  nm.onkeydown = e => { if (e.key === "Enter") nm.blur(); };
+  nm.onchange = () => { const n = cutText(nm.value.trim(), 30); if (n === (o.name || "")) return; commit("줄 이름"); if (n) o.name = n; else delete o.name; changed(false); };
+  $("otVis").onchange = e => { commit("줄 보이기"); if (o.id === "C1") S.captionsOn = e.target.checked; else if (e.target.checked) delete o.hide; else o.hide = true; changed(); };
+  $("otLock").onchange = e => { commit("줄 잠그기"); if (e.target.checked) o.lock = true; else delete o.lock; changed(false); };
+  el.querySelectorAll("[data-oord]").forEach(b => b.onclick = () => otOrder(o.id, b.dataset.oord));
+  if ($("otDel")) $("otDel").onclick = () => deleteOtrack(o.id);
+  if (o.k === "c") { bindCapStyle(o, el); if ($("otReset")) $("otReset").onclick = () => { commit("자막 줄 모양 다시 맞추기"); delete o.style; changed(false); toast(`${otLabel(o)} 줄을 자막 1 모양으로 (한 줄 위에) 다시 맞췄어요`); }; }
+  if (o.k === "t") bindRowTitleStyle(o, el);
+}
+// 고른 자막·타이틀·도형·전술 그림의 줄 고르기 (같은 종류 줄 + 새 줄)
+function otSelectHTML(k, cur, label) {
+  const ls = S.otracks.filter(o => o.k === k).slice().reverse();
+  return `<div class="f"><label>${label}</label><select class="s" id="pTk">${ls.map(o => `<option value="${o.id}" ${o.id === cur ? "selected" : ""}>${esc(otLabel(o))}${o.lock ? " (잠김)" : ""}${otVisible(o) ? "" : " (숨김)"}</option>`).join("")}${otNewId(k) ? `<option value="+">＋ 새 줄</option>` : ""}</select><span></span></div>`;
+}
+function bindOtSelect(x, k) {
+  const sel = $("pTk"); if (!sel) return;
+  sel.onchange = () => {
+    const cur = k === "c" ? otCap(x) : trkOf(x, k), v = sel.value, o = OTK(v);
+    if (v === cur) return;
+    if (o && o.lock) { toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); return renderPanels(); }
+    if (k === "c" && o && otHits("c", +x.start, +x.end, x).some(h => h.id === v)) { toast("그 줄에는 같은 때 자막이 있어요"); return renderPanels(); }
+    commit(k === "c" ? "자막 줄 옮기기" : "줄 옮기기");
+    let to = v;
+    if (v === "+") { const n = otNew(k); otIns(S.otracks, n, S.otracks.findIndex(q => q.id === cur) + 1); to = n.id; }
+    setTrk(x, to);
+    const st = k === "c" ? null : otSettle(x, k);
+    if (k === "c") { P.sequences.forEach(ensureSeq); capKey = ""; }
+    changed(k === "c");
+    toast(k === "c" ? "모든 편집본에서 이 줄에 보여요" : st ? (st.full ? "줄은 종류마다 9개까지예요 · 겹친 채로 두었어요" : `겹쳐서 ${OT_NAME[k]} ${st.id.slice(1)} 줄로 옮겼어요`) : `${otLabel(OTK(to))} 줄로 옮겼어요`);
+  };
 }
 
 /* 효과 컨트롤 */
@@ -3993,6 +4401,7 @@ function renderFx() {
   const el = $("rt-fx");
   if (selX && selX.k === "trans") return renderTransPanel(el);
   if (selX && selX.k === "gap") { el.innerHTML = `<div class="pg"><h4>빈 곳 · ${selX.track}</h4><div class="hint" style="margin-bottom:8px">${mmss(selX.s)} ~ ${mmss(selX.e)} (${(selX.e - selX.s).toFixed(2)}초)</div><button class="btn" id="gapDel">빈 곳 지우고 당기기 (Delete)</button></div>`; $("gapDel").onclick = () => deleteGap(selX); return; }
+  if (selX && selX.k === "otrack") return renderOtPanel(el);
   if (selX && ["title", "caption", "shape"].includes(selX.k)) return renderGfxPanel(el);
   if (selX && selX.k === "tact") { const tc = tacSel(); if (tc) return renderTacPanel(el, tc); selX = null; }
   const its = S.items.filter(x => selI.has(x.id) && unlocked(x.track)); // 잠긴 트랙 클립은 바꾸지 않음
@@ -4162,11 +4571,13 @@ function renderGfxPanel(el) {
       <textarea class="s" id="pCapText">${esc(cap.text)}</textarea>
       <div class="f" style="margin-top:8px"><label>시작</label><div class="nud"><button class="btn" data-cnud="start:-0.1">−</button><span>${mmss(cap.start)}</span><button class="btn" data-cnud="start:0.1">＋</button></div><span></span></div>
       <div class="f"><label>끝</label><div class="nud"><button class="btn" data-cnud="end:-0.1">−</button><span>${mmss(cap.end)}</span><button class="btn" data-cnud="end:0.1">＋</button></div><span></span></div>
-      <button class="btn" id="pCapSplit">재생 위치에서 자막 나누기</button> <button class="btn" id="pCapDel">삭제</button></div>` + styleEditor("cs_", S.captionStyle, false);
+      ${otSelectHTML("c", otCap(cap), "자막 줄")}
+      <button class="btn" id="pCapSplit">재생 위치에서 자막 나누기</button> <button class="btn" id="pCapDel">삭제</button></div>` + styleEditor("cs_", capStyleOf(OTK(otCap(cap)) || { id: "C1" }), false, `자막 스타일 · ${esc(otLabel(OTK(otCap(cap)) || { id: "C1", k: "c" }))} 줄 전체`);
   if (tt) h += `<div class="pg"><h4><span class="dot" style="background:var(--title)"></span>타이틀</h4>
       <textarea class="s" id="pTitleText">${esc(tt.text)}</textarea>
       <div class="hint" style="margin:6px 0">${mmss(tt.start)}부터 ${tt.dur.toFixed(1)}초 · 타임라인에서 끌어 옮기거나 끝을 늘려요</div>
-      <button class="btn" id="pTitleDel">삭제</button></div>` + styleEditor("ts_", tt.style, true);
+      ${otSelectHTML("t", trkOf(tt, "t"), "타이틀 줄")}
+      <button class="btn" id="pTitleDel">삭제</button> <button class="btn" id="pTitleRow" title="이 타이틀 모양을 이 줄에 새로 넣는 타이틀의 기본 모양으로">이 모양을 줄 기본으로</button></div>` + styleEditor("ts_", tt.style, true);
   if (sh) h += `<div class="pg"><h4><span class="dot" style="background:#3e8a46"></span>도형 · ${esc(sh.name || "도형")}</h4>
       <div class="f"><label>색</label><input type="color" id="shColor" value="${sh.color}"><span></span></div>
       ${slider("shOpacity", "진하기", sh.opacity, 0.05, 1, 0.05, v => Math.round(v * 100) + "%")}
@@ -4176,6 +4587,7 @@ function renderGfxPanel(el) {
       ${slider("shH", "높이", sh.h, 0.01, 1, 0.005, v => Math.round(v * 100) + "%")}
       ${slider("shR", "모서리 둥글기", sh.radius || 0, 0, 100, 1, v => v + "%")}
       <div class="f"><label>나오는 시간</label><label class="tog"><input type="checkbox" id="shFull" ${sh.full ? "checked" : ""}> 처음부터 끝까지</label><span></span></div>
+      ${otSelectHTML("g", trkOf(sh, "g"), "도형 줄")}
       <button class="btn" id="shDel">삭제</button></div>`;
   el.innerHTML = h;
   if (cap) {
@@ -4193,19 +4605,21 @@ function renderGfxPanel(el) {
       const st = trackState("V1", T), it = st && (st.item || st.b); const src = it ? mt(it, T) : -1;
       if (src <= cap.start + 0.1 || src >= cap.end - 0.1) return toast("재생 위치를 자막 안쪽에 두고 눌러 주세요");
       commit("자막 나누기"); const words = cap.text.split(/\s+/).filter(Boolean), r = (src - cap.start) / (cap.end - cap.start), cut = Math.max(1, Math.round(words.length * r));
-      const b = { id: nid(), start: src, end: cap.end, text: words.slice(cut).join(" ") || cap.text };
+      const b = { id: nid(), start: src, end: cap.end, text: words.slice(cut).join(" ") || cap.text, ...(cap.trk ? { trk: cap.trk } : {}) }; // 나눈 뒤쪽도 같은 자막 줄
       cap.end = src; cap.text = words.slice(0, cut).join(" ");
       P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); changed();
     };
-    bindStyle("cs_", () => S.captionStyle, el);
-    el.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { commit("자막 스타일"); Object.assign(S.captionStyle, PRESETS[b.dataset.preset]); changed(false); toast(`"${b.dataset.preset}" 스타일을 적용했어요`); });
+    bindCapStyle(OTK(otCap(cap)) || OTK("C1"), el); // 이 자막이 놓인 줄의 모양 (C1 = captionStyle)
+    bindOtSelect(cap, "c");
   }
   if (tt) {
     const ta = $("pTitleText"); let before = null;
     ta.oninput = () => { if (!before) before = JSON.stringify(P); tt.text = ta.value; scheduleSave(); frameDirty = true; };
     ta.onblur = () => { if (before) { pushHist("타이틀 글자", before); before = null; renderTimeline(); } };
     $("pTitleDel").onclick = deleteGfx;
+    $("pTitleRow").onclick = () => { const o = OTK(trkOf(tt, "t")); if (!o) return; commit("줄 기본 모양"); o.style = JSON.parse(JSON.stringify(tt.style)); changed(false); toast(`${otLabel(o)} 줄에 새로 넣는 타이틀은 이 모양으로 나와요`); };
     bindStyle("ts_", () => tt.style, el);
+    bindOtSelect(tt, "t");
   }
   if (sh) {
     const pct = v => Math.round(v * 100) + "%";
@@ -4214,6 +4628,7 @@ function renderGfxPanel(el) {
     bindRange("shW", v => sh.w = v, pct); bindRange("shH", v => sh.h = v, pct); bindRange("shR", v => sh.radius = v, v => v + "%");
     $("shFull").onchange = e => { commit("도형 시간"); sh.full = e.target.checked; if (!sh.full) { sh.start = fr(T); sh.dur = Math.min(5, Math.max(1, total() - T)); } changed(false); };
     $("shDel").onclick = deleteGfx;
+    bindOtSelect(sh, "g");
   }
 }
 /* 색보정 */
@@ -4287,10 +4702,11 @@ function bindTrackButtons(root) {
 }
 /* 시퀀스 설정 */
 function renderSeqTab() {
-  const el = $("rt-seq");
+  const el = $("rt-seq"), capRows = S.otracks.filter(o => o.k === "c"), nVis = capRows.filter(o => otVisible(o)).length, capMixed = nVis > 0 && nVis < capRows.length;
   let h = `<div class="pg"><h4>시퀀스 · ${esc(S.name)}</h4>
     <div class="f"><label>형식</label><div class="seg" id="pFmt"><button data-v="shorts" class="${S.format === "shorts" ? "on" : ""}">쇼츠 9:16</button><button data-v="long" class="${S.format === "long" ? "on" : ""}">롱폼 16:9</button></div><span></span></div>
-    <div class="f"><label>자막</label><label class="tog"><input type="checkbox" id="pCapOn" ${S.captionsOn ? "checked" : ""}> 영상에 자막 넣기</label><span></span></div>
+    <div class="f"><label>자막</label><label class="tog"><input type="checkbox" id="pCapOn" ${capRows.some(o => otVisible(o)) ? "checked" : ""}> 영상에 자막 넣기</label><span></span></div>
+    ${capMixed ? `<div class="hint" style="margin:-4px 0 6px">일부 자막 줄만 보여요 · 누르면 모든 자막 줄을 함께 켜고 꺼요</div>` : ""}
     <div class="hint">전체 음량·소리 크기 맞추기는 "오디오" 탭에 있어요.</div></div>`;
   if (S.format === "shorts") {
     const lay = S.layout;
@@ -4309,11 +4725,14 @@ function renderSeqTab() {
       <h4 style="margin-top:6px">템플릿 <span class="hint">(화면 구성 + 제목·자막 위치·색을 한 번에)</span></h4>
       <div class="presets">${Object.keys(TEMPLATES).map(k => `<button class="btn" data-tpl="${k}">${k}</button>`).join("")}</div></div>`;
   }
-  h += styleEditor("cs_", S.captionStyle, false);
+  h += styleEditor("cs_", S.captionStyle, false, capRows.length > 1 ? "기본 자막(자막 1) 스타일" : null);
+  if (capRows.length > 1) h += `<div class="pg hint" style="padding-top:0">다른 자막 줄은 타임라인 줄 머리 ⚙ 에서 따로 바꿔요</div>`;
   h += `<div class="pg"><h4><span class="dot" style="background:#3e8a46"></span>도형 추가</h4><div class="presets" style="margin:0">${Object.keys(SHAPES).map(k => `<button class="btn" data-shape="${k}">${k}</button>`).join("")}</div></div>`;
   el.innerHTML = h;
   $("pFmt").querySelectorAll("button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); if (ltab === "rec") renderRec(); });
-  $("pCapOn").onchange = e => { commit("자막 켜기/끄기"); S.captionsOn = e.target.checked; changed(); };
+  $("pCapOn").indeterminate = capMixed;
+  // '영상에 자막 넣기' = 모든 자막 줄을 함께 켜고 끄기 (자막 1 만 있으면 예전과 같음 · 타임라인 C1 눈은 자막 1 만 · D-301)
+  $("pCapOn").onchange = e => { commit("자막 켜기/끄기"); const on = e.target.checked; S.captionsOn = on; for (const o of capRows) if (o.id !== "C1") { if (on) delete o.hide; else o.hide = true; } changed(); };
   if (S.format === "shorts") {
     $("pLay").querySelectorAll("button").forEach(b => b.onclick = () => { commit("화면 구성"); S.layout.mode = b.dataset.v; changed(false); });
     if ($("pBar")) { const e2 = $("pBar"); let before = null; e2.oninput = () => { if (!before) before = JSON.stringify(P); S.layout.bar = e2.value; frameDirty = true; }; e2.onchange = () => { if (before) { pushHist("박스 색", before); before = null; scheduleSave(); } }; }
@@ -4487,6 +4906,8 @@ document.addEventListener("contextmenu", e => {
       [it.link ? "영상·소리 연결 해제" : "연결하기", toggleLink, "Ctrl+L"], ["클립 길이로 구간 표시", () => { markIn = it.start; markOut = iEnd(it); renderTimeline(); }, "X"]]);
     return;
   }
+  const oh = e.target.closest("#tracks .row[data-ok] .hd");
+  if (oh) return otMenu(e, oh.closest(".row").dataset.tk);
   const mk = e.target.closest("#tracks .umk");
   if (mk) return showMenu(e, [["마커 지우기", () => { commit("마커 지우기"); S.markers.splice(+mk.dataset.mk, 1); changed(false); }], ["이름 붙이기", () => { const m = S.markers[+mk.dataset.mk], n = prompt("마커 이름 (메모)", m.name || ""); if (n !== null) { commit("마커 이름"); m.name = n.trim(); changed(false); } }]]);
   const te = e.target.closest("#tracks .trn");
@@ -4505,7 +4926,7 @@ function uniqSeqName(n, except) { const names = new Set(P.sequences.filter(q => 
 function switchSeq(id) {
   if (id === S.id && P.sequences.includes(S)) { changed(); return; }
   pause(); for (const e of [...POOL.values()]) killEntry(e); P.active = id; bindS(); selI.clear(); selX = null; markIn = markOut = null; scheduleSave(); ver++;
-  zoomFit(); layoutFrame(); changed(); seek(0);
+  zoomFit(); layoutFrame(); changed(); seek(0); seatTracks(); // 편집본마다 글자·그림 줄 수가 달라 V1·A1 자리를 다시 맞춤 (D-043 · D-296)
   if (ltab === "rec") renderRec(); // 쇼츠/롱폼에 따라 정리 버튼 안내가 다름
 }
 async function renderBin() {
@@ -4635,7 +5056,7 @@ function openExport() {
   const io = markIn != null && markOut != null && markOut > markIn;
   $("exRange").querySelector('[data-v="io"]').disabled = !io; if (!io) EXP.range = "all";
   $("exRange").querySelectorAll("button").forEach(b => { b.classList.toggle("on", b.dataset.v === EXP.range); b.onclick = () => { if (!b.disabled) { EXP.range = b.dataset.v; openExport(); } }; });
-  $("exSrtHint").textContent = S.captionsOn ? "" : " — 영상엔 자막을 안 넣어도 자막 파일은 만들어져요";
+  $("exSrtHint").textContent = S.otracks.some(o => o.k === "c" && otVisible(o)) ? "" : " — 영상엔 자막을 안 넣어도 자막 파일은 만들어져요";
   $("exXmlHint").textContent = S.tactics.length ? " · 전술 그림은 프리미어 파일에는 빠져요 (영상 mp4 에는 들어가요)" : "";
   $("exInfo").textContent = `길이 ${mmss(EXP.range === "io" ? markOut - markIn : total())} · 장면 전환 ${S.trans.length}개 · 트랙 ${new Set(S.items.map(x => x.track)).size}개 사용`;
   $("exModal").classList.add("show");
@@ -4874,10 +5295,21 @@ const scrub = $("scrub");
 scrub.onmousedown = e => { pause(); const f = ev => { const r = scrub.getBoundingClientRect(); seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * total()); autoscroll(); }; f(e); dragSeek(f); };
 $("tlscroll").addEventListener("wheel", e => { if (e.ctrlKey || e.altKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), xToT(e)); } }, { passive: false });
 $("tracks").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return;
+  const b = e.target.closest("button, .hd [data-oset]"); if (!b) return;
   const d = b.dataset;
-  if (b.id === "hCap") { commit("자막 보이기"); S.captionsOn = !S.captionsOn; changed(); return; }
-  if (b.id === "addTrk") { const r = b.getBoundingClientRect(); return showMenu({ clientX: r.left, clientY: r.bottom + 2 }, [["영상 트랙 추가", () => addTrack("v")], ["오디오 트랙 추가", () => addTrack("a")], null, ["뒤쪽 빈 트랙 지우기", removeEmptyTracks]]); }
+  if (d.ohide) { // 글자·그림 줄 눈: C1 은 '영상에 자막 넣기'(captionsOn) · 숨긴 줄은 미리보기·내보내기에서 빠짐 (D-301)
+    const o = OTK(d.ohide); if (!o) return; commit("줄 보이기");
+    if (o.id === "C1") S.captionsOn = !S.captionsOn; else if (o.hide) delete o.hide; else o.hide = true;
+    changed(); return;
+  }
+  if (d.olock) { // 잠그기: 고르기·옮기기·끝 끌기·화면에서 옮기기를 막음 (잔물결 편집은 그림과 같이 따라감 · D-300)
+    const o = OTK(d.olock); if (!o) return; commit("줄 잠그기");
+    if (o.lock) delete o.lock; else { o.lock = true; if (selX && otSelRow() === o.id) selX = null; }
+    changed(false); return;
+  }
+  if (d.oset) { selX = { k: "otrack", id: d.oset }; selI.clear(); setRtab("fx", true); renderTimeline(); return; }
+  if (b.id === "addTrk") { const r = b.getBoundingClientRect(); return showMenu({ clientX: r.left, clientY: r.bottom + 2 }, [["영상 트랙 추가", () => addTrack("v")], ["오디오 트랙 추가", () => addTrack("a")],
+    ["자막 트랙 추가", () => addOtrack("c")], ["타이틀 트랙 추가", () => addOtrack("t")], ["도형 트랙 추가", () => addOtrack("g")], null, ["뒤쪽 빈 트랙 지우기", removeEmptyTracks]]); }
   if (d.tgt) { const t = TRK(d.tgt); t.target = !t.target; ver++; renderTimeline(); scheduleSave(); return; }
   if (d.lock) { commit("트랙 잠금"); const t = TRK(d.lock); t.lock = !t.lock; if (t.lock) { for (const x of S.items) if (x.track === t.id) selI.delete(x.id); if (selX && selX.k === "trans" && S.trans.some(x => x.id === selX.id && x.track === t.id)) selX = null; } changed(false); return; }
   if (d.hide) { commit("트랙 보이기"); const t = TRK(d.hide); t.hide = !t.hide; changed(false); return; }
@@ -4885,6 +5317,7 @@ $("tracks").addEventListener("click", e => {
   if (d.mute || d.solo) { const tr = TRK(d.mute || d.solo); commit(d.mute ? "트랙 음소거" : "트랙 솔로"); if (d.mute) tr.mute = !tr.mute; else tr.solo = !tr.solo; changed(false); }
 });
 $("tracks").addEventListener("dblclick", e => {
+  const lb = e.target.closest(".hd span[data-oset]"); if (lb) return otRename(lb.dataset.oset, lb); // 줄 이름 바꾸기 (그 자리에서)
   const mk = e.target.closest(".umk");
   if (mk) { const m = S.markers[+mk.dataset.mk], n = prompt("마커 이름 (메모)", m.name || ""); if (n !== null) { commit("마커 이름"); m.name = n.trim(); changed(false); } return; }
   const ce = e.target.closest(".clip[data-id], .clip[data-gk], .trn[data-tr]"); if (ce && tool === "select") { setRtab("fx", true); }

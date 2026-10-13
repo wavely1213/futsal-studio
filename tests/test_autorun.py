@@ -1232,6 +1232,25 @@ class EditorOpenDuringRun(unittest.TestCase):
         self.assertEqual(d["captions"][0]["text"], "창이 고친 자막", "창이 고친 자막은 그대로")
         self.assertNotIn("captions", merged)
 
+    def test_caption_moved_to_other_row_is_kept(self):
+        """D-296: 코치가 자막을 다른 자막 줄(C2)로 옮기기만 했어도 '고친 자막' — 끝까지 자동으로가 다시 들은 자막으로 바꾸지 않음."""
+        name = self.w.name
+        win = json.loads(json.dumps(editor.load_project(name)))
+        old = json.loads(json.dumps(win["captions"]))
+        win["captions"][0]["trk"] = "C2"
+        editor.save_project(name, win, win["rev"], False, "창1", 1)
+        new_caps = [dict(c, text=c["text"] + " (다시 들음)") for c in old]
+        autorun.add_to_project(name, [dict(win["sequences"][0], id="AUTO3", autoRun="r3", autoKey="long")], [], new_caps, old)
+        d = self.disk()
+        self.assertIn("AUTO3", [q["id"] for q in d["sequences"]])
+        self.assertEqual(d["captions"][0].get("trk"), "C2")
+        self.assertEqual(d["captions"][0]["text"], old[0]["text"], "줄을 옮긴 자막은 그대로")
+        # 줄을 안 옮겼으면(글도 그대로) 예전처럼 다시 들은 자막으로
+        d["captions"] = old
+        editor.save_project(name, d, d["rev"], False, "창1", 2)
+        autorun.add_to_project(name, [dict(win["sequences"][0], id="AUTO4", autoRun="r4", autoKey="long")], [], new_caps, old)
+        self.assertEqual(self.disk()["captions"], new_caps)
+
     def test_browser_cannot_claim_auto_writer(self):
         """화면(HTTP)이 보낸 '자동' 저장 표시는 받지 않음 (작업만 씀) · 저장 응답에 합친 편집본(autoAdded)."""
         import app

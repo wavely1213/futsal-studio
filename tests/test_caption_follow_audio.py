@@ -44,6 +44,10 @@ CAPS = [  # 원본 시각 자막 (MSGRAW01 처럼)
     {"id": "c5", "start": 100.5, "end": 102.5, "text": "생각하시거든요"},
 ]
 OTHER = [{"id": "o1", "start": 85.2, "end": 86.6, "text": "패스하고 바로 움직여요"}, {"id": "o2", "start": 87.0, "end": 88.0, "text": "좋아요"}]
+# 여러 자막 줄 (D-296): C2 자막이 C1 자막 사이에 끼어도 C1 의 이어 붙이기·최소 시간은 그 줄 안에서만 · 다른 영상 자막은 trk 가 있어도 C1
+MULTI = CAPS + [{"id": "m1", "start": 25.5, "end": 25.9, "text": "여기!", "trk": "C2"}, {"id": "m2", "start": 34.3, "end": 36.5, "text": "보조 자막", "trk": "C2"},
+                {"id": "m3", "start": 101.0, "end": 102.0, "text": "셋째 줄", "trk": "C3"}]
+OT3 = [{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "C2", "k": "c"}, {"id": "C3", "k": "c"}, {"id": "T1", "k": "t"}]
 
 
 def proj(items, tracks=None, media=None, fmt="long", caps=None):
@@ -348,9 +352,9 @@ class PreviewParityTest(unittest.TestCase):
         prog = "let S, P, ver = 0;\nconst total = () => Math.max(0, ...S.items.map(iEnd));\n" + "\n".join(out) + """
 const inp = JSON.parse(require('fs').readFileSync(0, 'utf8')), res = [];
 for (const c of inp) {
-  S = { items: c.items, tracks: c.tracks, format: c.format }; P = { captions: c.captions };
+  S = { items: c.items, tracks: c.tracks, format: c.format, otracks: c.otracks }; P = { captions: c.captions };
   for (const k in MCAPS) delete MCAPS[k]; Object.assign(MCAPS, c.mcaps || {}); ver++;
-  res.push(capsTL().map(x => [x.s, x.e, x.text, x.mid]));
+  res.push(capsTL().map(x => [x.s, x.e, x.text, x.mid, x.trk]));
 }
 process.stdout.write(JSON.stringify(res));"""
         r = subprocess.run([NODE, "-e", prog], input=json.dumps(cases), capture_output=True, text=True, encoding="utf-8", timeout=60)
@@ -371,15 +375,22 @@ process.stdout.write(JSON.stringify(res));"""
                  proj([V("v", "main", 0, 24.0, 34.0), A("b", "bgm", 0, 0, 10, track="A2")]),  # 소리 없는 원본 + 배경음악 (D-285)
                  proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 26.0), V("w", "main", 4, 97.0, 103.0, speed=1.5),
                        A("a2", "main", 4, 97.0, 98.5)]),  # A1 이 일부만 (빠르기 1.5배 클립의 뒤쪽만 영상 기준)
-                 proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 28.0, mute=True)])]  # 소리 끈 클립 → 영상으로도 없음
+                 proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 28.0, mute=True)]),  # 소리 끈 클립 → 영상으로도 없음
+                 dict(proj(lcut(), caps=MULTI), otracks=OT3), dict(proj(lcut(), caps=MULTI, fmt="shorts"), otracks=OT3), proj(lcut(), caps=MULTI),
+                 proj(append_other(), media=MEDIA, caps=MULTI)]  # 여러 자막 줄 (D-296) · 줄 목록이 없어도 같음 (자막 줄은 저절로 생김)
         js = self.run_js([dict(c, mcaps={"oth": OTHER}) for c in cases])
         with mock.patch.object(editor, "media_captions", lambda f, src="videos": OTHER if f == MEDIA[2]["file"] else []):
             for c, j in zip(cases, js):
                 py = editor.timeline_captions(c)
-                self.assertEqual([[round(x["start"], 4), round(x["end"], 4), x["text"]] for x in py],
-                                 [[round(a, 4), round(b, 4), t] for a, b, t, _ in j], c["items"][0]["id"])
-        self.assertEqual([m for *_, m in js[6]], ["main", "oth", "oth"])
+                self.assertEqual([[round(x["start"], 4), round(x["end"], 4), x["text"], x.get("trk", "C1")] for x in py],
+                                 [[round(a, 4), round(b, 4), t, k] for a, b, t, _, k in j], c["items"][0]["id"])
+        self.assertEqual([m for *_, m, _k in js[6]], ["main", "oth", "oth"])
         self.assertTrue(all(js[k] for k in (0, 1, 2, 4, 5, 7, 8, 9)))
+        # 여러 자막 줄 (D-296): C2·C3 자막은 자기 줄 · C2 '여기!' 가 C1 '공을 먼저 보세요' 사이에 끼어도 C1 은 그대로 · 다른 영상 자막은 C1
+        self.assertEqual({k for *_, k in js[11]}, {"C1", "C2", "C3"})
+        self.assertEqual([x for x in js[11] if x[4] == "C1"], [x for x in js[0]], "C1 자막은 다른 줄 자막과 상관없이 예전과 같음")
+        self.assertEqual(js[13], js[11], "줄 목록이 없어도 자막 줄은 같음")
+        self.assertEqual({k for *_, m, k in js[14] if m == "oth"}, {"C1"})
         self.assertEqual(js[3], js[1])  # 대사 트랙(A1) M 은 듣기용 — 자막은 그대로 (D-285)
         self.assertEqual(js[10], [])  # 소리 끈 클립은 짝 영상으로도 없음
 

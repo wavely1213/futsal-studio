@@ -364,7 +364,7 @@ def add_to_project(name, seqs, media=(), captions=None, captions_old=None, clien
         have = {m.get("id") for m in proj.get("media") or []}
         proj["media"] = list(proj.get("media") or []) + [m for m in media if m.get("id") not in have]
         if captions:
-            txt = lambda cs: "\n".join(str(c.get("text") or "") for c in cs or [])  # noqa: E731
+            txt = lambda cs: "\n".join(str(c.get("text") or "") + ("\t" + str(c["trk"]) if c.get("trk") else "") for c in cs or [])  # noqa: E731 — 줄(trk)만 옮긴 자막도 고친 것 (D-296)
             cur = proj.get("captions") or []
             if not cur or (captions_old is not None and txt(cur) == txt(captions_old)):
                 proj["captions"] = captions

@@ -2067,7 +2067,9 @@ def load_project(name):
 
 
 def _cap_text(cs):
-    return "\n".join(str(c.get("text") or "") for c in cs or [] if isinstance(c, dict))
+    """자막 글 묶음 서명 — 글 + 자막 줄(trk · C1 이면 없음). 줄만 옮긴 자막도 '고친 자막'으로 봄 → 자동 작업이 몰래 바꾸지 않음
+    (autorun.add_to_project · editor.html msgCaps 와 같은 서명 · D-296)."""
+    return "\n".join(str(c.get("text") or "") + ("\t" + str(c["trk"]) if c.get("trk") else "") for c in cs or [] if isinstance(c, dict))
 
 
 def _auto_diff(p, proj):
@@ -3120,7 +3122,9 @@ def media_captions(file, src="videos"):
 
 def timeline_captions(proj):
     """자막을 타임라인 시간으로 — 대사 소리 클립(caption_items)을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨.
-    원본 클립은 프로젝트 자막, 보관함의 다른 영상 클립은 그 영상 자막(media_captions · proj 에 media 가 있을 때)."""
+    원본 클립은 프로젝트 자막, 보관함의 다른 영상 클립은 그 영상 자막(media_captions · proj 에 media 가 있을 때).
+    자막 줄(D-296): 원본 자막의 trk(C2~C9)를 따라 조각마다 "trk" (C1 이면 키 없음 → 예전과 같은 dict) ·
+    이어 붙이기·최소 보이는 시간은 자막 줄마다 따로 (editor.html capsTL 과 같은 규칙)."""
     res = []
     total = seq_total(proj)
     # noCaps: 다시 보기·티저처럼 같은 장면을 한 번 더 쓴 클립은 말 자막을 다시 띄우지 않음 (editor.html capsTL 과 같은 규칙)
@@ -3139,6 +3143,7 @@ def timeline_captions(proj):
             md = mds.get(mid)
             caps = media_captions(md.get("file"), md.get("src", "videos")) if md else []
         for cap0 in caps:
+            trk = cap_trk(cap0, mid)
             for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
                 alive.append(cap)
                 toks = str(cap.get("text") or "").split()
@@ -3159,12 +3164,14 @@ def timeline_captions(proj):
                                 c["_toks"] = toks
                                 c["_full"] = cap["text"]
                             c["_k"] = id(cap)
+                            if trk != "C1":
+                                c["trk"] = trk
                             res.append(c)
     # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
     # 같은 소리를 두 대사 트랙에 겹쳐 둔 것(같은 자막이 겹침)도 한 덩어리 (editor.html capsTL 과 같은 규칙)
-    out = []
+    out, last = [], {}  # last: 자막 줄마다 마지막 조각 (다른 줄 자막이 사이에 있어도 같은 자막은 이어 붙임)
     for c in sorted(res, key=lambda x: x["start"]):
-        p = out[-1] if out else None
+        p = last.get(c.get("trk", "C1"))
         if p is not None and p["_k"] == c["_k"] and abs(c["start"] - p["end"]) <= CAP_JOIN:
             p["end"] = max(p["end"], c["end"])
             if "words" in p and "words" in c:
@@ -3188,16 +3195,22 @@ def timeline_captions(proj):
                 p.pop("words", None)
             continue
         out.append(c)
+        last[c.get("trk", "C1")] = c
     # 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막이 나오기 전까지 CAP_MIN 초는 보이게 (editor.html capsTL 과 같은 규칙)
     # (바로 이어지는 다음 자막이 넉넉하면 그 시작을 조금 늦춰 자리를 만듦)
     # 글자가 많으면 1초에 CAP_CPS 글자를 넘지 않게 읽을 시간도 (다음 자막 전까지)
-    for k, c in enumerate(out):
-        need = max(CAP_MIN, len(re.sub(r"\s+", "", c["text"])) / CAP_CPS)
-        if c["end"] - c["start"] < need:
-            n = out[k + 1] if k + 1 < len(out) else None
-            if n is not None and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
-                n["start"] = c["start"] + need
-            c["end"] = max(c["end"], min(c["start"] + need, n["start"] if n is not None else total))
+    # 자막 줄마다 따로 — 다른 줄의 짧은 자막이 이 줄 자막을 줄이거나 늦추지 않음
+    lanes = {}
+    for c in out:
+        lanes.setdefault(c.get("trk", "C1"), []).append(c)
+    for lane in lanes.values():
+        for k, c in enumerate(lane):
+            need = max(CAP_MIN, len(re.sub(r"\s+", "", c["text"])) / CAP_CPS)
+            if c["end"] - c["start"] < need:
+                n = lane[k + 1] if k + 1 < len(lane) else None
+                if n is not None and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
+                    n["start"] = c["start"] + need
+                c["end"] = max(c["end"], min(c["start"] + need, n["start"] if n is not None else total))
     for c in out:
         for k in ("_k", "_keep", "_n", "_toks", "_full"):
             c.pop(k, None)
@@ -3365,6 +3378,98 @@ def _rot(s):
     return max(-45.0, min(45.0, r)) if math.isfinite(r) else 0.0
 
 
+# ---------- 글자·그림 줄 (C 자막 · T 타이틀 · G 도형·전술 그림 · D-296) ----------
+# 편집본마다 seq.otracks = 줄 목록 (아래 → 위 = 뒤 → 앞). 목록 차례가 미리보기 겹침 · 내보내기 ASS 층(Layer) · 타임라인 줄 차례.
+# 항목(자막·타이틀·도형·전술 그림)의 trk 가 없으면 그 종류 첫 줄(C1·T1·G1) · 첫 줄 이름은 저장하지 않음.
+# 예전 겹침 순서 G1 < C1 < T1 (도형·전술 그림 → 자막 → 타이틀) 이 기본 → 예전 프로젝트는 내보낸 화면이 그대로.
+# editor.html otList · trkOf · capTrk · capTrackDefault · capStyleOf 와 같은 규칙.
+OT_BASE = ({"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"})
+OT_MAX = 9       # 종류마다 줄 수 한도
+OT_EPS = 1e-3    # 시간 겹침 판단 (가장자리가 닿는 것은 겹침 아님)
+_OT_ID = re.compile(r"[CTG][1-9]")
+_CN_ID = re.compile(r"C[2-9]")
+
+
+def _ot_insert(out, o):
+    """같은 종류 맨 위 줄 바로 위에 새 줄 (그 종류가 없으면 맨 위)."""
+    idx = max([i for i, x in enumerate(out) if x["k"] == o["k"]], default=len(out) - 1)
+    out.insert(idx + 1, o)
+
+
+def overlay_tracks(seq):
+    """글자·그림 줄 목록 (아래 → 위) — seq.otracks 를 정리: 틀린 줄·겹친 id 는 버림 · C1 의 style/hide 는 뺌(C1 은 captionStyle·captionsOn) ·
+    빠진 기본 줄(G1 맨 아래 · C1 · T1 맨 위) · 자막이 가리키는 C 줄이 없으면 만듦(모양은 아직 안 정함 · 숨김은 captionsOn 따라) ·
+    줄 목록이 있으면 타이틀·도형·전술 그림이 가리키는 없는 줄도 만듦. seq 는 바꾸지 않음 (editor.html otList 와 같은 규칙)."""
+    out, seen = [], set()
+    raw = seq.get("otracks")
+    for o in raw if isinstance(raw, list) else ():
+        tid = o.get("id") if isinstance(o, dict) else None
+        if not (isinstance(tid, str) and _OT_ID.fullmatch(tid) and o.get("k") == tid[0].lower() and tid not in seen):
+            continue
+        seen.add(tid)
+        o = dict(o)
+        if tid == "C1":
+            o.pop("style", None)
+            o.pop("hide", None)
+        out.append(o)
+    if "G1" not in seen:
+        out.insert(0, dict(OT_BASE[0]))
+    for b in OT_BASE[1:]:
+        if b["id"] not in seen:
+            out.append(dict(b))
+    have = {o["id"] for o in out}
+    caps = seq.get("msgCaps") or seq.get("captions") or ()
+    for tid in sorted({c.get("trk") for c in caps if isinstance(c, dict) and isinstance(c.get("trk"), str) and _CN_ID.fullmatch(c["trk"])} - have):
+        _ot_insert(out, {"id": tid, "k": "c", "hide": not seq.get("captionsOn", True)})
+        have.add(tid)
+    if isinstance(raw, list):
+        want = set()
+        for kind, key in (("T", "titles"), ("G", "shapes"), ("G", "tactics")):
+            for x in seq.get(key) or ():
+                tid = x.get("trk") if isinstance(x, dict) else None
+                if isinstance(tid, str) and _OT_ID.fullmatch(tid) and tid[0] == kind:
+                    want.add(tid)
+        for tid in sorted(want - have):
+            _ot_insert(out, {"id": tid, "k": tid[0].lower()})
+    return out
+
+
+def track_of(x, kind, ids):
+    """타이틀·도형·전술 그림이 놓인 줄 — trk 가 이 편집본 줄이고 종류(T·G)가 맞으면 그 줄, 아니면 그 종류 첫 줄 (editor.html trkOf)."""
+    tid = x.get("trk") if isinstance(x, dict) else None
+    return tid if isinstance(tid, str) and tid in ids and tid[0] == kind else kind + "1"
+
+
+def cap_trk(cap, mid="main"):
+    """자막이 놓인 줄 — 원본 자막의 trk(C2~C9) · 보관함의 다른 영상 자막은 늘 C1 (editor.html capTrk)."""
+    tid = cap.get("trk") if isinstance(cap, dict) else None
+    return tid if mid == "main" and isinstance(tid, str) and _CN_ID.fullmatch(tid) else "C1"
+
+
+def cap_track_default(c1, n, fmt):
+    """아직 모양을 안 정한 자막 줄(Cn)의 높이: C1 에서 자막 한 줄 높이씩 (n-1)번 — C1 이 화면 아래쪽(y ≥ 0.5)이면 위로(0.1 까지),
+    위쪽이면 아래로(0.95 까지). 반올림 없이 editor.html capTrackDefault 와 같은 계산 차례 (두 쪽 값이 비트까지 같음)."""
+    H = 1920 if fmt == "shorts" else 1080
+    band = (1.25 * float(c1["size"]) + 2 * float(c1["strokeW"])) / H + 0.012
+    y = float(c1["y"])
+    return max(0.1, y - (n - 1) * band) if y >= 0.5 else min(0.95, y + (n - 1) * band)
+
+
+def cap_style_of(seq, o):
+    """자막 줄의 글자 모양 — C1 은 captionStyle · 다른 줄은 자기 style(빠진 값은 C1) · 아직 안 정했으면 C1 모양을 한 줄씩 옮긴 높이."""
+    st = seq["captionStyle"]
+    if o["id"] == "C1":
+        return st
+    if isinstance(o.get("style"), dict) and o["style"]:
+        return {**st, **o["style"]}
+    return dict(st, y=cap_track_default(st, int(o["id"][1]), seq.get("format")))
+
+
+def track_visible(seq, o):
+    """줄을 보이는지 — C1 은 '영상에 자막 넣기'(captionsOn) · 다른 줄은 hide 가 아니면. 숨긴 줄은 미리보기·내보내기에서 빠짐 (SRT 는 다 남음)."""
+    return seq.get("captionsOn", True) if o["id"] == "C1" else not o.get("hide")
+
+
 def build_ass(proj, W, H, fps=30):
     st = proj["captionStyle"]
 
@@ -3390,14 +3495,22 @@ def build_ass(proj, W, H, fps=30):
              "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
              "MarginL, MarginR, MarginV, Encoding",
              style_line("Cap", st)]
+    # 글자·그림 줄 (D-296) — 자막 줄마다 스타일 Cap(C1) · Cap2~Cap9 (예전 프로젝트는 Cap 하나 → 스타일 묶음이 예전과 같음)
+    ots = overlay_tracks(proj)
+    ids = {o["id"] for o in ots}
+    cst = {o["id"]: cap_style_of(proj, o) for o in ots if o["k"] == "c"}
+    cname = {tid: "Cap" if tid == "C1" else "Cap" + tid[1:] for tid in cst}
+    for tid in sorted(cst):
+        if tid != "C1":
+            lines.append(style_line(cname[tid], cst[tid]))
     for t in proj["titles"]:
         lines.append(style_line(f"T{t['id']}", t["style"]))
     lines.append("Style: Shape,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1")
     lines.append(tactic.STYLE_LINE)
     lines += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-    # 도형 (자막·타이틀 아래 층)
     tl_total = seq_total(proj)
-    for sh in proj.get("shapes", []):
+
+    def shape_line(sh, layer):
         x, y = int(sh["x"] * W), int(sh["y"] * H)
         w, h = max(2, int(sh["w"] * W)), max(2, int(sh["h"] * H))
         r = int(min(sh.get("radius", 0) / 100 * min(w, h) / 2, min(w, h) / 2))
@@ -3410,12 +3523,10 @@ def build_ass(proj, W, H, fps=30):
         start = 0.0 if sh.get("full") else sh["start"]
         end = tl_total if sh.get("full") else min(tl_total, sh["start"] + sh["dur"])
         col, a = _ass_color(sh["color"]), int((1 - sh.get("opacity", 1.0)) * 255)
-        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
-                     rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
-    # 전술 그림 (도형 위 · 자막·타이틀 아래 · 프레임마다 미리보기와 같은 모양 — tactic.ops_at)
-    lines += tactic.ass_lines(proj.get("tactics") or [], W, H, fps, tl_total, _ass_time)
+        return (f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
+                rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
-    def event(style, s, start, end, text, words=None, fit=False):
+    def event(style, s, start, end, text, words=None, fit=False, layer=1):
         al = s.get("align", "center")
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
@@ -3426,14 +3537,29 @@ def build_ass(proj, W, H, fps=30):
         tags = rf"{{\an{an}\pos({x},{y}){fs}{fr}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}{fr}}}"
         body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
         eff = _effect_tags(s["effect"], x, y, end - start, rz)
-        lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
+        lines.append(f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
-    if proj.get("captionsOn", True):
-        for c in timeline_captions(proj):
-            event("Cap", st, c["start"], c["end"], c["text"], c.get("words"), fit=True)
-    for t in proj["titles"]:
-        if t["start"] < tl_total:
-            event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), t["text"])
+    # 글자·그림 줄을 아래(뒤)부터 — 층(Layer) = 쌓는 차례 (editor.html 미리보기 .olay z-index 와 같음) · 숨긴 줄은 빠짐
+    # 예전 프로젝트(G1 < C1 < T1): 도형·전술 그림 0 · 자막 1 · 타이틀 2 → 화면은 예전과 같음 (예전에도 타이틀은 자막 뒤에 써서 위)
+    caps = timeline_captions(proj) if any(o["k"] == "c" and track_visible(proj, o) for o in ots) else []
+    for layer, o in enumerate(ots):
+        tid, k = o["id"], o["k"]
+        if not track_visible(proj, o):
+            continue
+        if k == "g":  # 도형 → 같은 줄 전술 그림 (프레임마다 미리보기와 같은 모양 — tactic.ops_at · 스포트라이트는 먼저)
+            for sh in proj.get("shapes") or []:
+                if track_of(sh, "G", ids) == tid:
+                    lines.append(shape_line(sh, layer))
+            lines += tactic.ass_lines([x for x in proj.get("tactics") or [] if isinstance(x, dict) and track_of(x, "G", ids) == tid],
+                                      W, H, fps, tl_total, _ass_time, layer=layer)
+        elif k == "c":
+            for c in caps:
+                if c.get("trk", "C1") == tid:
+                    event(cname[tid], cst[tid], c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer)
+        else:
+            for t in proj["titles"]:
+                if track_of(t, "T", ids) == tid and t["start"] < tl_total:
+                    event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), t["text"], layer=layer)
     return "\n".join(lines) + "\n"
 
 
