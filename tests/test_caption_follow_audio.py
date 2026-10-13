@@ -4,7 +4,9 @@
 B롤로 V1 을 덮은 동안 자막이 사라졌고, 보관함의 다른 영상을 이어 붙이면 그 부분 자막이 없었다.
 - editor.caption_items · timeline_captions (내보내기·SRT·올리기 키트) 와 editor.html capItems · capsTL (미리보기) 이 같은 규칙인지 node 로 견줌
 - 다른 영상 자막 editor.media_captions (그 영상 프로젝트 자막 → 없으면 받아쓰기) · media_bundle 의 captions · 올리기 키트 예비 길(upload.build_kit)
-- 손대지 않은 V1·A1 짝 편집본은 예전과 같음 · 거꾸로·다시 보기(noCaps)·소리 끈 클립·트랙·효과음 트랙은 자막 없음."""
+- 손대지 않은 V1·A1 짝 편집본은 예전과 같음 · 거꾸로·다시 보기(noCaps)·소리 끈 클립·효과음 트랙은 자막 없음.
+- (D-285) 트랙 M·S 는 듣기용이라 자막과 상관없음 · 대사 트랙에 원본 소리가 하나도 없는 V1 원본 영상 구간(소리 없는 원본·대사 소리를
+  지우고 배경음악을 깐 곳)은 예전처럼 영상을 따라감 — 예전(B3 처음)에는 배경음악만 깔아도 자막이 전부 사라지고 자막 ＋ 도 막혔다."""
 import json
 import re
 import shutil
@@ -106,16 +108,45 @@ class CaptionItemsTest(unittest.TestCase):
         self.assertEqual(len(editor.timeline_captions(proj(base))), 1)
         for kw in ({"mute": True}, {"rev": True}, {"noCaps": True}):
             self.assertEqual(editor.timeline_captions(proj([A("a", "main", 0, 24.0, 28.0, **kw)])), [], kw)
-        tr = editor.default_tracks()
-        next(t for t in tr if t["id"] == "A1")["mute"] = True
-        self.assertEqual(editor.timeline_captions(proj(base, tracks=tr)), [])
         # 효과음 트랙(대사 역할 + voiceFx false) · 음악 트랙에 놓은 원본 소리는 자막 없음
         tr = editor.default_tracks()
         next(t for t in tr if t["id"] == "A2").update(role="dialog", voiceFx=False)
         self.assertEqual(editor.timeline_captions(proj([A("s", "main", 0, 24.0, 28.0, track="A2")], tracks=tr)), [])
         self.assertEqual(editor.timeline_captions(proj([A("m", "main", 0, 24.0, 28.0, track="A3")])), [])
-        # 소리 클립(다른 트랙의 음악이라도)이 있으면 V1 영상만 있는 곳에는 자막 없음 (말소리를 따라감)
-        self.assertEqual(editor.timeline_captions(proj([V("v", "main", 0, 24.0, 28.0), A("m", "main", 0, 24.0, 28.0, track="A3")])), [])
+        # 소리 끈 클립이 V1 영상과 짝이면 영상으로도 안 뜸 (대사 트랙에 원본 소리가 있는 곳은 소리 기준)
+        self.assertEqual(editor.timeline_captions(proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 28.0, mute=True)])), [])
+
+    def test_track_mute_and_solo_are_listening_only(self):
+        """트랙 M(소리 끄기)·S(이 트랙만 듣기)는 듣기용 — 자막은 그대로 (예전 B3: A1 M 을 누르면 미리보기·내보내기·SRT 자막이 전부 사라졌고,
+        A2 S 로 A1 이 안 들려도 자막은 남아 둘이 반대로 굴었음 · D-285)."""
+        items = [V("v", "main", 0, 24.0, 28.0, "L"), A("a", "main", 0, 24.0, 28.0, "L")]
+        plain = editor.timeline_captions(proj(items))
+        self.assertEqual(texts(plain), ["공을 먼저 보세요"])
+        for tid, k in (("A1", "mute"), ("A2", "solo"), ("A1", "solo")):
+            tr = editor.default_tracks()
+            next(t for t in tr if t["id"] == tid)[k] = True
+            self.assertEqual(editor.timeline_captions(proj(items, tracks=tr)), plain, (tid, k))
+
+    def test_silent_source_and_bgm_keep_captions(self):
+        """검토 재현: 소리 없는 원본(화면 녹화)이나 A1 을 지우고 배경음악을 깐 편집본 — 기준 701bc49 는 자막 1개, B3 처음은 [] (자막 ＋ 도 막힘)
+        → 이제 대사 트랙에 원본 소리가 없는 V1 원본 영상 구간은 예전처럼 영상을 따라감."""
+        cap = [{"id": "s", "start": 1.0, "end": 3.0, "text": "화면 녹화 설명 자막"}]
+        for bgm in (A("b", "bgm", 0, 0, 10, track="A2"), A("b", "bgm", 0, 0, 10)):  # 음악 트랙 · 지운 A1 자리에 깐 배경음악(원본 아님)
+            q = proj([V("v", "main", 0, 0, 10), bgm], caps=cap)
+            self.assertEqual(rnd(editor.timeline_captions(q)), [[1.0, 3.0, "화면 녹화 설명 자막"]])
+            self.assertEqual(editor.timeline_captions(q), _old_rule(q))
+        # 음악 트랙에 놓은 원본 소리 + 같은 V1 영상: 대사 트랙이 아니니 영상을 따라감 (예전 V1 규칙과 같음)
+        q = proj([V("v", "main", 0, 24.0, 28.0), A("m", "main", 0, 24.0, 28.0, track="A3")])
+        self.assertEqual(editor.timeline_captions(q), _old_rule(q))
+
+    def test_v1_only_where_dialog_audio_missing(self):
+        """A1 이 V1 일부만 덮으면 나머지 V1 구간만 영상을 따라감 — 같은 자막은 한 덩어리 · L 컷처럼 다른 원본 소리가 덮은 곳은 소리 기준 그대로."""
+        q = proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 26.0)])  # 2~4초는 대사 소리 없음 (원본 26~28초)
+        its = editor.caption_items(q)
+        self.assertEqual([(i["track"], round(i["start"], 3), round(i["in"], 3), round(i["out"], 3)) for i in its],
+                         [("A1", 0, 24.0, 26.0), ("V1", 2.0, 26.0, 28.0)])
+        self.assertEqual(rnd(editor.timeline_captions(q)), [[1.0, 3.0, "공을 먼저 보세요"]])
+        self.assertNotIn("그제서야 어디로 갈지", texts(editor.timeline_captions(proj(lcut()))))
 
     def test_video_only_sequence_keeps_v1_rule(self):
         """소리 클립이 하나도 없는 편집본(영상만)은 따라갈 소리가 없으니 예전처럼 V1 원본 영상 — 예전 규칙 그대로."""
@@ -309,6 +340,9 @@ class PreviewParityTest(unittest.TestCase):
         for name in ("const FPS =", "const EPS =", "const sp =", "const iEnd =", "const iLen =", "const mt =", "const tlOf =", "const aTracks ="):
             i = src.index(name)
             out.append(src[i:src.index("\n", i)])
+        for a in ("function mergeIv(", "function minusIv("):
+            i = src.index(a)
+            out.append(src[i:src.index("\n}\n", i) + 2])
         i = src.index("function capWords(")
         out.append(src[i:src.index("// 한 줄 자막이 화면 밖으로", i)])
         prog = "let S, P, ver = 0;\nconst total = () => Math.max(0, ...S.items.map(iEnd));\n" + "\n".join(out) + """
@@ -333,16 +367,21 @@ process.stdout.write(JSON.stringify(res));"""
         cases = [proj(lcut()), proj(broll()), proj(lcut(), fmt="shorts"), proj(broll(), tracks=tr_m),
                  proj([V("v", "brl", 0, 0, 10), A("x", "main", 2.0, 25.0, 27.0, track="A4"), A("r", "main", 5, 33.0, 38.0, rev=True)], tracks=tr_v),
                  proj([A("a", "main", 0, 24.0, 28.0), A("b", "main", 0, 24.0, 28.0, track="A2")], tracks=tr_d),
-                 proj(append_other(), media=MEDIA), proj([V("a", "main", 0, 24.0, 28.0), V("b", "main", 8, 97.0, 100.0)])]
+                 proj(append_other(), media=MEDIA), proj([V("a", "main", 0, 24.0, 28.0), V("b", "main", 8, 97.0, 100.0)]),
+                 proj([V("v", "main", 0, 24.0, 34.0), A("b", "bgm", 0, 0, 10, track="A2")]),  # 소리 없는 원본 + 배경음악 (D-285)
+                 proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 26.0), V("w", "main", 4, 97.0, 103.0, speed=1.5),
+                       A("a2", "main", 4, 97.0, 98.5)]),  # A1 이 일부만 (빠르기 1.5배 클립의 뒤쪽만 영상 기준)
+                 proj([V("v", "main", 0, 24.0, 28.0), A("a", "main", 0, 24.0, 28.0, mute=True)])]  # 소리 끈 클립 → 영상으로도 없음
         js = self.run_js([dict(c, mcaps={"oth": OTHER}) for c in cases])
         with mock.patch.object(editor, "media_captions", lambda f, src="videos": OTHER if f == MEDIA[2]["file"] else []):
             for c, j in zip(cases, js):
                 py = editor.timeline_captions(c)
                 self.assertEqual([[round(x["start"], 4), round(x["end"], 4), x["text"]] for x in py],
                                  [[round(a, 4), round(b, 4), t] for a, b, t, _ in j], c["items"][0]["id"])
-        self.assertEqual([m for *_, m in js[-2]], ["main", "oth", "oth"])
-        self.assertTrue(all(js[k] for k in (0, 1, 2, 4, 5, 7)))
-        self.assertEqual(js[3], [])  # 대사 트랙(A1) 소리를 끄면 자막도 없음
+        self.assertEqual([m for *_, m in js[6]], ["main", "oth", "oth"])
+        self.assertTrue(all(js[k] for k in (0, 1, 2, 4, 5, 7, 8, 9)))
+        self.assertEqual(js[3], js[1])  # 대사 트랙(A1) M 은 듣기용 — 자막은 그대로 (D-285)
+        self.assertEqual(js[10], [])  # 소리 끈 클립은 짝 영상으로도 없음
 
 
 if __name__ == "__main__":

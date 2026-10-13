@@ -3056,22 +3056,31 @@ CAP_CPS = 14.0   # 자막 1초에 읽을 글자 수 한도 (띄어쓰기 빼고)
 
 def caption_items(proj):
     """자막이 따라갈 클립 = 말소리가 나오는 대사 소리 클립 (시작 순) — A1 이나 '대사' 역할 트랙의 소리 클립(영상과 짝이 없어도).
-    소리를 끈 클립·트랙, 효과음 트랙(대사 역할 + voiceFx false), 거꾸로 재생, 다시 보기·티저(noCaps)는 뺌 (B롤 덮어쓰기·J/L 컷에서도
-    들리는 말에 자막 · D-283). 트랙 목록이 없으면(MSG 가 만들며 부를 때) 기본 트랙. 소리 클립이 하나도 없는 편집본(영상만)은 따라갈 소리가
-    없으니 예전처럼 V1 의 원본 영상 클립. editor.html capItems 와 같은 규칙."""
+    소리를 끈 클립, 효과음 트랙(대사 역할 + voiceFx false), 거꾸로 재생, 다시 보기·티저(noCaps)는 뺌 (B롤 덮어쓰기·J/L 컷에서도
+    들리는 말에 자막 · D-283). 트랙의 소리 끄기(M)·이 트랙만 듣기(S)는 듣기용이라 자막과 상관없음 (D-285).
+    그 시간에 대사 역할 트랙에 원본 소리 클립(소리 끈 것·거꾸로·noCaps 도)이 하나도 없는 V1 원본 영상 구간도 자막을 따라감 — 영상만 있는
+    편집본, 소리 없는 원본(화면 녹화), 대사 소리를 지우고 음악을 깐 곳은 예전처럼 영상을 따라감 (D-285 · 부분만이면 그 구간만 자른 사본).
+    트랙 목록이 없으면(MSG 가 만들며 부를 때) 기본 트랙. editor.html capItems 와 같은 규칙."""
     items = proj.get("items") or ()
-    if not any(str(it.get("track") or "").startswith("A") for it in items):
-        return sorted([it for it in items if it.get("track") == "V1" and it.get("media", "main") == "main" and not it.get("rev") and not it.get("noCaps")],
-                      key=lambda x: x["start"])
     tracks = {t["id"]: t for t in (proj.get("tracks") or default_tracks()) if t.get("k") == "a"}
-    out = []
+    out, cover = [], []
     for it in items:
         tr = tracks.get(it.get("track"))
-        if tr is None or not (it["track"] == "A1" or tr.get("role") == "dialog") or tr.get("voiceFx") is False:
+        if tr is None or not (it["track"] == "A1" or tr.get("role") == "dialog"):
             continue
-        if tr.get("mute") or it.get("mute") or it.get("rev") or it.get("noCaps"):
+        if it.get("media", "main") == "main" and i_end(it) - float(it["start"]) > 1e-6:
+            cover.append((float(it["start"]), i_end(it)))
+        if tr.get("voiceFx") is not False and not it.get("mute") and not it.get("rev") and not it.get("noCaps"):
+            out.append(it)
+    cv = _merge_spans(cover)
+    for it in items:
+        if it.get("track") != "V1" or it.get("media", "main") != "main" or it.get("rev") or it.get("noCaps"):
             continue
-        out.append(it)
+        s, e = float(it["start"]), i_end(it)
+        for a, b in _minus_spans([[s, e]], cv):
+            if b - a > 0.04:
+                out.append(it if a <= s + 1e-9 and b >= e - 1e-9 else
+                           dict(it, start=a, **{"in": it["in"] + (a - s) * i_sp(it), "out": it["in"] + (b - s) * i_sp(it)}))
     return sorted(out, key=lambda x: x["start"])
 
 

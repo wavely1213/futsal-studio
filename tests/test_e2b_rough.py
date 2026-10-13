@@ -448,7 +448,8 @@ class SfxDuckPreviewTest(unittest.TestCase):
         src = (Path(__file__).resolve().parents[1] / "editor.html").read_text(encoding="utf-8")
         out = []
         for name in ("const FPS =", "const EPS =", "const fr =", "const sp =", "const iEnd =", "const iLen =", "const mt =", "const tlOf =",
-                     "const TRK =", "const aTracks =", "const dbLin =", "const linDb =", "const targetOf =", "const isSfxMd =", "const lbl ="):
+                     "const TRK =", "const aTracks =", "const dbLin =", "const linDb =", "const targetOf =", "const isSfxMd =", "const lbl =",
+                     "const itemsOn =", "const mdOf =", "const MED =", "const MCAPS =", "const isTalkMd =", "const sfxOnly ="):
             i = src.index(name)
             out.append(src[i:src.index("\n", i)])
         for a, b in (("function mergeIv(", "\n}\n"), ("const roleOf =", "function headHTML("), ("// 말소리 감지 (배경음악 자동 줄이기 미리보기)", "function renderFrame("),
@@ -509,7 +510,8 @@ r.push(autoDest(sfx, 0, 0.4, false)[1]);
 S.items.push({ id: "x", track: "A4", start: 0, in: 0, out: 1, speed: 1 }); r.push(autoDest(sfx, 0.5, 0.4, false)[1]);
 r.push(isSfxMd(sfx), isSfxMd(song), isSfxMd({ kind: "audio", src: "videos", file: "효과음_x.wav" }));
 process.stdout.write(JSON.stringify(r));""")
-        self.assertEqual(res, ["A4", "A2", "A4", "A5", True, False, False])
+        # 효과음: 빈 음악 트랙 A2(넣을 때 효과음 트랙으로 바꿈 · 예전: 화면 밖 새 A4) → 효과음 트랙 A4 → A4 가 차 있으면 다시 빈 음악 트랙 A2 (D-287)
+        self.assertEqual(res, ["A2", "A2", "A4", "A2", True, False, False])
 
 
 class ThumbGrabTest(WorkMixin, unittest.TestCase):
