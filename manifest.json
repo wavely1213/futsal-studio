@@ -1,6 +1,8 @@
 {
   "version": "2.20.0",
   "notes": "밖에서 PC 스튜디오 전체 쓰기 · 아이디·비밀번호로 연결(코드 입력 칸 뺌) · 원격 접속 늘 켜기 · 끝까지 자동으로 · 쇼츠 주제 줄 · MSG round7 · '자동' 탭 누끼",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/78a201d75bebd60ce16298826c103aacc42ae470.zip",
+  "commit": "78a201d75bebd60ce16298826c103aacc42ae470",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "d8182d078269f9814b485a9fb4b5f6096c33aee62a149459713fcca428f23db7",
