@@ -362,6 +362,156 @@ class DuckingTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class SfxDuckTest(unittest.TestCase):
+    """효과음 역할·배경음악 줄이기 고치기 (B3 · D-280~D-282): 자막이 없어 소리 크기로 판단할 때도 효과음은 음악을 줄이지 않음 ·
+    '여기는 줄이지 않기'(noDuck) 구간 · 미리보기(editor.html)도 같은 규칙."""
+
+    def mix(self, q, voice=None, t1=8.0, sfx=True):
+        import numpy as np
+        tmp = Path(tempfile.mkdtemp(prefix="B3 덕킹 "))
+        try:
+            _tone(tmp / "main.wav", 440, 20)
+            _tone(tmp / "bgm.wav", 1000, 8)
+            r = core.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=3000:d=0.4", "-af", "volume=3", "-ar", "48000", str(tmp / "sfx.wav")])
+            assert r.returncode == 0, r.stderr
+            media = {"main": {"id": "main", "file": "main.wav", "src": "x", "dur": 20.0, "audio": True},
+                     "bgm": {"id": "bgm", "file": "bgm.wav", "src": "x", "dur": 8.0, "audio": True},
+                     "fx": {"id": "fx", "file": "sfx.wav", "src": "x", "dur": 0.4, "audio": True}}
+            q = dict(q, voice=voice or {})
+            with mock.patch.object(editor, "media_path", lambda f, src="videos": tmp / f):
+                path, _ = editor._mix_audio(q, media, 0.0, t1, tmp, [], lambda x: None)
+            return np.fromfile(path, np.float32).reshape(-1, 2)[:, 0]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @staticmethod
+    def amp(y, a, b, f):
+        import numpy as np
+        x = y[int(a * 48000):int(b * 48000)]
+        spec = np.abs(np.fft.rfft(x * np.hanning(len(x))))
+        k = int(round(f * len(x) / 48000))
+        return float(spec[k - 2:k + 3].max())
+
+    def sfx_seq(self, caps=(), dialog=False):
+        tr = editor.default_tracks()
+        next(t for t in tr if t["id"] == "A3").update(role="dialog", voiceFx=False, name="효과음")
+        items = [{"id": "m", "track": "A2", "media": "bgm", "start": 0.0, "in": 0.0, "out": 8.0, "speed": 1, "rev": False, "fx": {}, "gain": 0}]
+        items += [{"id": f"s{k}", "track": "A3", "media": "fx", "start": t, "in": 0.0, "out": 0.4, "speed": 1, "rev": False, "fx": {}, "gain": 0}
+                  for k, t in enumerate((2.0, 5.0))]
+        if dialog:  # 아주 작은 원본 소리 (-40 dBFS 아래 · 말 없음)
+            items.append({"id": "d", "track": "A1", "media": "main", "start": 0.0, "in": 0.0, "out": 8.0, "speed": 1, "rev": False,
+                          "fx": {"level": {"v": -60.0, "k": []}}, "gain": 0})
+        return {"tracks": tr, "items": items, "captions": list(caps), "duck": {"on": True, "amount": -14.0}}
+
+    def test_fallback_ignores_sfx_hits(self):
+        """자막이 없는 편집본(소리 크기로 판단)에서 효과음 '휙'이 울려도 배경음악이 꺼졌다 살아나지 않음 (목소리 보정 끔·켬 둘 다)."""
+        for voice in ({}, {"hp": True, "comp": True}):
+            y = self.mix(self.sfx_seq(dialog=True), voice)
+            ref = self.amp(y, 1.0, 1.3, 1000)  # 같은 길이 창끼리 견줌
+            for a in (2.05, 2.45, 5.05, 5.45):  # 효과음 동안 · 효과음 끝난 뒤 (예전: -14dB 로 줄었다 0.45초에 걸쳐 살아남)
+                self.assertGreater(20 * math.log10(self.amp(y, a, a + 0.3, 1000) / ref), -1.0, (voice, a))
+            self.assertGreater(self.amp(y, 2.05, 2.35, 3000), ref * 0.5)  # 효과음은 그대로 들림
+
+    def test_fallback_still_ducks_on_loud_dialog(self):
+        q = self.sfx_seq()
+        q["items"].append({"id": "d", "track": "A1", "media": "main", "start": 3.0, "in": 0.0, "out": 1.0, "speed": 1, "rev": False, "fx": {}, "gain": 0})
+        y = self.mix(q)
+        self.assertLess(20 * math.log10(self.amp(y, 3.3, 3.9, 1000) / self.amp(y, 1.0, 1.6, 1000)), -10.0)  # 대사는 예전처럼 줄임
+
+    def test_no_duck_range_export(self):
+        q = DuckingTest.seq(None, [{"start": 10.0, "end": 14.0, "text": "말하는 중"}])  # 타임라인 2~6초 말
+        q["noDuck"] = [[3.5, 5.0]]
+        y = self.mix(q)
+        ref = self.amp(y, 0.5, 1.1, 1000)  # 0.6초 창끼리 견줌
+        self.assertLess(20 * math.log10(self.amp(y, 2.4, 3.0, 1000) / ref), -10.0)   # 말하는 중 → 줄임
+        self.assertGreater(20 * math.log10(self.amp(y, 4.3, 4.9, 1000) / ref), -1.0)  # 여기는 줄이지 않기
+        self.assertLess(20 * math.log10(self.amp(y, 5.4, 6.0, 1000) / ref), -10.0)   # 그 뒤 말은 다시 줄임
+
+    def test_no_duck_speech_spans(self):
+        q = DuckingTest.seq(None, [{"start": 10.0, "end": 14.0, "text": "말"}])
+        base = editor.speech_spans(q)
+        q["noDuck"] = [[3.0, 4.0], ["x", 1], [5.5, 5.0], [3.5, 4.5]]  # 잘못된 값·거꾸로는 버리고 겹친 것은 합침
+        self.assertEqual(editor.no_duck_spans(q), [[3.0, 4.5]])
+        sp, other = editor.speech_spans(q)
+        self.assertEqual([[round(a, 3), round(b, 3)] for a, b in base[0]], [[1.8, 6.2]])
+        self.assertEqual([[round(a, 3), round(b, 3)] for a, b in sp], [[1.8, 3.0], [4.5, 6.2]])
+        self.assertEqual(editor._minus_spans([[0, 10]], []), [[0, 10]])
+        self.assertEqual(editor._minus_spans([[0, 2], [3, 6], [8, 9]], [[1, 4], [5, 8.5]]), [[0, 1], [4, 5], [8.5, 9]])
+
+
+@unittest.skipUnless(shutil.which("node"), "node 가 없어요")
+class SfxDuckPreviewTest(unittest.TestCase):
+    """editor.html 의 트랙 역할(대사·음악·효과음) · 미리보기 배경음악 줄이기(speechSpans·noDuck·곡선) · 효과음 놓을 트랙을 node 로 그대로 실행."""
+
+    def run_js(self, body):
+        import subprocess
+        src = (Path(__file__).resolve().parents[1] / "editor.html").read_text(encoding="utf-8")
+        out = []
+        for name in ("const FPS =", "const EPS =", "const fr =", "const sp =", "const iEnd =", "const iLen =", "const mt =", "const tlOf =",
+                     "const TRK =", "const aTracks =", "const dbLin =", "const linDb =", "const targetOf =", "const isSfxMd =", "const lbl ="):
+            i = src.index(name)
+            out.append(src[i:src.index("\n", i)])
+        for a, b in (("function mergeIv(", "\n}\n"), ("const roleOf =", "function headHTML("), ("// 말소리 감지 (배경음악 자동 줄이기 미리보기)", "function renderFrame("),
+                     ("// 배경음악 줄이기 곡선", "function drawWaves("), ("// 넣을 트랙 고르기", "const srcDest")):
+            i = src.index(a)
+            out.append(src[i:src.index(b, i) + (2 if b == "\n}\n" else 0)])
+        prog = "let S, P, ver = 0;\nconst total = () => Math.max(0, ...S.items.map(iEnd));\nconst audioAt = () => [];\n" + "\n".join(out) + "\n" + body
+        r = subprocess.run([shutil.which("node"), "-e", prog], capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_role_select(self):
+        res = self.run_js("""
+const msg = { id: "A2", k: "a", role: "dialog", name: "효과음", voiceFx: false }, bgm = { id: "A3", k: "a", role: "music", name: "배경음악" }, mine = { id: "A4", k: "a", role: "music" };
+const r = [roleOf(msg), lbl(msg)];
+setRole(msg, "dialog"); r.push(roleOf(msg), "voiceFx" in msg, lbl(msg));
+setRole(msg, "sfx"); r.push(roleOf(msg), msg.role, msg.voiceFx, lbl(msg));
+setRole(bgm, "sfx"); r.push(lbl(bgm)); setRole(mine, "sfx"); r.push(lbl(mine)); setRole(mine, "music"); r.push(lbl(mine), "voiceFx" in mine);
+process.stdout.write(JSON.stringify(r));""")
+        self.assertEqual(res, ["sfx", "효과음 2", "dialog", False, "대사 2", "sfx", "dialog", False, "효과음 2", "효과음 3", "효과음 4", "음악 4", False])
+
+    def test_preview_spans_match_export(self):
+        q = DuckingTest.seq(None, [{"start": 10.0, "end": 14.0, "text": "말"}, {"start": 15.0, "end": 15.5, "text": "끝"}])
+        q["noDuck"] = [[3.0, 4.0], [5.5, 9.0]]
+        q["tracks"].append({"id": "A4", "k": "a", "role": "dialog", "voiceFx": False})
+        q["items"].append({"id": "x", "track": "A4", "media": "main", "start": 0.0, "in": 10.0, "out": 12.0, "speed": 1, "rev": False})
+        res = self.run_js("""const q = %s;
+S = { id: "s", items: q.items, tracks: q.tracks, noDuck: q.noDuck, duck: { on: true, amount: -14 } }; P = { captions: q.captions, speech: [] };
+const sps = speechSpans(), c = duckCurve(), g = t => Math.round(linDb(c.g[Math.round(t / 0.02)]) * 10) / 10;
+process.stdout.write(JSON.stringify([sps, speechAt(2.5), speechAt(3.5), speechAt(6.0), g(1.0), g(2.8), g(3.6), g(4.7), g(6.5)]));""" % json.dumps(q))
+        py = editor.speech_spans(q)[0]
+        self.assertEqual([[round(a, 6), round(b, 6)] for a, b in res[0]], [[round(a, 6), round(b, 6)] for a, b in py])
+        self.assertEqual(res[1:4], [True, False, False])  # '여기는 줄이지 않기' 안은 말이 있어도 줄이지 않음
+        self.assertEqual(res[4], 0.0)
+        self.assertLess(res[5], -13.0)   # 말하는 중
+        self.assertGreater(res[6], -9.0)  # 줄이지 않기 구간에서 다시 커지는 중 (0.45초 걸쳐)
+        self.assertLess(res[7], -13.0)
+        self.assertGreater(res[8], -1.0)
+
+    def test_sfx_never_counts_as_speech(self):
+        """자막이 없는(소리 크기로 판단) 편집본에서도 효과음 트랙 소리는 말로 안 봄 (예전: 자막이 있을 때만 건너뜀)."""
+        res = self.run_js("""
+S = { id: "s", items: [{ id: "x", track: "A3", media: "fx", start: 0, in: 0, out: 1, speed: 1 }],
+      tracks: [{ id: "A1", k: "a", role: "dialog" }, { id: "A3", k: "a", role: "dialog", voiceFx: false }], duck: { on: true, amount: -14 } };
+P = { captions: [], speech: [] }; let seen = 0;
+audioAtSeen = () => { seen++; return []; };
+process.stdout.write(JSON.stringify([speechSpans(), speechAt(0.5)]));""".replace("audioAtSeen", "globalThis.audioAtSeen"))
+        self.assertEqual(res, [None, False])
+
+    def test_sfx_media_goes_to_sfx_track(self):
+        res = self.run_js("""
+const unlocked = id => { const t = TRK(id); return t && !t.lock; };
+const sfx = { id: "s1", kind: "audio", src: "assets", file: "효과음_휙.wav", audio: true, dur: 0.4 }, song = { id: "m1", kind: "audio", src: "assets", file: "bgm.mp3", audio: true, dur: 60 };
+S = { items: [], tracks: [{ id: "V1", k: "v", target: true }, { id: "A1", k: "a", role: "dialog", target: true }, { id: "A2", k: "a", role: "music" }, { id: "A3", k: "a", role: "music" }] };
+const r = [autoDest(sfx, 0, 0.4, false)[1], autoDest(song, 0, 60, false)[1]];
+S.tracks.push({ id: "A4", k: "a", role: "dialog", voiceFx: false });
+r.push(autoDest(sfx, 0, 0.4, false)[1]);
+S.items.push({ id: "x", track: "A4", start: 0, in: 0, out: 1, speed: 1 }); r.push(autoDest(sfx, 0.5, 0.4, false)[1]);
+r.push(isSfxMd(sfx), isSfxMd(song), isSfxMd({ kind: "audio", src: "videos", file: "효과음_x.wav" }));
+process.stdout.write(JSON.stringify(r));""")
+        self.assertEqual(res, ["A4", "A2", "A4", "A5", True, False, False])
+
+
 class ThumbGrabTest(WorkMixin, unittest.TestCase):
     def test_source_resolution_and_separate_files(self):
         import thumb

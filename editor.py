@@ -487,13 +487,16 @@ def poster(name, src="videos"):
 
 
 def media_bundle(f, src="videos"):
-    """편집실에 미디어를 올릴 때 필요한 정보 한 번에 (파형·썸네일 포함)."""
+    """편집실에 미디어를 올릴 때 필요한 정보 한 번에 (파형·썸네일 포함) · 보관함의 다른 영상이면 그 영상 자막도 (captions ·
+    대사 트랙에 놓은 그 영상 소리에 자막 · 내보내기 timeline_captions 와 같은 media_captions · D-284)."""
     e = media_entry(f, src)
     out = {"media": e, "waveform": None, "thumbs": None}
     if e["audio"]:
         out["waveform"] = waveform(e["file"], 50, src)
     if e["kind"] in ("video", "image"):
         out["thumbs"] = thumbs(e["file"], src)
+    if src == "videos" and e["kind"] == "video" and e["audio"]:
+        out["captions"] = media_captions(e["file"], src)
     return out
 
 
@@ -3051,38 +3054,105 @@ CAP_MIN = 0.7    # 타임라인 자막 조각은 (다음 자막 전까지) 적�
 CAP_CPS = 14.0   # 자막 1초에 읽을 글자 수 한도 (띄어쓰기 빼고) — 넘으면 다음 자막 전까지 조금 더 보임
 
 
+def caption_items(proj):
+    """자막이 따라갈 클립 = 말소리가 나오는 대사 소리 클립 (시작 순) — A1 이나 '대사' 역할 트랙의 소리 클립(영상과 짝이 없어도).
+    소리를 끈 클립·트랙, 효과음 트랙(대사 역할 + voiceFx false), 거꾸로 재생, 다시 보기·티저(noCaps)는 뺌 (B롤 덮어쓰기·J/L 컷에서도
+    들리는 말에 자막 · D-283). 트랙 목록이 없으면(MSG 가 만들며 부를 때) 기본 트랙. 소리 클립이 하나도 없는 편집본(영상만)은 따라갈 소리가
+    없으니 예전처럼 V1 의 원본 영상 클립. editor.html capItems 와 같은 규칙."""
+    items = proj.get("items") or ()
+    if not any(str(it.get("track") or "").startswith("A") for it in items):
+        return sorted([it for it in items if it.get("track") == "V1" and it.get("media", "main") == "main" and not it.get("rev") and not it.get("noCaps")],
+                      key=lambda x: x["start"])
+    tracks = {t["id"]: t for t in (proj.get("tracks") or default_tracks()) if t.get("k") == "a"}
+    out = []
+    for it in items:
+        tr = tracks.get(it.get("track"))
+        if tr is None or not (it["track"] == "A1" or tr.get("role") == "dialog") or tr.get("voiceFx") is False:
+            continue
+        if tr.get("mute") or it.get("mute") or it.get("rev") or it.get("noCaps"):
+            continue
+        out.append(it)
+    return sorted(out, key=lambda x: x["start"])
+
+
+_MCAPS = {}
+
+
+def media_captions(file, src="videos"):
+    """보관함의 다른 영상(원본이 아닌 미디어)을 이어 붙였을 때 그 클립에 띄울 자막 (그 영상 원본 시각) — 그 영상의 편집실 프로젝트
+    자막(고친 글)이 있으면 그것, 없으면 받아쓰기로 만든 자막, 받아쓰기도 없으면 []. 가져온 파일(assets)은 받아쓰기가 없어 [].
+    파일이 그대로면 다시 안 읽음 → 편집실 미리보기(media_bundle 의 captions)와 내보내기(timeline_captions)가 같은 자막을 씀 (D-284)."""
+    if src != "videos":
+        return []
+    name = Path(str(file)).name
+    try:
+        if not (core.VIDEOS / name).exists():
+            return []
+        pp, tp = _ppath(name), core.adir(name) / "transcript.json"
+        key = tuple(f.stat().st_mtime_ns if f.exists() else None for f in (pp, tp))
+        hit = _MCAPS.get(name)
+        if hit and hit[0] == key:
+            return hit[1]
+        caps = None
+        if pp.exists():
+            try:
+                c = _read_json(pp).get("captions")
+                caps = [x for x in c if isinstance(x, dict)] if isinstance(c, list) else None
+            except (OSError, ValueError, AttributeError):
+                caps = None
+        if caps is None:
+            segs = _segments_of(name)
+            caps = _captions_of(segs, media_info(name), silences_of(name)) if segs else []
+    except Exception:  # noqa: BLE001 — 못 읽는 영상·받아쓰기는 자막 없이 (미리보기·내보내기는 그대로 됨)
+        return []
+    _MCAPS[name] = (key, caps)
+    return caps
+
+
 def timeline_captions(proj):
-    """자막을 타임라인 시간으로 (V1 의 원본 클립을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨)."""
+    """자막을 타임라인 시간으로 — 대사 소리 클립(caption_items)을 따라감, 잘린 부분은 빠지고 여러 클립에 걸치면 나뉨.
+    원본 클립은 프로젝트 자막, 보관함의 다른 영상 클립은 그 영상 자막(media_captions · proj 에 media 가 있을 때)."""
     res = []
     total = seq_total(proj)
     # noCaps: 다시 보기·티저처럼 같은 장면을 한 번 더 쓴 클립은 말 자막을 다시 띄우지 않음 (editor.html capsTL 과 같은 규칙)
-    vids = sorted([it for it in proj["items"] if it["track"] == "V1" and it["media"] == "main" and not it.get("rev") and not it.get("noCaps")],
-                  key=lambda x: x["start"])
+    its = caption_items(proj)
     shorts = SHORTS_SPLIT and proj.get("format") == "shorts"
-    # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
-    for cap0 in proj.get("msgCaps") or proj["captions"]:
-        for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
-            toks = str(cap.get("text") or "").split()
-            for it in vids:
-                a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
-                if b - a > 0.05:
-                    s, e = i_tl(it, a), min(i_tl(it, b), total)
-                    if e - s > 0.04:
-                        # 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말·고쳐 다시 한 말이 자막에 남지 않게 · editor.html capsTL 과 같은 규칙)
-                        keep = [k for k, w in enumerate(ws) if it["in"] <= (float(w["s"]) + float(w["e"])) / 2 < it["out"]] if ws else None
-                        if keep is not None and not keep:
-                            continue
-                        c = {"start": s, "end": e, "text": cap["text"] if keep is None or len(keep) == len(ws) else " ".join(toks[k] for k in keep)}
-                        if ws:  # 노래방 자막용 단어 시각도 타임라인으로
-                            c["words"] = [{"w": ws[k].get("w", ""), "s": i_tl(it, float(ws[k]["s"])), "e": i_tl(it, float(ws[k]["e"]))} for k in keep]
-                            c["_keep"] = keep
-                            c["_n"] = len(ws)
-                            c["_toks"] = toks
-                            c["_full"] = cap["text"]
-                        c["_k"] = id(cap)
-                        res.append(c)
+    mds = {m.get("id"): m for m in proj.get("media") or () if isinstance(m, dict)}
+    groups = {}
+    for it in its:
+        groups.setdefault(it.get("media", "main"), []).append(it)
+    alive = []  # 쇼츠형으로 나눈 자막 조각을 끝까지 붙잡아 둠 — _k(id) 가 다른 조각에 다시 쓰여 다른 자막끼리 합쳐지지 않게 (editor.html 은 객체 자체로 견줌)
+    for mid, vids in groups.items():
+        if mid == "main":
+            # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
+            caps = proj.get("msgCaps") or proj.get("captions") or []
+        else:
+            md = mds.get(mid)
+            caps = media_captions(md.get("file"), md.get("src", "videos")) if md else []
+        for cap0 in caps:
+            for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
+                alive.append(cap)
+                toks = str(cap.get("text") or "").split()
+                for it in vids:
+                    a, b = max(cap["start"], it["in"]), min(cap["end"], it["out"])
+                    if b - a > 0.05:
+                        s, e = i_tl(it, a), min(i_tl(it, b), total)
+                        if e - s > 0.04:
+                            # 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말·고쳐 다시 한 말이 자막에 남지 않게 · editor.html capsTL 과 같은 규칙)
+                            keep = [k for k, w in enumerate(ws) if it["in"] <= (float(w["s"]) + float(w["e"])) / 2 < it["out"]] if ws else None
+                            if keep is not None and not keep:
+                                continue
+                            c = {"start": s, "end": e, "text": cap["text"] if keep is None or len(keep) == len(ws) else " ".join(toks[k] for k in keep)}
+                            if ws:  # 노래방 자막용 단어 시각도 타임라인으로
+                                c["words"] = [{"w": ws[k].get("w", ""), "s": i_tl(it, float(ws[k]["s"])), "e": i_tl(it, float(ws[k]["e"]))} for k in keep]
+                                c["_keep"] = keep
+                                c["_n"] = len(ws)
+                                c["_toks"] = toks
+                                c["_full"] = cap["text"]
+                            c["_k"] = id(cap)
+                            res.append(c)
     # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
-    # (editor.html capsTL 과 같은 규칙)
+    # 같은 소리를 두 대사 트랙에 겹쳐 둔 것(같은 자막이 겹침)도 한 덩어리 (editor.html capsTL 과 같은 규칙)
     out = []
     for c in sorted(res, key=lambda x: x["start"]):
         p = out[-1] if out else None
@@ -3095,6 +3165,18 @@ def timeline_captions(proj):
             if "_keep" in p and "_keep" in c:
                 p["_keep"] = sorted(set(p["_keep"]) | set(c["_keep"]))
                 p["text"] = " ".join(p["_toks"][k] for k in p["_keep"]) if len(p["_keep"]) < p["_n"] else p["_full"]
+            continue
+        if p is not None and p["_k"] == c["_k"] and c["start"] < p["end"]:  # 겹친 같은 자막: 아직 없는 낱말만 더함
+            p["end"] = max(p["end"], c["end"])
+            if "words" in p and "words" in c:
+                have = dict(zip(p["_keep"], p["words"]))
+                for k, w in zip(c["_keep"], c["words"]):
+                    have.setdefault(k, w)
+                p["_keep"] = sorted(have)
+                p["words"] = [have[k] for k in p["_keep"]]
+                p["text"] = " ".join(p["_toks"][k] for k in p["_keep"]) if len(p["_keep"]) < p["_n"] else p["_full"]
+            else:
+                p.pop("words", None)
             continue
         out.append(c)
     # 컷으로 잘려 너무 짧게 스치는 자막은 다음 자막이 나오기 전까지 CAP_MIN 초는 보이게 (editor.html capsTL 과 같은 규칙)
@@ -4198,7 +4280,41 @@ def speech_spans(seq):
                 continue
             t0, t1 = (st + (b - y) / sp, st + (b - x) / sp) if it.get("rev") else (st + (x - a) / sp, st + (y - a) / sp)
             talk.append((t0 - DUCK_PAD, t1 + DUCK_PAD))
-    return _merge_spans(talk), _merge_spans(other)
+    nd = no_duck_spans(seq)  # '여기는 줄이지 않기' 구간은 말이 있어도 줄이지 않음 (D-282)
+    return _minus_spans(_merge_spans(talk), nd), _minus_spans(_merge_spans(other), nd)
+
+
+def no_duck_spans(seq):
+    """'여기는 줄이지 않기' 구간 (편집본 noDuck · 타임라인 시각 [[a, b]] · 겹친 것은 합침) — 이 안에서는 배경음악을 줄이지 않음.
+    받아쓴 말 자리·소리 크기 어느 쪽으로 판단해도 같음 (미리보기 editor.html noDuckSpans 와 같은 규칙 · D-282)."""
+    ivs = []
+    for r in seq.get("noDuck") or ():
+        try:
+            a, b = float(r[0]), float(r[1])
+        except (IndexError, KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(a) and math.isfinite(b) and b > a:
+            ivs.append((max(0.0, a), b))
+    return _merge_spans(ivs)
+
+
+def _minus_spans(spans, cuts):
+    """구간 목록에서 cuts 구간을 뺌 (둘 다 시작 순 · 겹치지 않음) — cuts 가 없으면 그대로."""
+    if not cuts:
+        return spans
+    out = []
+    for a, b in spans:
+        for x, y in cuts:
+            if y <= a or x >= b:
+                continue
+            if x > a:
+                out.append([a, x])
+            a = max(a, y)
+            if a >= b:
+                break
+        if a < b:
+            out.append([a, b])
+    return out
 
 
 def _mix_audio(seq, media, t_lo, t_hi, tmp, trans, progress, abort=None):
@@ -4264,8 +4380,9 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
     dia = mus = fxb = None
     # 보정하지 않는 트랙(효과음)은 짧은 소리 조각으로 메모리에 모았다가 보정한 대사에 더함 — 예전처럼 영상 길이만큼의 버퍼(fx.f32)를
     # 따로 만들면 49분 영상에서 임시 파일이 1GB 더 필요했음 · 조각이 FX_MEM 을 넘으면(긴 소리를 그 트랙에 넣음) 그때만 파일 버퍼로
+    # 목소리 보정을 끈 편집본도 효과음은 따로 모음 — 배경음악 줄이기가 효과음을 더하기 전 대사 소리로 판단하게 (D-281)
     fx_parts, fx_bytes = [], [0]
-    fx_on = bool(vf) and any(not j[-1] and j[1].get("voiceFx") is False for j in jobs)
+    fx_on = any(not j[-1] and j[1].get("voiceFx") is False for j in jobs)
     try:
         dia = np.memmap(tmp / "dialog.f32", np.float32, "w+", shape=(n, 2))
         mus = np.memmap(tmp / "music.f32", np.float32, "w+", shape=(n, 2)) if any(j[-1] for j in jobs) else None
@@ -4400,7 +4517,13 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                     e = min(m, b + SR * 10)
                     dia[b:e] = np.asarray(cl[b * 2:e * 2]).reshape(-1, 2)
                 del cl
-        for a, y in fx_parts:  # 보정하지 않는 트랙(효과음)을 보정한 대사에 더함 (배경음악 줄이기는 예전처럼 둘을 합한 소리로 봄)
+        # 말할 때 배경음악 자동 줄이기 (덕킹) — 소리 크기 판단은 효과음을 더하기 전 대사 소리로 (자막이 없는 편집본·다른 영상 대사 클립에서
+        # 효과음 '휙·팡'마다 음악이 -14dB 로 꺼졌다 살아나지 않게 · D-281) · 결과는 대사 버퍼에 그대로 더함 (임시 파일 하나 덜 씀)
+        duck = seq.get("duck") or {}
+        win = SR // 50  # 20ms
+        nw = n // win + 1
+        act = _rms20(dia, n, win) > 10 ** (-40 / 20) if mus is not None and duck.get("on") else None
+        for a, y in fx_parts:  # 보정하지 않는 트랙(효과음)을 보정한 대사에 더함
             dia[a:a + len(y)] += y
         fx_parts.clear()
         if fxb is not None:
@@ -4408,15 +4531,10 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
             for b in range(0, n, SR * 10):
                 e = min(n, b + SR * 10)
                 dia[b:e] = dia[b:e] + fxb[b:e]
-        # 말할 때 배경음악 자동 줄이기 (덕킹) → 결과는 대사 버퍼에 그대로 더함 (임시 파일 하나 덜 씀)
-        duck = seq.get("duck") or {}
-        win = SR // 50  # 20ms
-        if mus is not None and duck.get("on"):
-            nw = n // win + 1
-            act = _rms20(dia, n, win) > 10 ** (-40 / 20)
+        if act is not None:
+            tw = t_lo + np.arange(nw) * 0.02
             sp_tl = speech_spans(seq)
             if sp_tl is not None:  # 받아쓴 말 자리만 (말 없는 시범·환호에서는 음악이 살아남) · 다른 영상 대사 클립은 소리 크기로 (E2)
-                tw = t_lo + np.arange(nw) * 0.02
                 on = np.zeros(nw, bool)
                 for a, b in sp_tl[0]:
                     on |= (tw >= a) & (tw < b)
@@ -4431,6 +4549,8 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                 if act[i]:
                     last = i
                 act_h[i] = i - last <= hold
+            for a, b in no_duck_spans(seq):  # '여기는 줄이지 않기' 구간은 말 뒤 쉼(hold)·소리 크기 판단과 상관없이 그대로 (D-282)
+                act_h &= ~((tw >= a) & (tw < b))
             target = 10 ** (float(duck.get("amount", -14)) / 20)
             gw = np.ones(nw, np.float32)
             g = 1.0

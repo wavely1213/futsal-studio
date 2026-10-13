@@ -1021,7 +1021,8 @@ def build_kit(name, seq=None, save=True):
         if not segs:  # 내보낸 자막이 없으면 편집본 자막(없으면 받아쓰기)을 편집본 시간으로 옮김
             caps = [c for c in (proj.get("captions") or []) if c.get("text")] or _transcript(d)
             try:
-                segs = _segments(editor.timeline_captions(dict(sq, captions=caps))) if caps else []
+                # media: 이어 붙인 보관함의 다른 영상 클립 자막도 (내보내기 SRT 와 같은 timeline_captions · D-284)
+                segs = _segments(editor.timeline_captions(dict(sq, captions=caps, media=proj.get("media") or []))) if caps else []
             except Exception:
                 segs = []
             notes.append("내보낸 자막 파일(.srt)이 없어서 편집본 자막으로 만들었어요" if segs else

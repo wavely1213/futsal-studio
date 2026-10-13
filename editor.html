@@ -240,6 +240,7 @@
   .strip .bt { display: flex; gap: 3px; }
   .strip .bt button { width: 22px; height: 20px; border: 1px solid var(--line-2); background: var(--panel-3); border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; padding: 0; }
   .strip .bt button.m.on { background: #7a2a2d; color: #fff; } .strip .bt button.s.on { background: #8a7316; color: #fff; }
+  .ndrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   @container (max-width: 310px) { .mixer { gap: 4px; padding: 10px 6px; } .strip { width: 58px; } }  /* 오른쪽 패널 기본 너비(280~)에 A1~A3 + 전체가 다 보이게 */
 
   /* 기록 */
@@ -309,6 +310,7 @@
   .clip .kfs { position: absolute; left: 0; right: 0; bottom: 2px; height: 7px; pointer-events: none; z-index: 1; }
   .clip .kfs i { position: absolute; width: 6px; height: 6px; margin-left: -3px; background: var(--kf); transform: rotate(45deg); }
   .c1 .clip { background: var(--cap); cursor: pointer; }
+  .c1 .clip.ocap { opacity: .7; border-style: dashed; }  /* 다른 영상(보관함)의 자막 · 여기서는 못 고침 */
   .gt .clip { background: var(--title); }
   .gs .clip { background: #3e8a46; }
   .gs .clip.tacc { background: #0b6e86; }
@@ -781,7 +783,8 @@ function remapSeq(q, cut, ins, extra) {
   const trans = (q.trans || []).map(tr => ({ ...tr, a: tr.a ? last.get(tr.a) || null : null, b: tr.b ? first.get(tr.b) || null : null })).filter(tr => tr.a || tr.b);
   const titles = (q.titles || []).map(span).filter(Boolean); topicAfter(titles);
   return { items, trans, titles, shapes: (q.shapes || []).map(span).filter(Boolean), tactics: (q.tactics || []).map(span).filter(Boolean),
-    markers: (q.markers || []).map(m => ({ ...m, t: f(m.t, false) })), cut: r6(cut.reduce((a, [x, y]) => a + y - x, 0)), added: r6(ins.reduce((a, x) => a + x.len, 0)) };
+    markers: (q.markers || []).map(m => ({ ...m, t: f(m.t, false) })), cut: r6(cut.reduce((a, [x, y]) => a + y - x, 0)), added: r6(ins.reduce((a, x) => a + x.len, 0)),
+    noDuck: (q.noDuck || []).map(r => [f(+r[0], false), f(+r[1], true)]).filter(r => r[1] - r[0] > 0.05) }; // '여기는 줄이지 않기' 구간도 같은 내용 위로
 }
 // 군더더기 정리: 원본 keep([{in,out}]) 밖에 있는 V1 원본 구간을 타임라인에서 뺌 — 쇼츠는 자기 구간 안에서만 줄어듦
 function tidySeq(q, keep) {
@@ -901,39 +904,54 @@ function capParts(cap) {
   }
   return out;
 }
-/* 자막 → 타임라인 (V1 원본 클립을 따라감 · 쇼츠 편집본은 쇼츠형으로 나눔) — editor.py timeline_captions 와 같은 규칙 */
+/* 자막 → 타임라인 (대사 소리 클립을 따라감 · 쇼츠 편집본은 쇼츠형으로 나눔) — editor.py timeline_captions 와 같은 규칙 */
 let _caps = { v: -1, list: [] };
 const CAP_MIN = 0.7, CAP_CPS = 14; // 타임라인 자막 조각 최소 보이는 시간(초) · 1초 글자 수 한도 · editor.py CAP_MIN·CAP_CPS
+// 보관함의 다른 영상 자막 (미디어 id → 그 영상 원본 시각 자막 · /api/edit/media 의 captions = editor.py media_captions · D-284)
+const MCAPS = {};
+// 자막이 따라갈 클립: A1 이나 '대사' 역할 트랙의 소리 클립(영상과 짝이 없어도) — 소리 끈 클립·트랙, 효과음 트랙(voiceFx false),
+// 거꾸로 재생, 다시 보기·티저(noCaps)는 뺌 → B롤 덮어쓰기·J/L 컷에서도 들리는 말에 자막 (editor.py caption_items 와 같은 규칙 · D-283)
+// 소리 클립이 하나도 없는 편집본(영상만)은 따라갈 소리가 없으니 예전처럼 V1 의 원본 영상 클립
+function capItems() {
+  if (!S.items.some(i => String(i.track || "")[0] === "A"))
+    return S.items.filter(i => i.track === "V1" && (i.media || "main") === "main" && !i.rev && !i.noCaps).sort((a, b) => a.start - b.start);
+  const ok = new Set(aTracks().filter(t => (t.id === "A1" || t.role === "dialog") && t.voiceFx !== false && !t.mute).map(t => t.id));
+  return S.items.filter(i => ok.has(i.track) && !i.mute && !i.rev && !i.noCaps).sort((a, b) => a.start - b.start);
+}
 function capsTL() {
   if (_caps.v === ver) return _caps.list;
-  const vids = S.items.filter(i => i.track === "V1" && i.media === "main" && !i.rev && !i.noCaps), out = [], tot = total(), shorts = S.format === "shorts"; // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
-  // msgCaps: MSG 후보가 함께 가져온 자막 (프로젝트 자막에 반영하면 지움 · editor.py timeline_captions 와 같은 규칙)
-  const cs = (S.msgCaps || P.captions).slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
-  const parts = new Map();
-  for (const it of vids) {
-    let lo = 0, hi = cs.length; const from = it.in - maxLen;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (cs[m].start < from) lo = m + 1; else hi = m; }
-    for (let i = lo; i < cs.length && cs[i].start < it.out; i++) {
-      const cap = cs[i];
-      if (!parts.has(cap)) parts.set(cap, shorts ? capParts(cap) : [{ start: cap.start, end: cap.end, text: cap.text, words: capWords(cap) }]);
-      for (const q of parts.get(cap)) {
-        const a = Math.max(q.start, it.in), b = Math.min(q.end, it.out);
-        if (b - a <= 0.05) continue;
-        const s = tlOf(it, a), e = Math.min(tlOf(it, b), tot);
-        if (e - s <= 0.04) continue;
-        // 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말이 자막에 남지 않게 · editor.py timeline_captions 와 같은 규칙)
-        const ws = q.words, mid = w => (+w.s + +w.e) / 2, keep = ws ? ws.map((w, k) => (it.in <= mid(w) && mid(w) < it.out) ? k : -1).filter(k => k >= 0) : null;
-        if (keep && !keep.length) continue;
-        out.push({ cap, q, s, e, n: ws ? ws.length : 0, kt: keep ? new Map(keep.map(k => [k, tlOf(it, +ws[k].s)])) : null });
+  const out = [], tot = total(), shorts = S.format === "shorts", groups = new Map(); // noCaps: 다시 보기·티저 (editor.py timeline_captions 와 같은 규칙)
+  for (const it of capItems()) { const m = it.media || "main"; if (!groups.has(m)) groups.set(m, []); groups.get(m).push(it); }
+  for (const [mid, vids] of groups) {
+    // msgCaps: MSG 후보가 함께 가져온 자막 (프로젝트 자막에 반영하면 지움 · editor.py timeline_captions 와 같은 규칙) · 다른 영상은 그 영상 자막
+    const cs = (mid === "main" ? S.msgCaps || P.captions : MCAPS[mid] || []).slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
+    const parts = new Map();
+    for (const it of vids) {
+      let lo = 0, hi = cs.length; const from = it.in - maxLen;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (cs[m].start < from) lo = m + 1; else hi = m; }
+      for (let i = lo; i < cs.length && cs[i].start < it.out; i++) {
+        const cap = cs[i];
+        if (!parts.has(cap)) parts.set(cap, shorts ? capParts(cap) : [{ start: cap.start, end: cap.end, text: cap.text, words: capWords(cap) }]);
+        for (const q of parts.get(cap)) {
+          const a = Math.max(q.start, it.in), b = Math.min(q.end, it.out);
+          if (b - a <= 0.05) continue;
+          const s = tlOf(it, a), e = Math.min(tlOf(it, b), tot);
+          if (e - s <= 0.04) continue;
+          // 단어 시각이 있으면 이 클립에 실제로 든 낱말만 (잘라 낸 말이 자막에 남지 않게 · editor.py timeline_captions 와 같은 규칙)
+          const ws = q.words, mid2 = w => (+w.s + +w.e) / 2, keep = ws ? ws.map((w, k) => (it.in <= mid2(w) && mid2(w) < it.out) ? k : -1).filter(k => k >= 0) : null;
+          if (keep && !keep.length) continue;
+          out.push({ cap, q, s, e, mid, n: ws ? ws.length : 0, kt: keep ? new Map(keep.map(k => [k, tlOf(it, +ws[k].s)])) : null });
+        }
       }
     }
   }
   out.sort((a, b) => a.s - b.s);
-  // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · editor.py timeline_captions 와 같은 규칙)
+  // 같은 자막이 컷으로만 나뉘어 바로 이어지면 한 덩어리 (컷마다 효과가 다시 시작돼 깜빡이지 않게 · 겹친 같은 자막도 · editor.py timeline_captions 와 같은 규칙)
   const joined = [];
   for (const c of out) {
     const p = joined[joined.length - 1];
     if (p && p.q === c.q && Math.abs(c.s - p.e) <= 0.06) { p.e = Math.max(p.e, c.e); if (p.kt && c.kt) for (const [k, v] of c.kt) p.kt.set(k, v); }
+    else if (p && p.q === c.q && c.s < p.e) { p.e = Math.max(p.e, c.e); if (p.kt && c.kt) for (const [k, v] of c.kt) if (!p.kt.has(k)) p.kt.set(k, v); } // 같은 소리를 두 대사 트랙에 겹쳐 둠: 아직 없는 낱말만
     else joined.push({ ...c });
   }
   for (const c of joined) {
@@ -1210,6 +1228,7 @@ function shiftAfter(t0, d, ignore = new Set(), skip = new Set()) {
   for (const g of S.shapes) if (!g.full && g.start >= t0 - EPS) g.start = Math.max(0, g.start + d);
   for (const g of S.tactics) if (g.start >= t0 - EPS) g.start = Math.max(0, g.start + d);
   for (const m of S.markers) if (m.t >= t0 - EPS) m.t = Math.max(0, m.t + d);
+  for (const r of S.noDuck || []) if (r[0] >= t0 - EPS) { r[0] = Math.max(0, r[0] + d); r[1] = Math.max(0, r[1] + d); } // '여기는 줄이지 않기'도 그 자리 내용과 함께
   return moved;
 }
 // 연결된 짝을 d 만큼 따라 옮김: 그 자리가 막혀 있으면(배경음악 등) 같은 종류·역할·상태(숨김·음소거·솔로·볼륨)의 빈 트랙으로 → 덮거나 겹치지 않고, 보이고 들리는 것도 그대로
@@ -1378,6 +1397,7 @@ function insertGap(t, len, tracks) {
   for (const g of S.tactics) if (g.start >= t - EPS) g.start += len;
     else if (g.follow && g.follow.length && g.start + g.dur > t + EPS) Object.assign(g, tacFollowHold(g, t, len)); // 따라가는 그림이 걸쳐 있으면: 끼운 동안 멈췄다가 밀린 선수를 이어서 따라감
   for (const m of S.markers) if (m.t >= t - EPS) m.t = fr(m.t + len); // 마커도 같이 밀림 (잘라내기·잔물결 삭제와 같게)
+  for (const r of S.noDuck || []) if (r[0] >= t - EPS) { r[0] = fr(r[0] + len); r[1] = fr(r[1] + len); }
 }
 // 원본 구간 [a, b] (대사 하나) 를 타임라인에서 빼기
 function extractSource(a, b) {
@@ -1487,7 +1507,7 @@ function loadBundle(md) {
 async function loadBundle1(md) {
   try {
     const j = await (await fetch(`/api/edit/media?src=${md.src}&f=${encodeURIComponent(md.file)}`)).json();
-    if (j.media) { WAVES[md.id] = j.waveform; THUMBS[md.id] = j.thumbs; for (const k of ["dur", "w", "h", "audio", "kind"]) md[k] = j.media[k]; delete md.missing; ver++; renderTimeline(); }
+    if (j.media) { WAVES[md.id] = j.waveform; THUMBS[md.id] = j.thumbs; if (j.captions) MCAPS[md.id] = j.captions; for (const k of ["dur", "w", "h", "audio", "kind"]) md[k] = j.media[k]; delete md.missing; ver++; renderTimeline(); }
     else { md.missing = true; ver++; renderTimeline(); if (btab === "media") renderMediaBin(); toast(`"${niceName(md.file)}" 파일을 찾을 수 없어요 · 옮기거나 지웠다면 다시 가져와 주세요 (빨간 점선 클립)`); }
   } catch (e) {}
 }
@@ -1496,9 +1516,11 @@ async function addMedia(src, file) {
   let md = P.media.find(m => m.src === src && m.file === file); if (md) return md;
   const j = await (await fetch(`/api/edit/media?src=${src}&f=${encodeURIComponent(file)}`)).json();
   if (!j.media) { toast(j.error || "열지 못했어요"); return null; }
-  md = j.media; P.media.push(md); MED[md.id] = md; WAVES[md.id] = j.waveform; THUMBS[md.id] = j.thumbs; scheduleSave(); renderMediaBin();
+  md = j.media; P.media.push(md); MED[md.id] = md; WAVES[md.id] = j.waveform; THUMBS[md.id] = j.thumbs; if (j.captions) { MCAPS[md.id] = j.captions; ver++; } scheduleSave(); renderMediaBin();
   return md;
 }
+// 앱에 든 효과음 (미디어 탭 '효과음 꺼내기' · sfxlib.sfx_file_name '효과음_<이름>.wav')
+const isSfxMd = md => md.kind === "audio" && md.src === "assets" && /^효과음_/.test(md.file || "");
 function placeMedia(md, t, vt, at, mode, a = 0, b = null) {
   const len = b != null ? b - a : md.kind === "image" ? 5 : Math.max(0.2, md.dur || 5);
   const s = fr(Math.max(0, t)), e = s + len;
@@ -1506,7 +1528,7 @@ function placeMedia(md, t, vt, at, mode, a = 0, b = null) {
   const vOk = md.kind !== "audio" && can(vt), aOk = md.audio && can(at);
   if (!vOk && !aOk) return toast("잠긴 트랙이에요");
   commit(mode === "insert" ? "끼워 넣기" : "덮어쓰기");
-  for (const id of [vOk && vt, aOk && at]) if (id && !TRK(id)) ensureTrack(id);
+  for (const id of [vOk && vt, aOk && at]) if (id && !TRK(id)) { ensureTrack(id); if (id === at && isSfxMd(md)) setRole(TRK(id), "sfx"); } // 효과음은 새 트랙도 효과음 역할
   if (mode === "insert") insertGap(s, len, mediaTracks());
   const link = vOk && aOk ? nid() : null, made = [];
   if (vOk) { clearRange(vt, s, e); const it = { id: nid(), track: vt, media: md.id, start: s, in: a, out: a + len, speed: 1, rev: false, link, reframe: 0.5, fit: "auto", fx: {}, color: {} }; S.items.push(it); made.push(it); }
@@ -1820,11 +1842,25 @@ function itemGain(it, t, w) {
 // 말소리 감지 (배경음악 자동 줄이기 미리보기)
 let speechHold = -9, duckG = 1, lastLoopT = 0;
 // editor.py speech_spans 와 같은 규칙 (E2): 대사 트랙 원본 클립 위의 받아쓴 말(자막) 자리 ± 0.2초만 말하는 중 — 말 없는 시범·환호에서는 음악이 살아남
-// 자막이 하나도 없으면 예전처럼 소리 크기로 · 원본이 아닌 대사 클립(다른 영상)은 소리 크기로 · 효과음 트랙(voiceFx false)은 안 봄
+// 자막이 하나도 없으면 예전처럼 소리 크기로 · 원본이 아닌 대사 클립(다른 영상)은 소리 크기로 · 효과음 트랙(voiceFx false)은 어느 쪽으로도 안 봄 (D-281)
+// '여기는 줄이지 않기' 구간(S.noDuck)은 말이 있어도 그대로 (D-282)
 const DUCK_PAD = 0.2;
 let SPEECH = { key: "", spans: null };
+// '여기는 줄이지 않기' 구간 (편집본 noDuck · 타임라인 시각 · 겹친 것은 합침) — editor.py no_duck_spans 와 같은 규칙
+function noDuckSpans() { return mergeIv((S.noDuck || []).map(r => [Math.max(0, +r[0]), +r[1]]).filter(r => Number.isFinite(r[0]) && Number.isFinite(r[1]) && r[1] > r[0]), 0); }
+// 구간 목록에서 cuts 를 뺌 (둘 다 시작 순) — editor.py _minus_spans 와 같은 규칙
+function minusIv(spans, cuts) {
+  if (!cuts.length) return spans;
+  const out = [];
+  for (let [a, b] of spans) {
+    for (const [x, y] of cuts) { if (y <= a || x >= b) continue; if (x > a) out.push([a, x]); a = Math.max(a, y); if (a >= b) break; }
+    if (a < b) out.push([a, b]);
+  }
+  return out;
+}
+const inIv = (iv, t) => iv.some(([a, b]) => t >= a && t < b);
 function speechSpans() {
-  const key = ver + "|" + (P.captions || []).length + "|" + (P.speech || []).length + "|" + S.id;
+  const key = ver + "|" + (P.captions || []).length + "|" + (P.speech || []).length + "|" + S.id + "|" + JSON.stringify(S.noDuck || []);
   if (SPEECH.key === key) return SPEECH.spans;
   // 자막 자리 + 받아쓴 말 자리(P.speech · 자막을 지운 말도) — editor.py speech_spans 와 같음
   const caps = (P.captions || []).filter(c => c.end > c.start && String(c.text || "").trim()).map(c => [c.start, c.end])
@@ -1844,16 +1880,17 @@ function speechSpans() {
         }
       }
     }
-    spans = mergeIv(talk, 0);
+    spans = minusIv(mergeIv(talk, 0), noDuckSpans());
   }
   SPEECH = { key, spans };
   return spans;
 }
 function speechAt(t) {
+  if (inIv(noDuckSpans(), t)) return false;
   const spans = speechSpans();
   if (spans) { let lo = 0, hi = spans.length - 1; while (lo <= hi) { const m = (lo + hi) >> 1; if (spans[m][1] <= t) lo = m + 1; else if (spans[m][0] > t) hi = m - 1; else return true; } }
   for (const tr of aTracks()) {
-    if (tr.role !== "dialog" || tr.mute || (spans && tr.voiceFx === false)) continue;
+    if (tr.role !== "dialog" || tr.mute || tr.voiceFx === false) continue; // 효과음 트랙은 자막이 없어도 말로 안 봄 (editor.py 는 효과음을 더하기 전 대사 소리로 잼 · D-281)
     for (const { it } of audioAt(tr.id, t)) {
       if (spans && (it.media || "main") === "main") continue;
       const wv = WAVES[it.media]; if (!wv || it.mute) continue;
@@ -1892,7 +1929,7 @@ function renderFrame() {
   // 소리
   const solo = aTracks().some(x => x.solo), speaking = S.duck.on && speechAt(t);
   if (speaking) speechHold = t;
-  const target = S.duck.on && playing && Math.abs(t - speechHold) < 0.35 ? dbLin(S.duck.amount) : 1;
+  const target = S.duck.on && playing && Math.abs(t - speechHold) < 0.35 && !inIv(noDuckSpans(), t) ? dbLin(S.duck.amount) : 1; // '여기는 줄이지 않기'는 말 뒤 쉼도 그대로 (editor.py 와 같은 규칙)
   const dt = Math.max(0.001, Math.abs(t - lastLoopT)); lastLoopT = t;
   duckG = target + (duckG - target) * Math.exp(-dt / (target < duckG ? 0.08 : 0.45));
   const vo = S.voice || {};
@@ -2517,7 +2554,15 @@ function rowList() {
   for (const tr of aTracks()) rows.push({ tk: tr.id, tr });
   return rows;
 }
-const lbl = tr => tr.name ? `${tr.name} ${tr.id.slice(1)}` : tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : (tr.role === "dialog" ? "대사 " : "음악 ") + tr.id[1];
+const lbl = tr => tr.name ? `${tr.name} ${tr.id.slice(1)}` : tr.k === "v" ? (tr.id === "V1" ? "영상 1 (메인)" : "영상 " + tr.id[1]) : ({ dialog: "대사 ", music: "음악 ", sfx: "효과음 " }[roleOf(tr)]) + tr.id[1];
+// 소리 트랙 역할 3가지 (D-280): 대사 · 음악 · 효과음(= 대사 역할 + voiceFx false · MSG 가 쓰는 표시 그대로 → 예전 프로젝트·editor.py 는 그대로)
+const roleOf = tr => tr.role === "dialog" ? (tr.voiceFx === false ? "sfx" : "dialog") : "music";
+const ROLE_NAME = { dialog: "대사", music: "배경음악", sfx: "효과음" };
+function setRole(tr, v) {
+  const was = roleOf(tr);
+  if (v === "sfx") { tr.role = "dialog"; tr.voiceFx = false; } else { tr.role = v === "dialog" ? "dialog" : "music"; delete tr.voiceFx; }
+  if (tr.name && tr.name === ROLE_NAME[was] && roleOf(tr) !== was) delete tr.name; // MSG 가 붙인 '효과음'·'배경음악' 이름은 역할과 함께 바뀜 (트랙 머리 '효과음 2' → '대사 2')
+}
 function headHTML(tr) {
   const a = tr.k === "a";
   return `<div class="hd"><button class="tb ${tr.target ? "on" : ""}" data-tgt="${tr.id}" title="대상 트랙 켜기/끄기 — Ctrl+K·붙여넣기·Q/W·전환이 이 트랙에 적용돼요">${tr.id}</button>
@@ -2585,7 +2630,8 @@ function renderTimeline() {
       const w = (c.e - c.s) * zoom, sel = selX && selX.k === "caption" && selX.id === c.cap.id;
       if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
       flush();
-      caps += `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`;
+      caps += c.mid !== "main" ? `<div class="clip ocap" data-ocap="${esc(c.mid)}" title="다른 영상(보관함)의 자막 · 그 영상 편집실에서 고쳐요" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`
+        : `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`;
     }
     flush();
   }
@@ -2621,11 +2667,29 @@ function renderTimeline() {
   if (io && tot) { css($("scrubIO"), "left", (markIn ?? 0) / tot * 100 + "%"); css($("scrubIO"), "width", ((markOut ?? tot) - (markIn ?? 0)) / tot * 100 + "%"); }
   frameDirty = true;
 }
+// 배경음악 줄이기 곡선 (음악 트랙 클립 위에 그림 · D-282) — 받아쓴 말 자리(speechSpans)로 정해지는 줄이기만 · editor.py _mix_audio 와 같은 계산
+// (20ms 칸 · 말 뒤 0.35초 쉼 · '여기는 줄이지 않기' 구간 · 줄일 때 0.08초 · 돌아올 때 0.45초) · 자막이 없거나(소리 크기로 판단) 끄면 null
+let DUCKC = { key: "", c: null };
+function duckCurve() {
+  if (!S.duck.on) return null;
+  const spans = speechSpans(); if (!spans) return null;
+  const nd = noDuckSpans(), tot = total(), key = SPEECH.key + "|" + JSON.stringify(nd) + "|" + S.duck.amount + "|" + tot;
+  if (DUCKC.key === key) return DUCKC.c;
+  const nw = Math.floor(tot / 0.02) + 2, act = new Uint8Array(nw), on = new Uint8Array(nw), g = new Float32Array(nw), hold = Math.floor(0.35 / 0.02);
+  const fill = (iv, arr, v) => { for (const [a, b] of iv) for (let i = Math.max(0, Math.ceil(a / 0.02 - 1e-9)); i < nw && i * 0.02 < b; i++) arr[i] = v; };
+  fill(spans, act, 1);
+  for (let i = 0, last = -1e9; i < nw; i++) { if (act[i]) last = i; on[i] = i - last <= hold ? 1 : 0; }
+  fill(nd, on, 0);
+  const tg0 = dbLin(S.duck.amount), ca = Math.exp(-1 / 4), cr = Math.exp(-1 / 22.5);
+  for (let i = 0, x = 1; i < nw; i++) { const tg = on[i] ? tg0 : 1; x = tg + (x - tg) * (tg < x ? ca : cr); g[i] = x; }
+  DUCKC = { key, c: { key, g } }; return DUCKC.c;
+}
 function drawWaves() {
   document.querySelectorAll("canvas[data-wid]").forEach(cv => {
     const it = byId(cv.dataset.wid); if (!it) return;
     const t0 = +cv.dataset.t0, t1 = +cv.dataset.t1, w = Math.min(16000, Math.max(1, Math.round((t1 - t0) * zoom))), h = +cv.dataset.h || 45;
-    const sig = [zoom, it.start, it.in, it.out, sp(it), it.gain, it.mute, TRK(it.track).role, JSON.stringify(prm(it, "level")), !!WAVES[it.media]].join("|");
+    const dc = TRK(it.track).role === "music" ? duckCurve() : null, nd = TRK(it.track).role === "music" && S.duck.on ? noDuckSpans() : [];
+    const sig = [zoom, it.start, it.in, it.out, sp(it), it.gain, it.mute, TRK(it.track).role, JSON.stringify(prm(it, "level")), !!WAVES[it.media], dc ? dc.key : "", JSON.stringify(nd)].join("|");
     if (cv._sig === sig) return; cv._sig = sig; // 이미 그린 그대로면 건너뜀
     cv.width = w; cv.height = h;
     const g = cv.getContext("2d"), wv = WAVES[it.media], music = TRK(it.track).role === "music";
@@ -2646,6 +2710,15 @@ function drawWaves() {
     g.stroke();
     g.fillStyle = "#f5c542";
     for (const k of prm(it, "level").k) { const x = (tlOf(it, k.t) - t0) * zoom; if (x >= -4 && x <= w + 4) { g.beginPath(); g.arc(x, y(k.v), 3, 0, 7); g.fill(); } }
+    // 배경음악 줄이기 (D-282): 주황 선 = 볼륨 선에서 말할 때 줄어드는 만큼 · 초록 띠 = '여기는 줄이지 않기'
+    if (dc && !it.mute) {
+      const at = x => { const tt = t0 + x / zoom; return val(it, "level", tt) + linDb(dc.g[Math.min(dc.g.length - 1, Math.max(0, Math.round(tt / 0.02)))]); };
+      g.strokeStyle = "#ff9a3c"; g.lineWidth = 1.5; g.beginPath();
+      for (let x = 0; x <= w; x += 2) { const yy = y(at(x)); x ? g.lineTo(x, yy) : g.moveTo(x, yy); }
+      g.stroke();
+    }
+    g.fillStyle = "rgba(47,191,107,.55)";
+    for (const [a, b] of nd) { const xa = Math.max(0, (a - t0) * zoom), xb = Math.min(w, (b - t0) * zoom); if (xb > xa) g.fillRect(xa, 0, xb - xa, 3); }
   });
 }
 function autoscroll() {
@@ -2708,7 +2781,9 @@ $("tracks").addEventListener("mousedown", ev => {
   if (tool === "hand") return handDrag(ev);
   if (tool === "zoom") return setZoom(zoom * (ev.altKey ? 1 / 1.6 : 1.6), tAt);
   if (rk === "C1") {
-    const c = t.closest("[data-cap]"), hit = c ? c.dataset.cap : t.closest(".caprun") ? (capsTL().find(x => tAt >= x.s && tAt < x.e) || {}).cap?.id : null;
+    const run = t.closest(".caprun") ? capsTL().find(x => tAt >= x.s && tAt < x.e) : null;
+    if (t.closest("[data-ocap]") || (run && run.mid !== "main")) { seek(tAt); return toast("다른 영상(보관함)의 자막이에요 · 글은 그 영상 편집실에서 고쳐요"); } // D-284
+    const c = t.closest("[data-cap]"), hit = c ? c.dataset.cap : run ? run.cap.id : null;
     if (hit) { selX = { k: "caption", id: hit }; selI.clear(); seek(tAt); renderTimeline(); renderPanels(); focusCap(hit, false); } else emptyDown(ev, rk, tAt); return;
   }
   if (rk === "T" || rk === "G") return gfxDown(ev, rk, tAt);
@@ -3120,11 +3195,13 @@ function layoutSrc() {
 function autoDest(md, t0, len, useTarget = true) {
   const busy = id => S.items.some(i => i.track === id && i.start < t0 + len - EPS && iEnd(i) > t0 + EPS);
   const freeOf = k => { const l = S.tracks.filter(x => x.k === k); const f = l.filter(x => !x.lock && x.id !== k.toUpperCase() + "1").find(x => !busy(x.id)); return f ? f.id : l.length < 9 ? k.toUpperCase() + (l.length + 1) : l[1].id; };
+  // 효과음 꺼내기로 꺼낸 소리는 비어 있는 '효과음' 트랙으로 — 없으면 새 효과음 트랙 (음악 트랙에 놓여 말 아래서 줄지 않게 · D-280)
+  const sfxOf = () => { const l = aTracks(), f = l.find(x => !x.lock && x.id !== "A1" && roleOf(x) === "sfx" && !busy(x.id)); return f ? f.id : l.length < 9 ? "A" + (l.length + 1) : freeOf("a"); };
   let vt = md.kind === "audio" ? null : (useTarget ? targetOf("v") : "V1") || null;
   if (!vt && md.kind !== "audio") return [null, md.audio ? targetOf("a") : null];
   if (vt === "V1" && md.id !== "main") vt = freeOf("v");
   const pair = vt && "A" + vt.slice(1);
-  const at = !md.audio ? null : md.kind === "audio" ? (useTarget && targetOf("a") !== "A1" ? targetOf("a") : freeOf("a"))
+  const at = !md.audio ? null : md.kind === "audio" ? (useTarget && targetOf("a") !== "A1" ? targetOf("a") : isSfxMd(md) ? sfxOf() : freeOf("a"))
     : vt === "V1" || (TRK(pair) && !busy(pair) && unlocked(pair)) ? pair : freeOf("a");
   return [vt, at];
 }
@@ -3240,7 +3317,7 @@ function addGfx(name, at) {
 let capKey = "";
 function renderCaps() {
   const q = $("capSearch").value.trim();
-  const vids = S.items.filter(x => x.track === "V1" && x.media === "main");
+  const vids = capItems().filter(x => (x.media || "main") === "main"); // 자막이 따라가는 대사 소리 클립 (capsTL 과 같은 규칙 · D-283)
   const inSeq = c => vids.some(x => c.end > x.in && c.start < x.out);
   const key = q + "|" + P.captions.map(c => c.id + c.start + c.end + c.text).join("|");
   if (key === capKey && document.activeElement && document.activeElement.closest("#capList") == null) {
@@ -3268,7 +3345,7 @@ function renderCaps() {
   });
   document.querySelectorAll("[data-cx]").forEach(el => el.onclick = () => { const c = P.captions.find(x => x.id === el.dataset.cx); extractSource(c.start, c.end); });
   document.querySelectorAll("[data-seek]").forEach(el => el.onclick = () => {
-    const c = P.captions.find(x => x.id === el.dataset.seek); const ts = src2tl(c.start + 0.01);
+    const c = P.captions.find(x => x.id === el.dataset.seek), hit = capsTL().find(x => x.cap === c); const ts = hit ? [hit.s] : src2tl(c.start + 0.01); // 대사 소리를 따라 뜨는 자리 (L 컷처럼 영상이 먼저 바뀐 곳도)
     selX = { k: "caption", id: c.id }; selI.clear();
     if (ts.length) seek(ts[0]); else toast("이 자막은 지금 잘려나간 구간에 있어요");
     renderTimeline(); renderPanels();
@@ -3281,9 +3358,9 @@ function focusCap(id, edit) {
   r.scrollIntoView({ block: "nearest" }); if (edit) r.querySelector("textarea").focus();
 }
 $("capSearch").oninput = renderCaps;
-$("capAdd").onclick = () => {
-  const st = trackState("V1", T), it = st && (st.item || st.b || st.a);
-  if (!it || it.media !== "main") return toast("V1에 원본 영상이 있는 곳에서 눌러 주세요");
+$("capAdd").onclick = () => { // 대사 트랙에 원본 소리가 있는 곳 (B롤로 덮은 곳·L 컷으로 소리만 이어지는 곳도 · capsTL 과 같은 규칙 · D-283)
+  const here = capItems().filter(x => x.start <= T + EPS && iEnd(x) > T + HF), it = here.find(x => (x.media || "main") === "main");
+  if (!it) return toast(here.length ? "다른 영상 소리예요 · 그 영상 자막은 그 영상 편집실에서 고쳐요" : "대사 트랙에 원본 소리가 있는 곳에서 눌러 주세요");
   const src = mt(it, T); commit("자막 추가"); const c = { id: nid(), start: src, end: Math.min(src + 2, it.out), text: "새 자막" };
   P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); selX = { k: "caption", id: c.id }; changed();
   setTimeout(() => focusCap(c.id, true), 30);
@@ -3434,6 +3511,7 @@ async function renderRec() {
     if (hit.length) return toast(`${hit.join("·")} 트랙이 잠겨 있어요 · 자물쇠를 풀어야 장면을 맞춰 옮길 수 있어요`);
     const nTr = res.trans.length;
     commit(label); Object.assign(S, { items: res.items, trans: res.trans, titles: res.titles, shapes: res.shapes, tactics: res.tactics, markers: res.markers });
+    if (S.noDuck) S.noDuck = res.noDuck;
     selI.clear(); selX = null; changed(); seek(0);
     const gone = nTr - S.trans.length; // 사이에 장면이 다시 들어가 붙어 있지 않게 된 두 클립의 전환은 뺌 (이제 이어진 원본이라)
     toast(msg(res) + (gone > 0 ? ` · 이어지지 않게 된 장면 전환 ${gone}개는 뺐어요` : ""));
@@ -4083,7 +4161,7 @@ function renderColor() {
 /* 오디오 믹서 */
 function renderMixer() {
   const el = $("rt-audio");
-  const strip = tr => `<div class="strip"><b>${tr.id}</b><select data-role="${tr.id}" title="대사 트랙의 말소리에 맞춰 음악 트랙이 자동으로 줄어요"><option value="dialog" ${tr.role === "dialog" ? "selected" : ""}>대사</option><option value="music" ${tr.role === "music" ? "selected" : ""}>음악</option></select>
+  const strip = tr => `<div class="strip"><b>${tr.id}</b><select data-role="${tr.id}" title="대사: 말소리 (음악을 줄이는 기준 · 목소리 보정) · 음악: 말할 때 자동으로 줄어요 · 효과음: 줄지 않고 목소리 보정도 안 받아요">${[["dialog", "대사"], ["music", "음악"], ["sfx", "효과음"]].map(([v, l]) => `<option value="${v}" ${roleOf(tr) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
     <div class="fw"><input type="range" class="vf" data-fader="${tr.id}" min="-40" max="12" step="0.5" value="${tr.vol || 0}"><div class="mt"><i data-mt="${tr.id}"></i></div></div>
     <span class="db" id="fdb_${tr.id}">${fmtDb(tr.vol || 0)}</span><div class="bt"><button class="m ${tr.mute ? "on" : ""}" data-mute="${tr.id}" title="소리 끄기">M</button><button class="s ${tr.solo ? "on" : ""}" data-solo="${tr.id}" title="이 트랙만 듣기">S</button></div></div>`;
   el.innerHTML = `<div class="pg" style="padding-bottom:4px"><h4>오디오 트랙 믹서</h4><div class="hint">재생하면 트랙마다 소리 크기 막대가 움직여요.</div></div>
@@ -4093,7 +4171,9 @@ function renderMixer() {
       <label class="tog"><input type="checkbox" id="duckOn" ${S.duck.on ? "checked" : ""}> 말할 때 "음악" 트랙 소리를 자동으로 줄여요</label>
       <div class="hint" style="margin-top:4px">받아쓴 말 자리(자막을 지운 말도)에서만 줄여요 · 말 없는 시범·공 소리에서는 음악을 그대로 둬요 · 받아쓰기가 놓친 말은 못 줄여요</div>
       <div style="margin-top:8px">${slider("duckAmt", "줄이는 정도", S.duck.amount, -30, -3, 1, v => v + " dB")}</div>
-      <div class="hint">대사(A1) 트랙에 말소리가 있으면 음악(A2·A3)이 부드럽게 작아졌다가 말이 끝나면 다시 커져요.<br>배경음악 트랙을 잠그면(자물쇠) 구간 잘라내기(' · Q · W)를 해도 음악이 끊기지 않아요.</div></div>
+      <div class="hint">대사(A1) 트랙에 말소리가 있으면 음악(A2·A3)이 부드럽게 작아졌다가 말이 끝나면 다시 커져요. 음악 클립 위 주황 선이 줄어드는 모양이에요.<br>효과음 트랙은 음악을 줄이지 않고, 효과음도 줄지 않아요.<br>배경음악 트랙을 잠그면(자물쇠) 구간 잘라내기(' · Q · W)를 해도 음악이 끊기지 않아요.</div>
+      <div style="margin-top:8px"><button class="btn sm" id="ndAdd" title="I·O 로 표시한 구간(없으면 고른 클립 구간)에서는 말이 있어도 음악을 줄이지 않아요">여기는 줄이지 않기</button></div>
+      <div id="ndList">${noDuckSpans().map(([a, b], i) => `<div class="ndrow"><span>${mmss(a)} ~ ${mmss(b)} · 줄이지 않음</span><button class="btn sm" data-ndx="${i}" title="이 구간도 다시 줄여요">지우기</button></div>`).join("")}</div></div>
     <div class="pg"><h4>목소리 보정 <span class="hint">(대사 트랙 · 프리미어의 에센셜 사운드 → 대화)</span></h4>
       <label class="tog"><input type="checkbox" id="voHp" ${(S.voice || {}).hp ? "checked" : ""}> 웅웅거림 줄이기 (에어컨·바람 같은 낮은 소리 컷)</label>
       <div class="f" style="margin-top:8px"><label>잡음 줄이기</label><div class="seg" id="voNr">${["끔", "약하게", "보통", "강하게"].map((l, i) => `<button data-v="${i}" class="${((S.voice || {}).nr || 0) === i ? "on" : ""}">${l}</button>`).join("")}</div><span></span></div>
@@ -4104,9 +4184,18 @@ function renderMixer() {
       <div style="margin-top:8px">${slider("lufs", "목표 크기", S.master.lufs ?? -14, -24, -9, 0.5, v => v + " LUFS")}</div>
       <div class="hint">유튜브는 보통 -14 LUFS예요. 숫자가 클수록(0에 가까울수록) 더 크게 들려요.</div></div>`;
   el.querySelectorAll("[data-fader]").forEach(f => { let before = null; f.oninput = () => { if (!before) before = JSON.stringify(P); TRK(f.dataset.fader).vol = +f.value; $("fdb_" + f.dataset.fader).textContent = fmtDb(+f.value); frameDirty = true; }; f.onchange = () => { if (before) { pushHist("트랙 볼륨", before); before = null; scheduleSave(); } }; });
-  el.querySelectorAll("[data-role]").forEach(s => s.onchange = () => { commit("트랙 역할"); TRK(s.dataset.role).role = s.value; changed(false); });
+  el.querySelectorAll("[data-role]").forEach(s => s.onchange = () => { commit("트랙 역할"); setRole(TRK(s.dataset.role), s.value); changed(false); });
   { const f = $("mxMaster"); let before = null; f.oninput = () => { if (!before) before = JSON.stringify(P); S.master.volume = +f.value; $("mxMasterV").textContent = fmtDb(linDb(+f.value)); frameDirty = true; }; f.onchange = () => { if (before) { pushHist("전체 볼륨", before); before = null; scheduleSave(); } }; }
   $("duckOn").onchange = e => { commit("자동 줄이기"); S.duck.on = e.target.checked; changed(false); };
+  $("ndAdd").onclick = () => { // '여기는 줄이지 않기' (D-282): I·O 구간 → 없으면 고른 클립들 구간
+    let a = null, b = null;
+    if (markIn != null || markOut != null) { a = markIn ?? 0; b = markOut ?? total(); }
+    else { const its = S.items.filter(x => selI.has(x.id)); if (its.length) { a = Math.min(...its.map(x => x.start)); b = Math.max(...its.map(iEnd)); } }
+    if (a == null || !(b - a > 0.05)) return toast("I·O 로 구간을 표시하거나 클립을 고른 뒤 눌러 주세요");
+    commit("여기는 줄이지 않기"); S.noDuck = mergeIv([...noDuckSpans(), [fr(a), fr(b)]], 0); changed(false);
+    toast(`${mmss(a)} ~ ${mmss(b)} 에서는 말이 있어도 배경음악을 줄이지 않아요 (되돌리기: Ctrl+Z)`);
+  };
+  el.querySelectorAll("[data-ndx]").forEach(b => b.onclick = () => { commit("줄이지 않기 지우기"); const l = noDuckSpans(); l.splice(+b.dataset.ndx, 1); S.noDuck = l; changed(false); });
   $("voHp").onchange = e => { commit("목소리 보정"); S.voice = { ...(S.voice || {}), hp: e.target.checked }; changed(false); };
   $("voComp").onchange = e => { commit("목소리 보정"); S.voice = { ...(S.voice || {}), comp: e.target.checked }; changed(false); };
   $("voNr").querySelectorAll("button").forEach(b => b.onclick = () => { commit("잡음 줄이기"); S.voice = { ...(S.voice || {}), nr: +b.dataset.v }; changed(false); });

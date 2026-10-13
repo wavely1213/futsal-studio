@@ -74,6 +74,15 @@ class TidyRemapTest(unittest.TestCase):
                            {"id": "e2", "text": "포인트!", "start": 6.0, "dur": 1.5, "plan": "emphasis"}],
                    markers=[{"id": "m", "t": 12.0}], shapes=[{"id": "sh", "start": 1.0, "dur": 3.0}, {"id": "full", "full": True, "start": 0, "dur": 1}])
 
+    def test_tidy_moves_no_duck_ranges(self):
+        """'여기는 줄이지 않기'(noDuck · 타임라인 시각 · D-282)도 그 자리 내용과 함께 당겨짐 · 걸친 구간은 뺀 만큼 줄고 · 다 빠진 구간은 없어짐."""
+        q = self.short()
+        q["noDuck"] = [[15.0, 17.0], [1.0, 5.0], [2.2, 3.8]]
+        res, = self.run_js([{"op": "tidy", "q": q, "keep": [{"in": 0, "out": 12}, {"in": 14, "out": 200}]}])
+        self.assertEqual([[round(a, 3), round(b, 3)] for a, b in res["noDuck"]], [[13.0, 15.0], [1.0, 3.0]])
+        res, = self.run_js([{"op": "tidy", "q": self.short(), "keep": [{"in": 0, "out": 12}, {"in": 14, "out": 200}]}])
+        self.assertEqual(res["noDuck"], [])  # 없던 편집본은 빈 목록 (editor.html applyRemap 은 S.noDuck 이 있을 때만 바꿈)
+
     def test_tidy_keeps_shorts_structure(self):
         # 원본 12~14 가 군더더기 (첫 클립 가운데) · 그 밖은 남김
         res, = self.run_js([{"op": "tidy", "q": self.short(), "keep": [{"in": 0, "out": 12}, {"in": 14, "out": 200}]}])
