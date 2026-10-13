@@ -2141,6 +2141,8 @@ class Service:
             except OSError:
                 pass
         inner = {"v": 1, "pc": self.store.data["pc"]["id"], "seq": seq, "ts": ts, "state": state, "reason": reason, "url": url}
+        if rlogin.is_id_only(lg):   # 아이디만 (D-290): 페이지가 비밀번호를 묻지 않게 · 페이지는 소유자 아이디에서만 이 표시를 믿음
+            inner["idOnly"] = True
         body = rlogin.seal_lookup(_unb64u(lg["bkey"]), lg["topic"], inner, gcm_seal)
         self._lookup_at = self.clock()
         if direct:
@@ -2202,9 +2204,9 @@ class Service:
                         self.log("다른 PC가 같은 아이디를 쓰고 있어요 · PC '휴대폰으로 보기'에서 아이디를 바꿔 주세요")
         threading.Thread(target=run, daemon=True, name="remote-login-collision").start()
 
-    def _new_block(self, cid, id_show, ver, old=None):
+    def _new_block(self, cid, id_show, ver, old=None, mode="password"):
         d = rlogin.derive_login(cid)
-        return {"v": 1, "canon": rlogin.CANON, "enabled": True, "id": cid, "idShow": id_show, "topic": d["topic"],
+        return {"v": 1, "canon": rlogin.CANON, "enabled": True, "mode": mode, "id": cid, "idShow": id_show, "topic": d["topic"],
                 "bkey": _b64u(d["bkey"]), "idc": d["idc"], "grp": ver["grp"], "salt": ver["salt"], "iters": ver["iters"],
                 "verifier": ver["verifier"], "fake": _b64u(secrets.token_bytes(32)), "control": "fsc" + secrets.token_hex(12),
                 "gen": int(old["gen"]) + 1 if old else 1, "setAt": int(self.clock()), "seq": int(old.get("seq") or 0) if old else 0,
@@ -2261,11 +2263,14 @@ class Service:
 
     def _preset_run(self, p, owner):
         cid = rlogin.canon_id(p["id"])
+        mode = "idOnly" if rlogin.is_id_only(p) else "password"
+        if mode == "idOnly" and not rlogin.preset_matches_id(p):   # 아이디만 PRESET 은 검증값이 정말 아이디에서 나온 것만 (D-291)
+            return False
         got = self._collision(cid)
         if got == "unknown":  # ntfy 에 닿지 않음 → 다음에 켤 때 다시
             return False
         block = self._new_block(cid, self._id_show(p["idShow"]),
-                                {"grp": p["grp"], "salt": p["salt"], "iters": p["iters"], "verifier": p["verifier"]})
+                                {"grp": p["grp"], "salt": p["salt"], "iters": p["iters"], "verifier": p["verifier"]}, mode=mode)
         block["preset"] = True
         if not rlogin.valid_login(block):
             return False
@@ -2288,7 +2293,10 @@ class Service:
         if got == "taken":
             self.log(f"미리 정해 둔 아이디({rlogin.PRESET_ID})는 다른 PC가 쓰고 있어서 이 PC에는 넣지 않았어요")
             return False
-        self.log("미리 정해 둔 아이디·비밀번호로 연결을 준비했어요 · PC '휴대폰으로 보기'에서 비밀번호를 바꾸는 걸 권해요")
+        if mode == "idOnly":
+            self.log(f"미리 정해 둔 아이디({rlogin.PRESET_ID})만으로 연결을 준비했어요 · 밖에서 이 아이디만 넣으면 열려요")
+        else:
+            self.log("미리 정해 둔 아이디·비밀번호로 연결을 준비했어요 · PC '휴대폰으로 보기'에서 비밀번호를 바꾸는 걸 권해요")
         return True
 
     def _login_brief(self, manage):
@@ -2320,7 +2328,8 @@ class Service:
                         "kicked": bool(e.get("kicked"))})
         base.update({"enabled": bool(lg.get("enabled")), "idShow": lg["idShow"], "idKeys": lg["id"], "setAt": lg["setAt"], "gen": lg["gen"],
                      "lock": g["lock"], "netLocks": g["netLocks"], "suspended": g["suspended"], "failsToday": g["failsToday"],
-                     "total": g["total"], "collision": lg.get("collision"), "events": evs, "preset": bool(lg.get("preset"))})
+                     "total": g["total"], "collision": lg.get("collision"), "events": evs, "preset": bool(lg.get("preset")),
+                     "idOnly": rlogin.is_id_only(lg)})
         return base
 
     def login_check(self, id_=None, password=""):
@@ -2334,10 +2343,11 @@ class Service:
         lg = self.store.login()
         return {"password": rlogin.suggest(rlogin.canon_id(id_) if id_ else (lg["id"] if lg else None))}
 
-    def login_set(self, id_=None, password=None, password2=None, revoke=True, force=False, ack=False):
+    def login_set(self, id_=None, password=None, password2=None, revoke=True, force=False, ack=False, id_only=False):
         """아이디·비밀번호 정하기 / 비밀번호 바꾸기 (PC 화면에서만 · 옛 비밀번호는 묻지 않음 · D-256):
         새 salt·검증값·가짜 비밀·[끊기] 주제 · 판(gen)+1 · 막힘·잠김·기록·주고받는 중 지움 · 이번만 기기 모두 끊음 ·
-        revoke(기본) 면 아이디로 연결한 기기도 끊음 (QR·코드 기기는 그대로)."""
+        revoke(기본) 면 아이디로 연결한 기기도 끊음 (QR·코드 기기는 그대로).
+        id_only: 비밀번호 없이 아이디만으로 (D-290 · 소유자 아이디에서만) — 검증값은 아이디에서 나온 비밀로 · 비밀번호 칸은 보지 않음."""
         lg = self.store.login()
         if id_ is None and not lg:
             raise ValueError("아이디를 넣어 주세요")
@@ -2348,21 +2358,26 @@ class Service:
             cid = rlogin.canon_id(id_)
         else:
             cid = lg["id"]
-        probs = rlogin.pw_problems(password or "", cid, password2)
-        if probs:
-            raise ValueError(rlogin.PW_MSG[probs[0]])
+        if id_only:
+            if not rlogin.id_only_ok(cid):
+                raise ValueError(f"비밀번호 없이 연결은 소유자 아이디({rlogin.PRESET_ID})에서만 쓸 수 있어요")
+            password = password2 = None
+        else:
+            probs = rlogin.pw_problems(password or "", cid, password2)
+            if probs:
+                raise ValueError(rlogin.PW_MSG[probs[0]])
         if not crypto_ok():
             raise ValueError(MISSING_MSG)
         if not self._code_devices() and not ack:
             raise LoginAsk("need_ack", LOGIN_ACK_MSG)
         if not lg or cid != lg["id"]:
             self._check_free(cid, force)
-        ver = rlogin.make_verifier(password)
+        ver = rlogin.make_id_verifier(cid) if id_only else rlogin.make_verifier(password)
         password = password2 = None  # noqa: F841 — 여기서 버림 (검증값만 남김)
         with self.login_lock:
             old = self.store.login()
             show = self._id_show(id_) if id_ is not None else old["idShow"]
-            self.store.data["login"] = self._new_block(cid, show, ver, old)
+            self.store.data["login"] = self._new_block(cid, show, ver, old, mode="idOnly" if id_only else "password")
             self.store.login_bad = False
             self.store.save()
             self.pending.clear()
@@ -2375,7 +2390,10 @@ class Service:
             self._publish_lookup("off", "login_off", lg=old)
         self._publish_lookup()
         self._control_ensure()
-        self.log("아이디·비밀번호로 연결의 비밀번호를 바꿨어요" if old else "아이디·비밀번호로 연결을 켰어요")
+        if id_only:
+            self.log("비밀번호 없이 아이디만으로 연결하게 바꿨어요" if old else "아이디만으로 연결을 켰어요")
+        else:
+            self.log("아이디·비밀번호로 연결의 비밀번호를 바꿨어요" if old else "아이디·비밀번호로 연결을 켰어요")
         return self.login_view()
 
     def login_id(self, id_, force=False):
@@ -2387,6 +2405,8 @@ class Service:
         if p:
             raise ValueError(rlogin.ID_MSG[p])
         cid = rlogin.canon_id(id_)
+        if rlogin.is_id_only(lg) and not rlogin.id_only_ok(cid):   # 아이디만은 소유자 아이디에서만 (D-290)
+            raise ValueError(f"비밀번호 없이 연결은 {rlogin.PRESET_ID} 에서만 돼요 · 다른 아이디를 쓰려면 먼저 비밀번호를 정해 주세요")
         if cid != lg["id"]:
             self._check_free(cid, force)
         with self.login_lock:

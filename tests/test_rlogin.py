@@ -4,7 +4,9 @@
 15번(π 로 다시 만듦)인지 · pysrp 교차 확인은 개발 때만: FUTSAL_PYSRP_PATH 에 pysrp 가 있으면) · 막기(Guard) · 주고받는 중(Pending) ·
 알림 낱말 · 블록 확인 · 미리 정해 둔 로그인(가짜 비밀번호로만).
 """
+import ast
 import importlib
+import io
 import os
 import random
 import sys
@@ -684,15 +686,27 @@ class PresetToolTests(unittest.TestCase):
         self.mp = importlib.import_module("make_preset")
 
     def test_shipped_preset_is_off_or_verifier_only(self):
-        # D-258: 소유자가 넣기로 정함 — 넣었다면 SRP 검증값 열쇠만 (비밀번호·평문 칸 없음) · 아이디는 PRESET_ID
+        # D-258 → D-291: 소유자가 넣기로 정함 — 넣었다면 SRP 검증값 열쇠만 (비밀번호·평문 칸 없음) · 아이디는 PRESET_ID ·
+        # 지금은 아이디만 방식 (D-290): 검증값은 아이디에서 나온 비밀로 만든 것이어야 함 (진짜 비밀번호의 검증값이 아님)
         P = rlogin.PRESET
         if P is not None:
             self.assertTrue(rlogin.preset_ok(P))
-            self.assertEqual(set(P), {"id", "idShow", "canon", "grp", "salt", "iters", "verifier"})
+            self.assertEqual(set(P), {"id", "idShow", "canon", "mode", "grp", "salt", "iters", "verifier"})
             self.assertEqual(P["id"], rlogin.canon_id(rlogin.PRESET_ID))
-            self.assertGreaterEqual(P["iters"], rlogin.LOGIN_ITERS)
+            self.assertEqual(P["mode"], "idOnly")
+            self.assertTrue(rlogin.preset_matches_id(P))
+            self.assertGreaterEqual(P["iters"], rlogin.ID_ITERS)
         self.assertEqual(rlogin.PRESET_ID, "wavely1213")
         self.assertIsNone(rlogin.id_problem(rlogin.PRESET_ID))
+
+    def test_make_preset_default_is_id_only(self):
+        p = self.mp.make()
+        self.assertTrue(rlogin.preset_ok(p) and rlogin.preset_matches_id(p))
+        self.assertEqual((p["mode"], p["iters"]), ("idOnly", rlogin.ID_ITERS))
+        x = rlogin.srp_x(rlogin.canon_pw("WAVELY1213"), rlogin._unb64u(p["salt"]), p["iters"])   # 페이지: 친 아이디 → 맞춘 꼴
+        self.assertEqual(rlogin.pad(rlogin.srp_verifier(x), rlogin.group()[0]), rlogin._unb64u(p["verifier"]))
+        self.assertFalse(rlogin.preset_matches_id(dict(p, verifier=self.mp.make()["verifier"])))   # 다른 salt 의 검증값
+        self.assertFalse(rlogin.preset_matches_id(self.mp.make(FAKE_PW, iters=100_000)))           # 비밀번호 PRESET
 
     def test_make_preset_has_no_password_and_logs_in(self):
         p = self.mp.make(FAKE_PW, iters=100_000)
@@ -711,7 +725,13 @@ class PresetToolTests(unittest.TestCase):
     def test_main_reads_env_only(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("FUTSAL_PRESET_PW", None)
-            self.assertEqual(self.mp.main(), 2)
+            self.assertEqual(self.mp.main(["--password"]), 2)   # 비밀번호 PRESET 은 환경 변수로만
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(self.mp.main([]), 0)              # 기본: 아이디만 (입력 없음)
+            p = ast.literal_eval(out.getvalue().strip()[len("PRESET = "):])
+            self.assertTrue(rlogin.preset_matches_id(p))
+            os.environ["FUTSAL_PRESET_PW"] = FAKE_PW
+            self.assertEqual(self.mp.main([]), 2)                  # 넣은 비밀번호를 말없이 버리지 않음
 
     def test_preset_ok_rejects_other_id(self):
         p = self.mp.make(FAKE_PW, iters=100_000)
@@ -722,3 +742,37 @@ class PresetToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IdOnlyTests(unittest.TestCase):
+    """아이디만 (D-290 · 소유자 결정): 소유자 아이디에서만 · SRP 비밀 = 맞춘 아이디 · 로그인 블록 모양."""
+
+    def test_only_owner_id(self):
+        for s in ("wavely1213", "WAVELY1213", "ㅈㅁㅍ디ㅛ1213", "wavely.1213"):
+            self.assertTrue(rlogin.id_only_ok(s), s)
+        for s in ("wavely12134", "kimcoach99", "김코치77", "", None):
+            self.assertFalse(rlogin.id_only_ok(s), s)
+
+    def test_secret_is_canonical_id_and_survives_canon_pw(self):
+        self.assertEqual(rlogin.id_secret("ㅈㅁㅍ디ㅛ1213"), "wavely1213")
+        self.assertEqual(rlogin.canon_pw(rlogin.id_secret("WAVELY1213")), "wavely1213")   # 예전 페이지 비밀번호 칸에 아이디를 쳐도 같음
+
+    def test_id_verifier_matches_page_math(self):
+        v = rlogin.make_id_verifier("wavely1213")
+        self.assertEqual(v["iters"], rlogin.ID_ITERS)
+        x = rlogin.srp_x("wavely1213", rlogin._unb64u(v["salt"]), v["iters"])
+        self.assertEqual(rlogin.pad(rlogin.srp_verifier(x), rlogin.group()[0]), rlogin._unb64u(v["verifier"]))
+
+    def test_valid_login_mode(self):
+        block = {"v": 1, "canon": rlogin.CANON, "enabled": True, "id": "wavely1213", "idShow": "wavely1213", "gen": 1, "setAt": 1, "seq": 0,
+                 "fake": rlogin._b64u(b"f" * 32), "control": "fsc" + "0" * 24, "events": [], "collision": None, "suspended": None}
+        d = rlogin.derive_login("wavely1213")
+        block.update(topic=d["topic"], bkey=rlogin._b64u(d["bkey"]), idc=d["idc"], **rlogin.make_id_verifier("wavely1213"))
+        self.assertTrue(rlogin.valid_login(block))                       # 예전 블록 (mode 없음 = password)
+        self.assertTrue(rlogin.valid_login(dict(block, mode="idOnly")))
+        self.assertTrue(rlogin.valid_login(dict(block, mode="password")))
+        self.assertFalse(rlogin.valid_login(dict(block, mode="open")))
+        d2 = rlogin.derive_login("kimcoach99")
+        other = dict(block, id="kimcoach99", idShow="kimcoach99", topic=d2["topic"], bkey=rlogin._b64u(d2["bkey"]), idc=d2["idc"])
+        self.assertTrue(rlogin.valid_login(other))
+        self.assertFalse(rlogin.valid_login(dict(other, mode="idOnly")))  # 소유자 아이디가 아니면 아이디만이 될 수 없음

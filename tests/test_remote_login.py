@@ -1091,7 +1091,7 @@ const pick = re => { const m = src.match(re); if (!m) throw new Error("missing "
 const fn = name => { const i = src.indexOf("function " + name + "("); let d = 0, j = src.indexOf("{", i);
   for (let k = j; k < src.length; k++) { if (src[k] === "{") d++; else if (src[k] === "}") { d--; if (!d) return src.slice(i, k + 1); } } };
 eval([pick(/const esc = .*\n/), pick(/const rmClock = .*\n/), pick(/const rlDay = .*\n/), pick(/const rlUntil = [\s\S]*?\n};\n/),
-  pick(/const rlKeys = .*\n/), fn("rlSection"), fn("rlOffNote")].join("\n") + "\nglobalThis.T = { rlSection, rlOffNote, rlUntil, rlKeys };");
+  pick(/const rlKeys = .*\n/), pick(/const rlIsOwner = .*\n/), fn("rlSection"), fn("rlOffNote")].join("\n") + "\nglobalThis.T = { rlSection, rlOffNote, rlUntil, rlKeys };");
 const cases = JSON.parse(require("fs").readFileSync(0, "utf8"));
 console.log(JSON.stringify(cases.map(c => c.op === "until" ? T.rlUntil(c.t) : c.op === "off" ? T.rlOffNote(c.d) : T.rlSection(c.d))));
 """
@@ -1116,6 +1116,20 @@ class PcUiTextTests(unittest.TestCase):
              "autoOffHours": 0, "events": [], "failsToday": 0, "lock": None, "suspended": None}
         L.update(kw)
         return {"site": "https://futsal.mulgyeol.kr", "devices": [{}], "maxDevices": 5, "login": L}
+
+    def test_id_only_texts(self):
+        """아이디만 (D-290): 켜짐 줄 · 밖에서 넣을 것 · 버튼 ('비밀번호 정하기' · 아이디 바꾸기 없음) · 소유자 비밀번호 PC 에만 '비밀번호 없이 쓰기'."""
+        own = dict(idShow="wavely1213", idKeys="wavely1213", idHint="wavely1213")
+        out = self.run_ui([{"d": self.view(idOnly=True, **own)}, {"d": self.view(**own)}, {"d": self.view(idHint="wavely1213")},
+                           {"op": "off", "d": self.view(idOnly=True, **own)}])
+        self.assertIn("비밀번호 없이 아이디만으로 들어와요", out[0])
+        self.assertIn("아이디를 아는 사람은 누구나 들어올 수 있어요", out[0])
+        self.assertIn('data-rl="pw">비밀번호 정하기', out[0])
+        self.assertNotIn('data-rl="id"', out[0])
+        self.assertNotIn("미리 정해 둔 비밀번호", out[0])
+        self.assertIn('data-rl="idonly"', out[1])
+        self.assertNotIn('data-rl="idonly"', out[2])   # 김코치77 → 비밀번호 없이는 못 고름
+        self.assertIn("아이디만으로 연결이 준비돼 있어요", out[3])
 
     def test_keys_parenthetical_only_for_hangul_ids(self):
         out = self.run_ui([{"d": self.view()}, {"d": self.view(idShow="wavely1213", idKeys="wavely1213")},
@@ -1184,6 +1198,80 @@ class SecretsTests(LoginBase):
         text = "\n".join(self.lines)
         for form in (PW, PW_KEYS, "새비밀번호바다3921", rlogin.canon_pw("새비밀번호바다3921"), "틀린비밀번호9182", CID, ID):
             self.assertNotIn(form, text)
+
+
+class IdOnlyLoginTests(LoginBase):
+    """아이디만 (D-290 · 소유자 결정 '접근도 wavely1213 하나 입력하면 통과되게'): 소유자 아이디에서만 · 비밀 = 맞춘 아이디 ·
+    'PC 찾기' 기록에 표시 · 비밀번호 ⇄ 아이디만 바꾸기 · 다른 아이디로는 못 바꿈."""
+    OWNER = "wavely1213"
+
+    def set_id_only(self, id_="WAVELY1213", **kw):
+        return self.svc.login_set(id_, None, None, **dict({"force": True, "ack": True, "id_only": True}, **kw))
+
+    def test_set_and_login_with_id_only(self):
+        v = self.set_id_only()
+        self.assertTrue(v["idOnly"] and v["set"] and v["enabled"])
+        lg = self.svc.store.login()
+        self.assertEqual((lg["id"], lg["mode"], lg["iters"]), (self.OWNER, "idOnly", rlogin.ID_ITERS))
+        for typed in ("wavely1213", "ㅈㅁㅍ디ㅛ1213", "WAVELY1213"):   # 페이지: 친 아이디 → 맞춘 꼴이 비밀
+            fin, inner = self.login(pw=rlogin.id_secret(typed), cid=self.OWNER, remember=False)
+            self.assertTrue(inner["guest"])
+        c = Client(self.svc, self.OWNER, "다른비밀번호1234")
+        st = self.svc.r_login_start(c.start_body(), "198.51.100.7", UA_WIN, "KR")
+        with self.assertRaises(remote.LoginError):
+            self.svc.r_login_finish(c.proof(st), "198.51.100.7", UA_WIN, "KR")
+        self.assertTrue(any("아이디만으로 연결을 켰어요" in x for x in self.lines))
+
+    def test_lookup_record_carries_flag_only_in_id_only(self):
+        self.set_id_only()
+        rec = self.lookup_records(self.OWNER)[-1]
+        self.assertIs(rec.get("idOnly"), True)
+        self.svc.login_set(None, PW, PW, force=True, ack=True)   # 비밀번호로 되돌림
+        self.assertTrue(self.wait(lambda: "idOnly" not in self.lookup_records(self.OWNER)[-1]))
+        self.assertFalse(self.svc.login_view()["idOnly"])
+        self.assertEqual(self.svc.store.login()["mode"], "password")
+
+    def test_other_ids_cannot_be_id_only(self):
+        for id_ in (ID, "kimcoach99", "wavely12134"):
+            with self.assertRaises(ValueError):
+                self.set_id_only(id_)
+        self.assertIsNone(self.svc.store.login())
+        self.set_login()   # 김코치77 · 비밀번호
+        with self.assertRaises(ValueError):
+            self.svc.login_set(None, None, None, force=True, ack=True, id_only=True)
+        self.assertEqual(self.svc.store.login()["mode"], "password")
+
+    def test_switch_password_to_id_only_and_back(self):
+        self.svc.login_set(self.OWNER, PW, PW, force=True, ack=True)
+        fin, inner = self.login(pw=PW, cid=self.OWNER)
+        dev = inner["device"]["id"] if isinstance(inner.get("device"), dict) else None
+        self.svc.login_set(None, None, None, force=True, ack=True, id_only=True, revoke=False)   # PC '비밀번호 없이 쓰기'
+        self.assertEqual(self.svc.store.login()["mode"], "idOnly")
+        self.login(pw=self.OWNER, cid=self.OWNER, remember=False)
+        c = Client(self.svc, self.OWNER, PW)   # 옛 비밀번호는 이제 틀림
+        st = self.svc.r_login_start(c.start_body(), "198.51.100.8", UA_WIN, "KR")
+        with self.assertRaises(remote.LoginError):
+            self.svc.r_login_finish(c.proof(st), "198.51.100.8", UA_WIN, "KR")
+        if dev:
+            self.assertIsNotNone(self.svc.store.device(dev))   # revoke=False → 기억한 기기 그대로
+        self.svc.login_set(None, PW, PW, force=True, ack=True)   # 비밀번호 정하기 (기본 revoke → 아이디로 연결한 기기 끊음)
+        self.assertEqual(self.svc.store.login()["mode"], "password")
+        self.login(pw=PW, cid=self.OWNER, remember=False)
+
+    def test_id_change_stays_on_owner_id(self):
+        self.set_id_only()
+        with self.assertRaises(ValueError):
+            self.svc.login_id("kimcoach99", force=True)
+        self.assertEqual(self.svc.store.login()["id"], self.OWNER)
+        self.svc.login_id("Wavely.1213", force=True)   # 같은 맞춘 꼴 → 그대로 들어감
+        self.login(pw=self.OWNER, cid=self.OWNER, remember=False)
+
+    def test_view_and_status_have_no_secret(self):
+        self.set_id_only()
+        v = self.svc.login_view()
+        raw = json.dumps(v, ensure_ascii=False)
+        for k in ("verifier", "salt", "bkey", "fake"):
+            self.assertNotIn(k, raw)
 
 
 class PresetTests(LoginBase):
@@ -1284,6 +1372,31 @@ class PresetTests(LoginBase):
         st = svc.r_login_start(c2.start_body(), "198.51.100.1", UA_WIN, "KR")
         with self.assertRaises(remote.LoginError):
             svc.r_login_finish(c2.proof(st), "198.51.100.1", UA_WIN, "KR")
+
+    def test_id_only_preset_applied_and_logs_in_with_id(self):
+        """배포하는 PRESET 모양 (D-291): 아이디만 · 소유자 PC 에 넣으면 아이디 하나로 연결."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import make_preset
+        p = make_preset.make()
+        svc, fb = self.fresh(p, owner="paired")
+        lg = svc.store.login()
+        self.assertEqual((lg["id"], lg["mode"], lg["preset"]), ("wavely1213", "idOnly", True))
+        self.assertTrue(svc.login_view()["idOnly"])
+        self.assertTrue(any("wavely1213)만으로 연결을 준비했어요" in x for x in fb.lines))
+        svc.turn_on()
+        self.assertTrue(self.wait(lambda: svc.state == "on"))
+        c = Client(svc, "wavely1213", rlogin.id_secret("ㅈㅁㅍ디ㅛ1213"))
+        st = svc.r_login_start(c.start_body(), "198.51.100.1", UA_WIN, "KR")
+        fin = svc.r_login_finish(c.proof(st, remember=False), "198.51.100.1", UA_WIN, "KR")
+        self.assertTrue(c.open(fin, st["pc"]["id"])["guest"])
+
+    def test_id_only_preset_with_foreign_verifier_not_applied(self):
+        """아이디만이라면서 검증값이 아이디에서 나온 것이 아니면 넣지 않음 (손댄 PRESET · D-291)."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import make_preset
+        p = dict(make_preset.make(), verifier=self.make_preset()["verifier"])
+        svc, _ = self.fresh(p, owner="paired")
+        self.assertIsNone(svc.store.login())
 
     def test_preset_wrong_channel_not_applied(self):
         p = self.make_preset()

@@ -1472,7 +1472,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/remote/login":  # 정하기 · 비밀번호 바꾸기 (아이디를 빼면 그대로)
                     return self._send(200, {"ok": True, "login": svc.login_set(pw("id"), pw("password") or "", pw("password2"),
                                                                                  b.get("revoke") is not False, b.get("force") is True,
-                                                                                 b.get("ack") is True)})
+                                                                                 b.get("ack") is True, b.get("idOnly") is True)})
                 if path == "/api/remote/login/id":
                     return self._send(200, {"ok": True, "login": svc.login_id(pw("id") or "", b.get("force") is True)})
                 if path == "/api/remote/login/check":

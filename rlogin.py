@@ -8,6 +8,7 @@ PC 화면을 볼 수 없는 곳(사무실 PC·노트북·남의 휴대폰)에서
     PC 의 remote.json 에는 검증값(verifier)만 둔다. 이 층은 소유자 승인으로 직접 만든 것이다 (D-257 · 검증된 부품
     hashlib·hmac·pow·pycryptodomex HKDF 위 · RFC 5054 부록 B 시험값과 pysrp(개발 때만) 교차 확인).
   - 틀린 시도 막기(Guard) · 주고받는 중인 확인(Pending) · 알림에 넣는 정해진 낱말(ua_vocab·country) · [끊기] 표.
+  - 아이디만(idOnly · D-290 · 소유자 결정): 소유자 아이디(PRESET_ID)에서만 · 비밀번호 없이 아이디로 연결 — SRP 비밀 = 맞춘 아이디(id_secret) · 나머지 약속은 같음.
 표준 라이브러리만 import 한다 (HKDF 는 함수 안에서 Cryptodome) · remote·app 을 import 하지 않는다 (AES-GCM 은 부르는 쪽이 넘겨줌).
 """
 import base64
@@ -39,6 +40,8 @@ EVENTS_MAX = 20
 KILL_TTL = 86400
 NAME_MAX = 60
 GROUP = "5054-3072"
+MODES = ("password", "idOnly")   # 로그인 방식 (블록의 mode · 없으면 password · D-290)
+ID_ITERS = ITERS_MIN             # 아이디만 방식의 PBKDF2 횟수 (비밀이 아이디라 늘려도 지켜 주는 것이 없음 · 휴대폰에서 빨리)
 
 # ---------- canon v1 (proto.js 와 같은 표 · 두벌식) ----------
 CHO = "rRseEfaqQtTdwWczxvg"
@@ -454,6 +457,31 @@ def make_verifier(password, iters=None, salt=None):
     return {"grp": GROUP, "salt": _b64u(salt), "iters": int(iters), "verifier": _b64u(pad(v, group()[0]))}
 
 
+# ---------- 아이디만 (idOnly · D-290 · 소유자 결정) ----------
+
+def id_only_ok(cid):
+    """아이디만 방식을 쓸 수 있는 아이디인지 — 소유자 아이디(PRESET_ID) 하나뿐 (D-290: 이 사이트는 소유자만 씀 ·
+    다른 아이디에는 페이지도 '아이디만' 표시를 믿지 않아서, 남이 올린 가짜 기록으로 비밀번호 PC 사용자를 속일 수 없음)."""
+    return canon_id(cid) == PRESET_ID
+
+
+def id_secret(cid):
+    """아이디만 방식의 SRP 비밀 = 맞춘 아이디(canon v1 · 영문 소문자·숫자) 그대로 — 페이지 proto.idSecret 과 같음.
+    x = PBKDF2-SHA256(id_secret, 'fsl-x/v1|' + b64u(salt), iters, 32) (srp_x 그대로). 맞춘 아이디는 canon_pw 를 거쳐도 같아서
+    예전 페이지(비밀번호 칸만)에 아이디를 비밀번호로 쳐도 맞는다 (8글쇠 이상 · wavely1213 은 10글쇠)."""
+    return canon_id(cid)
+
+
+def make_id_verifier(cid, iters=None, salt=None):
+    """아이디 → 아이디만 방식의 {grp, salt, iters, verifier} (비밀번호 없음 · 횟수 ID_ITERS)."""
+    return make_verifier(id_secret(cid), iters or ID_ITERS, salt)
+
+
+def is_id_only(b):
+    """로그인 블록(또는 PRESET)이 아이디만 방식인지."""
+    return isinstance(b, dict) and b.get("mode") == "idOnly"
+
+
 # ---------- 틀린 시도 막기 (D-254) ----------
 
 def time_scale():
@@ -762,25 +790,36 @@ def valid_login(b):
         c = b.get("collision")
         if c is not None and not isinstance(c, (int, float)):
             return False
+        if b.get("mode", "password") not in MODES or (is_id_only(b) and not id_only_ok(b["id"])):
+            return False
         return True
     except (TypeError, ValueError, AttributeError):
         return False
 
 
-# 미리 정해 둔 로그인 (D-258): 공개 저장소에는 비밀번호가 아니라 SRP 검증값만 둔다 · tools/make_preset.py 가 만든 것을 붙여 넣음.
-# None 이면 끔. 정해진 채널(최경진 풋살사관학교 · 모든 설치의 기본값이라 그것만으로는 안 됨) + 소유자 PC 표시(이 판 전에 QR 로 연결해 둔 기기 ·
+# 미리 정해 둔 로그인 (D-258 · D-291): 공개 저장소에는 검증값만 둔다 · tools/make_preset.py 가 만든 한 줄을 붙여 넣음. None 이면 끔.
+# 지금 값은 아이디만 방식(mode idOnly · 소유자 결정 D-290): 검증값은 아이디에서 나온 비밀(id_secret)로 만든 것 — 비밀번호는 어디에도 없다.
+# 정해진 채널(최경진 풋살사관학교 · 모든 설치의 기본값이라 그것만으로는 안 됨) + 소유자 PC 표시(이 판 전에 QR 로 연결해 둔 기기 ·
 # 그 채널로 연결한 유튜브)가 있고, 아직 로그인을 정한 적이 없고, 같은 아이디를 쓰는 PC 가 없을 때 한 번만 쓴다 (remote.Service._apply_preset).
 PRESET_ID = "wavely1213"
 PRESET_CHANNEL = "UCRYziLOw2T6BF6fXtpUby-g"
-PRESET = None
+PRESET = {'id': 'wavely1213', 'idShow': 'wavely1213', 'canon': 1, 'mode': 'idOnly', 'grp': '5054-3072', 'salt': 'fkk-YbIqdci8cX2j2rLFKw', 'iters': 100000, 'verifier': 'yecwwk3oaOEcKtfBCUs4JGaJ_YyWIm-XwNirgMGAZWQYGEzy4tP1z1aune4PKH-gFu1Uf1R_T-CNR2JLWbgwTn1i-9qv93xHSE3_M8hY4f9PyflFsuYg64zfkeyJMzYlKvXlyC1VMmLv2o-dhxxPS6kQ1kjfMOstUGwAN7Mpjd1J6JA6wx-a96dp13hOJU7JbEGGURhEf1LgcG62xSwwN9tugQMQgII4-x9lKIKZK-_DzaoCAOa6rJ1sa0L9816Ve2JWk7bjNuydUmQ2al9PUoF_U2MfOvJ2WieoPO5wvG-uneoOAdBIqrFsRdyfb3H6puvFbMyAUbOmBSCHQ_-A_76VNvb0cPy1o2HxcmZ0UYTutcP7NK_naKtyxqnDm8eophJNcleO-UIdE61NM7DtwMyq5f0RmDmYHAckQeGAgESsKeVIHziRAJlL3Our91k6_2Fu0yy1xwFywI-5qZRVz7vVOz7q_3jE8sFj4xxFlbyx_9X6sjIfJZj4mSui4CbU'}
 
 
 def preset_ok(p):
-    """PRESET 모양 확인 (아이디는 PRESET_ID · 검증값 모양)."""
-    if not isinstance(p, dict) or p.get("canon") != CANON or p.get("grp") != GROUP:
+    """PRESET 모양 확인 (아이디는 PRESET_ID · 검증값 모양 · 방식은 MODES 중 하나 · 없으면 password)."""
+    if not isinstance(p, dict) or p.get("canon") != CANON or p.get("grp") != GROUP or p.get("mode", "password") not in MODES:
         return False
     if canon_id(p.get("id")) != PRESET_ID or id_problem(PRESET_ID) or not isinstance(p.get("idShow"), str):
         return False
     N = group()[0]
     return (_b64_len(p.get("salt"), 16) and _int(p.get("iters")) and ITERS_MIN <= p["iters"] <= ITERS_MAX
             and _b64_len(p.get("verifier"), nlen(N)) and 1 < int.from_bytes(_unb64u(p["verifier"]), "big") < N)
+
+
+def preset_matches_id(p):
+    """아이디만 PRESET 의 검증값이 정말 그 아이디에서 나온 것인지 (같은 salt·횟수로 다시 계산 · 약 0.1초 — 앱을 켤 때가 아니라 넣는 스레드에서)."""
+    if not is_id_only(p):
+        return False
+    want = make_id_verifier(canon_id(p["id"]), p["iters"], _unb64u(p["salt"]))
+    return hmac.compare_digest(want["verifier"], str(p.get("verifier")))

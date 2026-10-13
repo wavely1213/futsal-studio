@@ -311,6 +311,7 @@ for (const c of cmd) {
       }
     }
     else if (c.op === "hash") out.push(P.parseHash(c.h).kill);
+    else if (c.op === "idonly") out.push({ owner: P.OWNER_ID, list: c.list.map(s => [P.idOnlyOk(s), P.idSecret(s), P.canonPw(P.idSecret(s))]) });
   } catch (e) { out.push({ error: String(e && e.message || e) }); }
 }
 console.log(JSON.stringify(out));
@@ -434,6 +435,46 @@ class LoginProtoInteropTests(unittest.TestCase):
             self.assertFalse(res["tamperedM2"])
             self.assertIsNone(res["tamperedSeal"])
             self.assertIsNone(res["otherPc"])
+
+    def test_id_only_rule_and_secret_same_both_sides(self):
+        """아이디만 (D-290): 소유자 아이디 · 비밀(맞춘 아이디)이 PC 와 같음 — 한글 자판·대문자·점으로 친 꼴도."""
+        import rlogin
+        table = ["wavely1213", "WAVELY1213", "ㅈㅁㅍ디ㅛ1213", " wavely.12-13 ", "wavely12134", "kimcoach99", "김코치77", ""]
+        got = self.node([{"op": "idonly", "list": table}])[0]
+        self.assertEqual(got["owner"], rlogin.PRESET_ID)
+        for s, (ok, sec, cpw) in zip(table, got["list"]):
+            self.assertEqual(ok, rlogin.id_only_ok(s), s)
+            self.assertEqual(sec, rlogin.id_secret(s), s)
+            self.assertEqual(cpw, rlogin.canon_pw(rlogin.id_secret(s)), s)
+        self.assertEqual([x[0] for x in got["list"]], [True, True, True, True, False, False, False, False])
+
+    def test_id_only_lookup_flag_and_handshake(self):
+        """아이디만 PC: 'PC 찾기' 기록에 idOnly 표시 → 페이지가 맞춘 아이디를 비밀로 써서 SRP 가 끝까지 맞음 (M2 · 봉투)."""
+        import rlogin
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        svc, _ = service(home, Clock())
+        svc.url = "http://127.0.0.1:9541"
+        svc._collision = lambda cid, timeout=5: "clear"
+        svc.login_set("WAVELY1213", id_only=True, ack=True)
+        lg = svc.store.login()
+        topic, body = svc._publish_lookup(direct=True)
+        d = rlogin.derive_login("wavely1213")
+        rec = self.node([{"op": "derive", "cid": "wavely1213", "msg": body}])[0]["rec"]
+        self.assertIs(rec["idOnly"], True)
+        self.assertEqual(topic, lg["topic"])
+        cpw = self.node([{"op": "idonly", "list": ["ㅈㅁㅍ디ㅛ1213"]}])[0]["list"][0][2]
+        a = os.urandom(32).hex()
+        A = self.node([{"op": "start", "a": a}])[0]
+        st = svc.r_login_start({"v": 1, "grp": rlogin.GROUP, "idc": d["idc"], "A": A}, "198.51.100.1", "", "KR")
+        o = {"canonPw": cpw, "host": svc.host(), "pcId": st["pc"]["id"], "idc": d["idc"], "remember": True,
+             "name": "Windows 노트북 · Chrome", "install": "i" * 22}
+        m1 = self.node([{"op": "proof", "a": a, "st": st, "o": o}])[0]
+        fin = svc.r_login_finish({"v": 1, "login": st["login"], "M1": m1["M1"], "remember": True, "name": o["name"], "install": o["install"]},
+                                 "198.51.100.1", "", "KR")
+        res = self.node([{"op": "finish", "a": a, "st": st, "o": o, "fin": fin}])[0]
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["inner"]["via"], "login")
 
     def test_tampered_B_M2_sealed_rejected(self):
         import rlogin
