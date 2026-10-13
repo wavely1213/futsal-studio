@@ -36,6 +36,7 @@ const subCrop = t => {  // t: 장면 시각 → { cropB } / { cropT } / {} (AI �
   const f = FRAMES.find(x => x.t === t) || {};
   return f.band === "bottom" ? { cropB: clamp(1 - (f.bandY || 0.76) + 0.01, 0.05, 0.3) } : f.band === "top" ? { cropT: clamp((f.bandY || 0.2) + 0.01, 0.05, 0.3) } : {};
 };
+const cutCrop = cut => subCrop(frameT(cut.src));  // 누끼는 그 누끼를 딴 장면의 글자 띠만큼 (둘째 후보 묶음은 배경이 다른 장면 · D-270)
 let STRIP_SORT = "time";  // 영상 장면 줄: 시간 순 / 표정 좋은 순 (FRAMES 는 서버가 고른 좋은 순 그대로 — 자동 제작이 앞에서부터 씀)
 const exprOf = f => (f.emo ? Math.min(1, (f.emo.happiness || 0) + (f.emo.surprise || 0)) : -1);
 function faceBadge(f) {  // 😆 웃음 / 😮 놀람 + 얼굴 크기 (화면 높이 대비) — '표정 좋은 순'과 같은 기준(exprOf)
@@ -82,7 +83,7 @@ const TPL = {
     "큰 글씨 2줄": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 92, contrast: 112, sat: 115 }, subCrop(f[0]))),
         L("shape", { name: "아래 어둡게", x: 0, y: LH * 0.42, w: LW, h: LH * 0.58, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.85 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: LW, h: LH }, CUTFX(12))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: 0, y: 0, w: LW, h: LH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 150, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), LW - 60), 0.5, 1, LW / 2, LH - 150));
       if (b) ls.push(place(fitW(txt(b, { size: 120, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - 28));
       return ls;
@@ -96,7 +97,7 @@ const TPL = {
     "3분할 사선": (f, a, b, cut) => {
       const ls = [0, 1, 2].map(i => L("image", { name: `장면 ${i + 1}`, src: frameSrc(f[i % f.length]), x: i * 410 - 40, y: 0, w: 500, h: LH, slant: 0.22, sat: 120, contrast: 110 }));
       ls.push(L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: LW, h: LH, fill: "#FFFFFF", opacity: 0.35, lines: 60, inner: 0.5 }));
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 240, y: 30, w: 800, h: 450, fit: "contain" }, CUTFX(14))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: 240, y: 30, w: 800, h: 450, fit: "contain" }, CUTFX(14))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFE14D", align: "center", skew: -6, strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 14 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - 140));
       if (b) ls.push(place(fitW(txt(b, { size: 110, fill: "#FFFFFF", align: "center", skew: -6, strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(7) }), LW - 60), 0.5, 1, LW / 2, LH - 28));
       return ls;
@@ -108,7 +109,7 @@ const TPL = {
     ],
     "네온 강조": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, bright: 70, sat: 125, vignette: 70 }, subCrop(f[0])))];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: LW, h: LH }, CUTFX(10))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: 0, y: 0, w: LW, h: LH }, CUTFX(10))));
       const t = txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 10 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 40, opacity: 1 } });
       ls.push(place(fitW(t, LW - 80), 0.5, 1, LW / 2, LH - (b ? 150 : 50)));
       if (b) ls.push(place(fitW(txt(b, { size: 100, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 18 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(6) }), LW - 80), 0.5, 1, LW / 2, LH - 36));
@@ -118,7 +119,7 @@ const TPL = {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: LW, h: LH, sat: 115, contrast: 108 }, subCrop(f[0]))),
         L("image", Object.assign({ name: "장면 2", src: frameSrc(f[Math.min(3, f.length - 1)]), x: 520, y: 0, w: 760, h: LH, sat: 115, contrast: 108, fade: { on: true, angle: 180, start: 0.45, end: 0.95 } }, subCrop(f[Math.min(3, f.length - 1)]))),
         L("shape", { name: "아래 어둡게", x: 0, y: LH * 0.5, w: LW, h: LH * 0.5, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.8 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: -200, y: 0, w: LW, h: LH }, CUTFX(12))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: -200, y: 0, w: LW, h: LH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", fill2: "#FFE14D", gradAngle: 90, strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), LW - 60), 0.5, 1, LW / 2, LH - (b ? 140 : 40)));
       if (b) ls.push(place(fitW(txt(b, { size: 104, fill: "#FF3B30", align: "center", strokes: [{ color: "#FFFFFF", width: 20 }, { color: "#FFFFFF", width: 0 }], outline: { on: true, color: "#111111", width: 6 }, shadow: HARD(6) }), LW - 60), 0.5, 1, LW / 2, LH - 30));
       return ls;
@@ -135,7 +136,7 @@ const TPL = {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 92, contrast: 112, sat: 118 }, subCrop(f[0]))),
         L("shape", { name: "위 어둡게", x: 0, y: 0, w: SW, h: 760, fill: "#000000", fill2: "rgba(0,0,0,0)", gradAngle: 90, opacity: 0.85 }),
         L("shape", { name: "아래 어둡게", x: 0, y: SH - 700, w: SW, h: 700, fill: "rgba(0,0,0,0)", fill2: "#000000", gradAngle: 90, opacity: 0.85 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: SW, h: SH }, CUTFX(14))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: 0, y: 0, w: SW, h: SH }, CUTFX(14))));
       ls.push(place(fitW(txt(a, { size: 170, fill: "#FFE14D", align: "center", strokes: [{ color: "#111111", width: 30 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(10) }), SAFE_W), 0.5, 0, SW / 2, 230));
       if (b) ls.push(place(fitW(txt(b, { size: 140, fill: "#FFFFFF", align: "center", strokes: [{ color: "#111111", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(9) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
@@ -155,14 +156,14 @@ const TPL = {
     "쇼츠 · 인물 강조": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, blur: cut ? 10 : 0, bright: cut ? 55 : 80, sat: 120 }, subCrop(f[0]))),
         L("shape", { name: "집중선", shape: "burst", x: 0, y: 0, w: SW, h: SH, fill: "#FFFFFF", opacity: 0.3, lines: 70, inner: 0.45 })];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: -540, y: 260, w: SW * 2, h: SH - 260, fit: "cover" }, CUTFX(16))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: -540, y: 260, w: SW * 2, h: SH - 260, fit: "cover" }, CUTFX(16))));
       ls.push(place(fitW(txt(a, { size: 140, fill: "#FFFFFF", align: "center", strokes: NOSTROKE, shadow: { on: true, color: "#000000", blur: 18, dx: 0, dy: 8, opacity: 0.6 }, box: { on: true, color: "#E50914", pad: 20, radius: 8 } }), SAFE_W), 0.5, 0, SW / 2, 170));
       if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#FFE14D", align: "center", strokes: [{ color: "#000000", width: 26 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
     },
     "쇼츠 · 네온": (f, a, b, cut) => {
       const ls = [L("image", Object.assign({ name: "배경", src: frameSrc(f[0]), x: 0, y: 0, w: SW, h: SH, bright: 60, sat: 130, vignette: 80 }, subCrop(f[0])))];
-      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...subCrop(f[0]), x: 0, y: 0, w: SW, h: SH }, CUTFX(12))));
+      if (cut) ls.push(L("image", Object.assign({ name: "누끼", src: cut.cut, orig: cut.src, ...cutCrop(cut), x: 0, y: 0, w: SW, h: SH }, CUTFX(12))));
       ls.push(place(fitW(txt(a, { size: 160, fill: "#FFFFFF", align: "center", strokes: [{ color: "#B26BFF", width: 12 }, { color: "#FFFFFF", width: 0 }], shadow: { on: false }, glow: { on: true, color: "#9B5CFF", size: 46, opacity: 1 } }), SAFE_W), 0.5, 0, SW / 2, 240));
       if (b) ls.push(place(fitW(txt(b, { size: 130, fill: "#A6FF00", align: "center", strokes: [{ color: "#000000", width: 22 }, { color: "#FFFFFF", width: 0 }], shadow: HARD(8) }), SAFE_W), 0.5, 1, SW / 2, SB));
       return ls;
@@ -207,9 +208,9 @@ function makeCands() {
   if (!FRAMES.length) { $("cands").innerHTML = `<div class="hint" style="padding:10px">장면을 고르는 중이에요…</div>`; return; }
   const a = $("aL1").value.trim() || "제목", b = $("aL2").value.trim(), fr = FRAMES.map(f => f.t), sets = [fr, [...fr.slice(2), ...fr.slice(0, 2)]];
   const f = FMT[AUTO_FMT]; CANDS = [];
-  // 칸마다 얼굴·머리에 맞춰 자름 (anchorTpl · 판정 5회차 D-092: 가운데 자르기로 머리 없는 칸 34%)
+  // 칸마다 얼굴·머리에 맞춰 자름 (anchorTpl · 판정 5회차 D-092: 가운데 자르기로 머리 없는 칸 34%) · 배경과 짝이 아닌 누끼도 그 누끼 장면의 머리로 (D-270)
   const br = brandOf();  // 썸네일 스타일을 골랐으면 예전 템플릿의 노랑·흰 글자·배경 밝기도 그 버릇으로 (styleLayers · D-130)
-  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: styleLayers(anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k]), br, true) } });
+  for (const [name, fn] of Object.entries(TPL[AUTO_FMT])) for (let k = 0; k < 2; k++) CANDS.push({ name, doc: { w: f.w, h: f.h, bg: "#000000", layers: styleLayers(anchorTpl(fn(sets[k], a, b, CUT_AUTO), sets[k], { w: f.w, h: f.h }), br, true) } });
   const cw = AUTO_FMT === "short" ? 180 : 320, ch = AUTO_FMT === "short" ? 320 : 180;
   $("cands").innerHTML = CANDS.map((c, i) => `<div class="cand" data-c="${i}"><canvas width="${cw}" height="${ch}"></canvas><div>${c.name}</div></div>`).join("");
   drawCands();

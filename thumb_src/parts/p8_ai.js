@@ -1074,18 +1074,21 @@ function slotFocus(f) {  // 칸이 지켜야 할 곳 (장면 좌표): 얼굴 →
   if (hb) return { pt: [hb[0] + hb[2] / 2, hb[1] + hb[3] / 2], head: hb };
   const m = mainBox(f); return m ? { pt: [m[0] + m[2] / 2, m[1] + m[3] * 0.3], head: null } : null;
 }
-function anchorSlot(l, f, ar) {  // 머리(얼굴)가 칸 위 1/3 가운데에 오게 fx·fy → 머리가 칸 안에 70% 넘게 보이는지
-  const sf = slotFocus(f); if (!sf) return true;
-  const r = imgRect(l, ar), [u, v] = sf.pt;
+function anchorPt(l, pt, ar) {  // 장면 점 pt(0~1)가 칸 가운데·위 1/3 에 오게 fx·fy (cover 로 남는 쪽만)
+  const r = imgRect(l, ar), [u, v] = pt;
   const ux = ((l.flipX ? 1 - u : u) - (l.cropL || 0)) / r.cw, vy = (v - (l.cropT || 0)) / r.ch;
   if (r.dw > l.w + 1) l.fx = clamp((l.w * 0.5 - ux * r.dw) / (l.w - r.dw), 0, 1);
   if (r.dh > l.h + 1) l.fy = clamp((l.h * 0.33 - vy * r.dh) / (l.h - r.dh), 0, 1);
+}
+function anchorSlot(l, f, ar) {  // 머리(얼굴)가 칸 위 1/3 가운데에 오게 fx·fy → 머리가 칸 안에 70% 넘게 보이는지
+  const sf = slotFocus(f); if (!sf) return true;
+  anchorPt(l, sf.pt, ar);
   if (!sf.head) return true;
   const b = boxC(l, sf.head, ar), vis = clipTo(b, { x: l.x, y: l.y, w: l.w, h: l.h });
   return areaOf(b) > 0 && areaOf(vis) / areaOf(b) >= 0.7;
 }
-function anchorTpl(layers, ts) {  // layers: 예전 템플릿이 만든 레이어 · ts: 그 템플릿에 넘긴 장면 시각들 (바꿔 넣을 후보)
-  const ar = frameAspect(), used = new Set(layers.map(l => frameT(l.src)).filter(t => t != null));
+function anchorTpl(layers, ts, cv) {  // layers: 예전 템플릿이 만든 레이어 · ts: 그 템플릿에 넘긴 장면 시각들 (바꿔 넣을 후보) · cv: 캔버스 {w, h} (따로 놓인 누끼가 화면 밖으로 나가는지)
+  const ar = frameAspect(), used = new Set(layers.map(l => frameT(l.src)).filter(t => t != null)), twins = new Set();
   for (const l of layers) {
     if (l.type !== "image" || l.fit === "contain") continue;
     const t = frameT(l.src); if (t == null) continue;
@@ -1099,15 +1102,53 @@ function anchorTpl(layers, ts) {  // layers: 예전 템플릿이 만든 레이�
         if (anchorSlot(l2, f2, ar)) { Object.assign(l, { src: l2.src, fx: l2.fx, fy: l2.fy }); used.add(t2); ok = true; break; }
       }
     }
-    for (const c of twin) Object.assign(c, { fx: l.fx, fy: l.fy });
+    for (const c of twin) { Object.assign(c, { fx: l.fx, fy: l.fy }); twins.add(c); }
+  }
+  // 배경과 짝이 아닌 누끼 (D-270): '인물 누끼 넣어서 만들기'(CUT_AUTO)를 크게 키운 '쇼츠 · 인물 강조'·옆으로 민 '두 장면 겹치기',
+  // 둘째 후보 묶음(배경은 다른 장면)의 화면 전체 누끼 → 그 누끼를 딴 장면(orig)의 얼굴·머리로 자르는 자리를 정함
+  for (const c of layers) {
+    if (c.type !== "image" || c.fit === "contain" || twins.has(c) || frameT(c.src) != null) continue;
+    const t = frameT(c.orig); if (t == null) continue;
+    anchorCut(c, frameMeta(t), ar, cv);
+    // 화면 끝까지만 옮긴 누끼가 같은 장면 배경과 같은 자리에 꼭 놓이면('두 장면 겹치기' x −200 → 0) 배경도 누끼와 같은 곳을 잘라 짝으로
+    // (누끼만 머리 쪽으로 다시 맞춰 위아래로 비껴 같은 사람 머리가 두 번 보이지 않게 · D-273)
+    const same = g => g !== c && g.type === "image" && g.src === c.orig && ["x", "y", "w", "h", "fit", "cropL", "cropR", "cropT", "cropB", "flipX"].every(k => (g[k] || 0) === (c[k] || 0));
+    for (const g of layers) if (same(g)) Object.assign(g, { fx: c.fx, fy: c.fy });
   }
   return layers;
+}
+function anchorCut(l, f, ar, cv) {  // 따로 놓인 누끼: 칸과 같은 규칙(anchorSlot) → 머리가 화면에 다 안 들거나 화면 옆 끝이면 머리 쪽으로 다시 → 자르는 자리를 조금 더 → 그래도 안 되면 레이어를 옮김
+  const hb = f && headBox(f); if (!hb) return true;  // 지킬 주인공 머리가 없는 장면(머리가 원본에서 잘림 · 사람 없음)은 템플릿 그대로 (얼굴로 찾은 것이 공·다른 사람일 수 있음)
+  const edge = cv ? 0.08 * cv.w : 0;
+  const look = () => {  // 머리 상자(캔버스) · 보이는 곳(레이어 ∩ 화면) · 보이는 비율 · 화면 옆 끝(8%)에 걸렸는지
+    const b = boxC(l, hb, ar), box = { x: l.x, y: l.y, w: l.w, h: l.h }, v = cv ? clipTo(box, { x: 0, y: 0, w: cv.w, h: cv.h }) : box;
+    const p = areaOf(b) ? areaOf(clipTo(b, v)) / areaOf(b) : 0;
+    return { b, v, box, p, ok: p >= 0.95 && (!cv || (b.x >= edge && b.x + b.w <= cv.w - edge)) };
+  };
+  const over = (a0, a1, lo, hi, m) => (a0 < lo + m ? lo + m - a0 : a1 > hi - m ? hi - m - a1 : 0);  // 구간 안으로 들이려면 옮길 만큼
+  anchorSlot(l, f, ar);
+  let s = look(); if (s.ok) return true;
+  if (!areaOf(s.v)) return false;
+  anchorPt(l, [hb[0] + hb[2] / 2, hb[1] + hb[3] / 2], ar);  // 초점 얼굴이 다른 사람(주인공 얼굴을 못 찾은 장면)이면 주인공 머리 쪽으로
+  s = look();
+  const r = imgRect(l, ar), m = 0.03 * Math.min(s.v.w, s.v.h);
+  if (s.p < 0.95 && r.dh > l.h + 1 && s.b.h <= s.v.h - 2 * m) l.fy = clamp(l.fy + over(s.b.y, s.b.y + s.b.h, s.v.y, s.v.y + s.v.h, m) / (l.h - r.dh), 0, 1);  // 큰 얼굴: 머리가 다 들게
+  if (s.p < 0.95 && r.dw > l.w + 1 && s.b.w <= s.v.w - 2 * m) l.fx = clamp(l.fx + over(s.b.x, s.b.x + s.b.w, s.v.x, s.v.x + s.v.w, m) / (l.w - r.dw), 0, 1);
+  s = look(); if (s.ok || !cv) return s.ok;
+  // 자르는 자리로는 더 못 옮김 → 머리가 누끼 레이어 안(잘라 낸 곳이 아님)이면 레이어를 옮김 — 단 템플릿 레이어가 화면 끝까지 덮던 쪽은 옮긴 뒤에도 덮게 (D-273):
+  // 레이어 끝(원본 테두리·자른 선)이 화면 안으로 들어오면 그 끝에 닿은 사람 팔·다리가 흰 테두리 친 곧은 선으로 잘려 보임 (투명한 곳만 있는 게 아님)
+  const { b, box } = s, mm = 0.03 * Math.min(cv.w, cv.h);
+  const room = (p, n, N, d) => clamp(d, p + n >= N ? N - n - p : -Infinity, p <= 0 ? -p : Infinity);  // 옮길 만큼 d → 덮던 화면 끝을 드러내지 않는 만큼
+  if (b.x >= box.x && b.x + b.w <= box.x + box.w && (b.x < edge || b.x + b.w > cv.w - edge))  // 화면 밖·옆 끝: 템플릿이 가운데 사람을 두려던 자리(레이어 가운데, 화면 안) 쪽으로
+    l.x += room(l.x, l.w, cv.w, clamp(box.x + box.w / 2, edge + b.w / 2, cv.w - edge - b.w / 2) - (b.x + b.w / 2));
+  if (b.y >= box.y && b.y + b.h <= box.y + box.h) l.y += room(l.y, l.h, cv.h, over(b.y, b.y + b.h, 0, cv.h, mm));  // 위·아래: 화면 안까지만
+  return look().ok;
 }
 // 예전 템플릿(TPL)은 fn(장면 시각들, 첫 줄, 둘째 줄, 누끼)이라 어댑터로 감싸 같이 씀 (예전 후보 화면·e2e 는 그대로)
 function legacyTpl(fmt) {
   return Object.fromEntries(Object.entries(TPL[fmt]).map(([k, fn]) => [k, { legacy: true, needs: {}, fn: ctx => {
     const ts = [ctx.frame.t, ...ctx.frames.filter(f => f.t !== ctx.frame.t).map(f => f.t)];
-    return anchorTpl(fn(ts, ctx.copy.l1, ctx.copy.l2, null), ts);  // 예전 템플릿은 배경 자리가 달라 자동 누끼를 겹치지 않음 · 칸은 얼굴·머리에 맞춰 자름
+    return anchorTpl(fn(ts, ctx.copy.l1, ctx.copy.l2, null), ts, { w: ctx.W, h: ctx.H });  // 예전 템플릿은 배경 자리가 달라 자동 누끼를 겹치지 않음 · 칸은 얼굴·머리에 맞춰 자름
   } }]));
 }
 const allTpl = fmt => Object.assign({}, T_NEW[fmt], legacyTpl(fmt));

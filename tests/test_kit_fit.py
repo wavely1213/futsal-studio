@@ -552,6 +552,143 @@ class KitBuildTests(KitBase):
         self.assertEqual([g["name"] for g in kit["guests"]], ["이한울"])
         self.assertIn("이한울", kit["description"])
 
+    def test_other_channel_guests_never_bring_coach_back(self):
+        """D-271 · I-161(1): 원본이 다른 채널 영상인 편집본 키트는 게스트를 넣고·바꾸고·빼고·다시 만들어도 감독님 '▶ 출연' 줄이 없음 · '▶ 출처'는 그대로."""
+        import source
+        name = self.add_video(self.NAME)
+        self.project(name, [("e1", "편집본", "long", 0.0, 600.0, [])])
+        other = {"kind": "other", "channel": "쌈바 풋살 클래스", "channelKey": "UCx", "channelUrl": "https://youtube.com/@samba"}
+        coach = "최경진 감독 (풋살사관학교)"
+        with mock.patch.object(source, "describe", lambda f, data=None, running=None: dict(other if f == name else {"kind": "footage"})):
+            kit = upload.build_kit(name, "e1")
+            self.assertNotIn(coach, kit["description"])
+            self.assertNotIn("▶ 출연", kit["description"])
+            for guests in ([{"name": "이한울", "bio": "강원FS"}], [{"name": "김영권", "bio": ""}, {"name": "이한울", "bio": ""}]):
+                kit = upload.set_guests(name, "e1", guests)
+                d = kit["description"]
+                self.assertNotIn(coach, d)
+                rows = d.split("\n")
+                at = rows.index("▶ 출연")
+                self.assertEqual(rows[at + 1:at + 1 + len(guests)], [f"{g['name']} ({g['bio']})" if g["bio"] else g["name"] for g in guests])
+                self.assertLess(at, rows.index("▶ 출처"))
+                self.assertIn("쌈바 풋살 클래스 (https://youtube.com/@samba)", d)
+                txt = upload.kit_text(kit)
+                self.assertNotIn("최경진", txt.split("■ 제목")[0], "키트 .txt 맨 위 '출연:' 줄에도 감독님 없음")
+                self.assertIn("출연: " + guests[0]["name"], txt)
+            kit = upload.build_kit(name, "e1")  # 게스트를 둔 채 다시 만들어도 (설명을 새로 만든 뒤 게스트를 넣고 출처를 붙임)
+            rows = kit["description"].split("\n")
+            self.assertNotIn(coach, kit["description"])
+            self.assertEqual(rows[rows.index("▶ 출연") + 1:rows.index("▶ 출연") + 3], ["김영권", "이한울"])
+            kit = upload.set_guests(name, "e1", [])
+            self.assertNotIn("▶ 출연", kit["description"])
+            self.assertNotIn(coach, kit["description"])
+            self.assertIn("▶ 출처\n쌈바 풋살 클래스", kit["description"])
+            self.assertNotIn("\n\n\n", kit["description"])
+        # 다른 채널 클립만 가져온 우리 영상은 그대로 감독님 줄 뒤에 게스트
+        with mock.patch.object(source, "describe", lambda f, data=None, running=None: dict({"kind": "footage"})):
+            upload.build_kit(name, "e1")
+            kit = upload.set_guests(name, "e1", [{"name": "이한울", "bio": ""}])
+        rows = kit["description"].split("\n")
+        self.assertEqual(rows[rows.index(coach) + 1], "이한울")
+
+    OTHER = {"kind": "other", "channel": "쌈바 풋살 클래스", "channelKey": "UCx", "channelUrl": "https://youtube.com/@samba"}
+
+    def other_main(self, name):
+        import source
+        return mock.patch.object(source, "describe", lambda f, data=None, running=None: dict(self.OTHER if f == name else {"kind": "footage"}))
+
+    @staticmethod
+    def cast(desc):
+        """설명의 '▶ 출연' 묶음 줄들 (없으면 None)."""
+        rows = desc.split("\n")
+        if "▶ 출연" not in rows:
+            return None
+        at = rows.index("▶ 출연")
+        end = next((i for i in range(at + 1, len(rows)) if not rows[i].strip() or rows[i].startswith(("▶", "#"))), len(rows))
+        return rows[at + 1:end]
+
+    def test_other_channel_guest_bio_with_academy_survives_rebuild(self):
+        """D-272 (검토): 이력에 '풋살사관학교'·'최경진 감독'이 든 게스트 줄도 키트를 다시 만들 때 빠지지 않음 — 넣기·다시 만들기·다시 넣기 모두 같은 설명."""
+        name = self.add_video(self.NAME)
+        self.project(name, [("e1", "편집본", "long", 0.0, 600.0, [])])
+        for bio in ("풋살사관학교 코치", "최경진 감독 제자"):
+            want = [f"박지훈 ({bio})"]
+            with self.other_main(name):
+                upload.build_kit(name, "e1")
+                k1 = upload.set_guests(name, "e1", [{"name": "박지훈", "bio": bio}])
+                k2 = upload.build_kit(name, "e1")
+                k3 = upload.set_guests(name, "e1", [{"name": "박지훈", "bio": bio}])
+            for k in (k1, k2, k3):
+                self.assertEqual(self.cast(k["description"]), want, bio)
+                self.assertNotIn("최경진 감독 (풋살사관학교)", k["description"])
+                self.assertLess(k["description"].index("▶ 출연"), k["description"].index("▶ 출처"))
+            self.assertEqual(k2["description"], k3["description"], "버튼 누른 순서에 따라 설명이 바뀌지 않음")
+            self.assertIn("출연: 박지훈", upload.kit_text(k2))
+
+    def test_other_channel_custom_template_cast_block_dropped_whole(self):
+        """D-272 (검토): 설명 틀의 '▶ 출연' 묶음(감독님 아래 소개 줄 · '▶ 출연: 최경진 감독' 한 줄 머리)은 다른 채널 원본 키트에서 통째로 빠짐 —
+        소개 줄이 게스트 이력처럼 게스트 아래에 남거나 감독님 이름이 머리 줄에 남지 않음. 우리 영상은 틀 그대로."""
+        name = self.add_video(self.NAME)
+        self.project(name, [("e1", "편집본", "long", 0.0, 600.0, [])])
+        intro = "前 풋살 국가대표 · 레슨 문의는 인스타 DM"
+        tpls = {"intro": upload.DEFAULT_TEMPLATE.replace("최경진 감독 (풋살사관학교)\n", "최경진 감독 (풋살사관학교)\n" + intro + "\n"),
+                "oneline": upload.DEFAULT_TEMPLATE.replace("▶ 출연\n최경진 감독 (풋살사관학교)\n", "▶ 출연: 최경진 감독 (풋살사관학교)\n")}
+        self.assertNotEqual(tpls["intro"], upload.DEFAULT_TEMPLATE)
+        self.assertNotEqual(tpls["oneline"], upload.DEFAULT_TEMPLATE)
+        for key, tpl in tpls.items():
+            upload.template_path().write_text(tpl, encoding="utf-8")
+            with self.other_main(name):
+                if upload.load_kit(name, "e1"):  # 앞 틀에서 넣은 게스트를 빼고 시작
+                    upload.set_guests(name, "e1", [])
+                kit = upload.build_kit(name, "e1")
+                self.assertNotIn("▶ 출연", kit["description"], key)
+                self.assertNotIn(intro, kit["description"], key)
+                self.assertNotIn("최경진 감독 (풋살사관학교)", kit["description"], key)
+                self.assertNotIn("{레슨 문의}", kit["description"])
+                self.assertIn("▶ 출처\n쌈바 풋살 클래스", kit["description"])
+                kit = upload.set_guests(name, "e1", [{"name": "이한울", "bio": "강원FS"}])
+                self.assertEqual(self.cast(kit["description"]), ["이한울 (강원FS)"], key)
+                kit = upload.build_kit(name, "e1")  # 게스트를 기억한 채 다시 만들기
+                self.assertEqual(self.cast(kit["description"]), ["이한울 (강원FS)"], key)
+                self.assertNotIn(intro, kit["description"], key)
+                self.assertNotIn("최경진 감독 (풋살사관학교)", kit["description"], key)
+                kit = upload.set_guests(name, "e1", [])
+                self.assertIsNone(self.cast(kit["description"]), key)
+                self.assertNotIn("▶ 출연", kit["description"], key)
+            with mock.patch("source.describe", lambda f, data=None, running=None: {"kind": "footage"}):
+                own = upload.build_kit(name, "e1")["description"]  # 우리 영상은 설명 틀 그대로
+            self.assertIn("최경진 감독 (풋살사관학교)", own, key)
+            if key == "intro":
+                self.assertIn("최경진 감독 (풋살사관학교)\n" + intro, own)
+
+    def test_other_channel_old_buggy_kit_loses_coach_on_guest_change(self):
+        """D-272 (검토): v2.18·v2.19 에서 게스트를 넣어 감독님 줄이 다시 들어간 채 저장된 다른 채널 원본 키트도 게스트를 바꾸거나 빼면 감독님 줄이 빠짐."""
+        name = self.add_video(self.NAME)
+        self.project(name, [("e1", "편집본", "long", 0.0, 600.0, [])])
+        with self.other_main(name):
+            kit = upload.build_kit(name, "e1")
+            self.assertNotIn("▶ 출연", kit["description"])
+            # 예전 판이 저장한 모양: '▶ 출처' 뒤 · 해시태그 앞에 '▶ 출연 / 최경진 감독 (풋살사관학교) / 이한울 (강원FS)'
+            rows = kit["description"].rstrip("\n").split("\n")
+            tail = max(i for i, r in enumerate(rows) if r.startswith("#"))
+            rows[tail:tail] = ["▶ 출연", "최경진 감독 (풋살사관학교)", "이한울 (강원FS)", ""]
+            kit.update(description="\n".join(rows), guests=[{"name": "이한울", "bio": "강원FS"}],
+                       guestAuto=dict(kit.get("guestAuto") or {}, lines=["이한울 (강원FS)"]))
+            upload._store(kit, name, "e1", upload._target(name, "e1")[0])
+            kit = upload.set_guests(name, "e1", [{"name": "박민수", "bio": ""}])
+            self.assertNotIn("최경진 감독 (풋살사관학교)", kit["description"])
+            self.assertEqual(self.cast(kit["description"]), ["박민수"])
+            self.assertLess(kit["description"].index("▶ 출연"), kit["description"].index("▶ 출처"))
+            self.assertNotIn("\n\n\n", kit["description"])
+            self.assertIn("출연: 박민수", upload.kit_text(kit))
+            # 게스트를 다 빼는 경우 (감독님 줄만 남은 예전 묶음도)
+            kit.update(description=kit["description"].replace("▶ 출연\n박민수", "▶ 출연\n최경진 감독 (풋살사관학교)\n박민수"))
+            upload._store(kit, name, "e1", upload._target(name, "e1")[0])
+            kit = upload.set_guests(name, "e1", [])
+            self.assertNotIn("▶ 출연", kit["description"])
+            self.assertNotIn("최경진 감독 (풋살사관학교)", kit["description"])
+            self.assertIn("▶ 출처\n쌈바 풋살 클래스", kit["description"])
+
     def test_guest_book_and_episode(self):
         """검토: 같은 촬영본의 롱폼·쇼츠는 한 회 (쇼츠 기본 제목이 '2탄'이 되지 않음) · 다른 날 찍은 영상부터 2탄."""
         name = self.add_video(self.NAME)

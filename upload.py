@@ -933,22 +933,59 @@ def other_sources(name, sq=None, proj=None):
     return out
 
 
-def _credit(text, others, main_other):
-    """설명에 '▶ 출처' 줄을 넣고, 원본이 다른 채널 영상이면 감독님 '▶ 출연' 묶음은 뺌."""
+def _main_other(kit):
+    """키트 원본이 다른 채널 영상인지 (D-166 · 그 키트의 설명에는 감독님 '▶ 출연' 줄을 넣지 않음)."""
+    return any(isinstance(o, dict) and o.get("main") for o in kit.get("foreign") or ())
+
+
+def _cast_blocks(rows):
+    """설명 줄들의 '▶ 출연' 묶음 → [(머리 줄 번호, 끝 번호)] — 묶음은 '▶ 출연' 줄과 그 아래 빈 줄·'▶'·'#'·'{자리}' 앞까지의 줄."""
+    out, i = [], 0
+    while i < len(rows):
+        if not rows[i].strip().startswith("▶ 출연"):
+            i += 1
+            continue
+        j = i + 1
+        while j < len(rows) and rows[j].strip() and not rows[j].strip().startswith(("▶", "#", "{")):
+            j += 1
+        out.append((i, j))
+        i = j
+    return out
+
+
+def _drop_cast(text):
+    """설명 틀에서 온 '▶ 출연' 묶음을 통째로 뺌 — 원본이 다른 채널 영상인 키트를 만들 때 게스트를 넣기 전에 (감독님 줄·그 아래 소개 줄·
+    '▶ 출연: 최경진 감독' 한 줄 머리까지 · 게스트는 그 뒤 `_insert_cast(coach=False)` 가 '▶ 출연' + 게스트만으로 · D-166·D-272)."""
+    rows = text.split("\n")
+    for i, j in reversed(_cast_blocks(rows)):
+        del rows[i:j]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(rows))
+
+
+def _tidy_cast(rows, keep=()):
+    """설명 줄들의 '▶ 출연' 묶음에서 감독님 줄만 뺌 — 감독님 이름으로 시작하는 줄(예전 판이 게스트와 함께 넣은 '최경진 감독 (풋살사관학교)' · I-161(1))과
+    머리 줄의 감독님 이름('▶ 출연: 최경진 감독 …' → '▶ 출연'). 게스트 줄(keep · 이력에 '풋살사관학교'가 있어도)·손으로 쓴 다른 줄은 그대로 ·
+    남은 줄이 없으면 '▶ 출연' 줄도 뺌 (게스트 줄만 머리 없이 떠돌거나 빈 '▶ 출연'이 남지 않게 · D-271·D-272)."""
+    keep = {str(k).strip() for k in keep or ()}
+    out, last = [], 0
+    for i, j in _cast_blocks(rows):
+        out += rows[last:i]
+        head, rest = rows[i], rows[i].strip()[len("▶ 출연"):]
+        if COACH in rest or "풋살사관학교" in rest:
+            head, rest = "▶ 출연", ""
+        body = [r for r in rows[i + 1:j] if r.strip() in keep or not r.strip().startswith(COACH)]
+        if body or rest.strip(" :·-|"):
+            out += [head] + body
+        last = j
+    return out + rows[last:]
+
+
+def _credit(text, others, main_other, keep=()):
+    """설명에 '▶ 출처' 줄을 넣고, 원본이 다른 채널 영상이면 남은 감독님 '▶ 출연' 줄은 뺌 (게스트 줄 keep 은 남김 · 설명 틀의 묶음은
+    `build_kit` 이 게스트를 넣기 전에 `_drop_cast` 로 통째로 뺌)."""
     rows = text.split("\n")
     if main_other:
-        out, skip = [], False
-        for r in rows:
-            if r.strip().startswith("▶ 출연"):
-                skip = True
-                continue
-            if skip and (not r.strip() or r.strip().startswith("▶")):
-                skip = False
-            if skip and (COACH in r or "풋살사관학교" in r):
-                continue
-            skip = False
-            out.append(r)
-        rows = out
+        rows = _tidy_cast(rows, keep)
     block = ["▶ 출처"] + [f"{o['channel']}" + (f" ({o['url']})" if o["url"] else "") for o in others]
     at = next((i for i, r in enumerate(rows) if r.strip().startswith("#")), len(rows))
     rows[at:at] = block + [""]
@@ -1055,13 +1092,17 @@ def build_kit(name, seq=None, save=True):
     kit["hashtags"] = todo_hashtags(kit["hashtags"], hints, fmt)
     quote_avoid = [_kit_quote(k) for k in others if k.get("name") == name]  # 같은 촬영본의 다른 키트가 쓴 첫 줄 인용
     kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur, quote_avoid), chs, kit["hashtags"], kit["title"], topics, notes=notes)
+    if foreign:  # 게스트를 넣기 전에 (원본이 다른 채널 영상이면 '▶ 출연'은 게스트만 · D-271)
+        kit["foreign"] = foreign
+        if _main_other(kit):  # 설명 틀의 감독님 '▶ 출연' 묶음은 통째로 뺌 (그 아래 소개 줄이 게스트 이력처럼 남지 않게 · D-272)
+            kit["description"] = _drop_cast(kit["description"])
     _apply_guests(kit, kit.get("guests") or [])  # 설명 '▶ 출연' 줄·태그·해시태그 (제목 후보는 위에서)
     kit["thumbnail"] = thumbnail_check(name, fmt, sq)
     kit["prompt"] = claude_prompt(kit, segs)
     kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
     kit["description"] = add_promo(kit["description"], kit["promo"], notes)
     if foreign:  # 다른 채널 클립이 든 편집본: 설명에 출처 · 원본이 다른 채널이면 '출연' 줄 빼기 · 알림 (E2)
-        kit["description"] = fit_description(_credit(kit["description"], foreign, any(o["main"] for o in foreign)), notes)
+        kit["description"] = fit_description(_credit(kit["description"], foreign, _main_other(kit), (kit.get("guestAuto") or {}).get("lines") or ()), notes)
         kit["foreign"] = foreign
         notes.insert(0, OTHER_NOTE.format(", ".join(o["channel"] for o in foreign)))
     kit["notes"] = notes
@@ -1080,7 +1121,7 @@ def kit_text(kit):
     sch = kit.get("schedule") or {}
     out = ["풋살사관학교 스튜디오 · 올리기 키트", f"영상: {kit['name']} ({src})", f"만든 시각: {kit['made']}",
            *([sch["line"]] if sch.get("line") else []),
-           *([f"출연: {COACH} · " + " · ".join(g['name'] for g in kit['guests'])] if kit.get("guests") else []), "",
+           *(["출연: " + " · ".join(([] if _main_other(kit) else [COACH]) + [g['name'] for g in kit['guests']])] if kit.get("guests") else []), "",
            f"■ 제목 (지금 {c['title']}/{TITLE_MAX}자)", kit["title"], "", "■ 제목 후보",
            *[f"{i}. {t}" for i, t in enumerate(kit["titles"], 1)], "",
            f"■ 설명 (지금 {c['description']}/{DESC_MAX}자)", kit["description"], "",
@@ -1514,19 +1555,30 @@ def _drop_line(text, line):
     return "\n".join(lines)
 
 
-def _insert_cast(text, lines):
-    """설명의 '▶ 출연' 묶음에 게스트 줄을 넣음: 감독님 줄 바로 뒤 → '▶ 출연' 줄 뒤 → 없으면 해시태그 줄 앞에 묶음째."""
-    if not lines:
-        return text
+def _insert_cast(text, lines, coach=True):
+    """설명의 '▶ 출연' 묶음에 게스트 줄을 넣음: 감독님 줄 바로 뒤 → '▶ 출연' 줄 뒤 → 없으면 해시태그 줄 앞에 묶음째.
+    coach=False (원본이 다른 채널 영상 · D-166·D-271·D-272): 감독님 줄은 넣지 않고, 남아 있던 감독님 줄(예전 판이 게스트와 함께 넣은 줄 ·
+    '▶ 출연: 최경진 감독' 머리)도 먼저 뺌 — 묶음은 '▶ 출연' + 게스트만('▶ 출처' 앞) · 게스트가 없으면 비어 남은 '▶ 출연' 줄도 뺌
+    (손으로 쓴 다른 줄은 그대로)."""
     rows = text.split("\n")
-    at = next((i + 1 for i, r in enumerate(rows) if COACH in r and "(" in r), None)
+    if not coach:
+        rows = _tidy_cast(rows)
+        if not lines:  # 게스트를 다 뺌: 비어 남은 '▶ 출연' 줄도 뺌 (손으로 쓴 줄이 있으면 그대로)
+            return re.sub(r"\n{3,}", "\n\n", "\n".join(rows))
+    elif not lines:  # 우리 영상은 그대로
+        return text
+    at = next((i + 1 for i, r in enumerate(rows) if COACH in r and "(" in r), None) if coach else None
     if at is None:
         at = next((i + 1 for i, r in enumerate(rows) if r.strip().startswith("▶ 출연")), None)
     if at is None:
         tail = next((i for i in range(len(rows) - 1, -1, -1) if rows[i].strip().startswith("#")), len(rows))
-        block = ["▶ 출연", f"{COACH} (풋살사관학교)", *lines, ""]
-        return "\n".join(rows[:tail] + block + rows[tail:]).strip()
-    return "\n".join(rows[:at] + lines + rows[at:])
+        if not coach:
+            tail = next((i for i, r in enumerate(rows) if r.strip().startswith("▶ 출처")), tail)
+        block = ["▶ 출연", *([f"{COACH} (풋살사관학교)"] if coach else []), *lines, ""]
+        out = "\n".join(rows[:tail] + block + rows[tail:]).strip()
+    else:
+        out = "\n".join(rows[:at] + lines + rows[at:])
+    return out if coach else re.sub(r"\n{3,}", "\n\n", out)
 
 
 def _apply_guests(kit, guests):
@@ -1562,7 +1614,7 @@ def _apply_guests(kit, guests):
     if old_line and old_line in desc:
         i = desc.rfind(old_line)
         desc = desc[:i] + new_line + desc[i + len(old_line):]
-    desc = _insert_cast(desc, lines)
+    desc = _insert_cast(desc, lines, coach=not _main_other(kit))  # 원본이 다른 채널 영상이면 감독님 줄 없이 (D-271 · I-161(1))
     kit.update(description=fit_description(desc), tags=new_tags, hashtags=hts, guests=list(guests),
                guestAuto=dict(auto, lines=lines, tags=gtags, hashtags=ghts))
     return kit
