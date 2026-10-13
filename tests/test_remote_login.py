@@ -306,6 +306,8 @@ class LookupPublishTests(LoginBase):
     def test_login_off_and_id_change_post_login_off_to_old_topic(self):
         self.set_login()
         self.svc.login_id("kimcoach99", force=True)
+        # 보내기는 뒤에서 (pub 줄) — 무거운 기계에서 켜짐만 먼저 보일 수 있어 꺼짐 기록이 닿을 때까지 기다림
+        self.wait(lambda: self.lookup_records(CID)[-1]["state"] == "off")
         old = self.lookup_records(CID)
         self.assertEqual((old[-1]["state"], old[-1]["reason"]), ("off", "login_off"))
         new = self.lookup_records("kimcoach99")
