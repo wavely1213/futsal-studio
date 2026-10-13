@@ -4567,7 +4567,7 @@ async function rlOpen(kind) {
   $("rlMask").classList.add("show");
   if (kind === "set" && $("rlId")) {
     $("rlId").value = L.set ? (L.idShow || "") : (L.idHint || "");  // 아직 안 정한 PC 는 wavely1213 을 미리 (D-258)
-    if ($("rlIdOnlyChk")) $("rlIdOnlyChk").checked = rlIsOwner($("rlId").value, L) && (!L.set || !!L.idOnly);  // 소유자 아이디면 비밀번호 없이가 기본 (D-290)
+    if ($("rlIdOnlyChk")) $("rlIdOnlyChk").checked = rlIsOwner($("rlId").value, L) && !!L.idOnly;  // 기본은 비밀번호 쓰기 (D-294) · 이미 아이디만이면 그대로
     rlIdOnlyShow();
   }
   const first = $("rlId") || $("rlPw");

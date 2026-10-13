@@ -798,12 +798,12 @@ def valid_login(b):
 
 
 # 미리 정해 둔 로그인 (D-258 · D-291): 공개 저장소에는 검증값만 둔다 · tools/make_preset.py 가 만든 한 줄을 붙여 넣음. None 이면 끔.
-# 지금 값은 아이디만 방식(mode idOnly · 소유자 결정 D-290): 검증값은 아이디에서 나온 비밀(id_secret)로 만든 것 — 비밀번호는 어디에도 없다.
+# 지금은 끔(None · 소유자 결정 D-294: 아이디 + 비밀번호 · 비밀번호는 코드에 넣지 않고 집 PC 에서 직접 정함). 다시 켤 때는 tools/make_preset.py 출력(아이디만)을 넣는다.
 # 정해진 채널(최경진 풋살사관학교 · 모든 설치의 기본값이라 그것만으로는 안 됨) + 소유자 PC 표시(이 판 전에 QR 로 연결해 둔 기기 ·
 # 그 채널로 연결한 유튜브)가 있고, 아직 로그인을 정한 적이 없고, 같은 아이디를 쓰는 PC 가 없을 때 한 번만 쓴다 (remote.Service._apply_preset).
 PRESET_ID = "wavely1213"
 PRESET_CHANNEL = "UCRYziLOw2T6BF6fXtpUby-g"
-PRESET = {'id': 'wavely1213', 'idShow': 'wavely1213', 'canon': 1, 'mode': 'idOnly', 'grp': '5054-3072', 'salt': 'fkk-YbIqdci8cX2j2rLFKw', 'iters': 100000, 'verifier': 'yecwwk3oaOEcKtfBCUs4JGaJ_YyWIm-XwNirgMGAZWQYGEzy4tP1z1aune4PKH-gFu1Uf1R_T-CNR2JLWbgwTn1i-9qv93xHSE3_M8hY4f9PyflFsuYg64zfkeyJMzYlKvXlyC1VMmLv2o-dhxxPS6kQ1kjfMOstUGwAN7Mpjd1J6JA6wx-a96dp13hOJU7JbEGGURhEf1LgcG62xSwwN9tugQMQgII4-x9lKIKZK-_DzaoCAOa6rJ1sa0L9816Ve2JWk7bjNuydUmQ2al9PUoF_U2MfOvJ2WieoPO5wvG-uneoOAdBIqrFsRdyfb3H6puvFbMyAUbOmBSCHQ_-A_76VNvb0cPy1o2HxcmZ0UYTutcP7NK_naKtyxqnDm8eophJNcleO-UIdE61NM7DtwMyq5f0RmDmYHAckQeGAgESsKeVIHziRAJlL3Our91k6_2Fu0yy1xwFywI-5qZRVz7vVOz7q_3jE8sFj4xxFlbyx_9X6sjIfJZj4mSui4CbU'}
+PRESET = None
 
 
 def preset_ok(p):
