@@ -268,8 +268,51 @@ class CaptionTrackTest(unittest.TestCase):
         q = seq(otracks=[{"id": "C2", "k": "c", "style": {"size": 33, "fill": "#00FF00"}}])
         o = editor.overlay_tracks(q)[1]
         st = editor.cap_style_of(q, o)
-        self.assertEqual((st["size"], st["fill"], st["y"], st["effect"]), (33, "#00FF00", editor.LONG_STYLE["y"], editor.LONG_STYLE["effect"]))
+        y2 = editor.cap_track_default(editor.LONG_STYLE, 2, "long")
+        self.assertEqual((st["size"], st["fill"], st["y"], st["effect"]), (33, "#00FF00", y2, editor.LONG_STYLE["effect"]), "높이를 안 정했으면 자막 1 한 줄 위 (D-308)")
+        o2 = {"id": "C2", "k": "c", "style": {"y": 0.3}}
+        self.assertEqual(editor.cap_style_of(q, o2)["y"], 0.3, "세로 위치를 직접 정하면 그 값")
         self.assertIs(editor.cap_style_of(q, {"id": "C1", "k": "c", "style": {"size": 1}}), q["captionStyle"])
+
+    def test_sparse_row_style_follows_c1(self):
+        """색만 바꾼 자막 2 도 자막 1 크기·자리를 바꾸면 따라감 — 겹치지 않음 (D-308 · 예전엔 처음 고칠 때 높이까지 굳음)."""
+        q = seq(otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "C2", "k": "c", "style": {"fill": "#FFE14D"}}, {"id": "T1", "k": "t"}])
+        o = editor.overlay_tracks(q)[2]
+        for size in (52, 90):
+            q["captionStyle"]["size"] = size
+            st, c1 = editor.cap_style_of(q, o), q["captionStyle"]
+            self.assertEqual(st["fill"], "#FFE14D")
+            self.assertEqual(st["size"], size)
+            top1 = c1["y"] - (1.25 * c1["size"] + 2 * c1["strokeW"]) / 1080
+            self.assertLessEqual(st["y"], top1 - 0.011, f"자막 2 아래 끝이 자막 1 위 끝보다 위 (크기 {size})")
+        q["captionStyle"]["y"] = 0.3  # 자막 1 을 위쪽으로 (템플릿 등) → 자막 2 는 그 아래로
+        self.assertGreater(editor.cap_style_of(q, o)["y"], 0.3)
+
+    def test_c2_clears_two_line_c1(self):
+        """자막 1 이 두 줄인 동안 높이를 안 정한 자막 2 는 그만큼 더 위로 · 자막 1 이 위쪽이면 자기 글이 두 줄인 만큼 더 아래로 (D-308)."""
+        for fmt, W, H in (("long", 1920, 1080), ("shorts", 1080, 1920)):
+            q = seq([C("a", 1, 4, "퍼스트 터치\n꿀팁이에요"), C("b", 1.5, 3.5, "새 자막", trk="C2"), C("c", 6, 8, "한 줄"), C("d", 6.2, 7.5, "새 자막 둘", trk="C2")], fmt=fmt,
+                    items=[item("v", 0, 0, 10)])
+            c1 = q["captionStyle"]
+            ev = {e[4].split("}")[-1]: e for e in events(ass_of(q, W, H))}
+            ys = {k: int(re.search(r"\\pos\(\d+,(\d+)\)", v[4]).group(1)) for k, v in ev.items()}
+            line = 1.25 * c1["size"] + 2 * c1["strokeW"]
+            top2 = c1["y"] * H - (2 * 1.25 * c1["size"] + 2 * c1["strokeW"])  # 두 줄 자막 1 의 위 끝
+            self.assertLessEqual(ys["새 자막"], top2, (fmt, ys))
+            self.assertEqual(ys["새 자막 둘"], int(H * editor.cap_track_default(c1, 2, fmt)), "자막 1 이 한 줄이면 예전 자리")
+            self.assertLess(ys["새 자막"], ys["새 자막 둘"])
+            self.assertGreater(ys["한 줄"] - ys["새 자막 둘"], line - 2)
+        # 자막 1 이 위쪽(y 0.3): 자막 2 는 아래 · 자기 글이 두 줄이면 그만큼 더 아래 (위로 자라는 두 줄이 자막 1 을 덮지 않게)
+        q = seq([C("a", 1, 4, "위 자막"), C("b", 1.5, 3.5, "두 줄\n자막", trk="C2")], items=[item("v", 0, 0, 10)])
+        q["captionStyle"]["y"] = 0.3
+        c1 = q["captionStyle"]
+        e2 = [e for e in events(ass_of(q)) if e[3] == "Cap2"][0]
+        y2 = int(re.search(r"\\pos\(\d+,(\d+)\)", e2[4]).group(1))
+        self.assertGreaterEqual(y2 - (2 * 1.25 * c1["size"] + 2 * c1["strokeW"]), 0.3 * 1080, "두 줄 자막 2 의 위 끝이 자막 1 아래")
+        # 세로 위치를 직접 정한 트랙은 그대로
+        q = seq([C("a", 1, 4, "퍼스트 터치\n꿀팁이에요"), C("b", 1.5, 3.5, "새 자막", trk="C2")], otracks=[{"id": "C2", "k": "c", "style": {"y": 0.5}}], items=[item("v", 0, 0, 10)])
+        e2 = [e for e in events(ass_of(q)) if e[3] == "Cap2"][0]
+        self.assertIn("\\pos(960,540)", e2[4])
 
     def test_other_media_caption_on_c1(self):
         oth = [C("o", 0.5, 2.5, "다른 영상 말", trk="C2")]
@@ -373,12 +416,22 @@ def js_block():
     assert "// 글자·그림 줄 (D-296)" in blk and "// 글자·그림 줄 끝" in blk
     assert "document" not in blk and "$(" not in blk, "줄 블록은 화면을 쓰지 않음"
     parts.append(blk)
-    return "const FPS = 30; let S = null, P = null;\n" + "\n".join(parts)
+    return "const FPS = 30; let S = null, P = null, selX = null;\n" + "\n".join(parts)
 
 
-def run_node(body, inp):
-    prog = js_block() + "\nconst INP = JSON.parse(require('fs').readFileSync(0, 'utf8'));\nlet OUT = null;\n" + body + "\nprocess.stdout.write(JSON.stringify(OUT));"
-    r = subprocess.run([NODE, "-e", prog], input=json.dumps(inp), capture_output=True, text=True, encoding="utf-8", timeout=120)
+def js_text_block():
+    """editor.html 의 자막 글줄 셈 (emOf · capFit · capLines · capRowY) — 화면(DOM) 없음."""
+    src = (ROOT / "editor.html").read_text(encoding="utf-8")
+    i = src.index("const emOf =")
+    j = src.index("// 쇼츠 첫머리 주제 줄 (BR-120", i)
+    blk = src[i:j]
+    assert "function capRowY(" in blk and "document" not in blk and "$(" not in blk
+    return blk
+
+
+def run_node(body, inp, text=False):
+    prog = js_block() + ("\n" + js_text_block() if text else "") + "\nconst INP = JSON.parse(require('fs').readFileSync(0, 'utf8'));\nlet OUT = null;\n" + body + "\nprocess.stdout.write(JSON.stringify(OUT));"
+    r = subprocess.run([NODE, "-e", prog], input=json.dumps(inp), capture_output=True, text=True, encoding="utf-8", timeout=180)
     if r.returncode:
         raise AssertionError(r.stderr[-3000:])
     return json.loads(r.stdout)
@@ -504,7 +557,7 @@ class NodeParityTest(unittest.TestCase):
         q = seq(titles=[T("a", 0, 5), T("b", 6, 2)], otracks=[])
         r = self.place(q, [], """const r1 = otPlace("t", [1, 3]); const r2 = otPlace("t", [5.5, 6]); const r3 = otPlace("t", [7, 7.5]);
             OUT = { r: [r1, r2, r3], ids: S.otracks.map(o => o.id) };""")
-        self.assertEqual(r["r"], [{"id": "T2", "made": True}, {"id": "T1"}, {"id": "T2"}])
+        self.assertEqual(r["r"], [{"id": "T2", "made": True, "why": "overlap"}, {"id": "T1"}, {"id": "T2"}])
         self.assertEqual(r["ids"], ["G1", "C1", "T1", "T2"])
         # 9줄이 다 차면 맨 위 겹친 줄에 함께
         q = seq(titles=[T(f"t{j}", 0, 5, f"T{j}" if j > 1 else None) for j in range(1, 10)], otracks=[{"id": f"T{j}", "k": "t"} for j in range(1, 10)])
@@ -513,11 +566,11 @@ class NodeParityTest(unittest.TestCase):
         # G: 새 도형은 겹친 전술 그림 아래 · 스포트라이트는 화살표 아래, 도형 위
         q = seq(tactics=[TAC("r", "ring", 0, 5)], otracks=[])
         r = self.place(q, [], 'const a = otPlace("g", [1, 2], { sub: "shape" }); OUT = { a, ids: S.otracks.map(o => o.id) };')
-        self.assertEqual(r["a"], {"id": "G2", "made": True})
+        self.assertEqual(r["a"], {"id": "G2", "made": True, "why": "overlap"})
         self.assertEqual(r["ids"], ["G2", "G1", "C1", "T1"], "도형 줄이 전술 그림 줄 아래")
         q = seq(shapes=[SH("s", 0, 5)], tactics=[TAC("x", "arrow", 0, 5, "G2")], otracks=[{"id": "G1", "k": "g"}, {"id": "G2", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}])
         r = self.place(q, [], 'const a = otPlace("g", [1, 2], { sub: "spot" }); OUT = { a, ids: S.otracks.map(o => o.id) };')
-        self.assertEqual(r["a"], {"id": "G3", "made": True})
+        self.assertEqual(r["a"], {"id": "G3", "made": True, "why": "overlap"})
         self.assertEqual(r["ids"][:3], ["G1", "G3", "G2"], "스포트라이트는 도형(G1) 위 · 화살표(G2) 아래")
         # 잠긴 줄·숨긴 줄은 건너뜀 · 고른 줄(prefer)
         q = seq(titles=[T("a", 0, 5)], otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "T2", "k": "t", "lock": True}, {"id": "T3", "k": "t"}, {"id": "T4", "k": "t"}])
@@ -526,9 +579,9 @@ class NodeParityTest(unittest.TestCase):
         # C: 원본 시각으로 프로젝트 자막과 겹치면 새 자막 줄 (자막을 끈 편집본은 숨김)
         q = seq(otracks=[], on=False)
         r = self.place(q, [C("a", 10, 12)], 'OUT = otPlace("c", [11, 13]);')
-        self.assertEqual(r, {"id": "C2", "made": True})
+        self.assertEqual(r, {"id": "C2", "made": True, "why": "overlap"})
         r = self.place(seq(otracks=[]), [C("a", 10, 12), C("b", 10, 12, trk="C3")], 'OUT = [otPlace("c", [11, 13]), S.otracks.find(o => o.id === "C2")];')
-        self.assertEqual(r[0], {"id": "C2", "made": True}, "C3 가 다른 편집본에서 쓰여도 가장 작은 빈 번호")
+        self.assertEqual(r[0], {"id": "C2", "made": True, "why": "overlap"}, "C3 가 다른 편집본에서 쓰여도 가장 작은 빈 번호")
 
     def test_ot_settle(self):
         q = seq(titles=[T("a", 0, 5), T("b", 6, 2)], otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "T2", "k": "t"}, {"id": "T3", "k": "t"}])
@@ -538,6 +591,146 @@ class NodeParityTest(unittest.TestCase):
         q = seq(titles=[T("a", 0, 5), T("b", 1, 2), T("c", 1.5, 2, "T2")], otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "T2", "k": "t"}])
         r = self.place(q, [], 'const b = S.titles[1]; OUT = [otSettle(b, "t"), S.otracks.map(o => o.id)];')
         self.assertEqual(r, [{"id": "T3", "made": True}, ["G1", "C1", "T1", "T3", "T2"]], "바로 위(T2)가 차 있고 더 위가 없으면 자기 줄 바로 위 새 줄")
+
+
+@unittest.skipUnless(NODE, "node 가 없어요")
+class ReviewFixTest(unittest.TestCase):
+    """검토 고침 (D-306~D-309) — 도형·전술 그림 앞뒤 · 새 항목 기본 트랙 · 9개 한도 · 자막 ＋ 빈 곳 · 새 쇼츠 트랙 차례 · 자막 트랙 높이."""
+
+    def place(self, q, caps, body, text=False):
+        return run_node("S = INP.q; P = { captions: INP.caps, sequences: [S] }; ensureSeq(S);\n" + body, {"q": q, "caps": caps}, text)
+
+    LB = [SH("lb1", 0, 0, full=True, y=0, h=0.1, color="#000000"), SH("lb2", 0, 0, full=True, y=0.9, h=0.1, color="#000000")]
+
+    def test_shape_with_tactic_on_same_row(self):
+        """위아래 띠(처음부터 끝까지 도형)와 전술 그림이 한 도형 트랙(G1)에 있으면 새 도형·스포트라이트도 그 트랙 — 트랙 안 차례가 이미 맞음
+        (예전: 띠 때문에 G2 를 위에 만들어 상자가 전술 그림을 덮음)."""
+        q = seq(shapes=self.LB, tactics=[TAC("r", "ring", 6, 4)], otracks=[])
+        r = self.place(q, [], """const a = otPlace("g", [7, 12], { sub: "shape" }); const sh = { id: "n", x: 0.4, y: 0.7, w: 0.2, h: 0.1, color: "#000000", opacity: 0.6, start: 7, dur: 5 };
+            setTrk(sh, a.id); S.shapes.push(sh); const b = otPlace("g", [7, 9], { sub: "spot" }); OUT = { a, b, q: S };""")
+        self.assertEqual((r["a"], r["b"]), ({"id": "G1"}, {"id": "G1"}))
+        self.assertEqual(ids(r["q"]["otracks"]), ["G1", "C1", "T1"], "새 트랙 없음")
+        ev = [(e[0], e[3]) for e in events(ass_of(r["q"])) if e[3] in ("Shape", "Board")]
+        self.assertEqual(ev[-1][1], "Board")
+        self.assertEqual({lay for lay, _ in ev}, {0}, "한 층에서 도형 → 전술 그림 차례 (전술 그림이 위)")
+        # 예전 프로젝트: 이름 띠(도형) + 화살표가 G1 → 스포트라이트도 G1 (화살표가 어두워지지 않음)
+        q = seq(shapes=[SH("s", 6, 4)], tactics=[TAC("x", "arrow", 6, 4)], otracks=[])
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("g", [7, 9], { sub: "spot" });'), {"id": "G1"})
+        # 그 트랙이 잠겼으면 전술 그림 아래 새 트랙 (도형이 전술 그림을 덮지 않는 것이 먼저)
+        q = seq(shapes=self.LB, tactics=[TAC("r", "ring", 6, 4)], otracks=[{"id": "G1", "k": "g", "lock": True}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}])
+        r = self.place(q, [], 'OUT = [otPlace("g", [7, 12], { sub: "shape" }), S.otracks.map(o => o.id)];')
+        self.assertEqual(r, [{"id": "G2", "made": True, "why": "overlap"}, ["G2", "G1", "C1", "T1"]])
+
+    def test_settle_keeps_shape_under_tactic(self):
+        """끌어 옮긴 도형·스포트라이트는 같은 트랙 전술 그림과 겹쳐도 그대로 · 띠(처음부터 끝까지)와도 그대로 ·
+        같은 차례끼리(도형↔도형) 겹칠 때만 옮기고 그때도 전술 그림 아래 (D-306)."""
+        q = seq(shapes=[SH("s", 9, 3)], tactics=[TAC("r", "ring", 1, 4), TAC("x", "arrow", 1, 4), TAC("p", "spot", 10, 2)], otracks=[])
+        r = self.place(q, [], """const s = S.shapes[0]; s.start = 1.5; const a = otSettle(s, "g"); const sp = S.tactics[2]; sp.start = 1.5; const b = otSettle(sp, "g");
+            OUT = [a, b, S.otracks.map(o => o.id), s.trk || null, sp.trk || null];""")
+        self.assertEqual(r, [None, None, ["G1", "C1", "T1"], None, None])
+        q = seq(shapes=self.LB + [SH("bar", 3, 2)], tactics=[TAC("r", "ring", 1, 6)], otracks=[])
+        self.assertIsNone(self.place(q, [], 'const b = S.shapes[2]; b.start = 3.5; OUT = otSettle(b, "g");'), "띠가 있는 MSG 편집본에서 막대를 밀어도 그대로")
+        # 도형↔도형 겹침 + 위 트랙(G2)에 전술 그림: 새 트랙은 G1 과 G2 사이 (전술 그림 아래)
+        q = seq(shapes=[SH("a", 1, 4), SH("b", 9, 2)], tactics=[TAC("r", "ring", 1, 4, "G2")], otracks=[{"id": "G1", "k": "g"}, {"id": "G2", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}])
+        r = self.place(q, [], 'const b = S.shapes[1]; b.start = 1.5; OUT = [otSettle(b, "g"), S.otracks.map(o => o.id)];')
+        self.assertEqual(r[1].index(r[0]["id"]), 1, r)
+        self.assertLess(r[1].index(r[0]["id"]), r[1].index("G2"), "옮긴 도형은 전술 그림 트랙 아래")
+        # 도형↔도형만 (전술 그림 없음): 위쪽 새 트랙 (예전과 같음)
+        q = seq(shapes=[SH("a", 1, 4), SH("b", 9, 2)], otracks=[])
+        r = self.place(q, [], 'const b = S.shapes[1]; b.start = 1.5; OUT = [otSettle(b, "g"), S.otracks.map(o => o.id)];')
+        self.assertEqual(r, [{"id": "G2", "made": True, "why": "overlap"}, ["G1", "G2", "C1", "T1"]])
+
+    def test_preset_box_under_its_text(self):
+        """그래픽 프리셋 상자는 자기 글자 트랙 아래 (도형 트랙을 맨 앞으로 옮겨 둔 편집본에서도 · D-306)."""
+        q = seq(otracks=[{"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "G1", "k": "g"}])
+        r = self.place(q, [], """const t = otPlace("t", [2, 5]); const g = otPlace("g", [2, 5], { sub: "shape", under: t.id }); OUT = [t, g, S.otracks.map(o => o.id)];""")
+        self.assertEqual(r[0], {"id": "T1"})
+        self.assertEqual(r[1], {"id": "G2", "made": True, "why": "under"})
+        self.assertLess(r[2].index("G2"), r[2].index("T1"))
+        # 아래에 쓸 수 있는 도형 트랙이 있으면 그 트랙
+        q = seq(otracks=[{"id": "G2", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "G1", "k": "g"}])
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("g", [2, 5], { sub: "shape", under: "T1" });'), {"id": "G2"})
+
+    def test_full_limit_skips_hidden_and_locked(self):
+        """9개가 다 차면 겹친 트랙 중 맨 위 '쓸 수 있는' 트랙 (숨김·잠김은 건너뜀) · 하나도 없으면 otBlocked (D-307)."""
+        base = [{"id": f"T{j}", "k": "t"} for j in range(1, 10)]
+        q = seq(titles=[T(f"t{j}", 0, 6, f"T{j}" if j > 1 else None) for j in range(1, 10)], otracks=[dict(o, **({"hide": True} if o["id"] == "T9" else {})) for o in base])
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("t", [1, 2]);'), {"id": "T8", "full": True})
+        q["otracks"] = [dict(o, **({"lock": True} if o["id"] in ("T8", "T9") else {})) for o in base]
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("t", [1, 2]);'), {"id": "T7", "full": True})
+        q["otracks"] = [dict(o, lock=True) for o in base]
+        self.assertEqual(self.place(q, [], 'OUT = otBlocked("t");'), True)
+        self.assertEqual(self.place(seq(otracks=[]), [], 'OUT = [otBlocked("t"), otBlocked("g"), otBlocked("c")];'), [False, False, False])
+
+    def test_new_items_default_to_first_row(self):
+        """겹치지 않으면 새 항목은 첫 트랙 — 코치가 자막 2 를 자막 1 뒤로 옮겨도 · 고른 자막이 자막 2 에 있어도 (D-307)."""
+        ots = [{"id": "G1", "k": "g"}, {"id": "C2", "k": "c", "name": "코치 설명", "style": {"fill": "#FFE14D", "y": 0.15}}, {"id": "C1", "k": "c"}, {"id": "T2", "k": "t", "style": {"fill": "#00FFFF"}}, {"id": "T1", "k": "t"}]
+        q = seq(otracks=ots)
+        caps = [C("a", 0.2, 2.0), C("b", 0.5, 1.8, trk="C2")]
+        r = self.place(q, caps, 'selX = { k: "caption", id: "b" }; OUT = [otPlace("c", [4, 6], { prefer: otPrefer("c") }), otPlace("t", [5, 8], { prefer: otPrefer("t") }), otPrefer("c")];')
+        self.assertEqual(r, [{"id": "C1"}, {"id": "T1"}, None])
+        # 트랙 머리를 눌러 고른 트랙은 따름
+        r = self.place(q, caps, 'selX = { k: "otrack", id: "C2" }; OUT = otPlace("c", [4, 6], { prefer: otPrefer("c") });')
+        self.assertEqual(r, {"id": "C2"})
+        # 겹칠 때 고르는 빈 트랙은 번호 차례 (쌓인 자리 차례가 아님)
+        q = seq(titles=[T("a", 0, 5)], otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t"}, {"id": "T3", "k": "t"}, {"id": "T2", "k": "t"}])
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("t", [1, 2]);'), {"id": "T2"})
+        # 첫 트랙이 잠겨 새 트랙을 만들면 까닭이 '겹침'이 아님
+        q = seq(otracks=[{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "T1", "k": "t", "lock": True}])
+        self.assertEqual(self.place(q, [], 'OUT = otPlace("t", [15, 18]);'), {"id": "T2", "made": True, "why": "blocked"})
+
+    def test_cap_add_end(self):
+        """자막 ＋: 자막 사이 빈 곳이면 다음 자막 앞까지 → 자막 1 (예전: 2초가 다음 자막에 걸쳐 자막 2 를 만듦) · 자막이 나오는 곳이면 2초 → 자막 2 (D-307)."""
+        caps = [C("a", 0.2, 2.0), C("b", 3.0, 5.8), C("c", 7.0, 8.0)]
+        r = self.place(seq(otracks=[]), caps, """const out = []; for (const src of [2.3, 2.7, 1.0, 6.0, 8.5]) { const e = capAddEnd(src, 30); out.push([e, otPlace("c", [src, e]).id]); } OUT = out;""")
+        self.assertEqual(r, [[3.0, "C1"], [2.7 + 2, "C2"], [3.0, "C2"], [7.0, "C1"], [10.5, "C1"]])
+
+    def test_copy_rows_keeps_base_order(self):
+        """새 쇼츠: 바탕 편집본의 자막·타이틀 앞뒤 그대로 (자막을 큰 제목 앞으로 옮겨 둔 바탕이면 새 쇼츠도 · D-309)."""
+        base = seq(fmt="shorts", otracks=[{"id": "G1", "k": "g"}, {"id": "T1", "k": "t"}, {"id": "C1", "k": "c"}, {"id": "C2", "k": "c", "name": "선수", "style": {"fill": "#FFE14D"}}])
+        new = seq(fmt="shorts", titles=[T("h", 0, 30), T("k", 0, 2.5)])
+        r = run_node("P = { captions: [], sequences: INP }; const [b, q] = INP; ensureSeq(b); ensureSeq(q); otCopyRows(q, b); OUT = q.otracks;", [base, new])
+        self.assertEqual(ids(r), ["G1", "T1", "T2", "C1", "C2"])
+        self.assertEqual(r[-1].get("name"), "선수")
+        self.assertEqual(r[-1].get("style"), {"fill": "#FFE14D"})
+
+    def test_cap_lines_and_row_y_parity(self):
+        """자막 줄 수 어림(capLines = cap_lines) · 자막 트랙 높이(capRowY = cap_row_y) · capTrackDefault(more·own) 가 JS·파이썬 비트까지 같음."""
+        rnd = random.Random(308)
+        words = ["퍼스트", "터치", "꿀팁", "오늘은", "공을", "받을", "때", "몸을", "열어요", "OK", "1:1", "패스!", "아주아주아주긴낱말이에요"]
+        cases = []
+        for _ in range(240):
+            st = dict(rnd.choice([editor.SHORTS_STYLE, editor.LONG_STYLE, editor.DEFAULT_STYLE]), size=rnd.choice([40, 52, 70, 90, 120]), strokeW=rnd.choice([0, 4, 8, 11]),
+                      weight=rnd.choice(["Bold", "Black"]), y=rnd.choice([0.15, 0.3, 0.5, 0.8, 0.9]), x=rnd.choice([0.5, 0.2]), align=rnd.choice(["center", "left"]))
+            text = " ".join(rnd.choice(words) for _ in range(rnd.randint(1, 12)))
+            if rnd.random() < 0.3:
+                text = text.replace(" ", "\n", 1)
+            cases.append([text, st, rnd.choice([1080, 1920])])
+        js = run_node("OUT = INP.map(([t, st, W]) => capLines(t, st, W));", cases, text=True)
+        self.assertEqual(js, [editor.cap_lines(t, st, W) for t, st, W in cases])
+        self.assertGreater(len(set(js)), 2, "한 줄 · 두 줄 · 그 이상이 섞임")
+        # capTrackDefault(more · own) = cap_track_default
+        tcs = [[st, n, f, m, dict(st, size=st["size"] + 7)] for st in (editor.SHORTS_STYLE, editor.LONG_STYLE, dict(editor.LONG_STYLE, y=0.3)) for n in (2, 3, 9) for f in ("long", "shorts") for m in (0, 1, 3)]
+        js = run_node("OUT = INP.map(([st, n, f, m, own]) => capTrackDefault(st, n, f, m, own));", tcs)
+        self.assertEqual(js, [editor.cap_track_default(st, n, f, m, own) for st, n, f, m, own in tcs])
+        # capRowY = cap_row_y (자막 1 두 줄 · 위쪽 자막 1 · 정한 높이)
+        rows = []
+        for k in range(120):
+            c1 = dict(rnd.choice([editor.SHORTS_STYLE, editor.LONG_STYLE]), y=rnd.choice([0.3, 0.8, 0.9]), size=rnd.choice([52, 70, 90]))
+            o = {"id": f"C{rnd.randint(2, 4)}", "k": "c"}
+            if rnd.random() < 0.3:
+                o["style"] = {"fill": "#FFFFFF"} if rnd.random() < 0.5 else {"y": 0.5}
+            q = {"captionStyle": c1, "format": rnd.choice(["long", "shorts"])}
+            ev = {"start": 1.0, "end": 3.0, "text": " ".join(rnd.choice(words) for _ in range(rnd.randint(1, 10)))}
+            c1s = [{"start": rnd.uniform(0, 4), "end": 0, "text": " ".join(rnd.choice(words) for _ in range(rnd.randint(1, 14)))} for _ in range(rnd.randint(0, 3))]
+            for c in c1s:
+                c["end"] = c["start"] + rnd.uniform(0.2, 3)
+            rows.append([q, o, ev, c1s, rnd.choice([1080, 1920])])
+        js = run_node("""OUT = INP.map(([q, o, ev, c1s, W]) => { const st = capStyleOf(o, q);
+            return capRowY(q, o, st, { s: ev.start, e: ev.end, text: ev.text }, c1s.map(c => ({ s: c.start, e: c.end, text: c.text })), W); });""", rows, text=True)
+        py = [editor.cap_row_y(q, o, editor.cap_style_of(q, o), ev, c1s, W) for q, o, ev, c1s, W in rows]
+        self.assertEqual(js, py)
+        self.assertTrue(any(a != editor.cap_style_of(q, o)["y"] for a, (q, o, *_x) in zip(py, rows)), "두 줄 때문에 비킨 경우가 있음")
 
 
 if __name__ == "__main__":

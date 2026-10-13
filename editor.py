@@ -3446,23 +3446,71 @@ def cap_trk(cap, mid="main"):
     return tid if mid == "main" and isinstance(tid, str) and _CN_ID.fullmatch(tid) else "C1"
 
 
-def cap_track_default(c1, n, fmt):
-    """아직 모양을 안 정한 자막 줄(Cn)의 높이: C1 에서 자막 한 줄 높이씩 (n-1)번 — C1 이 화면 아래쪽(y ≥ 0.5)이면 위로(0.1 까지),
-    위쪽이면 아래로(0.95 까지). 반올림 없이 editor.html capTrackDefault 와 같은 계산 차례 (두 쪽 값이 비트까지 같음)."""
+def cap_track_default(c1, n, fmt, more=0, own=None):
+    """높이(y)를 정하지 않은 자막 트랙(Cn)의 높이: C1 에서 자막 한 줄 높이씩 (n-1)번 — C1 이 화면 아래쪽(y ≥ 0.5)이면 위로(0.1 까지),
+    위쪽이면 아래로(0.95 까지). more: 글줄 몇 개 더 (위로 갈 때는 그때 나오는 자막 1 이 여러 줄인 만큼 · 아래로 갈 때는 자기 글 · cap_row_y · D-308) ·
+    own: 그 트랙 모양 (아래로 갈 때 띠 높이). 반올림 없이 editor.html capTrackDefault 와 같은 계산 차례 (두 쪽 값이 비트까지 같음 · more 0 이면 예전 값과도 같음)."""
+    own = c1 if own is None else own
     H = 1920 if fmt == "shorts" else 1080
-    band = (1.25 * float(c1["size"]) + 2 * float(c1["strokeW"])) / H + 0.012
     y = float(c1["y"])
-    return max(0.1, y - (n - 1) * band) if y >= 0.5 else min(0.95, y + (n - 1) * band)
+    if y >= 0.5:
+        band = (1.25 * float(c1["size"]) + 2 * float(c1["strokeW"])) / H + 0.012
+        return max(0.1, y - ((n - 1) * band + more * 1.25 * float(c1["size"]) / H))
+    band = (1.25 * float(own["size"]) + 2 * float(own["strokeW"])) / H + 0.012
+    return min(0.95, y + (n - 1) * band + more * 1.25 * float(own["size"]) / H)
 
 
 def cap_style_of(seq, o):
-    """자막 줄의 글자 모양 — C1 은 captionStyle · 다른 줄은 자기 style(빠진 값은 C1) · 아직 안 정했으면 C1 모양을 한 줄씩 옮긴 높이."""
+    """자막 트랙의 글자 모양 — C1 은 captionStyle · 다른 트랙은 C1 모양 위에 자기 style(고친 값만 · D-308) ·
+    높이(y)를 안 정했으면 C1 에서 한 줄씩 옮긴 높이 (색만 바꾼 자막 2 도 자막 1 크기·자리를 따라감 · editor.html capStyleOf)."""
     st = seq["captionStyle"]
     if o["id"] == "C1":
         return st
-    if isinstance(o.get("style"), dict) and o["style"]:
-        return {**st, **o["style"]}
-    return dict(st, y=cap_track_default(st, int(o["id"][1]), seq.get("format")))
+    own = o["style"] if isinstance(o.get("style"), dict) else {}
+    m = {**st, **own}
+    if "y" not in own:
+        m["y"] = cap_track_default(st, int(o["id"][1]), seq.get("format"), 0, m)
+    return m
+
+
+def cap_lines(text, st, W):
+    """자막 하나가 화면에서 몇 줄인지 어림 (editor.html capLines) — cap_fit 으로 글자를 줄여 들어가면 글 속 줄 수 그대로 ·
+    아니면 화면 폭 92% 에서 띄어쓰기마다 바꿈 (text_box 와 같은 셈)."""
+    paras = str(text if text is not None else "").replace("\r", "").split("\n")
+    if cap_fit(text, st, W) < 1:
+        return len(paras)
+    size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
+    black = st.get("weight") == "Black"
+    avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
+    n = 0
+    for para in paras:
+        cur = 0.0
+        n += 1
+        for w in para.split(" "):
+            ww = sum(_em(ch, black) for ch in w) * size
+            if cur and cur + sp + ww > avail:
+                n += 1
+                cur = ww
+            else:
+                cur = cur + (sp if cur else 0.0) + ww
+    return n
+
+
+def cap_row_y(seq, o, st, ev, c1s, W):
+    """높이(y)를 정하지 않은 자막 트랙(Cn)의 자막 하나가 놓일 높이 (D-308 · editor.html capRowY) — 트랙 기본 높이에서
+    자막 1 이 화면 아래쪽이면 그 자막이 나오는 동안 보이는 자막 1 이 두 줄 이상인 만큼 더 위로 · 위쪽이면 자기 글이 두 줄 이상인 만큼 더 아래로.
+    ev·c1s 는 timeline_captions 항목 (start·end·text) · c1s 는 보이는 자막 1 자막들."""
+    if o["id"] == "C1" or (isinstance(o.get("style"), dict) and "y" in o["style"]):
+        return st["y"]
+    c1 = seq["captionStyle"]
+    more = 0
+    if float(c1["y"]) >= 0.5:
+        for c in c1s:
+            if c["start"] < ev["end"] - OT_EPS and ev["start"] < c["end"] - OT_EPS:
+                more = max(more, cap_lines(c["text"], c1, W) - 1)
+    else:
+        more = cap_lines(ev["text"], st, W) - 1
+    return cap_track_default(c1, int(o["id"][1]), seq.get("format"), more, st) if more > 0 else st["y"]
 
 
 def track_visible(seq, o):
@@ -3542,6 +3590,7 @@ def build_ass(proj, W, H, fps=30):
     # 글자·그림 줄을 아래(뒤)부터 — 층(Layer) = 쌓는 차례 (editor.html 미리보기 .olay z-index 와 같음) · 숨긴 줄은 빠짐
     # 예전 프로젝트(G1 < C1 < T1): 도형·전술 그림 0 · 자막 1 · 타이틀 2 → 화면은 예전과 같음 (예전에도 타이틀은 자막 뒤에 써서 위)
     caps = timeline_captions(proj) if any(o["k"] == "c" and track_visible(proj, o) for o in ots) else []
+    c1s = [c for c in caps if c.get("trk", "C1") == "C1"] if track_visible(proj, {"id": "C1"}) else []  # 두 줄 자막 1 과 안 겹치게 (cap_row_y · D-308)
     for layer, o in enumerate(ots):
         tid, k = o["id"], o["k"]
         if not track_visible(proj, o):
@@ -3555,7 +3604,12 @@ def build_ass(proj, W, H, fps=30):
         elif k == "c":
             for c in caps:
                 if c.get("trk", "C1") == tid:
-                    event(cname[tid], cst[tid], c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer)
+                    s1 = cst[tid]
+                    if tid != "C1":
+                        yy = cap_row_y(proj, o, s1, c, c1s, W)
+                        if yy != s1["y"]:
+                            s1 = dict(s1, y=yy)
+                    event(cname[tid], s1, c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer)
         else:
             for t in proj["titles"]:
                 if track_of(t, "T", ids) == tid and t["start"] < tl_total:
