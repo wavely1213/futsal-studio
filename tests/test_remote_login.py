@@ -1136,16 +1136,20 @@ class PcUiTextTests(unittest.TestCase):
         self.assertNotIn(warn, out[3])
 
     def test_lock_until_names_the_day(self):
-        now = time.time()
-        lt = time.localtime(now)
-        tomorrow = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1, 15, 40, 0, 0, 0, -1))
-        later = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 3, 9, 5, 0, 0, 0, -1))
+        # 화면(node)은 TZ=Asia/Seoul 로 돌므로 기대값도 같은 시간대로 계산 (시험 PC 가 UTC 면 날짜가 하루 어긋남)
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        kst = ZoneInfo("Asia/Seoul")
+        now_k = datetime.now(kst)
+        now = now_k.timestamp()
+        tomorrow = (now_k + timedelta(days=1)).replace(hour=15, minute=40, second=0, microsecond=0).timestamp()
+        later_k = (now_k + timedelta(days=3)).replace(hour=9, minute=5, second=0, microsecond=0)
+        later = later_k.timestamp()
         out = self.run_ui([{"op": "until", "t": int(now) + 60}, {"op": "until", "t": int(tomorrow)}, {"op": "until", "t": int(later)},
                            {"d": self.view(lock={"scope": "net", "until": int(tomorrow)})}])
         self.assertFalse(out[0].startswith("내일") or "월" in out[0])
         self.assertTrue(out[1].startswith("내일 "), out[1])
-        lt3 = time.localtime(later)
-        self.assertTrue(out[2].startswith(f"{lt3.tm_mon}월 {lt3.tm_mday}일 "), out[2])
+        self.assertTrue(out[2].startswith(f"{later_k.month}월 {later_k.day}일 "), out[2])
         self.assertIn("내일 ", out[3])
 
 
