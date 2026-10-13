@@ -4521,8 +4521,11 @@ function rlPwFields(L) {
     <ul class="achk" id="rlChk"></ul>
     <div class="small">대문자·소문자, 한글·영문 자판은 가리지 않아요 — 같은 글쇠를 누르면 같은 비밀번호예요</div>
     <div class="small" id="rlSugg" hidden>이 비밀번호를 적어 두거나 휴대폰 브라우저에 저장해 두세요 · 휴대폰에서 한글 자판이 안 나오면 [보기]를 누르고 쳐요</div>
-    <div class="rnote">이 비밀번호를 아는 사람은 밖에서 이 PC 스튜디오를 그대로 쓸 수 있어요 (영상 받기·편집·유튜브 올리기까지) · 다른 사이트에서 쓰는 비밀번호는 쓰지 마세요</div>`
-    + (L.codeDevices === 0
+    <div class="rnote">이 비밀번호를 아는 사람은 밖에서 이 PC 스튜디오를 그대로 쓸 수 있어요 (영상 받기·편집·유튜브 올리기까지) · 다른 사이트에서 쓰는 비밀번호는 쓰지 마세요</div>`;
+}
+// 휴대폰(QR) 없음 경고·확인 / 알림 시험 — 비밀번호 칸과 따로 (아이디만을 골라 비밀번호 칸을 숨겨도 늘 보임 · 서버가 확인을 요구함)
+function rlAckFields(L) {
+  return (L.codeDevices === 0
       ? `<p class="rerr">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>
          <div class="rrow"><label><input type="checkbox" id="rlAck"> 알고 있어요 · 그래도 켤게요</label></div>`
       : `<div class="small">새 기기 알림은 휴대폰 ntfy 앱으로 와요 <button class="btn sm" data-rlx="test">알림 시험</button></div>`);
@@ -4542,13 +4545,13 @@ async function rlOpen(kind) {
          <div class="small">한글·영문·숫자 (영문·숫자면 6글자 이상, 한글이면 3글자 이상) · 남이 짐작하기 어려운 걸로 (채널 이름·전화번호는 피해 주세요)</div>
          <div class="rrow" id="rlIdOnlyRow" style="display:none"><label><input type="checkbox" id="rlIdOnlyChk"> 비밀번호 없이 아이디만으로 들어오기</label></div>
          <div class="small" id="rlIdOnlyNote" style="display:none">아이디를 아는 사람은 누구나 들어올 수 있어요</div>`
-      + `<div id="rlPwBox">${rlPwFields(L)}</div>` + foot("저장");
+      + `<div id="rlPwBox">${rlPwFields(L)}</div>` + rlAckFields(L) + foot("저장");
   } else if (kind === "idonly") {
     h = head("비밀번호 없이 쓰기")
       + `<p class="lead">비밀번호 없이 아이디 <b>${esc(L.idShow)}</b> 만으로 들어오게 바꿀까요? 아이디를 아는 사람은 누구나 들어올 수 있어요</p>`
       + (L.codeDevices === 0 ? `<div class="rrow"><label><input type="checkbox" id="rlAck"> 알고 있어요 · 그래도 켤게요</label></div>` : "") + foot("바꾸기");
   } else if (kind === "pw") {
-    h = head(L.idOnly ? "비밀번호 정하기" : "비밀번호 바꾸기") + rlPwFields(L)
+    h = head(L.idOnly ? "비밀번호 정하기" : "비밀번호 바꾸기") + rlPwFields(L) + rlAckFields(L)
       + `<div class="rrow"><label><input type="checkbox" id="rlRevoke" checked> 아이디·비밀번호로 연결한 기기도 모두 끊기 (권장) · 이 PC에 ${esc(L.loginDevices || 0)}대</label></div>` + foot("저장");
   } else if (kind === "id") {
     h = head("아이디 바꾸기")
