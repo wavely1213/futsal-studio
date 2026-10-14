@@ -264,10 +264,10 @@ class ExportTest(unittest.TestCase):
                 self.assertEqual(len(kf), len(c["text"].split()))
                 self.assertLessEqual(abs(sum(kf) - (c["end"] - c["start"]) * 100), 2, f[9])
                 self.assertIsNotNone(c.get("words"))
-                acc = 0
+                acc, a = 0, editor._ass_secs(f[1])  # 채움은 ASS 자막이 실제로 시작한 때부터 셈 (시작은 프레임 격자 · D-328)
                 for k, w in enumerate(c["words"][1:], 1):
                     acc += kf[k - 1]
-                    self.assertLessEqual(abs(acc - (w["s"] - c["start"]) * 100), 1.01, f[9])
+                    self.assertLessEqual(abs(acc - (w["s"] - a) * 100), 1.01, f[9])
 
     def test_too_wide_line_shrinks_in_shorts(self):
         st = dict(editor.SHORTS_STYLE)

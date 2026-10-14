@@ -540,7 +540,7 @@ def _video_pass(path, dur, W, H, sev, use_ocr, use_faces, prog):
 def _audio16(path):
     """16kHz 흑백 소리(int16 numpy) — 없으면 빈 배열."""
     np = _np()
-    cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"]
+    cmd = [core.ffmpeg(), "-v", "error", "-i", str(path), "-vn", "-af", "aresample=async=1:first_pts=0", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"]  # 늦게 시작하는 소리도 제자리 (D-324)
     p = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     chunks = []
     try:

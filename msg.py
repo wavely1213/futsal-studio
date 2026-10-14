@@ -637,7 +637,7 @@ def _levels_pass(path, segs, words, voice=None, sr=48000):
     멈추기(✕)를 누르면 바로 MsgError."""
     np = _np()
     vf = ",".join(editor.voice_filters(VOICE if voice is None else voice)) or "anull"
-    fc = f"[0:a]aformat=sample_rates={sr}:channel_layouts=stereo,asplit[a][b];[b]{vf}[v];[a][v]amerge=inputs=2[o]"
+    fc = f"[0:a]aresample=async=1:first_pts=0,aformat=sample_rates={sr}:channel_layouts=stereo,asplit[a][b];[b]{vf}[v];[a][v]amerge=inputs=2[o]"  # 늦게 시작하는 소리도 제자리 (D-324)
     try:
         p = subprocess.Popen([core.ffmpeg(), "-v", "error", "-i", str(path), "-vn", "-filter_complex", fc, "-map", "[o]", "-ac", "4", "-ar", str(sr),
                               "-f", "f32le", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **core.NO_WINDOW)
@@ -3650,8 +3650,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
                        and float(e["ins"]["start"]) > tl + 0.05] or [1e9])
             if tl + d > nxt - 0.02:
                 d = nxt - 0.02 - tl
-                if d < 0.5:  # 너무 짧으면 조금 앞당겨 0.5초
-                    tl, d = max(0.0, nxt - 0.52), 0.5
+                if d < MIN_TEXT:  # 너무 짧으면 조금 앞당겨 MIN_TEXT 초 — 뒤에서 MIN_TEXT 로 늘려도 끼워 넣은 장면에 안 걸리게 (예전 0.5초는 0.8초로 늘어 걸쳤음)
+                    tl, d = max(0.0, nxt - 0.02 - MIN_TEXT), MIN_TEXT
             tt = B.title(text, max(0.0, tl), d, look)
             refs["titles"].append(tt["id"])
         if c.get("sfx"):

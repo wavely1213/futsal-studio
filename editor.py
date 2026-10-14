@@ -90,12 +90,18 @@ def _cache_dir(f, src="videos"):
     return core.ANALYSIS / "_media" / f"{base}_{tag}"
 
 
+# 소리 줄기가 영상보다 늦게 시작하는 파일(소리 시작 0.5초 등): 앞을 조용히 채워 파일 시작 기준 제자리로 — 미리보기(브라우저)는 제자리로 틀어 주는데
+# 파형·받아쓰기·내보내기는 첫 소리를 0초로 읽어 그만큼 일렀음 (D-324) · 보통 파일(같이 시작)은 같은 소리 그대로 (core·plan·msg 도 같은 필터)
+AUDIO_T0 = "aresample=async=1:first_pts=0"
+
+
 def probe(path):
     """ffmpeg 만으로 길이·크기·소리 유무 확인 (ffprobe 는 없을 수 있음)."""
     path = Path(path)
     err = core.run([core.ffmpeg(), "-hide_banner", "-i", str(path)]).stderr
     m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
     dur = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
+    st = re.search(r"Duration: [^\n]*?start: (-?[\d.]+)", err)  # 파일 시작 시각 (보통 0 · D-324)
     vids = [ln for ln in err.splitlines() if "Video:" in ln and "attached pic" not in ln]
     v = re.search(r", (\d{2,5})x(\d{2,5})", vids[0]) if vids else None
     f = re.search(r"([\d.]+) fps", vids[0]) if vids else None
@@ -118,7 +124,27 @@ def probe(path):
         except Exception:
             pass
     return {"duration": round(dur, 3), "width": w, "height": h, "fps": float(f[1]) if f else 30.0,
-            "audio": "Audio:" in err, "kind": kind, "hdr": hdr}
+            "audio": "Audio:" in err, "kind": kind, "hdr": hdr, "start": float(st[1]) if st else 0.0}
+
+
+_T0 = {}
+
+
+def media_t0(f, src="videos"):
+    """원본 파일의 시작 시각(초 · ffmpeg 'start:') — 0 이 아닌 드문 파일은 브라우저 미리보기가 그만큼 뒤 시각(파일 안 PTS)을 씀.
+    내보내기·파형·받아쓰기(ffmpeg -ss)는 파일 시작 기준이라 미리보기 재생기 시각에만 더함 (editor.html elOff · D-324). 못 읽으면 0 · 파일 크기·시각으로 기억."""
+    try:
+        p = media_path(f, src)
+        s = p.stat()
+    except (OSError, ValueError):
+        return 0.0
+    k = (str(p), s.st_size, s.st_mtime_ns)
+    if k not in _T0:
+        try:
+            _T0[k] = float(probe(p).get("start") or 0.0)
+        except Exception:  # noqa: BLE001 — 못 읽으면 예전처럼 0
+            _T0[k] = 0.0
+    return _T0[k]
 
 
 def media_info(name):
@@ -144,6 +170,8 @@ def media_entry(f, src="videos", mid=None):
          "proxy": proxy_path(p.name, src).exists()}
     if i.get("hdr"):
         e["hdr"] = i["hdr"]
+    if i["kind"] == "video" and abs(i.get("start") or 0.0) > 0.005:  # 시작 시각이 0 이 아닌 파일 (미리보기 재생기에 더함 · D-324)
+        e["t0"] = round(i["start"], 3)
     return e
 
 
@@ -395,7 +423,7 @@ def _write_atomic(path, text):
 
 def waveform(name, per_sec=50, src="videos"):
     """소리 크기 (0~1) 를 1초에 per_sec 개씩."""
-    cache = _cache_dir(name, src) / f"waveform_{per_sec}.json"
+    cache = _cache_dir(name, src) / f"waveform_v2_{per_sec}.json"  # v2: 늦게 시작하는 소리 줄기도 제자리 (AUDIO_T0 · D-324 · 예전 캐시는 다시 만듦)
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))
     with _gen_lock(str(cache)):
@@ -404,7 +432,7 @@ def waveform(name, per_sec=50, src="videos"):
         import numpy as np
         sr = 8000
         with _GEN_SEM:
-            with core.popen([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-ac", "1", "-ar", str(sr),
+            with core.popen([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-af", AUDIO_T0, "-ac", "1", "-ar", str(sr),
                              "-f", "s16le", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL) as proc:
                 out, _ = proc.communicate()
             p = subprocess.CompletedProcess(proc.args, proc.returncode, out, b"")
@@ -521,7 +549,7 @@ def rev_audio(src, f, a, b, sp):
             except OSError:
                 pass
         tmp = d / f"rev.{threading.get_ident()}.tmp.wav"
-        af = ",".join(["areverse"] + _atempo(sp))
+        af = ",".join([AUDIO_T0, "areverse"] + _atempo(sp))
         with _GEN_SEM:
             r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, a):.3f}", "-t", f"{max(0.05, b - a):.3f}", "-i", str(p),
                           "-vn", "-af", af, "-ac", "2", "-ar", "48000", str(tmp)])
@@ -1828,6 +1856,11 @@ def migrate_project(name, proj):
                 m["proxy"] = proxy_path(m["file"], m.get("src", "videos")).exists()
             except ValueError:
                 m["proxy"] = False
+            t0 = media_t0(m.get("file") or "", m.get("src", "videos"))  # 시작 시각이 0 이 아닌 파일만 (D-324 · 보통 파일은 칸 없음 = 예전 그대로)
+            if abs(t0) > 0.005:
+                m["t0"] = round(t0, 3)
+            else:
+                m.pop("t0", None)
     proj["v"] = 2
     return proj
 
@@ -2067,9 +2100,10 @@ def load_project(name):
 
 
 def _cap_text(cs):
-    """자막 글 묶음 서명 — 글 + 자막 줄(trk · C1 이면 없음). 줄만 옮긴 자막도 '고친 자막'으로 봄 → 자동 작업이 몰래 바꾸지 않음
-    (autorun.add_to_project · editor.html msgCaps 와 같은 서명 · D-296)."""
-    return "\n".join(str(c.get("text") or "") + ("\t" + str(c["trk"]) if c.get("trk") else "") for c in cs or [] if isinstance(c, dict))
+    """자막 글 묶음 서명 — 글 + 자막 줄(trk · C1 이면 없음) + 손으로 맞춘 시간(tm · D-322). 줄만 옮기거나 시간만 고친 자막도 '고친 자막'으로 봄
+    → 자동 작업(다시 들은 받아쓰기)이 몰래 바꾸지 않음 (autorun.add_to_project · editor.html msgCaps 와 같은 서명 · D-296)."""
+    return "\n".join(str(c.get("text") or "") + ("\t" + str(c["trk"]) if c.get("trk") else "") + ("\t시간" if c.get("tm") else "")
+                     for c in cs or [] if isinstance(c, dict))
 
 
 def _auto_diff(p, proj):
@@ -3135,6 +3169,7 @@ def timeline_captions(proj):
     for it in its:
         groups.setdefault(it.get("media", "main"), []).append(it)
     alive = []  # 쇼츠형으로 나눈 자막 조각을 끝까지 붙잡아 둠 — _k(id) 가 다른 조각에 다시 쓰여 다른 자막끼리 합쳐지지 않게 (editor.html 은 객체 자체로 견줌)
+    cpos = proj.get("capPos") if isinstance(proj.get("capPos"), dict) else {}  # '이 자막만' 자리 (편집본마다 · D-321)
     for mid, vids in groups.items():
         if mid == "main":
             # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
@@ -3144,6 +3179,8 @@ def timeline_captions(proj):
             caps = media_captions(md.get("file"), md.get("src", "videos")) if md else []
         for cap0 in caps:
             trk = cap_trk(cap0, mid)
+            pos = cap_pos(cpos.get(cap0.get("id"))) if mid == "main" and isinstance(cap0, dict) else None
+            tm = mid == "main" and isinstance(cap0, dict) and bool(cap0.get("tm"))
             for cap, ws in (_shorts_parts(cap0) if shorts else [(cap0, _cap_words(cap0))]):
                 alive.append(cap)
                 toks = str(cap.get("text") or "").split()
@@ -3166,6 +3203,10 @@ def timeline_captions(proj):
                             c["_k"] = id(cap)
                             if trk != "C1":
                                 c["trk"] = trk
+                            if pos:
+                                c["pos"] = dict(pos)
+                            if tm:
+                                c["_tm"] = True
                             res.append(c)
     # 같은 자막이 컷(확대 컷·말 빠르기 나누기)으로만 나뉘어 바로 이어지면 한 덩어리로 — 컷마다 효과가 다시 시작돼 깜빡이지 않게
     # 같은 소리를 두 대사 트랙에 겹쳐 둔 것(같은 자막이 겹침)도 한 덩어리 (editor.html capsTL 과 같은 규칙)
@@ -3203,18 +3244,34 @@ def timeline_captions(proj):
     lanes = {}
     for c in out:
         lanes.setdefault(c.get("trk", "C1"), []).append(c)
+    # 손으로 시간을 맞춘 자막(tm · D-322)은 맞춘 그대로 — 늘리지도, 앞 자막 때문에 늦추지도 않음
     for lane in lanes.values():
         for k, c in enumerate(lane):
+            if c.get("_tm"):
+                continue
             need = max(CAP_MIN, len(re.sub(r"\s+", "", c["text"])) / CAP_CPS)
             if c["end"] - c["start"] < need:
                 n = lane[k + 1] if k + 1 < len(lane) else None
-                if n is not None and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
+                if n is not None and not n.get("_tm") and n["start"] - c["start"] < need and n["end"] - c["start"] >= need + CAP_MIN:
                     n["start"] = c["start"] + need
                 c["end"] = max(c["end"], min(c["start"] + need, n["start"] if n is not None else total))
     for c in out:
-        for k in ("_k", "_keep", "_n", "_toks", "_full"):
+        for k in ("_k", "_keep", "_n", "_toks", "_full", "_tm"):
             c.pop(k, None)
     return out
+
+
+def cap_pos(v):
+    """'이 자막만' 자리 (편집본 capPos[자막 id] · D-321) → {"x", "y"} 중 바르게 적힌 것만 (화면 비율 · x 0~1 · y 0.03~1) · 없으면 None.
+    editor.html capPosOf 와 같은 규칙."""
+    if not isinstance(v, dict):
+        return None
+    out = {}
+    for k, lo in (("x", 0.0), ("y", 0.03)):
+        x = v.get(k)
+        if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x):
+            out[k] = min(1.0, max(lo, float(x)))
+    return out or None
 
 
 # ---------- 단어 시각 · 쇼츠형 자막 나누기 (#5) ----------
@@ -3320,6 +3377,25 @@ def _ass_time(t):
     h, rem = divmod(t, 3600)
     m, s = divmod(rem, 60)
     return f"{int(h)}:{int(m):02d}:{s:05.2f}"
+
+
+def _ass_secs(s):
+    """ASS 시각 'h:mm:ss.cc' → 초."""
+    h, m, x = s.split(":")
+    return int(h) * 3600 + int(m) * 60 + float(x)
+
+
+def _ass_ftime(t, fps=30):
+    """자막·타이틀·도형의 시작·끝 → ASS 시각 — 미리보기와 같은 프레임에서 나타나고 사라지게 (D-328).
+    미리보기는 재생 위치 ≥ 시작인 첫 프레임 k = ceil(t·fps) 부터 그림 · 내보내기 subtitles 필터는 프레임 시각을 ms 로 잘라(trunc)
+    libass 에 넘기고 libass 는 시작 ≤ 지금 < 끝 일 때 그림 → 프레임 k 의 (잘린) ms 를 넘지 않는 가장 큰 1/100초.
+    예전 _ass_time(반올림)은 x.x67초처럼 반올림한 값이 프레임 시각을 넘는 곳(약 36%)에서 한 프레임 늦게 나오고 늦게 사라졌음.
+    (전술 그림은 반 프레임씩 비켜 둔 시각이라 그대로 _ass_time)"""
+    t = max(0.0, float(t))
+    k = max(0, math.ceil(t * fps - 1e-6))
+    ms = int(k * (1.0 / fps) * 1000)  # ffmpeg vf_subtitles: pts · av_q2d(1/fps) · 1000 → (long long)
+    cs = ms // 10
+    return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
 
 def _effect_tags(effect, x, y, dur, rz=0.0):
@@ -3518,8 +3594,10 @@ def track_visible(seq, o):
     return seq.get("captionsOn", True) if o["id"] == "C1" else not o.get("hide")
 
 
-def build_ass(proj, W, H, fps=30):
+def build_ass(proj, W, H, fps=30, frame_grid=True):
+    """frame_grid: 시작·끝을 프레임 격자로 (D-328 · 미리보기와 같은 프레임) — False 는 예전 반올림 (시험 golden 비교용)."""
     st = proj["captionStyle"]
+    at = (lambda t: _ass_ftime(t, fps)) if frame_grid else _ass_time
 
     def style_line(name, s):
         font = "Pretendard Black" if s["weight"] == "Black" else "Pretendard"
@@ -3571,7 +3649,7 @@ def build_ass(proj, W, H, fps=30):
         start = 0.0 if sh.get("full") else sh["start"]
         end = tl_total if sh.get("full") else min(tl_total, sh["start"] + sh["dur"])
         col, a = _ass_color(sh["color"]), int((1 - sh.get("opacity", 1.0)) * 255)
-        return (f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},Shape,,0,0,0,,"
+        return (f"Dialogue: {layer},{at(start)},{at(end)},Shape,,0,0,0,,"
                 rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
     def event(style, s, start, end, text, words=None, fit=False, layer=1):
@@ -3583,9 +3661,13 @@ def build_ass(proj, W, H, fps=30):
         rz = -_rot(s)  # 화면은 시계 방향 + · ASS \frz 는 반시계 방향 + (기준점은 \pos 자리 = 미리보기 transform-origin)
         fr = rf"\frz{_num(round(rz, 2))}" if rz else ""
         tags = rf"{{\an{an}\pos({x},{y}){fs}{fr}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}{fr}}}"
-        body = _karaoke(text, end - start, words, start) if s["effect"] == "karaoke" else _ass_text(text)
+        if frame_grid:  # 노래방 \kf 는 실제 ASS 시작·끝 기준 (합 = 그 길이 · 프레임 격자로 옮긴 만큼)
+            k0, k1 = _ass_secs(at(start)), _ass_secs(at(end))
+        else:
+            k0, k1 = start, end
+        body = _karaoke(text, k1 - k0, words, k0) if s["effect"] == "karaoke" else _ass_text(text)
         eff = _effect_tags(s["effect"], x, y, end - start, rz)
-        lines.append(f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{tags}{eff}{body}")
+        lines.append(f"Dialogue: {layer},{at(start)},{at(end)},{style},,0,0,0,,{tags}{eff}{body}")
 
     # 글자·그림 줄을 아래(뒤)부터 — 층(Layer) = 쌓는 차례 (editor.html 미리보기 .olay z-index 와 같음) · 숨긴 줄은 빠짐
     # 예전 프로젝트(G1 < C1 < T1): 도형·전술 그림 0 · 자막 1 · 타이틀 2 → 화면은 예전과 같음 (예전에도 타이틀은 자막 뒤에 써서 위)
@@ -3609,6 +3691,8 @@ def build_ass(proj, W, H, fps=30):
                         yy = cap_row_y(proj, o, s1, c, c1s, W)
                         if yy != s1["y"]:
                             s1 = dict(s1, y=yy)
+                    if c.get("pos"):  # '이 자막만' 옮긴 자리 (트랙 높이보다 먼저 · D-321)
+                        s1 = dict(s1, **c["pos"])
                     event(cname[tid], s1, c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer)
         else:
             for t in proj["titles"]:
@@ -4588,7 +4672,7 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                 raise Cancelled()
             sp = i_sp(it)
             tl_start = i_tl(it, hi if it.get("rev") else lo)  # 디코딩 시작점이 타임라인 어디인지
-            af = (["areverse"] if it.get("rev") else []) + _atempo(sp)
+            af = [AUDIO_T0] + (["areverse"] if it.get("rev") else []) + _atempo(sp)  # 늦게 시작하는 소리 줄기는 앞을 비워 제자리 (D-324)
             d_lo, d_hi = lo, hi
             if abs(sp - 1) > 1e-6:  # atempo 는 끝이 몇 ms 모자라게 나옴 → 조금 더 읽고 남는 건 아래에서 버림 (빠르게 한 컷 사이 '틱' 막기)
                 if it.get("rev"):

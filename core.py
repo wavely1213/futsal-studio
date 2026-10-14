@@ -902,7 +902,8 @@ def _analyze(name, log, model, step, label="편집점 찾는 중"):
     wav = outdir / "audio.wav"
     log(f"{label} · {name}")
     set_progress(label=label, item=name, step=step, pct=None, detail="소리 추출 중")
-    r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+    # 소리 줄기가 늦게 시작하는 파일도 받아쓴 시각이 제자리 (앞을 조용히 채움 · editor.AUDIO_T0 · D-324)
+    r = run([ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vn", "-af", "aresample=async=1:first_pts=0", "-ac", "1", "-ar", "16000", str(wav)])
     if r.returncode or not wav.exists():  # 어느 영상인지 이름을 넣음 (여러 개를 찾을 때 카드에서 알 수 있게)
         raise FileProblem(f"'{name}'에서 소리를 꺼내지 못했어요 (파일이 깨졌거나 소리가 없는 영상일 수 있어요) · {r.stderr.strip()[-200:]}")
 

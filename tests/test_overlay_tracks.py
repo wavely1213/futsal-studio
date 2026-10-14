@@ -34,7 +34,8 @@ def fixtures():
 
 
 def ass_of(proj, W=1920, H=1080):
-    return editor.build_ass(editor.migrate_seq(copy.deepcopy(proj)), W, H, 30)
+    # golden(줄 기능 전 코드)과 같은 시각 표기로 견줌 — 시작·끝을 프레임 격자로 맞추는 것(D-320)은 tests.test_edux 가 따로 봄
+    return editor.build_ass(editor.migrate_seq(copy.deepcopy(proj)), W, H, 30, frame_grid=False)
 
 
 def events(ass):

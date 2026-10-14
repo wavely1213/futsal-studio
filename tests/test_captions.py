@@ -497,9 +497,9 @@ class EditorCaptionTest(WorkDir):
                 self.assertLessEqual(abs(sum(kf) - (b - a) * 100), 2, body)  # \kf 합 = 자막 길이 (±2cs)
                 self.assertEqual(len(kf), len(cap["words"]))
                 acc = 0
-                for k, w in enumerate(cap["words"][1:], 1):  # 단어 k 는 그 단어를 말한 때부터 채움
+                for k, w in enumerate(cap["words"][1:], 1):  # 단어 k 는 그 단어를 말한 때부터 채움 (ASS 자막이 실제로 시작한 때 a 부터 셈 · 시작은 프레임 격자 D-328)
                     acc += kf[k - 1]
-                    self.assertLessEqual(abs(acc - (w["s"] - cap["start"]) * 100), 1.01, body)
+                    self.assertLessEqual(abs(acc - (w["s"] - item_in + item_start - a) * 100), 1.01, body)
                 self.assertEqual(body.count(r"\N"), cap["text"].count("\n"))
 
     def test_karaoke_falls_back_when_text_edited(self):
