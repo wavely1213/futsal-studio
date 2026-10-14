@@ -126,6 +126,33 @@ class EditorHtmlWiringTest(unittest.TestCase):
         self.assertIn("groupDrag(ev, { k, id })", self.fn("gfxDown"))
         self.assertIn("const dup = ev.altKey", self.fn("groupDrag"))
 
+    def test_review_fixes_wired(self):
+        """검토 고침 (D-350·D-351) — 실제 동작은 ppalign_e2e multi_test.py · keys_test.py [R]."""
+        # 클립과 함께 고른 그 클립의 자막은 복사하지 않음 (붙인 클립을 따라 나옴 · 두 겹 방지)
+        self.assertIn("copyOvs(new Set(its.map(x => x.id)))", self.fn("copySel"))
+        self.assertIn("cset.has(p.it.id) || cset.has(p.it2.id)", self.fn("copyOvs"))
+        # 붙이거나 복제한 자막은 이 편집본에만 (Ctrl+V · Alt+끌기)
+        self.assertIn("capThisSeqOnly(", self.fn("pasteOvs"))
+        self.assertIn("capThisSeqOnly(", self.fn("groupDrag"))
+        self.assertIn("capShownIn(q, c)", self.fn("capThisSeqOnly"))
+        # 위아래 끌기: 원래 트랙은 바꾸기 전에 · Alt+← →: 모두 옮긴 뒤 겹침 정리
+        gd = self.fn("groupDrag")
+        self.assertLess(gd.index("from = otCap(cap)"), gd.index("setTrk(x, L[L.indexOf(from) + dv])"))
+        nm = self.fn("nudgeMulti")
+        self.assertLess(nm.index("for (const g of gs) g.x.start ="), nm.index("otSettle(g.x, K)"))
+        # A · Shift+A: 자막은 고른 클립에 실린 것만
+        self.assertIn("capPieces(ovObj(o)).every(p => cset.has(p.it.id) && cset.has(p.it2.id))", self.fn("trackSelDown"))
+        # 쇼츠 한 줄 나눔은 남은 낱말 번호로
+        self.assertIn("x.shn = keep.length", self.fn("capVisible"))
+        # Alt+Shift+숫자(프리미어 작업 공간)는 편집본을 안 바꿈 · 바꾸면 알림
+        self.assertIn('alt && !sh && /^Digit[1-9]$/.test(e.code)', self.src)
+        self.assertIn("편집본으로 바꿨어요", self.fn("msgSwap"))
+        # 자막 파일 가져오기 창: 다른 단추에 포커스가 있으면 Enter 는 그 단추
+        self.assertIn('!e.target.closest("select, button:not(#srtGo)")', self.src)
+        # Ctrl+Alt+끌기 = 자리 바꾸기 · Ctrl+Alt+V 는 복사한 클립이 없으면 알림만
+        self.assertIn("const rearr = dup && (e.ctrlKey || e.metaKey)", self.fn("startMove"))
+        self.assertLess(self.fn("pasteAttrs").index("if (!srcV && !srcA)"), self.fn("pasteAttrs").index("commit("))
+
 
 if __name__ == "__main__":
     unittest.main()

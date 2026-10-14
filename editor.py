@@ -3806,14 +3806,21 @@ def parse_srt(text):
     return cues, bad
 
 
+def _srt_frame(t, fps=30):
+    """SRT 시각(초) → 시퀀스 프레임: 그 시각에 처음 보이는 프레임 — 미리보기·내보내기(_ass_ftime)와 같은 ceil 규칙.
+    SRT 는 밀리초라 프레임 시각을 반올림(+0.5ms)·버림(−1ms)해 적은 파일도 같은 프레임 (0.5ms 여유 · 예전 반올림은 내보낸 SRT 를
+    다시 가져오면 7개 중 7개가 한 프레임 앞으로 왔고, ,150 은 4 · ,050 은 2 처럼 반 프레임 시각이 짝수 쪽으로 갈렸음)."""
+    return max(0, math.ceil((float(t) - 0.0005) * fps - 1e-9))
+
+
 def srt_lanes(cues, fps=30):
     """가져온 자막을 프레임에 맞추고(프리미어처럼 시퀀스 프레임) 겹침 정리 → (자막 [{start, end, text, lane}], 끝을 줄인 수, 다른 트랙으로 보낸 수).
     겹침이 SRT_TRIM 초 이하이고 앞 자막 길이의 절반 이하면 앞 자막 끝을 다음 자막 시작으로 · 더 길면 겹치지 않는 다음 트랙(lane 1, 2 …)."""
     lanes, out, trimmed, moved = [], [], 0, 0
     lim = SRT_TRIM * fps + 1e-6
     for c in cues:
-        s = int(round(c["start"] * fps))
-        x = {"s": s, "e": max(s + 1, int(round(c["end"] * fps))), "text": c["text"]}
+        s = _srt_frame(c["start"], fps)
+        x = {"s": s, "e": max(s + 1, _srt_frame(c["end"], fps)), "text": c["text"]}
         k = 0
         while k < len(lanes):
             p = lanes[k][-1]
@@ -3880,24 +3887,33 @@ def srt_files(proj, stem, t_lo, t_hi, fps, tracks=None, split=False):
     info = srt_track_list(proj)
     want = srt_default_tracks(proj) if tracks is None else [t["id"] for t in info if t["id"] in set(tracks)]
     names = {t["id"]: t["name"] for t in info}
-    span = t_hi - t_lo
+    # 시각은 영상에 실제로 보이는 프레임으로 (태운 영상·미리보기·투명 영상과 같은 _ass_ftime 의 ceil · 프레임 시각을 적음) —
+    # 예전엔 받아쓴 시각(프레임 사이)을 그대로 적어 프리미어·다시 가져오기가 한 프레임 앞으로 맞췄음
+    k0, kmax = int(round(t_lo * fps)), int(round((t_hi - t_lo) * fps))
+    fk = lambda t: math.ceil((t - 1e-6) * fps) - k0  # noqa: E731
     by = {}
     for c in timeline_captions(proj):
         tid = c.get("trk", "C1")
         if tid not in want:
             continue
-        s, e = max(0.0, c["start"] - t_lo), min(span, c["end"] - t_lo)
+        ks, ke = max(0, fk(c["start"])), min(kmax, fk(c["end"]))
         cut = c["start"] < t_lo - 1e-6 or c["end"] > t_hi + 1e-6
-        if e - s < (2.0 if cut else 1.0) / fps - 1e-6:
+        if ke - ks < (2 if cut else 1):
             continue
-        by.setdefault(tid, []).append(dict(c, start=s, end=e))
+        by.setdefault(tid, []).append(dict(c, start=ks / fps, end=ke / fps))
     if not split:
         caps = sorted((c for t in want for c in by.get(t, ())), key=lambda c: c["start"])
         return [(f"{stem}.srt", _srt(caps), [t for t in want if by.get(t)])] if caps else []
-    out = []
+    out, used = [], set()
     for t in want:
         if by.get(t):
-            fn = f"{stem}.srt" if not out else f"{stem}_{_fname(names.get(t) or t) or t}.srt"
+            base = stem if not out else f"{stem}_{_fname(names.get(t) or t) or t}"
+            fn, n = f"{base}.srt", 2
+            if fn.lower() in used:  # 트랙 이름이 같으면 (이름은 마음대로 바꿀 수 있음) 트랙 번호를 붙여 덮어쓰지 않게 (Windows 는 대소문자 같음)
+                fn = f"{base} ({t}).srt"
+            while fn.lower() in used:
+                fn, n = f"{base} ({n}).srt", n + 1
+            used.add(fn.lower())
             out.append((fn, _srt(by[t]), [t]))
     return out
 
@@ -4061,6 +4077,39 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
         x["start"] = a - t_lo
         return x
 
+    BIG = 10 ** 9
+
+    def room(it):
+        """디졸브 손잡이로 더 쓸 수 있는 원본 (앞, 뒤 · 시퀀스 프레임) — timing() 과 같은 셈 · 사진은 끝없음 · 길이를 모르면 끝없음.
+        앞 = in 앞(거꾸로면 out 뒤) · 뒤 = out 뒤(거꾸로면 in 앞) · 속도가 빠르면 그만큼 적게."""
+        x, md = cut(it), media.get(it["media"]) or {}
+        if not x or md.get("kind") == "image":
+            return BIG, BIG
+        sp = i_sp(x)
+        i = int(round(x["in"] * fps))
+        o = i + int(round((F(i_end(x)) - F(x["start"])) * sp))
+        mf = int(round(float(md.get("dur") or 0) * fps)) or BIG
+        h, t = (mf - o, i) if x.get("rev") else (i, mf - o)
+        return max(0, int(h / sp + 1e-9)), max(0, int(t / sp + 1e-9))
+
+    def fit(ts, te, cf, ah, at):
+        """원본 여유(ah: 들어오는 클립 앞 · at: 나가는 클립 뒤)에 맞춘 전환 [ts, te] — 모자라면 프리미어·FCP7·OTIO 가 같게 읽는 꼴
+        (편집점 가운데(같은 폭) · 편집점에서 시작 · 편집점에서 끝) 중 원래 자리와 가장 많이 겹치는 것 (같으면 긴 것) · 하나도 안 되면 None.
+        예전엔 in 을 0 으로 깎아(max) 클립이 원본 다른 프레임에 놓여 영상이 자기 소리보다 앞섰고, 뒤 손잡이는 파일 길이를 넘었음."""
+        if cf - ts <= ah and te - cf <= at:
+            return ts, te
+        d, cands = te - ts, []
+        m = min(ah, at, d // 2)
+        if m > 0:
+            cands.append((cf - m, cf + m))
+        if min(d, at) > 0:
+            cands.append((cf, cf + min(d, at)))
+        if min(d, ah) > 0:
+            cands.append((cf - min(d, ah), cf))
+        if not cands:
+            return None
+        return max(cands, key=lambda c: (max(0, min(c[1], te) - max(c[0], ts)), c[1] - c[0]))
+
     # 전환 → 프레임 (구간 안에 다 들어간 것만) · head[b id] / tail[a id]
     head, tail = {}, {}
     for tr in valid_trans(proj):
@@ -4083,6 +4132,16 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
                 ts = cf - d // 2
                 te = ts + d
             cf = min(max(cf, ts), te)
+            # 원본 앞뒤 여유가 모자라면 (in 이 0 근처인 B롤·영상 끝 근처) 전환을 줄이거나 편집점 한쪽으로 — in/out 은 늘 실제 원본 프레임 (영상·소리 싱크)
+            ah, at = room(b)[0], room(a)[1]
+            nw = fit(ts, te, cf, ah, at)
+            if nw is None:
+                rep.setdefault("trans_short", []).append((r[0] - t_lo, (te - ts) / fps, 0.0, ""))
+                continue
+            if nw != (ts, te):
+                ts, te = nw
+                align = "start" if ts == cf else "end" if te == cf else "center"
+                rep.setdefault("trans_short", []).append((r[0] - t_lo, (r[1] - r[0]), (te - ts) / fps, align))
         elif b:
             cf, align = ts, "start-black"
         else:
@@ -4173,7 +4232,9 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
                 i -= d
             else:
                 o += d
-        return xs, xe, max(0, i), o
+        if i < 0:  # 사진(어느 프레임이나 같음)은 in/out 을 함께 밀어 길이를 지킴 · 영상은 위 fit 이 손잡이를 원본 안으로 맞춰 둠
+            o, i = o - i, 0
+        return xs, xe, i, o
 
     root = ET.Element("xmeml", version="4")
     sq = _xsub(root, "sequence", id="sequence-1")
@@ -4210,14 +4271,13 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
         if kind == "v":
             vi += 1
             tel = _xsub(vid, "track")
-            ci_n = 0
             for x in its:
                 md = media[x["media"]]
                 h = head.get(x["id"])
                 if h:  # 들어오는 전환은 이 클립 앞에 (구간에 다 들어간 전환만 있음 → 나가는 클립도 이 트랙에 있음)
                     trans_el(tel, h, "v")
                 n += 1
-                ci_n += 1
+                ci_n = 1 + sum(1 for c_ in tel if c_.tag in ("clipitem", "transitionitem"))  # 프리미어처럼 전환도 세는 트랙 안 차례 (link clipindex)
                 s, e, i, o = timing(x, "v")
                 ci = _xsub(tel, "clipitem", id=f"clipitem-{n}")
                 _xsub(ci, "masterclipid", masters.setdefault(md["id"], f"masterclip-{len(masters) + 1}"))
@@ -4271,7 +4331,6 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
             for side in (0, 1):
                 ai += 1
                 tel = _xsub(aud, "track", currentExplodedTrackIndex=side, totalExplodedTrackCount=2, premiereTrackType="Stereo")
-                ci_n = 0
                 for x in its:
                     md = media[x["media"]]
                     if not md.get("audio"):
@@ -4287,7 +4346,7 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
                     if h:
                         trans_el(tel, h, "a")
                     n += 1
-                    ci_n += 1
+                    ci_n = 1 + sum(1 for c_ in tel if c_.tag in ("clipitem", "transitionitem"))
                     s, e, i, o = timing(x, "a")
                     ci = _xsub(tel, "clipitem", id=f"clipitem-{n}", premiereChannelType="stereo")
                     _xsub(ci, "masterclipid", masters.setdefault(md["id"], f"masterclip-{len(masters) + 1}"))
@@ -4429,6 +4488,12 @@ def _xml_report(proj, rep, stem, fps, t_lo, t_hi, overlay=None, overlay_note=Non
                     + ", ".join(f"{nm.get(k, k)} {_tc(t, fps)}" for k, t in rep["trans_changed"][:12]))
     if rep.get("trans_cut"):
         rows.append(f"■ 구간 끝에 걸린 장면 전환 {len(rep['trans_cut'])}개는 빠져요 (그 자리는 바로 바뀜)")
+    if rep.get("trans_short"):
+        al = {"center": "편집점 가운데", "start": "편집점에서 시작", "end": "편집점에서 끝"}
+        rows.append(f"■ 원본 앞뒤 여유가 모자란 장면 전환 {len(rep['trans_short'])}개는 줄이거나 편집점 한쪽으로 옮겼어요\n"
+                    "  편집실은 모자란 곳을 첫·마지막 장면을 멈춰 보여 줘요. 프리미어 XML 에는 멈춘 장면을 넣을 수 없어서, 있는 원본만큼만 섞어요 (영상·소리 싱크는 그대로).\n  "
+                    + ", ".join(f"{_tc(t, fps)} {d0:.1f}초 → " + (f"{d1:.1f}초({al.get(a, a)})" if d1 > 0 else "빠짐(바로 바뀜)") for t, d0, d1, a in rep["trans_short"][:12])
+                    + (" …" if len(rep["trans_short"]) > 12 else ""))
     sound = []
     music = {t["id"] for t in proj["tracks"] if t["k"] == "a" and t.get("role") == "music"}
     if (proj.get("duck") or {}).get("on", True) and any(it["track"] in music and it["start"] < t_hi and i_end(it) > t_lo for it in proj["items"]):

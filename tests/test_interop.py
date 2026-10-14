@@ -65,9 +65,20 @@ class SrtParse(unittest.TestCase):
         self.assertEqual([(c["start"], c["end"], c["lane"]) for c in out],
                          [(1.0, 2.4, 0), (2.4, 4.0, 0), (5.0, 9.0, 0), (6.0, 7.5, 1)])
         self.assertEqual((trimmed, moved), (1, 1))
-        # 프레임에 맞춤 (프리미어처럼 시퀀스 프레임) · 1프레임도 안 되면 1프레임
+        # 프레임에 맞춤 (프리미어처럼 시퀀스 프레임) — 그 시각에 처음 보이는 프레임(미리보기·내보내기 _ass_ftime 과 같은 ceil) · 1프레임도 안 되면 1프레임
         out, *_ = editor.srt_lanes([{"start": 1.016, "end": 1.02, "text": "a"}, {"start": 2.049, "end": 3.001, "text": "b"}], 30)
-        self.assertEqual([(round(c["start"] * 30), round(c["end"] * 30)) for c in out], [(30, 31), (61, 90)])
+        self.assertEqual([(round(c["start"] * 30), round(c["end"] * 30)) for c in out], [(31, 32), (62, 91)])
+
+    def test_frame_rule_matches_burn_in(self):
+        # 반 프레임 시각은 짝수 쪽으로 갈리지 않음 (예전 round: ,150 → 4 · ,050 → 2) · 프레임 시각을 반올림(+0.5ms)·버림(−1ms)해 적어도 같은 프레임
+        for t, k in ((0.150, 5), (0.050, 2), (1.0, 30), (1.033, 31), (1.0335, 31), (1.066, 32), (1.067, 32), (0.0, 0), (3600.0, 108000)):
+            self.assertEqual(editor._srt_frame(t, 30), k, t)
+        for k in range(0, 400):  # 60fps 도: 프레임 시각 → 밀리초 반올림 → 같은 프레임
+            self.assertEqual(editor._srt_frame(round(k / 60 * 1000) / 1000, 60), k, k)
+            self.assertEqual(editor._srt_frame(int(k / 30 * 1000) / 1000, 30), k, k)
+        # 프레임 사이 시각은 영상에 처음 보이는 프레임 (ASS 와 같음)
+        for t in (0.15, 4.15, 7.75, 12.3456):
+            self.assertEqual(editor._srt_frame(t, 30), math.ceil((t - 1e-6) * 30), t)
         # 9개가 다 차면 마지막 트랙에 겹친 채로
         many = [{"start": 0.0, "end": 10.0, "text": str(k)} for k in range(11)]
         out, _, moved = editor.srt_lanes(many, 30)
@@ -121,6 +132,34 @@ class SrtExport(unittest.TestCase):
         # 첫 트랙에 자막이 없으면 다음 트랙이 '<이름>.srt'
         out = self.files(p, tracks=["C2", "C3"], split=True, lo=2.5, hi=10.0)
         self.assertEqual([f for f, _, _ in out], ["S.srt", "S_자막 3.srt"])
+
+    def test_round_trip_same_frames_as_burn_in(self):
+        # 내보낸 SRT → 다시 가져오기 = 태운 영상·미리보기와 같은 프레임 (예전: 7개 중 7개가 한 프레임 앞) · 시각은 프레임 시각으로 적음
+        caps = [{"id": f"c{k}", "start": 0.15 + k * 1.2, "end": 0.95 + k * 1.2 + (0.0167 if k % 2 else 0), "text": f"자막 {k}"} for k in range(7)]
+        p = seq(caps, otracks=self.OT[:2] + self.OT[4:])
+        burn = [(math.ceil((c["start"] - 1e-6) * 30), math.ceil((c["end"] - 1e-6) * 30)) for c in editor.timeline_captions(p)]
+        (fn, txt, _), = editor.srt_files(p, "S", 0.0, 10.0, 30)
+        for ln in txt.splitlines():
+            if "-->" in ln:
+                for part in ln.split(" --> "):
+                    ms = int(part[-3:])
+                    self.assertTrue(any(abs(ms - (k * 1000 / 30) % 1000) < 0.51 for k in range(30)), ln)  # 프레임 시각
+        back = editor.srt_import(txt.encode("utf-8-sig"), 30)["cues"]
+        self.assertEqual([(round(c["start"] * 30), round(c["end"] * 30)) for c in back], burn)
+        # 구간 내보내기도 구간 첫 프레임 기준으로 같음
+        (fn, txt, _), = editor.srt_files(p, "S", 2.0, 10.0, 30)
+        back = editor.srt_import(txt.encode("utf-8-sig"), 30)["cues"]
+        self.assertEqual([(round(c["start"] * 30) + 60, round(c["end"] * 30) + 60) for c in back],
+                         [(max(a, 60), b) for a, b in burn if b - max(a, 60) >= (2 if a < 60 else 1)])  # 구간 앞에서 잘린 자막은 구간 처음부터
+
+    def test_split_same_track_names_not_overwritten(self):
+        # 트랙 이름이 같아도 (이름은 마음대로 바꿈) 파일이 덮이지 않음 — 트랙 번호를 붙임
+        ot = [{"id": "G1", "k": "g"}, {"id": "C1", "k": "c"}, {"id": "C2", "k": "c", "name": "영어"}, {"id": "C3", "k": "c", "name": "영어"},
+              {"id": "C4", "k": "c", "name": "영어 (C3)"}, {"id": "T1", "k": "t"}]
+        caps = self.CAPS + [{"id": "d", "start": 7.0, "end": 8.0, "text": "넷", "trk": "C4"}]
+        p = seq(caps, otracks=ot)
+        out = self.files(p, tracks=["C1", "C2", "C3", "C4"], split=True)
+        self.assertEqual([(f, t) for f, _, t in out], [("S.srt", ["C1"]), ("S_영어.srt", ["C2"]), ("S_영어 (C3).srt", ["C3"]), ("S_영어 (C3) (C4).srt", ["C4"])])
 
     def test_range_slivers(self):
         caps = [{"id": "a", "start": 1.0, "end": 2.0, "text": "잘림", "tm": 1}, {"id": "b", "start": 2.0, "end": 2.06, "text": "짧음", "tm": 1},
@@ -324,6 +363,74 @@ class XmlWriter(Work):
         self.assertEqual(sq.findall("marker"), [])
         v1 = sq.findall("media/video/track")[0]
         self.assertEqual([(c.findtext("start"), c.findtext("end"), c.findtext("in")) for c in v1.findall("clipitem")], [("0", "3", "87"), ("3", "78", "120")])
+
+    def two(self, a, b, dur=1.0, align="center", **kw):
+        """V1·A1 두 클립 (붙어 있음 · 연결) + 가운데 디졸브 — a, b: (in, out) 원본 초"""
+        items = editor._items_from_cuts([{"in": a[0], "out": a[1]}, {"in": b[0], "out": b[1]}])
+        v = [it for it in items if it["track"] == "V1"]
+        return self.proj(items=items, trans=[{"id": "x", "track": "V1", "a": v[0]["id"], "b": v[1]["id"], "type": "dissolve", "dur": dur, "align": align}], **kw)
+
+    def clips(self, tr):
+        return [(c.findtext("start"), c.findtext("end"), c.findtext("in"), c.findtext("out")) for c in tr.findall("clipitem")]
+
+    def test_dissolve_handles_fit_media(self):
+        # 들어오는 클립 in 0.2초(6프레임) · 1초 가운데 디졸브(앞 15프레임 필요) → '편집점에서 시작'(나가는 클립 뒤 여유로) · in 은 실제 원본 6 = 연결된 소리와 같음
+        # (예전: in 을 0 으로 깎아 영상이 자기 소리보다 9프레임 앞섰음)
+        root, x, rep = self.xml(self.two((5.0, 7.0), (0.2, 3.2)))
+        sq = root.find("sequence")
+        v1, a1 = sq.findall("media/video/track")[0], sq.findall("media/audio/track")[0]
+        tr = v1.find("transitionitem")
+        self.assertEqual((tr.findtext("start"), tr.findtext("end"), tr.findtext("alignment"), tr.findtext("cutPointTicks")), ("60", "90", "start", "0"))
+        self.assertEqual(self.clips(v1), [("0", "-1", "150", "240"), ("-1", "150", "6", "96")])
+        self.assertEqual(self.clips(a1)[1], ("60", "150", "6", "96"))  # 같은 자리 같은 원본
+        self.assertEqual([(round(t * 30), round(d0, 3), round(d1, 3), a) for t, d0, d1, a in rep["trans_short"]], [(45, 1.0, 1.0, "start")])
+        # 나가는 클립이 원본 끝 근처(뒤 여유 3프레임) → '편집점에서 끝' · out 이 파일 길이(8초 = 240)를 넘지 않음
+        root, x, rep = self.xml(self.two((5.0, 7.9), (1.0, 4.0)))
+        v1 = root.find("sequence").findall("media/video/track")[0]
+        tr = v1.find("transitionitem")
+        self.assertEqual((tr.findtext("start"), tr.findtext("end"), tr.findtext("alignment")), ("57", "87", "end"))
+        self.assertEqual(self.clips(v1), [("0", "-1", "150", "237"), ("-1", "177", "0", "120")])
+        self.assertLessEqual(max(int(c.findtext("out")) for c in root.iter("clipitem") if c.findtext("name") == "원본.mp4"), 240)
+        # 양쪽 다 조금씩 (앞 10 · 뒤 8): 원래 자리와 가장 많이 겹치는 '가운데 같은 폭 16프레임' (편집점 82) · 둘 다 없으면 빠짐 + 빠진 것 목록
+        root, x, rep = self.xml(self.two((5.0, 8.0 - 8 / 30), (10 / 30, 3.0)))
+        tr = root.find("sequence").findall("media/video/track")[0].find("transitionitem")
+        self.assertEqual((tr.findtext("start"), tr.findtext("end"), tr.findtext("alignment")), ("74", "90", "center"))
+        root, x, rep = self.xml(self.two((5.0, 8.0), (0.0, 3.0)))
+        self.assertIsNone(root.find("sequence").findall("media/video/track")[0].find("transitionitem"))
+        self.assertEqual(rep["trans_short"][0][2], 0.0)
+        txt = editor._xml_report(editor.migrate_seq(self.two((5.0, 8.0), (0.0, 3.0))), rep, "시험", 30, 0.0, 6.0)
+        self.assertIn("원본 앞뒤 여유가 모자란 장면 전환 1개", txt)
+        self.assertIn("빠짐(바로 바뀜)", txt)
+
+    def test_dissolve_into_still_pads(self):
+        # 사진은 어느 프레임이나 같아 in/out 을 함께 밀어 길이를 지킴 (예전: in 을 0 으로 깎아 클립이 손잡이만큼 짧았음) · 파일 길이도 충분히
+        p = self.proj(media=self.proj()["media"] + [{"id": "img", "kind": "image", "src": "videos", "file": "사진.png", "w": 640, "h": 360}])
+        v = [it for it in p["items"] if it["track"] == "V1"]
+        v[1].update(media="img", **{"in": 0.0, "out": 3.0})
+        v[1].pop("link", None)
+        p["items"] = [it for it in p["items"] if not (it["track"] == "A1" and it["start"] > 1)]
+        p["trans"][0].update(dur=1.0)
+        root, x, rep = self.xml(p)
+        v1 = root.find("sequence").findall("media/video/track")[0]
+        im = v1.findall("clipitem")[1]
+        self.assertEqual((im.findtext("start"), im.findtext("end"), im.findtext("in"), im.findtext("out")), ("-1", "165", "0", "105"))
+        self.assertGreaterEqual(int(im.findtext("file/duration")), 105)
+        self.assertNotIn("trans_short", rep)
+
+    def test_link_clipindex_counts_transitions(self):
+        # 프리미어가 내보낸 XML 처럼 clipindex 는 트랙 안 clipitem·transitionitem 차례 (전환도 셈 · OTIO premiere_example: 전환 뒤 클립 = 3)
+        root, x, rep = self.xml(self.proj())
+        sq = root.find("sequence")
+        for tel in sq.findall("media/video/track") + sq.findall("media/audio/track"):
+            kids = [c for c in tel if c.tag in ("clipitem", "transitionitem")]
+            for pos, c in enumerate(kids, 1):
+                if c.tag != "clipitem":
+                    continue
+                own = [ln for ln in c.findall("link") if ln.findtext("linkclipref") == c.get("id")]
+                for ln in own:
+                    self.assertEqual(int(ln.findtext("clipindex")), pos, (c.get("id"), pos))
+        v1 = sq.findall("media/video/track")[0]
+        self.assertEqual([ln.findtext("clipindex") for ln in v1.findall("clipitem")[1].findall("link")][:1], ["3"])
 
     def test_otio_round_trip(self):
         try:
