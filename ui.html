@@ -371,7 +371,18 @@
   .drawer header .sp { flex: 1; }
   .drawer pre { margin: 0; height: 220px; overflow: auto; padding: 12px 20px; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-2); white-space: pre-wrap; }
 
-  /* 휴대폰으로 보기 (원격 접속 · remote.py) — 점은 #rmDot 에만 (8단계 점검 알림 점 .step .rdot 과 같은 이름이라 섞이지 않게) */
+  /* 실행기 (원격 접속 · remote.py · D-310 · 예전 이름 '휴대폰으로 보기') — 점은 #rmDot 에만 (8단계 점검 알림 점 .step .rdot 과 같은 이름이라 섞이지 않게)
+     · 옆의 ON/OFF 스위치(#rmSw)는 지금 상태를 보이고 누르면 바로 켜고 끔 (다음에 스튜디오를 켤 때도 그대로) */
+  .rmrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rmsw { display: inline-flex; align-items: center; gap: 6px; flex: none; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-3); border-radius: 999px; padding: 2px 8px 2px 3px; font-size: 11px; font-weight: 800; line-height: 16px; cursor: pointer; }
+  .rmsw i { width: 16px; height: 16px; border-radius: 50%; background: var(--ink-3); }
+  .rmsw.on { flex-direction: row-reverse; padding: 2px 3px 2px 8px; background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  .rmsw.on i { background: var(--brand-ink); }
+  .rmsw.on.wait { background: var(--peak-soft); border-color: var(--peak); color: var(--peak); }
+  .rmsw.on.wait i { background: var(--peak); }
+  .rmsw.on.err { background: var(--surface-2); border-color: var(--danger); color: var(--danger); }
+  .rmsw.on.err i { background: var(--danger); }
+  .rmsw:disabled { opacity: .6; cursor: default; }
   #rmDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 6px; vertical-align: 1px; opacity: .55; }
   #rmDot.on { background: var(--brand); opacity: 1; box-shadow: 0 0 0 3px var(--brand-soft); }
   #rmDot.wait { background: var(--peak); opacity: 1; }
@@ -862,7 +873,10 @@
     <div class="sp"></div>
     <div class="foot">
       <button class="linkbtn" id="btnLog">작업 기록 보기</button>
-      <button class="linkbtn" id="btnRemote" data-pc-only title="PC 작업을 휴대폰에서 보고 시키기"><i class="rdot" id="rmDot"></i>휴대폰으로 보기</button>
+      <div class="rmrow" data-pc-only>
+        <button class="linkbtn" id="btnRemote" title="다른 PC·휴대폰에서 사이트로 들어가 이 PC의 스튜디오를 쓰는 연결 · 눌러서 아이디·비밀번호·연결된 기기·설정"><i class="rdot" id="rmDot"></i>실행기</button>
+        <button class="rmsw" id="rmSw" role="switch" aria-checked="false" aria-label="실행기 켜기·끄기" title="실행기 켜기 (ON)"><i></i><span>OFF</span></button>
+      </div>
       <span class="stpill" id="studioPill" hidden></span>
       <button class="linkbtn" id="btnUpdate" data-pc-only>업데이트 확인</button>
       <button class="linkbtn" id="workspace" data-pc-only title="">작업 폴더</button>
@@ -1249,7 +1263,7 @@
 <div class="topright"><span class="pill prog" id="busy"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="ptxt"><b><span id="busyTxt"></span><span class="pct" id="busyPct"></span></b><small id="busyDetail"></small></span></span><span class="pill upd" id="updPill"></span></div>
 <div class="toast" id="toast"></div>
 <div class="rmask" id="autoMask"><div class="card rbox" id="autoBox" role="dialog" aria-modal="true" aria-label="끝까지 자동으로"></div></div>
-<div class="rmask" id="rmMask"><div class="card rbox" id="rmBox" role="dialog" aria-modal="true" aria-label="휴대폰으로 보기"></div></div>
+<div class="rmask" id="rmMask"><div class="card rbox" id="rmBox" role="dialog" aria-modal="true" aria-label="실행기"></div></div>
 <div class="rmask" id="rlMask"><div class="card rbox" id="rlBox" role="dialog" aria-modal="true" aria-label="아이디·비밀번호"></div></div>
 <div class="drawer" id="drawer"><header>작업 기록<span class="sp"></span><button class="linkbtn" id="btnLogClose">닫기</button></header><pre id="logtxt"></pre></div>
 
@@ -2472,7 +2486,7 @@ function setRing(svg, pct) {
 function showBusy() {
   const pr = state.progress || {};
   $("busy").classList.toggle("show", !!state.job);
-  $("busyTxt").textContent = (state.jobBy ? (String(state.jobBy).startsWith("밖에서") ? "밖에서 시킨 일 · " : "휴대폰에서 시킨 일 · ") : "") + (state.auto && state.job ? `끝까지 자동으로 ${state.auto.i}/${state.auto.n} · ` : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
+  $("busyTxt").textContent = (state.jobBy ? (String(state.jobBy).startsWith("밖에서") ? "밖에서 시킨 일 · " : "다른 기기에서 시킨 일 · ") : "") + (state.auto && state.job ? `끝까지 자동으로 ${state.auto.i}/${state.auto.n} · ` : "") + (pr.label ? `${pr.label}${pr.step && pr.step !== "1/1" ? " · " + pr.step : ""}` : (state.job && state.job !== "…" ? `${state.job} 중…` : "작업 중…"));
   $("busyPct").textContent = pr.pct !== null && pr.pct !== undefined ? `${pr.pct}%` : "";
   $("busyDetail").textContent = pr.detail || "";
   $("busyDetail").style.display = pr.detail ? "" : "none";
@@ -4307,12 +4321,21 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
 })();
 </script>
 <script>
-/* 휴대폰으로 보기: 원격 접속 켜기·휴대폰 연결(QR)·연결된 휴대폰·설정 (/api/remote*, remote.py) — 창을 연 동안만 2초마다 새로 */
-const RM = { open: false, iv: null, key: "", d: null };
+/* 실행기: ON·OFF·휴대폰 QR 연결·연결된 기기·설정 (/api/remote*, remote.py · D-310) — 창을 연 동안만 2초마다 새로 */
+const RM = { open: false, iv: null, key: "", d: null, st: null };
 function remoteDot(r) {
   const d = $("rmDot"); if (!d || !r) return;
   d.className = "rdot " + ({ on: "on", error: "err", off: "" }[r.state] ?? "wait");
-  d.title = { on: `켜져 있어요 · 휴대폰 ${r.devices}대`, error: "문제가 생겼어요", off: "꺼져 있어요" }[r.state] || "준비하는 중";
+  d.title = { on: `실행기 ON · 연결된 기기 ${r.devices}대`, error: "실행기에 문제가 생겼어요", off: "실행기 OFF" }[r.state] || "실행기 켜는 중";
+  const sw = $("rmSw");  // ON/OFF 스위치: 꺼짐(off)만 OFF · 켜는 중·다시 잡는 중·오류(저절로 다시)도 켜 둔 상태라 ON (색으로 구분)
+  if (sw && r.state) {
+    const on = r.state !== "off";
+    sw.className = "rmsw" + (on ? " on" : "") + (r.state === "error" ? " err" : on && r.state !== "on" ? " wait" : "");
+    sw.setAttribute("aria-checked", on ? "true" : "false");
+    sw.lastChild.textContent = on ? "ON" : "OFF";
+    sw.title = on ? "실행기 끄기 (OFF)" : "실행기 켜기 (ON)";
+  }
+  if (Array.isArray(r.studio)) RM.st = r;
   const pill = $("studioPill"), ss = (!window.FS_REMOTE && r.studio) || [];  // 밖에서 작업 세션 (끊기 전까지 모두 · PC 화면에만 · D-238)
   if (!pill || !Array.isArray(r.studio)) return;
   pill.hidden = !ss.length;
@@ -4345,43 +4368,44 @@ function rmRender(d) {
     sd.allowed, sd.sessions.map(x => [x.id, x.active, rmAgo(x.lastSeen), x.uploads, x.guest]), d.login]);
   if (key === RM.key) return;
   RM.key = key;
-  let h = `<h2>휴대폰으로 보기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
+  let h = `<h2>실행기<span class="sp"></span><button class="linkbtn" data-rm="close">닫기</button></h2>`;
   if (st === "off") {
-    h += `<p class="lead">PC에서 하는 작업을 휴대폰으로 보고, 밖에서도 영상 받기·편집점 찾기·내보내기를 시킬 수 있어요. 켜 둔 동안에는 PC를 켜 두세요.</p>
-      <button class="btn primary" data-rm="on">원격 접속 켜기</button>
-      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요</div>`
-      + (set.alwaysOn ? `<div class="small" id="rmAlwaysOff">늘 켜기: 스튜디오를 다시 켜면 원격 접속도 저절로 켜져요 (지금은 꺼 둔 상태)</div>` : "") + rlOffNote(d);
+    const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
+    h += `<p class="lead">실행기를 켜 두면 다른 PC·휴대폰에서 <b>${site}</b> 에 들어가 이 PC의 스튜디오를 그대로 써요 · 처리는 이 PC가 해요. 켜 둔 동안에는 PC를 켜 두세요.</p>
+      <button class="btn primary" data-rm="on">실행기 켜기 (ON)</button>
+      <div class="small">처음 한 번 연결 도구(Cloudflare, 약 55MB)를 받아요 · 공유기 설정은 필요 없어요 · 한 번 켜면 스튜디오를 다시 켜도 켜져 있어요</div>`
+      + (set.alwaysOn ? `<div class="small" id="rmAlwaysOff">지금은 꺼져 있지만 스튜디오를 다시 켜면 실행기도 저절로 켜져요</div>` : "") + rlOffNote(d);
   } else if (st === "preparing") {
     h += `<p class="lead">연결 도구 받는 중${d.prep != null ? " · " + esc(d.prep) + "%" : "…"}</p><div class="rbar"><i style="width:${Math.max(3, +d.prep || 0)}%"></i></div>
       <div class="rbtns"><button class="btn" data-rm="off">그만두기</button></div>`;
   } else if (st === "starting" || st === "restarting") {
     h += `<p class="lead">${st === "starting" ? "연결하는 중이에요…" : "연결을 다시 잡는 중이에요…"} <span class="spin" style="display:inline-block;vertical-align:-2px"></span></p>
-      <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
+      <div class="rbtns"><button class="btn" data-rm="off">실행기 끄기 (OFF)</button></div>`;
   } else if (st === "error") {
-    h += `<p class="rerr">${esc(d.error || "원격 접속을 켜지 못했어요")}</p>`
+    h += `<p class="rerr">${esc(d.error || "실행기를 켜지 못했어요")}</p>`
       + (d.retryAt ? `<div class="small">${esc(rmClock(d.retryAt))}쯤 저절로 다시 켜 볼게요 · 지금 하려면 [다시 시도]</div>` : "")
-      + `<div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기</button></div>`;
+      + `<div class="rbtns"><button class="btn primary" data-rm="on">다시 시도</button><button class="btn" data-rm="off">끄기 (OFF)</button></div>`;
   } else {
     const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));  // 주소는 서버(remote.SITE) 하나에서만
-    h += `<p class="lead"><span class="rok">켜져 있어요 ✓</span> · 휴대폰·노트북에서 <b>${site}</b> 을 열어 주세요</p>`;
+    h += `<p class="lead"><span class="rok">ON ✓</span> · 다른 PC·휴대폰에서 <b>${site}</b> 을 열어 주세요</p>`;
     if (d.pair) {
-      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">노트북·태블릿·아이폰 홈 화면 앱은 그 기기에서 <b>${site}</b> 을 열고 아래 '아이디·비밀번호로 연결'로 연결해요</div>
+      h += `<div class="rpair">${rmQr(d.pair.qr || [])}<div><b>휴대폰 카메라로 찍어 주세요</b><div class="small">다른 PC·노트북·태블릿·아이폰 홈 화면 앱은 그 기기에서 <b>${site}</b> 을 열고 아래 '아이디·비밀번호로 연결'로 연결해요</div>
         <div class="small">${esc(rmClock(d.pair.expiresAt))}까지 · 한 번만 쓸 수 있어요</div>
         <div class="rbtns"><button class="btn sm" data-rm="pcancel">취소</button></div></div></div>`;
     } else {
       if (d.pairNote) h += `<p class="rnote">${esc(d.pairNote)}</p>`;
-      h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button>`
-        + `<div class="small">노트북·태블릿은 아래 '아이디·비밀번호로 연결'로 연결해요</div>`
+      h += `<button class="btn primary" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 QR로 연결</button>`
+        + `<div class="small">다른 PC·노트북·태블릿은 아래 '아이디·비밀번호로 연결'로 연결해요</div>`
         + (d.devices.length >= d.maxDevices ? `<div class="small">기기는 ${esc(d.maxDevices)}대까지예요 · 안 쓰는 기기를 먼저 끊어 주세요</div>` : "");
     }
-    h += `<div class="rsec"><h3>연결된 기기 (휴대폰·노트북)</h3>` + (d.devices.length ? d.devices.map(x =>
+    h += `<div class="rsec"><h3>연결된 기기 (다른 PC·휴대폰)</h3>` + (d.devices.length ? d.devices.map(x =>
         `<div class="rdev"><b title="${esc(x.name)}">${esc(x.name)}${x.via === "login" ? " · 아이디로" : ""}</b><span>${esc(rmDate(x.created))} 연결 · ${esc(rmAgo(x.lastSeen))}${x.stale ? ` · <span class="rold">오래 안 씀</span>` : ""}</span><button class="btn sm" data-rm="revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}">끊기</button></div>`).join("")
-        + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 기기 끊기</button></div>` : `<div class="small">아직 없어요 · [휴대폰 연결하기]를 눌러 주세요</div>`) + `</div>`;
+        + `<div class="rbtns"><button class="btn sm" data-rm="revokeAll">모든 기기 끊기</button></div>` : `<div class="small">아직 없어요 · 다른 PC는 아래 '아이디·비밀번호로 연결', 휴대폰은 [휴대폰 QR로 연결]</div>`) + `</div>`;
     if (sd.available) {  // 밖에서 작업 (D-234): 연결한 기기에서 PC 스튜디오 화면 그대로 · 처리는 이 PC
       const site = esc(String(d.site || "").replace(/^https?:\/\//, ""));
       h += `<div class="rsec"><h3>밖에서 작업</h3>
         <div class="rrow"><label><input type="checkbox" data-rm="studio"${sd.allowed ? " checked" : ""}> 밖에서 작업 허용</label></div>
-        <div class="small">연결한 휴대폰·노트북에서 <b>${site}</b> 을 열고 [PC 스튜디오 열기]를 누르면 이 PC 화면 그대로 밖에서 작업해요 · 처리는 이 PC가 해요 · 끄면 휴대폰으로 보기만 돼요</div>`
+        <div class="small">연결한 다른 PC·휴대폰에서 <b>${site}</b> 을 열고 [PC 스튜디오 열기]를 누르면 이 PC 화면 그대로 밖에서 작업해요 · 처리는 이 PC가 해요 · 끄면 작업 상황 보기만 돼요</div>`
         + (sd.sessions.length ? sd.sessions.map(x => `<div class="rdev"><b title="${esc(x.device)}">${esc(x.device)}${x.guest ? " · 이번만" : ""}</b><span>${esc(rmClock(x.startedAt))} 시작 · ${x.active ? "지금 쓰는 중" : esc(rmAgo(x.lastSeen))}${x.uploads ? ` · 올리는 파일 ${esc(x.uploads)}개` : ""}</span><button class="btn sm" data-rm="scut" data-id="${esc(x.id)}" data-name="${esc(x.device)}">끊기</button></div>`).join("")
           + `<div class="rbtns"><button class="btn sm" data-rm="scutAll">모두 끊기</button></div>` : `<div class="small">지금 밖에서 작업 중인 기기는 없어요</div>`)
         + `<div class="small">[끊기]는 지금 연결만 끝내요 · 그 기기를 아예 못 쓰게 하려면 위 '연결된 기기'에서 [끊기]를 눌러 주세요 (열쇠까지 지워요)</div></div>`;
@@ -4390,17 +4414,15 @@ function rmRender(d) {
     const offOpt = [[0, "안 함"], [1, "1시간 동안 안 쓰면"], [3, "3시간 동안 안 쓰면"], [12, "12시간 동안 안 쓰면"], [24, "24시간 동안 안 쓰면"]]
       .map(([v, t]) => `<option value="${v}"${set.autoOffHours === v ? " selected" : ""}>${t}</option>`).join("");
     h += `<div class="rsec"><h3>설정</h3>
-      <div class="rrow"><label><input type="checkbox" data-rm="alwaysOn"${set.alwaysOn ? " checked" : ""}> 스튜디오가 켜져 있으면 원격 접속도 늘 켜기</label></div>
-      <div class="small">${set.alwaysOn ? "스튜디오를 켤 때마다 원격 접속도 저절로 켜져요 · 밖에서 언제든 들어올 수 있어요 (PC와 스튜디오는 켜 두세요)" : "끄면 원격 접속은 [원격 접속 켜기]를 눌렀을 때만 켜져요"}</div>
       <div class="rrow"><span>자동으로 끄기</span><select class="inp" style="min-width:0;padding:5px 8px" data-rm="autoOff">${offOpt}</select></div>
       <div class="rrow"><span>PC 잠들지 않게</span><div class="seg"><button data-rm="awake" data-v="always" class="${set.keepAwake !== "job" ? "on" : ""}">켜 둔 동안 항상</button><button data-rm="awake" data-v="job" class="${set.keepAwake === "job" ? "on" : ""}">작업할 때만</button></div></div>
-      <div class="small">${set.keepAwake === "job" ? "작업할 때만: 작업이 끝나면 PC가 잠들 수 있어서, 그 뒤에는 밖에서 새 작업을 못 시켜요" : "원격 접속을 켜 둔 동안 PC가 잠들지 않아요 · 밖에서 언제든 새 작업을 시킬 수 있어요"}</div>
+      <div class="small">${set.keepAwake === "job" ? "작업할 때만: 작업이 끝나면 PC가 잠들 수 있어서, 그 뒤에는 밖에서 새 작업을 못 시켜요" : "실행기를 켜 둔 동안 PC가 잠들지 않아요 · 밖에서 언제든 새 작업을 시킬 수 있어요"}</div>
       <div class="rrow"><span>알림</span>${[["done", "작업 끝"], ["failed", "멈춤"], ["attention", "확인 필요"]].map(([k, t]) =>
         `<label><input type="checkbox" data-rm="notify" data-k="${k}"${nt[k] !== false ? " checked" : ""}> ${t}</label>`).join("")}
         <button class="btn sm" data-rm="test"${d.devices.length ? "" : " disabled"}>알림 시험</button></div>
       <div class="small">알림은 ntfy 앱으로 받아요 · 휴대폰을 연결하면 휴대폰 화면이 알림 설정을 안내해요 · 주제 이름 <span class="rtopic">${esc(d.notify.topic)}</span> <button class="linkbtn" data-rm="copyTopic">복사</button></div>
       <div class="small">스튜디오 알림은 '작업이 끝났어요' 같은 짧은 문장뿐이에요 · 알림이 무엇을 설치하라고 하면 열지 말고 무시해 주세요 · 알림은 비밀번호를 묻지 않아요</div></div>
-      <div class="rbtns"><button class="btn" data-rm="off">원격 접속 끄기</button></div>`;
+      <div class="rbtns"><button class="btn" data-rm="off">실행기 끄기 (OFF)</button></div>`;
   }
   $("rmBox").innerHTML = h;
 }
@@ -4415,6 +4437,22 @@ function rmOpen() { RM.open = true; RM.key = ""; $("rmMask").classList.add("show
 function rmClose() { RM.open = false; clearInterval(RM.iv); RM.iv = null; $("rmMask").classList.remove("show"); }
 async function rmPost(path, body) { const r = await api(path, body || {}); RM.key = ""; await rmLoad(); return r; }
 $("btnRemote").onclick = rmOpen;
+async function rmSwitch(on) {  // 스위치·창의 [실행기 켜기]·[실행기 끄기] 모두 여기 → 서버 switch (지금 + 다음에 켤 때도 그대로 · D-310)
+  const r = await rmPost(on ? "/api/remote/on" : "/api/remote/off");
+  if (r && r.ok !== false) toast(on ? "실행기를 켰어요 (ON) · 스튜디오를 다시 켜도 켜져 있어요" : "실행기를 껐어요 (OFF) · 다시 ON 을 누를 때까지 꺼져 있어요");
+  return r;
+}
+function rmOffOk() {  // 끄기 전에: 밖에서 작업 중인 기기가 있으면 한 번 묻기 (아무도 안 쓰면 바로 끔)
+  const st = RM.d && RM.d.studio ? RM.d.studio.sessions : RM.st && RM.st.studio;
+  const live = (st || []).filter(x => x.active !== false);
+  return !live.length || confirm(`지금 밖에서 작업 중인 기기가 있어요 (${live.map(x => x.device).join(", ")}).\n실행기를 끌까요? 그 기기의 스튜디오 화면이 바로 잠기고, 다시 ON 을 누를 때까지 꺼져 있어요.`);
+}
+$("rmSw").onclick = async () => {
+  const sw = $("rmSw"), on = !sw.classList.contains("on");
+  if (!on && !rmOffOk()) return;
+  sw.disabled = true;
+  try { await rmSwitch(on); } finally { sw.disabled = false; }
+};
 $("rmMask").addEventListener("click", e => { if (e.target === $("rmMask")) rmClose(); });
 document.addEventListener("keydown", e => { if (e.key !== "Escape") return; if (RL.kind) rlClose(); else if (RM.open) rmClose(); });
 $("rmBox").addEventListener("click", e => { const b = e.target.closest("[data-rl]"); if (b) rlAct(b.dataset.rl, b); });
@@ -4422,11 +4460,10 @@ $("rmBox").addEventListener("click", async e => {
   const b = e.target.closest("[data-rm]"); if (!b || b.tagName === "SELECT" || b.tagName === "INPUT") return;
   const a = b.dataset.rm;
   if (a === "close") return rmClose();
-  if (a === "on") return rmPost("/api/remote/on");
+  if (a === "on") return rmSwitch(true);
   if (a === "off") {
-    const always = RM.d && RM.d.settings && RM.d.settings.alwaysOn;
-    if (RM.d && RM.d.state === "on" && !confirm("원격 접속을 끌까요? 휴대폰에서는 PC를 볼 수 없게 돼요." + (always ? "\n(늘 켜기라서 스튜디오를 다시 켜면 다시 켜져요 · 아예 끄려면 설정의 '늘 켜기'를 꺼 주세요)" : ""))) return;
-    return rmPost("/api/remote/off");
+    if (RM.d && RM.d.state === "on" && !rmOffOk()) return;
+    return rmSwitch(false);
   }
   if (a === "pair") return rmPost("/api/remote/pair");
   if (a === "pcancel") return rmPost("/api/remote/pair/cancel");
@@ -4441,14 +4478,13 @@ $("rmBox").addEventListener("click", async e => {
 $("rmBox").addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.rm === "autoOff") rmPost("/api/remote/settings", { autoOffHours: +t.value });
-  if (t.dataset.rm === "alwaysOn") rmPost("/api/remote/settings", { alwaysOn: t.checked });
   if (t.dataset.rm === "studio") {
     if (!t.checked && RM.d && RM.d.studio && RM.d.studio.sessions.length && !confirm("끄면 밖에서 작업 중인 화면이 바로 잠겨요. 끌까요?")) { t.checked = true; return; }
     rmPost("/api/remote/settings", { studio: t.checked });
   }
   if (t.dataset.rm === "notify") { const n = {}; $("rmBox").querySelectorAll('[data-rm="notify"]').forEach(c => n[c.dataset.k] = c.checked); rmPost("/api/remote/settings", { notify: n }); }
 });
-/* 아이디·비밀번호로 연결 (D-250~D-258): 휴대폰으로 보기 창의 칸(rlSection · RM.key 에 들어감 · 2초마다 다시 그림) +
+/* 아이디·비밀번호로 연결 (D-250~D-258): 실행기 창의 칸(rlSection · RM.key 에 들어감 · 2초마다 다시 그림) +
    따로 뜨는 창 #rlMask/#rlBox (열 때 한 번만 그리고 rmLoad 가 건드리지 않음 · 열기 전에는 비어 있어 이 화면에 비밀번호 칸이 없음) */
 const RL = { kind: null, t: null, busy: false };
 const rlDay = t => { const d = new Date(t * 1000); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
@@ -4499,8 +4535,8 @@ function rlSection(d) {
   h += L.idOnly ? `<div class="small">밖에서 <b>${site}</b> → 아이디 <b>${esc(L.idShow)}</b> 만 넣으면 열려요${L.codeDevices === 0 ? "" : " · 새 기기가 연결되면 휴대폰 알림이 와요"}</div>`
     : `<div class="small">밖에서 <b>${site}</b> → '아이디·비밀번호로 연결' · 이 주소가 아닌 곳에는 비밀번호를 넣지 마세요${L.codeDevices === 0 ? "" : " · 새 기기가 연결되면 휴대폰 알림이 와요"}</div>`;
   if (L.codeDevices === 0) h += `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>
-    <div class="rbtns"><button class="btn sm" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 연결하기</button></div>`;
-  if (L.autoOffHours > 0) h += `<div class="small">자동으로 끄기가 ${esc(L.autoOffHours)}시간이라, ${esc(L.autoOffHours)}시간 동안 안 쓰면 원격 접속이 꺼져 밖에서 연결할 수 없어요 <button class="btn sm" data-rl="autooff">안 함으로 바꾸기</button></div>`;
+    <div class="rbtns"><button class="btn sm" data-rm="pair"${d.devices.length >= d.maxDevices ? " disabled" : ""}>휴대폰 QR로 연결</button></div>`;
+  if (L.autoOffHours > 0) h += `<div class="small">자동으로 끄기가 ${esc(L.autoOffHours)}시간이라, ${esc(L.autoOffHours)}시간 동안 안 쓰면 실행기가 꺼져 밖에서 연결할 수 없어요 <button class="btn sm" data-rl="autooff">안 함으로 바꾸기</button></div>`;
   const ev = L.events || [];
   if (ev.length) {
     h += `<div class="small"><b>최근 아이디로 연결한 기기</b></div>` + ev.map(x =>
@@ -4513,12 +4549,12 @@ function rlSection(d) {
       : `<button class="btn" data-rl="pw">비밀번호 바꾸기</button>${owner ? `<button class="btn" data-rl="idonly">비밀번호 없이 쓰기</button>` : ""}<button class="btn" data-rl="id">아이디 바꾸기</button>`}<button class="btn" data-rl="off">끄기</button></div></div>`;
   return h;
 }
-function rlOffNote(d) {  // 원격 접속이 꺼져 있을 때: 준비된 아이디 연결을 알려 주고 [원격 접속 켜기] 하나만 (D-258 · 저절로 켜지 않음)
+function rlOffNote(d) {  // 실행기가 꺼져 있을 때: 준비된 아이디 연결을 알려 주고 [실행기 켜기 (ON)] 하나만 (D-258 · 저절로 켜지 않음)
   const L = d.login || {};
   if (!L.set || !L.enabled) return "";
-  if (L.idOnly) return `<div class="rnote">아이디만으로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b> (비밀번호 없음) · 밖에서 쓰려면 위 [원격 접속 켜기]를 눌러 주세요</div>`
+  if (L.idOnly) return `<div class="rnote">아이디만으로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b> (비밀번호 없음) · 밖에서 쓰려면 위 [실행기 켜기 (ON)]를 눌러 주세요</div>`
     + (L.codeDevices === 0 ? `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>` : "");
-  return `<div class="rnote">아이디·비밀번호로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b>${L.preset ? " · 미리 정해 둔 비밀번호예요 · 바꾸기를 권해요" : ""} · 밖에서 쓰려면 위 [원격 접속 켜기]를 눌러 주세요`
+  return `<div class="rnote">아이디·비밀번호로 연결이 준비돼 있어요 · 아이디 <b>${esc(L.idShow)}</b>${L.preset ? " · 미리 정해 둔 비밀번호예요 · 바꾸기를 권해요" : ""} · 밖에서 쓰려면 위 [실행기 켜기 (ON)]를 눌러 주세요`
     + (L.preset ? ` <button class="btn sm" data-rl="pw">비밀번호 바꾸기</button>` : "") + `</div>`
     + (L.codeDevices === 0 ? `<p class="rerr" id="rlNoPhone">연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요</p>` : "");
 }

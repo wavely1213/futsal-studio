@@ -1,4 +1,4 @@
-"""원격 접속 '휴대폰으로 보기' — 원격 경계 (D-027).
+"""원격 접속 '실행기'(PC 왼쪽 아래 ON/OFF · 예전 이름 '휴대폰으로 보기' · D-310) — 원격 경계 (D-027).
 
 PC 에서 하는 작업을 휴대폰(SITE · 지금 https://futsal.mulgyeol.kr)에서 보고, 정해진 몇 가지 일을 시키는 곳. 바깥(터널)에서 온 요청은 이 모듈만 받는다.
   - 원격 리스너: 켜 둔 동안만 127.0.0.1:<임의 포트> 에 따로 뜨는 작은 서버(앱 화면 포트 창 app_ports 밖). 화면용 로컬 서버(8765)는
@@ -110,7 +110,7 @@ COLLISION_AGE = 43200        # 다른 PC 의 같은 아이디 기록이 12시간
 LOGIN_CONTROL_TIMEOUT = 90   # [끊기] 주제 듣기: ntfy 는 45초마다 keepalive
 PRESET_MARK = "remote-preset.json"   # 미리 정한 로그인(D-258)을 이 PC 에서 다룬 표 (remote.json 옆 · 그 파일과 따로)
 LRU_MAX = 10000
-MISSING_MSG = "원격 접속에 필요한 구성요소가 없어요 · 왼쪽 아래 '업데이트 확인' → 다운로드 엔진 최신으로 바꾼 뒤 다시 켜 주세요"
+MISSING_MSG = "실행기에 필요한 구성요소가 없어요 · 왼쪽 아래 '업데이트 확인' → 다운로드 엔진 최신으로 바꾼 뒤 다시 켜 주세요"
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
 MEDIA_TYPES = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".txt": "text/plain; charset=utf-8", ".srt": "text/plain; charset=utf-8"}
@@ -130,9 +130,10 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               thumbstyle.JOB,
               # 끝까지 자동으로 (PC 보관함·휴대폰 'auto' · D-203)
               autorun.JOB}
+# OFF_REASONS 값은 비콘·조회 기록으로 페이지에 가는 약속 글자 (페이지가 글자 그대로 맞춰 봄) → 화면 이름이 '실행기'로 바뀌어도 그대로 (D-310)
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
-# 밖에 있을 때 할 수 있는 것: 휴대폰 원격 홈의 [더보기] → [원격 접속 끄기] (모든 연결·밖에서 작업이 바로 끝남) · PC 앞이면 [끊기] (D-239)
-NOT_ME = "내가 한 게 아니면 휴대폰 원격 홈의 [더보기] → [원격 접속 끄기]를 누르거나, PC의 '휴대폰으로 보기'에서 [끊기]를 눌러 주세요"
+# 밖에 있을 때 할 수 있는 것: 원격 홈의 [더보기] → [실행기 끄기] (모든 연결·밖에서 작업이 바로 끝남) · PC 앞이면 [끊기] (D-239)
+NOT_ME = "내가 한 게 아니면 원격 홈의 [더보기] → [실행기 끄기]를 누르거나, PC의 '실행기'에서 [끊기]를 눌러 주세요"
 NOTE_TEXT = {
     "paired": "새 기기가 연결됐어요 ({kind}) · " + NOT_ME,
     "test": "알림 시험이에요 · 잘 받았다면 준비 끝!",
@@ -193,7 +194,7 @@ def login_note(guest, ua, cc, at):
 # 아이디·비밀번호로 연결 — 휴대폰 페이지에 돌려주는 정해진 문장 (페이지는 code 로 자기 문장을 고름)
 LOGIN_MSG = {
     "not_ready": "PC가 아직 준비 중이에요 · 잠시 뒤 다시 해 주세요",
-    "login_off": "이 PC는 지금 아이디·비밀번호 연결을 쓰지 않아요 · PC '휴대폰으로 보기'에서 켜 주세요",
+    "login_off": "이 PC는 지금 아이디·비밀번호 연결을 쓰지 않아요 · PC '실행기'에서 켜 주세요",
     "suspended": "아이디·비밀번호 연결이 잠겨 있어요",
     "locked": "비밀번호를 여러 번 틀려서 잠시 막았어요",
     "busy": "지금 연결하려는 기기가 많아요 · 잠시 뒤 다시 해 주세요",
@@ -201,7 +202,7 @@ LOGIN_MSG = {
     "bad": "비밀번호가 맞지 않아요",
     "bad_request": "잘못된 요청이에요",
     "not_allowed": "QR·코드로 연결한 휴대폰이나 PC에서 할 수 있어요",
-    "guest_off": "이번만 연결한 기기에서는 원격 접속을 끌 수 없어요 · 다 쓰면 [이 기기에서 나가기]를 눌러 주세요",
+    "guest_off": "이번만 연결한 기기에서는 실행기를 끌 수 없어요 · 다 쓰면 [이 기기에서 나가기]를 눌러 주세요",
 }
 LOGIN_ACK_MSG = ("연결된 휴대폰이 없어서 새 기기 알림을 받을 곳이 없어요 · 먼저 휴대폰을 QR로 연결하고 알림을 켜 두는 걸 권해요")
 LOGIN_TAKEN_MSG = "이 아이디는 다른 PC가 쓰고 있어요 · 다른 아이디를 골라 주세요"
@@ -1244,7 +1245,7 @@ class Service:
     def auth_failed(self, ip):
         if self.limiter.failed(ip) and self.clock() - self._lockout_logged > 600:
             self._lockout_logged = self.clock()
-            self.log("원격 접속 · 잘못된 연결 시도가 많아 잠시 막았어요")
+            self.log("실행기 · 잘못된 연결 시도가 많아 잠시 막았어요")
 
     def studio_started(self, rec, replaced=False):
         if not replaced:
@@ -1323,7 +1324,7 @@ class Service:
         return f"{self.site()}#pair={code}" + (f"&u={hint}" if hint else "")
 
     def turn_on(self, auto=False):
-        """원격 접속 켜기 (PC 화면에서만 · auto 는 오류 뒤 저절로 다시)."""
+        """실행기 켜기 (PC 화면에서만 · auto 는 오류 뒤 저절로 다시)."""
         with self.lock:
             if self.state in ("preparing", "starting", "on", "restarting"):
                 return True
@@ -1376,18 +1377,18 @@ class Service:
                     tun.start()
             if dev_url:
                 self._tunnel_event(gen, None, "on", url=dev_url)
-            self.log("원격 접속을 켰어요")
+            self.log("실행기를 켰어요 (ON)")
         except Exception as e:  # noqa: BLE001
             with self.lock:
                 if not self._current(gen, cancel):  # 받는 중에 [그만두기]·[끄기]
                     return
                 tuns, lst2 = self._take_resources()
-                self.state, self.error, self.prep, self._err_kind = "error", scrub(e) or "원격 접속을 켜지 못했어요", None, "start"
+                self.state, self.error, self.prep, self._err_kind = "error", scrub(e) or "실행기를 켜지 못했어요", None, "start"
                 self._schedule_retry()
             self._stop_resources(tuns, lst2)
             if not isinstance(e, (RuntimeError, OSError)):
                 _trace()
-            self.log(f"원격 접속을 켜지 못했어요 · {scrub(e)}")
+            self.log(f"실행기를 켜지 못했어요 · {scrub(e)}")
         finally:
             if lst is not None:  # 띄웠지만 넘겨주지 못한 리스너 (그만둔 시도·오류) → 닫음
                 _close_server(lst)
@@ -1436,7 +1437,7 @@ class Service:
             self._publish_lookup()
         if kind == "error":
             self._stop_resources([dead], lst, timeout=2)  # 멈춘 터널이 (혹시라도) 남긴 프로세스까지 · 이 스레드가 터널 스레드여도 됨
-            self.log(f"원격 접속 · {error}")
+            self.log(f"실행기 · {error}")
             self._drop_guests(None, "none", "연결이 끊김")
             self.pending.clear()
             self.pub.beacon(important=True)
@@ -1479,13 +1480,13 @@ class Service:
         self.tickets.drop()
         self.pairing.cancel()
         if self.studio:
-            self.studio_ended(self.studio.drop_all("none", "원격 접속을 끔"))
-        self._drop_guests(None, "none", "원격 접속을 끔")
+            self.studio_ended(self.studio.drop_all("none", "실행기를 끔"))
+        self._drop_guests(None, "none", "실행기를 끔")
         if self.pending is not None:
             self.pending.clear()
         if was != "off":
             self.pub.beacon(important=True)
-            self.log(f"원격 접속을 껐어요 · {OFF_REASONS.get(why, why)}")
+            self.log("실행기를 껐어요 (OFF)" + (" · 오래 쓰지 않아서" if why == "idle" else ""))
             self._publish_lookup("off", why if why in ("user", "idle") else "user")
         if err:
             raise err
@@ -1493,7 +1494,7 @@ class Service:
 
     def pair_start(self):
         if self.state != "on":
-            raise PairError("먼저 원격 접속을 켜 주세요")
+            raise PairError("먼저 실행기를 켜 주세요")
         if len(self.store.data["devices"]) >= MAX_DEVICES:
             raise PairError(f"휴대폰은 {MAX_DEVICES}대까지 연결할 수 있어요 · 안 쓰는 휴대폰을 먼저 끊어 주세요")
         if not crypto_ok():
@@ -1545,6 +1546,15 @@ class Service:
             self.log(f"휴대폰 연결을 끊었어요 · {clean(x['name'], 40)} ({why})")
         return len(gone) + guests
 
+    def switch(self, on):
+        """실행기 ON/OFF (D-310): 스위치 하나 = 지금 켜고 끄기 + 스튜디오를 다시 켤 때도 그대로 (늘 켜기 설정에 같이 적음).
+        OFF 는 PC 화면·밖의 [실행기 끄기] 모두 같은 뜻 → 다시 ON 을 누를 때까지 꺼진 채. 자동으로 끄기(idle)는 늘 켜기를 건드리지 않음."""
+        self.store.set(settings=dict(self.store.data["settings"], alwaysOn=bool(on)))
+        if on:
+            return self.turn_on()
+        self.turn_off("user")
+        return True
+
     def set_settings(self, b):
         s = dict(self.store.data["settings"])
         if "autoOffHours" in b:
@@ -1569,7 +1579,7 @@ class Service:
         if b.get("alwaysOn") is True and self.state in ("off", "error"):  # 늘 켜기를 켜면 지금도 켬 (D-295)
             self.turn_on()
         if "studio" in b and self.studio:
-            if not b["studio"]:  # 끄면 열려 있던 밖에서 작업도 바로 끝 (휴대폰으로 보기는 그대로)
+            if not b["studio"]:  # 끄면 열려 있던 밖에서 작업도 바로 끝 (실행기·작업 보기는 그대로)
                 self.studio.handoffs.drop()
                 self.studio_ended(self.studio.sessions.end(lambda r: True, "none", "밖에서 작업 허용을 끔"))
             self.log("밖에서 작업 허용을 " + ("켰어요" if b["studio"] else "껐어요"))
@@ -1764,11 +1774,11 @@ class Service:
             h = self.store.data["settings"].get("autoOffHours") or 0
             if h and not cur and self.clock() - self.last_auth >= h * 3600 * rlogin.time_scale():  # 시간 줄이기는 개발 때만 (e2e)
                 self.turn_off("idle")
-                self._note("attention", f"원격 접속을 껐어요 ({h}시간 동안 안 써서)")
+                self._note("attention", f"실행기를 껐어요 ({h}시간 동안 안 써서)")
         elif (self.state == "error" and self._err_kind in ("tunnel", "start") and self.store.data.get("enabled")
               and self._retry["at"] is not None and self.clock() >= self._retry["at"]):
             self._retry["at"] = None
-            self.log("원격 접속을 다시 켜 볼게요")
+            self.log("실행기를 다시 켜 볼게요")
             self.turn_on(auto=True)
         if self.studio:  # 밖에서 작업: 오래 안 쓴(30분)·12시간 지난 세션 끝 · 7일 넘은 올리던 조각은 한 시간에 한 번 정리
             self.studio_ended(self.studio.sessions.sweep())
@@ -1823,7 +1833,7 @@ class Service:
         다음에 켤 때 앱이 그 포트를 써야 할 수 있으므로 (D-034)."""
         port = int(os.environ.get("FUTSAL_REMOTE_PORT") or 0)
         if port and port in app_ports():
-            raise RuntimeError("원격 접속용 포트가 앱 화면 포트와 겹쳐요 · FUTSAL_REMOTE_PORT 를 바꿔 주세요")
+            raise RuntimeError("실행기용 포트가 앱 화면 포트와 겹쳐요 · FUTSAL_REMOTE_PORT 를 바꿔 주세요")
         srv = None
         for _ in range(20):
             try:
@@ -1839,7 +1849,7 @@ class Service:
                 continue
             break
         if srv is None:
-            raise RuntimeError("원격 접속용 포트를 열지 못했어요 · 잠시 뒤 다시 켜 주세요")
+            raise RuntimeError("실행기용 포트를 열지 못했어요 · 잠시 뒤 다시 켜 주세요")
         threading.Thread(target=srv.serve_forever, daemon=True, name="remote-listener").start()
         return srv
 
@@ -2210,7 +2220,7 @@ class Service:
                     except OSError:
                         pass
                     if want:
-                        self.log("다른 PC가 같은 아이디를 쓰고 있어요 · PC '휴대폰으로 보기'에서 아이디를 바꿔 주세요")
+                        self.log("다른 PC가 같은 아이디를 쓰고 있어요 · PC '실행기'에서 아이디를 바꿔 주세요")
         threading.Thread(target=run, daemon=True, name="remote-login-collision").start()
 
     def _new_block(self, cid, id_show, ver, old=None, mode="password"):
@@ -2305,7 +2315,7 @@ class Service:
         if mode == "idOnly":
             self.log(f"미리 정해 둔 아이디({rlogin.PRESET_ID})만으로 연결을 준비했어요 · 밖에서 이 아이디만 넣으면 열려요")
         else:
-            self.log("미리 정해 둔 아이디·비밀번호로 연결을 준비했어요 · PC '휴대폰으로 보기'에서 비밀번호를 바꾸는 걸 권해요")
+            self.log("미리 정해 둔 아이디·비밀번호로 연결을 준비했어요 · PC '실행기'에서 비밀번호를 바꾸는 걸 권해요")
         return True
 
     def _login_brief(self, manage):
@@ -3099,11 +3109,11 @@ class RemoteHandler(BaseHTTPRequestHandler):
                   ("GET", "/r/login/events"): lambda: svc.r_login_events(dev), ("POST", "/r/login/kick"): lambda: svc.r_login_kick(dev, b),
                   ("POST", "/r/login/unlock"): lambda: svc.r_login_unlock(dev), ("POST", "/r/login/logout"): lambda: svc.r_login_logout(dev)}
         if (method, path) == ("POST", "/r/remote-off"):  # 더 안전하게만 (휴대폰에서 켜는 길은 없음)
-            if dev.get("guest"):  # 이번만 기기(빌린 기기)는 모두의 원격 접속을 끄지 못함 — 끝낼 때는 [이 기기에서 나가기] (D-256)
+            if dev.get("guest"):  # 이번만 기기(빌린 기기)는 모두의 실행기를 끄지 못함 — 끝낼 때는 [이 기기에서 나가기] (D-256)
                 return self._json(403, {"ok": False, "code": "not_allowed", "error": LOGIN_MSG["guest_off"]})
-            svc.log(f"원격 · {clean(dev['name'], 40)} · 원격 접속 끄기")
+            svc.log(f"원격 · {clean(dev['name'], 40)} · 실행기 끄기")
             self._json(200, {"ok": True})
-            threading.Timer(0.3, svc.turn_off, args=("user",)).start()
+            threading.Timer(0.3, svc.switch, args=(False,)).start()  # 사람이 끈 OFF 는 PC 의 OFF 와 같음: 스튜디오를 다시 켜도 꺼진 채 (D-310)
             return
         fn = routes.get((method, path))
         if not fn:

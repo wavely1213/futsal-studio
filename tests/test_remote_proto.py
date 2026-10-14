@@ -524,9 +524,10 @@ class LoginProtoInteropTests(unittest.TestCase):
         self.assertEqual(got[1:], [None] * 5)
 
     def test_index_html_and_vercel_json_unchanged(self):
-        """아이디·비밀번호로 연결은 index.html(CSP)·vercel.json 을 바꾸지 않음 (이미 ntfy.sh·*.trycloudflare.com 허용 · D-250)."""
+        """아이디·비밀번호로 연결은 index.html(CSP)·vercel.json 을 바꾸지 않음 (이미 ntfy.sh·*.trycloudflare.com 허용 · D-250).
+        D-310: 머리글 이름 글자만 '휴대폰으로 보기' → '실행기' (CSP 줄은 그대로)."""
         self.assertEqual(hashlib.sha256((SITE / "index.html").read_bytes()).hexdigest(),
-                         "4fad325eae12e3034d6b1526fd2e7d6dbf578d953aebf91df88d956f8ca9e14c")
+                         "93087dd38e3706b3d18ddd8c3ee2e4bee20ff44c1fa0c06f24165ed9569a9c5c")
         vj = SITE.parent.parent / "vercel.json"
         if vj.is_file():
             self.assertEqual(hashlib.sha256(vj.read_bytes()).hexdigest(), "f637dc2a0b0cc993ea86d93cfed12f14d9ef27e79cb51dd4b7ca79f1b5c3392c")

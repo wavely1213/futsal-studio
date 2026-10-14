@@ -60,7 +60,7 @@ HELLO_CSP = ("default-src 'none'; script-src 'self'; connect-src 'self'; style-s
              "base-uri 'none'; form-action 'none'")
 FEATURES = ["studio", "upload", "download"]
 PC_ONLY_LIST = ["폴더·파일 열기", "업데이트·다시 시작", "클로드 설치·로그인", "유튜브 계정 연결·Google 설정",
-                "로그인 정보 브라우저(쿠키)", "원격 접속 설정·기기 연결", "앱 끄기"]
+                "로그인 정보 브라우저(쿠키)", "실행기 설정·기기 연결", "앱 끄기"]
 
 # ---------- 화면 문장 (정해진 것만) ----------
 MSG = {
@@ -68,7 +68,7 @@ MSG = {
     "expired": "오래 쓰지 않아 연결이 끝났어요 · 원격 홈에서 다시 열어 주세요",
     "revoked": "PC에서 연결을 끊었어요 · 다시 쓰려면 원격 홈에서 다시 열어 주세요",
     "logout": "이 브라우저에서 연결을 끝냈어요 · 다시 쓰려면 원격 홈에서 [PC 스튜디오 열기]를 눌러 주세요",
-    "studio_off": "PC에서 '밖에서 작업 허용'이 꺼져 있어요 · PC의 '휴대폰으로 보기'에서 켜 주세요",
+    "studio_off": "PC에서 '밖에서 작업 허용'이 꺼져 있어요 · PC의 '실행기'에서 켜 주세요",
     "pc_only": "PC에서만 할 수 있어요",
     "not_remote": "아직 밖에서 쓸 수 없는 기능이에요 · PC에서 해 주세요",
     "csrf": "화면이 오래됐어요 · 새로 고친 뒤 다시 해 주세요",
@@ -287,7 +287,7 @@ class Studio:
         self.uploads = Uploads(svc)
         self._static = {}
 
-    def drop_all(self, code="none", why="원격 접속을 끔"):
+    def drop_all(self, code="none", why="실행기를 끔"):
         self.handoffs.drop()
         return self.sessions.end(lambda r: True, code, why)
 

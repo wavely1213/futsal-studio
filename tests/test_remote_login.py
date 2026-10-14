@@ -401,7 +401,7 @@ class StartFinishHttpTests(LoginBase):
         self.svc.login_off()
         st, j = self.start()
         self.assertEqual((st, j["code"]), (403, "login_off"))
-        self.assertEqual(j["error"], "이 PC는 지금 아이디·비밀번호 연결을 쓰지 않아요 · PC '휴대폰으로 보기'에서 켜 주세요")
+        self.assertEqual(j["error"], "이 PC는 지금 아이디·비밀번호 연결을 쓰지 않아요 · PC '실행기'에서 켜 주세요")
 
     def test_locked_423_scope_until(self):
         ip = "203.0.113.70"

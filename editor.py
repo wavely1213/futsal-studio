@@ -229,7 +229,7 @@ def make_proxy(f, src="videos", log=print):
     return {"src": src, "file": Path(f).name}
 
 
-# ---------- 휴대폰으로 보기 (remote.py) 가 쓰는 것 ----------
+# ---------- 원격 실행기 (remote.py) 가 쓰는 것 ----------
 
 PREVIEW_KEEP = 10  # 휴대폰용 작은 미리보기는 최근 10개만 (오래된 것부터 지움)
 

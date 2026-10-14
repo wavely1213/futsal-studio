@@ -338,7 +338,7 @@ def open_folder(path):
 
 def restart():
     """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후). 순서 (D-034):
-    1. 휴대폰으로 보기를 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로 → 새 앱이 이어서 켬)
+    1. 실행기(원격)를 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로 → 새 앱이 이어서 켬)
     2. 실행기(updater --launch)를 띄움 — 이 프로세스 번호(FUTSAL_OLD_PID)를 넘겨, 뒤로 미룬 구성요소 설치(.req_pending)는
        이 프로세스가 끝나 .pyd 를 놓은 뒤에 하게 (.launch_lock 안에서) → 3. 끝내기 (남은 자식은 Job Object 로 같이 꺼짐)."""
     log("다시 시작하는 중…")
@@ -352,7 +352,7 @@ def restart():
     args = ["--browser"] if "--browser" in sys.argv else []
     try:
         subprocess.Popen([_gui_python(), str(core.APP_DIR / "updater.py"), "--launch", *args], **kw)  # 새 버전이 열리는지 확인 후 실행
-    except OSError as e:  # 실행기를 못 띄우면 끄지 않음 (작업은 다시 받음 · 휴대폰으로 보기는 다음에 켤 때 이어서)
+    except OSError as e:  # 업데이트 실행기(updater)를 못 띄우면 끄지 않음 (작업은 다시 받음 · 원격 실행기는 다음에 켤 때 이어서)
         log(f"다시 시작하지 못했어요 · {e} · 프로그램을 닫고 다시 켜 주세요")
         RESTARTING.clear()
         return
@@ -741,9 +741,9 @@ class Handler(BaseHTTPRequestHandler):
             for n, r in res.items():
                 r["uploaded"] = n in ups
             return self._send(200, {"ok": True, "videos": res})
-        if u.path == "/api/remote":  # '휴대폰으로 보기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
+        if u.path == "/api/remote":  # '실행기' 창 (이 PC 화면에서만 · 터널로는 닿지 않음)
             if not remote.SVC.store:
-                return self._send(503, {"error": "원격 접속을 준비하는 중이에요"})
+                return self._send(503, {"error": "실행기를 준비하는 중이에요"})
             st = remote.SVC.pc_status()
             if st["pair"]:
                 st["pair"]["qr"] = qr.encode(st["pair"]["link"])
@@ -1426,16 +1426,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, dict(d, ok=True))
         if path.startswith("/api/strategy/"):  # 채널 전략 (8단계)
             return self._strategy_post(path, b)
-        if path.startswith("/api/remote/"):  # 휴대폰으로 보기: 켜기·끄기·연결·끊기·설정 (PC 화면에서만 · 켜는 길은 여기뿐)
+        if path.startswith("/api/remote/"):  # 실행기: ON·OFF·연결·끊기·설정 (PC 화면에서만 · 켜는 길은 여기뿐)
             svc = remote.SVC
             if not svc.store:
-                return self._send(503, {"ok": False, "error": "원격 접속을 준비하는 중이에요"})
+                return self._send(503, {"ok": False, "error": "실행기를 준비하는 중이에요"})
             try:
-                if path == "/api/remote/on":
-                    ok = svc.turn_on()
+                if path == "/api/remote/on":  # 실행기 ON·OFF = 스위치 (D-310): 지금 + 다음에 스튜디오를 켤 때도 그대로
+                    ok = svc.switch(True)
                     return self._send(200 if ok else 400, {"ok": ok, "error": None if ok else svc.error, "state": svc.state})
                 if path == "/api/remote/off":
-                    svc.turn_off("user")
+                    svc.switch(False)
                     return self._send(200, {"ok": True})
                 if path == "/api/remote/pair":
                     pair = svc.pair_start()
@@ -1495,7 +1495,7 @@ class Handler(BaseHTTPRequestHandler):
             except (remote.PairError, ValueError) as e:
                 return self._send(400, {"ok": False, "error": str(e)})
             except OSError as e:
-                log(f"원격 접속 설정을 저장하지 못했어요 · {e}")
+                log(f"실행기 설정을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(404, {"error": "not found"})
         if path.startswith("/api/youtube/"):  # 유튜브에 바로 올리기 (7단계)
@@ -2130,12 +2130,12 @@ def main():
     JOB_HOOKS.append(idle.touch)  # 작업이 끝나고 5분 동안 다른 작업이 없으면 불러 둔 모델을 내려놓음 (메모리 반환)
     idle.start(LOCK, lambda: bool(JOB["name"]))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:  # 휴대폰으로 보기: 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
+    try:  # 실행기(원격): 켜 둔 채로 껐다 켰으면(업데이트 재시작 포함) 이어서 켬 · 실패해도 앱은 그대로
         remote.init(_remote_bridge())
         JOB_HOOKS.append(remote.SVC.job_hook)
     except Exception as e:  # noqa: BLE001
-        studiolog.trace(e, "휴대폰으로 보기 준비 오류 위치")
-        log(f"휴대폰으로 보기를 준비하지 못했어요 · {e}")
+        studiolog.trace(e, "실행기 준비 오류 위치")
+        log(f"실행기를 준비하지 못했어요 · {e}")
     if sys.platform == "win32":
         winlink.prepare(core.APP_DIR, _gui_python(), core.ENGINE_HOME, log)  # 아이콘·작업 표시줄 묶음 (창을 만들기 전에)
     elif sys.platform == "darwin":

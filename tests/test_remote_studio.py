@@ -304,19 +304,19 @@ class DeviceWordsUnitTest(unittest.TestCase):
         self.assertEqual(remote.Store(tmp / "remote.json", Clock()).data["devices"][0]["name"], "Windows 노트북 · Edge")
 
     def test_alert_says_what_to_do_from_outside(self):
-        """새 기기·새 밖에서 작업 알림: 밖에서 할 수 있는 것(원격 홈 [더보기] → [원격 접속 끄기])과 PC 의 [끊기] · 기기 종류."""
+        """새 기기·새 밖에서 작업 알림: 밖에서 할 수 있는 것(원격 홈 [더보기] → [실행기 끄기])과 PC 의 [끊기] · 기기 종류."""
         for kind in ("studio", "paired"):
             t = remote.note_text(kind, "iPhone · Safari")
             self.assertIn("(아이폰 · Safari)", t)
             self.assertIn("내가 한 게 아니면", t)
-            self.assertIn("[더보기] → [원격 접속 끄기]", t)
+            self.assertIn("[더보기] → [실행기 끄기]", t)
             self.assertIn("[끊기]", t)
             self.assertNotIn("{", t)
             self.assertIn("기기", remote.note_text(kind, "evil http://x"))
             self.assertNotIn("evil", remote.note_text(kind, "evil http://x"))
         pwa = Path(os.environ.get("FUTSAL_SITE_DIR") or "/nonexistent") / "app.js"
         if pwa.is_file():  # 그 단추 이름이 원격 홈에 그대로 있는지
-            self.assertIn('"원격 접속 끄기")', pwa.read_text(encoding="utf-8"))
+            self.assertIn('"실행기 끄기")', pwa.read_text(encoding="utf-8"))
 
 
 class AwakeUnitTest(unittest.TestCase):

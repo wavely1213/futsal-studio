@@ -236,7 +236,7 @@ class RetryTests(LifecycleBase):
         self.assertIn(self.svc.state, ("preparing", "starting", "on"))
         self.assertTrue(wait_for(lambda: self.svc.state == "on", 15))
         self.assertEqual(self.svc._retry, {"n": 0, "at": None})  # 다시 켜지면 셈을 처음부터
-        self.assertIn("원격 접속을 다시 켜 볼게요", self.fb.lines)
+        self.assertIn("실행기를 다시 켜 볼게요", self.fb.lines)
         self.assertEqual(len(self.pids()), 1)
 
     def test_backoff_grows_and_user_off_stops_retries(self):

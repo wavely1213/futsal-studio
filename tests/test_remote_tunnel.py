@@ -215,7 +215,7 @@ class TunnelTests(unittest.TestCase):
             self.assertRegex(svc.url, r"\.trycloudflare\.com$")
             svc.turn_off()
         text = "\n".join(fb.lines)
-        self.assertIn("원격 접속을 켰어요", text)
+        self.assertIn("실행기를 켰어요", text)
         self.assertNotIn("trycloudflare", text)
         self.assertNotIn("Registered", text)
         self.assertNotIn("INF", text)

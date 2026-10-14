@@ -365,7 +365,7 @@ class NotifyTests(NotifyBase):
         t = remote.note_text("paired", "새 폰")
         self.assertIn("내가 한 게 아니면", t)  # 소유자가 받는 유일한 보안 신호 → 할 일까지
         self.assertIn("[끊기]", t)
-        self.assertIn("[원격 접속 끄기]", t)  # 밖에 있으면 원격 홈 [더보기]에서 (D-239)
+        self.assertIn("[실행기 끄기]", t)  # 밖에 있으면 원격 홈 [더보기]에서 (D-239 · 이름 D-310)
         self.assertIn("(기기)", t)  # 이름 칸의 글('새 폰')은 알림에 넣지 않음 — 정해진 낱말만
         pair_device(self.svc, "iPhone · Safari")
         self.assertIn(remote.note_text("paired", "iPhone · Safari"), [p[1] for p in self.notes(2)])
@@ -427,7 +427,7 @@ class IdleTests(NotifyBase):
         self.svc.tick()
         self.assertEqual(self.svc.state, "off")
         self.assertFalse(self.svc.store.data["enabled"])
-        self.assertIn("원격 접속을 껐어요 (1시간 동안 안 써서)", [p[1] for p in self.notes()])
+        self.assertIn("실행기를 껐어요 (1시간 동안 안 써서)", [p[1] for p in self.notes()])
         last = open_beacon(self.beacons(n=2)[-1][1], self.a)
         self.assertEqual(last["reason"], "오래 쓰지 않아서 껐어요")
 

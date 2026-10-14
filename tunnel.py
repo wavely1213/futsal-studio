@@ -1,4 +1,4 @@
-"""Cloudflare 빠른 터널(cloudflared) 관리 — '휴대폰으로 보기'의 바깥 연결 (D-027).
+"""Cloudflare 빠른 터널(cloudflared) 관리 — '실행기'(원격)의 바깥 연결 (D-027).
 
   - 받기: 고정 판(CF_VERSION)의 Windows 실행 파일을 GitHub 릴리스 고정 주소에서 받아 크기·sha256 확인 뒤 ~/.futsal-studio/bin 에 둠.
     확인 안 된 '최신'으로 바꿔 받지 않는다(실패하면 원격 접속만 안 켜짐).
