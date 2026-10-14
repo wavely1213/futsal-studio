@@ -334,8 +334,9 @@
   .otline { position: absolute; left: 0; right: 0; height: 2px; background: #ffe14d; z-index: 9; pointer-events: none; display: none; }
   .c1 .clip { background: var(--cap); cursor: grab; }
   .c1 .clip.sel { overflow: visible; }  /* 고른 자막: 손잡이를 바깥에 (작은 자막도 끝을 잡을 수 있게 · D-322) */
-  .c1 .clip .eh.ol, .c1 .clip .eh.or { width: 9px; top: -1px; bottom: -1px; background: #fff; border: 1px solid #000; border-radius: 2px; opacity: .9; }
-  .c1 .clip .eh.ol { left: -10px; } .c1 .clip .eh.or { right: -10px; }
+  .c1 .clip .eh.ol, .c1 .clip .eh.or { width: 9px; top: -1px; bottom: -1px; background: #fff; border: 1px solid #000; border-radius: 2px; opacity: .9; box-sizing: border-box; }
+  .c1 .clip .eh.ol { left: -10px; } .c1 .clip .eh.or { right: -10px; }  /* 너비·자리는 옆 자막까지 빈 자리만큼 (otLaneHTML) */
+  .c1 .clip.sel .eh:not(.ol):not(.or) { background: rgba(255,255,255,.55); }  /* 빈 자리가 없을 때 안쪽 손잡이 */
   .c1 .clip .eh.ol:hover, .c1 .clip .eh.or:hover { background: #ffe14d; }
   .c1 .clip.ocap { opacity: .7; border-style: dashed; }  /* 다른 영상(보관함)의 자막 · 여기서는 못 고침 */
   .gt .clip { background: var(--title); }
@@ -412,7 +413,8 @@
   .keys kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 5px; color: var(--ink); font: 11px ui-monospace, monospace; white-space: nowrap; }
   .keys h5 { grid-column: 1 / -1; margin: 8px 0 2px; color: var(--ink); font-size: 12px; }
   /* 떠 있는 단추 줄 (D-327) · 도구 줄 빠른 설명 */
-  .fbar { position: absolute; z-index: 80; display: none; align-items: center; gap: 2px; padding: 2px 3px; background: #262626; border: 1px solid var(--line-2); border-radius: 7px; box-shadow: 0 6px 18px rgba(0,0,0,.55); white-space: nowrap; }
+  .fbar { position: absolute; z-index: 80; display: none; align-items: center; gap: 2px; padding: 2px 3px; background: #262626; border: 1px solid var(--line-2); border-radius: 7px; box-shadow: 0 6px 18px rgba(0,0,0,.55); white-space: nowrap; pointer-events: none; }
+  .fbar input, .fbar button { pointer-events: auto; }  /* 단추·칸 사이 틈은 누르기가 아래로 지나감 */
   #tlBar { z-index: 12; }
   .fbar.side { flex-wrap: wrap; white-space: normal; row-gap: 2px; }
   .fbar .ic { min-width: 28px; height: 28px; padding: 0 5px; font-size: 14px; color: var(--ink); }
@@ -2191,7 +2193,7 @@ function txt(el, v) { if (el.textContent !== v) el.textContent = v; } // 같은 
 function seekEl(e, m) { if (e.el.seeking) { e.pend = m; return; } e.el.currentTime = m; }
 // 원본 파일 시작 시각이 0 이 아닌 드문 영상: 브라우저는 파일 안 시각(PTS) 그대로라 재생기 시각에 그만큼 더함
 // (내보내기·파형·받아쓰기·썸네일은 ffmpeg 가 파일 시작 기준 · 미리보기 파일(proxy)은 0 부터 · editor.media_t0 · D-324)
-const elOff = e => !e || e.rv || !e.md || !e.md.t0 || /[?&]proxy=1/.test((e.el && e.el.src) || "") ? 0 : +e.md.t0 || 0;
+const elOff = e => !e || e.rv || !e.md || !(+e.md.t0 > 0) || /[?&]proxy=1/.test((e.el && e.el.src) || "") ? 0 : +e.md.t0; // 0 보다 큰 시작만 (음수 시작은 브라우저가 0 으로 당겨 읽음)
 const PLAY_LEAD = 0.015 * 1000;  // ms — 재생기를 시계보다 이만큼 먼저 출발시킴 (play() 가 첫 프레임을 내기까지 걸리는 틈)
 function syncEl(e, it, t) {
   const el = e.el, m = (e.rv ? clamp(t - it.start, 0, Math.max(0, iLen(it) - 0.04)) : clamp(mt(it, t), 0, Math.max(0, mDur(e.md) - 0.04))) + elOff(e);
@@ -3214,13 +3216,26 @@ function otLaneHTML(o, v0, v1, tot) {
   if (o.k === "c") {
     let h = "", run = null;
     const flush = () => { if (run) h += `<div class="clip caprun" style="left:${run.a * zoom}px;width:${Math.max(3, (run.b - run.a) * zoom)}px"></div>`; run = null; };
-    for (const c of capsTL()) {
-      if (c.trk !== o.id || c.e < v0 || c.s > v1) continue;
+    const lane = capsTL().filter(c => c.trk === o.id);
+    // 고른 자막 끝의 빈 자리(px) — 바깥 손잡이는 이 빈 자리 안에만 (옆 자막·같은 자막의 다른 쇼츠 조각을 덮지 않게 · 덮으면 그 자막을 못 고르고 낱말 경계가 끌림)
+    const room = (c, side) => { let g = side === "l" ? c.s : Infinity; for (const x of lane) if (x !== c) { if (side === "l" && x.s <= c.s + 1e-9) g = Math.min(g, c.s - x.e); if (side === "r" && x.e >= c.e - 1e-9) g = Math.min(g, x.s - c.e); } return Math.max(0, g) * zoom; };
+    // 손잡이: 고른 자막의 진짜 시작(첫 조각 왼쪽)·끝(마지막 조각 오른쪽)은 빈 자리가 있으면 바깥에(최대 9px) · 없으면 안쪽 1/3 · 쇼츠 조각 사이 경계는 넓을 때(18px)만 안쪽 손잡이
+    const eh = (c, side, w, sel) => {
+      const outer = side === "l" ? pieceFirst(c) : pieceLast(c);
+      if (sel && outer) {
+        const ow = Math.min(9, Math.floor(room(c, side)) - 1);
+        if (ow >= 3) return `<div class="eh ${side} o${side}" style="width:${ow}px;${side === "l" ? "left" : "right"}:${-ow - 1}px"></div>`;
+        if (w < 18) return `<div class="eh ${side}" style="width:${Math.max(2, Math.floor(w / 3))}px"></div>`;
+      }
+      return w >= 18 ? `<div class="eh ${side}"></div>` : "";
+    };
+    for (const c of lane) {
+      if (c.e < v0 || c.s > v1) continue;
       const w = (c.e - c.s) * zoom, sel = isSel("caption", c.cap.id);
       if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
       flush();
-      // 원본 자막: 끝 손잡이(시작·끝 끌기) · 고른 자막은 작아도 잡을 수 있게 손잡이를 바깥에 (D-322) · 올리면 글과 시간
-      const hd = sel ? '<div class="eh l ol"></div>' : w >= 18 ? '<div class="eh l"></div>' : "", tl_ = sel ? '<div class="eh r or"></div>' : w >= 18 ? '<div class="eh r"></div>' : "";
+      // 원본 자막: 끝 손잡이(시작·끝 끌기) · 고른 자막은 작아도 잡을 수 있게 (D-322 · 옆 자막은 가리지 않음) · 올리면 글과 시간
+      const hd = c.mid === "main" ? eh(c, "l", w, sel) : "", tl_ = c.mid === "main" ? eh(c, "r", w, sel) : "";
       h += c.mid !== "main" ? `<div class="clip ocap" data-ocap="${esc(c.mid)}" title="${esc(otherCapNote(c.mid))}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`
         : `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" data-ps="${c.s}" title="${esc(cutText(c.text, 40))} · ${tc(c.s)} – ${tc(c.e)}${c.cap.tm ? " · 시간 맞춤" : ""} · 옆으로 끌어 시간 · 끝을 끌어 길이 · 위아래로 끌어 트랙" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px">${hd}<div class="lbl">${esc(c.text)}</div>${tl_}</div>`;
     }
@@ -4056,13 +4071,16 @@ $("sIns").onclick = () => srcPlace("insert"); $("sOver").onclick = () => srcPlac
 /* ---------- 모니터에서 타이틀·도형·자막 끌어 옮기기 (D-320 · D-321) ---------- */
 // 자막을 끌면 기본은 그 자막 트랙 전체 자리(자막 스타일의 세로·가로 위치 — 그 트랙 자막이 모두 같이) · Alt+끌기나 패널의 '이 자막만'은 그 자막 하나만 (편집본마다 S.capPos)
 let capMoveOne = false;
-const capMoveTag = (cap, one) => one ? "이 자막만" : `${otLabel(OTK(otCap(cap)) || { id: "C1", k: "c" })} 전체`;
+// 이 자막을 끌·화살표·맞춤으로 옮길 때 이 자막 하나만인지: Alt · '이 자막만' · 이미 따로 둔 자리(capPos)가 있으면 늘 그 자막만
+// (따로 둔 자막을 트랙 전체로 옮기면 그 자막은 제자리이고 다른 자막만 움직임 — 누른 것이 마우스를 따라가게)
+const capOne = (cap, alt) => !!alt || capMoveOne || !!(cap && capPosOf(cap.id));
+const capMoveTag = (cap, one) => one ? (!capMoveOne && capPosOf(cap.id) ? "이 자막만 · 따로 둔 자리" : "이 자막만") : `${otLabel(OTK(otCap(cap)) || { id: "C1", k: "c" })} 전체`;
 function drawGfxBox() {
   const box = $("gbox"), F = $("frame"), fr_ = F.getBoundingClientRect();
   let r = null, chip = "";
   if (selX && selX.k === "title") { const el = ovEls["t" + selX.id], g = S.titles.find(x => x.id === selX.id); if (el && g && !otLockedX(g, "t")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; } }
   if (selX && selX.k === "shape") { const sh = S.shapes.find(x => x.id === selX.id); if (sh && shapeOn(sh, T) && !otLockedX(sh, "g")) r = { l: sh.x * fr_.width, t: sh.y * fr_.height, w: sh.w * fr_.width, h: sh.h * fr_.height }; } // 잠긴·숨긴 줄은 화면에서 안 옮김
-  if (selX && selX.k === "caption") { const el = ovEls["c" + selX.id], c = P.captions.find(x => x.id === selX.id); if (el && c && !otLockedX(c, "c")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; chip = capMoveTag(c, capMoveOne); } }
+  if (selX && selX.k === "caption") { const el = ovEls["c" + selX.id], c = P.captions.find(x => x.id === selX.id); if (el && c && !otLockedX(c, "c")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; chip = capMoveTag(c, capOne(c)); } }
   if (!r || playing) { css(box, "display", "none"); return pvBarPlace(); }
   css(box, "display", "block"); css(box, "left", r.l + "px"); css(box, "top", r.t + "px"); css(box, "width", r.w + "px"); css(box, "height", r.h + "px");
   box.classList.toggle("cap", selX.k === "caption"); txt($("gchip"), chip);
@@ -4095,7 +4113,7 @@ function gfxDrag(ev, corner) {
   if (k === "caption") {
     const cap = P.captions.find(c => c.id === selX.id), el = ovEls["c" + selX.id];
     if (!cap || !el || otLockedX(cap, "c") || corner) return;
-    const one = ev.altKey || capMoveOne, ot = OTK(otCap(cap)) || OTK("C1");
+    const one = capOne(cap, ev.altKey), ot = OTK(otCap(cap)) || OTK("C1");
     o = { x: parseFloat(el.style.left) / 100, y: parseFloat(el.style.top) / 100 }; box = elBox(el);  // 지금 그려진 자리 (자막 2~ 높이·이 자막만 자리 포함)
     const al = (one ? null : capStyleOf(ot).align) || "center", hw = box.r - box.l;
     const xr = al === "left" ? [0, 1 - hw] : al === "right" ? [hw, 1] : [hw / 2, 1 - hw / 2]; // 글 상자가 화면 밖으로 안 나가게
@@ -4104,7 +4122,7 @@ function gfxDrag(ev, corner) {
       if (one) { S.capPos = S.capPos || {}; S.capPos[cap.id] = { x: r4(nx), y: r4(ny) }; }
       else { const st = capStyleTarget(ot); st.x = r4(nx); st.y = r4(ny); }
     };
-    label = one ? "이 자막 위치 옮기기" : "자막 위치 옮기기"; tagOf = () => capMoveTag(cap, one);
+    label = one ? "이 자막 위치 옮기기" : "자막 위치 옮기기"; const tag = capMoveTag(cap, one); tagOf = () => tag; // 끄는 동안 같은 이름 (Alt 로 처음 따로 둘 때도 '이 자막만')
   } else if (k === "title") {
     g = S.titles.find(x => x.id === selX.id); if (!g || otLockedX(g, "t")) return;
     o = { x: g.style.x ?? 0.5, y: g.style.y, size: g.style.size }; const el = ovEls["t" + g.id]; if (el) box = elBox(el);
@@ -4142,7 +4160,7 @@ function pvNudge(dx, dy) {
   const k = selX && selX.k, before = JSON.stringify(P);
   if (k === "caption") {
     const cap = P.captions.find(c => c.id === selX.id), el = ovEls["c" + selX.id]; if (!cap || otLockedX(cap, "c")) return false;
-    const one = capMoveOne, ot = OTK(otCap(cap)) || OTK("C1"), st = capStyleOf(ot), own = capPosOf(cap.id) || {};
+    const one = capOne(cap), ot = OTK(otCap(cap)) || OTK("C1"), st = capStyleOf(ot), own = capPosOf(cap.id) || {};
     const x0 = el ? parseFloat(el.style.left) / 100 : own.x ?? st.x ?? 0.5, y0 = el ? parseFloat(el.style.top) / 100 : own.y ?? st.y, r4 = v => Math.round(v * 1e4) / 1e4;
     const nx = r4(clamp(x0 + dx, 0.02, 0.98)), ny = r4(clamp(y0 + dy, 0.08, 0.95));
     if (one) { S.capPos = S.capPos || {}; S.capPos[cap.id] = { x: nx, y: ny }; } else { const t = capStyleTarget(ot); t.x = nx; t.y = ny; }
@@ -4150,9 +4168,10 @@ function pvNudge(dx, dy) {
   else if (k === "shape") { const g = S.shapes.find(x => x.id === selX.id); if (!g || otLockedX(g, "g")) return false; g.x = Math.round((g.x + dx) * 1e4) / 1e4; g.y = Math.round((g.y + dy) * 1e4) / 1e4; }
   else if (k === "tact") { const g = tacSel(); if (!g || otLockedX(g, "g")) return false; g.pts = g.pts.map(([x, y]) => [Math.round(clamp(x + dx, -0.2, 1.2) * 1e4) / 1e4, Math.round(clamp(y + dy, -0.2, 1.2) * 1e4) / 1e4]); }
   else return false;
+  // 이어 누른 화살표만 한 단계로 — 그 사이 다른 기록(끝을 재생 위치로·나누기·되돌리기 등)이 끼면 새 단계 (맨 위 기록이 이 화살표가 만든 것일 때만 합침)
   const now = performance.now(), key = JSON.stringify(selX) + S.id;
-  if (!pvNudgeH || pvNudgeH.key !== key || now - pvNudgeH.at > 600 || !hist.length) pushHist(k === "caption" ? (capMoveOne ? "이 자막 위치 옮기기" : "자막 위치 옮기기") : "자리 옮기기", before);
-  pvNudgeH = { key, at: now }; changed(false); return true;
+  if (!pvNudgeH || pvNudgeH.key !== key || now - pvNudgeH.at > 600 || !hist.length || hist[hist.length - 1] !== pvNudgeH.h) pushHist(k === "caption" ? (capOne(P.captions.find(c => c.id === selX.id)) ? "이 자막 위치 옮기기" : "자막 위치 옮기기") : "자리 옮기기", before);
+  pvNudgeH = { key, at: now, h: hist[hist.length - 1] }; changed(false); return true;
 }
 
 /* ---------- 타이틀 · 도형 · 그래픽 ---------- */
@@ -4298,11 +4317,15 @@ function otherCapNote(mid, add) {
 // 자막이 따라가는 원본 클립이 있는 곳 (B롤로 덮은 곳·L 컷으로 소리만 이어지는 곳·소리 없는 영상도 · capsTL 과 같은 규칙 · D-283·D-285)
 const CAPNEW = new Map();  // 이 창에서 넣은 자막 → 넣을 때 시작·끝 (처음 확정할 때 글자 수로 길이를 맞춤 · 손으로 고쳤으면 그대로)
 function addCaption({ at = T, after = null, prefer = null } = {}) {
-  let it = null, src = null;
+  let it = null, src = null, endAt = null;
   if (after) {
     src = after.end; prefer = prefer || otCap(after);
     it = capItems().filter(x => (x.media || "main") === "main" && src >= x.in - 1e-6 && src < x.out - HF).sort((a, b) => a.start - b.start)[0] || null;
     if (!it) return toast("이 자막 뒤로는 이 컷에 대사 소리가 없어요 · 재생 위치를 옮기고 Shift+T (자막 넣기)를 눌러 주세요"), null;
+    // 바로 뒤 = 같은 트랙의 다음 자막 앞까지만 (0.5초 규칙 없음 · 다른 트랙으로 넘겨 겹쳐 넣지 않음) — 받아쓴 자막처럼 바로 붙어 있으면 자리가 없다고 말함
+    const tk = otCap(after), nx = Math.min(it.out, src + 2, ...P.captions.filter(c => c !== after && otCap(c) === tk && c.end > src + OT_EPS).map(c => c.start));
+    if (nx - src < 0.3 - 1e-3) return toast("바로 뒤에 다음 자막이 붙어 있어요 · 다음 자막을 골라 재생 위치에서 나누거나(Ctrl+K), 재생 위치를 옮기고 Shift+T 를 눌러 주세요"), null;
+    endAt = nx;
   } else {
     at = fr(at); const on = x => x.start <= at + EPS && iEnd(x) > at + HF;
     const here = capItems().filter(on); it = here.find(x => (x.media || "main") === "main");
@@ -4319,7 +4342,7 @@ function addCaption({ at = T, after = null, prefer = null } = {}) {
   }
   if (otBlocked("c")) return toast(otBlockedNote("c")), null;
   commit("자막 추가");
-  const c = { id: nid(), start: r6c(src), end: r6c(capAddEnd(src, it.out)), text: "새 자막", tm: 1 }; // 대사 사이 빈 곳이면 다음 자막 앞까지 (D-307) · 손으로 넣은 시간 (tm · D-322)
+  const c = { id: nid(), start: r6c(src), end: r6c(endAt ?? capAddEnd(src, it.out)), text: "새 자막", tm: 1 }; // 대사 사이 빈 곳이면 다음 자막 앞까지 (D-307) · 손으로 넣은 시간 (tm · D-322)
   // 그 자리에 자막이 나오고 있으면(원본 시각) 다른 자막 트랙 (없으면 새 트랙 · 자막 트랙은 모든 편집본이 함께 씀 · D-298·D-299)
   const r = otPlace("c", [c.start, c.end], { prefer: prefer || otPrefer("c") }); setTrk(c, r.id);
   P.captions.push(c); P.captions.sort((a, b) => a.start - b.start); if (r.id !== "C1") P.sequences.forEach(ensureSeq);
@@ -4358,6 +4381,8 @@ async function capOneLine() {
     if (JSON.stringify(j.captions) === before) return toast("자막이 이미 모두 한 줄이에요");
     commit("자막 한 줄씩 나누기");
     const n0 = P.captions.length; P.captions = j.captions; P.capOneLine = 1;
+    // '이 자막만' 자리(편집본마다 capPos)를 나뉜 조각마다 그대로 — 서버는 첫 조각만 원래 id (Ctrl+K 나누기와 같음 · D-321)
+    for (const [nid_, oid] of Object.entries(j.from || {})) for (const q of P.sequences) if (q.capPos && q.capPos[oid]) q.capPos[nid_] = { ...q.capPos[oid] };
     if (selX && selX.k === "caption" && !P.captions.some(c => c.id === selX.id)) selX = null;
     capKey = ""; changed();
     toast(j.split ? `긴 자막 ${j.split}개를 한 줄씩 나눴어요 · 자막 ${n0}개 → ${P.captions.length}개 (되돌리기: Ctrl+Z)` : "쇼츠 편집본에서 쓸 한 줄 자막도 맞춰 뒀어요");
@@ -5163,22 +5188,37 @@ function bindTimeRows(root) {
   });
   root.querySelectorAll("[data-tto]").forEach(b => b.onclick = () => selSetEdge(b.dataset.tto, T));
   root.querySelectorAll("[data-palign]").forEach(b => b.onclick = () => alignSel(b.dataset.palign));
-  root.querySelectorAll("[data-tin]").forEach(inp => {
-    const edge = inp.dataset.tin, cur = () => { const sp_ = selSpan(); return sp_ ? (edge === "l" ? sp_[0] : sp_[1]) : null; };
-    inp.onkeydown = e => {
-      e.stopPropagation();
-      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
-      else if (e.key === "Escape") { inp.value = tc(cur() ?? 0); inp.dataset.skip = "1"; inp.blur(); }
-      else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); const c = cur(); if (c != null) { selSetEdge(edge, c + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? NUDGE_BIG : 1) / FPS, edge === "l" ? "시작 시간" : "끝 시간"); const n = document.querySelector(`[data-tin="${edge}"]`); if (n) { n.focus(); n.select(); } } }
-    };
-    inp.onfocus = () => inp.select();
-    inp.onblur = () => {
-      if (inp.dataset.skip) { delete inp.dataset.skip; return; }
-      const v = parseTc(inp.value), c = cur(); if (c == null) return;
-      if (v == null) { inp.value = tc(c); return toast("시각을 5:22 (5초 22프레임) 나 5.7 (초) 처럼 써 주세요"); }
-      if (Math.abs(fr(v) - c) > 1e-6) selSetEdge(edge, v, edge === "l" ? "시작 시간" : "끝 시간"); else inp.value = tc(c);
-    };
-  });
+  root.querySelectorAll("[data-tin]").forEach(inp => bindTcInput(inp, inp.dataset.tin, tc, () => document.querySelector(`[data-tin="${inp.dataset.tin}"]`)));
+}
+// 시작·끝 칸 하나 (패널 · 떠 있는 단추 줄이 함께 씀): 칸에 마지막으로 넣은 값(_last)과 글자가 다를 때만 확정 —
+// ↑↓ 는 바로 고치고 새 값을 칸에 써 둠 (고치며 패널이 다시 그려져 지워진 예전 칸의 blur 가 예전 글자를 다시 확정하지 않게 · 떠 있는 줄은 쓰는 중 다시 안 그려도 새 값이 보이게)
+let tinBusy = false;
+function bindTcInput(inp, edge, fmt, find) {
+  const cur = () => { const sp_ = selSpan(); return sp_ ? (edge === "l" ? sp_[0] : sp_[1]) : null; }, lab = edge === "l" ? "시작 시간" : "끝 시간";
+  inp._last = inp.value; inp._fmt = fmt; inp._cur = cur;
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
+    else if (e.key === "Escape") { const c = cur(); if (c != null) inp.value = inp._last = fmt(c); inp.blur(); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault(); const c = cur(); if (c == null) return;
+      tinBusy = true; try { selSetEdge(edge, c + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? NUDGE_BIG : 1) / FPS, lab); } finally { tinBusy = false; }
+      const n = (find && find()) || inp, v = cur(); if (!n.isConnected) return;
+      if (v != null) n.value = n._last = fmt(v);
+      if (document.activeElement !== n) n.focus();
+      n.select();
+    }
+  };
+  inp.onfocus = () => inp.select();
+  inp.onblur = () => {
+    if (tinBusy || !inp.isConnected) return; // 다시 그리며 지워진 칸: 확정하지 않음
+    if (inp.value.trim() === inp._last) return; // 손대지 않음 (↑↓ 로 이미 고친 값 포함)
+    const c = cur(); if (c == null) return;
+    const v = parseTc(inp.value);
+    if (v == null) { inp.value = inp._last = fmt(c); return toast("시각을 5:22 (5초 22프레임) 나 5.7 (초) 처럼 써 주세요"); }
+    if (Math.abs(fr(v) - c) > 1e-6) selSetEdge(edge, v, lab);
+    const c2 = cur(); if (c2 != null && inp.isConnected) inp.value = inp._last = fmt(c2);
+  };
 }
 // 자리 맞춤 (자막·타이틀·도형): 가운데 = 상자 한가운데를 화면 한가운데 · 아래 = 가로 가운데 + 상자 아래를 자막 기본 높이(쇼츠 80% · 롱폼 90%) · 위 = 상자 위를 10%
 const alignRowHTML = () => selKind() && ["caption", "title", "shape"].includes(selKind()) ? `<div class="f"><label>자리 맞춤</label><div class="nud"><button class="btn sm" data-palign="t" title="위쪽으로 (가로 가운데)">위</button><button class="btn sm" data-palign="c" title="화면 한가운데로">가운데</button><button class="btn sm" data-palign="b" title="자막 자리로 (가로 가운데 · 아래쪽)">아래</button></div><span></span></div>` : "";
@@ -5244,7 +5284,7 @@ function renderGfxPanel(el) {
       ${timeRowsHTML()}
       ${otSelectHTML("c", otCap(cap), "자막 트랙")}
       <div class="f"><label>화면에서 옮기기</label><div class="seg" id="pCapMove" title="미리보기에서 자막을 끌 때 (Alt 를 누르고 끌면 이 자막만)"><button data-v="track" class="${capMoveOne ? "" : "on"}">트랙 전체</button><button data-v="one" class="${capMoveOne ? "on" : ""}">이 자막만</button></div><span></span></div>
-      ${own ? `<div class="hint" style="margin:-4px 0 8px">이 자막만 자리를 바꿨어요 (이 편집본) <button class="btn sm" id="pCapPosReset">트랙 자리로 되돌리기</button></div>` : ""}
+      ${own ? `<div class="hint" style="margin:-4px 0 8px">이 자막만 따로 둔 자리예요 (이 편집본) · 끌기·화살표·맞춤은 이 자막만 옮겨요 <button class="btn sm" id="pCapPosReset">트랙 자리로 되돌리기</button></div>` : ""}
       ${alignRowHTML()}
       <button class="btn" id="pCapSplit" title="재생 위치에서 자막 나누기 (Ctrl+K)">재생 위치에서 자막 나누기</button> <button class="btn" id="pCapNext" title="바로 뒤에 자막 넣기 (Enter)">＋ 바로 뒤에 자막</button> <button class="btn" id="pCapDel" title="지우기 (Delete)">삭제</button></div>` + styleEditor("cs_", capStyleOf(OTK(otCap(cap)) || { id: "C1" }), false, `자막 스타일 · ${esc(otLabel(OTK(otCap(cap)) || { id: "C1", k: "c" }))} 트랙 전체`); }
   if (tt) h += `<div class="pg"><h4><span class="dot" style="background:var(--title)"></span>타이틀</h4>
@@ -5577,8 +5617,9 @@ function selMenu(at) {
   its.push(["여기에 자막 넣기", () => { seek(fr(at)); addCaption({ at }); }, "Shift+T"]);
   if (["caption", "title", "shape"].includes(k)) its.push(null, ["가운데로 맞춤", () => alignSel("c")], ["아래로 맞춤 (자막 자리)", () => alignSel("b")]);
   if (k === "caption") {
-    its.push([`${capMoveOne ? "" : "✓ "}화면에서 끌면 트랙 전체 옮기기`, () => { capMoveOne = false; renderPanels(); frameDirty = true; }], [`${capMoveOne ? "✓ " : ""}화면에서 끌면 이 자막만 옮기기`, () => { capMoveOne = true; renderPanels(); frameDirty = true; }, "Alt+끌기"]);
-    if (capPosOf(selX.id)) its.push(["이 자막을 트랙 자리로 되돌리기", () => capPosReset(selX.id)]);
+    const own = !!capPosOf(selX.id); // 따로 둔 자막은 늘 그 자막만 옮겨짐 (D-329)
+    its.push([`${capMoveOne ? "" : "✓ "}화면에서 끌면 트랙 전체 옮기기${own ? " (이 자막은 따로 둔 자리 · 이 자막만)" : ""}`, () => { capMoveOne = false; renderPanels(); frameDirty = true; }], [`${capMoveOne ? "✓ " : ""}화면에서 끌면 이 자막만 옮기기`, () => { capMoveOne = true; renderPanels(); frameDirty = true; }, "Alt+끌기"]);
+    if (capPosOf(selX.id)) its.push(["이 자막을 트랙 자리로 되돌리기 (따로 둔 자리 지우기)", () => capPosReset(selX.id)]);
   }
   its.push(null, ["재생 위치에서 나누기", splitSel, "Ctrl+K"]);
   if (k !== "caption") its.push(["복제 (바로 뒤에)", dupSel, k === "clip" ? "Alt+끌기" : ""]);
@@ -5654,7 +5695,8 @@ document.addEventListener("contextmenu", e => {
 
 
 /* ---------- 떠 있는 단추 줄: 고른 것 바로 옆에 시작·끝 칸 + 자주 쓰는 일 (D-327) ----------
-   미리보기에서 골랐으면 미리보기 상자 옆 · 타임라인에서 골랐으면 그 클립 위 (한 곳에만) · 재생·끄는 동안은 숨김 */
+   미리보기에서 골랐으면 미리보기 상자 옆 · 타임라인에서 골랐으면 그 클립 가까이 (한 곳에만) · 재생·끄는 동안은 숨김
+   다른 클립·자막·타이틀·도형을 가리지 않는 빈 자리에만 띄움 (가리면 그것을 누를 수 없음 · 빈 자리가 없으면 안 띄움 — 같은 일은 효과 컨트롤에 다 있음) */
 const tcs = t => t < 3600 ? tc(t).slice(3) : tc(t);  // 00:05:22 (분:초:프레임)
 const ICO = { del: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5"/></svg>' };
 function fbarHTML() {
@@ -5675,32 +5717,52 @@ function fbarBind(bar) {
     else if (a === "cap") addCaption(); else if (a === "del") deleteSel(false);
     else if (a === "more") { const r = b.getBoundingClientRect(); showMenu({ clientX: r.left, clientY: r.bottom + 2 }, selMenu(T)); }
   });
-  bar.querySelectorAll("[data-fin]").forEach(inp => {
-    const edge = inp.dataset.fin, cur = () => { const sp_ = selSpan(); return sp_ ? (edge === "l" ? sp_[0] : sp_[1]) : null; };
-    inp.onkeydown = e => {
-      e.stopPropagation();
-      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
-      else if (e.key === "Escape") { inp.dataset.skip = "1"; inp.blur(); }
-      else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); const c = cur(); if (c == null) return; selSetEdge(edge, c + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? NUDGE_BIG : 1) / FPS, edge === "l" ? "시작 시간" : "끝 시간"); fbarKey = ""; fbarPlaceAll(); const n = document.querySelector(`.fbar:not([hidden]) [data-fin="${edge}"]`); if (n) { n.focus(); n.select(); } }
-    };
-    inp.onfocus = () => inp.select();
-    inp.onblur = () => {
-      const c = cur(); if (inp.dataset.skip) { delete inp.dataset.skip; if (c != null) inp.value = tcs(c); return; }
-      const v = parseTc(inp.value); if (c == null) return;
-      if (v == null) { inp.value = tcs(c); return toast("시각을 5:22 (5초 22프레임) 나 5.7 (초) 처럼 써 주세요"); }
-      if (Math.abs(fr(v) - c) > 1e-6) selSetEdge(edge, v, edge === "l" ? "시작 시간" : "끝 시간"); else inp.value = tcs(c);
-    };
-  });
+  bar.querySelectorAll("[data-fin]").forEach(inp => bindTcInput(inp, inp.dataset.fin, tcs, () => bar.querySelector(`[data-fin="${inp.dataset.fin}"]`)));
 }
-let fbarKey = "";
 function fbarFill(bar) {
   const sp_ = selSpan(), key = JSON.stringify([selKind(), selX, primary, sp_, ver]);
-  if (bar.contains(document.activeElement)) return; // 쓰는 중에는 그대로
+  if (bar.contains(document.activeElement)) { // 쓰는 중에는 다시 그리지 않음 — 칸 값만 지금 값으로 (쓰고 있는 칸은 손대지 않았을 때만)
+    for (const inp of bar.querySelectorAll("[data-fin]")) { const v = inp._cur && inp._cur(); if (v != null && (inp !== document.activeElement || inp.value.trim() === inp._last)) inp.value = inp._last = inp._fmt(v); }
+    return;
+  }
   if (bar._key === key) return;
   bar._key = key; bar.innerHTML = fbarHTML(); fbarBind(bar);
 }
 // 어느 쪽에 띄울지 · 그 자리 (재생 중·끄는 중·여러 개는 숨김)
 function fbarPlaceAll() { pvBarPlace(); tlBarPlace(); }
+// 막는 상자들(rects · 화면 좌표)을 피해 w×h 를 놓을 자리 — 영역 A 안 · 기준(a: 왼쪽 x 바람 · 위 t · 아래 b)에 가장 가까운 곳 → { x, y } | null
+// 위아래로 4px 씩 보고 그 띠에서 빈 틈 중 바라는 x 에 가까운 곳 (세로 거리 + 가로 거리 × 0.35 · 같으면 위쪽)
+function freeSpot(rects, A, w, h, a, pad = 3) {
+  let best = null; const want = clamp(a.x, A.l, A.r - w);
+  if (A.r - A.l < w || A.b - A.t < h) return null;
+  for (let y = A.t; y <= A.b - h + 0.01; y += 4) {
+    const iv = rects.filter(b => b.top < y + h + pad && b.bottom > y - pad).map(b => [b.left - pad, b.right + pad]).sort((p, q) => p[0] - q[0]);
+    const gaps = []; let x0 = A.l;
+    for (const [l, r] of iv) { if (l > x0) gaps.push([x0, l]); x0 = Math.max(x0, r); }
+    if (A.r > x0) gaps.push([x0, A.r]);
+    for (const [l, r] of gaps) {
+      if (r - l < w) continue;
+      const x = clamp(want, l, r - w), dy = y + h <= a.t ? a.t - (y + h) : y >= a.b ? y - a.b + 1 : 0, c = dy + 0.35 * Math.abs(x - want);
+      if (!best || c < best.c) best = { x, y, c };
+    }
+  }
+  return best;
+}
+// 미리보기 화면에서 누를 수 있는 글자·도형·전술 그림 상자 (화면 좌표 · pvPick 과 같은 것들)
+function pvObstacles() {
+  const out = [], F = $("frame").getBoundingClientRect(), t = T, tot = total(), W = BW(), H = BH(), u = Math.min(W, H) / TC.BASE, k = F.width / W;
+  for (const o of S.otracks || []) {
+    if (!otVisible(o)) continue;
+    if (o.k !== "g") { const L = OLAY[o.id]; if (L) for (const el of L.el.children) if (el._pick && el.classList.contains("txt")) out.push(el.getBoundingClientRect()); continue; }
+    for (const sh of S.shapes) if (trkOf(sh, "g") === o.id && shapeOn(sh, t) && t < tot + 0.01) out.push({ left: F.left + sh.x * F.width, right: F.left + (sh.x + sh.w) * F.width, top: F.top + sh.y * F.height, bottom: F.top + (sh.y + sh.h) * F.height });
+    for (const n of S.tactics) if (trkOf(n, "g") === o.id && t >= n.start - TEPS && t < n.start + n.dur - TEPS && t < tot + 0.01) {
+      const P_ = tacShown(n, t); if (!P_ || !P_.length) continue; const r = ((n.size || 30) * 2.2 + 24) * u * k;
+      const xs = P_.map(q => F.left + q[0] * F.width), ys = P_.map(q => F.top + q[1] * F.height);
+      out.push({ left: Math.min(...xs) - r, right: Math.max(...xs) + r, top: Math.min(...ys) - r, bottom: Math.max(...ys) + r });
+    }
+  }
+  return out;
+}
 function fbarWant() { const k = selKind(); return !!k && !playing && !fbarDrag && (k !== "clip" || selClip()); }
 let fbarDrag = false;
 addEventListener("mousedown", e => { if (e.button === 0 && !e.target.closest(".fbar, #cmenu, .modal")) { fbarDrag = true; css($("pvBar"), "display", "none"); const tb = $("tlBar"); if (tb) css(tb, "display", "none"); } }, true);
@@ -5710,36 +5772,46 @@ function pvAnchor() {
   if (selX && selX.k === "tact") { const b = document.querySelector("#tacH .tb"); return b && $("tacH").style.display !== "none" ? b.getBoundingClientRect() : null; }
   const b = $("gbox"); return b.style.display === "block" ? b.getBoundingClientRect() : null;
 }
+let pvBarOn = false;  // 미리보기 쪽 단추 줄이 떠 있음 (못 띄우면 타임라인 쪽에 띄움)
 function pvBarPlace() {
   const bar = $("pvBar"); if (!bar) return;
   const a = fbarWant() && selSrc === "pv" && monMode === "prog" ? pvAnchor() : null;
-  if (!a) { css(bar, "display", "none"); return; }
-  fbarFill(bar); css(bar, "display", "flex");
-  // 화면 옆에 자리가 있으면(세로 9:16) 화면 밖 옆에 — 화면 속 다른 것(도형·아래 글자)을 가리지 않게 · 없으면(가로 16:9) 고른 것 아래(안 되면 위)
+  let on = false;
+  if (a) { fbarFill(bar); css(bar, "display", "flex"); on = pvBarPut(bar, a); }
+  if (!on) css(bar, "display", "none");
+  if (on !== pvBarOn) { pvBarOn = on; tlBarPlace(); }
+}
+function pvBarPut(bar, a) {
+  // 화면 옆에 자리가 있으면(세로 9:16) 화면 밖 옆에 · 없으면(가로 16:9) 화면 위 다른 글자·도형·전술 그림·고른 것을 가리지 않는 빈 자리(고른 것 아래·위 가까운 곳)
+  // 그런 자리가 없으면 타임라인 쪽 단추 줄 (리뷰: 고른 타이틀 바로 아래 단추 줄이 다른 타이틀을 덮어 누를 수 없었음)
   const m = $("mon").getBoundingClientRect(), f = $("frame").getBoundingClientRect(), roomR = m.right - f.right - 14, roomL = f.left - m.left - 14, side = Math.max(roomR, roomL) >= 170;
   css(bar, "maxWidth", side ? Math.min(400, Math.max(roomR, roomL)) + "px" : "none"); bar.classList.toggle("side", side);
   const bw = bar.offsetWidth, bh = bar.offsetHeight;
   if (side) {
     css(bar, "left", (roomR >= roomL ? f.right - m.left + 8 : f.left - m.left - bw - 8) + "px");
-    css(bar, "top", clamp((a.top + a.bottom) / 2 - m.top - bh / 2, 2, m.height - bh - 2) + "px"); return;
+    css(bar, "top", clamp((a.top + a.bottom) / 2 - m.top - bh / 2, 2, m.height - bh - 2) + "px"); return true;
   }
-  let top = a.bottom - m.top + 6; if (top + bh > m.height - 2) top = a.top - m.top - bh - 6; if (top < 2) top = Math.min(m.height - bh - 2, Math.max(2, a.bottom - m.top - bh - 6));
-  css(bar, "left", clamp((a.left + a.right) / 2 - m.left - bw / 2, 2, m.width - bw - 2) + "px"); css(bar, "top", top + "px");
+  const rects = pvObstacles(); rects.push({ left: a.left, right: a.right, top: a.top - 18, bottom: a.bottom + 2 }); // 고른 것 (위 꼬리표까지)
+  const sp_ = freeSpot(rects, { l: m.left + 2, r: m.right - 2, t: m.top + 2, b: m.bottom - 2 }, bw, bh, { x: (a.left + a.right) / 2 - bw / 2, t: a.top - 18, b: a.bottom + 2 }, 4);
+  if (!sp_) return false;
+  css(bar, "left", sp_.x - m.left + "px"); css(bar, "top", sp_.y - m.top + "px"); return true;
 }
 function tlBarPlace() {
   let bar = $("tlBar"); const tk = $("tracks"); if (!tk) return;
   if (!bar) { bar = document.createElement("div"); bar.id = "tlBar"; bar.className = "fbar"; tk.appendChild(bar); }
-  const k = fbarWant() && (selSrc !== "pv" || !pvAnchor()) ? selKind() : null;
+  const k = fbarWant() && (selSrc !== "pv" || !pvBarOn) ? selKind() : null;
   const el = !k ? null : k === "caption" ? (() => { const p = capPiece(selCap()); return p && tk.querySelector(`.clip[data-cap="${selX.id}"][data-ps="${p.s}"]`) || tk.querySelector(`.clip[data-cap="${selX.id}"].sel`); })()
     : k === "clip" ? tk.querySelector(`.clip[data-id="${selClip().id}"]`) : tk.querySelector(`.clip[data-gid="${selX.id}"]`);
   if (!el) { css(bar, "display", "none"); return; }
   fbarFill(bar); css(bar, "display", "flex");
-  const sc = $("tlscroll"), tr = tk.getBoundingClientRect(), r = el.getBoundingClientRect(), bw = bar.offsetWidth, bh = bar.offsetHeight;
-  const ru = tk.querySelector(".row.ruler"), top0 = sc.scrollTop + (ru ? ru.offsetHeight : 0);
-  let top = r.top - tr.top - bh - 3; if (top < top0 + 2) top = r.bottom - tr.top + 3;
-  const lo = sc.scrollLeft + HD + 4, hi = sc.scrollLeft + sc.clientWidth - bw - 4;
-  if (r.right - tr.left < lo || r.left - tr.left > hi + bw) { css(bar, "display", "none"); return; } // 그 클립이 타임라인 밖이면 숨김
-  css(bar, "left", clamp(r.left - tr.left, lo, Math.max(lo, hi)) + "px"); css(bar, "top", top + "px");
+  // 그 클립 가까이에서 다른 클립·자막·전환을 가리지 않는 빈 자리 (위 트랙·아래 트랙의 빈 곳 · 위가 먼저) · 눈금자·트랙 머리 위에는 안 놓음
+  const sc = $("tlscroll"), sr = sc.getBoundingClientRect(), tr = tk.getBoundingClientRect(), r = el.getBoundingClientRect(), bw = bar.offsetWidth, bh = bar.offsetHeight;
+  const ru = tk.querySelector(".row.ruler"), A = { l: sr.left + HD + 4, r: sr.left + sc.clientWidth - 4, t: (ru ? ru.getBoundingClientRect().bottom : sr.top) + 2, b: sr.top + sc.clientHeight - 2 };
+  if (r.right < A.l || r.left > A.r || r.bottom < A.t || r.top > A.b) { css(bar, "display", "none"); return; } // 그 클립이 타임라인 밖이면 숨김
+  const rects = [...tk.querySelectorAll(".lane .clip, .lane .clip .eh, .trn, .gapsel")].map(e => e.getBoundingClientRect()).filter(b => b.width > 0 && b.bottom > A.t && b.top < A.b && b.right > A.l && b.left < A.r);
+  const sp_ = freeSpot(rects, A, bw, bh, { x: r.left, t: r.top, b: r.bottom });
+  if (!sp_) { css(bar, "display", "none"); return; }
+  css(bar, "left", sp_.x - tr.left + "px"); css(bar, "top", sp_.y - tr.top + "px");
 }
 $("tlscroll").addEventListener("scroll", () => requestAnimationFrame(tlBarPlace));
 /* 도구 줄 빠른 설명: 올리면 바로 이름 · 단축키 · 하는 일 (native title 은 늦게 떠서) */

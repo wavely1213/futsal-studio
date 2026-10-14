@@ -1227,11 +1227,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(caps, list):
                 return self._send(400, {"error": "자막 목록이 아니에요"})
             info = b.get("info") if isinstance(b.get("info"), dict) else editor.media_info(b["name"])
+            src_of = {}  # 나뉜 조각(새 id) → 원래 자막 id ('이 자막만' 자리를 조각마다 · D-321)
             try:
-                out, n = editor.oneline_captions(caps, info, editor.silences_of(b["name"]))
+                out, n = editor.oneline_captions(caps, info, editor.silences_of(b["name"]), src_of=src_of)
             except (TypeError, ValueError, KeyError) as e:
                 return self._send(400, {"error": f"자막을 나누지 못했어요 · {e}"})
-            return self._send(200, {"captions": out, "split": n})
+            return self._send(200, {"captions": out, "split": n, "from": src_of})
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, _started(ok))

@@ -170,8 +170,8 @@ def media_entry(f, src="videos", mid=None):
          "proxy": proxy_path(p.name, src).exists()}
     if i.get("hdr"):
         e["hdr"] = i["hdr"]
-    if i["kind"] == "video" and abs(i.get("start") or 0.0) > 0.005:  # 시작 시각이 0 이 아닌 파일 (미리보기 재생기에 더함 · D-324)
-        e["t0"] = round(i["start"], 3)
+    if i["kind"] == "video" and (i.get("start") or 0.0) > 0.005:  # 시작 시각이 0 보다 큰 파일만 (미리보기 재생기에 더함 · D-324)
+        e["t0"] = round(i["start"], 3)  # 0 보다 작은 시작(.webm·Opus 의 -0.007 등)은 브라우저가 0 으로 당겨 읽음 → 더하면 한 프레임 일찍 보임
     return e
 
 
@@ -535,15 +535,17 @@ def rev_audio(src, f, a, b, sp):
     if not p.exists():
         raise FileNotFoundError(f"파일을 찾지 못했어요 · {f}")
     d = _cache_dir(f, src) / "rev"
-    out = d / f"rev_{a:.3f}_{b:.3f}_{sp:.4f}.wav"
+    # rev2_: 소리 줄기가 늦게 시작하는 파일도 제자리(AUDIO_T0)로 푼 판 — 예전 rev_ 파일(앞당겨진 소리)은 다시 만듦 (waveform_v2_ 와 같은 까닭 · D-324)
+    out = d / f"rev2_{a:.3f}_{b:.3f}_{sp:.4f}.wav"
     if out.exists():
         return out
     with _gen_lock(str(out)):
         if out.exists():
             return out
         d.mkdir(parents=True, exist_ok=True)
-        old = sorted(d.glob("rev_*.wav"), key=lambda x: x.stat().st_mtime)
-        for o in old[:-40]:  # 오래된 것 정리 (미리보기가 들고 있으면 Windows 는 못 지움 → 다음에)
+        old = sorted(d.glob("rev_*.wav"), key=lambda x: x.stat().st_mtime)  # 예전 판은 모두 정리
+        old = old + sorted(d.glob("rev2_*.wav"), key=lambda x: x.stat().st_mtime)[:-40]
+        for o in old:  # 오래된 것 정리 (미리보기가 들고 있으면 Windows 는 못 지움 → 다음에)
             try:
                 o.unlink(missing_ok=True)
             except OSError:
@@ -1856,8 +1858,8 @@ def migrate_project(name, proj):
                 m["proxy"] = proxy_path(m["file"], m.get("src", "videos")).exists()
             except ValueError:
                 m["proxy"] = False
-            t0 = media_t0(m.get("file") or "", m.get("src", "videos"))  # 시작 시각이 0 이 아닌 파일만 (D-324 · 보통 파일은 칸 없음 = 예전 그대로)
-            if abs(t0) > 0.005:
+            t0 = media_t0(m.get("file") or "", m.get("src", "videos"))  # 시작 시각이 0 보다 큰 파일만 (D-324 · 보통 파일은 칸 없음 = 예전 그대로)
+            if t0 > 0.005:  # 0 보다 작은 시작(.webm·Opus -0.007 등)은 브라우저가 0 으로 당겨 읽음 — 예전에 적힌 음수 t0 도 여기서 지움
                 m["t0"] = round(t0, 3)
             else:
                 m.pop("t0", None)
@@ -2015,10 +2017,11 @@ def _captions_of(segs, info, silences=()):
     return [_make_cap(c, fmt, terms) for c in captions.from_segments(segs, fmt, terms, silences)]
 
 
-def oneline_captions(caps, info, silences=(), terms=None):
+def oneline_captions(caps, info, silences=(), terms=None, src_of=None):
     """편집실 '자막 한 줄씩 나누기': 프로젝트 자막을 모두 한 줄 자막으로 → (새 자막 목록, 나눈 자막 수).
     지금 글(사용자가 고친 글) 그대로 나누고, 단어 시각(wt)이 글과 맞으면 그 시각대로, 아니면 글자 수대로 (silences: 조용한 곳).
-    이미 한 줄이고 짧은 자막은 그대로 (두 번 눌러도 같음) · 나뉜 첫 자막은 원래 id, 다른 값(위치·모양 등)은 나뉜 자막마다 그대로."""
+    이미 한 줄이고 짧은 자막은 그대로 (두 번 눌러도 같음) · 나뉜 첫 자막은 원래 id, 다른 값(위치·모양 등)은 나뉜 자막마다 그대로.
+    src_of(dict)를 주면 새 id 를 받은 조각 → 원래 자막 id 를 적어 줌 (편집본마다 둔 '이 자막만' 자리 capPos 를 조각마다 옮기게 · D-321)."""
     fmt = _cap_fmt(info)
     terms = _terms() if terms is None else terms
     out, n = [], 0
@@ -2045,6 +2048,8 @@ def oneline_captions(caps, info, silences=(), terms=None):
         n += 1
         for k, q in enumerate(parts):
             out.append(_make_cap(q, fmt, terms, dict(c, id=c.get("id") if k == 0 else None)))
+            if k and src_of is not None and c.get("id"):
+                src_of[out[-1]["id"]] = c["id"]
     return out, n
 
 
@@ -3392,7 +3397,9 @@ def _ass_ftime(t, fps=30):
     예전 _ass_time(반올림)은 x.x67초처럼 반올림한 값이 프레임 시각을 넘는 곳(약 36%)에서 한 프레임 늦게 나오고 늦게 사라졌음.
     (전술 그림은 반 프레임씩 비켜 둔 시각이라 그대로 _ass_time)"""
     t = max(0.0, float(t))
-    k = max(0, math.ceil(t * fps - 1e-6))
+    # 여유는 미리보기(editor.html TEPS)와 같은 1e-6 '초' — 손으로 맞춘 시각은 1e-6 초로 반올림해 둬서(r6c) 프레임 시각보다 5e-7 초까지 클 수 있음
+    # (예전 1e-6 '프레임' 여유는 그런 시각을 한 프레임 늦게 그렸음 · 약 1/3)
+    k = max(0, math.ceil((t - 1e-6) * fps))
     ms = int(k * (1.0 / fps) * 1000)  # ffmpeg vf_subtitles: pts · av_q2d(1/fps) · 1000 → (long long)
     cs = ms // 10
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"

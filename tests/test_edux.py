@@ -38,6 +38,14 @@ def first_shown(start_ms, fps, upto):
     return next(k for k in range(upto) if vf_ms(k, fps) >= start_ms)
 
 
+def preview_first(t, fps):
+    """미리보기(editor.html)가 시작 t 인 것을 처음 그리는 프레임: 프레임 시각 k/fps ≥ t − TEPS(1e-6 초)."""
+    k = max(0, int(t * fps) - 2)
+    while k / fps < t - 1e-6:
+        k += 1
+    return k
+
+
 def item(i, start, a, b, track="V1", media="main"):
     return {"id": i, "track": track, "media": media, "start": start, "in": a, "out": b, "speed": 1, "rev": False,
             "reframe": 0.5, "fit": "auto", "fx": {}, "color": {}}
@@ -58,12 +66,35 @@ class FrameGridTest(unittest.TestCase):
         for fps in (30, 60, 25, 24):
             bad = 0
             for k in range(0, 18001):
-                for t in (k / fps, k / fps + 0.37 / fps, round(k / fps, 3)):
-                    want = math.ceil(t * fps - 1e-6)
+                # r6c: 편집실이 손으로 맞춘 시각을 적는 방법 (1e-6 초 반올림 · 프레임 시각보다 5e-7 초까지 큼)
+                for t in (k / fps, k / fps + 0.37 / fps, round(k / fps, 3), round(k / fps, 6), k / fps + 4.9e-7, k / fps - 4.9e-7):
+                    want = preview_first(t, fps)
                     ms = ass_ms(editor._ass_ftime(t, fps))
                     if not (vf_ms(want, fps) >= ms and (want == 0 or vf_ms(want - 1, fps) < ms)):
                         bad += 1
             self.assertEqual(bad, 0, fps)
+
+    def test_hand_timed_r6c_same_frame_as_preview(self):
+        """리뷰: [ ] · 써 넣은 시각 · 나누기가 r6c 로 적은 시각(6.566667 등)이 미리보기는 k 프레임, 내보내기는 k+1 프레임이었음 (약 1/3).
+        미리보기 규칙(프레임 시각 t_k ≥ 시작 − TEPS 부터 · t_k < 끝 − TEPS 까지)과 ASS 첫·끝 프레임이 같아야 함 · 1프레임 자막도 사라지지 않음."""
+        TEPS, fps, bad = 1e-6, 30, []
+        r6c = lambda v: round(v * 1e6) / 1e6
+        for k in range(0, 3000):
+            s = r6c(k / fps)
+            e = r6c((k + 1) / fps)  # 1프레임짜리
+            first = next(j for j in range(max(0, k - 2), k + 3) if j / fps >= s - TEPS)
+            last = max(j for j in range(max(0, k - 2), k + 3) if j / fps < e - TEPS)
+            a, b = ass_ms(editor._ass_ftime(s, fps)), ass_ms(editor._ass_ftime(e, fps))
+            shown = [j for j in range(max(0, k - 3), k + 4) if a <= vf_ms(j, fps) < b]
+            if shown != list(range(first, last + 1)):
+                bad.append((k, shown, first, last))
+        self.assertEqual(bad[:5], [])
+        # 원본 시각이 r6c 인 자막을 32/30 초에서 시작하는 클립에 올린 경우 (타임라인 시각 = 클립 시작 + (원본 − in))
+        clip_start = round(32 / 30 * 1e6) / 1e6
+        for k in range(40, 70):
+            s = clip_start + (r6c(k / fps) - 1.0)
+            first = next(j for j in range(0, 200) if j / fps >= s - TEPS)
+            self.assertEqual(first_shown(ass_ms(editor._ass_ftime(s, fps)), fps, 200), first, k)
 
     def test_old_rounding_was_one_frame_late(self):
         """예전 _ass_time(반올림): 2.0667초(프레임 62)는 2.07 → 63번 프레임에서야 보였음 · 새 시각은 62번부터."""
@@ -140,6 +171,21 @@ class CapPosTest(unittest.TestCase):
         q = proj(caps, capPos={"a": {"y": 0.5}})
         line = next(ln for ln in editor.build_ass(q, 1920, 1080).splitlines() if ln.startswith("Dialogue:") and ",Cap2," in ln)
         self.assertIn(r"\pos(960,540)", line)
+
+
+class OnelineCapPosTest(unittest.TestCase):
+    """리뷰: '자막 한 줄씩 나누기'의 나뉜 조각(새 id)도 원래 자막의 '이 자막만' 자리를 받게 — 서버가 조각 → 원래 id 를 알려 줌."""
+
+    def test_src_of_maps_new_pieces(self):
+        long_text = "공이 오면 차지 말고 갖다 대세요 그리고 바로 다음 동작으로 이어서 패스를 주고 받으면서 앞으로 나가요"
+        caps = [{"id": "a", "start": 0.0, "end": 9.0, "text": long_text}, {"id": "b", "start": 10.0, "end": 11.0, "text": "짧은 말"}]
+        src_of = {}
+        out, n = editor.oneline_captions(caps, {"width": 1920, "height": 1080}, terms=(), src_of=src_of)
+        self.assertEqual(n, 1)
+        new_ids = [c["id"] for c in out if c["id"] not in ("a", "b")]
+        self.assertTrue(new_ids)
+        self.assertEqual(src_of, {i: "a" for i in new_ids})
+        self.assertEqual(editor.oneline_captions(caps, {"width": 1920, "height": 1080}, terms=())[1], 1)  # 예전 부르는 법 그대로
 
 
 class HandTimedTest(unittest.TestCase):
@@ -219,6 +265,37 @@ class AudioStartTest(unittest.TestCase):
     def test_probe_start(self):
         self.assertAlmostEqual(editor.probe(self.st1)["start"], 1.0, delta=0.01)
         self.assertAlmostEqual(editor.probe(self.plain)["start"], 0.0, delta=0.01)
+
+    def test_negative_start_not_recorded(self):
+        """리뷰: .webm(vp8+opus)은 시작 시각이 −0.007초 — 브라우저는 0 으로 당겨 읽으므로 t0 를 적지 않음 (적으면 미리보기가 한 프레임 일찍 보이고
+        클립 첫 프레임에서 1초에 60번 다시 맞춤) · 0 보다 큰 시작만 적음 · 예전에 적힌 음수 t0 는 열 때 지움."""
+        neg = Path(self.td.name) / "neg.webm"
+        r = subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=64x36:r=30:d=2", "-f", "lavfi", "-i", "sine=f=440:d=2",
+                            "-c:v", "libvpx", "-c:a", "libopus", "-t", "2", str(neg)], capture_output=True)
+        if r.returncode:
+            self.skipTest("libvpx·libopus 가 없는 ffmpeg")
+        self.assertLess(editor.probe(neg)["start"], 0)
+        for f, want in ((neg, None), (self.st1, 1.0), (self.plain, None)):
+            with mock.patch.object(editor, "media_path", return_value=f), mock.patch.object(editor, "proxy_path", return_value=Path(self.td.name) / "none.mp4"):
+                e = editor.media_entry(f.name, "edit_media")
+            self.assertEqual(e.get("t0"), want, f.name)
+        proj = {"source": "x.mp4", "info": {"duration": 2, "width": 64, "height": 36, "fps": 30}, "captions": [], "speech": [],
+                "sequences": [], "media": [{"id": "m1", "kind": "video", "src": "edit_media", "file": "neg.webm", "t0": -0.007}]}
+        with mock.patch.object(editor, "media_t0", return_value=-0.007), mock.patch.object(editor, "proxy_path", return_value=Path(self.td.name) / "none.mp4"):
+            out = editor.migrate_project("x.mp4", proj)
+        self.assertNotIn("t0", [m for m in out["media"] if m["id"] == "m1"][0])
+
+    def test_reverse_audio_cache_versioned(self):
+        """리뷰: 거꾸로 소리 미리보기 파일도 제자리(AUDIO_T0)로 푼 판으로 — 예전 rev_ 파일(앞당겨진 소리)을 계속 쓰지 않게 이름이 rev2_ · 예전 것은 정리."""
+        d = Path(self.td.name) / "cache"
+        (d / "rev").mkdir(parents=True, exist_ok=True)
+        stale = d / "rev" / "rev_0.000_2.000_1.0000.wav"
+        stale.write_bytes(b"old")
+        with mock.patch.object(editor, "media_path", return_value=self.late), mock.patch.object(editor, "_cache_dir", return_value=d):
+            out = editor.rev_audio("edit_media", "late.mp4", 0, 2, 1)
+        self.assertTrue(out.name.startswith("rev2_"), out.name)
+        self.assertTrue(out.exists() and out.stat().st_size > 1000)
+        self.assertFalse(stale.exists())
 
 
 @unittest.skipUnless(NODE, "node 가 없어요")
