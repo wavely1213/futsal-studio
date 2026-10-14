@@ -1,6 +1,8 @@
 {
   "version": "2.21.0",
   "notes": "편집실: 자막·타이틀·도형 트랙을 여러 개 만들고 앞뒤 순서·트랙마다 설정을 바꿀 수 있어요 · 자막이 대사 소리를 따라가요 · 소리 트랙 역할 '효과음' · 배경음악 줄이기 곡선과 '여기는 줄이지 않기'",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/9877adfd9e735b261c0389a35fd50abdf1451c04.zip",
+  "commit": "9877adfd9e735b261c0389a35fd50abdf1451c04",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f2b9c716c8e68a865ad7cf0617c7d50f314a4bb5dcd67b1d15c2cc5e1bc65606",
