@@ -159,6 +159,18 @@
   #pvGuides { position: absolute; inset: 0; z-index: 72; pointer-events: none; }
   #pvGuides i { position: absolute; background: var(--accent); box-shadow: 0 0 2px rgba(0,0,0,.8); }
   .mon.focus { box-shadow: inset 0 0 0 1px var(--accent); }  /* 미리보기를 눌렀음 → 화살표가 고른 글자·그림 자리를 옮김 */
+  /* 미리보기 확대 (D-336): 화면보다 크면 굴려 봄 (가운데 맞춤 대신 위·왼쪽부터 · 작으면 가로 가운데) */
+  .mon.zoomed { display: block; overflow: auto; }
+  .mon.zoomed .frame { margin: 8px auto; }
+  #monZoom { flex: none; background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 4px; font-size: 11.5px; padding: 1px 2px; height: 22px; }
+  /* 미리보기 크게 ( ` · D-336): 위 줄만 남기고 프로그램 모니터가 창을 채움 (다른 패널은 뒤에 그대로 · 창·메뉴(z 45~)는 그 위) */
+  .app.monmax > .monp { position: absolute; grid-column: 1 / -1 !important; grid-row: 1 / -1 !important; left: 0; right: 0; top: 42px; bottom: 0; z-index: 35; }  /* 칸 자리(인라인 grid-column·row)를 풀어야 창 전체가 기준 */
+  .app.monmax > .split, .app.monmax > .vsplit { display: none; }
+  /* 재생 위치 시각 칸 (D-335): 시간 표시를 누르면 써 넣는 칸 */
+  .tcbig.tcclick { cursor: text; border-radius: 3px; }
+  .tcbig.tcclick:hover { background: var(--panel-3); }
+  input.tcedit { flex: none; width: 104px; font: 700 14px/1.2 PretendardE, sans-serif; font-variant-numeric: tabular-nums; color: var(--play); background: var(--panel-2); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; outline: none; }
+  input.tcedit.sm { width: 96px; font-size: 13px; }
   #sframe video, #sframe img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .mbox .an { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 1px solid #fff; border-radius: 50%; }
   .ctl { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--line); }
@@ -412,6 +424,7 @@
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
   .keys kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 5px; color: var(--ink); font: 11px ui-monospace, monospace; white-space: nowrap; }
   .keys h5 { grid-column: 1 / -1; margin: 8px 0 2px; color: var(--ink); font-size: 12px; }
+  .keys .pd, .hint .pd { font-style: normal; font-size: 10px; font-weight: 700; color: var(--peak); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; margin-left: 2px; white-space: nowrap; }  /* 프리미어와 다르게 둔 키 (D-338) */
   /* 떠 있는 단추 줄 (D-327) · 도구 줄 빠른 설명 */
   .fbar { position: absolute; z-index: 80; display: none; align-items: center; gap: 2px; padding: 2px 3px; background: #262626; border: 1px solid var(--line-2); border-radius: 7px; box-shadow: 0 6px 18px rgba(0,0,0,.55); white-space: nowrap; pointer-events: none; }
   .fbar input, .fbar button { pointer-events: auto; }  /* 단추·칸 사이 틈은 누르기가 아래로 지나감 */
@@ -502,7 +515,8 @@
   <!-- 가운데 위: 프로그램 모니터 -->
   <div class="panel monp" style="grid-column:2;grid-row:2">
     <div class="ph" id="mtabs"><button class="tab on" data-mon="prog" title="편집한 결과 (프로그램 모니터)">프로그램</button><button class="tab" data-mon="src" title="넣기 전에 미리 보고 필요한 부분만 고르기 (소스 모니터)">소스</button><span class="hint" id="monFmt" style="margin-left:6px"></span><div class="sp"></div>
-      <div class="seg" id="fmtSeg"><button data-v="shorts">쇼츠 9:16</button><button data-v="long">롱폼 16:9</button></div></div>
+      <div class="seg" id="fmtSeg"><button data-v="shorts">쇼츠 9:16</button><button data-v="long">롱폼 16:9</button></div>
+      <button class="ic" id="monMax" title="미리보기 크게 — 창 전체로 ( ` ) · 한 번 더 누르면 되돌려요"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg></button></div>
     <div id="srcView" style="display:none;flex:1;min-height:0;flex-direction:column">
       <div class="mon" id="smon"><div class="frame" id="sframe"></div><div class="hint" id="sEmpty" style="position:absolute;padding:20px;text-align:center">미디어 탭에서 파일을 두 번 누르면 여기서 미리 보고<br>필요한 부분만 I·O 로 골라 넣을 수 있어요.</div></div>
       <div class="scrub" id="sscrub"><div class="io" id="sIO"></div><div class="fill" id="sFill"></div><div class="knob" id="sKnob"></div></div>
@@ -517,14 +531,15 @@
     <div class="scrub" id="scrub"><div class="io" id="scrubIO"></div><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
     <div class="ctl" id="pctl">
       <span class="tcbig" id="tcNow">00:00:00:00</span>
+      <select id="monZoom" title="미리보기 확대 — 맞춤 · 50% · 100% · 200% (영상 크기 기준) · 크게 보면 굴려서 봐요 (손 도구 H 로 끌기)"><option value="0">맞춤</option><option value="0.5">50%</option><option value="1">100%</option><option value="2">200%</option></select>
       <div class="sp"></div>
       <button class="ic" id="bIn" title="시작점 표시 (I)">⇤</button>
       <button class="ic" id="bOut" title="끝점 표시 (O)">⇥</button>
-      <button class="ic" id="bPrevEdit" title="이전 편집점 (↑)">⏮</button>
+      <button class="ic" id="bPrevEdit" title="이전 편집점 (↑) — 대상 트랙 · 고른 자막·타이틀·도형 트랙 (Shift: 모든 트랙)">⏮</button>
       <button class="ic" id="bBack" title="1프레임 뒤로 (←)">◀︎❚</button>
       <button class="ic" id="bPlay" title="재생/정지 (Space)" style="font-size:16px">▶</button>
       <button class="ic" id="bFwd" title="1프레임 앞으로 (→)">❚▶︎</button>
-      <button class="ic" id="bNextEdit" title="다음 편집점 (↓)">⏭</button>
+      <button class="ic" id="bNextEdit" title="다음 편집점 (↓) — 대상 트랙 · 고른 자막·타이틀·도형 트랙 (Shift: 모든 트랙)">⏭</button>
       <button class="ic" id="bLift" title="표시한 구간 들어내기 — 빈자리 남김 ( ; )">⇪</button>
       <button class="ic" id="bExtract" title="표시한 구간 잘라내기 — 뒤를 당김 ( ' )">⇲</button>
       <button class="ic" id="bMarker" title="마커 추가 (M)">◆</button>
@@ -556,7 +571,7 @@
     <div class="tl">
       <div class="tlbar">
         <span class="tcbig" id="tcNow2" style="font-size:13px">00:00:00:00</span>
-        <button class="btn sm tq" id="qSplit" title="재생 위치에서 자르기 (Ctrl+K) · 자막·타이틀을 골랐으면 그것을 나눠요">✂<span class="tx"> 자르기</span></button>
+        <button class="btn sm tq" id="qSplit" title="재생 위치에서 자르기 (Ctrl+K) · 자막·타이틀·도형을 골랐으면 그것만 나눠요 (밑의 영상은 그대로)">✂<span class="tx"> 자르기</span></button>
         <button class="btn sm tq" id="qCap" title="재생 위치에 자막 넣기 (Shift+T) · 바로 글을 쳐요 · Enter 확정 · 한 번 더 Enter 는 바로 뒤에 다음 자막">＋<span class="tx"> 자막</span></button>
         <button class="btn sm tq" id="qTitle" title="재생 위치에 타이틀 넣기 (T)">T<span class="tx"> 타이틀</span></button>
         <span class="hint" id="tlInfo"></span>
@@ -617,42 +632,60 @@
   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" id="spCancel">취소</button><button class="btn pri" id="spGo">적용</button></div>
 </div></div>
 
-<div class="modal" id="helpModal"><div class="box" style="width:640px">
-  <h3>단축키</h3><div class="hint" style="margin-bottom:6px">프리미어 프로와 같은 키를 쓰도록 맞췄어요. 한글 입력 상태여도 돼요. 클립·자막·미리보기를 <b>오른쪽 클릭</b>하면 자주 쓰는 일이 단축키와 함께 나와요.</div>
+<div class="modal" id="helpModal"><div class="box" style="width:660px">
+  <h3>단축키</h3><div class="hint" style="margin-bottom:6px">프리미어 프로 기본 키에 맞췄어요. 일부러 다르게 둔 키에는 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> 표시가 있어요. 한글 입력 상태여도 돼요. 클립·자막·미리보기를 <b>오른쪽 클릭</b>하면 자주 쓰는 일이 단축키와 함께 나와요. (이 창은 ? · Ctrl+Alt+K · 키 바꾸기는 아직 안 돼요)</div>
   <div class="keys">
     <h5>자주 쓰는 것</h5>
     <kbd>미리보기 누르기</kbd><span>그 자리의 자막·타이틀·도형·영상을 바로 골라요 (재생 중이면 멈추고 골라요) · 누른 채 끌면 옮겨요</span>
-    <kbd>미리보기에서 자막 끌기</kbd><span>그 자막 트랙 전체 자리 · <b>Alt+끌기</b>: 이 자막만 · 가운데·가장자리에 착 붙음 (Shift: 안 붙게)</span>
-    <kbd>← → ↑ ↓</kbd><span>미리보기를 누른 뒤: 고른 자막·타이틀·도형 자리 1% (Shift: 5%)</span><kbd>Shift+T</kbd><span>재생 위치에 자막 넣기 → 바로 글 쓰기</span>
-    <kbd>Enter</kbd><span>자막 글 확정 · 한 번 더: 바로 뒤에 다음 자막 (Shift+Enter: 줄바꿈)</span><kbd>[ · ]</kbd><span>고른 것의 시작 · 끝을 재생 위치로</span>
-    <kbd>Alt+← →</kbd><span>고른 클립·자막·타이틀 1프레임씩 옮기기 (Shift: 5프레임)</span><kbd>Shift+\</kbd><span>고른 것 크게 보기 (작은 자막도 끝을 잡기 쉽게)</span>
-    <kbd>끌면서 Shift</kbd><span>자석(착 붙기)을 잠깐 반대로 · 끄는 동안 시간·몇 프레임 옮겼는지 보여요</span><kbd>?</kbd><span>이 단축키 창</span>
+    <kbd>미리보기에서 자막 끌기</kbd><span>그 자막 트랙 전체 자리 · <b>Alt+끌기</b>: 이 자막만 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어 Alt+끌기는 복제) · 가운데·가장자리에 착 붙음 (Shift: 안 붙게)</span>
+    <kbd>← → ↑ ↓</kbd><span>미리보기를 누른 뒤: 고른 자막·타이틀·도형 자리 1% (Shift: 5%)</span>
+    <kbd>Shift+T</kbd><span>재생 위치에 자막 넣기 → 바로 글 쓰기 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 다듬기 창)</span>
+    <kbd>Enter</kbd><span>자막 글 확정 · 한 번 더: 바로 뒤에 다음 자막 (Shift+Enter: 줄바꿈)</span>
+    <kbd>[ · ]</kbd><span>고른 것의 시작 · 끝을 재생 위치로 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 클립 소리 크기 · 프리미어 손버릇이면 Q · W · E)</span>
+    <kbd>Q · W · E</kbd><span>고른 자막·타이틀·도형: 시작(Q) · 끝(W)을 재생 위치로 · E: 가까운 끝을 재생 위치까지 늘이거나 줄이기</span>
+    <kbd>Alt+← →</kbd><span>고른 클립·자막·타이틀 1프레임씩 옮기기 (Shift: 5프레임)</span>
+    <kbd>숫자 · Enter</kbd><span>그 시각으로 (1015 = 10초 15프레임 · 5:22 도 돼요) · 미리보기 아래·타임라인 위 시간 표시를 눌러 써도 돼요</span>
+    <kbd>+10 · −10 Enter</kbd><span>고른 것을 10프레임 뒤 · 앞으로 (안 골랐으면 재생 위치) — 숫자패드 + − 로 시작하거나 시간 표시를 눌러 써요</span>
+    <kbd>Shift+\</kbd><span>고른 것 크게 보기 (작은 자막도 끝을 잡기 쉽게)</span>
+    <kbd>`</kbd><span>미리보기 크게 (한 번 더: 되돌리기 · 마우스 자리와 상관없이 늘 미리보기) · 미리보기 아래 '맞춤'에서 50% · 100% · 200%</span>
+    <kbd>끌면서 S</kbd><span>자석 켜기 / 끄기 (프리미어와 같음)</span>
+    <kbd>끌면서 Shift</kbd><span>자석을 잠깐 반대로 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 한 방향으로만 옮기기) · 끄는 동안 시간·몇 프레임 옮겼는지 보여요</span>
+    <kbd>? · Ctrl+Alt+K</kbd><span>이 단축키 창</span>
     <h5>재생 · 이동</h5>
     <kbd>Space</kbd><span>재생 / 정지</span><kbd>J · K · L</kbd><span>뒤로 재생 · 정지 · 앞으로 재생 (누를수록 빠르게)</span>
-    <kbd>← →</kbd><span>1프레임 이동 (Shift: 5프레임)</span><kbd>↑ ↓</kbd><span>이전 / 다음 편집점</span>
+    <kbd>K 누른 채 J · L</kbd><span>1프레임 뒤 · 앞으로</span>
+    <kbd>← →</kbd><span>1프레임 이동 (Shift: 5프레임)</span>
+    <kbd>↑ ↓</kbd><span>이전 / 다음 편집점 — 대상 트랙(트랙 머리 V1·A1 단추를 켠 트랙) · 자막·타이틀·도형을 골랐으면 그 트랙의 시작·끝에서도 멈춰요</span>
+    <kbd>Shift+↑ ↓</kbd><span>모든 트랙의 편집점 (보이는 자막·타이틀·도형 트랙까지)</span>
     <kbd>Home / End</kbd><span>처음 / 끝으로</span><kbd>= / − / \</kbd><span>타임라인 확대 / 축소 / 전체 보기</span>
+    <kbd>휠</kbd><span>타임라인을 시간 방향(좌우)으로 · Ctrl+휠: 트랙 위아래 · Alt+휠: 확대 / 축소</span>
     <h5>도구</h5>
-    <kbd>V</kbd><span>선택 도구</span><kbd>A</kbd><span>앞으로 트랙 선택 (누른 곳부터 뒤를 전부)</span>
+    <kbd>V</kbd><span>선택 도구</span><kbd>A · Shift+A</kbd><span>앞으로 트랙 선택 (누른 곳부터 뒤를 전부) · 뒤로 트랙 선택 (누른 곳까지 앞을 전부)</span>
     <kbd>B</kbd><span>잔물결 편집 (끝을 끌면 뒤 클립이 따라옴)</span><kbd>N</kbd><span>롤링 편집 (두 클립 사이 편집점 옮기기)</span>
-    <kbd>R</kbd><span>속도 조정 (끝을 끌어 빠르게/느리게)</span><kbd>C</kbd><span>자르기 (Shift+클릭: 모든 트랙)</span>
+    <kbd>R</kbd><span>속도 조정 (끝을 끌어 빠르게/느리게)</span><kbd>C</kbd><span>자르기 (Shift+클릭: 모든 트랙 · 자막·타이틀·도형은 누른 곳에서 그것만 둘로)</span>
     <kbd>Y</kbd><span>밀어넣기 (자리 그대로, 안의 장면만 바꿈)</span><kbd>U</kbd><span>밀기 (옮기면 양옆 길이가 맞춰짐)</span>
-    <kbd>H · Z</kbd><span>손 (둘러보기) · 확대/축소 (Alt+클릭: 축소)</span><kbd>S</kbd><span>자석 켜기/끄기</span>
+    <kbd>H · Z</kbd><span>손 (둘러보기 · 크게 본 미리보기도 끌어서) · 확대/축소 (Alt+클릭: 축소)</span><kbd>S</kbd><span>자석 켜기/끄기</span>
     <h5>편집</h5>
-    <kbd>Ctrl+K</kbd><span>재생 위치에서 자르기 (자막·타이틀을 골랐으면 그것을 나눔 · Ctrl+Shift+K: 모든 트랙)</span><kbd>Q · W</kbd><span>재생 위치까지 앞/뒤를 잘라내고 당기기</span>
+    <kbd>Ctrl+K</kbd><span>재생 위치에서 자르기 — 자막·타이틀·도형을 골랐으면 그것만 나눠요 (밑의 영상은 그대로) · Ctrl+Shift+K: 모든 트랙</span>
+    <kbd>Q · W</kbd><span>재생 위치까지 앞/뒤를 잘라내고 당기기 · 자막·타이틀·도형을 골랐으면 그것의 시작·끝만 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (뒤 자막을 당기지 않아 대사 싱크가 그대로)</span>
+    <kbd>Alt+Q · Alt+W</kbd><span>재생 위치까지 앞/뒤를 잘라내고 빈자리는 그대로 (뒤 클립이 안 움직여요 · Ctrl+Alt+Q · W 도 같음)</span>
+    <kbd>E</kbd><span>고른 것의 가까운 끝(시작 또는 끝)을 재생 위치로</span><kbd>D</kbd><span>재생 위치의 클립 고르기 (대상 트랙 · 자막·타이틀을 골라 둔 트랙이면 그 트랙)</span>
+    <kbd>Alt+↑ ↓</kbd><span>고른 클립·자막·타이틀·도형을 위 · 아래 트랙으로 (같은 시각 그대로 · 클립은 그 자리를 덮어요)</span>
     <kbd>Delete</kbd><span>지우기 (빈자리 남김)</span><kbd>Shift+Delete</kbd><span>잔물결 삭제 (뒤를 당김) · Alt+Backspace도 같음</span>
     <kbd>I · O · X</kbd><span>시작점 · 끝점 · 클립 길이로 표시 (Ctrl+Shift+X: 지우기)</span><kbd>; · '</kbd><span>표시 구간 들어내기 · 잘라내고 당기기</span>
-    <kbd>Ctrl+C / V</kbd><span>복사 / 붙여넣기 (Ctrl+Shift+V: 끼워 넣기, Ctrl+Alt+V: 효과만)</span><kbd>Alt+끌기</kbd><span>복제해서 옮기기 (Ctrl+끌기: 끼워 넣기)</span>
+    <kbd>Ctrl+C / V</kbd><span>복사 / 붙여넣기 (Ctrl+Shift+V: 끼워 넣기, Ctrl+Alt+V: 효과만)</span><kbd>Alt+끌기</kbd><span>클립 복제해서 옮기기 (Ctrl+끌기: 끼워 넣기)</span>
     <kbd>Alt+← →</kbd><span>고른 클립·자막·타이틀·도형 1프레임씩 옮기기 (Shift: 5프레임)</span><kbd>Ctrl+L</kbd><span>영상·소리 연결 / 해제</span>
     <kbd>Ctrl+D</kbd><span>재생 위치 편집점에 기본 장면 전환 (Ctrl+Shift+D: 소리, Shift+D: 선택 클립)</span><kbd>Ctrl+R</kbd><span>속도 · 길이</span>
-    <kbd>G</kbd><span>소리 크기(게인)</span><kbd>M</kbd><span>마커 (Shift+M 다음 · Ctrl+Shift+M 이전)</span>
+    <kbd>G</kbd><span>소리 크기(게인)</span><kbd>M</kbd><span>마커 (Shift+M 다음 · Ctrl+Shift+M 이전 · Ctrl+Alt+M: 재생 위치 마커 지우기 · Ctrl+Alt+Shift+M: 모두 지우기)</span>
     <kbd>T</kbd><span>타이틀 추가 (Shift+T: 자막 넣기)</span><kbd>Ctrl+A</kbd><span>모두 선택 (Ctrl+Shift+A: 선택 해제)</span>
     <kbd>트랙 머리 끌기</kbd><span>자막·타이틀·도형 트랙 머리(C1·T1·G1 표시)를 위아래로 끌면 앞뒤 순서가 바뀌어요 · 위 트랙이 화면 앞</span>
     <kbd>Shift+I · O</kbd><span>시작점 · 끝점으로 가기 (Ctrl+Shift+I · O: 지우기)</span><kbd>Delete</kbd><span>효과 컨트롤에서 고른 키프레임 지우기</span>
     <kbd>Ctrl+Z</kbd><span>되돌리기 (Ctrl+Shift+Z 다시 실행)</span><kbd>Ctrl+M</kbd><span>내보내기</span>
+    <kbd>Alt+1~9</kbd><span>MSG 후보 카드 번호로 같은 장면에서 바꿔 보기 ('추천 · 자동 편집' 탭)</span>
     <h5>소스 모니터 (미디어를 두 번 클릭)</h5>
     <kbd>I · O</kbd><span>넣을 부분의 시작 · 끝</span><kbd>, · .</kbd><span>재생 위치에 끼워 넣기 · 덮어쓰기</span>
     <kbd>Space · ← →</kbd><span>미리 보기 재생 · 프레임 이동</span><kbd>Esc</kbd><span>프로그램 모니터로 돌아가기</span>
-    <kbd>J · K · L</kbd><span>1초 뒤로 · 정지 · 재생 (누를수록 빠르게)</span><kbd>Home / End</kbd><span>고른 부분의 처음 / 끝</span>
+    <kbd>J · K · L</kbd><span>1초 뒤로 · 정지 · 재생 (누를수록 빠르게) <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (J 는 거꾸로 재생 대신 1초 뒤로)</span><kbd>Home / End</kbd><span>고른 부분의 처음 / 끝</span>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="helpClose">닫기</button></div>
 </div></div>
@@ -2472,7 +2505,23 @@ function pause() {
   $("bPlay").textContent = "▶"; frameDirty = true; updateFxLive();
 }
 function toggle() { playing ? pause() : play(); }
-function edits() { const s = new Set([0]); for (const it of S.items) { s.add(+it.start.toFixed(4)); s.add(+iEnd(it).toFixed(4)); } return [...s].sort((a, b) => a - b); }
+// 편집점 (↑ ↓ · ⏮ ⏭ · D-333) — 프리미어처럼 대상 트랙(트랙 머리 V·A 를 켠 트랙 · 하나도 안 켰으면 모든 트랙)의 클립 끝 +
+// 고른 자막·타이틀·도형이 있는 트랙(또는 머리를 눌러 고른 글자·그림 트랙)의 경계 · any(Shift+↑ ↓): 모든 트랙 + 보이는 글자·그림 트랙 모두
+// 글자·그림 경계는 그것이 처음 보이는 프레임 · 사라지는 프레임 (미리보기·내보내기와 같은 셈 · TEPS · _ass_ftime)
+function edits(any) {
+  const s = new Set([0]), add = t => s.add(+(+t).toFixed(4)), fc = t => Math.ceil((t - TEPS) * FPS) / FPS;
+  const tg = new Set(S.tracks.filter(t => t.target).map(t => t.id));
+  for (const it of S.items) if (any || !tg.size || tg.has(it.track)) { add(it.start); add(iEnd(it)); }
+  const rows = new Set(any ? (S.otracks || []).filter(o => otVisible(o)).map(o => o.id) : [otSelRow()].filter(Boolean));
+  if (rows.size) {
+    for (const c of capsTL()) if (rows.has(c.trk)) { add(fc(c.s)); add(fc(c.e)); }
+    for (const g of S.titles) if (rows.has(trkOf(g, "t"))) { add(fc(g.start)); add(fc(g.start + g.dur)); }
+    for (const g of [...S.shapes, ...S.tactics]) if (!g.full && rows.has(trkOf(g, "g"))) { add(fc(g.start)); add(fc(g.start + g.dur)); }
+  }
+  const tot = total() + 1e-6;
+  return [...s].filter(t => t <= tot).sort((a, b) => a - b);
+}
+function goEdit(dir, any) { pause(); const ts = edits(any); if (dir < 0) { const p = ts.filter(t => t < T - HF); seek(p.length ? p[p.length - 1] : 0); } else { const n = ts.find(t => t > T + HF); if (n !== undefined) seek(n); } autoscroll(); }
 let lastT = -1, lastFx = 0, preTick = 0;
 function loop(now) {
   requestAnimationFrame(loop); // 한 프레임에서 오류가 나도 화면·재생이 멈추지 않게 먼저 다음 프레임 예약
@@ -2506,6 +2555,9 @@ function layoutFrame() {
   const ar = short ? 9 / 16 : 16 / 9;
   let h = mon.clientHeight - 16, w = h * ar;
   if (w > mon.clientWidth - 16) { w = mon.clientWidth - 16; h = w / ar; }
+  if (MONZ > 0) { w = BW() * MONZ; h = BH() * MONZ; } // 미리보기 확대 50%·100%·200% (영상 크기 기준 · 프리미어 모니터 확대 · D-336)
+  const big = MONZ > 0 && (w > mon.clientWidth - 16 || h > mon.clientHeight - 16); // 화면보다 크면 굴려 봄
+  if (big !== mon.classList.contains("zoomed")) { mon.classList.toggle("zoomed", big); if (!big) mon.scrollLeft = mon.scrollTop = 0; }
   f.style.width = Math.max(10, w) + "px"; f.style.height = Math.max(10, h) + "px";
   document.querySelectorAll("#fmtSeg button").forEach(b => b.classList.toggle("on", b.dataset.v === S.format));
   $("monFmt").textContent = short ? "1080×1920 · 세로" : "1920×1080 · 가로";
@@ -2922,6 +2974,7 @@ function pvSelRect() {
 }
 $("frame").addEventListener("mousedown", ev => {
   if (ev.button !== 0 || monMode !== "prog") return;
+  if (tool === "hand" && $("mon").classList.contains("zoomed")) { ev.preventDefault(); ev.stopPropagation(); return monPan(ev); } // 확대한 미리보기: 손 도구(H)로 끌어 둘러보기 (프리미어 · D-336)
   if (ev.target.closest("#mbox i, #gbox i, #tacH i")) return; // 크기 손잡이·점은 그 자리 손잡이가 (아래 mousedown)
   ev.preventDefault(); ev.stopPropagation();
   hideMenu(); pvCommitText(); monFocus = true; $("mon").classList.add("focus");
@@ -3167,11 +3220,12 @@ const TOOLS = [
 // 도구 줄: 단추마다 단축키 글자 · 올리면 바로 이름·단축키·하는 일 (D-327 · native title 대신 data-tip — 두 번 뜨지 않게)
 const tipOf = (name, key, what) => `<b>${esc(name)}</b>${key ? ` · ${esc(key)}` : ""}${what ? `<br>${esc(what)}` : ""}`;
 function renderTools() {
-  $("tools").innerHTML = TOOLS.map(([id, key, tip, svg]) => { const [nm, what] = tip.split(" — "); return `<button class="ic ${tool === id ? "on" : ""}" data-tool="${id}" aria-label="${esc(nm)}" data-tip="${tipOf(nm.replace(/ \([A-Z]\)$/, ""), key, what)}"><svg viewBox="0 0 16 16">${svg}</svg><span class="kb">${key}</span></button>`; }).join("") +
+  // 트랙 선택 칸은 앞으로(A)·뒤로(Shift+A) 중 지금 것 (프리미어처럼 한 칸에 둘 · D-334)
+  $("tools").innerHTML = TOOLS.map(x => x[0] === "tsel" && tool === "tselb" ? TSELB : x).map(([id, key, tip, svg]) => { const [nm, what] = tip.split(" — "); return `<button class="ic ${tool === id ? "on" : ""}" data-tool="${id}" aria-label="${esc(nm)}" data-tip="${tipOf(nm.replace(/ \((?:Shift\+)?[A-Z]\)$/, ""), key, what)}"><svg viewBox="0 0 16 16">${svg}</svg><span class="kb">${key.replace("Shift+", "⇧")}</span></button>`; }).join("") +
     `<hr><button class="ic" id="tTitle" aria-label="타이틀 추가 (T)" data-tip="${tipOf("타이틀 넣기", "T", "재생 위치에 화면 글자 (자막은 Shift+T)")}" style="font-weight:900">T<span class="kb">T</span></button><button class="ic" id="tShape" aria-label="도형 추가" data-tip="${tipOf("도형 넣기", "", "재생 위치에 사각형 (그래픽 탭에 띠·라벨)")}"><svg viewBox="0 0 16 16"><rect x="2.5" y="4" width="11" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>`;
   document.querySelectorAll("[data-tool]").forEach(b => b.onclick = () => setTool(b.dataset.tool));
   $("tTitle").onclick = addTitle; $("tShape").onclick = () => addShape("사각형");
-  const t = TOOLS.find(x => x[0] === tool); $("toolHint").textContent = t ? t[2].split(" — ")[0] : "";
+  const t = [...TOOLS, TSELB].find(x => x[0] === tool); $("toolHint").textContent = t ? t[2].split(" — ")[0] : "";
 }
 function setTool(t) { tool = t; renderTools(); $("tracks").className = "tracks t-" + t; }
 function rowList() {  // 위에서부터: 시간 · 글자·그림 줄(위 줄 = 화면 앞 · D-296) · 영상 트랙(V 큰 번호 먼저) · 소리 트랙
@@ -3454,8 +3508,8 @@ $("tracks").addEventListener("mousedown", ev => {
   const trn = t.closest(".trn");
   if (trn) return trnDown(ev, trn);
   if (tool === "razor") { const m = snapTo([tAt], new Set()); return razorAt(rk, tAt + (Math.abs(m.adj) * zoom < 6 ? m.adj : 0), ev.shiftKey); }
-  if (tool === "tsel") {
-    const pick = S.items.filter(x => x.start >= tAt - EPS && unlocked(x.track) && (!ev.shiftKey || x.track === rk));
+  if (tool === "tsel" || tool === "tselb") { // 앞으로(A): 누른 곳부터 뒤 · 뒤로(Shift+A · D-334): 누른 곳까지 앞 (Shift: 그 트랙만)
+    const back = tool === "tselb", pick = S.items.filter(x => (back ? iEnd(x) <= tAt + EPS : x.start >= tAt - EPS) && unlocked(x.track) && (!ev.shiftKey || x.track === rk));
     if (!pick.length) return;
     selI = new Set(pick.map(x => x.id)); primary = pick[0].id; selX = null; renderTimeline(); renderPanels();
     return startMove(ev, pick.sort((a, b) => a.start - b.start)[0]);
@@ -3517,6 +3571,12 @@ function razorAt(tid, t, all) {
   if (!its.length) return;
   if (!all && linkOn) for (const x of [...its]) for (const l of linkedOf(x)) if (!its.includes(l) && unlocked(l.track) && l.start < t - HF && iEnd(l) > t + HF) its.push(l);
   commit("자르기"); for (const x of its) splitItem(x, t); changed(false);
+}
+// 자르기 도구(C)로 자막·타이틀·도형·전술 그림을 누름: 그것을 고르고 누른 곳(재생 위치 6px 안이면 재생 위치 · 다른 편집점에도 붙음)에서 둘로 — 재생 위치는 그대로 (D-332)
+function razorOverlay(k, id, tAt) {
+  const sn = snapTo([tAt], new Set([id])), t = fr(tAt + (Math.abs(sn.adj) * zoom < 6 ? sn.adj : 0));
+  selKf = null; selX = { k, id }; selI.clear(); primary = null; selSrc = "tl";
+  renderTimeline(); renderPanels(); splitSel(t);
 }
 function emptyDown(ev, rk, tAt) {
   const x0 = ev.clientX, y0 = ev.clientY, tr = $("tracks").getBoundingClientRect(); let mq = false;
@@ -3740,6 +3800,7 @@ function capDown(ev, rk, tAt) {
   if (!hit) return emptyDown(ev, rk, tAt);
   const eh = t.closest(".eh"), edge = eh ? (eh.classList.contains("l") ? "l" : "r") : null, T0 = T;
   const cap = P.captions.find(x => x.id === hit); if (!cap) return;
+  if (tool === "razor") return razorOverlay("caption", hit, tAt); // 자르기 도구: 누른 곳에서 이 자막을 둘로 (밑의 영상은 그대로 · D-332)
   const piece = capPiece(cap, c && c.dataset.ps != null ? +c.dataset.ps + 1e-4 : tAt);
   selX = { k: "caption", id: hit }; selI.clear(); selSrc = "tl"; seek(fr(edge === "r" && piece ? Math.max(piece.s, piece.e - 1 / FPS) : edge === "l" && piece ? piece.s : tAt));
   renderTimeline(); renderPanels(); focusCap(hit, false);
@@ -3820,6 +3881,7 @@ function gfxDown(ev, rk, tAt) {
   const ce = ev.target.closest(".clip"); if (!ce) return emptyDown(ev, rk, tAt);
   const k = ce.dataset.gk, id = ce.dataset.gid, g = (k === "title" ? S.titles : k === "tact" ? S.tactics : S.shapes).find(x => x.id === id);
   if (!g) return;
+  if (tool === "razor") return g.full ? toast("처음부터 끝까지 나오는 도형은 나눌 수 없어요") : razorOverlay(k, id, tAt); // 자르기 도구: 누른 곳에서 둘로 (D-332)
   selX = { k, id }; selI.clear(); setRtab("fx"); selSrc = "tl"; snapT = T;
   if (!g.full && (T < g.start || T >= g.start + g.dur)) seek(fr(Math.min(g.start + Math.min(0.5, g.dur / 2), g.start + g.dur - 0.05)));
   if (g.full) { snapT = null; renderTimeline(); renderPanels(); return; }
@@ -4566,7 +4628,7 @@ function msgSection() {
     <div class="hint" style="margin-top:4px">배경음악: 앱이 만든 음악을 써요 · 내 음악을 쓰려면 <a href="#" id="msgBgm">'내 배경음악' 폴더</a>에 넣으세요 (분위기 폴더 신남·경쾌·잔잔·감성 · 저작권 걱정 없는 음악만)</div>
     <div style="margin-top:8px"><button class="btn pri" id="msgGo">MSG 후보 만들기</button></div>
     <div class="hint" style="margin-top:6px">지금 편집본은 그대로 두고 "MSG 후보 A · 스타일 · 양"을 새로 만들어요 (가편집 다시 만들기로 바뀌지 않아요).</div>
-    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(숫자 키 ${cands.length > 1 ? `1~${Math.min(9, cands.length)}` : "1"}: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
+    ${cands.length ? `<h4 style="margin-top:12px">후보 비교 <span class="hint">(Alt+${cands.length > 1 ? `1~${Math.min(9, cands.length)}` : "1"}: 같은 장면으로 바꿔 보기)</span></h4>${cands.map((q, i) => msgCard(q, i)).join("")}` : ""}
     ${cur ? msgList(cur) : ""}
   </div>`;
 }
@@ -4649,7 +4711,7 @@ function msgAdd(res) {
   ver++; switchSeq(res.sequences[0].id); renderBin(); renderRec(); if (capNote) renderCaps();
   // 만들지 않은 후보(쇼츠가 15초 안 됨)는 그 까닭도 (예전: 로그에만 남아 쇼츠를 골랐는데 롱폼만 생긴 까닭을 모름 · D-267)
   const skipNote = (res.notes || []).length ? ` · ${res.notes[0].why}` : "";
-  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote}${skipNote} · 숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
+  toast(`MSG 후보 ${res.sequences.length}개를 만들었어요${capNote}${skipNote} · Alt+숫자 키로 같은 장면에서 바꿔 볼 수 있어요`);
 }
 // 같은 원본 장면으로 다른 후보 보기: 지금 화면의 원본 시각 → 그 후보의 타임라인 시각 (다시 보기·티저 같은 noCaps 클립은 빼고)
 function srcAtT(q, t) { const it = q.items.find(i => i.track === "V1" && i.media === "main" && !i.noCaps && t >= i.start - 1e-6 && t < iEnd(i)); return it ? mt(it, t) : null; }
@@ -5241,26 +5303,28 @@ function alignSel(where) {
 // '이 자막만' 자리 지우기 → 트랙 자리로
 function capPosReset(id) { if (!S.capPos || !S.capPos[id]) return; commit("트랙 자리로 되돌리기"); delete S.capPos[id]; if (!Object.keys(S.capPos).length) delete S.capPos; changed(false); toast("이 자막을 트랙 자리로 되돌렸어요"); }
 // 고른 것 나누기 (재생 위치 · Ctrl+K 와 같은 자리): 클립은 자르기 · 자막은 그 조각을 실어 나르는 소리 클립의 원본 시각에서 (B롤·L 컷 아래에서도 · D-322) · 타이틀·도형은 둘로
-function splitSel() {
+// at: 자르기 도구(C)로 누른 타임라인 시각 (D-332 · 없으면 재생 위치)
+function splitSel(at) {
   const k = selKind(); if (!k) return splitAt(T, false);
   if (k === "clip") return splitAt(T, false);
   if (selLocked()) return toast(otLockNote);
+  const click = typeof at === "number" && isFinite(at); if (!click) at = T;
   if (k === "caption") {
-    const cap = selCap(), p = capPieces(cap).find(x => T > x.s + 0.05 && T < x.e - 0.05);
-    const it = p && [p.it, p.it2].find(x => T >= x.start - 1e-6 && T < iEnd(x)), src = it ? mt(it, T) : -1;
-    if (!p || !it || src <= cap.start + 0.05 || src >= cap.end - 0.05) return toast("재생 위치를 자막 안쪽에 두고 눌러 주세요");
+    const cap = selCap(), p = capPieces(cap).find(x => at > x.s + 0.05 && at < x.e - 0.05);
+    const it = p && [p.it, p.it2].find(x => at >= x.start - 1e-6 && at < iEnd(x)), src = it ? mt(it, at) : -1;
+    if (!p || !it || src <= cap.start + 0.05 || src >= cap.end - 0.05) return toast(click ? "자막 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 자막 안쪽에 두고 눌러 주세요");
     commit("자막 나누기"); const words = cap.text.split(/\s+/).filter(Boolean), r = (src - cap.start) / (cap.end - cap.start), cut = Math.max(1, Math.round(words.length * r));
     const b = { id: nid(), start: r6c(src), end: cap.end, text: words.slice(cut).join(" ") || cap.text, ...(cap.trk ? { trk: cap.trk } : {}), ...(cap.tm ? { tm: 1 } : {}) }; // 나눈 뒤쪽도 같은 자막 줄
     cap.end = r6c(src); cap.text = words.slice(0, cut).join(" ") || cap.text;
     for (const q of P.sequences) if (q.capPos && q.capPos[cap.id]) q.capPos[b.id] = { ...q.capPos[cap.id] }; // '이 자막만' 자리도 함께
-    P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); changed(); return toast("재생 위치에서 자막을 나눴어요");
+    P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); changed(); return toast(click ? "누른 곳에서 자막을 나눴어요" : "재생 위치에서 자막을 나눴어요");
   }
   const g = selG(); if (!g) return;
   if (g.full) return toast("처음부터 끝까지 나오는 도형은 나눌 수 없어요");
   if (g.follow && g.follow.length) return toast("선수를 따라가는 전술 그림은 나눌 수 없어요");
-  const t = fr(T); if (t <= g.start + 1 / FPS || t >= g.start + g.dur - 1 / FPS) return toast("재생 위치를 그 안쪽에 두고 눌러 주세요");
+  const t = fr(at); if (t <= g.start + 1 / FPS || t >= g.start + g.dur - 1 / FPS) return toast(click ? "그 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 그 안쪽에 두고 눌러 주세요");
   commit("나누기"); const b = JSON.parse(JSON.stringify(g)); b.id = nid(); b.start = t; b.dur = r6c(g.start + g.dur - t); g.dur = r6c(t - g.start);
-  (k === "title" ? S.titles : k === "shape" ? S.shapes : S.tactics).push(b); changed(false); toast("재생 위치에서 둘로 나눴어요");
+  (k === "title" ? S.titles : k === "shape" ? S.shapes : S.tactics).push(b); changed(false); toast(click ? "누른 곳에서 둘로 나눴어요" : "재생 위치에서 둘로 나눴어요");
 }
 // 복제: 클립은 바로 뒤에 끼워 넣기 (효과 패널 '복제'와 같음) · 타이틀·도형·전술 그림은 바로 뒤에 같은 트랙 (겹치면 위 트랙)
 function dupSel() {
@@ -5775,7 +5839,7 @@ function pvAnchor() {
 let pvBarOn = false;  // 미리보기 쪽 단추 줄이 떠 있음 (못 띄우면 타임라인 쪽에 띄움)
 function pvBarPlace() {
   const bar = $("pvBar"); if (!bar) return;
-  const a = fbarWant() && selSrc === "pv" && monMode === "prog" ? pvAnchor() : null;
+  const a = fbarWant() && (selSrc === "pv" || monMax) && monMode === "prog" ? pvAnchor() : null; // 미리보기를 크게 했으면 타임라인 쪽은 가려져 있어 늘 미리보기 쪽 (D-336)
   let on = false;
   if (a) { fbarFill(bar); css(bar, "display", "flex"); on = pvBarPut(bar, a); }
   if (!on) css(bar, "display", "none");
@@ -5784,17 +5848,18 @@ function pvBarPlace() {
 function pvBarPut(bar, a) {
   // 화면 옆에 자리가 있으면(세로 9:16) 화면 밖 옆에 · 없으면(가로 16:9) 화면 위 다른 글자·도형·전술 그림·고른 것을 가리지 않는 빈 자리(고른 것 아래·위 가까운 곳)
   // 그런 자리가 없으면 타임라인 쪽 단추 줄 (리뷰: 고른 타이틀 바로 아래 단추 줄이 다른 타이틀을 덮어 누를 수 없었음)
-  const m = $("mon").getBoundingClientRect(), f = $("frame").getBoundingClientRect(), roomR = m.right - f.right - 14, roomL = f.left - m.left - 14, side = Math.max(roomR, roomL) >= 170;
+  const mon = $("mon"), sx = mon.scrollLeft, sy = mon.scrollTop; // 미리보기를 확대해 굴린 만큼 (단추 줄은 #mon 안이라 함께 굴러감 · D-336)
+  const m = mon.getBoundingClientRect(), f = $("frame").getBoundingClientRect(), roomR = m.right - f.right - 14, roomL = f.left - m.left - 14, side = Math.max(roomR, roomL) >= 170;
   css(bar, "maxWidth", side ? Math.min(400, Math.max(roomR, roomL)) + "px" : "none"); bar.classList.toggle("side", side);
   const bw = bar.offsetWidth, bh = bar.offsetHeight;
   if (side) {
-    css(bar, "left", (roomR >= roomL ? f.right - m.left + 8 : f.left - m.left - bw - 8) + "px");
-    css(bar, "top", clamp((a.top + a.bottom) / 2 - m.top - bh / 2, 2, m.height - bh - 2) + "px"); return true;
+    css(bar, "left", (roomR >= roomL ? f.right - m.left + 8 : f.left - m.left - bw - 8) + sx + "px");
+    css(bar, "top", clamp((a.top + a.bottom) / 2 - m.top - bh / 2, 2, m.height - bh - 2) + sy + "px"); return true;
   }
   const rects = pvObstacles(); rects.push({ left: a.left, right: a.right, top: a.top - 18, bottom: a.bottom + 2 }); // 고른 것 (위 꼬리표까지)
   const sp_ = freeSpot(rects, { l: m.left + 2, r: m.right - 2, t: m.top + 2, b: m.bottom - 2 }, bw, bh, { x: (a.left + a.right) / 2 - bw / 2, t: a.top - 18, b: a.bottom + 2 }, 4);
   if (!sp_) return false;
-  css(bar, "left", sp_.x - m.left + "px"); css(bar, "top", sp_.y - m.top + "px"); return true;
+  css(bar, "left", sp_.x - m.left + sx + "px"); css(bar, "top", sp_.y - m.top + sy + "px"); return true;
 }
 function tlBarPlace() {
   let bar = $("tlBar"); const tk = $("tracks"); if (!tk) return;
@@ -6065,6 +6130,184 @@ function showVideoQA(rep) {
 $("qaClose").onclick = () => $("qaModal").classList.remove("show");
 $("busyStop").onclick = () => { if (confirm(qaRunning ? "검수를 건너뛸까요?" : `${JOBNAME || "작업"}을(를) 멈출까요?`)) post("/api/edit/cancel", {}); };
 
+/* ---------- 프리미어 손버릇 키 (D-331~D-338) ----------
+   프리미어 프로를 쓰던 손으로 눌러도 기대한 일이 일어나게 (점검 보고서 2·3장 · 소유자: "이번 v2.21.1에 함께"):
+   숫자 = 시각 써 넣기(편집본 바꾸기는 Alt+숫자) · Ctrl+Alt+K = 단축키 창 · Ctrl+Alt+M = 마커 지우기 · Alt+Q·W = 빈자리 남기고 다듬기 ·
+   Alt+↑↓ = 위·아래 트랙 · 휠 = 시간 방향 · K 누른 채 L·J = 1프레임 · 고른 자막·타이틀·도형에는 Ctrl+K·C·Q·W·E 가 그것에 · ` = 미리보기 크게 */
+const OVK = ["caption", "title", "shape", "tact"];
+const selOv = () => OVK.includes(selKind());
+const OV_NAME = { caption: "자막", title: "타이틀", shape: "도형", tact: "전술 그림" };
+// Ctrl+K · ✂ 자르기 (D-332): 자막·타이틀·도형·전술 그림을 골랐으면 그것만 나눔 — 재생 위치가 그 밖이면 아무것도 안 자르고 알림 (예전: 밑의 영상·소리를 잘랐음)
+// 프리미어처럼 고른 것이 대상 트랙보다 먼저 · Ctrl+Shift+K 는 예전처럼 모든 영상·소리 트랙
+function addEditKey(all) {
+  if (all || !selOv()) return splitAt(T, all);
+  const sp_ = selSpan(), what = OV_NAME[selKind()];
+  if (sp_ && (T <= sp_[0] + HF || T >= sp_[1] - HF)) return toast(`재생 위치가 고른 ${what} 밖이에요 · ${what} 안쪽에 두고 누르거나, 영상을 자르려면 Esc 로 선택을 풀고 Ctrl+K`);
+  splitSel();
+}
+// Q · W 를 고른 자막·타이틀·도형·전술 그림에 (D-332): 그것의 시작(Q)·끝(W)을 재생 위치로 — 잔물결 없음
+// (자막은 대사 소리를 따라가서 뒤 자막을 당기면 싱크가 깨짐 → 프리미어의 '당기기'와 다름 · 도움말에 '프리미어와 다름')
+function trimSelTo(side) {
+  const sp_ = selSpan(), what = OV_NAME[selKind()] || "고른 것";
+  if (!sp_) return toast("먼저 클립·자막·타이틀을 골라 주세요");
+  if (T <= sp_[0] + HF || T >= sp_[1] - HF) return toast(`재생 위치를 고른 ${what} 안에 두고 눌러 주세요 · 밖으로 늘이려면 E`);
+  selSetEdge(side === "q" ? "l" : "r", T, side === "q" ? `${what} 앞 다듬기 (Q)` : `${what} 뒤 다듬기 (W)`);
+}
+// Alt+Q · Alt+W (Ctrl+Alt+Q · W 도 · D-331): 재생 위치 아래 대상 트랙 클립의 앞·뒤를 재생 위치까지 잘라냄 — 빈자리를 남기고 뒤 클립·자막은 그대로
+// (프리미어 '앞/뒤 편집점을 재생 위치로 다듬기' · 예전: Q·W 와 똑같이 뒤를 당겼음) · 연결 선택이 켜져 있으면 연결된 짝도
+function gapTrimTo(side) {
+  if (selOv()) return trimSelTo(side);
+  const t = fr(T), tg = new Set(S.tracks.filter(x => x.target && !x.lock).map(x => x.id)), under = it => it.start < t - HF && iEnd(it) > t + HF;
+  const its = S.items.filter(it => tg.has(it.track) && under(it));
+  if (!its.length) return toast("재생 위치 아래 대상 트랙에 클립이 없어요");
+  if (linkOn) for (const it of [...its]) for (const l of linkedOf(it)) if (!its.includes(l) && unlocked(l.track) && under(l)) its.push(l);
+  commit(side === "q" ? "앞 다듬기 · 빈자리 남김 (Alt+Q)" : "뒤 다듬기 · 빈자리 남김 (Alt+W)");
+  for (const it of its) side === "q" ? trimStart(it, t) : trimEnd(it, t);
+  changed(false); toast(side === "q" ? "재생 위치 앞을 잘라냈어요 · 빈자리는 그대로 (당기려면 Q)" : "재생 위치 뒤를 잘라냈어요 · 빈자리는 그대로 (당기려면 W)");
+}
+// E (D-332 · 프리미어 '고른 편집점을 재생 위치로 늘이기'): 고른 것(클립·자막·타이틀·도형)의 가까운 끝을 재생 위치로 — 밖이면 늘이고 안이면 줄임 (옆 것에 닿으면 멈춤)
+function extendSel() {
+  const sp_ = selSpan(); if (!sp_) return toast("먼저 클립·자막·타이틀을 골라 주세요 · E 는 고른 것의 가까운 끝을 재생 위치로 옮겨요");
+  const t = fr(T), edge = Math.abs(t - sp_[0]) < Math.abs(t - sp_[1]) ? "l" : "r";
+  selSetEdge(edge, t, edge === "l" ? "시작을 재생 위치로 (E)" : "끝을 재생 위치로 (E)");
+}
+// D (D-334 · 프리미어 '재생 위치의 클립 고르기'): 대상 트랙에서 재생 위치에 걸친 클립을 고름 (연결 선택이면 짝도) ·
+// 자막·타이틀·도형을 골라 두었거나 그 트랙 머리를 눌러 두었으면 그 트랙에서 재생 위치에 보이는 것이 먼저 (없으면 대상 트랙 클립)
+function selectAtPlayhead() {
+  const t = T, row = otSelRow(), o = row && OTK(row), on = (s, e) => t >= s - TEPS && t < e - TEPS;
+  if (o && !o.lock) {
+    let hit = null;
+    if (o.k === "c") { const c = capsTL().find(x => x.trk === row && x.mid === "main" && on(x.s, x.e)); if (c) hit = ["caption", c.cap.id]; }
+    else if (o.k === "t") { const g = S.titles.filter(x => trkOf(x, "t") === row && on(x.start, x.start + x.dur)).pop(); if (g) hit = ["title", g.id]; }
+    else {
+      const g = S.tactics.filter(x => trkOf(x, "g") === row && on(x.start, x.start + x.dur)).pop(), sh = S.shapes.filter(x => trkOf(x, "g") === row && shapeOn(x, t)).pop();
+      if (g) hit = ["tact", g.id]; else if (sh) hit = ["shape", sh.id];
+    }
+    if (hit) { selectOverlay(hit[0], hit[1], "tl"); return toast(`재생 위치의 ${OV_NAME[hit[0]]}${josa(OV_NAME[hit[0]], "을", "를")} 골랐어요 (D)`); }
+  }
+  const tg = new Set(S.tracks.filter(x => x.target && !x.lock).map(x => x.id));
+  const its = S.items.filter(it => tg.has(it.track) && it.start <= t + EPS && iEnd(it) > t + EPS);
+  if (!its.length) return toast("재생 위치의 대상 트랙에 클립이 없어요 (트랙 머리 V1·A1 단추로 대상 트랙을 켜요)");
+  const ids = new Set(); for (const it of its) for (const x of linkOn ? linkedOf(it) : [it]) if (unlocked(x.track)) ids.add(x.id);
+  selKf = null; selX = null; selI = ids; primary = (its.find(isV) || its[0]).id; selSrc = "tl";
+  renderTimeline(); renderPanels(); frameDirty = true;
+}
+// Alt+↑ ↓ (D-331 · 프리미어 '클립을 위·아래 트랙으로' · 예전: 편집점 이동이었음): 고른 것을 같은 시각 그대로 바로 위·아래 트랙으로
+// 영상·소리 클립: 끌어 옮기기와 같음 — 그 자리에 있던 것은 덮어씀 · 영상과 연결된 소리는 거울처럼(V1→V2 이면 A1→A2) · 소리만 골랐으면 화면에서 위·아래 그대로
+// 자막·타이틀·도형·전술 그림: 화면에서 위·아래에 있는 같은 종류 트랙으로 (그 트랙에 같은 때 같은 것이 있으면 안 감 · 자막 트랙은 모든 편집본에서 같음)
+function moveTrackSel(dir) {
+  const k = selKind(); if (!k) return toast("먼저 클립·자막·타이틀을 골라 주세요");
+  const up = dir > 0 ? "위" : "아래", key = `Alt+${dir > 0 ? "↑" : "↓"}`;
+  if (k === "clip") {
+    const its = S.items.filter(it => selI.has(it.id) && unlocked(it.track)); if (!its.length) return toast(otLockNote);
+    const d = its.some(isV) ? dir : -dir, dest = new Map(); // 영상 트랙은 번호가 클수록 위 · 소리 트랙은 번호가 클수록 아래
+    for (const it of its) {
+      const kk = TRK(it.track).k, l = S.tracks.filter(t => t.k === kk), i = l.findIndex(t => t.id === it.track) + d;
+      if (i < 0 || i >= l.length) return toast(`${kk === "v" ? up : d > 0 ? "아래" : "위"}에 ${kk === "v" ? "영상" : "소리"} 트랙이 더 없어요 · 타임라인 '+ 트랙'으로 늘릴 수 있어요`);
+      if (l[i].lock) return toast(`${l[i].id} 트랙이 잠겨 있어요 · 자물쇠를 풀어 주세요`);
+      dest.set(it.id, l[i].id);
+    }
+    const ids = new Set(its.map(x => x.id)); let over = false;
+    commit(`${up} 트랙으로 (${key})`);
+    for (const it of its) it.track = dest.get(it.id);
+    for (const it of its) { if (itemsOn(it.track).some(x => !ids.has(x.id) && x.start < iEnd(it) - HF && iEnd(x) > it.start + HF)) over = true; clearRange(it.track, it.start, iEnd(it), ids); }
+    changed(false); const to = [...new Set(its.map(x => x.track))]; otReveal(to[0]);
+    return toast(`${to.join("·")} 트랙으로 옮겼어요${over ? " · 그 자리에 있던 클립을 덮었어요 (Ctrl+Z 로 되돌려요)" : ""}`);
+  }
+  if (selLocked()) return toast(otLockNote);
+  const K = k === "caption" ? "c" : k === "title" ? "t" : "g", x = k === "caption" ? selCap() : selG(); if (!x) return;
+  const ls = S.otracks, cur = K === "c" ? otCap(x) : trkOf(x, K); let j = ls.findIndex(o => o.id === cur) + dir;
+  while (j >= 0 && j < ls.length && ls[j].k !== K) j += dir; // 목록 차례 = 화면 아래 → 위 (다른 종류 트랙은 건너뜀)
+  if (j < 0 || j >= ls.length) return toast(`${up}에 ${OT_NAME[K]} 트랙이 없어요 · 타임라인 '+ 트랙'으로 늘릴 수 있어요`);
+  const to = ls[j]; if (to.lock) return toast(`${otLabel(to)} 트랙이 잠겨 있어요 · 자물쇠를 풀어 주세요`);
+  const s = K === "c" ? +x.start : x.full ? 0 : +x.start, e = K === "c" ? +x.end : x.full ? Infinity : +x.start + +x.dur;
+  const sub = K === "g" ? (S.shapes.includes(x) ? "shape" : x.kind === "spot" ? "spot" : "tact") : null;
+  if (otHits(K, s, e, x).some(h => h.id === to.id && (K !== "g" || h.sub === sub))) return toast(`${otLabel(to)} 트랙에는 같은 때 ${OV_NAME[k]}${josa(OV_NAME[k], "이", "가")} 있어요`);
+  commit(`${OV_NAME[k]} ${up} 트랙으로 (${key})`); setTrk(x, to.id);
+  if (K === "c") { P.sequences.forEach(ensureSeq); capKey = ""; changed(); } else changed(false);
+  otReveal(to.id); toast(`${otLabel(to)} 트랙으로 옮겼어요${K === "c" ? " · 모든 편집본에서 이 트랙에 있어요" : ""}${otVisible(to) ? "" : " · 숨긴 트랙이라 화면에는 안 보여요"}`);
+}
+// Ctrl+Alt+M: 재생 위치의 마커 지우기 · Ctrl+Alt+Shift+M: 모든 마커 지우기 (프리미어와 같음 · D-331 · 예전: 내보내기 창이 열렸음 — 내보내기는 Ctrl+M)
+function clearMarker(all) {
+  if (!S.markers.length) return toast("마커가 없어요");
+  if (all) { const n = S.markers.length; commit("모든 마커 지우기"); S.markers = []; changed(false); return toast(`마커 ${n}개를 모두 지웠어요 (Ctrl+Z 로 되돌려요)`); }
+  const i = S.markers.findIndex(m => Math.abs(m.t - T) < HF + 1e-6);
+  if (i < 0) return toast("재생 위치에 마커가 없어요 · Shift+M (다음) · Ctrl+Shift+M (이전) 으로 마커에 가요");
+  commit("마커 지우기"); S.markers.splice(i, 1); changed(false); toast("재생 위치의 마커를 지웠어요");
+}
+/* ---------- 재생 위치 시각 칸 (D-335 · 프리미어 시간 표시처럼) ----------
+   시간 표시(미리보기 아래 · 타임라인 위)를 누르거나 타임라인·미리보기에서 숫자를 치면 칸이 됨 → Enter
+   숫자는 오른쪽부터 프레임·초·분·시 (1015 = 00:00:10:15 · 5 = 5프레임 · 30 = 1초) · 5:22 · 1.00 처럼 나눠 써도 됨
+   +10 · -10 (숫자패드 + − 로 시작) = 고른 것(클립·자막·타이틀·도형)을 10프레임 뒤·앞으로 · 고른 것이 없으면 재생 위치 · Esc 그만두기 */
+function ppTc(s) {
+  s = String(s || "").trim(); if (!s) return null;
+  let ps;
+  if (/^\d+$/.test(s)) { const d = s.slice(-8).padStart(8, "0"); ps = [d.slice(0, 2), d.slice(2, 4), d.slice(4, 6), d.slice(6)]; }
+  else if (/^\d*([:;.,]\d*){1,3}$/.test(s)) ps = s.split(/[:;.,]/);
+  else return null;
+  const [f = 0, sec = 0, m = 0, h = 0] = ps.map(x => +(x || 0)).reverse();
+  return (h * 60 + m) * 60 + sec + f / FPS;
+}
+function tcApply(v) {
+  v = String(v || "").trim().replace(/[−–]/g, "-"); if (!v) return;
+  const rel = /^[+-]/.test(v), t = ppTc(rel ? v.slice(1) : v);
+  if (t == null) return toast("시각을 1015 (10초 15프레임) · 5:22 · +10 (10프레임 뒤로) 처럼 써 주세요");
+  if (rel) {
+    const d = (v[0] === "-" ? -1 : 1) * Math.round(t * FPS) / FPS; if (!d) return;
+    if (selKind()) return nudge(d); // 고른 것을 옮김 (프리미어: 클립을 고르고 +10 Enter)
+    pause(); seek(fr(T) + d); autoscroll(); return;
+  }
+  pause(); seek(fr(t)); autoscroll();
+}
+let tcEd = null;
+function tcEdit(span, init) {
+  if (!S || !span) return;
+  if (tcEd) tcEd.done(false);
+  if (playing) pause();
+  const inp = document.createElement("input"); inp.className = "tcedit"; inp.spellcheck = false; inp.autocomplete = "off";
+  inp.value = init ?? tc(T); inp.title = "시각 써 넣기 — 1015 = 10초 15프레임 · 5:22 · +10 = 고른 것(없으면 재생 위치)을 10프레임 뒤로 · Enter 확정 · Esc 그만두기";
+  if (span.id === "tcNow2") inp.classList.add("sm");
+  span.style.display = "none"; span.after(inp);
+  let fin = false;
+  const done = ok => { if (fin) return; fin = true; tcEd = null; const v = inp.value; inp.remove(); span.style.display = ""; if (ok) tcApply(v); };
+  tcEd = { inp, done };
+  inp.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); done(true); } else if (e.key === "Escape") { e.preventDefault(); done(false); } };
+  inp.onblur = () => done(false);
+  inp.focus(); if (init == null) inp.select(); else inp.setSelectionRange(inp.value.length, inp.value.length);
+}
+const tcType = ch => tcEdit(monMax || monFocus ? $("tcNow") : $("tcNow2"), ch); // 숫자를 치면: 미리보기를 눌렀으면 미리보기 아래 칸 · 아니면 타임라인 위 칸
+for (const id of ["tcNow", "tcNow2"]) { const sp_ = $(id); sp_.classList.add("tcclick"); sp_.title = "누르면 시각을 써 넣어요 (1015 = 10초 15프레임 · +10 = 10프레임 뒤로) · 타임라인에서 숫자를 쳐도 돼요"; sp_.onclick = () => tcEdit(sp_); }
+// K 를 누르고 있는 동안 L · J = 1프레임 앞·뒤 (프리미어 · D-331 · 예전: 빠르게 재생)
+let kHeld = false;
+addEventListener("keyup", e => { if (e.code === "KeyK" || String(e.key).toLowerCase() === "k") kHeld = false; });
+addEventListener("blur", () => { kHeld = false; });
+// 끄는 중에 S (D-337 · 프리미어): 자석을 켜고 끄고 마우스를 안 움직여도 그 자리에서 다시 맞춤 · Shift 를 누르고 끄기(잠깐 반대 · D-322)도 그대로
+let mDown = false, mLast = null;
+addEventListener("mousedown", e => { if (e.button === 0) mDown = true; }, true);
+addEventListener("mouseup", () => { mDown = false; }, true);
+addEventListener("mousemove", e => { mLast = e; if (!e.buttons) mDown = false; }, true);
+function snapRedrag() {
+  if (!mDown || !mLast) return;
+  const e = mLast; document.body.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, buttons: 1 }));
+}
+/* ---------- 미리보기 크게 (` · D-336) · 미리보기 확대 (맞춤 · 50% · 100% · 200% · D-336) ----------
+   ` : 위 줄만 남기고 프로그램 모니터가 창을 채움 · 한 번 더 누르면 되돌림 (프리미어는 마우스 아래 패널 · 여기는 늘 미리보기)
+   확대: 영상 크기(1080×1920 · 1920×1080)의 몇 배 — 화면보다 크면 굴려서 봄 (휠·막대 · 손 도구(H)로 끌기) · 눌러 고르기·끌기는 그대로 */
+let monMax = false, MONZ = 0;
+function monCenter() { const m = $("mon"); m.scrollLeft = Math.max(0, (m.scrollWidth - m.clientWidth) / 2); m.scrollTop = Math.max(0, (m.scrollHeight - m.clientHeight) / 2); }
+function setMonMax(on) {
+  monMax = !!on; $("app").classList.toggle("monmax", monMax);
+  const b = $("monMax"); b.classList.toggle("on", monMax); b.title = monMax ? "미리보기 되돌리기 ( ` )" : "미리보기 크게 — 창 전체로 ( ` ) · 한 번 더 누르면 되돌려요";
+  if (S) { layoutFrame(); if (MONZ) monCenter(); if (!monMax) { renderTimeline(); seatTracks(); } fbarPlaceAll(); }
+}
+function setMonZoom(z) { MONZ = z > 0 ? z : 0; const sel = $("monZoom"); if (+sel.value !== MONZ) sel.value = String(MONZ); if (S) { layoutFrame(); monCenter(); fbarPlaceAll(); } }
+function monPan(ev) { const m = $("mon"), x0 = ev.clientX, y0 = ev.clientY, l0 = m.scrollLeft, t0 = m.scrollTop; dragSeek(e => { m.scrollLeft = l0 - (e.clientX - x0); m.scrollTop = t0 - (e.clientY - y0); }); }
+$("monMax").onclick = () => setMonMax(!monMax);
+$("monZoom").onchange = e => setMonZoom(+e.target.value);
+$("mon").addEventListener("scroll", () => requestAnimationFrame(pvBarPlace));
+// 뒤로 트랙 선택 도구 (Shift+A · D-334): 앞으로 트랙 선택(A)과 같은 칸 (프리미어처럼 한 칸에 둘)
+const TSELB = ["tselb", "Shift+A", "뒤로 트랙 선택 도구 (Shift+A) — 누른 곳 앞의 클립을 한꺼번에 골라요 (Shift: 그 트랙만)", '<path d="M14 3l-6 4 2.5.6-1.5 3 1.2.6 1.5-3L14 10z" fill="currentColor"/><path d="M1 4h5M1 7h5M1 10h5M1 13h5" stroke="currentColor" stroke-width="1.3"/>'];
+
 /* ---------- 키보드 ---------- */
 addEventListener("keydown", e => {
   if ($("cmenu").style.display === "block" && (e.key === "Escape" || !["Shift", "Control", "Alt", "Meta"].includes(e.key))) { hideMenu(); if (e.key === "Escape") return; } // Esc: 메뉴만 닫음 (고른 것은 그대로)
@@ -6088,7 +6331,8 @@ addEventListener("keydown", e => {
   if (!S) return;
   if (mod && k === "z") { e.preventDefault(); sh ? redo() : undo(); return; }
   if (mod && k === "y") { e.preventDefault(); redo(); return; }
-  if (mod && k === "k") { e.preventDefault(); const sk = selKind(), sp_ = sk && sk !== "clip" && selSpan(); if (!sh && sp_ && T > sp_[0] + HF && T < sp_[1] - HF) return splitSel(); splitAt(T, sh); return; } // 고른 자막·타이틀·도형이 재생 위치에 걸치면 그것을 나눔
+  if (mod && alt && k === "k") { e.preventDefault(); $("helpModal").classList.add("show"); return; } // Ctrl+Alt+K: 단축키 창 (프리미어 '단축키' · 예전: 몰래 자르기 · D-331)
+  if (mod && k === "k") { e.preventDefault(); addEditKey(sh); return; } // 고른 자막·타이틀·도형이 있으면 그것만 나눔 (밖이면 안 자름 · D-332)
   if (mod && k === "s") { e.preventDefault(); saveNow(); return; }
   if (mod && k === "c") { e.preventDefault(); copySel(); return; }
   if (mod && k === "x" && !sh) { e.preventDefault(); if (!curKf() && copySel()) deleteSel(false); return; }
@@ -6100,8 +6344,10 @@ addEventListener("keydown", e => {
   if (mod && sh && k === "a") { e.preventDefault(); selI.clear(); selX = null; selKf = null; renderTimeline(); renderPanels(); return; } // 모두 선택 해제 (프리미어와 같게)
   if (mod && k === "a") { e.preventDefault(); selI = new Set(S.items.filter(x => unlocked(x.track)).map(x => x.id)); selX = null; renderTimeline(); renderPanels(); return; }
   if (mod && sh && (k === "i" || k === "o")) { e.preventDefault(); if (monMode === "src" && SRC) { SRC[k === "i" ? "in" : "out"] = null; updSrcBtns(); } else { if (k === "i") markIn = null; else markOut = null; renderTimeline(); } toast(k === "i" ? "시작점 지움" : "끝점 지움"); return; }
+  if (mod && alt && k === "m") { e.preventDefault(); clearMarker(sh); return; } // Ctrl+Alt+M: 재생 위치 마커 지우기 · +Shift: 모두 (프리미어 · 예전: 내보내기 창 · D-331)
   if (mod && sh && k === "m") { e.preventDefault(); jumpMarker(-1); return; }
   if (mod && k === "m") { e.preventDefault(); openExport(); return; }
+  if (mod && alt && (k === "q" || k === "w")) { e.preventDefault(); gapTrimTo(k); return; } // Ctrl+Alt+Q · W: Alt+Q · W 와 같음 (프리미어 판마다 둘 중 하나 · D-331)
   if (monMode === "src" && !mod && SRC) {
     // 소스 모니터가 보일 때는 재생·이동 키가 소스 모니터를 움직임 (숨은 프로그램 타임라인이 아니라)
     if (k === " ") { e.preventDefault(); return srcToggle(); }
@@ -6118,15 +6364,17 @@ addEventListener("keydown", e => {
   }
   if (mod) return;
   if (k === " ") { e.preventDefault(); toggle(); }
-  else if (k === "k") pause();
+  else if (k === "k") { pause(); kHeld = true; }
+  else if ((k === "l" || k === "j") && kHeld) { pause(); seek(fr(T) + (k === "l" ? 1 : -1) / FPS); } // K 를 누른 채 L · J: 1프레임 (프리미어 · D-331)
   else if (k === "l") { if (playing && shuttle > 0) { shuttle = Math.min(8, shuttle * 2); clock = { t0: T, at: performance.now() }; } else play(1); }
   else if (k === "j") { if (playing && shuttle < 0) { shuttle = Math.max(-8, shuttle * 2); clock = { t0: T, at: performance.now() }; } else play(-1); }
   else if (k.startsWith("arrow") && !alt && monFocus && !playing && ["title", "shape", "caption", "tact"].includes(selKind())) { // 미리보기를 누른 뒤: 고른 글자·그림 자리 1% (Shift 5%)
     e.preventDefault(); const st = sh ? 0.05 : 0.01; pvNudge(k === "arrowleft" ? -st : k === "arrowright" ? st : 0, k === "arrowup" ? -st : k === "arrowdown" ? st : 0); }
   else if (k === "arrowleft") { e.preventDefault(); if (alt) nudge(-(sh ? NUDGE_BIG : 1) / FPS); else { pause(); seek(fr(T) - (sh ? 5 : 1) / FPS); } }
   else if (k === "arrowright") { e.preventDefault(); if (alt) nudge((sh ? NUDGE_BIG : 1) / FPS); else { pause(); seek(fr(T) + (sh ? 5 : 1) / FPS); } }
-  else if (k === "arrowup") { e.preventDefault(); pause(); const p = edits().filter(t => t < T - HF); seek(p.length ? p[p.length - 1] : 0); }
-  else if (k === "arrowdown") { e.preventDefault(); pause(); const n = edits().find(t => t > T + HF); if (n !== undefined) seek(n); }
+  else if ((k === "arrowup" || k === "arrowdown") && alt) { e.preventDefault(); moveTrackSel(k === "arrowup" ? 1 : -1); } // Alt+↑ ↓: 고른 것을 위·아래 트랙으로 (프리미어 · 예전: 편집점 이동 · D-331)
+  else if (k === "arrowup") { e.preventDefault(); goEdit(-1, sh); } // ↑ ↓: 대상 트랙 + 고른 자막·타이틀·도형 트랙 편집점 · Shift: 모든 트랙 (D-333)
+  else if (k === "arrowdown") { e.preventDefault(); goEdit(1, sh); }
   else if (k === "[" || k === "]") { e.preventDefault(); selSetEdge(k === "[" ? "l" : "r", T); } // 고른 것의 시작·끝을 재생 위치로 (D-322)
   else if (k === "enter" && !sh && selKind() === "caption") { e.preventDefault(); addCaption({ after: selCap() }); } // 고른 자막 바로 뒤에 다음 자막 (D-325)
   else if (k === "?" || (k === "/" && sh)) $("helpModal").classList.add("show");
@@ -6137,12 +6385,12 @@ addEventListener("keydown", e => {
   else if (k === "x") markClip();
   else if (k === "'") { if (markIn != null || markOut != null) extractRange(markIn ?? 0, markOut ?? total()); else toast("I로 시작점, O로 끝점을 먼저 표시해 주세요"); }
   else if (k === ";") { if (markIn != null || markOut != null) liftRange(markIn ?? 0, markOut ?? total()); else toast("I로 시작점, O로 끝점을 먼저 표시해 주세요"); }
-  else if (k === "q") rippleTrimTo("q");
-  else if (k === "w") rippleTrimTo("w");
+  else if (k === "q" || k === "w") { if (selOv()) trimSelTo(k); else if (alt) gapTrimTo(k); else rippleTrimTo(k); } // 고른 자막·타이틀·도형: 그것만 (D-332) · Alt: 빈자리 남김 (D-331)
+  else if (k === "e" && !sh) extendSel(); // E: 고른 것의 가까운 끝을 재생 위치로 (D-332)
   else if (k === "home") { pause(); seek(0); }
   else if (k === "end") { pause(); seek(total()); }
   else if (k === "v") setTool("select");
-  else if (k === "a" && sh) { /* 프리미어: 뒤로 트랙 선택 — 여기선 아무것도 안 함 */ }
+  else if (k === "a" && sh) setTool("tselb"); // 뒤로 트랙 선택 (프리미어 · D-334)
   else if (k === "a") setTool("tsel");
   else if (k === "b") setTool("ripple");
   else if (k === "n") setTool("roll");
@@ -6152,14 +6400,18 @@ addEventListener("keydown", e => {
   else if (k === "u") setTool("slide");
   else if (k === "h") setTool("hand");
   else if (k === "z") setTool("zoom");
-  else if (k === "s") toggleSnap();
-  else if (/^[1-9]$/.test(k) && msgCands()[+k - 1]) { const q = msgCands()[+k - 1]; if (q.id !== S.id) msgSwap(q.id); } // 후보 카드의 번호와 같은 차례
+  else if (k === "s") { toggleSnap(); snapRedrag(); } // 끄는 중이면 그 자리에서 바로 다시 맞춤 (프리미어 · D-337)
+  else if (alt && /^Digit[1-9]$/.test(e.code)) { e.preventDefault(); const q = msgCands()[+e.code.slice(5) - 1]; if (q && q.id !== S.id) msgSwap(q.id); } // Alt+숫자: MSG 후보 카드 번호 (예전: 숫자만 · D-331)
+  else if (/^[0-9]$/.test(e.key) && !alt && monMode === "prog") { e.preventDefault(); tcType(e.key); } // 숫자: 시각 써 넣기 → Enter (프리미어 · D-335)
+  else if ((e.code === "NumpadAdd" || e.code === "NumpadSubtract") && monMode === "prog") { e.preventDefault(); tcType(e.code === "NumpadAdd" ? "+" : "-"); } // 숫자패드 + − : +10 Enter = 10프레임 (D-335)
+  else if (e.code === "Backquote" && !alt) { e.preventDefault(); setMonMax(!monMax); } // ` : 미리보기 크게 · 되돌리기 (프리미어 패널 최대화 · D-336)
   else if (k === "t" && sh) addCaption(); // 재생 위치에 자막 (T 는 타이틀 · D-325)
   else if (k === "t") addTitle();
   else if (k === "m" && sh) jumpMarker(1);
   else if (k === "m") addMarker();
   else if (k === "g") gainDialog();
   else if (k === "d" && sh) applyDefaultTrans("v", true);
+  else if (k === "d") selectAtPlayhead(); // D: 재생 위치의 클립 고르기 (프리미어 · D-334)
   else if ((k === "delete" || k === "backspace") && curKf()) { // 고른 키프레임만 지우기 (클립은 그대로)
     e.preventDefault();
     const it = byId(selKf.id), p = it && prm(it, selKf.key), i = p ? p.k.findIndex(x => Math.abs(x.t - selKf.t) < 1e-6) : -1;
@@ -6178,7 +6430,7 @@ addEventListener("keydown", e => {
 addEventListener("change", e => { if (e.target.matches && e.target.matches("select, input[type=range], input[type=checkbox], input[type=color]") && !e.target.closest(".modal")) e.target.blur(); }, true);
 // 창(모달)이 열리면 그 안의 버튼에 포커스 (Enter·Tab 이 뒤의 화면으로 가지 않게)
 document.querySelectorAll(".modal").forEach(m => new MutationObserver(() => {
-  if (m.classList.contains("show") && !m.contains(document.activeElement)) { const b = m.querySelector("[autofocus]") || m.querySelector("input[type=number]") || m.querySelector(".btn.pri") || m.querySelector("button"); if (b) setTimeout(() => { if (!m.contains(document.activeElement)) b.focus(); }, 40); }
+  if (m.classList.contains("show") && !m.contains(document.activeElement)) { const b = m.querySelector("[autofocus]") || m.querySelector("input[type=number]") || m.querySelector(".btn.pri") || m.querySelector("button"); if (b) setTimeout(() => { if (!m.contains(document.activeElement)) b.focus(m.id === "helpModal" ? { preventScroll: true } : undefined); }, 40); } // 단축키 창은 맨 위('자주 쓰는 것')부터 보이게 (닫기 단추가 맨 아래라 그쪽으로 굴러가지 않게)
 }).observe(m, { attributes: true, attributeFilter: ["class"] }));
 function toggleSnap() { snapOn = !snapOn; $("snapBtn").classList.toggle("on", snapOn); toast(snapOn ? "자석 켜짐 · 편집점에 착 붙어요" : "자석 꺼짐"); }
 function addMarker() { commit("마커"); S.markers.push({ t: fr(T), name: "" }); changed(false); toast("마커를 넣었어요 (M)"); }
@@ -6197,18 +6449,25 @@ $("bExtract").onclick = () => markIn != null || markOut != null ? extractRange(m
 $("bLift").onclick = () => markIn != null || markOut != null ? liftRange(markIn ?? 0, markOut ?? total()) : toast("I/O로 구간을 먼저 표시해 주세요");
 $("bMarker").onclick = addMarker;
 $("bBack").onclick = () => { pause(); seek(fr(T) - 1 / FPS); }; $("bFwd").onclick = () => { pause(); seek(fr(T) + 1 / FPS); };
-$("bPrevEdit").onclick = () => { const p = edits().filter(t => t < T - HF); seek(p.length ? p[p.length - 1] : 0); };
-$("bNextEdit").onclick = () => { const n = edits().find(t => t > T + HF); if (n !== undefined) seek(n); };
+$("bPrevEdit").onclick = e => goEdit(-1, e.shiftKey); $("bNextEdit").onclick = e => goEdit(1, e.shiftKey); // ↑ ↓ 와 같음 (Shift: 모든 트랙 · D-333)
 $("undo").onclick = undo; $("redo").onclick = redo;
 $("toThumb").onclick = () => leaveTo("/thumb?name=" + encodeURIComponent(NAME));
 $("help").onclick = () => $("helpModal").classList.add("show"); $("helpClose").onclick = () => $("helpModal").classList.remove("show");
-$("qSplit").onclick = () => { const sk = selKind(), sp_ = sk && sk !== "clip" && selSpan(); if (sp_ && T > sp_[0] + HF && T < sp_[1] - HF) return splitSel(); splitAt(T, false); };
+$("qSplit").onclick = () => addEditKey(false); // Ctrl+K 와 같음 (고른 자막·타이틀·도형은 그것만 · D-332)
 $("qCap").onclick = () => addCaption(); $("qTitle").onclick = addTitle;
 $("back").onclick = () => leaveTo("/", "cut");  // 스튜디오 4 편집실 (영상 카드의 다음 할 일 · 예전: 1 소재 찾기)
 document.querySelectorAll("#fmtSeg button").forEach(b => b.onclick = () => { commit("형식 바꾸기"); S.format = b.dataset.v; changed(); layoutFrame(); if (ltab === "rec") renderRec(); });
 const scrub = $("scrub");
 scrub.onmousedown = e => { pause(); const f = ev => { const r = scrub.getBoundingClientRect(); seek(fr(clamp((ev.clientX - r.left) / r.width, 0, 1) * total())); autoscroll(); }; f(e); dragSeek(f); };
-$("tlscroll").addEventListener("wheel", e => { if (e.ctrlKey || e.altKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), xToT(e)); } }, { passive: false });
+// 타임라인 휠 (D-331 · 프리미어 Windows 기본): 휠 = 시간 방향(좌우) · Ctrl+휠 = 트랙 위아래 · Alt+휠 = 확대/축소 (마우스 자리 기준)
+// 예전: 휠 = 트랙 위아래 · Shift+휠 = 좌우 · Ctrl·Alt+휠 = 확대 → Shift+휠도 좌우 그대로 · 터치패드 옆으로 쓸기는 브라우저 그대로
+$("tlscroll").addEventListener("wheel", e => {
+  if (e.altKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), xToT(e)); return; }
+  const sc = $("tlscroll"), u = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? sc.clientHeight : 1, dy = e.deltaY || 0, dx = e.deltaX || 0;
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); sc.scrollTop += (dy || dx) * u; return; }
+  if (!e.shiftKey && Math.abs(dx) > Math.abs(dy)) return;
+  e.preventDefault(); sc.scrollLeft += (dy || dx) * u;
+}, { passive: false });
 $("tracks").addEventListener("click", e => {
   const b = e.target.closest("button, .hd [data-oset]"); if (!b) return;
   const d = b.dataset;
