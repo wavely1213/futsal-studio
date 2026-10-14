@@ -1,4 +1,5 @@
 """풋살사관학교 스튜디오 — 데스크톱 앱 (화면은 전용 창, 내부 통신은 127.0.0.1 전용)."""
+import base64
 import collections
 import errno
 import faulthandler
@@ -1236,6 +1237,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, _started(ok))
+        if path == "/api/edit/srt":  # 자막 파일(SRT) 가져오기: 글자만 읽어 돌려줌 (어디에·어느 트랙에 놓을지는 편집실이 정하고 저장도 편집실이 함 · D-345)
+            try:
+                raw = base64.b64decode(str(b.get("data") or ""), validate=True)
+            except (ValueError, TypeError):
+                return self._send(400, {"ok": False, "error": "자막 파일을 읽지 못했어요"})
+            try:
+                return self._send(200, dict(editor.srt_import(raw, b.get("fps") or 30), ok=True))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+        if path == "/api/edit/frame":  # 지금 화면 그림으로 저장 (Ctrl+Shift+E · 한 프레임이라 작업 줄 없이 바로 · D-349)
+            try:
+                return self._send(200, dict(editor.export_frame(b["name"], b["project"], float(b.get("t") or 0), log), ok=True))
+            except (KeyError, TypeError, ValueError) as e:
+                return self._send(400, {"ok": False, "error": f"그림으로 저장하지 못했어요 · {e}"})
+            except RuntimeError as e:
+                return self._send(409 if "저장하는 중" in str(e) else 500, {"ok": False, "error": str(e)[-300:]})
+            except Exception as e:  # noqa: BLE001 — 예상 못 한 오류도 화면에 쉬운 말로 (위치는 studio.log)
+                studiolog.trace(e, "지금 화면 저장 오류 위치")
+                return self._send(500, {"ok": False, "error": "그림으로 저장하지 못했어요 · 잠시 뒤 다시 눌러 주세요"})
         if path in ("/api/edit/restore", "/api/edit/freeze"):
             try:
                 if path == "/api/edit/restore":

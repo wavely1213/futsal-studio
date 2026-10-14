@@ -170,7 +170,7 @@ class SideFiles(ExportBase):
             self.export(p, xml=True, srt=True)
         self.assertEqual([f.name for f in core.OUT.glob("*깨짐*")], [])
         out, _ = self.export(self.proj("깨짐", [item("v", "pat", "V1", 0, 0, 2)]), xml=True)
-        self.assertEqual(out, ["테스트_깨짐.mp4", "테스트_깨짐_premiere.xml"])
+        self.assertEqual(out, ["테스트_깨짐.mp4", "테스트_깨짐_premiere.xml", "테스트_깨짐_프리미어_빠진 것.txt"])  # XML 옆에 빠진 것 목록 (D-347)
 
 
 class HwErrors(unittest.TestCase):

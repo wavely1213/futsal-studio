@@ -1,5 +1,6 @@
 """편집실: 영상 정보·파형·썸네일·프로젝트 저장(멀티 트랙)·자동 추천·내보내기(영상/프리미어 XML/SRT)."""
 import hashlib
+import html as _html
 import itertools
 import json
 import math
@@ -13,6 +14,7 @@ import time
 import traceback
 import unicodedata
 import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
 from urllib.parse import quote
@@ -3601,7 +3603,7 @@ def cap_row_y(seq, o, st, ev, c1s, W):
 
 
 def track_visible(seq, o):
-    """줄을 보이는지 — C1 은 '영상에 자막 넣기'(captionsOn) · 다른 줄은 hide 가 아니면. 숨긴 줄은 미리보기·내보내기에서 빠짐 (SRT 는 다 남음)."""
+    """줄을 보이는지 — C1 은 '영상에 자막 넣기'(captionsOn) · 다른 줄은 hide 가 아니면. 숨긴 줄은 미리보기·내보내기에서 빠짐 (SRT 도 기본으로 빠짐 · srt_default_tracks · D-346)."""
     return seq.get("captionsOn", True) if o["id"] == "C1" else not o.get("hide")
 
 
@@ -3728,20 +3730,325 @@ def _srt(caps):
     return "\n".join(out)
 
 
-# ---------- 프리미어 XML (FCP7) ----------
+# ---------- 자막 파일(SRT) 가져오기 (D-345) ----------
 
-def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None):
-    """프리미어 프로에서 '가져오기'로 여는 XML (FCP7 형식, 트랙·속도 포함). t_lo~t_hi: 구간 내보내기면 그 구간만."""
-    tb = round(fps)
-    ntsc = "TRUE" if abs(fps - round(fps)) > 0.01 else "FALSE"
-    rate = f"<rate><timebase>{tb}</timebase><ntsc>{ntsc}</ntsc></rate>"
+SRT_MAX = 5 << 20      # 가져올 자막 파일 크기 한도 (바이트 · 두 시간짜리 자막도 1MB 안팎)
+SRT_TRIM = 0.5         # 앞 자막 끝이 다음 자막 시작을 이만큼(초)까지 넘으면 앞 자막 끝을 줄임 (자막 프로그램이 흔히 남기는 겹침)
+SRT_LANES = OT_MAX     # 더 길게 겹치면(두 사람이 같이 말함) 겹치지 않는 다음 자막 트랙으로 · 9개까지
+_SRT_TIME = r"(?:\d+:)?\d{1,2}:\d{1,2}(?:[,.:]\d{1,3})?"
+_SRT_ARROW = re.compile(rf"^\s*({_SRT_TIME})\s*-+>\s*({_SRT_TIME})")
+_SRT_TAG = re.compile(r"</?[A-Za-z][^<>]*>|\{\\[^{}]*\}")
+
+
+def srt_decode(data):
+    """자막 파일 바이트 → (글, 인코딩) — BOM(UTF-8·UTF-16) → UTF-8 → 한국어 Windows(CP949 · 메모장 'ANSI' 로 저장한 자막)."""
+    if data[:3] == b"\xef\xbb\xbf":
+        return data[3:].decode("utf-8", "replace"), "utf-8-sig"
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16", "replace"), "utf-16"
+    head = data[:400]
+    if head and head.count(b"\0") > len(head) // 4:  # BOM 없는 UTF-16 (글자마다 0 바이트)
+        return data.decode("utf-16-le" if head[1:2] == b"\0" else "utf-16-be", "replace"), "utf-16"
+    try:
+        return data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        pass
+    try:
+        return data.decode("cp949"), "cp949"
+    except UnicodeDecodeError:
+        return data.decode("cp949", "replace"), "cp949"
+
+
+def _srt_secs(s):
+    """'00:01:02,500' · '01:02.5' · '00:01:02:500' → 초."""
+    s = s.strip()
+    m = re.fullmatch(r"(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:[,.](\d{1,3}))?", s)
+    if m:
+        h, mi, se, ms = m.groups()
+    else:
+        p = s.split(":")
+        if len(p) != 4:
+            raise ValueError(s)
+        h, mi, se, ms = p
+    return int(h or 0) * 3600 + int(mi) * 60 + int(se) + (int(ms) / 10 ** len(ms) if ms else 0.0)
+
+
+def parse_srt(text):
+    """SRT 글 → (자막 [{start, end, text}] 시작 순, 못 읽어 버린 수).
+    줄바꿈 CRLF·CR · 번호 없는 파일 · 번호와 시각 사이 빈 줄도 읽음 · 꾸밈(<i> <b> <font …> {\\an8})과 &amp; 같은 글자는 풀고 줄바꿈은 그대로 ·
+    시각이 거꾸로이거나 글이 없는 자막은 버림."""
+    lines = text.replace("﻿", "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    hits = [(i, m) for i, m in ((i, _SRT_ARROW.match(ln)) for i, ln in enumerate(lines)) if m]
+    # 번호를 단 파일이면 시각 줄 바로 앞 줄이 숫자 → 앞 자막 글 끝의 숫자 한 줄은 다음 자막 번호 (번호 없는 파일의 '3' 같은 글은 그대로)
+    numbered = sum(1 for i, _ in hits if i > 0 and lines[i - 1].strip().isdigit()) * 2 >= len(hits)
+    cues, bad = [], 0
+    for k, (i, m) in enumerate(hits):
+        body = lines[i + 1:hits[k + 1][0] if k + 1 < len(hits) else len(lines)]
+        while body and not body[-1].strip():
+            body.pop()
+        if numbered and k + 1 < len(hits) and body and body[-1].strip().isdigit():
+            body.pop()
+        out = []
+        for ln in body:
+            ln = re.sub(r"[ \t 　]+", " ", _html.unescape(_SRT_TAG.sub("", ln))).strip()
+            if ln:
+                out.append(ln)
+        try:
+            a, b = _srt_secs(m[1]), _srt_secs(m[2])
+        except ValueError:
+            bad += 1
+            continue
+        if not out or b <= a:
+            bad += 1
+            continue
+        cues.append({"start": a, "end": b, "text": "\n".join(out)})
+    cues.sort(key=lambda c: c["start"])
+    return cues, bad
+
+
+def srt_lanes(cues, fps=30):
+    """가져온 자막을 프레임에 맞추고(프리미어처럼 시퀀스 프레임) 겹침 정리 → (자막 [{start, end, text, lane}], 끝을 줄인 수, 다른 트랙으로 보낸 수).
+    겹침이 SRT_TRIM 초 이하이고 앞 자막 길이의 절반 이하면 앞 자막 끝을 다음 자막 시작으로 · 더 길면 겹치지 않는 다음 트랙(lane 1, 2 …)."""
+    lanes, out, trimmed, moved = [], [], 0, 0
+    lim = SRT_TRIM * fps + 1e-6
+    for c in cues:
+        s = int(round(c["start"] * fps))
+        x = {"s": s, "e": max(s + 1, int(round(c["end"] * fps))), "text": c["text"]}
+        k = 0
+        while k < len(lanes):
+            p = lanes[k][-1]
+            if p["e"] <= s:
+                break
+            ov = p["e"] - s
+            if ov <= lim and ov * 2 <= p["e"] - p["s"] and s > p["s"]:
+                p["e"] = s
+                trimmed += 1
+                break
+            k += 1
+        if k >= len(lanes):
+            if len(lanes) < SRT_LANES:
+                lanes.append([])
+            k = len(lanes) - 1  # 9개가 다 차면 마지막 트랙에 겹친 채로
+        moved += 1 if k else 0
+        x["lane"] = k
+        lanes[k].append(x)
+        out.append(x)
+    return ([{"start": round(x["s"] / fps, 6), "end": round(x["e"] / fps, 6), "text": x["text"], "lane": x["lane"]} for x in out],
+            trimmed, moved)
+
+
+def srt_import(data, fps=30):
+    """자막 파일(바이트) → {cues, encoding, bad, trimmed, moved, lanes} — 편집실 'SRT 가져오기'가 씀 (어디에·어느 트랙에 놓을지는 편집실이 정함)."""
+    if len(data) > SRT_MAX:
+        raise ValueError("자막 파일이 너무 커요 (5MB 까지)")
+    text, enc = srt_decode(data)
+    cues, bad = parse_srt(text)
+    if not cues:
+        raise ValueError("자막을 하나도 읽지 못했어요 · SRT 자막 파일인지 확인해 주세요")
+    try:
+        fps = int(fps)
+    except (TypeError, ValueError):
+        fps = 30
+    out, trimmed, moved = srt_lanes(cues, fps if 1 <= fps <= 240 else 30)
+    return {"cues": out, "encoding": enc, "bad": bad, "trimmed": trimmed, "moved": moved, "lanes": 1 + max(c["lane"] for c in out)}
+
+
+# ---------- 자막 파일(SRT) 내보내기 — 트랙마다 (D-346) ----------
+
+def srt_track_list(proj):
+    """자막 트랙 [{id, name, show}] (번호 차례 C1, C2 …) — 이름은 editor.html otLabel 과 같음 · show: 영상에 보이는지(숨김·'영상에 자막 넣기')."""
+    out = [{"id": o["id"], "name": str(o.get("name") or f"자막 {o['id'][1:]}"), "show": track_visible(proj, o)}
+           for o in overlay_tracks(proj) if o["k"] == "c"]
+    return sorted(out, key=lambda o: int(o["id"][1:]))
+
+
+def _fname(s):
+    """파일 이름에 못 쓰는 글자를 뺌 (Windows)."""
+    return re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", str(s)).strip(" .")
+
+
+def srt_default_tracks(proj):
+    """내보낼 자막 트랙 기본값: 보이는 자막 트랙 — 하나도 안 보이면 자막 1 (영상엔 안 넣고 자막 파일만 유튜브에 올리는 경우 · D-301)."""
+    return [t["id"] for t in srt_track_list(proj) if t["show"]] or ["C1"]
+
+
+def srt_files(proj, stem, t_lo, t_hi, fps, tracks=None, split=False):
+    """내보낼 자막 파일 [(파일 이름, 내용, 트랙 id 들)] (D-346).
+    tracks: 넣을 자막 트랙 id (None 이면 srt_default_tracks — 숨긴 트랙은 빠짐) · split: 트랙마다 따로 (프리미어처럼 트랙 하나 = 파일 하나) —
+    첫 트랙이 '<이름>.srt'(올리기 키트·유튜브 자막이 이 파일을 씀), 다음 트랙은 '<이름>_<트랙 이름>.srt' · 합치면 '<이름>.srt' 하나에 시작 순.
+    구간 내보내기는 구간 안으로 잘라 0초부터 · 잘려서 2프레임도 안 남은 조각은 뺌 (예전: 첫 자막이 2프레임짜리로 남음)."""
+    info = srt_track_list(proj)
+    want = srt_default_tracks(proj) if tracks is None else [t["id"] for t in info if t["id"] in set(tracks)]
+    names = {t["id"]: t["name"] for t in info}
+    span = t_hi - t_lo
+    by = {}
+    for c in timeline_captions(proj):
+        tid = c.get("trk", "C1")
+        if tid not in want:
+            continue
+        s, e = max(0.0, c["start"] - t_lo), min(span, c["end"] - t_lo)
+        cut = c["start"] < t_lo - 1e-6 or c["end"] > t_hi + 1e-6
+        if e - s < (2.0 if cut else 1.0) / fps - 1e-6:
+            continue
+        by.setdefault(tid, []).append(dict(c, start=s, end=e))
+    if not split:
+        caps = sorted((c for t in want for c in by.get(t, ())), key=lambda c: c["start"])
+        return [(f"{stem}.srt", _srt(caps), [t for t in want if by.get(t)])] if caps else []
+    out = []
+    for t in want:
+        if by.get(t):
+            fn = f"{stem}.srt" if not out else f"{stem}_{_fname(names.get(t) or t) or t}.srt"
+            out.append((fn, _srt(by[t]), [t]))
+    return out
+
+
+# ---------- 프리미어 XML (FCP7 xmeml · D-347) ----------
+
+PPRO_TICKS = 254016000000   # 프리미어 시간 단위 (1초) — transitionitem cutPointTicks
+OVERLAY_TAG = "_글자도형"    # 글자·도형만 투명 영상 파일 이름 꼬리 (D-348)
+REPORT_TAG = "_프리미어_빠진 것"  # 프리미어 XML 에 못 넣은 것 목록 (.txt)
+_ACH = {}
+
+
+def _audio_channels(p):
+    """소리 채널 수 (모노 1 · 스테레오 2 · 못 읽으면 2) — 파일 크기·시각으로 기억."""
+    try:
+        st = Path(p).stat()
+    except OSError:
+        return 2
+    k = (str(p), st.st_size, st.st_mtime_ns)
+    if k not in _ACH:
+        n = 2
+        try:
+            err = core.run([core.ffmpeg(), "-hide_banner", "-i", str(p)]).stderr
+            m = re.search(r"Audio:[^\n]*?Hz, (mono|stereo|(\d+) channels|[\d.]+\(?)", err)
+            if m:
+                n = 1 if m[1] == "mono" else int(m[2]) if m[2] else 2
+        except Exception:  # noqa: BLE001 — 못 읽으면 스테레오로
+            n = 2
+        _ACH[k] = max(1, n)
+    return _ACH[k]
+
+
+def fit_rect(it, md, seq, W, H):
+    """미디어를 화면에 놓는 자리 (효과 컨트롤 100% 기준 · 반올림 없음) — editor.html fitRect 와 같은 셈 (미리보기 화면 그대로).
+    bx·by·bw·bh: 보이는 상자 · mx·my·mw·mh: 상자 안 원본 전체 그림(잘린 곳 포함) · bg: 쇼츠 위아래 박스(box)·흐린 배경(blur)."""
+    sw, sh = md.get("w") or W, md.get("h") or H
+    ref = W / (1080 if seq.get("format") == "shorts" else 1920)
+    lay = {"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0, **(seq.get("layout") or {})}
+    rf = float(it.get("reframe", 0.5) if it.get("reframe") is not None else 0.5)
+    fit = it.get("fit") or "auto"
+    if seq.get("format") == "shorts" and it["track"] == "V1" and fit == "auto":
+        ct, cb = float(lay.get("cropTop") or 0), float(lay.get("cropBottom") or 0)
+        vh = sh * max(0.2, 1 - ct - cb)
+        if lay["mode"] not in ("box", "blur"):
+            s = max(W / sw, H / vh)
+            scw, sch = max(W, sw * s), max(H, vh * s)
+            return {"bx": 0.0, "by": 0.0, "bw": W, "bh": H, "mw": sw * s, "mh": sh * s, "mx": -(scw - W) * rf, "my": -(sch - H) / 2 - ct * sh * s, "bg": None}
+        zw = W * max(1.0, float(lay["zoom"]))
+        s = zw / sw
+        zh = vh * s
+        ch = min(zh, H)
+        return {"bx": 0.0, "by": (H - ch) * float(lay["vpos"]), "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf,
+                "my": -(zh - ch) / 2 - ct * sh * s, "bg": lay["mode"], "bar": lay["bar"]}
+    if fit == "auto":
+        fit = "native" if md.get("kind") == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
+    s = ref if fit == "native" else (max if fit == "cover" else min)(W / sw, H / sh)
+    scw, sch = sw * s, sh * s
+    if fit == "cover":
+        return {"bx": 0.0, "by": 0.0, "bw": W, "bh": H, "mw": scw, "mh": sch, "mx": -(scw - W) * rf, "my": -(sch - H) / 2, "bg": None}
+    return {"bx": (W - scw) / 2, "by": (H - sch) / 2, "bw": scw, "bh": sch, "mw": scw, "mh": sch, "mx": 0.0, "my": 0.0, "bg": None}
+
+
+def premiere_motion(it, md, seq, W, H):
+    """클립 자리 → 프리미어 Basic Motion·Crop (D-347) — 미리보기·내보내기와 같은 그림이 되게:
+    원본 가운데가 놓일 자리(center · 시퀀스 가운데에서 떨어진 거리를 시퀀스 너비·높이로 나눈 값 · 아래가 +) · 확대(원본 픽셀 100% 기준) ·
+    회전(시계 방향 +) · Crop(원본 기준 % — 쇼츠 위아래 자르기·화면 채우기로 잘린 곳 · 확대를 줄이거나 돌려도 보이는 곳이 같게).
+    키프레임이 있으면 클립 가운데 시각의 값 하나 (animated True — 빠진 것 목록에 적음)."""
+    f = fit_rect(it, md, seq, W, H)
+    sw, sh = md.get("w") or W, md.get("h") or H
+    s = f["mw"] / sw
+    m = i_mt(it, (float(it["start"]) + i_end(it)) / 2)
+    pos = kf_at(param(it, "pos"), m)
+    sc = float(kf_at(param(it, "scale"), m)) / 100
+    rot = float(kf_at(param(it, "rot"), m))
+    anc = param(it, "anchor")["v"]
+    ax, ay = f["bx"] + float(anc[0]) * f["bw"], f["by"] + float(anc[1]) * f["bh"]
+    dx, dy = f["bx"] + f["mx"] + f["mw"] / 2 - ax, f["by"] + f["my"] + f["mh"] / 2 - ay
+    r = math.radians(rot)
+    cx = ax + (float(pos[0]) - 0.5) * W + sc * (math.cos(r) * dx - math.sin(r) * dy)
+    cy = ay + (float(pos[1]) - 0.5) * H + sc * (math.sin(r) * dx + math.cos(r) * dy)
+    l, rr = max(0.0, -f["mx"] / s), min(float(sw), (f["bw"] - f["mx"]) / s)
+    t, b = max(0.0, -f["my"] / s), min(float(sh), (f["bh"] - f["my"]) / s)
+    crop = [max(0.0, x) for x in (l / sw * 100, (sw - rr) / sw * 100, t / sh * 100, (sh - b) / sh * 100)]
+    anim = any(len({json.dumps(k["v"]) for k in param(it, key)["k"]}) > 1 for key in ("pos", "scale", "rot", "opacity"))
+    return {"scale": s * sc * 100, "rot": rot, "center": ((cx - W / 2) / W, (cy - H / 2) / H), "crop": [0.0 if x < 1e-3 else x for x in crop],
+            "opacity": float(kf_at(param(it, "opacity"), m)), "animated": anim, "bg": f["bg"], "bar": f.get("bar")}
+
+
+def _xnum(v, nd=6):
+    s = f"{float(v):.{nd}f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
+def _xsub(parent, tag, text=None, **attrs):
+    e = ET.SubElement(parent, tag, {k: str(v) for k, v in attrs.items()})
+    if text is not None:
+        e.text = str(text)
+    return e
+
+
+def _xrate(parent, fps):
+    r = _xsub(parent, "rate")
+    tb = int(round(float(fps)))
+    _xsub(r, "timebase", tb)
+    _xsub(r, "ntsc", "TRUE" if abs(float(fps) - tb) > 0.01 else "FALSE")
+    return r
+
+
+def _xparam(eff, pid, name, value=None, lo=None, hi=None, point=None):
+    p = _xsub(eff, "parameter", authoringApp="PremierePro")
+    _xsub(p, "parameterid", pid)
+    _xsub(p, "name", name)
+    if lo is not None:
+        _xsub(p, "valuemin", lo)
+        _xsub(p, "valuemax", hi)
+    v = _xsub(p, "value", None if point else value)
+    if point:
+        _xsub(v, "horiz", _xnum(point[0]))
+        _xsub(v, "vert", _xnum(point[1]))
+    return p
+
+
+def _xeffect(parent, name, eid, cat, typ, media):
+    e = _xsub(_xsub(parent, "filter"), "effect") if typ != "transition" else _xsub(parent, "effect")
+    _xsub(e, "name", name)
+    _xsub(e, "effectid", eid)
+    if cat:
+        _xsub(e, "effectcategory", cat)
+    _xsub(e, "effecttype", typ)
+    _xsub(e, "mediatype", media)
+    return e
+
+
+def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None):
+    """프리미어 프로에서 가져오기(Ctrl+I)로 여는 XML (FCP7 xmeml) — 프리미어가 내보내는 XML 과 같은 꼴 (D-347):
+    시퀀스 크기(쇼츠 1080×1920 · 롱폼 1920×1080)·초당 장면 · 영상 클립마다 Basic Motion(확대·자리·회전)+Crop 으로 미리보기와 같은 화면 채우기 ·
+    불투명도 · 속도·거꾸로(Time Remap) · 디졸브(transitionitem · 붙은 클립은 start/end -1 · 손잡이만큼 in/out 을 넓힘) · 영상·소리 연결(link) ·
+    소리는 트랙마다 스테레오 한 쌍(L·R 두 줄 — 프리미어가 내보내는 꼴) + 소리 크기·페이드 · 마커 · 숨긴 트랙은 꺼짐 · 잠근 트랙은 잠김.
+    overlay: 글자·도형만 투명 영상(.mov) 파일 경로 → 맨 위 영상 트랙 (D-348) · report: 못 넣은 것을 모음 (_xml_report).
+    t_lo~t_hi: 구간 내보내기면 그 구간만 (0 프레임부터)."""
+    rep = report if report is not None else {}
     media = {m["id"]: m for m in proj["media"]}
-    seen, fid = set(), {}
     t_hi = seq_total(proj) if t_hi is None else t_hi
     total_f = int(round((t_hi - t_lo) * fps))
+    F = lambda t: int(round(t * fps))  # noqa: E731  (구간 시작 기준 초 → 시퀀스 프레임)
+    tracks = proj["tracks"]
+    by_id = {it["id"]: it for it in proj["items"]}
+    solo = any(t.get("solo") for t in tracks if t["k"] == "a")
 
     def cut(it):
-        """구간 안쪽만 남긴 클립 (밖이면 None)."""
+        """구간 안쪽만 남긴 클립 (밖이면 None) · 시각은 구간 시작 기준."""
         s0, e0 = it["start"], i_end(it)
         a, b = max(s0, t_lo), min(e0, t_hi)
         if b - a < 0.5 / fps:
@@ -3754,62 +4061,392 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None):
         x["start"] = a - t_lo
         return x
 
-    def fileref(m):
-        k = m["id"]
-        if k not in fid:
-            fid[k] = f"f{len(fid) + 1}"
-        if k in seen:
-            return f'<file id="{fid[k]}"/>'
-        seen.add(k)
-        p = media_path(m["file"], m["src"])
-        url = _pathurl(p)
-        dur_f = int((m.get("dur") or 10) * fps)
-        med = ""
-        if m["kind"] in ("video", "image"):
-            med += f"<video><samplecharacteristics><width>{m['w']}</width><height>{m['h']}</height></samplecharacteristics></video>"
-        if m.get("audio"):
-            med += "<audio><channelcount>2</channelcount></audio>"
-        return (f'<file id="{fid[k]}"><name>{_xml_esc(p.name)}</name><pathurl>{url}</pathurl>{rate}<duration>{dur_f}</duration>'
-                f"<media>{med}</media></file>")
+    # 전환 → 프레임 (구간 안에 다 들어간 것만) · head[b id] / tail[a id]
+    head, tail = {}, {}
+    for tr in valid_trans(proj):
+        r = trans_range(proj, tr, by_id)
+        if not r:
+            continue
+        if r[0] < t_lo - 1e-6 or r[1] > t_hi + 1e-6:
+            rep.setdefault("trans_cut", []).append(r[0])
+            continue
+        a, b = by_id.get(tr.get("a")), by_id.get(tr.get("b"))
+        ts, te = F(r[0] - t_lo), F(r[1] - t_lo)
+        if te <= ts:
+            continue
+        if a and b:
+            cf = F(b["start"] - t_lo)
+            al = tr.get("align", "center")
+            align = al if al in ("start", "end") else "center"
+            if align == "center":  # 편집점을 가운데에 (FCP7·OTIO 는 (start+end)/2 를 버림한 자리를 편집점으로 읽음)
+                d = te - ts
+                ts = cf - d // 2
+                te = ts + d
+            cf = min(max(cf, ts), te)
+        elif b:
+            cf, align = ts, "start-black"
+        else:
+            cf, align = te, "end-black"
+        x = {"tr": tr, "ts": ts, "te": te, "cut": cf, "align": align, "a": a and a["id"], "b": b and b["id"]}
+        if b:
+            head[b["id"]] = x
+        if a:
+            tail[a["id"]] = x
+        typ = tr.get("type", "dissolve")
+        tk = next((t for t in tracks if t["id"] == tr["track"]), {})
+        if tk.get("k") == "v" and typ != "dissolve" and not (typ == "black" and not (a and b)):
+            rep.setdefault("trans_changed", []).append((typ, r[0] - t_lo))
 
-    def clipitem(it, k, kind):
-        m = media[it["media"]]
-        sp = i_sp(it)
-        s, e = int(round(it["start"] * fps)), int(round(i_end(it) * fps))
-        i, o = int(round(it["in"] * fps)), int(round(it["out"] * fps))
-        dur_f = int((m.get("dur") or 10) * fps)
-        x = (f'<clipitem id="{kind}{k}"><name>{_xml_esc(Path(m["file"]).name)}</name><enabled>TRUE</enabled><duration>{dur_f}</duration>{rate}'
-             f"<start>{s}</start><end>{e}</end><in>{i}</in><out>{o}</out>{fileref(m)}")
-        if kind == "a":
-            x += "<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>"
-        if abs(sp - 1) > 1e-3 or it.get("rev"):
-            x += ("<filter><effect><name>Time Remap</name><effectid>timeremap</effectid><effectcategory>motion</effectcategory>"
-                  "<effecttype>motion</effecttype><mediatype>video</mediatype>"
-                  "<parameter><parameterid>variablespeed</parameterid><name>variablespeed</name><valuemin>0</valuemin><valuemax>1</valuemax><value>0</value></parameter>"
-                  f"<parameter><parameterid>speed</parameterid><name>speed</name><valuemin>-100000</valuemin><valuemax>100000</valuemax><value>{sp * 100:.2f}</value></parameter>"
-                  f"<parameter><parameterid>reverse</parameterid><name>reverse</name><value>{'TRUE' if it.get('rev') else 'FALSE'}</value></parameter>"
-                  "</effect></filter>")
-        if kind == "a":
-            lv = 10 ** (param(it, "level")["v"] / 20) * 10 ** ((it.get("gain") or 0) / 20)
-            gain = 0 if it.get("mute") else lv
-            x += ("<filter><effect><name>Audio Levels</name><effectid>audiolevels</effectid><effecttype>audiolevels</effecttype><mediatype>audio</mediatype>"
-                  f"<parameter><parameterid>level</parameterid><name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax><value>{min(3.98, gain):.4f}</value></parameter></effect></filter>")
-        return x + "</clipitem>"
+    def trans_el(parent, x, kind):
+        t = _xsub(parent, "transitionitem")
+        _xsub(t, "start", x["ts"])
+        _xsub(t, "end", x["te"])
+        _xsub(t, "alignment", x["align"])
+        _xsub(t, "cutPointTicks", round((x["cut"] - x["ts"]) / fps * PPRO_TICKS))
+        _xrate(t, fps)
+        if kind == "v":
+            e = _xeffect(t, "Cross Dissolve", "Cross Dissolve", "Dissolve", "transition", "video")
+            for k, v in (("wipecode", 0), ("wipeaccuracy", 100), ("startratio", 0), ("endratio", 1), ("reverse", "FALSE")):
+                _xsub(e, k, v)
+        else:
+            cg = x["tr"] is None or x["tr"].get("type") == "cgain"  # 페이드·같은 크기로 섞기 = 0dB · 기본(일정한 크기로 들림) = +3dB
+            _xeffect(t, "Cross Fade (0dB)" if cg else "Cross Fade (+3dB)", "KGAudioTransCrossFade0dB" if cg else "KGAudioTransCrossFade3dB",
+                     "", "transition", "audio")
+        return t
 
-    vt, at, k = [], [], 0
-    for tr in proj["tracks"]:
-        its = sorted([x for x in (cut(it) for it in proj["items"] if it["track"] == tr["id"]) if x], key=lambda x: x["start"])
-        body = ""
-        for it in its:
-            if media.get(it["media"]) is None:
-                continue
-            k += 1
-            body += clipitem(it, k, "v" if tr["k"] == "v" else "a")
-        (vt if tr["k"] == "v" else at).append(f"<track>{body}</track>")
-    return (f'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4"><sequence id="seq1"><name>{_xml_esc(stem)}</name>'
-            f'<duration>{total_f}</duration>{rate}<media><video><format><samplecharacteristics>{rate}<width>{W}</width><height>{H}</height>'
-            f'<pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format>{"".join(vt)}</video>'
-            f'<audio>{"".join(at)}</audio></media></sequence></xmeml>\n')
+    files, masters = {}, {}
+
+    def file_el(parent, md, path=None, w=None, h=None, dur_f=None):
+        key = md["id"] if md else str(path)
+        if key in files:
+            return _xsub(parent, "file", id=files[key])
+        fid = files[key] = f"file-{len(files) + 1}"
+        p = Path(path) if path else media_path(md["file"], md.get("src", "videos"))
+        img = bool(md) and md.get("kind") == "image"
+        mf = fps if (not md or img) else float(md.get("fps") or fps)
+        f = _xsub(parent, "file", id=fid)
+        _xsub(f, "name", p.name)
+        _xsub(f, "pathurl", _pathurl(p))
+        _xrate(f, mf)
+        _xsub(f, "duration", dur_f if dur_f is not None else max(1, int(round(float(md.get("dur") or 0) * mf))))
+        tc = _xsub(f, "timecode")
+        _xrate(tc, mf)
+        _xsub(tc, "string", "00:00:00:00")
+        _xsub(tc, "frame", 0)
+        _xsub(tc, "displayformat", "NDF")
+        me = _xsub(f, "media")
+        if not md or md.get("kind") in ("video", "image"):
+            sc = _xsub(_xsub(me, "video"), "samplecharacteristics")
+            _xrate(sc, mf)
+            _xsub(sc, "width", w or md.get("w") or W)
+            _xsub(sc, "height", h or md.get("h") or H)
+            _xsub(sc, "anamorphic", "FALSE")
+            _xsub(sc, "pixelaspectratio", "square")
+            _xsub(sc, "fielddominance", "none")
+        if md and md.get("audio"):
+            au = _xsub(me, "audio")
+            sc = _xsub(au, "samplecharacteristics")
+            _xsub(sc, "depth", 16)
+            _xsub(sc, "samplerate", 48000)
+            _xsub(au, "channelcount", min(2, _audio_channels(p)))
+        return f
+
+    def timing(x, kind):
+        """→ (start, end, in, out) 시퀀스 프레임 · 전환이 붙은 쪽은 -1 이고 그 손잡이만큼 in/out 이 넓어짐 (프리미어·FCP7 규칙)."""
+        sp = i_sp(x)
+        s, e = F(x["start"]), F(i_end(x))
+        i = int(round(x["in"] * fps))
+        o = i + int(round((e - s) * sp))
+        xs, xe = s, e
+        h, t = head.get(x["id"]), tail.get(x["id"])
+        if h:
+            xs = -1
+            d = int(round((h["cut"] - h["ts"]) * sp))
+            if x.get("rev"):
+                o += d
+            else:
+                i -= d
+        if t:
+            xe = -1
+            d = int(round((t["te"] - t["cut"]) * sp))
+            if x.get("rev"):
+                i -= d
+            else:
+                o += d
+        return xs, xe, max(0, i), o
+
+    root = ET.Element("xmeml", version="4")
+    sq = _xsub(root, "sequence", id="sequence-1")
+    _xsub(sq, "duration", total_f)
+    _xrate(sq, fps)
+    _xsub(sq, "name", stem)
+    sm = _xsub(sq, "media")
+    vid = _xsub(sm, "video")
+    fmt = _xsub(_xsub(vid, "format"), "samplecharacteristics")
+    _xrate(fmt, fps)
+    for k, v in (("width", W), ("height", H), ("anamorphic", "FALSE"), ("pixelaspectratio", "square"), ("fielddominance", "none"), ("colordepth", 24)):
+        _xsub(fmt, k, v)
+    aud = _xsub(sm, "audio")
+    _xsub(aud, "numOutputChannels", 2)
+    asc = _xsub(_xsub(aud, "format"), "samplecharacteristics")
+    _xsub(asc, "depth", 16)
+    _xsub(asc, "samplerate", 48000)
+    outs = _xsub(aud, "outputs")
+    for ch in (1, 2):
+        g = _xsub(outs, "group")
+        _xsub(g, "index", ch)
+        _xsub(g, "numchannels", 1)
+        _xsub(g, "downmix", 0)
+        _xsub(_xsub(g, "channel"), "index", ch)
+
+    links = {}   # 연결(link id) → [(clipitem, mediatype, trackindex, clipindex)]
+    seen_color, seen_anim, seen_bg = [], [], set()
+    n = 0
+    vi = ai = 0
+    for tr in tracks:
+        its = sorted([x for x in (cut(it) for it in proj["items"] if it["track"] == tr["id"]) if x and media.get(x["media"])],
+                     key=lambda x: x["start"])
+        kind = tr["k"]
+        if kind == "v":
+            vi += 1
+            tel = _xsub(vid, "track")
+            ci_n = 0
+            for x in its:
+                md = media[x["media"]]
+                h = head.get(x["id"])
+                if h:  # 들어오는 전환은 이 클립 앞에 (구간에 다 들어간 전환만 있음 → 나가는 클립도 이 트랙에 있음)
+                    trans_el(tel, h, "v")
+                n += 1
+                ci_n += 1
+                s, e, i, o = timing(x, "v")
+                ci = _xsub(tel, "clipitem", id=f"clipitem-{n}")
+                _xsub(ci, "masterclipid", masters.setdefault(md["id"], f"masterclip-{len(masters) + 1}"))
+                _xsub(ci, "name", Path(md["file"]).name)
+                _xsub(ci, "enabled", "TRUE")
+                dur = max(o, int(round(float(md.get("dur") or 0) * fps)), 1)
+                _xsub(ci, "duration", dur)
+                _xrate(ci, fps)
+                for k, v in (("start", s), ("end", e), ("in", i), ("out", o)):
+                    _xsub(ci, k, v)
+                _xsub(ci, "alphatype", "none")
+                _xsub(ci, "pixelaspectratio", "square")
+                _xsub(ci, "anamorphic", "FALSE")
+                file_el(ci, md, dur_f=None if md.get("kind") != "image" else dur)
+                sp = i_sp(x)
+                if abs(sp - 1) > 1e-3 or x.get("rev"):
+                    e_ = _xeffect(ci, "Time Remap", "timeremap", "motion", "motion", "video")
+                    _xparam(e_, "variablespeed", "variablespeed", 0, 0, 1)
+                    _xparam(e_, "speed", "speed", f"{sp * 100:.2f}", -100000, 100000)
+                    _xparam(e_, "reverse", "reverse", "TRUE" if x.get("rev") else "FALSE")
+                    _xparam(e_, "frameblending", "frameblending", "FALSE")
+                mo = premiere_motion(x, md, proj, W, H)
+                e_ = _xeffect(ci, "Basic Motion", "basic", "motion", "motion", "video")
+                _xparam(e_, "scale", "Scale", _xnum(mo["scale"], 4), 0, 1000)
+                _xparam(e_, "rotation", "Rotation", _xnum(mo["rot"], 4), -8640, 8640)
+                _xparam(e_, "center", "Center", point=mo["center"])
+                _xparam(e_, "centerOffset", "Anchor Point", point=(0, 0))
+                if any(mo["crop"]):
+                    e_ = _xeffect(ci, "Crop", "crop", "motion", "motion", "video")
+                    for pid, v in zip(("left", "right", "top", "bottom"), mo["crop"]):
+                        _xparam(e_, pid, pid, _xnum(v, 4), 0, 100)
+                if mo["opacity"] < 99.95:
+                    e_ = _xeffect(ci, "Opacity", "opacity", "motion", "motion", "video")
+                    _xparam(e_, "opacity", "opacity", _xnum(mo["opacity"], 2), 0, 100)
+                if mo["animated"]:
+                    seen_anim.append(x["start"])
+                if mo["bg"] == "blur" or (mo["bg"] == "box" and str(mo.get("bar") or "#000000").lower() not in ("#000000", "#000")):
+                    seen_bg.add((mo["bg"], mo.get("bar")))
+                if not _color_default(x.get("color")):
+                    seen_color.append(x["start"])
+                if x.get("link"):
+                    links.setdefault(x["link"], []).append((ci, "video", vi, ci_n))
+                t_ = tail.get(x["id"])
+                if t_ and t_["b"] is None:
+                    trans_el(tel, t_, "v")
+            _xsub(tel, "enabled", "FALSE" if tr.get("hide") else "TRUE")
+            _xsub(tel, "locked", "TRUE" if tr.get("lock") else "FALSE")
+        else:
+            off = (tr.get("mute") or (solo and not tr.get("solo")))
+            tvol = 10 ** (float(tr.get("vol") or 0) / 20)
+            for side in (0, 1):
+                ai += 1
+                tel = _xsub(aud, "track", currentExplodedTrackIndex=side, totalExplodedTrackCount=2, premiereTrackType="Stereo")
+                ci_n = 0
+                for x in its:
+                    md = media[x["media"]]
+                    if not md.get("audio"):
+                        continue
+                    h, t_ = head.get(x["id"]), tail.get(x["id"])
+                    fi = F(min(float(x.get("fadeIn") or 0), i_len(x)))
+                    fo = F(min(float(x.get("fadeOut") or 0), i_len(x)))
+                    s0, e0 = F(x["start"]), F(i_end(x))
+                    if not h and fi > 0:  # 페이드 인 = 소리 없음에서 0dB 섞기 (start-black)
+                        h = head[x["id"]] = {"tr": None, "ts": s0, "te": s0 + fi, "cut": s0, "align": "start-black", "a": None, "b": x["id"]}
+                    if not t_ and fo > 0:
+                        t_ = tail[x["id"]] = {"tr": None, "ts": e0 - fo, "te": e0, "cut": e0, "align": "end-black", "a": x["id"], "b": None}
+                    if h:
+                        trans_el(tel, h, "a")
+                    n += 1
+                    ci_n += 1
+                    s, e, i, o = timing(x, "a")
+                    ci = _xsub(tel, "clipitem", id=f"clipitem-{n}", premiereChannelType="stereo")
+                    _xsub(ci, "masterclipid", masters.setdefault(md["id"], f"masterclip-{len(masters) + 1}"))
+                    _xsub(ci, "name", Path(md["file"]).name)
+                    _xsub(ci, "enabled", "TRUE")
+                    _xsub(ci, "duration", max(o, int(round(float(md.get("dur") or 0) * fps)), 1))
+                    _xrate(ci, fps)
+                    for k, v in (("start", s), ("end", e), ("in", i), ("out", o)):
+                        _xsub(ci, k, v)
+                    file_el(ci, md)
+                    st_ = _xsub(ci, "sourcetrack")
+                    _xsub(st_, "mediatype", "audio")
+                    p_ = media_path(md["file"], md.get("src", "videos"))
+                    _xsub(st_, "trackindex", side + 1 if _audio_channels(p_) >= 2 else 1)
+                    sp = i_sp(x)
+                    if abs(sp - 1) > 1e-3 or x.get("rev"):
+                        e_ = _xeffect(ci, "Time Remap", "timeremap", "motion", "motion", "audio")
+                        _xparam(e_, "variablespeed", "variablespeed", 0, 0, 1)
+                        _xparam(e_, "speed", "speed", f"{sp * 100:.2f}", -100000, 100000)
+                        _xparam(e_, "reverse", "reverse", "TRUE" if x.get("rev") else "FALSE")
+                    lv = 0.0 if x.get("mute") else 10 ** (float(kf_at(param(x, "level"), i_mt(x, x["start"] + i_len(x) / 2))) / 20) * 10 ** (float(x.get("gain") or 0) / 20) * tvol
+                    if param(x, "level")["k"]:
+                        seen_anim.append(x["start"])
+                    e_ = _xeffect(ci, "Audio Levels", "audiolevels", "audiolevels", "audiolevels", "audio")
+                    _xparam(e_, "level", "Level", _xnum(min(3.98109, lv), 5), 0, 3.98109)
+                    if x.get("link"):
+                        links.setdefault(x["link"], []).append((ci, "audio", ai, ci_n))
+                    if t_ and t_["b"] is None:
+                        trans_el(tel, t_, "a")
+                _xsub(tel, "enabled", "FALSE" if off else "TRUE")
+                _xsub(tel, "locked", "TRUE" if tr.get("lock") else "FALSE")
+                _xsub(tel, "outputchannelindex", side + 1)
+            for x in its:  # 페이드로 만든 전환은 이 트랙에서만
+                for d in (head, tail):
+                    if d.get(x["id"]) and d[x["id"]]["tr"] is None:
+                        d.pop(x["id"])
+    if overlay:  # 글자·도형만 투명 영상 → 맨 위 영상 트랙 (D-348)
+        tel = _xsub(vid, "track")
+        n += 1
+        ci = _xsub(tel, "clipitem", id=f"clipitem-{n}")
+        p = Path(overlay)
+        _xsub(ci, "masterclipid", f"masterclip-{len(masters) + 1}")
+        _xsub(ci, "name", p.name)
+        _xsub(ci, "enabled", "TRUE")
+        _xsub(ci, "duration", total_f)
+        _xrate(ci, fps)
+        for k, v in (("start", 0), ("end", total_f), ("in", 0), ("out", total_f)):
+            _xsub(ci, k, v)
+        _xsub(ci, "alphatype", "straight")
+        _xsub(ci, "pixelaspectratio", "square")
+        _xsub(ci, "anamorphic", "FALSE")
+        file_el(ci, None, path=p, w=W, h=H, dur_f=total_f)
+        e_ = _xeffect(ci, "Basic Motion", "basic", "motion", "motion", "video")
+        _xparam(e_, "scale", "Scale", 100, 0, 1000)
+        _xparam(e_, "rotation", "Rotation", 0, -8640, 8640)
+        _xparam(e_, "center", "Center", point=(0, 0))
+        _xparam(e_, "centerOffset", "Anchor Point", point=(0, 0))
+        _xsub(tel, "enabled", "TRUE")
+        _xsub(tel, "locked", "FALSE")
+    for grp in links.values():  # 영상·소리 연결 (프리미어가 내보내는 꼴: 묶음의 모든 클립을 자기 자신까지 적음)
+        if len(grp) < 2:
+            continue
+        for ci, *_ in grp:
+            for ref, mt, ti, cn in grp:
+                ln = _xsub(ci, "link")
+                _xsub(ln, "linkclipref", ref.get("id"))
+                _xsub(ln, "mediatype", mt)
+                _xsub(ln, "trackindex", ti)
+                _xsub(ln, "clipindex", cn)
+                if mt == "audio":
+                    _xsub(ln, "groupindex", 1)
+    tc = _xsub(sq, "timecode")
+    _xrate(tc, fps)
+    _xsub(tc, "string", "00:00:00:00")
+    _xsub(tc, "frame", 0)
+    _xsub(tc, "displayformat", "NDF")
+    for mk in sorted(proj.get("markers") or [], key=lambda m: float(m.get("t") or 0)):
+        t = float(mk.get("t") or 0)
+        if t_lo - 1e-6 <= t <= t_hi + 1e-6:
+            me = _xsub(sq, "marker")
+            _xsub(me, "comment", "")
+            _xsub(me, "name", str(mk.get("name") or ""))
+            _xsub(me, "in", F(t - t_lo))
+            _xsub(me, "out", -1)
+    rep.update(color=seen_color, anim=seen_anim, bg=sorted(seen_bg, key=str), clips=n)
+    if hasattr(ET, "indent"):
+        ET.indent(root, "  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + ET.tostring(root, encoding="unicode") + "\n"
+
+
+def _color_default(c):
+    """색 보정을 안 했는지 (editor.html colorIsDefault)."""
+    if not c:
+        return True
+    return all(abs(float(c.get(k, 0) or 0)) < 1e-6 for k in ("exp", "con", "hi", "sh", "vib", "temp", "tint")) and \
+        abs(float(c["sat"] if c.get("sat") is not None else 100) - 100) < 1e-6
+
+
+def _tc(t, fps=30):
+    """초 → '00:00:12:05' (시:분:초:프레임)."""
+    f = int(round(max(0.0, float(t)) * fps))
+    s, ff = divmod(f, int(round(fps)))
+    return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}:{ff:02d}"
+
+
+def _xml_report(proj, rep, stem, fps, t_lo, t_hi, overlay=None, overlay_note=None, srt=()):
+    """프리미어 XML 에 못 넣은 것 목록 (프리미어의 '번역 보고서'처럼 · D-347) — 무엇이 빠지고 어떻게 하면 되는지 쉬운 말로."""
+    span = t_hi - t_lo
+    caps = [c for c in timeline_captions(proj) if c["end"] > t_lo and c["start"] < t_hi]
+    titles = [t for t in proj.get("titles") or [] if t["start"] < t_hi and t["start"] + t["dur"] > t_lo]
+    shapes = [s for s in proj.get("shapes") or [] if s.get("full") or (s["start"] < t_hi and s["start"] + s["dur"] > t_lo)]
+    tacts = [x for x in proj.get("tactics") or [] if isinstance(x, dict)]
+    rows = []
+    gfx = [f"{k} {v}개" for k, v in (("자막", len(caps)), ("타이틀", len(titles)), ("도형", len(shapes)), ("전술 그림", len(tacts))) if v]
+    if gfx:
+        if overlay:
+            rows.append(f"■ 자막·타이틀·도형·전술 그림 ({' · '.join(gfx)})\n"
+                        f"  맨 위 영상 트랙의 '{Path(overlay).name}'(투명 배경 영상)으로 들어가요. 화면은 같지만 프리미어에서 글은 고칠 수 없어요(그림이에요).")
+        else:
+            rows.append(f"■ 자막·타이틀·도형·전술 그림이 빠져요 ({' · '.join(gfx)})\n"
+                        + (f"  {overlay_note}\n" if overlay_note else "")
+                        + "  편집실 내보내기에서 '글자·도형만 투명 영상'을 같이 켜면 맨 위 트랙에 똑같이 얹혀요.")
+        if caps and srt:
+            rows.append("■ 자막을 프리미어 자막 트랙으로 고치려면\n  " + " · ".join(f"'{s}'" for s in srt)
+                        + " 을(를) 가져오기(Ctrl+I) 한 뒤 시퀀스 처음(00:00:00:00)에 끌어 놓으세요.")
+    if rep.get("bg"):
+        for bg, bar in rep["bg"]:
+            rows.append("■ 흐린 배경이 빠져요\n  쇼츠 위아래의 흐린 배경 대신 검은 바탕이 보여요." if bg == "blur"
+                        else f"■ 위아래 띠 색({bar})이 빠져요\n  검은 바탕이 보여요.")
+    if rep.get("color"):
+        rows.append(f"■ 색 보정 {len(rep['color'])}개 클립이 빠져요\n  " + ", ".join(_tc(t, fps) for t in rep["color"][:12])
+                    + (" …" if len(rep["color"]) > 12 else ""))
+    if rep.get("anim"):
+        rows.append(f"■ 움직임(키프레임) {len(rep['anim'])}개 클립은 클립 가운데 값 하나로 들어가요\n  "
+                    + ", ".join(_tc(t, fps) for t in rep["anim"][:12]) + (" …" if len(rep["anim"]) > 12 else ""))
+    if rep.get("trans_changed"):
+        nm = {"black": "검정 거치기", "white": "흰색 거치기", "wipe": "닦아내기", "push": "밀어내기"}
+        rows.append(f"■ 장면 전환 {len(rep['trans_changed'])}개는 디졸브(Cross Dissolve)로 바뀌어요\n  "
+                    + ", ".join(f"{nm.get(k, k)} {_tc(t, fps)}" for k, t in rep["trans_changed"][:12]))
+    if rep.get("trans_cut"):
+        rows.append(f"■ 구간 끝에 걸린 장면 전환 {len(rep['trans_cut'])}개는 빠져요 (그 자리는 바로 바뀜)")
+    sound = []
+    music = {t["id"] for t in proj["tracks"] if t["k"] == "a" and t.get("role") == "music"}
+    if (proj.get("duck") or {}).get("on", True) and any(it["track"] in music and it["start"] < t_hi and i_end(it) > t_lo for it in proj["items"]):
+        sound.append("배경음악 자동 줄이기(말할 때 음악 작게)")
+    if voice_filters(proj.get("voice")):
+        sound.append("목소리 보정")
+    if (proj.get("master") or {}).get("normalize", True):
+        sound.append(f"소리 크기 맞추기({float((proj.get('master') or {}).get('lufs') or -14):.0f} LUFS)")
+    if sound:
+        rows.append("■ 소리 처리가 빠져요: " + " · ".join(sound) + "\n  프리미어에서는 원래 소리 그대로예요. 완성 MP4 와 소리가 다를 수 있어요.")
+    miss = rep.get("missing_media") or []
+    if miss:
+        rows.append("■ 파일이 없어서 프리미어에서 '미디어 오프라인'으로 보여요\n  " + ", ".join(miss[:10]))
+    head = (f"프리미어로 넘기기 · {stem}\n"
+            f"시퀀스 {rep.get('W')}×{rep.get('H')} · {int(fps)}fps · 길이 {_tc(span, fps)} · 클립 {rep.get('clips', 0)}개\n\n"
+            "프리미어에서: 파일 > 가져오기(Ctrl+I) → '" + f"{stem}_premiere.xml" + "' 를 고르면 같은 이름의 시퀀스가 생겨요.\n"
+            "그대로 넘어가는 것: 컷 자리 · 원본 구간 · 트랙 · 화면 채우기(확대·자리·자르기) · 속도·거꾸로 · 디졸브 · 소리 크기·페이드 · 영상·소리 연결 · 마커\n\n")
+    return head + ("못 넣은 것\n\n" + "\n\n".join(rows) if rows else "빠진 것이 없어요.") + "\n"
 
 
 def _pathurl(p):
@@ -5157,8 +5794,8 @@ def _check_disk(span, W, H, proj):
                            "(작업 폴더가 있는 드라이브에서 필요 없는 파일을 지워 주세요)")
 
 
-def export(name, proj, opts, log):
-    CANCEL.clear()
+def _export_prep(name, proj, opts, log):
+    """내보내기·지금 화면 저장(D-349)이 함께 쓰는 준비 → (편집본, 형식, 자막·도형 기준 크기 BW·BH, 출력 크기 W·H, fps, 미디어, 설정)."""
     proj = migrate_seq(dict(proj))
     fmt = proj.get("format", "shorts")
     BW, BH = (1080, 1920) if fmt == "shorts" else (1920, 1080)  # 자막·도형 기준 해상도
@@ -5179,8 +5816,21 @@ def export(name, proj, opts, log):
         log(f"  빈 클립 {len(bad)}개는 건너뛰어요")
         drop = {id(x) for x in bad}
         proj["items"] = [it for it in proj["items"] if id(it) not in drop]
+    return proj, fmt, BW, BH, W, H, fps, media, pr
+
+
+def _export_stem(name, proj, fmt):
+    """완성본 이름 앞부분 '<영상>_<편집본 이름>'."""
     label = re.sub(r'[\\/:*?"<>|]', "", proj.get("name") or ("쇼츠" if fmt == "shorts" else "롱폼")).strip(" .")
-    stem = f"{core.adir(name).name}_{label}"
+    return f"{core.adir(name).name}_{label}"
+
+
+def export(name, proj, opts, log):
+    """편집본 내보내기 — opts: video(mp4) · srt(+ srtTracks 넣을 자막 트랙 · srtSplit 트랙마다 따로 · D-346) · xml(프리미어 XML + 빠진 것 목록 · D-347) ·
+    overlay(글자·도형만 투명 영상 · D-348) · preset · fps · hw · range([시작, 끝] 초)."""
+    CANCEL.clear()
+    proj, fmt, BW, BH, W, H, fps, media, pr = _export_prep(name, proj, opts, log)
+    stem = _export_stem(name, proj, fmt)
     outputs = []
     total = seq_total(proj)
     t_lo, t_hi = 0.0, total
@@ -5190,39 +5840,51 @@ def export(name, proj, opts, log):
         stem += f"_구간_{_tlabel(t_lo)}-{_tlabel(t_hi)}"
     if t_hi - t_lo < 0.05:
         raise RuntimeError("내보낼 내용이 없어요 (타임라인이 비어 있어요)")
-    # 같은 이름이 있으면 덮어쓰지 않고 (2), (3)… 을 붙임
-    exts = ([".mp4"] if opts.get("video", True) else []) + ([".srt"] if opts.get("srt", True) else []) + (["_premiere.xml"] if opts.get("xml", True) else [])
+    want_v, want_srt, want_xml, want_ov = opts.get("video", True), opts.get("srt", True), opts.get("xml", True), bool(opts.get("overlay"))
+    # 자막 파일(SRT)은 '영상에 자막 넣기'와 상관없이 만듦 (유튜브 자막 올리기용) · 숨긴 트랙은 빠짐 · 구간 내보내기면 구간 안으로 잘라 0초부터
+    srt_tr = opts.get("srtTracks") if isinstance(opts.get("srtTracks"), list) else None
+    srts = srt_files(proj, "", t_lo, t_hi, fps, srt_tr, bool(opts.get("srtSplit"))) if want_srt else []
+    # 같은 이름이 있으면 덮어쓰지 않고 (2), (3)… 을 붙임 (이번에 만들 파일 이름 모두로 봄)
+    exts = ([".mp4"] if want_v else []) + ([fn for fn, _, _ in srts] or [".srt"] if want_srt else []) + \
+        (["_premiere.xml", REPORT_TAG + ".txt"] if want_xml else []) + ([OVERLAY_TAG + ".mov", OVERLAY_TAG + "_png.zip"] if want_ov else [])
     base, k = stem, 1
     while any((core.OUT / f"{stem}{e}").exists() for e in exts):
         k += 1
         stem = f"{base} ({k})"
-    if opts.get("video", True):
+    if want_v:
         miss = _missing_media(proj, media, t_lo, t_hi)
         if miss:
             raise RuntimeError("미디어 파일이 없어요 · " + ", ".join(miss[:5]) + " (옮기거나 지웠다면 미디어 탭에서 다시 넣어 주세요)")
-    # 자막 파일(SRT)은 '영상에 자막 넣기'와 상관없이 만듦 (유튜브 자막 올리기용) · 구간 내보내기면 구간 안으로 잘라 0초부터
     span = t_hi - t_lo
-    caps = []
-    for c in timeline_captions(proj):
-        s, e = max(0.0, c["start"] - t_lo), min(span, c["end"] - t_lo)
-        if e - s >= 1.0 / fps:
-            caps.append(dict(c, start=s, end=e))
-    side = []  # (파일 이름, 내용) — 영상을 만들면 영상이 다 된 뒤에 씀 (멈추거나 실패하면 짝 잃은 자막·XML 이 안 남음)
-    if opts.get("srt", True):
-        if caps:
-            side.append((f"{stem}.srt", _srt(caps)))
-        else:
-            log("  자막이 없어서 SRT 파일은 만들지 않았어요")
-    if opts.get("xml", True):
-        side.append((f"{stem}_premiere.xml", _xmeml(proj, BW, BH, fps, stem, t_lo, t_hi)))
+    side = [(stem + fn, txt) for fn, txt, _ in srts]  # (파일 이름, 내용) — 영상을 만들면 영상이 다 된 뒤에 씀 (멈추거나 실패하면 짝 잃은 자막·XML 이 안 남음)
+    if want_srt and not srts:
+        log("  자막이 없어서 SRT 파일은 만들지 않았어요")
 
-    def write_side():
-        for fn, txt in side:  # 자막(.srt)은 BOM 을 붙임 (프리미어·자막 프로그램이 한글을 안 깨지게 읽음 · core.SRT_ENCODING)
-            updater.write_atomic(core.OUT / fn, txt, encoding=core.SRT_ENCODING if fn.endswith(".srt") else "utf-8")
+    def write_side(ov=None, ov_note=None):
+        files = list(side)
+        if want_xml:  # XML 은 투명 영상을 만든 뒤 (맨 위 트랙에 걸 파일 이름이 정해진 뒤)
+            rep = {"W": BW, "H": BH, "missing_media": [] if want_v else _missing_media(proj, media, t_lo, t_hi)}
+            files.append((f"{stem}_premiere.xml", _xmeml(proj, BW, BH, fps, stem, t_lo, t_hi, overlay=ov, report=rep)))
+            files.append((f"{stem}{REPORT_TAG}.txt", _xml_report(proj, rep, stem, fps, t_lo, t_hi, ov, ov_note, [fn for fn, _ in side])))
+        for fn, txt in files:  # 자막(.srt)·빠진 것 목록(.txt)은 BOM 을 붙임 (프리미어·메모장·자막 프로그램이 한글을 안 깨지게 읽음 · core.SRT_ENCODING)
+            updater.write_atomic(core.OUT / fn, txt, encoding=core.SRT_ENCODING if fn.endswith((".srt", ".txt")) else "utf-8")
             outputs.append(fn)
 
-    if not opts.get("video", True):
-        write_side()
+    def overlay_step():
+        """글자·도형만 투명 영상 → (파일 경로 또는 None, 못 만든 까닭) · 멈추면 내보내기도 멈춤."""
+        if not want_ov:
+            return None, None
+        try:
+            ov, note = _overlay_export(name, proj, BW, BH, fps, t_lo, t_hi, stem, log)
+        except Cancelled:
+            log("  내보내기를 멈췄어요")
+            raise RuntimeError("내보내기를 멈췄어요")
+        if ov:
+            outputs.append(ov.name)
+        return (ov if ov and ov.suffix == ".mov" else None), note
+
+    if not want_v:
+        write_side(*overlay_step())
     else:
         sweep_temp(0)
         _check_disk(span, W, H, proj)
@@ -5451,6 +6113,164 @@ def export(name, proj, opts, log):
                 time.sleep(0.3)
         if err:
             raise RuntimeError(err)
-        write_side()
+        write_side(*overlay_step())
     log(f"  내보내기 완료 · {', '.join(outputs)}")
     return outputs
+
+
+# ---------- 글자·도형만 투명 영상 (D-348) · 지금 화면 그림으로 저장 (D-349) ----------
+
+OVERLAY_BPS = 12e6  # 글자·도형 투명 영상(ProRes 4444) 어림 크기(바이트/초 · 1080×1920 · 글자가 많은 쇼츠에서 잰 54Mbps ≈ 6.8MB/초의 두 배쯤 여유)
+OVERLAY_CODECS = ("prores_ks", "prores_aw")  # 먼저 prores_ks (알파 표준 구현) · 안 되면 prores_aw (2.5배쯤 빠르고 알파 같음 · I-342) · 둘 다 안 되면 PNG
+
+
+def _overlay_graph(BW, BH, fps, f0, n):
+    """자막·타이틀·도형·전술 그림만 투명 바탕으로 그리는 필터 — 내보내기와 같은 ASS·같은 프레임 시각(settb·setpts+f0 · _build_segment 끝과 같음).
+    알파는 검정·흰 바탕에 한 번씩 그린 두 화면의 차(1 − (흰 − 검정))로 구함: subtitles 필터의 alpha 처리는 반투명(도형 불투명도·글 상자·
+    나타나기 효과)이 두 번 곱해져 흐려짐 → 검정 바탕 그림(= 알파를 곱한 색)을 알파로 나눠 곱하기 전 색(straight)으로."""
+    src = (lambda c: f"color=c={c}:s={BW}x{BH}:r={fps}:d={n / fps + 1:.3f},format=rgb24,trim=end_frame={n},"
+                     f"settb=1/{fps},setpts=PTS+{int(f0)},subtitles=subs.ass:fontsdir=fonts,setpts=PTS-STARTPTS")
+    return (f"{src('black')}[b];\n{src('white')}[w];\n[b]split[b1][b2];\n[w]extractplanes=g[wg];\n[b1]extractplanes=g[bg];\n"
+            "[wg][bg]lut2=c0='clip(255-(x-y),0,255)'[a];\n[b2][a]alphamerge,unpremultiply=inplace=1")
+
+
+def _overlay_export(name, proj, BW, BH, fps, t_lo, t_hi, stem, log):
+    """글자·도형만 투명 영상 (프리미어 맨 위 트랙용 · D-348) → (완성본 폴더의 파일, 못 만들었을 때 까닭).
+    ProRes 4444 (.mov · yuva444p10le · BT.709) — 그 인코더가 안 되면 PNG 연속 그림 묶음(.zip · 그림마다 알파) · 둘 다 안 되면 (None, 까닭)."""
+    f0, f1 = int(round(t_lo * fps)), int(round(t_hi * fps))
+    n = max(1, f1 - f0)
+    try:
+        free = shutil.disk_usage(core.OUT).free
+    except OSError:
+        free = None
+    need = int(n / fps * OVERLAY_BPS + 100e6)
+    if free is not None and free < need:
+        note = f"디스크 공간이 모자라서 글자·도형 투명 영상은 만들지 않았어요 (약 {need / 1e9:.1f}GB 필요)"
+        log("  " + note)
+        return None, note
+    tmp = Path(tempfile.mkdtemp(prefix=".render_", dir=core.OUT))
+    t_start = time.time()
+
+    def prog(fr, what):
+        pct = 100 * min(1.0, fr / n)
+        el = time.time() - t_start
+        core.set_progress(label="내보내는 중", item=name, step="", pct=int(pct), detail=f"{what} · {fr}/{n}",
+                          eta=int(el / pct * (100 - pct)) if pct > 2 else None)
+
+    try:
+        (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
+        shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+        g = _overlay_graph(BW, BH, fps, f0, n)
+        (tmp / "ov.txt").write_text(g + ",scale=out_color_matrix=bt709:out_range=tv,format=yuva444p10le[v]", encoding="utf-8")
+        src, out, why = None, None, ""
+        for codec in OVERLAY_CODECS:
+            try:
+                prog(0, "글자·도형 투명 영상 만드는 중")
+                _run_ff(["-y", "-v", "error", _fc_opt(), "ov.txt", "-map", "[v]", "-frames:v", str(n), "-c:v", codec, "-profile:v",
+                         "4444" if codec == "prores_ks" else "4", "-pix_fmt", "yuva444p10le", *(["-alpha_bits", "16"] if codec == "prores_ks" else []),
+                         "-vendor", "apl0", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-r", str(fps),
+                         "-video_track_timescale", str(fps * 1000), "ov.mov"], tmp, lambda fr: prog(fr, "글자·도형 투명 영상 만드는 중"))
+                src, out = tmp / "ov.mov", core.OUT / f"{stem}{OVERLAY_TAG}.mov"
+                break
+            except Cancelled:
+                raise
+            except RuntimeError as e:
+                why = str(e)[-160:].strip()
+                log(f"  ProRes 4444({codec})로 못 만들었어요 · {why}")
+        if src is None:  # ProRes 인코더가 없거나 실패 → PNG 연속 그림 (그림마다 알파 · 프리미어 '이미지 시퀀스'로 가져옴)
+            log("  PNG 연속 그림으로 만들어요")
+            (tmp / "png").mkdir()
+            (tmp / "ovp.txt").write_text(g + ",format=rgba[v]", encoding="utf-8")
+            _run_ff(["-y", "-v", "error", _fc_opt(), "ovp.txt", "-map", "[v]", "-frames:v", str(n), "-r", str(fps), "-start_number", "0", "png/f_%06d.png"], tmp,
+                    lambda fr: prog(fr, "글자·도형 PNG 연속 그림 만드는 중"))
+            import zipfile
+            src, out = tmp / "ov.zip", core.OUT / f"{stem}{OVERLAY_TAG}_png.zip"
+            tag = OVERLAY_TAG.lstrip("_")
+            with zipfile.ZipFile(src, "w", zipfile.ZIP_STORED) as z:  # PNG 는 이미 줄인 것 → 그대로 담음
+                for p in sorted((tmp / "png").glob("f_*.png")):
+                    z.write(p, f"{tag}_{p.stem[2:]}.png")
+        try:
+            placed = _place_final(src, out, log)
+        except KeptFinal as e:
+            tmp = None  # 옮기지 못한 파일이 든 폴더는 지우지 않음 (다음에 켤 때 옮김)
+            return None, str(e)
+        log(f"  글자·도형 투명 영상 · {placed.name} · {time.time() - t_start:.0f}초 걸림")
+        return placed, None if placed.suffix == ".mov" else "PNG 연속 그림 묶음(.zip)으로 만들었어요 · 풀어서 첫 그림을 '이미지 시퀀스'로 가져오세요"
+    except Cancelled:
+        raise
+    except Exception as e:  # noqa: BLE001 — 완성 영상·자막·XML 은 그대로 두고 까닭만 알림
+        if not isinstance(e, RuntimeError):
+            studiolog.trace(e)
+        note = f"글자·도형 투명 영상을 만들지 못했어요 · {str(e)[-200:].strip()}"
+        log("  " + note)
+        return None, note
+    finally:
+        for _ in range(5 if tmp else 0):
+            shutil.rmtree(tmp, ignore_errors=True)
+            if not tmp.exists():
+                break
+            time.sleep(0.3)
+
+
+def _ff_once(args, cwd, timeout=180):
+    """ffmpeg 한 번 (멈추기 ✕ 표시와 상관없이 · 진행률 없음) — 지금 화면 저장처럼 금방 끝나는 일. 멈추기는 _PROCS 로 끔."""
+    p = core.popen([core.ffmpeg(), "-hide_banner"] + args, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    _PROCS.add(p)
+    try:
+        _, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        raise RuntimeError("그림을 만드는 데 너무 오래 걸려요")
+    finally:
+        _PROCS.discard(p)
+    if p.returncode:
+        raise RuntimeError(err.decode("utf-8", "replace")[-600:])
+
+
+_FRAME_LOCK = threading.Lock()
+
+
+def export_frame(name, proj, t, log=print):
+    """지금 화면 그림으로 저장 (프리미어 '프레임 내보내기' · Ctrl+Shift+E · 📷 · D-349) — 재생 위치 한 프레임을 자막·타이틀·도형·전술 그림까지
+    내보내기와 같은 그리기(_build_segment · 같은 ASS · 한 프레임 구간)로 시퀀스 크기 그대로(쇼츠 1080×1920 · 롱폼 1920×1080) PNG 로 완성본 폴더에.
+    이름: '<영상>_<편집본>_프레임 00-00-12-05.png' (같은 이름이 있으면 ' (2)' …) → {file, w, h, t}."""
+    if not _FRAME_LOCK.acquire(blocking=False):
+        raise RuntimeError("지금 화면을 저장하는 중이에요 · 잠시 뒤 다시 눌러 주세요")
+    try:
+        proj, fmt, BW, BH, _W, _H, fps, media, _pr = _export_prep(name, proj, {"preset": "youtube", "fps": 30}, log)
+        total = seq_total(proj)
+        if total < 0.5 / fps:
+            raise RuntimeError("타임라인이 비어 있어요")
+        f = min(max(0, int(round(float(t) * fps))), max(0, int(round(total * fps)) - 1))
+        miss = _missing_media(proj, media, f / fps, (f + 1) / fps)
+        if miss:
+            raise RuntimeError("미디어 파일이 없어요 · " + ", ".join(miss[:5]) + " (옮기거나 지웠다면 미디어 탭에서 다시 넣어 주세요)")
+        base = f"{_export_stem(name, proj, fmt)}_프레임 {_tc(f / fps, fps).replace(':', '-')}"
+        out, k = core.OUT / f"{base}.png", 1
+        while out.exists():
+            k += 1
+            out = core.OUT / f"{base} ({k}).png"
+        core.OUT.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix=".render_", dir=core.OUT))
+        try:
+            (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
+            shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+            args, final, _n = _build_segment(proj, media, BW, BH, fps, f, f + 1, valid_trans(proj), tmp, 0)
+            run = lambda a: _ff_once(["-y", "-v", "error"] + a + [_fc_opt(), "fc0.txt", "-map", f"[{final}]", "-frames:v", "1", "-update", "1", "frame.png"], tmp)  # noqa: E731
+            if hwdec.is_bad():
+                args = hwdec.strip(args)
+            try:
+                run(args)
+            except RuntimeError:
+                if "-hwaccel" not in args:
+                    raise
+                hwdec.mark_bad()  # 그래픽카드로 풀기가 안 됨 → 일반 방식으로 다시
+                run(hwdec.strip(args))
+            updater.replace_retry(tmp / "frame.png", out)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        log(f"지금 화면을 그림으로 저장했어요 · {out.name}")
+        return {"file": out.name, "w": BW, "h": BH, "t": round(f / fps, 6)}
+    finally:
+        _FRAME_LOCK.release()

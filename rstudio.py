@@ -334,6 +334,7 @@ POLICY = {
         "/api/thumb/save",
         "/api/edit/save", "/api/edit/oneline", "/api/edit/export", "/api/edit/restore", "/api/edit/freeze", "/api/edit/track",
         "/api/edit/qa", "/api/edit/proxy", "/api/edit/cancel", "/api/edit/msg", "/api/edit/autoseq", "/api/edit/upload",
+        "/api/edit/srt", "/api/edit/frame",  # 자막 파일(SRT) 가져오기 (읽기만 · D-345) · 지금 화면 그림으로 저장 (완성본 폴더 · D-349)
         "/api/upload/kit",
         "/api/strategy/draft", "/api/strategy/save", "/api/strategy/channels", "/api/strategy/refresh", "/api/strategy/pause",
         "/api/strategy/checkup", "/api/strategy/todo", "/api/strategy/takeaway", "/api/strategy/settings", "/api/strategy/ai",
@@ -355,7 +356,7 @@ POLICY = {
 }
 PREFIX = ((_G, "/fonts/", STATIC), (_G, "/stickers/", STATIC), (_G, "/asset/", READ), (_P, "/api/remote/", PC_ONLY))
 # 상태를 바꾸지만 기록(studio.log)에는 남기지 않는 것 (자주 저절로 저장됨)
-QUIET = {"/api/edit/save", "/api/thumb/save", "/api/strategy/draft", "/api/whisper/estimate", "/api/edit/oneline", "/api/thumb/ocr",
+QUIET = {"/api/edit/save", "/api/thumb/save", "/api/strategy/draft", "/api/whisper/estimate", "/api/edit/oneline", "/api/thumb/ocr", "/api/edit/srt",
          "/api/youtube/check", "/s/upload/chunk", "/s/upload/init", "/s/prefs", "/api/crash/dismiss",
          "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb"}
 LABELS = {"/api/analyze": "편집점 찾기", "/api/bundle": "한 영상으로 묶기", "/api/convert": "MP4로 바꾸기", "/api/download": "보관함에 담기",
@@ -365,7 +366,8 @@ LABELS = {"/api/analyze": "편집점 찾기", "/api/bundle": "한 영상으로 �
           "/api/youtube/finish": "유튜브 마무리", "/api/rename": "이름 바꾸기", "/api/style/learn": "스타일 배우기",
           "/api/refs/add": "학습용 영상 받기", "/api/strategy/refresh": "채널 전략 새로 고침", "/api/strategy/save": "채널 전략 저장",
           "/s/upload/finish": "보관함에 올림", "/s/outputs/preview": "작은 미리보기 만들기", "/s/logout": "연결 끝내기",
-          "/api/auto": "끝까지 자동으로", "/api/edit/sfx": "효과음 꺼내기"}
+          "/api/auto": "끝까지 자동으로", "/api/edit/sfx": "효과음 꺼내기",
+          "/api/edit/frame": "지금 화면 그림으로 저장"}
 
 
 def classify(method, path):
