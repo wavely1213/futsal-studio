@@ -393,6 +393,7 @@ def _after_start():
         threading.Thread(target=core.engine_autoupdate, args=(log,), daemon=True).start()
     _session_start()
     threading.Thread(target=_place_kept, daemon=True).start()
+    core.app_autoupdate(log, _auto_claim, _auto_done)  # 쉴 때 새 버전을 받아 다시 시작 (D-311 · config "auto_update": false 면 안 함)
 
 
 def _place_kept():
@@ -402,6 +403,58 @@ def _place_kept():
             fn(log)
         except Exception as e:  # noqa: BLE001 — 곁가지
             studiolog.trace(e, "옮기지 못한 결과 옮기기 오류 위치")
+
+
+# 자동 업데이트 (D-311 · 확인·설치는 core.auto_update_once): 스튜디오를 쓰지 않을 때만 — 하는 작업·다시 시작·편집실이 만드는 파일이
+# 없고, PC 화면에서 AUTO_LOCAL_QUIET, 밖에서 작업 세션이 AUTO_REMOTE_QUIET 동안 조용할 때. 아니면 core 가 5분 뒤 다시 물음.
+AUTO_JOB = "자동 업데이트"
+AUTO_LOCAL_QUIET = 1800   # PC 화면에서 사람이 마지막으로 무언가 한 뒤 (화면이 저절로 묻는 QUIET_REQS 는 안 셈)
+AUTO_REMOTE_QUIET = 600   # 밖에서 작업 세션의 마지막 요청 뒤 (그 화면이 열려 있으면 묻기만 해도 셈 · 세션은 길어야 12시간)
+# 화면이 저절로 묻는 길 (사람이 누른 것이 아님): 상태·핑·원격 상태·썸네일 그릴 것·업데이트 확인·유튜브 상태 · 출처 찾기·올린 영상 처리 확인
+QUIET_REQS = {("GET", "/api/state"), ("GET", "/api/ping"), ("GET", "/api/remote"), ("GET", "/api/auto/pending"),
+              ("GET", "/api/update/check"), ("GET", "/api/youtube/status"), ("POST", "/api/source/check"), ("POST", "/api/youtube/check")}
+_SEEN = {"local": time.time()}  # PC 화면에서 사람이 마지막으로 한 일 (켠 때부터 셈 — 켜자마자 바꾸지 않게)
+
+
+def _auto_why():
+    """자동 업데이트를 지금 하면 안 되는 까닭 (None = 쉬는 중)."""
+    if JOB["name"]:
+        return f"'{JOB['name']}' 작업 중"
+    if RESTARTING.is_set():
+        return "다시 시작하는 중"
+    if editor._PROCS:  # 작업 밖에서 도는 내보내기·미리보기 파일 ffmpeg
+        return "편집실이 파일을 만드는 중"
+    if time.time() - _SEEN["local"] < AUTO_LOCAL_QUIET:
+        return "PC 화면을 쓰는 중"
+    st = remote.SVC.studio
+    if st is not None:
+        now = st.sessions.clock()
+        if any(now - r["last"] < AUTO_REMOTE_QUIET for r in st.sessions.all()):
+            return "밖에서 작업 중"
+    return None
+
+
+def _auto_claim():
+    """쉬는 중이면 작업 자리를 잡고 None (설치하는 동안 PC·휴대폰·밖에서 새 작업을 시작하지 못하게 · 화면엔 '자동 업데이트 중') · 아니면 까닭."""
+    why = _auto_why()
+    if why:
+        return why
+    with LOCK:
+        if JOB["name"] or RESTARTING.is_set():  # 확인한 사이에 시작됨
+            return BUSY_MSG
+        JOB.update(name=AUTO_JOB, by=None, t0=time.time())
+    return None
+
+
+def _auto_done(restart_now):
+    """자리를 놓음. 다시 시작이면 자리를 놓으며 RESTARTING 을 한 잠금 안에서 → 설치와 다시 시작 사이에 끼어드는 작업이 없음
+    (/api/restart 와 같은 표시 · 실행기를 못 띄우면 restart 가 표시를 지우고 그대로 켜 둠)."""
+    with LOCK:
+        JOB["name"] = None
+        if restart_now:
+            RESTARTING.set()
+    if restart_now:
+        restart()
 
 
 def _redirect_to_updater():
@@ -544,6 +597,11 @@ class Handler(BaseHTTPRequestHandler):
         """POST 의 Origin: 없거나(같은 PC 의 프로그램 · _focus_running) 이 앱 창과 같은 출처만 (다른 사이트의 몰래 요청 막기)."""
         return not origin or origin in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}")
 
+    def _seen(self, method, path):
+        """PC 화면에서 사람이 무언가 함 → 자동 업데이트는 그 뒤 AUTO_LOCAL_QUIET 를 기다림 (화면이 저절로 묻는 길은 안 셈 · D-311)."""
+        if (method, path) not in QUIET_REQS:
+            _SEEN["local"] = time.time()
+
     def handle_one_request(self):
         """요청 처리 중 잡히지 않은 오류도 studio.log 에 위치(어느 요청인지)를 남김 (pythonw 는 콘솔이 없어 사라졌음).
         traceback 은 studiolog.trace 가 한 번만 오류 출력에 → 서버의 handle_error(_Server)는 같은 오류를 다시 찍지 않음."""
@@ -560,6 +618,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "forbidden"})
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        self._seen("GET", u.path)
         # 영상 이름을 받는 주소: 파일 이름만 허용 (C:\..., \\서버\... 같은 경로는 거절)
         if u.path in ("/frame", "/api/thumb/open", "/api/edit/open", "/api/edit/autoseq", "/media", "/thumbs.jpg", "/api/timeline", "/api/edit/backups"):
             try:
@@ -800,6 +859,7 @@ class Handler(BaseHTTPRequestHandler):
         # 다른 사이트가 이 로컬 서버를 조작하지 못하게: 같은 출처 요청만 허용
         if not self._host_ok() or not self._origin_ok(self.headers.get("Origin")):
             return self._send(403, {"error": "forbidden"})
+        self._seen("POST", urlparse(self.path).path)
         if urlparse(self.path).path == "/api/edit/upload":  # 큰 파일은 JSON 대신 그대로 받음
             try:
                 n = parse_qs(urlparse(self.path).query)["name"][0]
@@ -1828,6 +1888,9 @@ class StudioHandler(Handler):
 
     def _origin_ok(self, origin):
         return True if self._studio_req else super()._origin_ok(origin)  # 경계가 터널 출처와 정확히 같은지 이미 봄
+
+    def _seen(self, method, path):
+        """밖에서 작업은 PC 화면이 아님 — 자동 업데이트는 그 세션의 마지막 요청(rstudio)으로 따로 셈 (app._auto_why)."""
 
     def studio_call(self, method, who):
         """경계를 지난 요청을 이 앱의 처리 코드로 · 그 동안 이 스레드는 '밖에서 · <기기>' (start_job) · 엔진 스스로 고치기 없음."""

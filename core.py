@@ -1484,6 +1484,8 @@ def check_update():
     out.update(latest=m["version"], available=_newer(m["version"], VERSION), notes=m.get("notes", ""), zip=m.get("zip"))
     if out["available"] and updater.skipped(APP_DIR) == m["version"]:  # 되돌렸던 그 버전은 더 새 버전이 나올 때까지 권하지 않음
         out.update(available=False, note=_skip_note(m["version"]))
+    elif out["available"] and auto_update_on() and not _auto_tried(m["version"]):
+        out["auto"] = True  # 쉴 때 저절로 받음 (D-311) — 화면 단추는 '지금 받기' 그대로
     return out
 
 
@@ -1563,3 +1565,127 @@ def _pip_advice(stderr):
     if re.search(r"No space left|WinError 112|디스크 공간이 부족", t):
         return "저장 공간이 부족해요. 공간을 비운 뒤 다시 시도해 주세요"
     return "인터넷 연결을 확인하고 다시 시도해 주세요"
+
+
+# ---------- 자동 업데이트 (D-311) ----------
+# PC 를 밖에서만 써도(원격 홈 futsal.mulgyeol.kr) 새 버전이 저절로 들어오게: 뒤에서 manifest 를 보고, 스튜디오를 쓰지 않을 때만
+# 업데이트 단추와 같은 길(update_app → updater 의 확인·되돌리기)로 설치한 뒤 다시 시작. '쓰지 않을 때'는 app 이 판단 (claim).
+AUTO_FIRST = 600     # 켠 뒤 첫 확인 (초) — 켜는 일(엔진 확인·원격 켜기)·방금 한 업데이트 다시 시작과 겹치지 않게
+AUTO_EVERY = 3600    # 그 뒤 확인 간격 · 실패했을 때도 이만큼 뒤에 다시
+AUTO_WAIT = 300      # 새 버전이 있는데 스튜디오를 쓰는 중이면 이 간격으로 다시 봄 (하는 일은 끊지 않음)
+AUTO_STAMP = "app_autoupdate"  # ENGINE_HOME/<이름>.json {"restarted": 버전} — 한 버전으로는 저절로 한 번만 다시 시작 (되돌려졌으면 손으로)
+_AUTO = {"said": set(), "thread": None}  # said: 기록에 남긴 (버전, 종류) — 5분·1시간마다 같은 말을 쌓지 않게
+
+
+def auto_update_on():
+    """자동 업데이트를 할지: config.json 의 "auto_update": false 면 안 함 (기본 켬 · 메모장으로 "false"·0 이라 적어도 끔).
+    개발 폴더(git)에서는 안 함 — 작업 중인 코드를 배포본으로 덮지 않게 (사용자 PC 는 zip 으로 설치해 .git 이 없음)."""
+    v = CONFIG.get("auto_update", True)
+    if v is False or str(v).strip().lower() in ("false", "0", "off", "no"):
+        return False
+    return not (APP_DIR / ".git").exists()
+
+
+def _auto_tried(ver):
+    """그 버전으로 이미 저절로 다시 시작해 봤는지 (그런데도 아직 이 버전이면 되돌려졌거나 다시 시작을 못 함 → 또 하지 않음)."""
+    try:
+        d = json.loads((ENGINE_HOME / f"{AUTO_STAMP}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(d, dict) and d.get("restarted") == ver
+
+
+def _auto_say(log, ver, kind, msg):
+    """같은 버전·같은 종류의 말은 기록에 한 번만."""
+    if (ver, kind) in _AUTO["said"]:
+        return
+    _AUTO["said"].add((ver, kind))
+    log(msg)
+
+
+def _auto_kind(e):
+    """실패 종류: 인터넷(net) · 받은 파일(file · 깨짐·지문·버전 다름·바꾸기 실패) · 구성요소(pip) · 그 밖(other)."""
+    if isinstance(e, updater.UpdateError):
+        return "net" if "받지 못했어요" in str(e) else "file"
+    return "pip" if "구성요소" in str(e) else "other"
+
+
+def _auto_mark():
+    """방금 설치한 업데이트가 자동이었다고 .update_pending 에 적음 → 새 버전의 updater.finish 가 '자동으로 …' 알림. 설치한 버전."""
+    p = updater._read_json(APP_DIR / updater.PENDING)
+    if not isinstance(p, dict) or p.get("state") != "installed":
+        return None
+    try:
+        updater._write_json(APP_DIR / updater.PENDING, dict(p, auto=True))
+    except OSError:  # 알림 말만 '업데이트 완료'로 남음
+        pass
+    return p.get("to")
+
+
+def auto_update_once(log, claim, done):
+    """한 번 확인 → 다음 확인까지 기다릴 초. 화면 알림(updater.take_notice)은 가져가지 않음 (check_update 몫).
+    claim() → None(쉬는 중 · 작업 자리를 잡았음) 또는 아직 안 되는 까닭 · done(restart) → 자리를 놓음 (restart 면 다시 시작)."""
+    url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
+    if not url or not auto_update_on():
+        return AUTO_EVERY
+    try:
+        m, _ = updater.fetch_manifest(url)
+    except updater.UpdateError as e:
+        _auto_say(log, "", "net", f"자동 업데이트 확인을 못 했어요 · {e} · 조금 뒤에 저절로 다시 해 봐요")
+        return AUTO_EVERY
+    _AUTO["said"].discard(("", "net"))  # 다시 끊기면 그때 한 번 더 알림
+    ver = m["version"]
+    if not _newer(ver, VERSION) or updater.skipped(APP_DIR) == ver:  # 되돌렸던 버전은 되돌릴 때 이미 알렸음
+        return AUTO_EVERY
+    if _auto_tried(ver):
+        _auto_say(log, ver, "tried", f"자동 업데이트 · 새 버전(v{ver})으로 한 번 다시 시작했지만 마치지 못했어요 · "
+                                     "왼쪽 아래 '업데이트 확인'으로 받아 주세요")
+        return AUTO_EVERY
+    if claim():
+        _auto_say(log, ver, "wait", f"새 버전(v{ver})이 나왔어요 · 스튜디오를 쓰지 않을 때 저절로 받아 다시 시작해요")
+        return AUTO_WAIT
+    lines, restart = ["자동 업데이트 · 스튜디오를 쓰지 않는 동안 새 버전을 받아요"], False  # 실패가 되풀이되면 같은 줄을 또 쓰지 않게 모아 둠
+    try:
+        with keep_awake():
+            restart = bool(update_app(lines.append))
+    except Exception as e:  # noqa: BLE001 — 인터넷·받은 파일·구성요소 실패는 다음 확인 때 다시 (앱 폴더는 그대로이거나 되돌려 둠)
+        kind = _auto_kind(e)
+        if (ver, kind) not in _AUTO["said"]:
+            for x in lines:
+                log(x)
+        _auto_say(log, ver, kind, f"  자동 업데이트를 마치지 못했어요 · {e} · 조금 뒤에 저절로 다시 해 봐요")
+        if kind == "other":
+            import studiolog
+            studiolog.trace(e, "자동 업데이트 오류 위치")
+    else:
+        for x in lines:
+            log(x)
+        if restart:
+            to = _auto_mark() or ver
+            _stamp(AUTO_STAMP, restarted=to, at=int(time.time()))  # 다시 시작 전에 적음 → 되돌려져도 같은 버전으로 또 다시 시작하지 않음
+            log(f"자동 업데이트로 다시 시작해요 (v{VERSION} → v{to})")
+    finally:
+        set_progress()
+        done(restart)
+    return AUTO_EVERY
+
+
+def app_autoupdate(log, claim, done):
+    """앱이 켜진 뒤 한 번 (app._after_start): 뒤에서 AUTO_FIRST 초 뒤 처음, 그 뒤 AUTO_EVERY 초마다 (새 버전이 기다리면 AUTO_WAIT).
+    화면(JS)이 아니라 서버에서 돎 — 창을 며칠 안 만져도 됨. 꺼 두었으면(auto_update_on) 시작하지 않음."""
+    if _AUTO["thread"] is not None or not auto_update_on():
+        return
+
+    def loop():
+        wait = AUTO_FIRST
+        while True:
+            time.sleep(wait)
+            try:
+                wait = auto_update_once(log, claim, done)
+            except Exception as e:  # noqa: BLE001 — 곁가지가 앱을 깨뜨리지 않게 (다음 확인 때 다시)
+                import studiolog
+                studiolog.trace(e, "자동 업데이트 오류 위치")
+                wait = AUTO_EVERY
+
+    _AUTO["thread"] = threading.Thread(target=loop, daemon=True, name="app-autoupdate")
+    _AUTO["thread"].start()

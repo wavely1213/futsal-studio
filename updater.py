@@ -1035,8 +1035,9 @@ def finish(app_dir=APP_DIR):
     if isinstance(p, dict) and p.get("state") == "installed" and _read_version(app_dir) == p.get("to"):
         _remove(app_dir / PENDING)
         _remove(app_dir / SKIP)  # 새 버전이 잘 켜졌으니 예전에 건너뛴 기록은 필요 없음
-        msgs.append(f"업데이트 완료 · v{p.get('from')} → v{p.get('to')}")
-        _NOTICES.append({"text": msgs[-1], "warn": False})
+        auto = p.get("auto") is True  # 아무도 안 누르고 쉬는 동안 받은 업데이트 (core.auto_update_once · D-311)
+        msgs.append(f"업데이트 완료 · v{p.get('from')} → v{p.get('to')}" + (" (자동)" if auto else ""))
+        _NOTICES.append({"text": f"자동으로 새 버전(v{p.get('to')})으로 업데이트했어요" if auto else msgs[-1], "warn": False})
     return msgs
 
 

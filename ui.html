@@ -2580,7 +2580,8 @@ async function checkUpdate(manual) {
   }
   const pill = $("updPill");
   pill.classList.toggle("show", !!u.available);
-  pill.textContent = u.available ? `새 버전 v${u.latest} 받기` : "";
+  pill.textContent = u.available ? (u.auto ? `새 버전 v${u.latest} · 쉴 때 자동으로 받아요` : `새 버전 v${u.latest} 받기`) : "";  // auto: 서버가 쉴 때 받음 (D-311)
+  pill.title = u.available && u.auto ? "누르면 지금 받아요" : "";
   if (manual && !u.available) {
     if (confirm(`${u.note ? u.note + "\n" : `지금 최신 버전(v${u.current})이에요.\n`}다운로드 엔진만 최신으로 바꿀까요? 영상 받기가 실패할 때 도움이 돼요.`))
       job("/api/update", { engine: true, app: false }, () => toast("다운로드 엔진을 최신으로 바꿨어요"));

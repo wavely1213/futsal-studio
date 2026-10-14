@@ -98,7 +98,7 @@ fonts/              자막·썸네일 폰트 + OFL 라이선스
 tests/              단위 테스트 (unittest) + 가짜 Google(tests/fake_google.py). 배포 목록에서 빠짐
 tools/              개발 PC 용 도구: make_preset.py (미리 정해 둔 로그인의 검증값 만들기 · 비밀번호는 환경 변수 FUTSAL_PRESET_PW 로만 · D-258)
 docs/               개발 지침·기록 문서 (이 문서 포함)
-config.json         기본 설정 (channel_url·workspace·update_manifest_url). 사용자 PC에서는 업데이트가 덮어쓰지 않음
+config.json         기본 설정 (channel_url·workspace·update_manifest_url · 넣으면 auto_update: false 로 자동 업데이트 끔). 사용자 PC에서는 업데이트가 덮어쓰지 않음
 version.txt         현재 버전 (release.sh가 씀)
 manifest.json       배포 안내 + 파일별 sha256 (release.sh가 씀)
 release.sh          배포 스크립트
@@ -146,7 +146,7 @@ icon.ico / icon.png 앱 아이콘
 | YouTube 공개 RSS (`www.youtube.com/feeds/videos.xml?channel_id=UC…`) | 채널 전략: 채널마다 최근 15개 영상의 정확한 날짜·조회수·좋아요·원제. 사용자가 [새로 고침]·[지금 점검하기]를 누를 때와 8단계를 열 때 우리 채널 하루 한 번만 (D-024 · BR-016) · 시간 제한 20초 · 응답 2MB 까지 · DOCTYPE/ENTITY 가 든 응답은 거절 · 429·5xx 는 5초 뒤 한 번만 다시 | 키 없음. 쿠키 없음 (User-Agent `futsal-studio/<버전>`) |
 | PyPI (pip) | yt-dlp를 3일마다 최신으로, YouTube가 막으면 그 자리에서 한 번 더. `requirements.txt`가 바뀐 업데이트 때 설치(켜진 앱이 쓰는 파일 때문에 못 하면 다음 실행 때 실행기가). Python 지원이 끝날 무렵(3.N 은 2016+N 년 7월부터)에만 `pypi.org/pypi/yt-dlp/json` 으로 최신 yt-dlp 가 받는 Python 을 확인 (`core._engine_needs_newer_python`) | 없음 |
 | Microsoft (aka.ms) | `시작하기 (Windows).bat` 이 Visual C++ 구성요소(msvcp140)가 없을 때만 `vc_redist.x64.exe` 를 받아 설치 (D-033) | 없음 |
-| GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
+| GitHub (raw·archive) | 업데이트 안내 `manifest.json`과 배포 커밋 zip (앱이 켜져 있으면 1시간마다 확인 · 자동 업데이트 D-311) | 없음 (공개 저장소). 배포 푸시는 개발 PC의 git 자격 증명 |
 | GitHub denoland/deno · dl.deno.land | Deno(yt-dlp-ejs용 JS 실행기)를 Windows에 자동 설치 → `~/.futsal-studio/bin`. sha256 확인 | 없음 |
 | GitHub danielgatis/rembg releases | 누끼 모델 (BiRefNet 약 220MB / u2net_human_seg 약 170MB) → `~/.futsal-studio/models` · 받다 끊기면 그 자리부터 이어받음(`Range`·`If-Range` · 응답 ETag·Last-Modified 가 같을 때만 이어 붙임 · 모델 받기 모두 · D-071) | 없음 |
 | ModelScope RapidAI/RapidOCR (v3.9.2 태그) · Hugging Face monkt/paddleocr-onnx·zeropointnine/yamnet-onnx (고정 커밋) | 영상 기획 분석의 화면 글자 읽기(PP-OCRv5 글자 찾기·한국어 읽기·글자 목록)와 소리 종류(YAMNet), 약 35MB → `~/.futsal-studio/models`. 크기·sha256 확인, 실패하면 10분 쉬고 어림 규칙으로 계속 | 없음 |
