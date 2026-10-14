@@ -156,6 +156,8 @@
   .gbox.cap i { display: none; }  /* 자막 크기는 트랙 모양 (자막 스타일의 크기) — 상자에는 크기 손잡이 없음 */
   .gbox .gchip { position: absolute; left: -1px; bottom: 100%; margin-bottom: 3px; background: #ffe14d; color: #111; font: 700 10.5px/1.5 PretendardE, sans-serif; padding: 0 5px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
   .gbox .gchip:empty { display: none; }
+  #gbox2 { position: absolute; inset: 0; z-index: 69; pointer-events: none; }  /* 여러 개 고른 나머지 (D-340) — 마지막에 누른 것만 노란 상자·손잡이 */
+  #gbox2 i { position: absolute; border: 1px dashed #ffe14d; box-shadow: 0 0 0 1px rgba(0,0,0,.45); }
   #pvGuides { position: absolute; inset: 0; z-index: 72; pointer-events: none; }
   #pvGuides i { position: absolute; background: var(--accent); box-shadow: 0 0 2px rgba(0,0,0,.8); }
   .mon.focus { box-shadow: inset 0 0 0 1px var(--accent); }  /* 미리보기를 눌렀음 → 화살표가 고른 글자·그림 자리를 옮김 */
@@ -527,7 +529,7 @@
         <button class="btn sm pri" id="sOver" title="프로그램 재생 위치에 덮어쓰기 ( . )">덮어쓰기</button>
         <div class="sp"></div><span class="tcdim" id="sDur"></span></div>
     </div>
-    <div class="mon" id="mon"><div class="fbar" id="pvBar" style="display:none"></div><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i><b class="gchip" id="gchip"></b></div><div id="tacH"></div><div id="pvGuides"></div></div></div>
+    <div class="mon" id="mon"><div class="fbar" id="pvBar" style="display:none"></div><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i><b class="gchip" id="gchip"></b></div><div id="gbox2"></div><div id="tacH"></div><div id="pvGuides"></div></div></div>
     <div class="scrub" id="scrub"><div class="io" id="scrubIO"></div><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
     <div class="ctl" id="pctl">
       <span class="tcbig" id="tcNow">00:00:00:00</span>
@@ -651,6 +653,16 @@
     <kbd>끌면서 S</kbd><span>자석 켜기 / 끄기 (프리미어와 같음)</span>
     <kbd>끌면서 Shift</kbd><span>자석을 잠깐 반대로 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 한 방향으로만 옮기기) · 끄는 동안 시간·몇 프레임 옮겼는지 보여요</span>
     <kbd>? · Ctrl+Alt+K</kbd><span>이 단축키 창</span>
+    <h5>여러 개 고르기</h5>
+    <kbd>Shift+누르기</kbd><span>자막·타이틀·도형·클립을 하나씩 더하거나 빼기 (타임라인·미리보기 모두) · 고른 것 중 하나를 그냥 누르면 그것만</span>
+    <kbd>빈 곳에서 끌기</kbd><span>네모에 닿은 것 모두 (자막·타이틀·도형 트랙까지 · Shift: 더하기)</span>
+    <kbd>Ctrl+A</kbd><span>모두 고르기 (자막·타이틀·도형까지 · 잠긴 트랙은 빼고) · Ctrl+Shift+A · Esc: 선택 풀기</span>
+    <kbd>고른 것 끌기</kbd><span>모두 함께 옮겨요 (서로 간격 그대로) · 자막은 옆 자막에 닿으면 모두 함께 멈춰요 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 덮어씀 · 자막은 대사 싱크를 지키려고) · 미리보기에서 끌면 화면 자리도 함께</span>
+    <kbd>Alt+끌기</kbd><span>복제 — 원본은 그대로, 사본이 옮겨져요 (자막·타이틀·도형도 · 사본을 골라요)</span>
+    <kbd>Alt+← → · Alt+↑ ↓</kbd><span>모두 1프레임씩 (Shift: 5프레임) · 모두 위 · 아래 트랙으로</span>
+    <kbd>Delete · Ctrl+C / V</kbd><span>모두 지우기 (자막은 이 편집본에서만) · 복사해서 재생 위치에 같은 간격으로 붙이기 — 같은 트랙에, 그때 그 트랙에 같은 것이 있으면 다른 트랙에 <em class="pd" title="프리미어 프로 기본 단축키와 다르게 움직여요">프리미어와 다름</em> (프리미어는 대상 트랙에 덮어씀)</span>
+    <kbd>스타일</kbd><span>오른쪽 'N개 선택'에서 바꾸면 고른 것 모두에 (자막은 그 자막들의 트랙 모양 · 자리는 미리보기에서 함께 끌기)</span>
+    <kbd>[ · ] · Q · W · E</kbd><span>하나만 골랐을 때 (여러 개면 끌기 · Alt+← → 로 함께)</span>
     <h5>재생 · 이동</h5>
     <kbd>Space</kbd><span>재생 / 정지</span><kbd>J · K · L</kbd><span>뒤로 재생 · 정지 · 앞으로 재생 (누를수록 빠르게)</span>
     <kbd>K 누른 채 J · L</kbd><span>1프레임 뒤 · 앞으로</span>
@@ -660,7 +672,7 @@
     <kbd>Home / End</kbd><span>처음 / 끝으로</span><kbd>= / − / \</kbd><span>타임라인 확대 / 축소 / 전체 보기</span>
     <kbd>휠</kbd><span>타임라인을 시간 방향(좌우)으로 · Ctrl+휠: 트랙 위아래 · Alt+휠: 확대 / 축소</span>
     <h5>도구</h5>
-    <kbd>V</kbd><span>선택 도구</span><kbd>A · Shift+A</kbd><span>앞으로 트랙 선택 (누른 곳부터 뒤를 전부) · 뒤로 트랙 선택 (누른 곳까지 앞을 전부)</span>
+    <kbd>V</kbd><span>선택 도구</span><kbd>A · Shift+A</kbd><span>앞으로 트랙 선택 (누른 곳부터 뒤를 전부) · 뒤로 트랙 선택 (누른 곳까지 앞을 전부) — 자막·타이틀·도형까지 (Shift+누르기: 그 트랙만)</span>
     <kbd>B</kbd><span>잔물결 편집 (끝을 끌면 뒤 클립이 따라옴)</span><kbd>N</kbd><span>롤링 편집 (두 클립 사이 편집점 옮기기)</span>
     <kbd>R</kbd><span>속도 조정 (끝을 끌어 빠르게/느리게)</span><kbd>C</kbd><span>자르기 (Shift+클릭: 모든 트랙 · 자막·타이틀·도형은 누른 곳에서 그것만 둘로)</span>
     <kbd>Y</kbd><span>밀어넣기 (자리 그대로, 안의 장면만 바꿈)</span><kbd>U</kbd><span>밀기 (옮기면 양옆 길이가 맞춰짐)</span>
@@ -671,13 +683,13 @@
     <kbd>Alt+Q · Alt+W</kbd><span>재생 위치까지 앞/뒤를 잘라내고 빈자리는 그대로 (뒤 클립이 안 움직여요 · Ctrl+Alt+Q · W 도 같음)</span>
     <kbd>E</kbd><span>고른 것의 가까운 끝(시작 또는 끝)을 재생 위치로</span><kbd>D</kbd><span>재생 위치의 클립 고르기 (대상 트랙 · 자막·타이틀을 골라 둔 트랙이면 그 트랙)</span>
     <kbd>Alt+↑ ↓</kbd><span>고른 클립·자막·타이틀·도형을 위 · 아래 트랙으로 (같은 시각 그대로 · 클립은 그 자리를 덮어요)</span>
-    <kbd>Delete</kbd><span>지우기 (빈자리 남김)</span><kbd>Shift+Delete</kbd><span>잔물결 삭제 (뒤를 당김) · Alt+Backspace도 같음</span>
+    <kbd>Delete</kbd><span>지우기 (빈자리 남김 · 자막은 이 편집본에서만 — 자막 목록 ↺ 로 되살리기)</span><kbd>Shift+Delete</kbd><span>잔물결 삭제 (뒤를 당김) · Alt+Backspace도 같음</span>
     <kbd>I · O · X</kbd><span>시작점 · 끝점 · 클립 길이로 표시 (Ctrl+Shift+X: 지우기)</span><kbd>; · '</kbd><span>표시 구간 들어내기 · 잘라내고 당기기</span>
-    <kbd>Ctrl+C / V</kbd><span>복사 / 붙여넣기 (Ctrl+Shift+V: 끼워 넣기, Ctrl+Alt+V: 효과만)</span><kbd>Alt+끌기</kbd><span>클립 복제해서 옮기기 (Ctrl+끌기: 끼워 넣기)</span>
+    <kbd>Ctrl+C / V</kbd><span>복사 / 붙여넣기 — 자막·타이틀·도형도 (Ctrl+Shift+V: 끼워 넣기, Ctrl+Alt+V: 효과만)</span><kbd>Alt+끌기</kbd><span>클립·자막·타이틀·도형 복제해서 옮기기 — 원본은 그대로 (Ctrl+끌기: 클립 끼워 넣기)</span>
     <kbd>Alt+← →</kbd><span>고른 클립·자막·타이틀·도형 1프레임씩 옮기기 (Shift: 5프레임)</span><kbd>Ctrl+L</kbd><span>영상·소리 연결 / 해제</span>
     <kbd>Ctrl+D</kbd><span>재생 위치 편집점에 기본 장면 전환 (Ctrl+Shift+D: 소리, Shift+D: 선택 클립)</span><kbd>Ctrl+R</kbd><span>속도 · 길이</span>
     <kbd>G</kbd><span>소리 크기(게인)</span><kbd>M</kbd><span>마커 (Shift+M 다음 · Ctrl+Shift+M 이전 · Ctrl+Alt+M: 재생 위치 마커 지우기 · Ctrl+Alt+Shift+M: 모두 지우기)</span>
-    <kbd>T</kbd><span>타이틀 추가 (Shift+T: 자막 넣기)</span><kbd>Ctrl+A</kbd><span>모두 선택 (Ctrl+Shift+A: 선택 해제)</span>
+    <kbd>T</kbd><span>타이틀 추가 (Shift+T: 자막 넣기)</span><kbd>Ctrl+A</kbd><span>모두 선택 — 자막·타이틀·도형까지 (Ctrl+Shift+A: 선택 해제)</span>
     <kbd>트랙 머리 끌기</kbd><span>자막·타이틀·도형 트랙 머리(C1·T1·G1 표시)를 위아래로 끌면 앞뒤 순서가 바뀌어요 · 위 트랙이 화면 앞</span>
     <kbd>Shift+I · O</kbd><span>시작점 · 끝점으로 가기 (Ctrl+Shift+I · O: 지우기)</span><kbd>Delete</kbd><span>효과 컨트롤에서 고른 키프레임 지우기</span>
     <kbd>Ctrl+Z</kbd><span>되돌리기 (Ctrl+Shift+Z 다시 실행)</span><kbd>Ctrl+M</kbd><span>내보내기</span>
@@ -722,6 +734,8 @@ let P = null, S = null, EVENTS = [], REC = null, STYLES = null, MSGSRC = null;
 const MED = {}, WAVES = {}, THUMBS = {};
 let T = 0, playing = false, shuttle = 1, clock = null, tool = "select", zoom = 20, markIn = null, markOut = null, snapOn = true, linkOn = true;
 let selI = new Set(), selX = null, primary = null, clipboard = null, selKf = null;
+let selO = [], selOA = null;  // 여러 개 고른 자막·타이틀·도형·전술 그림 [{k, id}] — selX(마지막에 누른 것)를 늘 포함 · 둘 이상일 때만 (D-340 · 하나면 selX 만)
+// selOA: selO 를 정할 때의 selX 객체 — 다른 곳에서 selX 를 새로 정하면(하나만 고름) 여러 개 선택은 저절로 풀림
 let hist = [], redoS = [], saveTimer = null, ver = 0, frameDirty = true;
 let rtab = "fx", ltab = "caps", btab = "seqs";
 const DEF = { pos: [0.5, 0.5], scale: 100, rot: 0, anchor: [0.5, 0.5], opacity: 100, level: 0 };
@@ -746,7 +760,7 @@ const unlocked = tid => { const t = TRK(tid); return t && !t.lock; };
 const linkedOf = it => it.link ? S.items.filter(x => x.link === it.link) : [it];
 const BW = () => S.format === "shorts" ? 1080 : 1920, BH = () => S.format === "shorts" ? 1920 : 1080;
 // 고른 키프레임은 고를 때의 선택(클립·타이틀·자막·전환)이 그대로이고 효과 패널에 보일 때만 → 다른 것을 고른 뒤 Delete 가 안 보이는 키프레임을 지우지 않게
-const selSig = () => S.id + "|" + [...selI].join() + "|" + primary + "|" + JSON.stringify(selX);
+const selSig = () => S.id + "|" + [...selI].join() + "|" + primary + "|" + JSON.stringify(selX) + "|" + selO.map(o => o.k + o.id).join();
 function curKf() {
   if (!selKf || selKf.sig !== selSig() || rtab !== "fx") return null;
   const it = byId(selKf.id);
@@ -1215,7 +1229,9 @@ function capsTL() {
   for (const it of capItems()) { const m = it.media || "main"; if (!groups.has(m)) groups.set(m, []); groups.get(m).push(it); }
   for (const [mid, vids] of groups) {
     // msgCaps: MSG 후보가 함께 가져온 자막 (프로젝트 자막에 반영하면 지움 · editor.py timeline_captions 와 같은 규칙) · 다른 영상은 그 영상 자막
-    const cs = (mid === "main" ? S.msgCaps || P.captions : MCAPS[mid] || []).slice().sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
+    // 이 편집본에서 지운 자막(S.capOff · D-344)은 빼고 — 자막 글은 모든 편집본이 함께 쓰므로 지우기는 이 편집본만 (editor.py timeline_captions 와 같은 규칙)
+    const off = mid === "main" && Array.isArray(S.capOff) && S.capOff.length ? new Set(S.capOff) : null;
+    const cs = (mid === "main" ? S.msgCaps || P.captions : MCAPS[mid] || []).filter(c => !off || !off.has(c.id)).sort((a, b) => a.start - b.start), maxLen = Math.max(1, ...cs.map(c => c.end - c.start));
     const parts = new Map();
     for (const it of vids) {
       let lo = 0, hi = cs.length; const from = it.in - maxLen;
@@ -1504,7 +1520,7 @@ function jumpHist(n) {
     restoreP(cur); afterHist(); toast(`다시 실행 · ${last.label}`);
   }
 }
-function afterHist() { const ok = new Set(S.items.map(i => i.id)); selI = new Set([...selI].filter(id => ok.has(id))); selX = null; changed(); if (ltab === "rec") renderRec(); } // 정리 버튼 켬/끔·안내도 되돌린 상태로
+function afterHist() { const ok = new Set(S.items.map(i => i.id)); selI = new Set([...selI].filter(id => ok.has(id))); selX = null; selO = []; changed(); if (ltab === "rec") renderRec(); } // 정리 버튼 켬/끔·안내도 되돌린 상태로
 function restoreSeq(snap) { const i = P.sequences.indexOf(S); S = JSON.parse(snap); P.sequences[i] = S; ver++; }
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
 
@@ -1769,10 +1785,15 @@ function splitAt(t, all) {
 }
 function deleteSel(ripple) {
   if (selX && selX.k === "gap") return deleteGap(selX);
+  if (multiSel()) return deleteMulti(ripple); // 여러 개 (자막·타이틀·도형 + 클립 · D-342)
   if (selX && selX.k !== "gap" && !selI.size) return deleteGfx();
   const its = S.items.filter(it => selI.has(it.id) && unlocked(it.track));
   if (!its.length) return;
   commit(ripple ? "잔물결 삭제" : "지우기");
+  toast(clipsGone(its, ripple)); changed();
+}
+// 클립 지우기 (Delete · Shift+Delete 잔물결) → 안내 글 — 고른 것 지우기(deleteSel)·여러 개 지우기(deleteMulti)가 함께 씀
+function clipsGone(its, ripple) {
   const ids = new Set(its.map(x => x.id));
   const rng = its.map(x => [x.start, iEnd(x)]).sort((a, b) => a[0] - b[0]);
   S.items = S.items.filter(x => !ids.has(x.id)); selI.clear();
@@ -1783,9 +1804,9 @@ function deleteSel(ripple) {
     for (const [s, e] of merged.reverse()) {
       const sk = spanning(s, e); sk.forEach(x => kept.add(x)); addMk(mk, markCut(s, e)); nduckMap([[s, e]]); tacRippleCut(s, e, sk); mv.push(...shiftAfter(e, -(e - s), new Set(), sk));
     }
-    toast((kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv) + markNote(mk));
-  } else toast("지웠어요 · 빈자리를 당기려면 빈 곳을 누르고 Delete (또는 Shift+Delete)");
-  changed();
+    return (kept.size ? `당겼어요 · ${[...kept].join("·")} 트랙은 클립이 걸쳐 있어 그대로 뒀어요 (배경음악은 끊기지 않게)` : "지우고 뒤를 당겼어요") + followNote(mv) + markNote(mk);
+  }
+  return "지웠어요 · 빈자리를 당기려면 빈 곳을 누르고 Delete (또는 Shift+Delete)";
 }
 // 지운 구간에 걸쳐 있는 클립이 있는 트랙 (배경음악 등) → 그 트랙은 그대로 둠
 function spanning(s, e) { return new Set(S.items.filter(x => unlocked(x.track) && x.start < e - EPS && iEnd(x) > s + EPS).map(x => x.track)); }
@@ -1803,13 +1824,20 @@ function deleteGfx() {
   if (selX.k === "otrack") return deleteOtrack(selX.id); // 트랙: 첫 트랙이 아닌 빈 트랙만 (D-302)
   if (selLocked()) return toast(otLockNote); // 잠긴 트랙의 자막·타이틀·도형·전술 그림 (자막 목록에서 골랐어도 · D-309)
   if (selX.k === "trans" && S.trans.some(t => t.id === selX.id && !unlocked(t.track))) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
-  commit("지우기");
-  if (selX.k === "caption") { P.captions = P.captions.filter(c => c.id !== selX.id); for (const q of P.sequences) if (q.capPos && q.capPos[selX.id]) { delete q.capPos[selX.id]; if (!Object.keys(q.capPos).length) delete q.capPos; } } // '이 자막만' 자리도
+  // 자막: 이 편집본에서만 지움 (D-344 · 자막 글은 모든 편집본이 함께 씀 — 다른 편집본에 나오는 자막은 이 편집본의 '지운 자막'에만 적음)
+  // 이 편집본에 안 나오는 자막(자막 목록에서 고름)은 물어보고 자막 글에서 지움 (다른 편집본에서도 빠짐)
+  let note = "";
+  if (selX.k === "caption") {
+    const c = P.captions.find(x => x.id === selX.id);
+    if (c && !capInSeq()(c) && P.sequences.some(q => q !== S && capShownIn(q, c)) && !confirm("이 자막은 지금 편집본에는 안 나와요.\n자막 목록에서 지울까요? 다른 편집본에서도 빠져요. (Ctrl+Z 로 되돌릴 수 있어요)")) return;
+    commit("자막 지우기");
+    const r = c && !capInSeq()(c) ? capDelete([selX.id], true) : capDelete([selX.id]); note = capDelNote(r);
+  } else commit("지우기");
   if (selX.k === "title") { const g = S.titles.find(t => t.id === selX.id); S.titles = S.titles.filter(t => t.id !== selX.id); topicGone(g); }
   if (selX.k === "shape") S.shapes = S.shapes.filter(t => t.id !== selX.id);
   if (selX.k === "tact") S.tactics = S.tactics.filter(t => t.id !== selX.id);
   if (selX.k === "trans") S.trans = S.trans.filter(t => t.id !== selX.id);
-  selX = null; changed();
+  selX = null; selO = []; changed(); if (note) toast(note);
 }
 // Q / W: 재생 위치까지 앞/뒤를 잘라내고 당기기
 function rippleTrimTo(side) {
@@ -1917,6 +1945,7 @@ function selSpan() {
 const selLockedAny = () => { const k = selKind(); if (k === "clip") { const it = selClip(); return !it || !unlocked(it.track); } return selLocked(); };
 // 고른 것의 시작(l)·끝(r)을 타임라인 시각 t 로 (되돌리기 한 단계) — 자막·타이틀·도형·전술 그림·클립(연결된 짝도)
 function selSetEdge(edge, t, label) {
+  if (multiSel()) return toast("여러 개를 골랐어요 · 시작·끝 맞추기는 하나만 골라서 해요 (그것만 누르기 · Esc 로 선택 풀기)"); // 여러 개는 끌기·Alt+← → 로 함께 (D-342)
   const k = selKind(); if (!k) return toast("먼저 클립·자막·타이틀을 골라 주세요");
   if (selLockedAny()) return toast(otLockNote);
   t = fr(t); commit(label || (edge === "l" ? "시작을 재생 위치로" : "끝을 재생 위치로"));
@@ -1937,6 +1966,7 @@ function selSetEdge(edge, t, label) {
 }
 // 고른 것을 d 초(프레임 단위)만큼 옮기기 — Alt+← → (Shift: 5프레임) · 떠 있는 단추 줄 · 오른쪽 클릭 (예전: 클립만 · 자막·타이틀은 아무 일도 없었음)
 function nudge(d) {
+  if (multiSel()) return nudgeMulti(d); // 여러 개: 모두 함께 (D-342)
   const k = selKind(); if (!k) return toast("먼저 클립·자막·타이틀을 골라 주세요");
   const word = `${Math.round(Math.abs(d) * FPS)}프레임 ${d < 0 ? "앞으로" : "뒤로"}`;
   if (k === "clip") {
@@ -1963,7 +1993,7 @@ function nudge(d) {
 function selNote(main, extra) { toast(main + (extra ? " · " + extra : "")); }
 // 고른 것 크게 보기 (Shift+\): 고른 클립·자막·타이틀이 타임라인에서 약 160px 이 되게 확대하고 가운데로 — 작은 자막도 끝을 잡기 쉽게
 function zoomSel() {
-  const sp_ = selSpan(); if (!sp_) return toast("먼저 클립·자막·타이틀을 골라 주세요");
+  const sp_ = multiSel() ? groupSpan() : selSpan(); if (!sp_) return toast("먼저 클립·자막·타이틀을 골라 주세요"); // 여러 개: 모두 보이게 (D-340)
   const [s, e] = sp_, sc = $("tlscroll");
   setZoom(clamp(160 / Math.max(1 / FPS, e - s), 0.5, 400), (s + e) / 2);
   sc.scrollLeft = Math.max(0, HD + (s + e) / 2 * zoom - (sc.clientWidth + HD) / 2); renderTimeline();
@@ -2512,7 +2542,7 @@ function edits(any) {
   const s = new Set([0]), add = t => s.add(+(+t).toFixed(4)), fc = t => Math.ceil((t - TEPS) * FPS) / FPS;
   const tg = new Set(S.tracks.filter(t => t.target).map(t => t.id));
   for (const it of S.items) if (any || !tg.size || tg.has(it.track)) { add(it.start); add(iEnd(it)); }
-  const rows = new Set(any ? (S.otracks || []).filter(o => otVisible(o)).map(o => o.id) : [otSelRow()].filter(Boolean));
+  const rows = new Set(any ? (S.otracks || []).filter(o => otVisible(o)).map(o => o.id) : [otSelRow(), ...selOvs().map(o => ovTrk(o))].filter(Boolean)); // 여러 개 고른 것의 트랙 모두 (D-340)
   if (rows.size) {
     for (const c of capsTL()) if (rows.has(c.trk)) { add(fc(c.s)); add(fc(c.e)); }
     for (const g of S.titles) if (rows.has(trkOf(g, "t"))) { add(fc(g.start)); add(fc(g.start + g.dur)); }
@@ -2957,7 +2987,7 @@ function pvPick(cx, cy) {
 const pvSame = (a, b) => a && b && a.k === b.k && a.id === b.id;
 // 고른 글자·그림(selX)을 미리보기·타임라인·효과 컨트롤·자막 목록에 함께 (타임라인에서 누른 것과 같은 선택)
 function selectOverlay(k, id, src = "pv") {
-  selKf = null; selX = { k, id }; selI.clear(); primary = null; selSrc = src;
+  selKf = null; selX = { k, id }; selO = []; selI.clear(); primary = null; selSrc = src;
   if (rtab !== "fx") setRtab("fx");
   renderTimeline(); renderPanels(); frameDirty = true;
   const row = otSelRow(); if (row) otReveal(row);
@@ -2980,20 +3010,35 @@ $("frame").addEventListener("mousedown", ev => {
   hideMenu(); pvCommitText(); monFocus = true; $("mon").classList.add("focus");
   const wasPlaying = playing; if (playing) pause(); // 재생 중: 그 장면에서 멈추고 고르기만 (같은 누르기로 옮기지는 않음)
   const r = pvSelRect();
-  if (!wasPlaying && r && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) { selSrc = "pv"; return pvDrag(ev); }
+  if (!wasPlaying && r && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) { // 여러 개면 그냥 누르기는 그것 하나만 · Shift+누르기는 빼기 (D-340)
+    selSrc = "pv"; const k0 = selX.k, id0 = selX.id;
+    return pvDrag(ev, ev.shiftKey ? () => { toggleOv(k0, id0); selRedraw(); } : () => selectOverlay(k0, id0));
+  }
   const pick = pvPick(ev.clientX, ev.clientY);
-  if (!pick) { if (selI.size || selX) { selI.clear(); selX = null; primary = null; selKf = null; renderTimeline(); renderPanels(); frameDirty = true; } return; }
+  if (!pick) { if (!ev.shiftKey && (selI.size || selX)) { selI.clear(); selX = null; selO = []; primary = null; selKf = null; renderTimeline(); renderPanels(); frameDirty = true; } return; } // Shift+빈 곳: 고른 것 그대로
   if (pick.k === "locked") return toast(otLockNote);
   if (pick.k === "caption" && pick.mid && pick.mid !== "main") return toast(otherCapNote(pick.mid)); // 다른 영상 자막 (타임라인과 같은 안내 · D-284)
   if (pick.k === "clip") {
     const it = byId(pick.id); if (!it) return;
-    if (ev.shiftKey || !selI.has(it.id)) selectItem(it, ev.shiftKey, ev.altKey); else if (ev.altKey) { selI = new Set([it.id]); primary = it.id; } else primary = it.id; // Alt: 한쪽만 (타임라인과 같음)
+    if (ev.shiftKey || !selI.has(it.id)) selectItem(it, ev.shiftKey, ev.altKey); else if (ev.altKey) { selI = new Set([it.id]); primary = it.id; } else primary = it.id; // Alt: 한쪽만 (타임라인과 같음) · Shift: 넣기·빼기 (고른 자막·타이틀은 그대로 · D-340)
     selSrc = "pv"; if (rtab !== "fx" && rtab !== "color") setRtab("fx");
     renderTimeline(); renderPanels(); frameDirty = true; renderFrame(); frameDirty = false;
-    if (!wasPlaying && !ev.shiftKey && selI.has(it.id)) monDrag(ev, false);
+    if (!wasPlaying && !ev.shiftKey && selI.has(it.id)) { if (multiSel()) pvGroupDrag(ev); else monDrag(ev, false); } // 자막·타이틀도 골라 뒀으면 모두 함께 옮김 (D-341)
     return;
   }
-  if (!pvSame(selX, pick)) selectOverlay(pick.k, pick.id);
+  if (ev.shiftKey) { // Shift+누르기: 안 고른 것은 넣고(끌면 함께 · 자석은 잠깐 반대) · 고른 것은 그냥 누를 때 뺌 (D-340)
+    const was = ovSelHas(pick.k, pick.id);
+    if (!was) toggleOv(pick.k, pick.id); else setPrimaryOv(pick.k, pick.id);
+    selSrc = "pv"; if (rtab !== "fx") setRtab("fx"); selRedraw(); renderFrame(); frameDirty = false;
+    if (!wasPlaying) pvDrag(ev, was ? () => { toggleOv(pick.k, pick.id); selRedraw(); } : null);
+    return;
+  }
+  if (multiSel() && ovSelHas(pick.k, pick.id)) { // 여러 개 중 하나를 누름: 끌면 모두 함께 · 그냥 누르면 그것 하나만 (D-341)
+    setPrimaryOv(pick.k, pick.id); selSrc = "pv"; renderFrame(); frameDirty = false;
+    if (!wasPlaying) pvDrag(ev, () => selectOverlay(pick.k, pick.id)); else selRedraw();
+    return;
+  }
+  if (!pvSame(selX, pick) || selO.length) selectOverlay(pick.k, pick.id);
   selSrc = "pv"; renderFrame(); frameDirty = false;
   if (!wasPlaying) pvDrag(ev);
 }, true);
@@ -3005,7 +3050,7 @@ $("frame").addEventListener("dblclick", () => {
 });
 // 미리보기 밖을 누르면 화살표는 다시 재생 위치 (미리보기 안을 눌렀을 때만 화살표 = 자리 옮기기)
 addEventListener("mousedown", e => { if (!e.target.closest("#mon, #pvBar")) { monFocus = false; $("mon").classList.remove("focus"); } }, true);
-function pvDrag(ev) { if (!selX) return; if (selX.k === "tact") return tacDrag(ev, null); if (["title", "shape", "caption"].includes(selX.k)) gfxDrag(ev, false); }
+function pvDrag(ev, click) { if (!selX) return; if (multiSel()) return pvGroupDrag(ev, click); if (selX.k === "tact") return tacDrag(ev, null); if (["title", "shape", "caption"].includes(selX.k)) gfxDrag(ev, false); } // 여러 개: 함께 (D-341)
 // 마우스 모양: 고를 수 있는 것 위는 손가락 · 고른 것 위는 옮기기 (한 화면에 한 번만 셈)
 let pvHoverQ = 0;
 $("frame").addEventListener("mousemove", e => {
@@ -3266,7 +3311,7 @@ function otHeadHTML(o) {
 }
 // 글자·그림 줄 칸: 자막은 그 줄 자막만 (멀리서 본 작은 자막은 한 덩어리 · 다른 영상 자막은 늘 C1) · 타이틀 · 도형+전술 그림
 function otLaneHTML(o, v0, v1, tot) {
-  const isSel = (k, id) => selX && selX.k === k && selX.id === id;
+  const ovSel = new Set(selOvs().map(ovKey)), isSel = (k, id) => ovSel.has(k + ":" + id), isPri = (k, id) => selX && selX.k === k && selX.id === id; // 여러 개 고른 것 모두 흰 테두리 · 바깥 손잡이는 마지막에 누른 것만 (D-340)
   if (o.k === "c") {
     let h = "", run = null;
     const flush = () => { if (run) h += `<div class="clip caprun" style="left:${run.a * zoom}px;width:${Math.max(3, (run.b - run.a) * zoom)}px"></div>`; run = null; };
@@ -3285,11 +3330,11 @@ function otLaneHTML(o, v0, v1, tot) {
     };
     for (const c of lane) {
       if (c.e < v0 || c.s > v1) continue;
-      const w = (c.e - c.s) * zoom, sel = isSel("caption", c.cap.id);
+      const w = (c.e - c.s) * zoom, sel = isSel("caption", c.cap.id), pri = sel && isPri("caption", c.cap.id);
       if (w < 6 && !sel) { if (run && (c.s - run.b) * zoom < 2) run.b = Math.max(run.b, c.e); else { flush(); run = { a: c.s, b: c.e }; } continue; }
       flush();
       // 원본 자막: 끝 손잡이(시작·끝 끌기) · 고른 자막은 작아도 잡을 수 있게 (D-322 · 옆 자막은 가리지 않음) · 올리면 글과 시간
-      const hd = c.mid === "main" ? eh(c, "l", w, sel) : "", tl_ = c.mid === "main" ? eh(c, "r", w, sel) : "";
+      const hd = c.mid === "main" ? eh(c, "l", w, pri) : "", tl_ = c.mid === "main" ? eh(c, "r", w, pri) : "";
       h += c.mid !== "main" ? `<div class="clip ocap" data-ocap="${esc(c.mid)}" title="${esc(otherCapNote(c.mid))}" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px"><div class="lbl">${esc(c.text)}</div></div>`
         : `<div class="clip ${sel ? "sel" : ""}" data-cap="${c.cap.id}" data-ps="${c.s}" title="${esc(cutText(c.text, 40))} · ${tc(c.s)} – ${tc(c.e)}${c.cap.tm ? " · 시간 맞춤" : ""} · 옆으로 끌어 시간 · 끝을 끌어 길이 · 위아래로 끌어 트랙" style="left:${c.s * zoom}px;width:${Math.max(3, w)}px">${hd}<div class="lbl">${esc(c.text)}</div>${tl_}</div>`;
     }
@@ -3486,7 +3531,9 @@ function selectItem(it, add, single) {
   if (add) { const on = selI.has(it.id); for (const x of grp) on ? selI.delete(x.id) : selI.add(x.id); }
   else if (!selI.has(it.id)) selI = new Set(grp.map(x => x.id));
   else if (single) selI = new Set([it.id]);
-  primary = it.id; selX = null;
+  primary = it.id;
+  if (!add || (selX && !OVK.includes(selX.k))) selX = null; // Shift+누르기(넣기·빼기)는 고른 자막·타이틀·도형을 그대로 (D-340)
+  if (!selX) selO = [];
 }
 $("tracks").addEventListener("mousedown", ev => {
   if (ev.button !== 0) return;
@@ -3500,20 +3547,14 @@ $("tracks").addEventListener("mousedown", ev => {
   if (tool === "hand") return handDrag(ev);
   if (tool === "zoom") return setZoom(zoom * (ev.altKey ? 1 / 1.6 : 1.6), tAt);
   const ot = OTK(rk);
-  if (ot) { // 글자·그림 줄: 잠긴 줄은 고르지도 옮기지도 않음 (영상·소리 트랙과 같은 안내)
-    if (ot.lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
-    return ot.k === "c" ? capDown(ev, rk, tAt) : gfxDown(ev, rk, tAt);
-  }
-  if (TRK(rk).lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); // 클립·장면 전환 모두
+  if (ot && ot.lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); // 글자·그림 줄: 잠긴 줄은 고르지도 옮기지도 않음 (영상·소리 트랙과 같은 안내)
+  if (!ot && TRK(rk).lock) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요"); // 클립·장면 전환 모두
+  // 앞으로(A): 누른 곳부터 뒤 · 뒤로(Shift+A · D-334): 누른 곳까지 앞 (Shift: 그 트랙만) — 자막·타이틀·도형 트랙도 (D-340)
+  if (tool === "tsel" || tool === "tselb") return trackSelDown(ev, rk, tAt);
+  if (ot) return ot.k === "c" ? capDown(ev, rk, tAt) : gfxDown(ev, rk, tAt);
   const trn = t.closest(".trn");
   if (trn) return trnDown(ev, trn);
   if (tool === "razor") { const m = snapTo([tAt], new Set()); return razorAt(rk, tAt + (Math.abs(m.adj) * zoom < 6 ? m.adj : 0), ev.shiftKey); }
-  if (tool === "tsel" || tool === "tselb") { // 앞으로(A): 누른 곳부터 뒤 · 뒤로(Shift+A · D-334): 누른 곳까지 앞 (Shift: 그 트랙만)
-    const back = tool === "tselb", pick = S.items.filter(x => (back ? iEnd(x) <= tAt + EPS : x.start >= tAt - EPS) && unlocked(x.track) && (!ev.shiftKey || x.track === rk));
-    if (!pick.length) return;
-    selI = new Set(pick.map(x => x.id)); primary = pick[0].id; selX = null; renderTimeline(); renderPanels();
-    return startMove(ev, pick.sort((a, b) => a.start - b.start)[0]);
-  }
   const ce = t.closest(".clip");
   if (!ce) return emptyDown(ev, rk, tAt);
   const it = byId(ce.dataset.id); if (!it) return;
@@ -3526,6 +3567,7 @@ $("tracks").addEventListener("mousedown", ev => {
   if (!isV(it) && tool === "select" && bandDown(ev, it, ce, tAt)) return;
   if (tool === "slip") return slipDrag(ev, it);
   if (tool === "slide") return slideDrag(ev, it);
+  if (selOvs().length) return groupDrag(ev, { k: "clip", id: it.id }); // 자막·타이틀도 골라 뒀으면 함께 (D-341)
   startMove(ev, it);
 });
 // 소리 클립의 노란 볼륨 선: 위아래로 끌면 볼륨, Ctrl+클릭은 키프레임 추가 (프리미어와 같게)
@@ -3588,7 +3630,8 @@ function emptyDown(ev, rk, tAt) {
   };
   const up = e => {
     removeEventListener("mousemove", mv); removeEventListener("mouseup", up); $("marquee").style.display = "none";
-    if (!ev.shiftKey) { selI.clear(); selX = null; }
+    const keep = ev.shiftKey ? selOvs() : []; // Shift+네모: 고른 것에 더함
+    if (!ev.shiftKey) { selI.clear(); selX = null; selO = []; }
     if (!mq) {
       const tk = TRK(rk);
       if (tk) {
@@ -3598,12 +3641,17 @@ function emptyDown(ev, rk, tAt) {
       if (!playing) seek(fr(tAt));
       renderTimeline(); renderPanels(); return;
     }
-    const ta = Math.min(xToT(ev), xToT(e)), tb = Math.max(xToT(ev), xToT(e)), ya = Math.min(y0, e.clientY), yb = Math.max(y0, e.clientY);
+    const ta = Math.min(xToT(ev), xToT(e)), tb = Math.max(xToT(ev), xToT(e)), ya = Math.min(y0, e.clientY), yb = Math.max(y0, e.clientY), orows = new Set();
     for (const r of document.querySelectorAll("#tracks .row")) {
-      const b = r.getBoundingClientRect(); if (b.bottom < ya || b.top > yb || !TRK(r.dataset.tk) || TRK(r.dataset.tk).lock) continue;
-      for (const it of itemsOn(r.dataset.tk)) if (it.start < tb && iEnd(it) > ta) for (const x of linkOn ? linkedOf(it) : [it]) selI.add(x.id);
+      const b = r.getBoundingClientRect(); if (b.bottom < ya || b.top > yb) continue;
+      if (OTK(r.dataset.tk)) { orows.add(r.dataset.tk); continue; } // 자막·타이틀·도형 트랙도 (D-340 · 잠긴 트랙은 marqueeOvs 가 뺌)
+      if (!TRK(r.dataset.tk) || TRK(r.dataset.tk).lock) continue;
+      for (const it of itemsOn(r.dataset.tk)) if (it.start < tb && iEnd(it) > ta) for (const x of linkOn ? linkedOf(it) : [it]) if (unlocked(x.track)) selI.add(x.id);
     }
-    primary = [...selI][0] || null; renderTimeline(); renderPanels();
+    if (selX && !OVK.includes(selX.k)) selX = null;
+    const got = orows.size ? marqueeOvs(ta, tb, orows) : [];
+    if (got.length || keep.length) setOvSel([...keep, ...got], null);
+    primary = [...selI][0] || null; selSrc = "tl"; renderTimeline(); renderPanels(); frameDirty = true; if (got.length) renderCaps();
   };
   addEventListener("mousemove", mv); addEventListener("mouseup", up);
 }
@@ -3801,9 +3849,11 @@ function capDown(ev, rk, tAt) {
   const eh = t.closest(".eh"), edge = eh ? (eh.classList.contains("l") ? "l" : "r") : null, T0 = T;
   const cap = P.captions.find(x => x.id === hit); if (!cap) return;
   if (tool === "razor") return razorOverlay("caption", hit, tAt); // 자르기 도구: 누른 곳에서 이 자막을 둘로 (밑의 영상은 그대로 · D-332)
+  if (!edge && (ev.shiftKey || (multiSel() && ovSelHas("caption", hit)))) return ovGroupDown(ev, "caption", hit, tAt); // Shift+누르기 · 여러 개 중 하나 (D-340 · D-341)
   const piece = capPiece(cap, c && c.dataset.ps != null ? +c.dataset.ps + 1e-4 : tAt);
-  selX = { k: "caption", id: hit }; selI.clear(); selSrc = "tl"; seek(fr(edge === "r" && piece ? Math.max(piece.s, piece.e - 1 / FPS) : edge === "l" && piece ? piece.s : tAt));
+  selX = { k: "caption", id: hit }; selO = []; selI.clear(); selSrc = "tl"; seek(fr(edge === "r" && piece ? Math.max(piece.s, piece.e - 1 / FPS) : edge === "l" && piece ? piece.s : tAt));
   renderTimeline(); renderPanels(); focusCap(hit, false);
+  if (!edge && ev.altKey) return groupDrag(ev, { k: "caption", id: hit }); // Alt+끌기: 복제 — 원본은 그대로 (프리미어 · 예전: 원본이 옮겨짐 · D-341)
   const x0 = ev.clientX, y0 = ev.clientY, before = JSON.stringify(P), o = JSON.stringify({ start: cap.start, end: cap.end, wt: cap.wt, words: cap.words, tm: cap.tm });
   let to = null, mode = null, note = "", at = null;
   const restore = () => { const v = JSON.parse(o); for (const k of ["start", "end", "wt", "words", "tm"]) { if (v[k] === undefined) delete cap[k]; else cap[k] = v[k]; } };
@@ -3882,10 +3932,12 @@ function gfxDown(ev, rk, tAt) {
   const k = ce.dataset.gk, id = ce.dataset.gid, g = (k === "title" ? S.titles : k === "tact" ? S.tactics : S.shapes).find(x => x.id === id);
   if (!g) return;
   if (tool === "razor") return g.full ? toast("처음부터 끝까지 나오는 도형은 나눌 수 없어요") : razorOverlay(k, id, tAt); // 자르기 도구: 누른 곳에서 둘로 (D-332)
-  selX = { k, id }; selI.clear(); setRtab("fx"); selSrc = "tl"; snapT = T;
+  const edge = ev.target.classList.contains("eh") ? (ev.target.classList.contains("l") ? "l" : "r") : null, K = k === "title" ? "t" : "g";
+  if (!edge && (ev.shiftKey || (multiSel() && ovSelHas(k, id)))) return ovGroupDown(ev, k, id, tAt); // Shift+누르기 · 여러 개 중 하나 (D-340 · D-341)
+  selX = { k, id }; selO = []; selI.clear(); setRtab("fx"); selSrc = "tl"; snapT = T;
   if (!g.full && (T < g.start || T >= g.start + g.dur)) seek(fr(Math.min(g.start + Math.min(0.5, g.dur / 2), g.start + g.dur - 0.05)));
   if (g.full) { snapT = null; renderTimeline(); renderPanels(); return; }
-  const edge = ev.target.classList.contains("eh") ? (ev.target.classList.contains("l") ? "l" : "r") : null, K = k === "title" ? "t" : "g";
+  if (!edge && ev.altKey) { snapT = null; renderTimeline(); renderPanels(); return groupDrag(ev, { k, id }); } // Alt+끌기: 복제 — 원본은 그대로 (프리미어 · 예전: 원본이 옮겨짐 · D-341)
   const before = JSON.stringify(P), o = { start: g.start, dur: g.dur }, x0 = ev.clientX, y0 = ev.clientY; let moved = false, hz = false;
   const mv = e => {
     // 시간은 옆으로 3px 넘게 끌었을 때만 바뀜 — 위아래로만 움직이면 트랙만 (누르다 살짝 흔들려도 0.5초 밀리지 않게 · D-309)
@@ -4143,9 +4195,11 @@ function drawGfxBox() {
   if (selX && selX.k === "title") { const el = ovEls["t" + selX.id], g = S.titles.find(x => x.id === selX.id); if (el && g && !otLockedX(g, "t")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; } }
   if (selX && selX.k === "shape") { const sh = S.shapes.find(x => x.id === selX.id); if (sh && shapeOn(sh, T) && !otLockedX(sh, "g")) r = { l: sh.x * fr_.width, t: sh.y * fr_.height, w: sh.w * fr_.width, h: sh.h * fr_.height }; } // 잠긴·숨긴 줄은 화면에서 안 옮김
   if (selX && selX.k === "caption") { const el = ovEls["c" + selX.id], c = P.captions.find(x => x.id === selX.id); if (el && c && !otLockedX(c, "c")) { const b = el.getBoundingClientRect(); r = { l: b.left - fr_.left, t: b.top - fr_.top, w: b.width, h: b.height }; chip = capMoveTag(c, capOne(c)); } }
+  drawGfxBox2(); // 여러 개 고른 나머지 (점선 · D-340)
   if (!r || playing) { css(box, "display", "none"); return pvBarPlace(); }
   css(box, "display", "block"); css(box, "left", r.l + "px"); css(box, "top", r.t + "px"); css(box, "width", r.w + "px"); css(box, "height", r.h + "px");
-  box.classList.toggle("cap", selX.k === "caption"); txt($("gchip"), chip);
+  const nn = selOvs().length; if (nn > 1) chip = `${nn}개 함께` + (chip ? " · " + chip : "");
+  box.classList.toggle("cap", selX.k === "caption" || nn > 1); txt($("gchip"), chip); // 여러 개면 크기 손잡이 없음 (한 개만 크기를 바꾸지 않게)
   pvBarPlace();
 }
 $("gbox").addEventListener("mousedown", ev => { if (ev.target.tagName !== "I" || !selX) return; ev.preventDefault(); ev.stopPropagation(); gfxDrag(ev, true); }); // 모서리: 크기 (몸통은 미리보기 고르기 · pvDown)
@@ -4219,6 +4273,7 @@ function gfxDrag(ev, corner) {
 // 미리보기를 누른 뒤 화살표: 고른 타이틀·도형·자막·전술 그림 자리를 1% (Shift: 5%) — 0.6초 안에 이어 누르면 되돌리기 한 단계
 let pvNudgeH = null;
 function pvNudge(dx, dy) {
+  if (multiSel()) return pvNudgeMulti(dx, dy); // 여러 개: 모두 같은 만큼 (D-341)
   const k = selX && selX.k, before = JSON.stringify(P);
   if (k === "caption") {
     const cap = P.captions.find(c => c.id === selX.id), el = ovEls["c" + selX.id]; if (!cap || otLockedX(cap, "c")) return false;
@@ -4316,7 +4371,7 @@ function addGfx(name, at, row) {  // row: 끌어다 놓은 줄 (같은 종류면
 /* ---------- 자막 목록 ---------- */
 let capKey = "";
 // 자막(원본 시각)이 지금 편집본에 들어 있나 — 자막이 따라가는 원본 클립(capItems · capsTL 과 같은 규칙 · D-283·D-285)
-function capInSeq() { const vids = capItems().filter(x => (x.media || "main") === "main"); return c => vids.some(x => c.end > x.in && c.start < x.out); }
+function capInSeq() { const vids = capItems().filter(x => (x.media || "main") === "main"), off = capOffSet(); return c => !off.has(c.id) && vids.some(x => c.end > x.in && c.start < x.out); } // 이 편집본에서 지운 자막(capOff · D-344)은 흐리게
 function refreshCapOut() { // 목록은 그대로 두고 흐림만 다시 (changed(false) 뒤)
   const box = $("capList"); if (!box || !P) return;
   const inSeq = capInSeq(), byCap = new Map(P.captions.map(c => [c.id, c]));
@@ -4326,24 +4381,26 @@ function renderCaps() {
   const q = $("capSearch").value.trim();
   const inSeq = capInSeq();
   const lockC = new Set(S.otracks.filter(o => o.k === "c" && o.lock).map(o => o.id)); // 잠긴 자막 트랙의 자막은 목록에서도 못 고침 (D-309)
-  const key = q + "|" + [...lockC].join() + "|" + P.captions.map(c => c.id + c.start + c.end + c.text + (c.trk || "")).join("|");
+  const offs = capOffSet(), selC = new Set(selOvs().filter(o => o.k === "caption").map(o => o.id)); // 여러 개 고른 자막 모두 (D-340) · 이 편집본에서 지운 자막(D-344)
+  const key = q + "|" + [...lockC].join() + "|" + [...offs].join() + "|" + P.captions.map(c => c.id + c.start + c.end + c.text + (c.trk || "")).join("|");
   if (key === capKey && document.activeElement && document.activeElement.closest("#capList") == null) {
     const byCap = new Map(P.captions.map(c => [c.id, c]));
     for (const r of $("capList").children) { const c = r.dataset.id && byCap.get(r.dataset.id); if (!c) continue;
-      r.classList.toggle("out", !inSeq(c)); r.classList.toggle("sel", !!(selX && selX.k === "caption" && selX.id === c.id)); }
+      r.classList.toggle("out", !inSeq(c)); r.classList.toggle("sel", selC.has(c.id)); }
     return;
   }
   capKey = key;
   $("capList").innerHTML = P.captions.filter(c => !q || c.text.includes(q)).map(c => `
-    <div class="caprow ${selX && selX.k === "caption" && selX.id === c.id ? "sel" : ""} ${inSeq(c) ? "" : "out"}" data-id="${c.id}">
+    <div class="caprow ${selC.has(c.id) ? "sel" : ""} ${inSeq(c) ? "" : "out"}" data-id="${c.id}"${offs.has(c.id) ? ` title="이 편집본에서 지운 자막이에요 · 다른 편집본에는 있어요 (↺ 로 되살리기)"` : ""}>
       <div class="bar"></div>
       <div class="tc" data-seek="${c.id}">${mmss(c.start)}<br>${mmss(c.end)}${c.trk && /^C[2-9]$/.test(c.trk) ? `<br><span class="ctag" title="이 자막이 놓인 트랙 (모든 편집본 공용)">자막 ${c.trk.slice(1)}</span>` : ""}</div>
       <textarea rows="${Math.max(1, Math.ceil(c.text.length / 20))}" data-cap="${c.id}" spellcheck="false"${lockC.has(otCap(c)) ? ` readonly title="잠긴 트랙의 자막이에요 · 트랙 머리 자물쇠를 풀면 고칠 수 있어요"` : ""}>${esc(c.text)}</textarea>
-      <button class="cx" data-cx="${c.id}" title="이 대사 구간을 영상에서 잘라내기">✂</button>
+      ${offs.has(c.id) ? `<button class="cx" data-cback="${c.id}" title="이 편집본에 다시 넣기 (지운 자막 되살리기)">↺</button>` : `<button class="cx" data-cx="${c.id}" title="이 대사 구간을 영상에서 잘라내기">✂</button>`}
     </div>`).join("") || `<div class="hint" style="padding:12px">자막이 없어요. 스튜디오의 보관함에서 "편집점 찾기"를 먼저 해 주세요.</div>`;
+  document.querySelectorAll("[data-cback]").forEach(el => el.onclick = () => capRestore(el.dataset.cback));
   document.querySelectorAll("#capList [data-cap]").forEach(ta => {
     const fit = () => { if (CSS.supports("field-sizing", "content")) return; ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
-    ta.onfocus = () => { const was = selX && selX.k === "caption" && selX.id === ta.dataset.cap; selX = { k: "caption", id: ta.dataset.cap }; selI.clear(); selSrc = "pv"; ta._before = JSON.stringify(P); renderPanels(); if (!was) renderTimeline(); };
+    ta.onfocus = () => { const was = selX && selX.k === "caption" && selX.id === ta.dataset.cap && !selO.length; selX = { k: "caption", id: ta.dataset.cap }; selO = []; selI.clear(); selSrc = "pv"; ta._before = JSON.stringify(P); renderPanels(); if (!was) renderTimeline(); };
     ta.onkeydown = e => capEnterKey(e, ta);
     ta.oninput = () => {
       const c = P.captions.find(x => x.id === ta.dataset.cap); if (otLockOf(c, "c")) { ta.value = c.text; return toast(otLockNote); }
@@ -4355,8 +4412,9 @@ function renderCaps() {
   document.querySelectorAll("[data-cx]").forEach(el => el.onclick = () => { const c = P.captions.find(x => x.id === el.dataset.cx); extractSource(c.start, c.end); });
   document.querySelectorAll("[data-seek]").forEach(el => el.onclick = () => {
     const c = P.captions.find(x => x.id === el.dataset.seek), hit = capsTL().find(x => x.cap === c); const ts = hit ? [hit.s] : src2tl(c.start + 0.01); // 대사 소리를 따라 뜨는 자리 (L 컷처럼 영상이 먼저 바뀐 곳도)
-    selX = { k: "caption", id: c.id }; selI.clear();
-    if (ts.length) seek(ts[0]); else toast("이 자막은 지금 잘려나간 구간에 있어요");
+    selX = { k: "caption", id: c.id }; selO = []; selI.clear();
+    const gone = capOffSet().has(c.id);
+    if (ts.length && !gone) seek(ts[0]); else toast(gone ? "이 편집본에서 지운 자막이에요 · ↺ 로 되살릴 수 있어요" : "이 자막은 지금 잘려나간 구간에 있어요");
     renderTimeline(); renderPanels(); otReveal(otCap(c)); // 그 자막의 트랙이 타임라인 밖이면 보이게 (D-309)
   });
 }
@@ -4444,7 +4502,10 @@ async function capOneLine() {
     commit("자막 한 줄씩 나누기");
     const n0 = P.captions.length; P.captions = j.captions; P.capOneLine = 1;
     // '이 자막만' 자리(편집본마다 capPos)를 나뉜 조각마다 그대로 — 서버는 첫 조각만 원래 id (Ctrl+K 나누기와 같음 · D-321)
-    for (const [nid_, oid] of Object.entries(j.from || {})) for (const q of P.sequences) if (q.capPos && q.capPos[oid]) q.capPos[nid_] = { ...q.capPos[oid] };
+    for (const [nid_, oid] of Object.entries(j.from || {})) for (const q of P.sequences) {
+      if (q.capPos && q.capPos[oid]) q.capPos[nid_] = { ...q.capPos[oid] };
+      if (Array.isArray(q.capOff) && q.capOff.includes(oid) && !q.capOff.includes(nid_)) q.capOff.push(nid_); // 그 편집본에서 지운 자막은 조각도 지운 채 (D-344)
+    }
     if (selX && selX.k === "caption" && !P.captions.some(c => c.id === selX.id)) selX = null;
     capKey = ""; changed();
     toast(j.split ? `긴 자막 ${j.split}개를 한 줄씩 나눴어요 · 자막 ${n0}개 → ${P.captions.length}개 (되돌리기: Ctrl+Z)` : "쇼츠 편집본에서 쓸 한 줄 자막도 맞춰 뒀어요");
@@ -5063,6 +5124,7 @@ function renderFx() {
   if (selX && selX.k === "trans") return renderTransPanel(el);
   if (selX && selX.k === "gap") { el.innerHTML = `<div class="pg"><h4>빈 곳 · ${selX.track}</h4><div class="hint" style="margin-bottom:8px">${mmss(selX.s)} ~ ${mmss(selX.e)} (${(selX.e - selX.s).toFixed(2)}초)</div><button class="btn" id="gapDel">빈 곳 지우고 당기기 (Delete)</button></div>`; $("gapDel").onclick = () => deleteGap(selX); return; }
   if (selX && selX.k === "otrack") return renderOtPanel(el);
+  if (multiSel()) return renderMultiPanel(el); // 여러 개: 'N개 선택' · 스타일은 모두에 (D-340)
   if (selX && ["title", "caption", "shape"].includes(selX.k)) return renderGfxPanel(el);
   if (selX && selX.k === "tact") { const tc = tacSel(); if (tc) return renderTacPanel(el, tc); selX = null; }
   const its = S.items.filter(x => selI.has(x.id) && unlocked(x.track)); // 잠긴 트랙 클립은 바꾸지 않음
@@ -5305,29 +5367,22 @@ function capPosReset(id) { if (!S.capPos || !S.capPos[id]) return; commit("트�
 // 고른 것 나누기 (재생 위치 · Ctrl+K 와 같은 자리): 클립은 자르기 · 자막은 그 조각을 실어 나르는 소리 클립의 원본 시각에서 (B롤·L 컷 아래에서도 · D-322) · 타이틀·도형은 둘로
 // at: 자르기 도구(C)로 누른 타임라인 시각 (D-332 · 없으면 재생 위치)
 function splitSel(at) {
+  if (multiSel()) return splitMulti(); // 여러 개: 재생 위치에 걸친 것 모두 (D-342)
   const k = selKind(); if (!k) return splitAt(T, false);
   if (k === "clip") return splitAt(T, false);
   if (selLocked()) return toast(otLockNote);
   const click = typeof at === "number" && isFinite(at); if (!click) at = T;
-  if (k === "caption") {
-    const cap = selCap(), p = capPieces(cap).find(x => at > x.s + 0.05 && at < x.e - 0.05);
-    const it = p && [p.it, p.it2].find(x => at >= x.start - 1e-6 && at < iEnd(x)), src = it ? mt(it, at) : -1;
-    if (!p || !it || src <= cap.start + 0.05 || src >= cap.end - 0.05) return toast(click ? "자막 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 자막 안쪽에 두고 눌러 주세요");
-    commit("자막 나누기"); const words = cap.text.split(/\s+/).filter(Boolean), r = (src - cap.start) / (cap.end - cap.start), cut = Math.max(1, Math.round(words.length * r));
-    const b = { id: nid(), start: r6c(src), end: cap.end, text: words.slice(cut).join(" ") || cap.text, ...(cap.trk ? { trk: cap.trk } : {}), ...(cap.tm ? { tm: 1 } : {}) }; // 나눈 뒤쪽도 같은 자막 줄
-    cap.end = r6c(src); cap.text = words.slice(0, cut).join(" ") || cap.text;
-    for (const q of P.sequences) if (q.capPos && q.capPos[cap.id]) q.capPos[b.id] = { ...q.capPos[cap.id] }; // '이 자막만' 자리도 함께
-    P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); changed(); return toast(click ? "누른 곳에서 자막을 나눴어요" : "재생 위치에서 자막을 나눴어요");
-  }
-  const g = selG(); if (!g) return;
-  if (g.full) return toast("처음부터 끝까지 나오는 도형은 나눌 수 없어요");
-  if (g.follow && g.follow.length) return toast("선수를 따라가는 전술 그림은 나눌 수 없어요");
-  const t = fr(at); if (t <= g.start + 1 / FPS || t >= g.start + g.dur - 1 / FPS) return toast(click ? "그 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 그 안쪽에 두고 눌러 주세요");
-  commit("나누기"); const b = JSON.parse(JSON.stringify(g)); b.id = nid(); b.start = t; b.dur = r6c(g.start + g.dur - t); g.dur = r6c(t - g.start);
-  (k === "title" ? S.titles : k === "shape" ? S.shapes : S.tactics).push(b); changed(false); toast(click ? "누른 곳에서 둘로 나눴어요" : "재생 위치에서 둘로 나눴어요");
+  const x = k === "caption" ? selCap() : selG(); if (!x) return;
+  if (x.full) return toast("처음부터 끝까지 나오는 도형은 나눌 수 없어요");
+  if (x.follow && x.follow.length) return toast("선수를 따라가는 전술 그림은 나눌 수 없어요");
+  if (splitOv(k, x, at, true)) return toast(k === "caption" ? (click ? "자막 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 자막 안쪽에 두고 눌러 주세요") : (click ? "그 안쪽을 눌러 주세요 (끝에서 조금 떨어진 곳)" : "재생 위치를 그 안쪽에 두고 눌러 주세요"));
+  commit(k === "caption" ? "자막 나누기" : "나누기"); splitOv(k, x, at);
+  if (k === "caption") { changed(); return toast(click ? "누른 곳에서 자막을 나눴어요" : "재생 위치에서 자막을 나눴어요"); }
+  changed(false); toast(click ? "누른 곳에서 둘로 나눴어요" : "재생 위치에서 둘로 나눴어요");
 }
 // 복제: 클립은 바로 뒤에 끼워 넣기 (효과 패널 '복제'와 같음) · 타이틀·도형·전술 그림은 바로 뒤에 같은 트랙 (겹치면 위 트랙)
 function dupSel() {
+  if (multiSel()) return dupMulti(); // 여러 개: 모두 바로 뒤에 (간격 그대로 · D-343)
   const k = selKind(); if (!k) return toast("먼저 클립·자막·타이틀을 골라 주세요");
   if (k === "clip") { const its = S.items.filter(x => selI.has(x.id)); if (copySel(true)) pasteAt(fr(Math.max(...its.map(iEnd))), true, true, "복제"); return; }
   if (k === "caption") return addCaption({ after: selCap() });
@@ -5335,7 +5390,7 @@ function dupSel() {
   const g = selG(); if (!g) return; if (g.full) return toast("처음부터 끝까지 나오는 도형은 복제할 수 없어요");
   commit("복제"); const b = JSON.parse(JSON.stringify(g)), K = k === "title" ? "t" : "g"; b.id = nid(); b.start = fr(g.start + g.dur); delete b.follow;
   (k === "title" ? S.titles : k === "shape" ? S.shapes : S.tactics).push(b); const st = otSettle(b, K);
-  selX = { k, id: b.id }; changed(false); seek(b.start); if (st) otReveal(st.id); toast("바로 뒤에 복제했어요");
+  selX = { k, id: b.id }; selO = []; changed(false); seek(b.start); if (st) otReveal(st.id); toast("바로 뒤에 복제했어요");
 }
 function renderGfxPanel(el) {
   const cap = selX.k === "caption" ? P.captions.find(c => c.id === selX.id) : null, tt = selX.k === "title" ? S.titles.find(c => c.id === selX.id) : null, sh = selX.k === "shape" ? S.shapes.find(c => c.id === selX.id) : null;
@@ -5343,7 +5398,8 @@ function renderGfxPanel(el) {
   if (cap ? otLockOf(cap, "c") : tt ? otLockOf(tt, "t") : otLockOf(sh, "g")) // 잠긴 트랙: 고치는 칸 없이 안내만 (영상·소리 트랙 잠금과 같음 · D-309)
     return void (el.innerHTML = otLockPanel(cap ? "자막" : tt ? "타이틀" : "도형", cap || tt || sh, cap ? "c" : tt ? "t" : "g", cap ? `<div class="hint" style="margin-bottom:6px;white-space:pre-wrap">${esc(cap.text)}</div>` : ""));
   let h = "";
-  if (cap) { const own = capPosOf(cap.id); h += `<div class="pg"><h4><span class="dot" style="background:var(--cap)"></span>자막 수정</h4>
+  if (cap) { const own = capPosOf(cap.id), gone = capOffSet().has(cap.id); h += `<div class="pg"><h4><span class="dot" style="background:var(--cap)"></span>자막 수정</h4>
+      ${gone ? `<div class="hint" style="margin-bottom:8px">이 편집본에서 지운 자막이에요 · 다른 편집본에는 그대로 있어요 <button class="btn sm" id="pCapBack">이 편집본에 다시 넣기</button></div>` : ""}
       <textarea class="s" id="pCapText" title="Enter: 확정 · Shift+Enter: 줄바꿈">${esc(cap.text)}</textarea>
       ${timeRowsHTML()}
       ${otSelectHTML("c", otCap(cap), "자막 트랙")}
@@ -5380,6 +5436,7 @@ function renderGfxPanel(el) {
     ta.onkeydown = e => capEnterKey(e, ta);
     bindTimeRows(el);
     $("pCapDel").onclick = deleteGfx;
+    if ($("pCapBack")) $("pCapBack").onclick = () => capRestore(cap.id);
     $("pCapSplit").onclick = () => splitSel();
     $("pCapNext").onclick = () => addCaption({ after: cap });
     $("pCapMove").querySelectorAll("button").forEach(b => b.onclick = () => { capMoveOne = b.dataset.v === "one"; renderPanels(); frameDirty = true; });
@@ -5597,9 +5654,11 @@ $("spCancel").onclick = () => $("spModal").classList.remove("show");
 
 /* ---------- 복사 · 붙여넣기 · 연결 ---------- */
 function copySel(quiet) {
-  const its = S.items.filter(x => selI.has(x.id)); if (!its.length) return false;
-  const base = Math.min(...its.map(x => x.start));
-  clipboard = { base, items: JSON.parse(JSON.stringify(its)) }; if (!quiet) toast(`클립 ${its.length}개를 복사했어요`); return true;
+  const its = S.items.filter(x => selI.has(x.id)), ov = copyOvs(); if (!its.length && !ov.length) return false; // 자막·타이틀·도형·전술 그림도 (D-343)
+  const base = Math.min(...its.map(x => x.start), ...ov.filter(o => o.s != null).map(o => o.s), ...(its.length || ov.some(o => o.s != null) ? [] : [0]));
+  clipboard = { base, items: JSON.parse(JSON.stringify(its)), ov };
+  if (!quiet) { const c = selCount(); toast(ov.length ? `${c.parts.join(" · ")} 복사했어요 · 붙여넣기 Ctrl+V (재생 위치에 같은 간격으로)` : `클립 ${its.length}개를 복사했어요`); }
+  return true;
 }
 // 트랙이 없으면 만들기 (V4, A4 … 9개까지)
 function ensureTrack(id) {
@@ -5609,6 +5668,7 @@ function ensureTrack(id) {
 }
 function pasteAt(t, insert, keepTracks, label) {
   if (!clipboard) return toast("복사한 클립이 없어요 (Ctrl+C)");
+  const ovc = clipboard.ov || []; // 자막·타이틀·도형·전술 그림 (D-343): 같은 트랙 · 간격 그대로 (pasteOvs)
   // 붙여넣기는 대상 트랙으로 (프리미어처럼: 복사한 클립들 중 가장 낮은 트랙 → 가장 낮은 대상 트랙, 간격은 그대로)
   let its = clipboard.items.map(x => ({ ...x }));
   if (!keepTracks) for (const k of ["V", "A"]) {
@@ -5618,11 +5678,12 @@ function pasteAt(t, insert, keepTracks, label) {
     for (const x of g) x.track = k + (+x.track.slice(1) - src + dst);
   }
   its = its.filter(x => (TRK(x.track) || +x.track.slice(1) <= 9) && (!TRK(x.track) || unlocked(x.track)));
-  if (!its.length) return toast("잠긴 트랙이에요");
+  if (!its.length && !ovc.length) return toast("잠긴 트랙이에요");
   commit(label || (insert ? "끼워 붙여넣기" : "붙여넣기"));
   for (const x of its) ensureTrack(x.track);
-  const span = Math.max(...its.map(iEnd)) - clipboard.base, lmap = new Map(), made = [];
-  if (insert) { // 복제: 그 자리에 걸쳐 있는 다른 트랙(배경음악 등)은 끊지 않음
+  const ovEnd = Math.max(-Infinity, ...ovc.filter(o => o.s != null).map(o => o.s + (o.k === "caption" ? o.data.end - o.data.start : o.data.dur)));
+  const span = Math.max(...its.map(iEnd), ovEnd) - clipboard.base, lmap = new Map(), made = [];
+  if (insert && its.length) { // 복제: 그 자리에 걸쳐 있는 다른 트랙(배경음악 등)은 끊지 않음
     const own = new Set(its.map(x => x.track));
     insertGap(t, span, keepTracks ? mediaTracks().filter(tid => own.has(tid) || !itemsOn(tid).some(x => x.start < t - EPS && iEnd(x) > t + EPS)) : mediaTracks());
   }
@@ -5631,7 +5692,12 @@ function pasteAt(t, insert, keepTracks, label) {
     if (x.link) { if (!lmap.has(x.link)) lmap.set(x.link, nid()); x.link = lmap.get(x.link); }
     clearRange(x.track, x.start, iEnd(x)); S.items.push(x); made.push(x);
   }
-  selI = new Set(made.map(x => x.id)); selX = null; primary = made[0].id; changed(false); seek(t + span);
+  const ov = ovc.length ? pasteOvs(t, clipboard.base) : { made: [], lost: 0, moved: 0 };
+  if (!made.length && !ov.made.length) { uncommit(); return toast(ov.lost ? "재생 위치에 대사 소리가 없어 자막을 넣지 못했어요 · 화면 글자는 타이틀(T)로" : "잠긴 트랙이에요"); }
+  selI = new Set(made.map(x => x.id)); selX = null; selO = []; primary = made.length ? made[0].id : null;
+  if (ov.made.length) setOvSel(ov.made, ov.made[0]);
+  changed(ov.made.some(m => m.k === "caption")); seek(t + span);
+  if (ov.made.length || ov.lost) toast(`${ov.made.length + made.length}개를 붙여 넣었어요` + (ov.moved ? ` · 같은 때 같은 것이 있어 ${ov.moved}개는 다른 트랙에 넣었어요` : "") + (ov.lost ? ` · 대사 소리가 없는 곳이라 자막 ${ov.lost}개는 못 넣었어요` : ""));
 }
 // 키프레임은 클립의 원본 시간에 붙어 있음 → 다른 클립에 옮길 때는 '클립 시작에서 몇 %' 로 바꿔서 (애니메이션·페이드가 그대로)
 function remapFx(src, dst, fx) {
@@ -5673,6 +5739,7 @@ addEventListener("mousedown", e => { if (!e.target.closest("#cmenu")) hideMenu()
 /* 자주 쓰는 작은 일을 고른 것 바로 옆에서 한 번에 (소유자: "그런 자잘한 작업들, 툴 부분들이 접근하기 어려우면 힘들어" · D-327)
    오른쪽 클릭 메뉴(타임라인 클립·자막·타이틀·도형·미리보기)와 떠 있는 단추 줄이 같은 일을 같은 단축키 이름으로 */
 function selMenu(at) {
+  if (multiSel()) return multiMenu(); // 여러 개 (D-340)
   const k = selKind(); if (!k) return [];
   at = at ?? T;
   const its = [["시작을 재생 위치로", () => selSetEdge("l", T), "["], ["끝을 재생 위치로", () => selSetEdge("r", T), "]"],
@@ -5686,6 +5753,7 @@ function selMenu(at) {
     if (capPosOf(selX.id)) its.push(["이 자막을 트랙 자리로 되돌리기 (따로 둔 자리 지우기)", () => capPosReset(selX.id)]);
   }
   its.push(null, ["재생 위치에서 나누기", splitSel, "Ctrl+K"]);
+  if (k !== "clip") its.push(["복사", () => copySel(), "Ctrl+C"]); // 자막·타이틀·도형도 복사 · 붙여넣기 (D-343)
   if (k !== "caption") its.push(["복제 (바로 뒤에)", dupSel, k === "clip" ? "Alt+끌기" : ""]);
   its.push(["고른 것 크게 보기", zoomSel, "Shift+\\"], ["지우기", () => deleteSel(false), "Delete"]);
   return its;
@@ -5710,7 +5778,8 @@ document.addEventListener("contextmenu", e => {
     if (pick && pick.k === "locked") return toast(otLockNote);
     if (pick && pick.k === "caption" && pick.mid && pick.mid !== "main") return toast(otherCapNote(pick.mid));
     if (pick && pick.k === "clip") { const it = byId(pick.id); if (it && !selI.has(it.id)) selectItem(it, false); selSrc = "pv"; renderTimeline(); renderPanels(); frameDirty = true; }
-    else if (pick && !pvSame(selX, pick)) selectOverlay(pick.k, pick.id);
+    else if (pick && multiSel() && ovSelHas(pick.k, pick.id)) { setPrimaryOv(pick.k, pick.id); selSrc = "pv"; } // 여러 개 중 하나: 고른 것 그대로 (D-340)
+    else if (pick && (!pvSame(selX, pick) || selO.length)) selectOverlay(pick.k, pick.id);
     monFocus = true; $("mon").classList.add("focus");
     return showMenu(e, pick ? selMenu(T) : emptyMenu(null, T));
   }
@@ -5725,7 +5794,8 @@ document.addEventListener("contextmenu", e => {
     if (cc && cc.dataset.gk) hit = { k: cc.dataset.gk, id: cc.dataset.gid };
     else if (cc) { const c = cc.dataset.cap || (capsTL().find(x => x.trk === rk && tAt >= x.s && tAt < x.e) || { cap: {} }).cap.id; if (c) hit = { k: "caption", id: c }; }
     if (!hit) return showMenu(e, emptyMenu(rk, tAt));
-    if (!pvSame(selX, hit)) { selectOverlay(hit.k, hit.id, "tl"); const sp_ = selSpan(); if (sp_ && (T < sp_[0] || T >= sp_[1])) seek(fr(clamp(tAt, sp_[0], sp_[1] - 1 / FPS))); }
+    if (multiSel() && ovSelHas(hit.k, hit.id)) setPrimaryOv(hit.k, hit.id); // 여러 개 중 하나: 고른 것 그대로 (D-340)
+    else if (!pvSame(selX, hit) || selO.length) { selectOverlay(hit.k, hit.id, "tl"); const sp_ = selSpan(); if (sp_ && (T < sp_[0] || T >= sp_[1])) seek(fr(clamp(tAt, sp_[0], sp_[1] - 1 / FPS))); }
     selSrc = "tl"; return showMenu(e, selMenu(tAt));
   }
   const vrow = e.target.closest("#tracks .row[data-tk]");
@@ -5736,6 +5806,7 @@ document.addEventListener("contextmenu", e => {
     if (!unlocked(it.track)) return toast("잠긴 트랙이에요 · 자물쇠를 눌러 풀어 주세요");
     if (!selI.has(it.id)) { selectItem(it, false); renderTimeline(); renderPanels(); }
     selSrc = "tl"; primary = it.id;
+    if (multiSel()) return showMenu(e, multiMenu()); // 자막·타이틀과 함께 고른 클립 (D-340)
     const tAt = xToT(e), side = tAt - it.start < iEnd(it) - tAt ? "l" : "r";
     showMenu(e, [...selMenu(tAt).filter(x => !x || !["지우기", "복제 (바로 뒤에)", "재생 위치에서 나누기"].includes(x[0])), null,
       ["여기서 자르기", () => razorAt(it.track, tAt), "C"], ["복사", copySel, "Ctrl+C"], ["붙여넣기 (재생 위치)", () => pasteAt(fr(T), false), "Ctrl+V"], ["효과만 붙여넣기", pasteAttrs, "Ctrl+Alt+V"], ["복제 (바로 뒤에)", dupSel, "Alt+끌기"], null,
@@ -5764,6 +5835,9 @@ document.addEventListener("contextmenu", e => {
 const tcs = t => t < 3600 ? tc(t).slice(3) : tc(t);  // 00:05:22 (분:초:프레임)
 const ICO = { del: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5"/></svg>' };
 function fbarHTML() {
+  if (multiSel()) return `<b class="fbn">${selCount().total}개 선택</b><button class="ic" data-fa="nl" title="1프레임 앞으로 (Alt+← · Shift: ${NUDGE_BIG}프레임)">−1</button><button class="ic" data-fa="nr" title="1프레임 뒤로 (Alt+→ · Shift: ${NUDGE_BIG}프레임)">+1</button>
+    <button class="ic" data-fa="split" title="재생 위치에 걸친 것 모두 나누기 (Ctrl+K)">✂</button><button class="ic fbt" data-fa="copy" title="복사 (Ctrl+C) · 붙여넣기 Ctrl+V">복사</button>
+    <button class="ic" data-fa="del" title="모두 지우기 (Delete)">${ICO.del}</button><button class="ic" data-fa="more" title="더 보기 (오른쪽 클릭 메뉴와 같아요)">⋯</button>`; // 여러 개 (D-340)
   const k = selKind(), sp_ = selSpan(); if (!k || !sp_) return "";
   const nm = { caption: "자막", title: "타이틀", shape: "도형", tact: "전술 그림", clip: "클립" }[k], full = k === "shape" && selG() && selG().full;
   const tin = edge => `<input class="num tcin" data-fin="${edge}" value="${tcs(edge === "l" ? sp_[0] : sp_[1])}" spellcheck="false" title="${edge === "l" ? "시작" : "끝"} — 써 넣기 (5:22 = 5초 22프레임) · ↑↓ 1프레임 (Shift: ${NUDGE_BIG}) · Enter 확정">`;
@@ -5779,12 +5853,13 @@ function fbarBind(bar) {
     const a = b.dataset.fa;
     if (a === "l" || a === "r") selSetEdge(a, T); else if (a === "split") splitSel(); else if (a === "next") addCaption({ after: selCap() });
     else if (a === "cap") addCaption(); else if (a === "del") deleteSel(false);
+    else if (a === "nl" || a === "nr") nudge((a === "nl" ? -1 : 1) * (e.shiftKey ? NUDGE_BIG : 1) / FPS); else if (a === "copy") copySel();
     else if (a === "more") { const r = b.getBoundingClientRect(); showMenu({ clientX: r.left, clientY: r.bottom + 2 }, selMenu(T)); }
   });
   bar.querySelectorAll("[data-fin]").forEach(inp => bindTcInput(inp, inp.dataset.fin, tcs, () => bar.querySelector(`[data-fin="${inp.dataset.fin}"]`)));
 }
 function fbarFill(bar) {
-  const sp_ = selSpan(), key = JSON.stringify([selKind(), selX, primary, sp_, ver]);
+  const sp_ = selSpan(), key = JSON.stringify([selKind(), selX, primary, sp_, ver, selO.length, selI.size]);
   if (bar.contains(document.activeElement)) { // 쓰는 중에는 다시 그리지 않음 — 칸 값만 지금 값으로 (쓰고 있는 칸은 손대지 않았을 때만)
     for (const inp of bar.querySelectorAll("[data-fin]")) { const v = inp._cur && inp._cur(); if (v != null && (inp !== document.activeElement || inp.value.trim() === inp._last)) inp.value = inp._last = inp._fmt(v); }
     return;
@@ -5895,7 +5970,7 @@ const seqLen = q => Math.max(0, ...(q.items || []).map(iEnd));
 function uniqSeqName(n, except) { const names = new Set(P.sequences.filter(q => q !== except).map(q => q.name)); if (!names.has(n)) return n; let k = 2; while (names.has(`${n} ${k}`)) k++; return `${n} ${k}`; }
 function switchSeq(id) {
   if (id === S.id && P.sequences.includes(S)) { changed(); return; }
-  pause(); for (const e of [...POOL.values()]) killEntry(e); P.active = id; bindS(); selI.clear(); selX = null; markIn = markOut = null; scheduleSave(); ver++;
+  pause(); for (const e of [...POOL.values()]) killEntry(e); P.active = id; bindS(); selI.clear(); selX = null; selO = []; markIn = markOut = null; scheduleSave(); ver++;
   zoomFit(); layoutFrame(); changed(); seek(0); seatTracks(); // 편집본마다 글자·그림 줄 수가 달라 V1·A1 자리를 다시 맞춤 (D-043 · D-296)
   if (ltab === "rec") renderRec(); // 쇼츠/롱폼에 따라 정리 버튼 안내가 다름
 }
@@ -6141,6 +6216,7 @@ const OV_NAME = { caption: "자막", title: "타이틀", shape: "도형", tact: 
 // 프리미어처럼 고른 것이 대상 트랙보다 먼저 · Ctrl+Shift+K 는 예전처럼 모든 영상·소리 트랙
 function addEditKey(all) {
   if (all || !selOv()) return splitAt(T, all);
+  if (multiSel()) return splitMulti(); // 여러 개: 재생 위치에 걸친 것 모두 (D-342)
   const sp_ = selSpan(), what = OV_NAME[selKind()];
   if (sp_ && (T <= sp_[0] + HF || T >= sp_[1] - HF)) return toast(`재생 위치가 고른 ${what} 밖이에요 · ${what} 안쪽에 두고 누르거나, 영상을 자르려면 Esc 로 선택을 풀고 Ctrl+K`);
   splitSel();
@@ -6189,13 +6265,14 @@ function selectAtPlayhead() {
   const its = S.items.filter(it => tg.has(it.track) && it.start <= t + EPS && iEnd(it) > t + EPS);
   if (!its.length) return toast("재생 위치의 대상 트랙에 클립이 없어요 (트랙 머리 V1·A1 단추로 대상 트랙을 켜요)");
   const ids = new Set(); for (const it of its) for (const x of linkOn ? linkedOf(it) : [it]) if (unlocked(x.track)) ids.add(x.id);
-  selKf = null; selX = null; selI = ids; primary = (its.find(isV) || its[0]).id; selSrc = "tl";
+  selKf = null; selX = null; selO = []; selI = ids; primary = (its.find(isV) || its[0]).id; selSrc = "tl";
   renderTimeline(); renderPanels(); frameDirty = true;
 }
 // Alt+↑ ↓ (D-331 · 프리미어 '클립을 위·아래 트랙으로' · 예전: 편집점 이동이었음): 고른 것을 같은 시각 그대로 바로 위·아래 트랙으로
 // 영상·소리 클립: 끌어 옮기기와 같음 — 그 자리에 있던 것은 덮어씀 · 영상과 연결된 소리는 거울처럼(V1→V2 이면 A1→A2) · 소리만 골랐으면 화면에서 위·아래 그대로
 // 자막·타이틀·도형·전술 그림: 화면에서 위·아래에 있는 같은 종류 트랙으로 (그 트랙에 같은 때 같은 것이 있으면 안 감 · 자막 트랙은 모든 편집본에서 같음)
 function moveTrackSel(dir) {
+  if (multiSel()) return moveTrackMulti(dir); // 여러 개: 모두 함께 (D-342)
   const k = selKind(); if (!k) return toast("먼저 클립·자막·타이틀을 골라 주세요");
   const up = dir > 0 ? "위" : "아래", key = `Alt+${dir > 0 ? "↑" : "↓"}`;
   if (k === "clip") {
@@ -6308,6 +6385,542 @@ $("mon").addEventListener("scroll", () => requestAnimationFrame(pvBarPlace));
 // 뒤로 트랙 선택 도구 (Shift+A · D-334): 앞으로 트랙 선택(A)과 같은 칸 (프리미어처럼 한 칸에 둘)
 const TSELB = ["tselb", "Shift+A", "뒤로 트랙 선택 도구 (Shift+A) — 누른 곳 앞의 클립을 한꺼번에 골라요 (Shift: 그 트랙만)", '<path d="M14 3l-6 4 2.5.6-1.5 3 1.2.6 1.5-3L14 10z" fill="currentColor"/><path d="M1 4h5M1 7h5M1 10h5M1 13h5" stroke="currentColor" stroke-width="1.3"/>'];
 
+/* ---------- 여러 개 고르기 (D-340~D-344 · 보고서 3장 9번 · 소유자 선택 "자막 여러 개 한꺼번에 고르기") ----------
+   자막·타이틀·도형·전술 그림도 클립처럼 여러 개를 함께: Shift+누르기(넣기·빼기 · 미리보기도) · 빈 곳에서 끌어 네모 · Ctrl+A · A / Shift+A(트랙 선택) ·
+   고른 것 모두에: 타임라인 끌기(간격 그대로) · Alt+끌기 복제(원본은 그대로) · Alt+← → · Delete · Ctrl+C / V · Alt+↑ ↓ · 스타일 · 미리보기 끌기·화살표
+   selX = 마지막에 누른 것(효과 컨트롤·단추 줄 기준) · selO = 고른 글자·그림 전부(selX 포함 · 둘 이상일 때만) · 클립은 selI 그대로 (클립 + 글자·그림도 함께 고를 수 있음) */
+const ovKey = o => o.k + ":" + o.id;
+function ovList(k) { return k === "title" ? S.titles : k === "shape" ? S.shapes : k === "tact" ? S.tactics : null; }
+function ovObj(o) { if (!o) return null; if (o.k === "caption") return P.captions.find(c => c.id === o.id) || null; const ls = ovList(o.k); return ls ? ls.find(x => x.id === o.id) || null : null; }
+const ovK = k => k === "caption" ? "c" : k === "title" ? "t" : "g";
+function ovTrk(o, x = ovObj(o)) { return x ? (o.k === "caption" ? otCap(x) : trkOf(x, ovK(o.k))) : null; }
+const ovLocked = o => otLockOf(ovObj(o), ovK(o.k));
+// 고른 글자·그림 전부 (selX 포함) — selO 가 지금 selX 를 안 담고 있으면(다른 곳에서 하나만 고름) selX 하나
+function selOvs() {
+  if (!selX || !OVK.includes(selX.k)) return [];
+  if (selO.length < 2 || selOA !== selX || !selO.some(o => o.k === selX.k && o.id === selX.id)) return [selX];
+  return selO.filter(o => ovObj(o));
+}
+// 여러 개 중 하나를 마지막에 누른 것으로 (고른 것은 그대로)
+function setPrimaryOv(k, id) { const keep = selOvs().length > 1 && selOvs().some(o => o.k === k && o.id === id); selX = { k, id }; if (keep) selOA = selX; }
+const ovSelHas = (k, id) => selOvs().some(o => o.k === k && o.id === id);
+// 여러 개를 골랐나 — 글자·그림 둘 이상, 또는 글자·그림 + 클립 (클립만 여럿은 예전 그대로 클립 쪽에서)
+function multiSel() { const n = selOvs().length; return n > 1 || (n > 0 && selI.size > 0); }
+// 글자·그림 선택을 ls 로 (prim: 마지막에 누른 것 · 없으면 ls 의 마지막) — 클립 선택(selI)은 그대로
+function setOvSel(ls, prim) {
+  const seen = new Set(), out = [];
+  for (const o of ls) if (o && OVK.includes(o.k) && !seen.has(ovKey(o)) && ovObj(o)) { seen.add(ovKey(o)); out.push({ k: o.k, id: o.id }); }
+  selKf = null;
+  if (!out.length) { if (selX && OVK.includes(selX.k)) selX = null; selO = []; return; }
+  const p = (prim && out.find(o => o.k === prim.k && o.id === prim.id)) || out[out.length - 1];
+  selX = { k: p.k, id: p.id }; selO = out.length > 1 ? out : []; selOA = selX;
+}
+// Shift+누르기: 글자·그림 하나를 넣거나 빼기 (클립 선택은 그대로 · 빈 곳·전환·트랙 머리 선택은 풂)
+function toggleOv(k, id) {
+  const cur = selOvs(), has = cur.some(o => o.k === k && o.id === id);
+  if (selX && !OVK.includes(selX.k)) selX = null;
+  setOvSel(has ? cur.filter(o => !(o.k === k && o.id === id)) : [...cur, { k, id }], has ? null : { k, id });
+  if (selI.size && !selI.has(primary)) primary = [...selI][0];
+}
+function clearSel() { selI.clear(); selX = null; selO = []; selKf = null; primary = null; renderTimeline(); renderPanels(); frameDirty = true; }
+function selRedraw() { renderTimeline(); renderPanels(); frameDirty = true; renderCaps(); }
+// 고른 것 하나의 타임라인 구간 (자막은 이 편집본에 보이는 조각 전부의 처음~끝 · 안 보이면 null · 처음부터 끝까지 도형은 편집본 전체)
+function ovSpan(o, x = ovObj(o)) {
+  if (!x) return null;
+  if (o.k === "caption") { const ps = capPieces(x); return ps.length ? [Math.min(...ps.map(p => p.s)), Math.max(...ps.map(p => p.e))] : null; }
+  return x.full ? [0, total()] : [x.start, x.start + x.dur];
+}
+function groupSpan() { // 고른 것 전부 (클립 포함)
+  let a = Infinity, b = -Infinity;
+  for (const o of selOvs()) { const s = ovSpan(o); if (s) { a = Math.min(a, s[0]); b = Math.max(b, s[1]); } }
+  for (const id of selI) { const x = byId(id); if (x) { a = Math.min(a, x.start); b = Math.max(b, iEnd(x)); } }
+  return a <= b ? [a, b] : null;
+}
+// '자막 3 · 타이틀 2 · 클립 2' (단추 줄·효과 컨트롤·메뉴·알림)
+function selCount() {
+  const ovs = selOvs(), n = {}; for (const o of ovs) n[o.k] = (n[o.k] || 0) + 1;
+  const parts = OVK.filter(k => n[k]).map(k => `${OV_NAME[k]} ${n[k]}`); if (selI.size) parts.push(`클립 ${selI.size}`);
+  return { total: ovs.length + selI.size, parts, n };
+}
+// 이 편집본의 자막·타이틀·도형·전술 그림 중 hit(시작, 끝) 인 것 (잠긴 트랙은 빼고 · rows 를 주면 그 트랙만) → [{k, id}]
+// 자막은 이 편집본에 보이는 것만 (대사 소리를 따라 뜬 조각 · 다른 영상 자막은 그 영상 편집실에서)
+function ovFind(hit = () => true, rows = null) {
+  const out = [], seen = new Set(), ok = id => { const o = OTK(id); return !!o && !o.lock && (!rows || rows.has(id)); };
+  for (const c of capsTL()) if (c.mid === "main" && ok(c.trk) && hit(c.s, c.e) && !seen.has(c.cap.id)) { seen.add(c.cap.id); out.push({ k: "caption", id: c.cap.id }); }
+  for (const g of S.titles) if (ok(trkOf(g, "t")) && hit(g.start, g.start + g.dur)) out.push({ k: "title", id: g.id });
+  for (const g of S.shapes) if (ok(trkOf(g, "g")) && (g.full ? hit(0, total()) : hit(g.start, g.start + g.dur))) out.push({ k: "shape", id: g.id });
+  for (const g of S.tactics) if (ok(trkOf(g, "g")) && hit(g.start, g.start + g.dur)) out.push({ k: "tact", id: g.id });
+  return out;
+}
+// Ctrl+A (D-340): 모든 트랙 — 클립 + 자막·타이틀·도형·전술 그림 (잠긴 트랙은 빼고 · 프리미어와 같음 · 예전: 클립만)
+function selectAll() {
+  selI = new Set(S.items.filter(x => unlocked(x.track)).map(x => x.id)); primary = [...selI][0] || null;
+  if (selX && !OVK.includes(selX.k)) selX = null;
+  setOvSel(ovFind(), null); selSrc = "tl"; selRedraw();
+}
+// 트랙 선택 도구 (A 앞으로 · Shift+A 뒤로 · D-334): 글자·그림 트랙도 (누른 곳부터 뒤 · 누른 곳까지 앞 · Shift: 누른 트랙만) → 고른 것 모두 함께 끌기
+function trackSelDown(ev, rk, tAt) {
+  const back = tool === "tselb", hit = (s, e) => back ? e <= tAt + EPS : s >= tAt - EPS;
+  const clips = S.items.filter(x => hit(x.start, iEnd(x)) && unlocked(x.track) && (!ev.shiftKey || x.track === rk));
+  const ovs = ovFind(hit, ev.shiftKey ? new Set([rk]) : null);
+  if (!clips.length && !ovs.length) return;
+  selI = new Set(clips.map(x => x.id)); primary = clips.length ? clips[0].id : null; selX = null; selO = [];
+  setOvSel(ovs, null); selSrc = "tl"; renderTimeline(); renderPanels(); frameDirty = true;
+  if (!ovs.length) return startMove(ev, clips.sort((a, b) => a.start - b.start)[0]); // 클립만: 예전 그대로
+  const first = clips.length ? { k: "clip", id: clips.sort((a, b) => a.start - b.start)[0].id } : ovs[0];
+  groupDrag(ev, first);
+}
+// 빈 곳에서 끈 네모 안의 글자·그림 (emptyDown · 영상·소리 클립과 함께 · 잠긴 트랙은 빼고)
+function marqueeOvs(ta, tb, rows) { return ovFind((s, e) => s < tb && e > ta, rows); }
+
+/* 자막 지우기는 이 편집본에서만 (D-344 · 보고서 S43): 자막 글(P.captions · 원본 시각)은 모든 편집본이 함께 씀 —
+   다른 편집본에 나오는 자막은 이 편집본의 '지운 자막'(S.capOff)에만 적고 (미리보기·내보내기·SRT 에서 빠짐 · 자막 목록에는 흐리게),
+   어느 편집본에도 안 나오면 자막 글에서 지움 (모든 편집본의 capOff·capPos 도 정리 · 편집본이 하나면 예전과 같음) */
+const capOffSet = (q = S) => new Set(q && Array.isArray(q.capOff) ? q.capOff : []); // 이 편집본에서 지운 자막 id (목록이 아니면 없음 · editor.py timeline_captions 와 같음)
+function capShownIn(q, c) { // 편집본 q 에 자막 c 가 나오나 (capInSeq 와 같은 규칙 · 그 편집본에서 지운 자막·MSG 후보 자막은 아님)
+  if (!q || !c || (q.msgCaps && q.msgCaps.length) || (Array.isArray(q.capOff) && q.capOff.includes(c.id))) return false;
+  const S0 = S; S = q; try { return capItems().some(x => (x.media || "main") === "main" && c.end > x.in && c.start < x.out); } finally { S = S0; }
+}
+function capDelete(ids, everywhere = false) { // → { off: 이 편집본에서만 지운 수, gone: 자막 글에서 지운 수 }
+  const want = new Set(ids), others = P.sequences.filter(q => q !== S), rm = new Set(); let off = 0;
+  for (const c of P.captions) if (want.has(c.id)) {
+    if (!everywhere && others.some(q => capShownIn(q, c))) { S.capOff = Array.isArray(S.capOff) ? S.capOff : []; if (!S.capOff.includes(c.id)) S.capOff.push(c.id); off++; }
+    else rm.add(c.id);
+  }
+  if (rm.size) {
+    P.captions = P.captions.filter(c => !rm.has(c.id));
+    for (const q of P.sequences) {
+      if (q.capPos) { for (const id of rm) delete q.capPos[id]; if (!Object.keys(q.capPos).length) delete q.capPos; } // '이 자막만' 자리도
+      if (Array.isArray(q.capOff)) { q.capOff = q.capOff.filter(id => !rm.has(id)); if (!q.capOff.length) delete q.capOff; }
+    }
+  }
+  return { off, gone: rm.size };
+}
+const capDelNote = r => !r.off ? "" : `${r.off + r.gone > 1 ? `자막 ${r.off}개는 ` : ""}이 편집본에서만 지웠어요 · 다른 편집본에는 그대로 있어요 (자막 목록에 흐리게 남아요 · ↺ 로 되살리기)`;
+// 이 편집본에서 지운 자막 되살리기 (자막 목록 ↺ · 자막 패널)
+function capRestore(id) {
+  if (!Array.isArray(S.capOff) || !S.capOff.includes(id)) return;
+  commit("자막 되살리기"); S.capOff = S.capOff.filter(x => x !== id); if (!S.capOff.length) delete S.capOff;
+  capKey = ""; changed(); toast("이 편집본에 자막을 다시 넣었어요");
+}
+// Delete · Shift+Delete (D-342): 고른 것 모두 — 자막은 이 편집본에서만(D-344) · 타이틀·도형·전술 그림 · 클립(잔물결이면 클립 자리만 당김) · 되돌리기 한 단계
+function deleteMulti(ripple) {
+  const ovs = selOvs();
+  if (ovs.some(ovLocked)) return toast(otLockNote);
+  const its = S.items.filter(it => selI.has(it.id) && unlocked(it.track));
+  commit(ripple && its.length ? "잔물결 삭제" : "지우기");
+  const r = capDelete(ovs.filter(o => o.k === "caption").map(o => o.id));
+  for (const o of ovs) if (o.k !== "caption") {
+    const ls = ovList(o.k), g = ls.find(x => x.id === o.id); if (!g) continue;
+    ls.splice(ls.indexOf(g), 1); if (o.k === "title") topicGone(g);
+  }
+  const n = ovs.length + its.length, msg = its.length ? clipsGone(its, ripple) : "";
+  selX = null; selO = []; selI.clear(); changed();
+  toast(`${n}개를 지웠어요` + (msg && ripple ? " · " + msg : "") + (capDelNote(r) ? " · " + capDelNote(r) : ""));
+}
+// 같은 시간만큼 옮길 자막 (원본 시각) — 그 자막을 실어 나르는 소리 클립을 같이 옮기면 자막은 손대지 않음 (대사 소리를 따라감 · D-283)
+function capMovers(ovs, cset) {
+  const out = [];
+  for (const o of ovs) if (o.k === "caption") {
+    const c = ovObj(o), ps = c ? capPieces(c) : []; if (!ps.length || ps.some(p => cset.has(p.it.id) || cset.has(p.it2.id))) continue;
+    const p = ps.slice().sort((a, b) => a.s - b.s)[0];
+    out.push({ id: c.id, p, s: p.s, e: Math.max(...ps.map(x => x.e)), o0: JSON.stringify({ start: c.start, end: c.end, wt: c.wt, words: c.words, tm: c.tm, trk: c.trk }) });
+  }
+  return out;
+}
+// 그 자막들이 함께 갈 수 있는 타임라인 시간 범위 [lo, hi] — 같은 트랙 앞뒤 자막(같이 옮기는 것은 빼고)에 닿거나 그 소리 클립 밖(0.1초 남김)이면 모두 함께 멈춤 (capMoveBy 와 같은 규칙)
+function capGroupRange(caps) {
+  const ids = new Set(caps.map(c => c.id)); let lo = -Infinity, hi = Infinity;
+  for (const c of caps) {
+    const cap = P.captions.find(x => x.id === c.id), it = c.p.it, k = sp(it), tk = otCap(cap), VIS = 0.1;
+    let a = 0, b = Infinity;
+    for (const x of P.captions) if (x !== cap && !ids.has(x.id) && otCap(x) === tk) { if (x.start <= cap.start + 1e-6) a = Math.max(a, x.end); else b = Math.min(b, x.start); }
+    a = Math.min(a, cap.start); b = Math.max(b, cap.end); // 이미 겹쳐 있던 것은 그 자리까지만
+    lo = Math.max(lo, Math.max(a - cap.start, it.in + VIS - cap.end) / k); hi = Math.min(hi, Math.min(b - cap.end, it.out - VIS - cap.start) / k);
+  }
+  return [Math.min(lo, 0), Math.max(hi, 0)];
+}
+function capShift(cap, d) { if (Math.abs(d) < 1e-9) return; cap.start = r6c(cap.start + d); cap.end = r6c(cap.end + d); capShiftWords(cap, d); cap.tm = 1; }
+// 자막 사본의 바탕: 이 편집본에 보이는 부분만 (컷에 잘려 안 보이던 머리·꼬리는 뺌 — 붙인 자리에서 갑자기 앞이 보이지 않게) · 낱말 시각이 있으면 보이는 낱말만
+function capVisible(cap) {
+  const ps = capPieces(cap), x = JSON.parse(JSON.stringify(cap)); if (!ps.length) return x;
+  const a = Math.max(cap.start, Math.min(...ps.map(p => p.it.in))), b = Math.min(cap.end, Math.max(...ps.map(p => p.it2.out))); // 자막을 실어 나르는 소리 클립의 원본 구간 안
+  if (b - a < 0.05 || (a <= cap.start + 1e-6 && b >= cap.end - 1e-6)) return x;
+  const ws = capWords(cap), toks = String(cap.text || "").split(/\s+/).filter(Boolean);
+  if (ws) { const keep = ws.map((w, k) => { const m = (+w.s + +w.e) / 2; return m >= a && m < b ? k : -1; }).filter(k => k >= 0);
+    if (keep.length) { x.text = keep.map(k => toks[k]).join(" "); x.words = keep.map(k => ({ w: toks[k], s: +ws[k].s, e: +ws[k].e })); delete x.wt; delete x.sh; delete x.shn; } }
+  x.start = r6c(a); x.end = r6c(b); return x;
+}
+// 자막 사본 (복제·붙여넣기): 놓을 타임라인 시각 ts 의 대사 소리 클립에서 원본 시각을 다시 셈 — 자막은 그 소리를 따라감 (소리가 없는 곳이면 null)
+// srcAt: 원본 자막이 보이기 시작한 원본 시각 · 낱말 시각·쇼츠 나눔·트랙은 그대로 (같은 만큼 옮김)
+function capCopyAt(cap, srcAt, ts, id = nid()) {
+  const it = capItems().find(x => (x.media || "main") === "main" && x.start <= ts + EPS && iEnd(x) > ts + HF); if (!it) return null;
+  const nc = JSON.parse(JSON.stringify(cap)); nc.id = id; capShift(nc, r6c(mt(it, ts) - srcAt)); nc.tm = 1;
+  return nc;
+}
+// 타임라인에서 자막·타이틀·도형을 Shift+누르기 · 여러 개 중 하나를 누르기 (D-340 · D-341)
+// Shift: 안 고른 것이면 바로 넣고(끌면 함께 · 자석은 잠깐 반대 — D-322 그대로) · 고른 것이면 그냥 누를 때(안 움직임) 뺌
+// Shift 없이 고른 것 중 하나: 끌면 모두 함께 · 그냥 누르면 그것 하나만 (재생 위치는 한 개 누를 때처럼 그 안으로)
+function ovGroupDown(ev, k, id, tAt) {
+  const was = ovSelHas(k, id);
+  if (ev.shiftKey && !was) toggleOv(k, id); else setPrimaryOv(k, id);
+  selSrc = "tl"; if (rtab !== "fx") setRtab("fx"); selRedraw();
+  const into = () => { const x = ovObj({ k, id }); if (!x) return; if (k === "caption") seek(fr(tAt)); else if (!x.full && (T < x.start || T >= x.start + x.dur)) seek(fr(Math.min(x.start + Math.min(0.5, x.dur / 2), x.start + x.dur - 0.05))); };
+  const click = ev.shiftKey ? (was ? () => { toggleOv(k, id); selRedraw(); } : null) : () => { selectOverlay(k, id, "tl"); into(); };
+  groupDrag(ev, { k, id }, { click });
+}
+// 여러 개 함께 끌기 (D-341): 고른 클립·자막·타이틀·도형·전술 그림을 같은 시간만큼 (서로 간격 그대로) · 위아래로 끌면 누른 것과 같은 종류 트랙끼리 같은 칸만큼
+// Alt(누를 때): 복제 — 원본은 그대로, 사본이 옮겨짐 (프리미어 · 예전: 자막·타이틀·도형은 원본이 옮겨졌음) · 놓은 뒤 사본을 고름
+// 자막은 원본 시각을 옮김(대사 소리 클립 안 · 같은 트랙 앞뒤 자막에 닿으면 모두 함께 멈춤) · 타이틀·도형·전술 그림은 놓은 뒤 자기 트랙에서 겹치면 다른 트랙(otSettle) ·
+// 클립은 그 자리를 덮어씀(startMove 와 같음) · 그냥 누르기(안 움직임)는 opt.click
+function groupDrag(ev, anchor, opt = {}) {
+  const ovs = selOvs().filter(o => !ovLocked(o)), cids = [...selI].filter(id => { const x = byId(id); return x && unlocked(x.track); });
+  if (!ovs.length && !cids.length) return;
+  const dup = ev.altKey, before = JSON.stringify(P), snapS = JSON.stringify(S), x0 = ev.clientX, y0 = ev.clientY, T0 = T, cset = new Set(cids);
+  const caps = capMovers(ovs, cset);
+  const gfx = ovs.filter(o => o.k !== "caption").map(o => { const x = ovObj(o), K = ovK(o.k); return { o, K, full: !!x.full, s: x.full ? 0 : x.start, e: x.full ? 0 : x.start + x.dur, trk: trkOf(x, K) }; })
+    .filter(g => !(dup && g.full)); // 처음부터 끝까지 나오는 도형은 복제하지 않음 (dupSel 과 같음)
+  const oc = new Map(cids.map(id => { const x = byId(id); return [id, { start: x.start, end: iEnd(x), track: x.track }]; }));
+  const spans = [...[...oc.values()].map(o => [o.start, o.end]), ...caps.map(c => [c.s, c.e]), ...gfx.filter(g => !g.full).map(g => [g.s, g.e])];
+  if (!spans.length && !gfx.length) return;
+  const minS = spans.length ? Math.min(...spans.map(x => x[0])) : 0, maxE = spans.length ? Math.max(...spans.map(x => x[1])) : 0;
+  let [dLo, dHi] = dup ? [-Infinity, Infinity] : capGroupRange(caps); dLo = Math.max(dLo, -minS);
+  const aOv = anchor.k !== "clip", aK = aOv ? ovK(anchor.k) : null, aRow = aOv ? ovTrk(anchor) : (byId(anchor.id) || {}).track;
+  const rowsOf = K => S.otracks.filter(o => o.k === K).map(o => o.id);
+  const newIds = new Map([...cids, ...ovs.map(o => o.id)].map(id => [id, nid()])), made = new Set(newIds.values()), lmap = new Map();
+  const restore = () => {
+    restoreSeq(snapS);
+    if (dup) P.captions = P.captions.filter(c => !made.has(c.id));
+    for (const c of caps) { const cap = P.captions.find(x => x.id === c.id), v = JSON.parse(c.o0); for (const k of ["start", "end", "wt", "words", "tm", "trk"]) { if (v[k] === undefined) delete cap[k]; else cap[k] = v[k]; } }
+    ver++;
+  };
+  let moved = false;
+  const apply = (e, final) => {
+    restore();
+    let dt = clamp((e.clientX - x0) / zoom, dLo, dHi), at = null;
+    if (spans.length) {
+      snapT = T0; const sn = snapTo([minS + dt, maxE + dt], new Set([...cids, ...ovs.map(o => o.id)]), e); snapT = null;
+      if (sn.at != null && dt + sn.adj >= dLo - 1e-9 && dt + sn.adj <= dHi + 1e-9) { dt += sn.adj; at = sn.at; }
+      dt = clamp(fr(minS + dt) - minS, dLo, dHi);
+    }
+    // 위아래 — 글자·그림을 누르고 끌면 같은 종류 트랙끼리 · 클립을 누르고 끌면 영상·소리 트랙끼리 (startMove 와 같음 · 잠긴 트랙·없는 트랙으로는 못 감)
+    const rk = rowAtY(e.clientY), ro = OTK(rk); let dv = 0; const dk = { v: 0, a: 0 }; apply.blk = null;
+    if (aOv && ro && ro.k === aK && aRow) {
+      const L = rowsOf(aK), its = [...caps.map(c => otCap(P.captions.find(x => x.id === c.id))), ...gfx.filter(g => g.K === aK).map(g => g.trk)];
+      dv = L.indexOf(rk) - L.indexOf(aRow);
+      const ok = d => its.every(t => { const i = L.indexOf(t) + d; return i >= 0 && i < L.length && !OTK(L[i]).lock; });
+      while (dv && !ok(dv)) dv -= Math.sign(dv);
+    } else if (!aOv && cids.length && aRow) {
+      const rt = rk && TRK(rk), aKind = TRK(aRow).k; let dIdx = rt && rt.k === aKind ? kindIdx(rk) - kindIdx(aRow) : 0;
+      for (const k of ["v", "a"]) { const idx = cids.map(id => oc.get(id).track).filter(t => TRK(t).k === k).map(kindIdx); if (idx.length) dIdx = clamp(dIdx, -Math.min(...idx), S.tracks.filter(t => t.k === k).length - 1 - Math.max(...idx)); }
+      const destOk = (k, d) => cids.every(id => { const o = oc.get(id); return TRK(o.track).k !== k || unlocked(trackAt(k, kindIdx(o.track) + d)); });
+      for (const [k, d0] of [[aKind, dIdx], [aKind === "v" ? "a" : "v", null]]) { let d = d0 ?? dk[aKind]; while (d && !destOk(k, d)) d -= Math.sign(d); dk[k] = d; }
+      if (dk[aKind] !== dIdx) apply.blk = true;
+    }
+    const mclips = [], mg = [], mc = []; let lost = 0;
+    for (const id of cids) {
+      let x = byId(id); const o = oc.get(id), k = TRK(o.track).k;
+      if (dup) { x = JSON.parse(JSON.stringify(x)); x.id = newIds.get(id); if (x.link) { if (!lmap.has(x.link)) lmap.set(x.link, nid()); x.link = lmap.get(x.link); } S.items.push(x); }
+      x.start = fr(o.start + dt); x.track = trackAt(k, clamp(kindIdx(o.track) + dk[k], 0, S.tracks.filter(t => t.k === k).length - 1)); mclips.push(x);
+    }
+    for (const g of gfx) {
+      let x = ovObj(g.o); if (!x) continue;
+      if (dup) { x = JSON.parse(JSON.stringify(x)); x.id = newIds.get(g.o.id); delete x.follow; ovList(g.o.k).push(x); }
+      if (!g.full) x.start = fr(Math.max(0, g.s + dt));
+      if (dv && g.K === aK) { const L = rowsOf(aK); setTrk(x, L[L.indexOf(g.trk) + dv]); }
+      mg.push({ x, K: g.K });
+    }
+    for (const c of caps) {
+      const cap = P.captions.find(x => x.id === c.id); let x = cap;
+      if (dup) { const base = capVisible(cap); x = capCopyAt(base, base.start, c.s + dt, newIds.get(c.id)); if (!x) { lost++; continue; } P.captions.push(x); }
+      else capShift(cap, r6c(dt * sp(c.p.it)));
+      if (dv && aK === "c") { const L = rowsOf("c"); setTrk(x, L[L.indexOf(otCap(cap)) + dv]); }
+      mc.push({ x, from: otCap(cap) });
+    }
+    if (dup && mc.length) P.captions.sort((a, b) => a.start - b.start);
+    if (final) {
+      const notes = [], mids = new Set(mclips.map(x => x.id));
+      for (const x of mclips) clearRange(x.track, x.start, iEnd(x), mids); // 놓은 자리를 덮어씀 (startMove 와 같음)
+      for (const m of mg) { const st = otSettle(m.x, m.K); if (st) notes.push(st.full ? "트랙은 종류마다 9개까지예요 · 겹친 채로 두었어요" : `겹쳐서 ${OT_NAME[m.K]} ${st.id.slice(1)} 트랙으로 옮겼어요`); }
+      let trk = false;
+      for (const m of mc) {
+        if (otHits("c", +m.x.start, +m.x.end, m.x).some(h => h.id === otCap(m.x))) { // 그 트랙에 같은 때 자막: 옮기기는 원래 트랙 · 복제는 넣을 때와 같은 규칙으로 빈 자막 트랙
+          if (dup) { const r = otPlace("c", [+m.x.start, +m.x.end], { prefer: otCap(m.x), self: m.x }); setTrk(m.x, r.id); notes.push(otNote(r, "c") || "같은 때 자막이 있어 다른 자막 트랙에 넣었어요"); }
+          else { setTrk(m.x, m.from); notes.push("그 트랙에는 같은 때 자막이 있어 자막 트랙은 그대로 뒀어요"); }
+        }
+        if (otCap(m.x) !== m.from || dup) trk = true;
+      }
+      if (trk) { P.sequences.forEach(ensureSeq); capKey = ""; }
+      apply.notes = notes; apply.lost = lost; apply.trkCap = mc.some(m => otCap(m.x) !== m.from);
+    }
+    apply.at = at;
+    const n = mclips.length + mg.length + mc.length;
+    dtip(e, `${n}개 · ${fmtD(dt)} · 시작 ${tc(minS + dt)}${dv || dk.v || dk.a ? ` · 트랙 ${(dv || dk.v || dk.a) > 0 ? "+" : ""}${dv || dk.v || dk.a}` : ""}${dup ? " · 복제" : ""}${apply.blk ? " · 잠긴 트랙" : ""}${snapOn && e.shiftKey ? " · 자석 꺼짐 (Shift)" : ""}`);
+  };
+  const draw = dragFrame(e => { apply(e, false); renderTimeline(); showSnap(apply.at); frameDirty = true; });
+  const mv = e => { if (!moved && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return; moved = true; draw(e); };
+  const up = e => {
+    removeEventListener("mousemove", mv); removeEventListener("mouseup", up); draw.cancel(); showSnap(null); dtip(e, null); snapT = null;
+    if (!moved) { if (opt.click) opt.click(); else { renderTimeline(); renderPanels(); } return; }
+    apply(e, true);
+    if (JSON.stringify(P) === before) { renderTimeline(); renderPanels(); return toast(caps.length && !dup ? "옆 자막·소리 끝에 닿아 더 옮길 수 없어요" : "그대로예요"); }
+    pushHist(dup ? "복제해서 옮기기" : "여러 개 옮기기", before);
+    if (dup) { // 사본을 고름 (원본은 그대로)
+      const nc = cids.map(id => newIds.get(id)).filter(id => byId(id));
+      selI = new Set(nc); primary = nc[0] || null;
+      setOvSel(ovs.map(o => ({ k: o.k, id: newIds.get(o.id) })), aOv ? { k: anchor.k, id: newIds.get(anchor.id) } : null);
+    }
+    changed(caps.length > 0 || dup);
+    const notes = [...new Set(apply.notes || [])];
+    if (apply.lost) notes.push(`대사 소리가 없는 곳이라 자막 ${apply.lost}개는 복제하지 않았어요 · 화면 글자는 타이틀(T)로`);
+    if (apply.trkCap && !dup) notes.push("자막은 모든 편집본에서 그 트랙에 있어요");
+    if (apply.blk) notes.push("잠긴 트랙 쪽 클립은 제자리 트랙에 뒀어요");
+    if (notes.length) toast(notes.join(" · "));
+  };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+// Alt+← → · +10 · 단추 줄 (D-342): 고른 것 모두를 d 초 (간격 그대로) — 하나라도 못 가면 모두 그대로 · 되돌리기 한 단계
+function nudgeMulti(d) {
+  const ovs = selOvs(); if (ovs.some(ovLocked)) return toast(otLockNote);
+  const cids = [...selI].filter(id => { const x = byId(id); return x && unlocked(x.track); }), cset = new Set(cids);
+  const word = `${Math.round(Math.abs(d) * FPS)}프레임 ${d < 0 ? "앞으로" : "뒤로"}`;
+  for (const id of cids) {
+    const it = byId(id), ns = it.start + d; if (ns < -EPS) return toast("타임라인 처음이에요");
+    if (itemsOn(it.track).some(x => !cset.has(x.id) && x.start < ns + iLen(it) - EPS && iEnd(x) > ns + EPS)) return toast("옆 클립과 겹쳐서 더 옮길 수 없어요");
+  }
+  const caps = capMovers(ovs, cset), [lo, hi] = capGroupRange(caps);
+  if (d < lo - 1e-9 || d > hi + 1e-9) return toast(d < 0 ? "앞 자막이나 소리 처음에 닿아 더 옮길 수 없어요" : "다음 자막이나 소리 끝에 닿아 더 옮길 수 없어요");
+  const gs = ovs.filter(o => o.k !== "caption").map(o => ({ o, x: ovObj(o) })).filter(g => g.x && !g.x.full);
+  if (gs.some(g => g.x.start + d < -EPS)) return toast("타임라인 처음이에요");
+  commit("여러 개 조금 옮기기"); const notes = [];
+  for (const id of cids) byId(id).start = fr(byId(id).start + d);
+  for (const c of caps) capShift(P.captions.find(x => x.id === c.id), r6c(d * sp(c.p.it)));
+  for (const g of gs) { g.x.start = fr(Math.max(0, g.x.start + d)); const K = ovK(g.o.k), st = otSettle(g.x, K); if (st) notes.push(st.full ? "트랙은 종류마다 9개까지예요 · 겹친 채로 두었어요" : `겹쳐서 ${OT_NAME[K]} ${st.id.slice(1)} 트랙으로 옮겼어요`); }
+  changed(caps.length > 0); const sp_ = groupSpan();
+  selNote(`${selCount().total}개 ${word}` + (sp_ ? " · 시작 " + tc(sp_[0]) : ""), [...new Set(notes)].join(" · "));
+}
+// Alt+↑ ↓ (D-342): 고른 것 모두를 위·아래 트랙으로 (같은 시각 그대로) — 글자·그림은 같은 종류 트랙 · 클립은 moveTrackSel 과 같은 규칙 · 하나라도 못 가면 모두 그대로
+function moveTrackMulti(dir) {
+  const ovs = selOvs(); if (ovs.some(ovLocked)) return toast(otLockNote);
+  const up = dir > 0 ? "위" : "아래", key = `Alt+${dir > 0 ? "↑" : "↓"}`, before = JSON.stringify(P);
+  const its = S.items.filter(it => selI.has(it.id) && unlocked(it.track)), dest = new Map();
+  const d = its.some(isV) ? dir : -dir; // 영상 트랙은 번호가 클수록 위 · 소리 트랙은 번호가 클수록 아래
+  for (const it of its) {
+    const kk = TRK(it.track).k, l = S.tracks.filter(t => t.k === kk), i = l.findIndex(t => t.id === it.track) + d;
+    if (i < 0 || i >= l.length) return toast(`${kk === "v" ? up : d > 0 ? "아래" : "위"}에 ${kk === "v" ? "영상" : "소리"} 트랙이 더 없어요 · 타임라인 '+ 트랙'으로 늘릴 수 있어요`);
+    if (l[i].lock) return toast(`${l[i].id} 트랙이 잠겨 있어요 · 자물쇠를 풀어 주세요`);
+    dest.set(it.id, l[i].id);
+  }
+  const plan = [];
+  for (const o of ovs) {
+    const x = ovObj(o), K = ovK(o.k), ls = S.otracks, cur = ovTrk(o, x); let j = ls.findIndex(r => r.id === cur) + dir;
+    while (j >= 0 && j < ls.length && ls[j].k !== K) j += dir;
+    if (j < 0 || j >= ls.length) return toast(`${up}에 ${OT_NAME[K]} 트랙이 없어요 · 타임라인 '+ 트랙'으로 늘릴 수 있어요`);
+    if (ls[j].lock) return toast(`${otLabel(ls[j])} 트랙이 잠겨 있어요 · 자물쇠를 풀어 주세요`);
+    plan.push({ o, x, K, from: cur, to: ls[j].id });
+  }
+  for (const p of plan) setTrk(p.x, p.to);
+  const clash = plan.find(p => { const x = p.x, s = p.K === "c" ? +x.start : x.full ? 0 : +x.start, e = p.K === "c" ? +x.end : x.full ? Infinity : +x.start + +x.dur;
+    const sub = p.K === "g" ? (S.shapes.includes(x) ? "shape" : x.kind === "spot" ? "spot" : "tact") : null;
+    return otHits(p.K, s, e, x).some(h => h.id === p.to && (p.K !== "g" || h.sub === sub)); });
+  if (clash) { for (const p of plan) setTrk(p.x, p.from); return toast(`${otLabel(OTK(clash.to))} 트랙에는 같은 때 ${OV_NAME[clash.o.k]}${josa(OV_NAME[clash.o.k], "이", "가")} 있어요 · 하나씩 옮겨 주세요`); }
+  const ids = new Set(its.map(x => x.id)); let over = false;
+  for (const it of its) it.track = dest.get(it.id);
+  for (const it of its) { if (itemsOn(it.track).some(x => !ids.has(x.id) && x.start < iEnd(it) - HF && iEnd(x) > it.start + HF)) over = true; clearRange(it.track, it.start, iEnd(it), ids); }
+  if (JSON.stringify(P) === before) return;
+  pushHist(`${up} 트랙으로 (${key})`, before);
+  const cap = plan.some(p => p.K === "c"); if (cap) { P.sequences.forEach(ensureSeq); capKey = ""; }
+  changed(cap); const to = [...new Set([...plan.map(p => p.to), ...its.map(x => x.track)])]; otReveal(to[0]);
+  toast(`${selCount().total}개를 ${up} 트랙으로 옮겼어요 (${to.map(t => OTK(t) ? otLabel(OTK(t)) : t).join("·")})${over ? " · 그 자리에 있던 클립을 덮었어요 (Ctrl+Z 로 되돌려요)" : ""}${cap ? " · 자막은 모든 편집본에서 그 트랙에 있어요" : ""}`);
+}
+// 나누기 (Ctrl+K · ✂ · D-332 와 같은 규칙): 고른 것 중 재생 위치에 걸친 것 모두 (클립도) · 되돌리기 한 단계
+function splitMulti() {
+  const ovs = selOvs().filter(o => !ovLocked(o)), t = fr(T);
+  const under = ovs.filter(o => { const s = ovSpan(o), x = ovObj(o); return s && !x.full && !(x.follow && x.follow.length) && t > s[0] + 1 / FPS && t < s[1] - 1 / FPS; });
+  const its = S.items.filter(it => selI.has(it.id) && unlocked(it.track) && it.start < t - HF && iEnd(it) > t + HF);
+  if (!under.length && !its.length) return toast("재생 위치에 걸친 고른 것이 없어요 · 재생 위치를 옮기고 눌러 주세요");
+  commit("여러 개 나누기"); let n = 0;
+  for (const o of under) if (!splitOv(o.k, ovObj(o), t)) n++;
+  for (const it of its) if (splitItem(it, t)) n++;
+  if (!n) { uncommit(); return toast("재생 위치에서 나눌 수 있는 것이 없어요 (자막은 안쪽에서)"); }
+  changed(); toast(`재생 위치에서 ${n}개를 나눴어요`);
+}
+// 글자·그림 하나 나누기 (기록 없이 · 고른 것 나누기 splitSel 과 여러 개 나누기가 함께 씀) → 못 나누면 까닭 글 ("" = 나눔 · dry: 나눌 수 있는지만)
+function splitOv(k, x, at, dry) {
+  if (!x) return "없어요";
+  if (k === "caption") {
+    const p = capPieces(x).find(q => at > q.s + 0.05 && at < q.e - 0.05), it = p && [p.it, p.it2].find(y => at >= y.start - 1e-6 && at < iEnd(y)), src = it ? mt(it, at) : -1;
+    if (!p || !it || src <= x.start + 0.05 || src >= x.end - 0.05) return "자막 안쪽에서";
+    if (dry) return "";
+    const words = x.text.split(/\s+/).filter(Boolean), r = (src - x.start) / (x.end - x.start), cut = Math.max(1, Math.round(words.length * r));
+    const b = { id: nid(), start: r6c(src), end: x.end, text: words.slice(cut).join(" ") || x.text, ...(x.trk ? { trk: x.trk } : {}), ...(x.tm ? { tm: 1 } : {}) };
+    x.end = r6c(src); x.text = words.slice(0, cut).join(" ") || x.text;
+    for (const q of P.sequences) { if (q.capPos && q.capPos[x.id]) q.capPos[b.id] = { ...q.capPos[x.id] }; if (Array.isArray(q.capOff) && q.capOff.includes(x.id)) q.capOff.push(b.id); } // '이 자막만' 자리 · 그 편집본에서 지운 자막도 함께
+    P.captions.push(b); P.captions.sort((a, c) => a.start - c.start); return "";
+  }
+  if (x.full || (x.follow && x.follow.length)) return "나눌 수 없어요";
+  const t = fr(at); if (t <= x.start + 1 / FPS || t >= x.start + x.dur - 1 / FPS) return "안쪽에서";
+  if (dry) return "";
+  const b = JSON.parse(JSON.stringify(x)); b.id = nid(); b.start = t; b.dur = r6c(x.start + x.dur - t); x.dur = r6c(t - x.start);
+  ovList(k).push(b); return "";
+}
+/* 복사 · 붙여넣기 (Ctrl+C · Ctrl+V · D-343): 클립과 함께 자막·타이틀·도형·전술 그림도 — 재생 위치에, 복사할 때의 간격 그대로, 같은 트랙에
+   (그 트랙에 같은 때 같은 종류가 있으면 덮어쓰지 않고 넣을 때와 같은 규칙으로 다른 트랙 · 자막은 그 자리 대사 소리 클립의 원본 시각 · 소리가 없는 곳이면 그 자막은 못 넣음)
+   '이 자막만' 자리(capPos)도 함께 · 다른 편집본에 붙여도 됨 */
+function copyOvs() {
+  const out = [];
+  for (const o of selOvs()) {
+    const x = ovObj(o); if (!x) continue;
+    if (o.k === "caption") { const ps = capPieces(x); if (!ps.length) continue; const p = ps.slice().sort((a, b) => a.s - b.s)[0], pos = capPosOf(x.id), data = capVisible(x);
+      out.push({ k: o.k, s: p.s, srcAt: data.start, data, trk: otCap(x), pos: pos ? { ...pos } : null }); }
+    else out.push({ k: o.k, s: x.full ? null : x.start, data: JSON.parse(JSON.stringify(x)), trk: trkOf(x, ovK(o.k)) });
+  }
+  return out;
+}
+function pasteOvs(t, base) {
+  const made = []; let lost = 0, moved = 0;
+  for (const c of clipboard.ov || []) {
+    if (c.k === "caption") {
+      const nc = capCopyAt(c.data, c.srcAt, fr(t + c.s - base)); if (!nc) { lost++; continue; }
+      const r = otPlace("c", [nc.start, nc.end], { prefer: c.trk }); setTrk(nc, r.id); if (r.id !== c.trk) moved++;
+      P.captions.push(nc); if (c.pos) { S.capPos = S.capPos || {}; S.capPos[nc.id] = { ...c.pos }; }
+      made.push({ k: "caption", id: nc.id }); continue;
+    }
+    const K = ovK(c.k), x = JSON.parse(JSON.stringify(c.data)); x.id = nid(); delete x.follow;
+    if (!x.full) x.start = fr(Math.max(0, t + c.s - base));
+    const o = OTK(c.trk), sub = c.k === "shape" ? "shape" : c.k === "tact" ? (x.kind === "spot" ? "spot" : "tact") : undefined;
+    if (o && o.k === K && otUsable(o, K) && !x.full) setTrk(x, c.trk);
+    else { const r = otPlace(K, x.full ? [0, Infinity] : [x.start, x.start + x.dur], { prefer: c.trk, sub }); setTrk(x, r.id); if (r.id !== c.trk) moved++; } // 처음부터 끝까지 도형은 겹치는 도형이 없는 트랙에
+    ovList(c.k).push(x); const st = otSettle(x, K); if (st && !st.full) moved++;
+    made.push({ k: c.k, id: x.id });
+  }
+  if (made.some(m => m.k === "caption")) { P.captions.sort((a, b) => a.start - b.start); P.sequences.forEach(ensureSeq); capKey = ""; }
+  return { made, lost, moved };
+}
+// 복제 (메뉴 · 효과 컨트롤 '복제'): 고른 것 모두를 바로 뒤에 (간격 그대로 · 클립은 끼워 넣기 — 클립 한 개 복제와 같음)
+function dupMulti() {
+  const sp_ = groupSpan(); if (!sp_) return toast("이 편집본에 보이는 것을 골라 주세요");
+  const keep = clipboard; if (!copySel(true)) return;
+  pasteAt(fr(sp_[1]), selI.size > 0, true, "복제"); clipboard = keep;
+}
+// 미리보기에서 여러 개 함께 옮기기 (D-341): 고른 자막·타이틀·도형·전술 그림·영상 클립 자리를 같은 만큼 — 자막은 한 개 끌 때와 같은 규칙
+// (트랙 전체 · Alt·'이 자막만'·따로 둔 자리는 그 자막만 · D-321·D-329 · 같은 트랙 자막 여럿은 트랙 자리를 한 번만) · 잠긴·숨긴 트랙은 그대로
+function pvMovers(alt) {
+  const F = $("frame").getBoundingClientRect(), r4 = v => Math.round(v * 1e4) / 1e4, movers = [], done = new Set(); let bb = null, n = 0;
+  const grow = b => { if (b) bb = bb ? { l: Math.min(bb.l, b.l), r: Math.max(bb.r, b.r), t: Math.min(bb.t, b.t), b: Math.max(bb.b, b.b) } : { ...b }; };
+  const elBox = el => { const b = el.getBoundingClientRect(); return b.width ? { l: (b.left - F.left) / F.width, r: (b.right - F.left) / F.width, t: (b.top - F.top) / F.height, b: (b.bottom - F.top) / F.height } : null; };
+  for (const o of selOvs()) {
+    const x = ovObj(o); if (!x || otLockedX(x, ovK(o.k))) continue; n++;
+    if (o.k === "caption") {
+      const el = ovEls["c" + x.id], ot = OTK(otCap(x)) || OTK("C1"), st = capStyleOf(ot), own = capPosOf(x.id) || {};
+      const ox = el ? parseFloat(el.style.left) / 100 : own.x ?? st.x ?? 0.5, oy = el ? parseFloat(el.style.top) / 100 : own.y ?? st.y;
+      if (capOne(x, alt)) movers.push((dx, dy) => { S.capPos = S.capPos || {}; S.capPos[x.id] = { x: r4(clamp(ox + dx, 0.02, 0.98)), y: r4(clamp(oy + dy, 0.08, 0.95)) }; });
+      else if (!done.has(ot.id)) { done.add(ot.id); movers.push((dx, dy) => { const t = capStyleTarget(ot); t.x = r4(clamp(ox + dx, 0.02, 0.98)); t.y = r4(clamp(oy + dy, 0.08, 0.95)); }); }
+      if (el) grow(elBox(el));
+    } else if (o.k === "title") {
+      const ox = x.style.x ?? 0.5, oy = x.style.y; movers.push((dx, dy) => { x.style.x = r4(clamp(ox + dx, 0, 1)); x.style.y = r4(clamp(oy + dy, 0.03, 1)); });
+      const el = ovEls["t" + x.id]; if (el) grow(elBox(el));
+    } else if (o.k === "shape") {
+      const ox = x.x, oy = x.y; movers.push((dx, dy) => { x.x = r4(ox + dx); x.y = r4(oy + dy); }); if (shapeOn(x, T)) grow({ l: x.x, r: x.x + x.w, t: x.y, b: x.y + x.h });
+    } else if (o.k === "tact") {
+      const p0 = JSON.parse(JSON.stringify(x.pts)); movers.push((dx, dy) => { x.pts = p0.map(([a, b]) => [r4(clamp(a + dx, -0.2, 1.2)), r4(clamp(b + dy, -0.2, 1.2))]); });
+    }
+  }
+  // 함께 고른 영상 클립: 지금 화면에 보이는 것의 위치(효과 컨트롤 '위치' · 키프레임이 있으면 재생 위치에 · monDrag 와 같은 셈)
+  for (const id of selI) {
+    const it = byId(id); if (!it || !isV(it) || !unlocked(it.track) || TRK(it.track).hide || T < it.start - 1e-6 || T >= iEnd(it) || mdOf(it).kind === "audio") continue;
+    const p0 = val(it, "pos", T).slice(); n++; movers.push((dx, dy) => setVal(it, "pos", [p0[0] + dx, p0[1] + dy]));
+  }
+  return { movers, bb, n, F };
+}
+function pvGroupDrag(ev, click) {
+  const { movers, bb, n, F } = pvMovers(ev.altKey), x0 = ev.clientX, y0 = ev.clientY, before = JSON.stringify(P);
+  if (!movers.length) return;
+  let moved = false;
+  const mv = e => {
+    if (!moved && Math.hypot(e.clientX - x0, e.clientY - y0) <= PV_MOVE) return;
+    moved = true; let dx = (e.clientX - x0) / F.width, dy = (e.clientY - y0) / F.height, lines = [];
+    if (bb) [dx, dy, lines] = pvSnap(bb, dx, dy, F, snapOn !== e.shiftKey);
+    for (const m of movers) m(dx, dy);
+    pvGuides(lines); ver++; frameDirty = true;
+    dtip(e, `${n}개 함께 · 가로 ${dx >= 0 ? "+" : "−"}${Math.round(Math.abs(dx) * 100)}% · 세로 ${dy >= 0 ? "+" : "−"}${Math.round(Math.abs(dy) * 100)}%${lines.length ? " · 맞춤" : ""}`);
+  };
+  const up = e => {
+    removeEventListener("mousemove", mv); removeEventListener("mouseup", up); pvGuides(null); dtip(e, null);
+    if (moved && JSON.stringify(P) !== before) { pushHist(`${n}개 자리 옮기기`, before); changed(false); }
+    else if (!moved && click) click();
+  };
+  addEventListener("mousemove", mv); addEventListener("mouseup", up);
+}
+let pvNudgeM = null;
+function pvNudgeMulti(dx, dy) {
+  const before = JSON.stringify(P), { movers, n } = pvMovers(false); if (!movers.length) return false;
+  for (const m of movers) m(dx, dy);
+  const now = performance.now(), key = selOvs().map(ovKey).join() + S.id;
+  if (!pvNudgeM || pvNudgeM.key !== key || now - pvNudgeM.at > 600 || !hist.length || hist[hist.length - 1] !== pvNudgeM.h) pushHist(`${n}개 자리 옮기기`, before);
+  pvNudgeM = { key, at: now, h: hist[hist.length - 1] }; changed(false); return true;
+}
+// 미리보기: 고른 것의 상자 — 마지막에 누른 것은 노란 상자(gbox · 손잡이) · 나머지는 노란 점선 (#gbox2 · D-340)
+function drawGfxBox2() {
+  const box = $("gbox2"); if (!box) return;
+  const ovs = playing ? [] : selOvs().filter(o => !(selX && o.k === selX.k && o.id === selX.id)), F = $("frame").getBoundingClientRect(), rs = [];
+  for (const o of ovs) {
+    const x = ovObj(o); if (!x || otLockedX(x, ovK(o.k))) continue;
+    if (o.k === "shape") { if (shapeOn(x, T)) rs.push([x.x * F.width, x.y * F.height, x.w * F.width, x.h * F.height]); continue; }
+    if (o.k === "tact") { const n_ = tacNorm(x); if (!n_ || T < n_.start || T >= n_.start + n_.dur) continue; const P_ = tacShown(n_, T); if (!P_ || !P_.length) continue; const xs = P_.map(q => q[0] * F.width), ys = P_.map(q => q[1] * F.height); rs.push([Math.min(...xs) - 10, Math.min(...ys) - 10, Math.max(...xs) - Math.min(...xs) + 20, Math.max(...ys) - Math.min(...ys) + 20]); continue; }
+    const el = ovEls[(o.k === "caption" ? "c" : "t") + x.id]; if (!el) continue; const b = el.getBoundingClientRect(); if (b.width) rs.push([b.left - F.left, b.top - F.top, b.width, b.height]);
+  }
+  const key = JSON.stringify(rs.map(r => r.map(v => Math.round(v))));
+  if (box._k === key) return; box._k = key;
+  box.innerHTML = rs.map(([l, t, w, h]) => `<i style="left:${l}px;top:${t}px;width:${w}px;height:${h}px"></i>`).join("");
+}
+// 효과 컨트롤 — 여러 개 (D-340): 'N개 선택' · 함께 옮기기·트랙·복사·복제·지우기 · 스타일은 고른 것 모두에 (자막은 그 자막들의 트랙 모양 · 타이틀은 고른 타이틀마다 · 도형은 색·진하기·둥글기)
+// 자리(가로·세로)는 미리보기에서 함께 끌어 옮김 (모두 같은 값으로 겹치지 않게 패널에는 안 둠)
+function renderMultiPanel(el) {
+  const ovs = selOvs(), ct = selCount(), objs = k => ovs.filter(o => o.k === k).map(ovObj).filter(Boolean);
+  const caps = objs("caption"), tts = objs("title"), shs = objs("shape"), rows = [...new Set(caps.map(otCap))].map(OTK).filter(Boolean);
+  const locked = ovs.some(ovLocked), off = caps.filter(c => capOffSet().has(c.id)).length;
+  let h = `<div class="pg" id="multiPg"><h4><span class="dot" style="background:var(--accent)"></span>${ct.total}개 선택</h4>
+    <div class="hint" style="margin-bottom:8px">${esc(ct.parts.join(" · "))} · 타임라인·미리보기에서 끌면 함께 옮겨져요 (간격 그대로) · Alt+끌기: 복제 · Shift+누르기: 넣기·빼기</div>
+    ${locked ? `<div class="hint" style="margin-bottom:8px">잠긴 트랙에 있는 것이 섞여 있어요 · 자물쇠를 풀면 함께 고칠 수 있어요</div>` : ""}
+    <div class="f"><label>시간</label><div class="nud"><button class="btn sm" data-mnud="-1" title="1프레임 앞으로 (Alt+← · Shift: ${NUDGE_BIG}프레임)">− 1프레임</button><button class="btn sm" data-mnud="1" title="1프레임 뒤로 (Alt+→ · Shift: ${NUDGE_BIG}프레임)">＋ 1프레임</button></div><span></span></div>
+    <div class="f"><label>트랙</label><div class="nud"><button class="btn sm" data-mtrk="1" title="위 트랙으로 (Alt+↑)">위 트랙으로</button><button class="btn sm" data-mtrk="-1" title="아래 트랙으로 (Alt+↓)">아래 트랙으로</button></div><span></span></div>
+    <div class="presets" style="margin:4px 0 0"><button class="btn sm" id="mCopy" title="Ctrl+C · 붙여넣기 Ctrl+V (재생 위치에 같은 간격으로)">복사</button><button class="btn sm" id="mDup" title="고른 것 모두를 바로 뒤에">복제 (바로 뒤에)</button><button class="btn sm" id="mSplit" title="재생 위치에 걸친 것 모두 (Ctrl+K)">재생 위치에서 나누기</button><button class="btn sm" id="mDel" title="Delete${selI.size ? " · 잔물결 삭제 Shift+Delete" : ""}">지우기</button><button class="btn sm" id="mNone" title="Esc">선택 풀기</button></div>
+    ${caps.length && P.sequences.length > 1 ? `<div class="hint" style="margin-top:8px">자막 지우기는 이 편집본에서만이에요 · 다른 편집본에는 그대로 있어요${off ? ` (이 편집본에서 지운 자막 ${off}개)` : ""}</div>` : ""}
+    ${selI.size ? `<div class="hint" style="margin-top:8px">클립 효과(위치·크기·볼륨)는 클립만 골랐을 때 여기 보여요</div>` : ""}</div>`;
+  if (caps.length && rows.length && !locked) h += styleEditor("cs_", capStyleOf(rows[0]), false, `자막 스타일 · 고른 자막 ${caps.length}개 (${esc(rows.map(o => otLabel(o)).join("·"))} 트랙 전체)`);
+  if (tts.length && !locked) h += styleEditor("ts_", tts[0].style, true, `타이틀 스타일 · 고른 타이틀 ${tts.length}개`);
+  if (shs.length && !locked) h += `<div class="pg"><h4><span class="dot" style="background:#3e8a46"></span>도형 · 고른 도형 ${shs.length}개</h4>
+      <div class="f"><label>색</label><input type="color" id="mShColor" value="${shs[0].color}"><span></span></div>
+      ${slider("mShOpacity", "진하기", shs[0].opacity, 0.05, 1, 0.05, v => Math.round(v * 100) + "%")}
+      ${slider("mShR", "모서리 둥글기", shs[0].radius || 0, 0, 100, 1, v => v + "%")}</div>`;
+  el.innerHTML = h;
+  el.querySelectorAll("[data-mnud]").forEach(b => b.onclick = e => nudge(+b.dataset.mnud * (e.shiftKey ? NUDGE_BIG : 1) / FPS));
+  el.querySelectorAll("[data-mtrk]").forEach(b => b.onclick = () => moveTrackSel(+b.dataset.mtrk));
+  $("mCopy").onclick = () => copySel(); $("mDup").onclick = dupSel; $("mSplit").onclick = () => splitSel(); $("mDel").onclick = () => deleteSel(false); $("mNone").onclick = clearSel;
+  // 자리(가로·세로) 칸은 빼고 — 여러 개는 미리보기에서 함께 끌어 옮김
+  for (const id of ["cs_x", "cs_y", "ts_x", "ts_y"]) { const r = el.querySelector("#" + id); if (r && r.closest(".f")) r.closest(".f").remove(); }
+  if (caps.length && rows.length && !locked) {
+    bindStyle("cs_", () => capStyleTarget(rows[0]), el, (k, v) => { for (const o of rows.slice(1)) { const st = capStyleTarget(o); if (v === undefined) delete st[k]; else st[k] = v; } });
+    el.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { commit("자막 스타일"); for (const o of rows) Object.assign(capStyleTarget(o), PRESETS[b.dataset.preset]); changed(false); toast(`"${b.dataset.preset}" 스타일을 ${rows.map(o => otLabel(o)).join("·")} 트랙에 적용했어요`); });
+  }
+  if (tts.length && !locked) bindStyle("ts_", () => tts[0].style, el, (k, v) => { for (const t of tts.slice(1)) { if (v === undefined) delete t.style[k]; else t.style[k] = v; } });
+  if (shs.length && !locked) {
+    const pct = v => Math.round(v * 100) + "%", c = $("mShColor"); let bc = null;
+    c.oninput = () => { if (!bc) bc = JSON.stringify(P); for (const s of shs) s.color = c.value; frameDirty = true; }; c.onchange = () => { if (bc) { pushHist("도형 색", bc); bc = null; scheduleSave(); } };
+    bindRange("mShOpacity", v => { for (const s of shs) s.opacity = v; }, pct, "도형 진하기"); bindRange("mShR", v => { for (const s of shs) s.radius = v; }, v => v + "%", "도형 둥글기");
+  }
+}
+// 오른쪽 클릭 메뉴 · ⋯ — 여러 개 (D-340)
+function multiMenu() {
+  const c = selCount();
+  return [[`${c.total}개 선택 · ${c.parts.join(" · ")}`, () => {}], null,
+    ["1프레임 앞으로", () => nudge(-1 / FPS), "Alt+←"], ["1프레임 뒤로", () => nudge(1 / FPS), "Alt+→"],
+    ["위 트랙으로", () => moveTrackSel(1), "Alt+↑"], ["아래 트랙으로", () => moveTrackSel(-1), "Alt+↓"], null,
+    ["재생 위치에서 나누기", () => splitSel(), "Ctrl+K"], ["복사", () => copySel(), "Ctrl+C"], ...(clipboard ? [["붙여넣기 (재생 위치)", () => pasteAt(fr(T), false), "Ctrl+V"]] : []), ["복제 (바로 뒤에)", dupSel, "Alt+끌기"], null,
+    ["고른 것 크게 보기", zoomSel, "Shift+\\"], ["선택 풀기", clearSel, "Esc"], ["지우기", () => deleteSel(false), "Delete"], ...(selI.size ? [["잔물결 삭제", () => deleteSel(true), "Shift+Delete"]] : [])];
+}
+
 /* ---------- 키보드 ---------- */
 addEventListener("keydown", e => {
   if ($("cmenu").style.display === "block" && (e.key === "Escape" || !["Shift", "Control", "Alt", "Meta"].includes(e.key))) { hideMenu(); if (e.key === "Escape") return; } // Esc: 메뉴만 닫음 (고른 것은 그대로)
@@ -6341,8 +6954,8 @@ addEventListener("keydown", e => {
   if (mod && k === "d") { e.preventDefault(); applyDefaultTrans(sh ? "a" : "v"); return; }
   if (mod && k === "r") { e.preventDefault(); openSpeed(); return; }
   if (mod && k === "l") { e.preventDefault(); toggleLink(); return; }
-  if (mod && sh && k === "a") { e.preventDefault(); selI.clear(); selX = null; selKf = null; renderTimeline(); renderPanels(); return; } // 모두 선택 해제 (프리미어와 같게)
-  if (mod && k === "a") { e.preventDefault(); selI = new Set(S.items.filter(x => unlocked(x.track)).map(x => x.id)); selX = null; renderTimeline(); renderPanels(); return; }
+  if (mod && sh && k === "a") { e.preventDefault(); clearSel(); return; } // 모두 선택 해제 (프리미어와 같게)
+  if (mod && k === "a") { e.preventDefault(); selectAll(); return; } // 모두 선택: 클립 + 자막·타이틀·도형·전술 그림 (잠긴 트랙 빼고 · D-340)
   if (mod && sh && (k === "i" || k === "o")) { e.preventDefault(); if (monMode === "src" && SRC) { SRC[k === "i" ? "in" : "out"] = null; updSrcBtns(); } else { if (k === "i") markIn = null; else markOut = null; renderTimeline(); } toast(k === "i" ? "시작점 지움" : "끝점 지움"); return; }
   if (mod && alt && k === "m") { e.preventDefault(); clearMarker(sh); return; } // Ctrl+Alt+M: 재생 위치 마커 지우기 · +Shift: 모두 (프리미어 · 예전: 내보내기 창 · D-331)
   if (mod && sh && k === "m") { e.preventDefault(); jumpMarker(-1); return; }
@@ -6423,7 +7036,7 @@ addEventListener("keydown", e => {
   else if (k === "-" || k === "_") setZoom(zoom / 1.4);
   else if ((k === "|" || (k === "\\" && sh)) || (e.code === "Backslash" && sh)) zoomSel(); // 고른 것 크게 보기 Shift+\ (D-322)
   else if (k === "\\") zoomFit();
-  else if (k === "escape") { selI.clear(); selX = null; selKf = null; renderTimeline(); renderPanels(); }
+  else if (k === "escape") { selI.clear(); selX = null; selO = []; selKf = null; renderTimeline(); renderPanels(); frameDirty = true; }
   else if (k === "." || k === ",") { if (SRC) srcPlace(k === "," ? "insert" : "over"); else { const m = $("bt-media").querySelector(".item.on"); if (m) dropOn("media", m.dataset.name, null, k === "," ? "insert" : "over"); else toast("미디어 탭에서 넣을 파일을 먼저 눌러 고르세요"); } }
 });
 // 고른 뒤에는 선택 상자·슬라이더·체크박스에서 포커스를 놓음 → 화살표·Space·Delete 가 다시 편집 단축키로

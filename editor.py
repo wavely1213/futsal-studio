@@ -3175,10 +3175,14 @@ def timeline_captions(proj):
         groups.setdefault(it.get("media", "main"), []).append(it)
     alive = []  # 쇼츠형으로 나눈 자막 조각을 끝까지 붙잡아 둠 — _k(id) 가 다른 조각에 다시 쓰여 다른 자막끼리 합쳐지지 않게 (editor.html 은 객체 자체로 견줌)
     cpos = proj.get("capPos") if isinstance(proj.get("capPos"), dict) else {}  # '이 자막만' 자리 (편집본마다 · D-321)
+    # 이 편집본에서 지운 자막 (capOff · D-344) — 자막 글은 모든 편집본이 함께 쓰므로 편집실의 지우기는 이 편집본만 (editor.html capsTL 과 같은 규칙)
+    off = {x for x in proj.get("capOff") or () if isinstance(x, str)} if isinstance(proj.get("capOff"), list) else set()
     for mid, vids in groups.items():
         if mid == "main":
             # msgCaps: MSG 후보가 함께 가져온 자막 (다시 들은·다듬은 받아쓰기) — 편집실이 프로젝트 자막에 반영하면 지움 (editor.html capsTL 과 같은 규칙)
             caps = proj.get("msgCaps") or proj.get("captions") or []
+            if off:
+                caps = [c for c in caps if not (isinstance(c, dict) and c.get("id") in off)]
         else:
             md = mds.get(mid)
             caps = media_captions(md.get("file"), md.get("src", "videos")) if md else []

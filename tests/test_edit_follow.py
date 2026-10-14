@@ -32,6 +32,7 @@ const commit = () => {}, changed = () => { ver++; }, seek = () => {}, toast = m 
 const renderRec = () => {}, renderMediaBin = () => {}, refitMusic = () => {}, musicFit = () => false, revealRow = () => {}, addGfx = () => {};
 const total = () => Math.max(0, ...S.items.map(iEnd)), audioAt = () => [];
 const addMedia = async (src, f) => MED[f], rowAtY = () => ROW, xToT = e => e.t, tacVideoAt = () => null; // 전술 그림 없음
+const multiSel = () => false; // 여러 개 고르기(D-340)는 ppalign_e2e/multi_test.py · test_multi_select 에서
 """
 
 
