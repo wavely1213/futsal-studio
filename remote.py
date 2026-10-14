@@ -129,7 +129,9 @@ JOB_LABELS = {"보관함에 담기", "편집점 찾기", "학습용 영상 받�
               # 썸네일 버릇 배우기 (PC 스타일 카드에서만 시작 · D-130)
               thumbstyle.JOB,
               # 끝까지 자동으로 (PC 보관함·휴대폰 'auto' · D-203)
-              autorun.JOB}
+              autorun.JOB,
+              # 쉴 때 새 버전을 받는 동안 잡는 작업 자리 (app.AUTO_JOB · D-311)
+              "자동 업데이트"}
 # OFF_REASONS 값은 비콘·조회 기록으로 페이지에 가는 약속 글자 (페이지가 글자 그대로 맞춰 봄) → 화면 이름이 '실행기'로 바뀌어도 그대로 (D-310)
 OFF_REASONS = {"app": "앱을 껐어요", "user": "원격 접속을 껐어요", "idle": "오래 쓰지 않아서 껐어요", "error": "연결이 끊겼어요"}
 # 밖에 있을 때 할 수 있는 것: 원격 홈의 [더보기] → [실행기 끄기] (모든 연결·밖에서 작업이 바로 끝남) · PC 앞이면 [끊기] (D-239)
@@ -1151,7 +1153,9 @@ class Service:
         self.tun = None
         self.pub = None
         self.sem = threading.BoundedSemaphore(CONCURRENCY)
-        self.last_auth = clock()
+        self._busy = 0          # 원격 리스너가 지금 처리 중인 요청 수 (받기·영상 보기·올리기 조각 포함) → in_flight · 자동 업데이트가 끊지 않게 (D-311)
+        self._busy_lock = threading.Lock()
+        self.last_auth = clock()  # 휴대폰 원격 홈·밖에서 작업이 마지막으로 연결 정보를 보인 때 (자동 끄기 · 자동 업데이트 D-311)
         self.last = None
         self.qa = collections.OrderedDict()
         self.confirms = {}
@@ -1864,6 +1868,11 @@ class Service:
             _close_server(srv)
 
     # ----- 휴대폰 요청 처리 -----
+    def in_flight(self):
+        """원격 리스너가 지금 처리 중인 요청 수 — 휴대폰이 받는 완성본(/r/m · /s/dl)·영상 보기·올리기 조각은 끝날 때까지 셈
+        (멈춘 연결은 RemoteHandler.timeout 뒤 끝남). 앱 다시 시작(자동 업데이트)이 이것을 끊지 않게 (app._auto_why · D-311)."""
+        return self._busy
+
     def touch(self, dev):
         self.last_auth = self.clock()
         self.store.touch(dev)
@@ -2995,6 +3004,8 @@ class RemoteHandler(BaseHTTPRequestHandler):
         svc = self.server.svc
         if not svc.sem.acquire(blocking=False):
             return self._json(503, {"error": "지금은 바빠요 · 잠시 뒤 다시 해 주세요"}, {"Retry-After": "2"})
+        with svc._busy_lock:
+            svc._busy += 1
         try:
             self._handle(method, svc)
         except (ConnectionError, TimeoutError):  # 휴대폰이 먼저 끊음 (영상 앞뒤로 옮기기 · Windows 는 ConnectionAbortedError 10053 도)
@@ -3006,6 +3017,8 @@ class RemoteHandler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         finally:
+            with svc._busy_lock:
+                svc._busy -= 1
             svc.sem.release()
 
     def _handle(self, method, svc):

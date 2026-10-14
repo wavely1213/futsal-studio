@@ -665,6 +665,24 @@ def keep_awake():
         _keep_awake(False, prev)
 
 
+def input_idle_secs():
+    """Windows: 이 PC 에서 키보드·마우스를 마지막으로 쓴 뒤 지난 초 (다른 프로그램을 쓴 것도 셈 · GetLastInputInfo) ·
+    그 밖의 OS·못 읽으면 None. 자동 업데이트가 PC 를 쓰는 중에 창을 다시 띄우지 않게 (app._auto_why · D-311)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        class LastInput(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        li = LastInput(ctypes.sizeof(LastInput), 0)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(li)):
+            return None
+        return ((ctypes.windll.kernel32.GetTickCount() - li.dwTime) & 0xFFFFFFFF) / 1000  # 둘 다 49.7일마다 0 으로 돌아가는 32비트 ms
+    except Exception:  # noqa: BLE001 — 못 읽으면 이 확인만 건너뜀
+        return None
+
+
 @contextlib.contextmanager
 def _analysis_session():
     """편집점 찾기 한 묶음 (겹쳐 불러도 바깥 한 번만): 절전 막기 → 끝나면(실패해도) 되돌리고 모델을 내려놓음 (메모리 반환)."""
@@ -1474,6 +1492,8 @@ def check_update():
     n = updater.take_notice()  # 방금 업데이트·되돌림 결과 → 화면에 한 번 알림
     if n:
         out.update(notice=n["text"], notice_warn=n["warn"])
+        if n.get("auto"):  # 자동 업데이트 결과 → 화면은 남는 카드로 (D-311)
+            out["notice_auto"] = True
     url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
     if not url:
         return dict(out, note="업데이트 주소가 설정되지 않았어요")
@@ -1574,16 +1594,22 @@ AUTO_FIRST = 600     # 켠 뒤 첫 확인 (초) — 켜는 일(엔진 확인·�
 AUTO_EVERY = 3600    # 그 뒤 확인 간격 · 실패했을 때도 이만큼 뒤에 다시
 AUTO_WAIT = 300      # 새 버전이 있는데 스튜디오를 쓰는 중이면 이 간격으로 다시 봄 (하는 일은 끊지 않음)
 AUTO_STAMP = "app_autoupdate"  # ENGINE_HOME/<이름>.json {"restarted": 버전} — 한 버전으로는 저절로 한 번만 다시 시작 (되돌려졌으면 손으로)
-_AUTO = {"said": set(), "thread": None}  # said: 기록에 남긴 (버전, 종류) — 5분·1시간마다 같은 말을 쌓지 않게
+_AUTO = {"said": set(), "thread": None, "err": None}  # said: 기록에 남긴 (버전, 종류) — 5분·1시간마다 같은 말을 쌓지 않게 · err: 뒤 스레드의 마지막 오류
+
+
+def _dev_folder():
+    """개발 폴더(git)인지 — 작업 중인 코드를 배포본으로 덮지 않게 자동 업데이트는 늘 안 함 (사용자 PC 는 zip 으로 설치해 .git 이 없음)."""
+    return (APP_DIR / ".git").exists()
 
 
 def auto_update_on():
-    """자동 업데이트를 할지: config.json 의 "auto_update": false 면 안 함 (기본 켬 · 메모장으로 "false"·0 이라 적어도 끔).
-    개발 폴더(git)에서는 안 함 — 작업 중인 코드를 배포본으로 덮지 않게 (사용자 PC 는 zip 으로 설치해 .git 이 없음)."""
-    v = CONFIG.get("auto_update", True)
+    """자동 업데이트를 할지: config.json 의 "auto_update": false 면 안 함 (기본 켬 · 메모장으로 "false"·0 이라 적어도 끔) · 개발 폴더는 안 함.
+    물을 때마다 config.json 을 다시 읽음 → 켜 둔 채 메모장으로 바꿔도 다음 확인부터 (앱을 다시 켜지 않아도 · 지금 못 읽으면 켤 때 읽은 값)."""
+    d, bad = updater.read_config(APP_DIR)
+    v = (CONFIG if bad else d).get("auto_update", True)
     if v is False or str(v).strip().lower() in ("false", "0", "off", "no"):
         return False
-    return not (APP_DIR / ".git").exists()
+    return not _dev_folder()
 
 
 def _auto_tried(ver):
@@ -1610,6 +1636,24 @@ def _auto_kind(e):
     return "pip" if "구성요소" in str(e) else "other"
 
 
+# 우리 안내의 '…하고 다시 시도해 주세요' → 할 일만 (다시 하는 것은 저절로) · 남은 '(잠시·몇 분 뒤) 다시 시도해 주세요' 문장은 뺌
+_AUTO_DO = (("확인하고 다시 시도해 주세요", "확인해 주세요"), ("비운 뒤 다시 시도해 주세요", "비워 주세요"),
+            ("껐다 켠 뒤 다시 시도해 주세요", "껐다 켜 주세요"), ("닫고 다시 시도해 주세요", "닫아 주세요"))
+
+
+def _auto_line(e, kind):
+    """실패를 기록에 쓸 쉬운 한 줄: 우리 안내의 까닭과 할 일만 — 사람에게 다시 하라는 말은 뺌 (1시간 뒤 저절로 다시 하므로)
+    · 영어 원문(' · ' 뒤)은 studio.log 에만 (_auto_raw) · 그 밖의 오류는 trouble.explain 의 쉬운 말 (CODING_STANDARDS · 작업 실패와 같게)."""
+    if kind == "other":
+        import trouble
+        return trouble.explain(e)["msg"]
+    head = str(e).split(" · ")[0].strip()
+    for a, b in _AUTO_DO:
+        head = head.replace(a, b)
+    parts = [x.strip().rstrip(".") for x in re.split(r"(?<=\.)\s+", head) if x.strip()]
+    return ". ".join([x for x in parts if "다시 시도해 주세요" not in x] or parts[:1])
+
+
 def _auto_mark():
     """방금 설치한 업데이트가 자동이었다고 .update_pending 에 적음 → 새 버전의 updater.finish 가 '자동으로 …' 알림. 설치한 버전."""
     p = updater._read_json(APP_DIR / updater.PENDING)
@@ -1622,16 +1666,25 @@ def _auto_mark():
     return p.get("to")
 
 
+def _auto_raw(e):
+    """실패의 원문 (영어 원인·파일 이름) → studio.log 에만 한 줄 (화면·휴대폰 기록에는 쉬운 한 줄만)."""
+    import studiolog
+    studiolog.write(f"  원문 · {' '.join(str(e).split())[:400]}")
+
+
 def auto_update_once(log, claim, done):
     """한 번 확인 → 다음 확인까지 기다릴 초. 화면 알림(updater.take_notice)은 가져가지 않음 (check_update 몫).
-    claim() → None(쉬는 중 · 작업 자리를 잡았음) 또는 아직 안 되는 까닭 · done(restart) → 자리를 놓음 (restart 면 다시 시작)."""
+    claim() → None(쉬는 중 · 작업 자리를 잡았음) 또는 아직 안 되는 까닭 · done(restart, fail) → 자리를 놓음 (restart 면 다시 시작 ·
+    fail: 실패했으면 그 쉬운 한 줄 — 휴대폰 '마지막 작업' 칸)."""
     url = CONFIG.get("update_manifest_url") or DEFAULT_MANIFEST
     if not url or not auto_update_on():
         return AUTO_EVERY
     try:
         m, _ = updater.fetch_manifest(url)
     except updater.UpdateError as e:
-        _auto_say(log, "", "net", f"자동 업데이트 확인을 못 했어요 · {e} · 조금 뒤에 저절로 다시 해 봐요")
+        if ("", "net") not in _AUTO["said"]:
+            _auto_raw(e)
+        _auto_say(log, "", "net", f"자동 업데이트 확인을 못 했어요 · {_auto_line(e, 'net')} · 1시간 뒤에 저절로 다시 해 봐요")
         return AUTO_EVERY
     _AUTO["said"].discard(("", "net"))  # 다시 끊기면 그때 한 번 더 알림
     ver = m["version"]
@@ -1644,19 +1697,22 @@ def auto_update_once(log, claim, done):
     if claim():
         _auto_say(log, ver, "wait", f"새 버전(v{ver})이 나왔어요 · 스튜디오를 쓰지 않을 때 저절로 받아 다시 시작해요")
         return AUTO_WAIT
-    lines, restart = ["자동 업데이트 · 스튜디오를 쓰지 않는 동안 새 버전을 받아요"], False  # 실패가 되풀이되면 같은 줄을 또 쓰지 않게 모아 둠
+    lines, restart, fail = ["자동 업데이트 · 스튜디오를 쓰지 않는 동안 새 버전을 받아요"], False, None  # 실패가 되풀이되면 같은 줄을 또 쓰지 않게 모아 둠
     try:
         with keep_awake():
             restart = bool(update_app(lines.append))
     except Exception as e:  # noqa: BLE001 — 인터넷·받은 파일·구성요소 실패는 다음 확인 때 다시 (앱 폴더는 그대로이거나 되돌려 둠)
         kind = _auto_kind(e)
-        if (ver, kind) not in _AUTO["said"]:
+        fail = _auto_line(e, kind)
+        if (ver, kind) not in _AUTO["said"]:  # 같은 버전·같은 종류는 처음 한 번만 (설치 중 줄 · 원문 · 오류 위치까지)
             for x in lines:
                 log(x)
-        _auto_say(log, ver, kind, f"  자동 업데이트를 마치지 못했어요 · {e} · 조금 뒤에 저절로 다시 해 봐요")
-        if kind == "other":
-            import studiolog
-            studiolog.trace(e, "자동 업데이트 오류 위치")
+            if kind == "other":
+                import studiolog
+                studiolog.trace(e, "자동 업데이트 오류 위치")
+            else:
+                _auto_raw(e)
+        _auto_say(log, ver, kind, f"  자동 업데이트를 마치지 못했어요 · {fail} · 1시간 뒤에 저절로 다시 해 봐요")
     else:
         for x in lines:
             log(x)
@@ -1666,26 +1722,38 @@ def auto_update_once(log, claim, done):
             log(f"자동 업데이트로 다시 시작해요 (v{VERSION} → v{to})")
     finally:
         set_progress()
-        done(restart)
+        done(restart, fail)
     return AUTO_EVERY
+
+
+def _auto_step(log, claim, done):
+    """뒤 스레드의 한 번 → 다음 확인까지 기다릴 초. 곁가지가 앱을 깨뜨리지 않게 오류는 여기서 (다음 확인 때 다시 ·
+    같은 오류가 1시간마다 되풀이되면 오류 위치는 한 번만)."""
+    try:
+        wait = auto_update_once(log, claim, done)
+    except Exception as e:  # noqa: BLE001
+        key = f"{type(e).__name__}: {e}"
+        if key != _AUTO["err"]:
+            _AUTO["err"] = key
+            import studiolog
+            studiolog.trace(e, "자동 업데이트 오류 위치")
+        return AUTO_EVERY
+    _AUTO["err"] = None
+    return wait
 
 
 def app_autoupdate(log, claim, done):
     """앱이 켜진 뒤 한 번 (app._after_start): 뒤에서 AUTO_FIRST 초 뒤 처음, 그 뒤 AUTO_EVERY 초마다 (새 버전이 기다리면 AUTO_WAIT).
-    화면(JS)이 아니라 서버에서 돎 — 창을 며칠 안 만져도 됨. 꺼 두었으면(auto_update_on) 시작하지 않음."""
-    if _AUTO["thread"] is not None or not auto_update_on():
+    화면(JS)이 아니라 서버에서 돎 — 창을 며칠 안 만져도 됨. 꺼 두었어도(config) 돌며 확인할 때마다 설정을 다시 읽음
+    (auto_update_on · 켜 둔 채 끄거나 다시 켜도 됨) · 개발 폴더는 시작하지 않음."""
+    if _AUTO["thread"] is not None or _dev_folder():
         return
 
     def loop():
         wait = AUTO_FIRST
         while True:
             time.sleep(wait)
-            try:
-                wait = auto_update_once(log, claim, done)
-            except Exception as e:  # noqa: BLE001 — 곁가지가 앱을 깨뜨리지 않게 (다음 확인 때 다시)
-                import studiolog
-                studiolog.trace(e, "자동 업데이트 오류 위치")
-                wait = AUTO_EVERY
+            wait = _auto_step(log, claim, done)
 
     _AUTO["thread"] = threading.Thread(target=loop, daemon=True, name="app-autoupdate")
     _AUTO["thread"].start()

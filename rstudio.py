@@ -1308,6 +1308,12 @@ class Uploads:
             self._load()
             return [self.view(r) for r in self.items.values() if r["device"] == sess["device"]]
 
+    def active(self, within, now=None):
+        """마지막 조각이 within 초 안에 온 올리기 수 — 조각 사이에도 '올리는 중' (앱 다시 시작·자동 업데이트가 끊지 않게 · D-311)."""
+        now = time.time() if now is None else now
+        with self.lock:
+            return sum(1 for r in (self.items or {}).values() if now - (r.get("updated") or 0) < within)
+
     def sweep(self, now=None):
         """7일 넘게 안 이어 올린 것 · 기록 없는 조각 파일 정리."""
         now = now or time.time()

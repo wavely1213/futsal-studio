@@ -301,6 +301,8 @@
   .fail { padding: 14px 16px; margin: -4px 0 16px; display: grid; gap: 10px; border-left: 4px solid var(--danger); }
   .fail .ftop { display: flex; gap: 10px; align-items: flex-start; }
   .fail .fic { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: var(--surface); display: grid; place-items: center; font-weight: 800; font-size: 13px; }  /* 흰 글자는 어두운 화면 --danger 위 3.35:1 → 카드 바탕색(밝은 6.57 · 어두운 5.16) */
+  .fail[data-kind="updated"] { border-left-color: var(--brand); }  /* 잘된 소식 카드 (자동 업데이트 · D-311): 같은 카드에 초록 ✓ */
+  .fail[data-kind="updated"] .fic { background: var(--brand); color: var(--brand-ink); }
   .fail .ftx { flex: 1; min-width: 0; line-height: 1.55; }
   .fail .ftx b { display: block; color: var(--ink); overflow-wrap: anywhere; }
   .fail .ftx small { color: var(--ink-3); font-size: 12px; }
@@ -1377,7 +1379,7 @@ function showFail(f, jb) {  // f {kind, msg, actions, browser, suggest, job} · 
     : `<button class="btn${i ? "" : " primary"}" data-fa="${a}">${label[a]}</button>`).join("");
   const msg = acts.includes("cookies") && f.card ? f.card : f.msg;  // 카드 안에 브라우저 고르기가 있으면 '아래에서 고르고…' (화면 설정 칸을 또 가리키지 않게)
   const slot = failSlot(panel);
-  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">!</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")}${f.kind === "crash" ? "" : ` · ${hm}`}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
+  slot.innerHTML = `<div class="card fail" role="alert" data-kind="${esc(f.kind || "")}"><div class="ftop"><span class="fic">${f.kind === "updated" ? "✓" : "!"}</span><div class="ftx"><b>${esc(msg)}</b><small>${esc(f.job || jb.name || "작업")}${f.kind === "crash" ? "" : ` · ${hm}`}</small></div><button class="fx" title="닫기" aria-label="닫기">✕</button></div>${btns ? `<div class="fbtns">${btns}</div>` : ""}</div>`;
   const card = slot.firstElementChild;
   card.querySelector(".fx").onclick = () => { slot.innerHTML = ""; };
   if (/^cookie_/.test(f.kind || "") && ckCur && $("cookies").value === ckCur) useCookies(null);  // 그 브라우저 로그인 정보를 못 읽음 → 화면 설정은 '안 씀'으로 (다음 작업까지 같은 오류가 나지 않게 · 카드의 고르기는 그대로)
@@ -2576,7 +2578,9 @@ $("btnLogClose").onclick = () => $("drawer").classList.remove("open");
 async function checkUpdate(manual) {
   const u = await api("/api/update/check");
   if (u.notice) {  // 방금 업데이트·되돌림 결과 · 지난번에 갑자기 꺼짐 (켜진 뒤 한 번) · 알릴 일은 카드로 남김
-    if (u.notice_warn) showFail({ kind: "notice", msg: u.notice, actions: ["log", ...(/studio\.log|관리자/.test(u.notice) ? ["logfile"] : [])], job: "알림" }, { panel: curPanel() }); else toast(u.notice);
+    if (u.notice_warn) showFail({ kind: "notice", msg: u.notice, actions: ["log", ...(/studio\.log|관리자/.test(u.notice) ? ["logfile"] : [])], job: "알림" }, { panel: curPanel() });
+    else if (u.notice_auto) showFail({ kind: "updated", msg: u.notice, actions: [], job: "자동 업데이트" }, { panel: curPanel() });  // 아무도 없을 때 바뀜 → ✕ 를 누를 때까지 남김 (D-311)
+    else toast(u.notice);
   }
   const pill = $("updPill");
   pill.classList.toggle("show", !!u.available);
@@ -3031,7 +3035,9 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
   const schedMin = () => ((YT.st || {}).scheduleMinMinutes || 15);
   const audited = () => !!((YT.st || {}).settings || {}).audited;
   const privText = h => h.locked ? "비공개(잠김)" : `${PK[h.privacy] || ""}${h.preAudit ? "(감사 전 · 공개 불가)" : ""}`;
-  async function getJ(path) { try { const r = await fetch(path); return await r.json(); } catch (e) { return null; } }
+  async function getJ(path, auto) {  // auto: 화면이 저절로 묻는 것 → 서버가 'PC 를 쓰는 중'으로 세지 않음 (X-FS-Auto · 자동 업데이트 D-311)
+    try { const r = await fetch(path, auto ? { headers: { "X-FS-Auto": "1" } } : {}); return await r.json(); } catch (e) { return null; }
+  }
 
   async function loadStatus() {
     const j = await getJ("/api/youtube/status");
@@ -3040,18 +3046,18 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
     navDot();
     return j;
   }
-  async function loadPlan() {
+  async function loadPlan(auto) {
     const c = ctx();
     if (!c.name || !c.kit) { YT.plan = null; YT.planKey = keyOf(c); return render(); }
     const k = keyOf(c);
-    const j = await getJ(`/api/youtube/plan?name=${encodeURIComponent(c.name)}&seq=${encodeURIComponent(c.seq || "")}`);
+    const j = await getJ(`/api/youtube/plan?name=${encodeURIComponent(c.name)}&seq=${encodeURIComponent(c.seq || "")}`, auto);
     if (k !== keyOf(ctx())) return;  // 그사이 다른 영상·편집본을 고름
     YT.plan = j && j.ok ? j : null;
     YT.planKey = k;
     render();
   }
-  async function loadHist() {
-    const j = await getJ("/api/youtube/history?limit=10");
+  async function loadHist(auto) {
+    const j = await getJ("/api/youtube/history?limit=10", auto);
     YT.hist = j && j.ok ? j.items : [];
     renderHist();
   }
@@ -3234,12 +3240,12 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
     YT.checks[vid] = Date.now();
     let j = null;
     if (manual) j = await api("/api/youtube/check", { videoId: vid });
-    else {  // 저절로 확인할 때는 오류를 띄우지 않음 (연결이 끊겼으면 다음 화면 그리기에서 보임)
-      try { j = await (await fetch("/api/youtube/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId: vid }) })).json(); } catch (e) {}
+    else {  // 저절로 확인할 때는 오류를 띄우지 않음 (연결이 끊겼으면 다음 화면 그리기에서 보임) · 그 뒤 새로 고침까지 '저절로' 표시 (D-311)
+      try { j = await (await fetch("/api/youtube/check", { method: "POST", headers: { "Content-Type": "application/json", "X-FS-Auto": "1" }, body: JSON.stringify({ videoId: vid }) })).json(); } catch (e) {}
     }
     if (!j || !j.ok) { if (!manual) loadStatus(); return; }
     if (manual) toast(j.problem ? j.problem : j.processing ? "아직 처리 중이에요 · 조금 뒤 다시 확인해 주세요" : "처리가 끝났어요 ✓");
-    loadPlan(); if (YT.hist) loadHist();
+    loadPlan(!manual); if (YT.hist) loadHist(!manual);
   }
   function autoCheck() {  // 처리 중인 영상: 올린 뒤 30분까지 1분마다 한 번 (videos.list 1단위)
     const p = planNow(), h = p && p.last;

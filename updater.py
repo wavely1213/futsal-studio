@@ -1037,15 +1037,18 @@ def finish(app_dir=APP_DIR):
         _remove(app_dir / SKIP)  # 새 버전이 잘 켜졌으니 예전에 건너뛴 기록은 필요 없음
         auto = p.get("auto") is True  # 아무도 안 누르고 쉬는 동안 받은 업데이트 (core.auto_update_once · D-311)
         msgs.append(f"업데이트 완료 · v{p.get('from')} → v{p.get('to')}" + (" (자동)" if auto else ""))
-        _NOTICES.append({"text": f"자동으로 새 버전(v{p.get('to')})으로 업데이트했어요" if auto else msgs[-1], "warn": False})
+        _NOTICES.append({"text": f"자동으로 새 버전(v{p.get('to')})으로 업데이트했어요", "warn": False, "auto": True} if auto else
+                        {"text": msgs[-1], "warn": False})  # auto: 화면은 사라지는 알림 대신 ✕ 를 누를 때까지 남는 카드 (아무도 없을 때 바뀜)
     return msgs
 
 
 def take_notice():
-    """앱이 켜진 뒤 화면에 한 번 띄울 업데이트 결과 {text, warn} (없으면 None)."""
+    """앱이 켜진 뒤 화면에 한 번 띄울 업데이트 결과 {text, warn} (+ 자동 업데이트 결과면 auto) (없으면 None)."""
     if not _NOTICES:
         return None
     out = {"text": " ".join(n["text"] for n in _NOTICES), "warn": any(n["warn"] for n in _NOTICES)}
+    if any(n.get("auto") for n in _NOTICES):
+        out["auto"] = True
     _NOTICES.clear()
     return out
 

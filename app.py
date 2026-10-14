@@ -150,6 +150,7 @@ def start_job(name, fn, by=None, ctx=None):
                 while len(DONE) > 20:
                     DONE.popitem(last=False)
                 JOB["name"] = None
+                _SEEN["job"] = time.time()  # 자리를 놓는 순간 → 자동 업데이트가 화면이 이어서 시킬 작업 사이에 끼어들지 않게 (AUTO_AFTER_JOB)
             studiolog.job(None)
             for h in list(JOB_HOOKS):
                 try:  # 알림 같은 곁가지가 작업을 깨뜨리지 않게
@@ -336,11 +337,12 @@ def open_folder(path):
         subprocess.Popen(["xdg-open", str(path)])
 
 
-def restart():
+def restart(auto=False):
     """새 프로세스로 앱을 다시 띄우고 지금 프로세스는 종료 (업데이트 후). 순서 (D-034):
     1. 실행기(원격)를 끔 (터널·리스너·마지막 비콘이 새 프로세스의 켜기와 겹치지 않게 · 켜 둠 표시는 그대로 → 새 앱이 이어서 켬)
     2. 실행기(updater --launch)를 띄움 — 이 프로세스 번호(FUTSAL_OLD_PID)를 넘겨, 뒤로 미룬 구성요소 설치(.req_pending)는
-       이 프로세스가 끝나 .pyd 를 놓은 뒤에 하게 (.launch_lock 안에서) → 3. 끝내기 (남은 자식은 Job Object 로 같이 꺼짐)."""
+       이 프로세스가 끝나 .pyd 를 놓은 뒤에 하게 (.launch_lock 안에서) → 3. 끝내기 (남은 자식은 Job Object 로 같이 꺼짐).
+    auto: 자동 업데이트(D-311)의 다시 시작 → 새 창은 내려 둔 채로 (FUTSAL_AUTO · 다른 프로그램을 쓰는 사람 앞에 창이 뜨지 않게)."""
     log("다시 시작하는 중…")
     remote.SVC.shutdown()
     kw = {"cwd": str(core.APP_DIR)}
@@ -349,6 +351,8 @@ def restart():
     else:
         kw["start_new_session"] = True
     kw["env"] = dict(os.environ, FUTSAL_RESTART="1", FUTSAL_OLD_PID=str(os.getpid()))  # 새 프로세스는 '이미 실행 중' 확인을 건너뜀
+    if auto:
+        kw["env"]["FUTSAL_AUTO"] = "1"
     args = ["--browser"] if "--browser" in sys.argv else []
     try:
         subprocess.Popen([_gui_python(), str(core.APP_DIR / "updater.py"), "--launch", *args], **kw)  # 새 버전이 열리는지 확인 후 실행
@@ -405,15 +409,50 @@ def _place_kept():
             studiolog.trace(e, "옮기지 못한 결과 옮기기 오류 위치")
 
 
-# 자동 업데이트 (D-311 · 확인·설치는 core.auto_update_once): 스튜디오를 쓰지 않을 때만 — 하는 작업·다시 시작·편집실이 만드는 파일이
-# 없고, PC 화면에서 AUTO_LOCAL_QUIET, 밖에서 작업 세션이 AUTO_REMOTE_QUIET 동안 조용할 때. 아니면 core 가 5분 뒤 다시 물음.
+# 자동 업데이트 (D-311 · 확인·설치는 core.auto_update_once): 스튜디오를 쓰지 않을 때만 — 하는 작업·다시 시작·편집실이 만드는 파일·
+# 밖에서 주고받는 파일이 없고, 작업이 끝난 뒤 AUTO_AFTER_JOB, PC 화면에서 AUTO_LOCAL_QUIET, 밖에서 작업·원격 홈이 AUTO_REMOTE_QUIET,
+# (Windows) PC 키보드·마우스가 AUTO_INPUT_QUIET 동안 조용할 때. 아니면 core 가 5분 뒤 다시 물음.
 AUTO_JOB = "자동 업데이트"
-AUTO_LOCAL_QUIET = 1800   # PC 화면에서 사람이 마지막으로 무언가 한 뒤 (화면이 저절로 묻는 QUIET_REQS 는 안 셈)
-AUTO_REMOTE_QUIET = 600   # 밖에서 작업 세션의 마지막 요청 뒤 (그 화면이 열려 있으면 묻기만 해도 셈 · 세션은 길어야 12시간)
-# 화면이 저절로 묻는 길 (사람이 누른 것이 아님): 상태·핑·원격 상태·썸네일 그릴 것·업데이트 확인·유튜브 상태 · 출처 찾기·올린 영상 처리 확인
+AUTO_LOCAL_QUIET = 1800   # PC 화면에서 사람이 마지막으로 무언가 한 뒤 (화면이 저절로 묻는 QUIET_REQS·AUTO_HEADER 는 안 셈)
+AUTO_REMOTE_QUIET = 600   # 밖에서 작업 세션·원격 홈의 마지막 요청 뒤 (그 화면이 열려 있으면 묻기만 해도 셈 · 원격 홈은 화면이 보일 때만 물음)
+AUTO_INPUT_QUIET = 600    # Windows: PC 키보드·마우스를 (다른 프로그램에서라도) 마지막으로 쓴 뒤 — PC 를 쓰는 사람 앞에서 창을 다시 띄우지 않게
+AUTO_AFTER_JOB = 120      # 작업이 끝난 뒤 — 화면이 이어서 시키는 작업(내보내기 → 자동 검수)·끝난 뒤 새로 고침 사이에 끼어들지 않게
+AUTO_UPLOAD_GAP = 120     # 밖에서 올리는 파일: 마지막 조각이 이 시간 안에 왔으면 '올리는 중' (조각과 조각 사이)
+AUTO_SETTLE_STEP = 10     # 설치를 마친 뒤 다시 시작하기 전: 이 간격으로 다시 봄
+AUTO_SETTLE_QUIET = 120   # 설치하는 사이 누가 쓰기 시작했으면 이만큼 조용해질 때까지 기다림
+AUTO_SETTLE_MAX = 600     # 그래도 계속 쓰면 이만큼만 기다리고 다시 시작 (그동안 새 작업은 409) · 주고받는 파일·편집실 ffmpeg 는 끝날 때까지
+# 화면이 저절로 묻는 길 (사람이 누른 것이 아님): 상태·핑·원격 상태·썸네일 그릴 것·업데이트 확인·유튜브 상태 · 출처 찾기
 QUIET_REQS = {("GET", "/api/state"), ("GET", "/api/ping"), ("GET", "/api/remote"), ("GET", "/api/auto/pending"),
-              ("GET", "/api/update/check"), ("GET", "/api/youtube/status"), ("POST", "/api/source/check"), ("POST", "/api/youtube/check")}
-_SEEN = {"local": time.time()}  # PC 화면에서 사람이 마지막으로 한 일 (켠 때부터 셈 — 켜자마자 바꾸지 않게)
+              ("GET", "/api/update/check"), ("GET", "/api/youtube/status"), ("POST", "/api/source/check")}
+AUTO_HEADER = "X-FS-Auto"  # 화면이 저절로 보낸 요청 표시 ('1') — 길이 같아도 사람이 누른 것과 가름 (7단계 올린 영상 처리 확인과 그 뒤 새로 고침)
+_SEEN = {"local": time.time(), "job": 0.0}  # PC 화면에서 사람이 마지막으로 한 일 (켠 때부터 셈 — 켜자마자 바꾸지 않게) · 작업이 마지막으로 끝난 때
+
+
+def _auto_busy():
+    """다시 시작하면 끊기는 일 (끝날 때까지 기다림): 작업 밖 편집실 ffmpeg · 밖에서 주고받는 파일 (원격 리스너가 처리 중인 요청 —
+    휴대폰이 받는 완성본·영상 보기·올리기 조각 · 조각 사이의 올리기). None = 없음."""
+    if editor._PROCS:  # 작업 밖에서 도는 내보내기·미리보기 파일 ffmpeg
+        return "편집실이 파일을 만드는 중"
+    if remote.SVC.in_flight():
+        return "밖에서 파일을 주고받는 중"
+    st = remote.SVC.studio
+    if st is not None and st.uploads.active(AUTO_UPLOAD_GAP):
+        return "밖에서 파일을 올리는 중"
+    return None
+
+
+def _auto_used(local_quiet, remote_quiet):
+    """사람이 쓰는 중인 까닭 (None = 조용함): PC 화면 · 밖에서 작업 세션 · 원격 홈(휴대폰 · 화면이 보이는 동안 10초마다 물음)."""
+    if time.time() - _SEEN["local"] < local_quiet:
+        return "PC 화면을 쓰는 중"
+    svc = remote.SVC
+    if svc.studio is not None:
+        now = svc.studio.sessions.clock()
+        if any(now - r["last"] < remote_quiet for r in svc.studio.sessions.all()):
+            return "밖에서 작업 중"
+    if svc.clock() - svc.last_auth < remote_quiet:
+        return "원격 홈을 보는 중"
+    return None
 
 
 def _auto_why():
@@ -422,39 +461,65 @@ def _auto_why():
         return f"'{JOB['name']}' 작업 중"
     if RESTARTING.is_set():
         return "다시 시작하는 중"
-    if editor._PROCS:  # 작업 밖에서 도는 내보내기·미리보기 파일 ffmpeg
-        return "편집실이 파일을 만드는 중"
-    if time.time() - _SEEN["local"] < AUTO_LOCAL_QUIET:
-        return "PC 화면을 쓰는 중"
-    st = remote.SVC.studio
-    if st is not None:
-        now = st.sessions.clock()
-        if any(now - r["last"] < AUTO_REMOTE_QUIET for r in st.sessions.all()):
-            return "밖에서 작업 중"
+    why = _auto_busy()
+    if why:
+        return why
+    if time.time() - _SEEN["job"] < AUTO_AFTER_JOB:
+        return "작업이 막 끝남"
+    why = _auto_used(AUTO_LOCAL_QUIET, AUTO_REMOTE_QUIET)
+    if why:
+        return why
+    idle = core.input_idle_secs()
+    if idle is not None and idle < AUTO_INPUT_QUIET:
+        return "PC를 쓰는 중"
     return None
 
 
 def _auto_claim():
-    """쉬는 중이면 작업 자리를 잡고 None (설치하는 동안 PC·휴대폰·밖에서 새 작업을 시작하지 못하게 · 화면엔 '자동 업데이트 중') · 아니면 까닭."""
+    """쉬는 중이면 작업 자리를 잡고 None (설치하는 동안 PC·휴대폰·밖에서 새 작업을 시작하지 못하게 · 화면엔 '자동 업데이트 중') · 아니면 까닭.
+    자리는 새 작업 번호로 (앞 작업의 결과·오류·번호를 이 자리가 다시 내보이지 않게)."""
     why = _auto_why()
     if why:
         return why
     with LOCK:
         if JOB["name"] or RESTARTING.is_set():  # 확인한 사이에 시작됨
             return BUSY_MSG
-        JOB.update(name=AUTO_JOB, by=None, t0=time.time())
+        JOB.update(name=AUTO_JOB, result=None, error=None, fail=None, big=False, by=None, t0=time.time(), id=JOB["id"] + 1)
     return None
 
 
-def _auto_done(restart_now):
-    """자리를 놓음. 다시 시작이면 자리를 놓으며 RESTARTING 을 한 잠금 안에서 → 설치와 다시 시작 사이에 끼어드는 작업이 없음
-    (/api/restart 와 같은 표시 · 실행기를 못 띄우면 restart 가 표시를 지우고 그대로 켜 둠)."""
+def _auto_settle(sleep=time.sleep, clock=time.time):
+    """설치를 마친 뒤 다시 시작하기 전 (작업 자리는 그대로 '자동 업데이트' → 새 작업은 409): 설치하는 사이 시작된 일이 있으면 기다림 —
+    편집실 ffmpeg·밖에서 주고받는 파일은 끝날 때까지, 사람이 쓰는 것(PC 화면·밖에서 작업·원격 홈)은 AUTO_SETTLE_QUIET 동안 조용해질 때까지
+    (길어야 AUTO_SETTLE_MAX · 그 뒤로는 다시 시작). 기다리면 기록 한 줄 + 진행 줄."""
+    start, said = clock(), False
+    while True:
+        why = _auto_busy() or (clock() - start < AUTO_SETTLE_MAX and _auto_used(AUTO_SETTLE_QUIET, AUTO_SETTLE_QUIET))
+        if not why:
+            return
+        if not said:
+            said = True
+            log("  새 버전을 받았어요 · 하던 일이 끝나면 다시 시작해요")
+            core.set_progress(label="새 버전을 받았어요", detail="하던 일이 끝나면 다시 시작해요")
+        sleep(AUTO_SETTLE_STEP)
+
+
+def _auto_done(restart_now, fail=None):
+    """자리를 놓음. 다시 시작이면 먼저 설치하는 사이 시작된 일을 기다린 뒤(_auto_settle), 자리를 놓으며 RESTARTING 을 한 잠금 안에서 →
+    설치와 다시 시작 사이에 끼어드는 작업이 없음 (/api/restart 와 같은 표시 · 실행기를 못 띄우면 restart 가 표시를 지우고 그대로 켜 둠).
+    fail: 실패한 쉬운 한 줄 → 휴대폰 '마지막 작업' 칸 (알림은 안 보냄)."""
+    if restart_now:
+        _auto_settle()
+        core.set_progress()
+    # 휴대폰 '마지막 작업' 칸을 이 자리로 (자리를 놓기 전에 → 원격 홈이 작업이 끝난 것을 보고 그 전 작업의 끝을 또 알리지 않게)
+    remote.SVC.last = {"name": AUTO_JOB, "ok": not fail, "warn": bool(fail), "error": remote.scrub(fail) if fail else None,
+                       "blocked": False, "endedAt": int(remote.SVC.clock()), "by": None}
     with LOCK:
         JOB["name"] = None
         if restart_now:
             RESTARTING.set()
     if restart_now:
-        restart()
+        restart(auto=True)
 
 
 def _redirect_to_updater():
@@ -598,8 +663,9 @@ class Handler(BaseHTTPRequestHandler):
         return not origin or origin in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}")
 
     def _seen(self, method, path):
-        """PC 화면에서 사람이 무언가 함 → 자동 업데이트는 그 뒤 AUTO_LOCAL_QUIET 를 기다림 (화면이 저절로 묻는 길은 안 셈 · D-311)."""
-        if (method, path) not in QUIET_REQS:
+        """PC 화면에서 사람이 무언가 함 → 자동 업데이트는 그 뒤 AUTO_LOCAL_QUIET 를 기다림 (화면이 저절로 묻는 길 QUIET_REQS ·
+        저절로 보낸 표시 AUTO_HEADER 가 붙은 요청은 안 셈 · D-311)."""
+        if (method, path) not in QUIET_REQS and self.headers.get(AUTO_HEADER) != "1":
             _SEEN["local"] = time.time()
 
     def handle_one_request(self):
@@ -2163,11 +2229,23 @@ def _start_webview(webview):
         webview.start()
 
 
+def _create_window(webview, url, minimized=False):
+    """앱 창 (자동 업데이트 뒤에는 내려 둔 채로 · 예전 pywebview 가 minimized 를 모르면 그냥)."""
+    kw = {"width": 1320, "height": 860, "min_size": (960, 640)}
+    if minimized:
+        try:
+            return webview.create_window(APP_NAME, url, minimized=True, **kw)
+        except TypeError:
+            pass
+    return webview.create_window(APP_NAME, url, **kw)
+
+
 def main():
     _error_log()
     if _redirect_to_updater():  # 끊긴 업데이트는 실행기가 먼저 되돌림
         return
     restart = bool(os.environ.pop("FUTSAL_RESTART", None))
+    auto = bool(os.environ.pop("FUTSAL_AUTO", None))  # 자동 업데이트의 다시 시작 (아무도 안 누름) → 창은 내려 둔 채로 · 브라우저를 새로 열지 않음
     if not restart and _focus_running():
         return
     srv = _bind(restart)
@@ -2206,7 +2284,7 @@ def main():
     if "--browser" not in sys.argv:
         try:
             import webview  # pywebview: 전용 앱 창
-            win = webview.create_window(APP_NAME, url, width=1320, height=860, min_size=(960, 640))
+            win = _create_window(webview, url, auto)
             _WINDOW.append(win)
             try:
                 win.events.closing += _on_closing(win)
@@ -2218,7 +2296,8 @@ def main():
             _WINDOW.clear()
             log(f"앱 창을 열지 못해 브라우저로 엽니다 · {e}")
         _BROWSER.append(True)
-    webbrowser.open(url)
+    if not auto:  # 자동 업데이트: 열어 둔 브라우저 탭이 새 앱에 다시 붙음 (아이콘을 누르면 /api/focus 가 화면을 엶)
+        webbrowser.open(url)
     while True:
         time.sleep(3600)
 
