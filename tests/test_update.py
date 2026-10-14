@@ -1145,7 +1145,11 @@ class DenoTests(Base):
             with mock.patch.object(self.core, "_yt", return_value=yt):
                 d = threading.Thread(target=lambda: out.setdefault("failed", self.core.download(["abcdefghijk"], self.logs.append)))
                 d.start()
-                time.sleep(1.2)
+                # 바쁜 PC: 받기 쪽이 잠금을 기다리며 진행률을 쓰기까지 1.2초보다 늦을 수 있어 나올 때까지(최대 10초) 기다림
+                end = time.time() + 10
+                while self.core.PROGRESS.get("label") is None and time.time() < end:
+                    time.sleep(0.1)
+                time.sleep(0.6)  # 기다리는 동안(잠금 0.5초 간격) 받기를 시작하지 않는지도 봄
                 self.assertEqual(yt.calls, [], "설치가 끝날 때까지 받기 시작하지 않음")
                 self.assertEqual((self.core.PROGRESS.get("label"), self.core.PROGRESS.get("pct")), ("YouTube 해석 도구 받는 중", 23))
                 gate.set()
