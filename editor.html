@@ -398,6 +398,7 @@
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(16px); background: #fff; color: #111; padding: 9px 16px; border-radius: 8px; font-weight: 700; opacity: 0; transition: .2s; pointer-events: none; z-index: 50; max-width: 80vw; }
   .toast.show { opacity: 1; transform: translateX(-50%); }
   .toast.act { pointer-events: auto; display: flex; gap: 10px; align-items: center; } /* 단추 하나 달린 알림 ([폴더 열기] · D-349) */
+  .app.monmax ~ .toast { bottom: 84px; }  /* 미리보기 크게( ` · D-336)일 때는 모니터 아래 단추 줄(사진기 · D-349) 위에 — 알림이 단추를 덮지 않게 */
   .exsub { margin: -3px 0 3px 24px; display: flex; flex-wrap: wrap; gap: 0 12px; } /* 내보내기: 자막 트랙 고르기 (D-346) */
   .modal .exsub label { padding: 2px 0; }
   .modal label.hl { flex-wrap: wrap; } .modal label.hl > .hint:not(:empty) { flex-basis: 100%; padding-left: 21px; margin-top: -3px; } /* 안내는 칸 아래 줄에 */
