@@ -2067,24 +2067,28 @@ def _captions_of(segs, info, silences=()):
 def oneline_captions(caps, info, silences=(), terms=None, src_of=None):
     """편집실 '자막 한 줄씩 나누기': 프로젝트 자막을 모두 한 줄 자막으로 → (새 자막 목록, 나눈 자막 수).
     지금 글(사용자가 고친 글) 그대로 나누고, 단어 시각(wt)이 글과 맞으면 그 시각대로, 아니면 글자 수대로 (silences: 조용한 곳).
+    길지 않아도 따로 한 말이 한 자막에 든 것('혼난다. 시작!' · 단어 시각이 있으면 말 경계 · 없으면 글 속 . ? !)도 나눔 (D-387).
     이미 한 줄이고 짧은 자막은 그대로 (두 번 눌러도 같음) · 나뉜 첫 자막은 원래 id, 다른 값(위치·모양 등)은 나뉜 자막마다 그대로.
+    가로 영상 자막은 쇼츠 편집본에서 나눌 곳(sh)도 지금 규칙으로 다시 (글·단어 시각은 그대로).
     src_of(dict)를 주면 새 id 를 받은 조각 → 원래 자막 id 를 적어 줌 (편집본마다 둔 '이 자막만' 자리 capPos 를 조각마다 옮기게 · D-321)."""
     fmt = _cap_fmt(info)
     terms = _terms() if terms is None else terms
     out, n = [], 0
     for c in sorted((c for c in caps or () if isinstance(c, dict)), key=lambda c: float(c.get("start") or 0)):
         text = str(c.get("text") or "")
-        if not captions.needs_split(text, fmt):
-            if fmt == "long" and not c.get("sh") and text.strip():  # 예전 자막: 쇼츠 편집본에서 나눌 곳만 새로 (글·단어 시각·줄바꿈은 그대로)
+        ws = _cap_words(c)
+        if not captions.needs_split(text, fmt) and not captions.merged_utterances(text, ws, terms):
+            if fmt == "long" and text.strip() and len(text.split()) > 1:  # 쇼츠 편집본에서 나눌 곳만 새로 (글·단어 시각·줄바꿈은 그대로)
                 try:
-                    sh = _shorts_cuts(text, float(c["start"]), float(c["end"]), terms, _cap_words(c))
+                    sh = _shorts_cuts(text, float(c["start"]), float(c["end"]), terms, ws)
                 except (TypeError, ValueError, KeyError):
-                    sh = []
-                if sh:
-                    c = dict(c, sh=sh, shn=len(text.split()))
+                    sh = None
+                if sh is not None and (sh != (c.get("sh") or []) or (sh and c.get("shn") != len(text.split()))):
+                    c = {k: v for k, v in c.items() if k not in ("sh", "shn")}
+                    if sh:
+                        c.update(sh=sh, shn=len(text.split()))
             out.append(c)
             continue
-        ws = _cap_words(c)
         try:
             parts = captions.split_text(text, c["start"], c["end"], fmt, terms, words=ws, silences=() if ws else silences)
         except (TypeError, ValueError, KeyError):
@@ -2104,6 +2108,112 @@ def long_captions(caps, info):
     """한 줄로 나누면 좋을 자막 수 (편집실이 열 때 '한 줄씩 나눌까요?' 안내를 띄울지)."""
     fmt = _cap_fmt(info)
     return sum(1 for c in caps or () if isinstance(c, dict) and captions.needs_split(c.get("text"), fmt))
+
+
+def merged_captions(caps):
+    """따로 한 말이 한 자막에 합쳐진 자막 수 (편집실이 열 때 '자막 다시 나누기' 안내를 띄울지 · D-387) — 손으로 맞춘 시간(tm)은 뺌."""
+    n = 0
+    for c in caps or ():
+        if isinstance(c, dict) and not c.get("tm"):
+            try:
+                n += captions.merged_utterances(c.get("text"), _cap_words(c))
+            except (TypeError, ValueError, KeyError):
+                continue
+    return n
+
+
+def _seg_end_times(segs):
+    """받아쓰기 구간마다 마지막 낱말 끝 시각(1/100초) — 자막 단어 중 받아쓰기 구간 끝을 찾을 때 (자막 다시 나누기)."""
+    out = set()
+    for s in segs or ():
+        ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]
+        if ws:
+            try:
+                out.add(int(round(float(ws[-1]["e"]) * 100)))
+            except (TypeError, ValueError, KeyError):
+                continue
+    return out
+
+
+def resplit_captions(caps, info, ids=None, terms=None, src_of=None, seg_ends=()):
+    """편집실 '자막 다시 나누기' (D-380 · D-387): 고른 자막(ids · None 이면 모두)을 새 규칙(따로 한 말은 따로 자막)으로 다시 나눔
+    → (새 자막 목록, 바뀐 묶음 수). 같은 자막 트랙에서 차례로 이어지는 자막들(단어 시각이 글과 맞고 손으로 시간을 맞추지 않은 것)의
+    낱말을 이어 받아쓴 자막을 만들 때와 같은 규칙(captions.segment · 그 뒤 _tidy)으로 다시 나눔 — 고친 글·단어 시각 그대로, 짧은 대답도 따로,
+    한 말은 길이 한도 안에서 다시 묶음. 단어 시각이 없거나 손으로 맞춘(tm) 자막은 '자막 한 줄씩 나누기'처럼 글 속 문장부호에서만 나누고
+    (oneline_captions) 그 앞뒤로는 잇지 않음. 조각은 첫 낱말이 있던 자막의 다른 값(트랙·모양 등)과 id 를 이어받고(이미 쓴 id 면 새 id ·
+    src_of[새 id] = 원래 id), 가로 영상 자막은 쇼츠 편집본에서 나눌 곳(sh)도 새로. 두 번 눌러도 같음.
+    seg_ends: 받아쓰기 구간 끝 낱말의 끝 시각(1/100초 정수 · _seg_end_times) — 그 낱말 뒤를 조금 쉬었으면 말 경계로 봄."""
+    fmt = _cap_fmt(info)
+    terms = _terms() if terms is None else terms
+    allc = [c for c in caps or () if isinstance(c, dict)]
+    want = None if ids is None else {str(i) for i in ids}
+    used, out, n = set(), [], 0
+    by_trk = {}
+    for c in allc:
+        trk = c.get("trk") if isinstance(c.get("trk"), str) and re.fullmatch(r"C[2-9]", c.get("trk")) else "C1"
+        by_trk.setdefault(trk, []).append(c)
+
+    def take(c, words=None):
+        if words is None:
+            words = _cap_words(c)
+        ok = (want is None or str(c.get("id")) in want) and not c.get("tm") and words is not None
+        return ok, words
+
+    for trk, lane in by_trk.items():
+        lane.sort(key=lambda c: (float(c.get("start") or 0), float(c.get("end") or 0)))
+        chains, cur = [], []
+        for c in lane:
+            ok, ws = take(c)
+            if ok:
+                cur.append((c, ws))
+                continue
+            if cur:
+                chains.append(cur)
+                cur = []
+            if (want is None or str(c.get("id")) in want) and not c.get("tm"):  # 단어 시각이 없는 자막: 글 속 문장부호에서만 (한 줄씩 나누기와 같음)
+                part, k = oneline_captions([c], info, terms=terms, src_of=src_of)
+                n += k
+                out.extend(part)
+                used.update(x.get("id") for x in part)
+            else:
+                out.append(c)
+                used.add(c.get("id"))
+        if cur:
+            chains.append(cur)
+        for k, ch in enumerate(chains):
+            flat, owner = [], []
+            for c, ws in ch:
+                for w in ws:
+                    flat.append({"w": w["w"], "s": float(w["s"]), "e": float(w["e"])})
+                    owner.append(c)
+            order = sorted(range(len(flat)), key=lambda i: (flat[i]["s"], i))  # 겹쳐 둔 자막이 있어도 시간 순으로
+            flat, owner = [flat[i] for i in order], [owner[i] for i in order]
+            ends = {i for i, w in enumerate(flat) if int(round(w["e"] * 100)) in seg_ends}
+            parts = captions.segment(flat, fmt, ends, terms)
+            lo = min(float(c["start"]) for c, _ in ch)
+            hi = max(float(c["end"]) for c, _ in ch)
+            nxt = [float(c["start"]) for c in lane if float(c["start"]) >= hi - 1e-6 and all(c is not x for x, _ in ch)]
+            parts = [dict(q) for q in parts]
+            if parts:
+                parts[0]["start"] = min(parts[0]["start"], lo)
+                parts[-1]["end"] = max(parts[-1]["end"], hi)
+            captions._tidy(parts, min(nxt) if nxt else float("inf"))
+            if [(q["text"]) for q in parts] != [str(c.get("text") or "") for c, _ in ch]:
+                n += 1
+            i = 0
+            for q in parts:
+                base = owner[i]
+                i += len(q["words"])
+                cid = base.get("id")
+                fresh = not cid or cid in used
+                cap = _make_cap(q, fmt, terms, dict(base, id=None if fresh else cid))
+                cap["start"], cap["end"] = round(float(q["start"]), 3), round(float(q["end"]), 3)
+                if fresh and src_of is not None and cid:
+                    src_of[cap["id"]] = cid
+                used.add(cap["id"])
+                out.append(cap)
+    out.sort(key=lambda c: float(c.get("start") or 0))
+    return out, n
 
 
 def load_project(name):

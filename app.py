@@ -826,6 +826,7 @@ class Handler(BaseHTTPRequestHandler):
                 rec = proj.pop("_recovered", None)
                 return self._send(200, {"project": proj, "waveform": editor.waveform(n), "recovered": rec,
                                         "capLong": editor.long_captions(proj.get("captions"), proj.get("info")),
+                                        "capMerged": editor.merged_captions(proj.get("captions")),
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
                                         "recommend": editor.recommend(n)})
             except Exception as e:
@@ -1234,6 +1235,21 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError, KeyError) as e:
                 return self._send(400, {"error": f"자막을 나누지 못했어요 · {e}"})
             return self._send(200, {"captions": out, "split": n, "from": src_of})
+        if path == "/api/edit/resplit":  # 편집실 '자막 다시 나누기' (이 편집본에 나오는 자막을 새 규칙으로 · 고친 글 그대로 · 저장은 편집실이 함 · D-380)
+            caps, ids = b.get("captions"), b.get("ids")
+            if not isinstance(caps, list) or (ids is not None and not isinstance(ids, list)):
+                return self._send(400, {"error": "자막 목록이 아니에요"})
+            info = b.get("info") if isinstance(b.get("info"), dict) else editor.media_info(b["name"])
+            src_of = {}
+            try:
+                try:
+                    ends = editor._seg_end_times(editor._segments_of(b["name"]))
+                except Exception:  # noqa: BLE001 — 받아쓰기를 못 읽어도 자막 단어 시각만으로 나눔
+                    ends = set()
+                out, n = editor.resplit_captions(caps, info, ids, src_of=src_of, seg_ends=ends)
+            except (TypeError, ValueError, KeyError) as e:
+                return self._send(400, {"error": f"자막을 다시 나누지 못했어요 · {e}"})
+            return self._send(200, {"captions": out, "changed": n, "from": src_of})
         if path == "/api/edit/export":
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
             return self._send(200 if ok else 409, _started(ok))

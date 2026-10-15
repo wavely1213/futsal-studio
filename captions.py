@@ -26,8 +26,8 @@ _FIN = re.compile(r"(?<!필)(?<!중)요[~]*$|(?:니다|습니까|[었았였했�
 # 앞말에 기대는 말(의존 명사) — 이 앞에서는 되도록 안 끊음 ('할 수 / 있는', '등지게 되기 / 때문에', '하는 / 게')
 _BOUND = re.compile(r"^(?:것|거|건|걸|게|수|때문|줄|데|뿐|듯|적|만큼|때)"
                     r"(?:이|은|는|을|를|가|에|에는|도|만|예요|에요|이에요|야|죠|지|다|입니다|이다|에서|라|라서|요)?[,.?!…~]*$")
-# 뒤 낱말을 꾸미는 말 — 이 뒤에서는 되도록 안 끊음 ('첫 / 터치를', '말씀드렸던 / 게', '갈 / 방향으로')
-_MOD = re.compile(r"^(?:첫|한|두|세|네|그|이|저|이런|그런|저런|어떤|무슨|모든|각|새|몇|딴|온갖|안|못|잘|더|좀|꼭|제일|가장)$"
+# 뒤 낱말을 꾸미는 말 — 이 뒤에서는 되도록 안 끊음 ('첫 / 터치를', '말씀드렸던 / 게', '갈 / 방향으로' · '요 / 세 마디만' 의 '요'(이))
+_MOD = re.compile(r"^(?:첫|한|두|세|네|그|이|저|요|이런|그런|저런|어떤|무슨|모든|각|새|몇|딴|온갖|안|못|잘|더|좀|꼭|제일|가장)$"
                   r"|(?:던|[하되있없가오보주받치차쓰놓]는)$")
 # 이어 주는 말 — 이 앞에서 끊기 좋음 ('늦어요 / 그래서')
 _CONJ = re.compile(r"^(?:그래서|그러면|그럼|그런데|근데|그리고|그러니까|그니까|하지만|그래도|그러나|왜냐하면|어쨌든|아무튼|자|이제|그다음에?)[,]?$")
@@ -46,6 +46,26 @@ _CLAUSE = re.compile(r"(?:데|고|서|면|며|요|다|죠|까|네|야|지만|니
 # 꾸밈을 자주 받는 이름씨: 그 앞의 움직씨 꾸밈꼴('받는 사람'·'하는 거'·'좋은 방법')은 따로 떼면 어색함
 _HEAD_N = ("사람", "것", "거", "게", "때", "곳", "쪽", "방향", "순간", "동작", "선수", "상황", "자리", "방법", "경우", "이유", "부분", "거리",
            "느낌", "타이밍", "친구", "분들")
+# ---------- 말 경계 (D-380) — 따로 한 말은 따로 자막 ----------
+# 이 뒤에서는 언제나 자막을 나눔 (chunk 는 그 안에서만 길이·끊어 읽기 좋은 곳으로 나눔 · 짧은 대답 '시작!'·'감독님.'도 혼자 둠)
+UTT_GAP = 0.6     # 이만큼 쉬면 언제나 다른 말
+END_GAP = 0.12    # 문장부호(. ? ! …) 뒤 이만큼 쉬면
+FIN_GAP = 0.14    # 문장부호 없는 말끝(~요 · ~니다 · 반말 ~돼 · 하지 마 · 혼난다 …) 뒤
+SEG_GAP = 0.19    # 받아쓰기 구간 끝 · 부르는 말(감독님, · 형,) · 말끝 ~어/~아(잡아 · 좋아) 뒤
+SOFT_GAP = 0.3    # 이름씨 뒤 조사와 같은 꼴인 말끝(~가 · ~니) 뒤 (쉼표만으로는 안 나눔: '자, 첫 번째 동작.' · '두 번째, 슛.' · '하나, 둘, 셋')
+# 반말 말끝 (문장부호 없이 받아쓴 코치·선수의 짧은 말: '하면 돼' · '혼난다' · '알겠어' · '잘했어' · '어렵네' · '그렇지' · '뭐야')
+_CASUAL = re.compile(r"(?:돼|해|봐|줘|겠어|[았었였했됐갔왔봤줬났셨렸켰쳤었]어|잖아|거든|구나|는군|네|냐|더라|야|지|다)$")
+_CASUAL_NOT = re.compile(r"(?:까지|가지|미지|이지|보다|마다|에다|다가|분야)$"  # 조사·이름씨·이음말인 같은 꼴 ('여기까지' · '두 가지' · '공보다' · '하다가')
+                         r"|^(?:위해|대해|통해|비해|의해|향해|관해|이해|피해|손해|방해|올해|시야|바다)$")  # 낱말 하나 ('패스를 통해' · '시야' · '준비해'는 말끝)
+_REPLY = {"응", "어", "네", "예", "그래", "좋아", "맞아", "아니", "아니야", "오케이", "대박", "나이스", "굿", "됐어", "됐다", "좋다", "끝",
+          "그치", "그렇지", "알았어", "알겠어", "잠깐", "잠깐만", "마", "마라", "가", "와", "해", "돼", "봐", "줘", "멈춰", "스톱", "시작"}
+# 부르는 말 — 쉼표가 있거나 조금 더 쉬면 그 뒤는 다른 말 ('순두시지 마, / 감독님.' · '감독님, / 이거 맞아요?' · '민수야, / 패스')
+_VOC = re.compile(r"^(?:감독님|코치님|선생님|형님|형|누나|언니|오빠|얘들아|애들아|여러분|친구들)$")
+_VOC_NAME = re.compile(r"^[가-힣]{1,3}[아야]$")  # 이름 부르기 ('민수야') — '좋아'·'해야' 와 같은 꼴이라 쉼표가 있을 때만
+# 감탄·머뭇거림 (뒤 말의 머리) — 길이 한도로 나눠야 하면 이 뒤가 먼저 ('어 / 이것도 들어갔어요' · D-383 · 혼자 남는 짧은 자막은 여전히 피함)
+_INTJ = re.compile(r"^(?:어|아|음|으음|와|오|자|응|네|예|아이고|에이)[,!.?~…]*$")
+
+
 # 사전 고치기: 낱말 뒤에 붙어도 되는 조사 (최대 두 개 · '피버를'은 고치고 '피버트'는 안 고침)
 _JOSA = "(?:이에요|예요|입니다|이랑|에서|에게|한테|으로|부터|까지|처럼|보다|하고|은|는|이|가|을|를|의|에|로|와|과|도|만|랑|씩)"
 # 요·야·죠는 낱말 바로 뒤에 혼자 붙을 때만 ('피버요'는 고치고, '가요'·'가야' 같은 말끝이 붙은 '피버가요'는 그대로)
@@ -339,10 +359,10 @@ def chunk(words, fmt="long", breaks=(), terms=()):
     join, cut = [0.0], [0.0] * n  # join: k 와 k+1 을 한 자막에 둘 때 · cut: k 뒤에서 나눌 때 (클수록 나쁨)
     for k in range(n - 1):  # 문장 끝(마침표 등)이 가장 강한 끊을 곳 · 받아쓰기 구간 끝은 문장 중간일 때도 있어 그보다 약하게
         t, nx, seg, g = texts[k], texts[k + 1], k in brk, gap[k]
-        end, fin = bool(_END.search(t)), bool(_FIN.search(t))
+        end, fin = bool(_END.search(t)), bool(_FIN.search(t)) and t != "요"  # 혼자 쓴 '요'(문장부호 없음)는 '요 세 마디만'의 '이'
         join.append(join[-1] + (10 if end else 6 if fin else 4 if seg else 3 if t.endswith(",") else 0)
                     + (1.5 if _CONJ.match(nx) else 0) + (0.0 if mod[k] else 12 * max(0.0, g - 0.25)))
-        c = (0.0 if end or fin or g >= 0.4 else 0.3 if _CONJ.match(nx) else 0.4 if seg or t.endswith(",") or _EOW.search(t)
+        c = (0.0 if end or fin or g >= 0.4 else 0.3 if _CONJ.match(nx) or _INTJ.match(t) else 0.4 if seg or t.endswith(",") or _EOW.search(t)
              else 1.2 if _NICE.search(t) or g >= 0.2 else 2.5)
         if not (end or g >= 0.4):  # 문장 끝이나 말을 멈춘 곳이 아니면: 기대는 말 앞·꾸미는 말 뒤·목적어와 짧은 풀이말 사이는 피함
             if _BOUND.match(nx):
@@ -410,6 +430,112 @@ def chunk(words, fmt="long", breaks=(), terms=()):
         out.append({"start": ws[i]["s"], "end": ws[j - 1]["e"], "text": " ".join(texts[i:j]),
                     "words": [{"w": w["w"], "s": w["s"], "e": w["e"]} for w in ws[i:j]]})
     return out
+
+
+# 말 경계 먼저 (D-380): 문장 끝·말끝·짧은 대답·부르는 말 뒤를 조금 쉬었으면 그 앞뒤는 다른 자막 — 예전 chunk 만으로는 짧은 자막·외톨이 낱말을
+# 피하려고 '순두시지 마, 감독님.' · '혼난다. 시작!' 처럼 따로 한 말을 이웃 자막에 붙였음 (소유자: '따로따로 들어갈 부분들이 합쳐져서 분리가 안됨')
+
+def _bare(t):
+    return re.sub(r"[\"'”’)\]]+$", "", re.sub(r"[,.?!…~]+$", "", str(t or "").strip()))
+
+
+def _jong(ch):
+    o = ord(ch) - 0xAC00 if ch else -1
+    return o % 28 if 0 <= o < 11172 else -1
+
+
+def _casual_gap(t):
+    """문장부호 없는 말끝이면 그 뒤를 다른 말로 볼 쉼(초) — 아니면 None. ('하면 돼' 0.14 · '좋아' 0.19 · '선수가' 0.3)"""
+    b = _bare(t)
+    if not b or not re.search(r"[가-힣]$", b) or b == "요":  # 혼자 쓴 '요'는 '요 세 마디만'(이) · 문장부호가 붙었으면 문장 끝으로 따로 봄
+        return None
+    if b in _REPLY:
+        return SEG_GAP if b in ("어", "아니") else FIN_GAP
+    if _FIN.search(b):
+        return FIN_GAP
+    if len(b) < 2 or _CASUAL_NOT.search(b):
+        return None
+    if _CASUAL.search(b):
+        return FIN_GAP
+    if b[-1] in "래게까" and _jong(b[-2]) == 8:  # ㄹ래 · ㄹ게 · ㄹ까 ('할래' · '할게' · '갈까' — '원래'·'세게' 는 아님)
+        return FIN_GAP
+    if b[-1] == "자" and _jong(b[-2]) == 0 and b not in ("여자", "의자", "모자", "감자"):  # '가자' · '해보자'
+        return FIN_GAP
+    if b[-1] == "라" and b != "아라" and b[-2] in "어아해봐와줘마가차서":  # '해라' · '가라' · '하지 마라' (포지션 '아라'는 아님)
+        return FIN_GAP
+    if b[-1] in "어아":  # '좋아' · '잡아' — 뒤에 붙여 읽는 풀이말('잡아 / 줘')은 _AUX 가 막음
+        return SEG_GAP
+    if b[-1] in "가니":  # '가' 는 '선수가' 같은 조사일 때가 많음
+        return SOFT_GAP
+    return None
+
+
+def utterance_breaks(words, seg_ends=(), terms=(), est=False):
+    """단어 [{w, s, e}] → 이 번호의 단어 뒤에서 말이 끝남(언제나 자막을 나눔) 집합 (D-380).
+    문장부호 뒤 · 말끝(~요·~니다·반말 ~돼·~해·하지 마) 뒤 · 받아쓰기 구간 끝(seg_ends) · 부르는 말(감독님,) 뒤를 조금 쉬었을 때,
+    그리고 UTT_GAP 초 넘게 쉰 곳. 꾸미는 말 뒤('두 / 개')·붙여 읽는 풀이말('해 / 주세요' · '하지 / 마')·기대는 말 앞('할 / 수')·여러 단어 용어 안은
+    문장부호가 없으면 안 나눔. est: 시각을 글자 수로 어림한 단어(단어 시각 없음) — 쉼을 믿을 수 없어 문장부호와 조용한 곳(긴 쉼)만."""
+    ws = [w for w in words or ()]
+    texts = [re.sub(r"\s+", " ", str(w.get("w") or "")).strip() for w in ws]
+    inside = _term_joints(texts, terms)
+    out = set()
+    for k in range(len(ws) - 1):
+        t, nx = texts[k], texts[k + 1]
+        g = float(ws[k + 1]["s"]) - float(ws[k]["e"]) + 1e-6
+        if k in inside:
+            continue
+        if g >= UTT_GAP or (_END.search(t) and (est or g >= END_GAP) and not (_INTJ.match(t) and re.search(r"(?:…|\.\.)$", t))):  # '음…' 은 뒤 말의 머리
+            out.add(k)
+            continue
+        if est:
+            continue
+        b = _bare(t)
+        if _modifier(t, nx) or _BOUND.match(nx) or any(a.search(b) and c.match(nx) for a, c in _AUX):
+            continue
+        need = _casual_gap(t)
+        if need is not None and g >= need:
+            out.add(k)
+        elif k in seg_ends and g >= SEG_GAP:
+            out.add(k)
+        elif (t.endswith(",") and g >= SEG_GAP and (_VOC.match(b) or _VOC_NAME.match(b))) or (g >= SOFT_GAP and _VOC.match(b)):
+            out.add(k)
+    return out
+
+
+def segment(words, fmt="long", seg_ends=(), terms=(), est=False):
+    """단어 → 한 줄 자막들 — 먼저 말 경계(utterance_breaks)에서 나누고, 그 안만 chunk 로 길이·끊어 읽기 좋은 곳에서 나눔 (D-380).
+    짧게 따로 한 말('시작!' · '감독님.' · '좋아요')도 한 자막 (보여 주는 시간은 _tidy·타임라인이 다음 자막 전까지 늘림).
+    seg_ends: 받아쓰기 구간 끝 단어 번호 (words 기준)."""
+    ws, ends = [], set()
+    for k, w in enumerate(words or ()):
+        if not str(w.get("w") or "").strip():
+            continue
+        ws.append(w)
+        if k in seg_ends:
+            ends.add(len(ws) - 1)
+    brk = utterance_breaks(ws, ends, terms, est)
+    out, a = [], 0
+    for k in range(len(ws)):
+        if k in brk or k == len(ws) - 1:
+            run = ws[a:k + 1]
+            out.extend(chunk(run, fmt, {i - a for i in ends if a <= i <= k}, terms))
+            a = k + 1
+    return out
+
+
+def merged_utterances(text, words=None, terms=()):
+    """한 자막 안에 따로 한 말이 둘 넘게 들었는지 (D-387 · '혼난다. 시작!') — 단어 시각이 글과 맞으면 그 말 경계로,
+    없으면 글 속 문장부호(. ? ! …) 뒤에 낱말이 더 있을 때."""
+    toks = str(text or "").split()
+    if len(toks) < 2:
+        return False
+    if words and len(words) == len(toks):
+        try:
+            ws = [{"w": t, "s": float(w["s"]), "e": float(w["e"])} for t, w in zip(toks, words)]
+            return bool(utterance_breaks(ws, terms=terms))
+        except (TypeError, ValueError, KeyError):
+            pass
+    return any(_END.search(t) for t in toks[:-1])
 
 
 def _limit(fmt):
@@ -526,7 +652,7 @@ def split_text(text, start, end, fmt="long", terms=(), words=None, silences=()):
             real = False
     if not real:
         ws = even_words(toks, start, end, silences)
-    parts = chunk(ws, fmt, terms=terms)
+    parts = segment(ws, fmt, terms=terms, est=not real)  # 따로 한 말('혼난다. 시작!')은 짧아도 따로 (D-387)
     if not parts:
         return []
     out = [{"start": q["start"], "end": q["end"], "text": q["text"], **({"words": q["words"]} if real else {})} for q in parts]
@@ -557,13 +683,14 @@ def split_text(text, start, end, fmt="long", terms=(), words=None, silences=()):
 
 def from_segments(segs, fmt="long", terms=(), silences=()):
     """받아쓰기 구간 → 편집실 자막 [{start, end, text(, words)}] — 모두 한 줄.
-    단어 시각이 있는 구간은 chunk 로 읽기 좋게 나누고, 없는 구간(예전 받아쓰기)은 split_text 로 글자 수대로 시간을 나눠 한 줄씩."""
+    단어 시각이 있는 구간은 segment(말 경계에서 먼저 나눈 뒤 chunk)로 읽기 좋게 나누고, 없는 구간(예전 받아쓰기)은 split_text 로
+    글자 수대로 시간을 나눠 한 줄씩. 받아쓰기 구간 끝은 조금 쉬었으면 말 경계, 아니면 끊기 좋은 곳으로만 봄."""
     segs = [s for s in segs or () if str(s.get("text") or "").strip()]
     out, run, brk = [], [], set()
 
     def flush():
         if run:
-            out.extend(chunk(run, fmt, brk, terms))
+            out.extend(segment(run, fmt, brk, terms))
             run.clear()
             brk.clear()
 

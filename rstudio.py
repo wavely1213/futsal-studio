@@ -332,7 +332,7 @@ POLICY = {
         "/api/thumb/frames", "/api/thumb/cut", "/api/thumb/analyze", "/api/thumb/copy", "/api/thumb/brand", "/api/thumb/ocr",
         "/api/thumb/ab", "/api/thumb/style", "/api/thumb/ab_win", "/api/thumb/judge", "/api/thumb/upload", "/api/thumb/export",
         "/api/thumb/save",
-        "/api/edit/save", "/api/edit/oneline", "/api/edit/export", "/api/edit/restore", "/api/edit/freeze", "/api/edit/track",
+        "/api/edit/save", "/api/edit/oneline", "/api/edit/resplit", "/api/edit/export", "/api/edit/restore", "/api/edit/freeze", "/api/edit/track",
         "/api/edit/qa", "/api/edit/proxy", "/api/edit/cancel", "/api/edit/msg", "/api/edit/autoseq", "/api/edit/upload",
         "/api/edit/srt", "/api/edit/frame",  # 자막 파일(SRT) 가져오기 (읽기만 · D-345) · 지금 화면 그림으로 저장 (완성본 폴더 · D-349)
         "/api/upload/kit",
@@ -356,7 +356,7 @@ POLICY = {
 }
 PREFIX = ((_G, "/fonts/", STATIC), (_G, "/stickers/", STATIC), (_G, "/asset/", READ), (_P, "/api/remote/", PC_ONLY))
 # 상태를 바꾸지만 기록(studio.log)에는 남기지 않는 것 (자주 저절로 저장됨)
-QUIET = {"/api/edit/save", "/api/thumb/save", "/api/strategy/draft", "/api/whisper/estimate", "/api/edit/oneline", "/api/thumb/ocr", "/api/edit/srt",
+QUIET = {"/api/edit/save", "/api/thumb/save", "/api/strategy/draft", "/api/whisper/estimate", "/api/edit/oneline", "/api/edit/resplit", "/api/thumb/ocr", "/api/edit/srt",
          "/api/youtube/check", "/s/upload/chunk", "/s/upload/init", "/s/prefs", "/api/crash/dismiss",
          "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb"}
 LABELS = {"/api/analyze": "편집점 찾기", "/api/bundle": "한 영상으로 묶기", "/api/convert": "MP4로 바꾸기", "/api/download": "보관함에 담기",
