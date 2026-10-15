@@ -125,6 +125,7 @@ def start_job(name, fn, by=None, ctx=None):
         studiolog.job(name)  # 실행 표시에 작업 이름 (작업 중에 갑자기 꺼지면 다음에 켤 때 알림)
         core.set_progress()
         editor.CANCEL.clear()  # 예전 작업에서 누른 멈추기(✕)가 다음 작업에 남지 않게
+        claude_cli.job_begin()  # 이 작업에서 클로드를 쓴 양 (끝나면 작업 기록에 한 줄 · D-394)
         try:
             with core.keep_awake():  # 켜 두고 자리를 비워도 Windows 가 절전으로 들어가 작업이 멈추지 않게 (모든 작업)
                 res = fn()
@@ -144,6 +145,12 @@ def start_job(name, fn, by=None, ctx=None):
             if info["kind"] not in EXPECTED_KINDS:  # 사용자 쪽 사정(멈춤·복사 중·막힘…)은 원문 줄만
                 studiolog.trace(e, detail=not yt_job)
         finally:
+            try:
+                line = claude_cli.job_end()
+                if line:
+                    log(line)  # 예: '클로드 3번 · 약 12천 토큰 · 아껴 쓰기 (저장해 둔 대답 2번 다시 씀)' — 숫자만 (프롬프트·대답 없음)
+            except Exception as ce:  # noqa: BLE001 — 기록이 작업을 깨뜨리지 않게
+                studiolog.trace(ce, "클로드 사용 기록 오류 위치")
             core.set_progress()
             err, res, secs = JOB["error"], JOB["result"], time.time() - (JOB["t0"] or time.time())  # 다음 작업이 바로 시작돼도 이 작업 값으로
             fail = JOB.get("fail")
@@ -758,7 +765,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"browsers": trouble.installed(), "order": list(trouble.ORDER)})
         # ---- 영상 기획 분석: 클로드 계정 상태 (읽기만 · 60초 기억) · Claude 에게 물어볼 내용 ----
         if u.path == "/api/claude/status":
-            return self._send(200, claude_cli.status(refresh=(q.get("refresh") or ["0"])[0] == "1"))
+            return self._send(200, dict(claude_cli.status(refresh=(q.get("refresh") or ["0"])[0] == "1"), **claude_cli.saver()))  # + 아껴 쓰기·오늘 쓴 양
         if u.path == "/api/style/plan_prompt":
             try:
                 d = json.loads(style.style_file((q.get("name") or [""])[0]).read_text(encoding="utf-8"))
@@ -1332,6 +1339,15 @@ class Handler(BaseHTTPRequestHandler):
             ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
             return self._send(200 if ok else 409, _started(ok))
         # ---- 영상 기획 분석: 클로드 계정으로 쓰기 (사용자 PC 의 Claude Code CLI) · Claude 대답 붙여 넣기 ----
+        if path == "/api/claude/save":  # 클로드 아껴 쓰기 켬/끔 (D-390 · 사용자 폴더 claude_prefs.json)
+            if not isinstance(b.get("on"), bool):
+                return self._send(400, {"ok": False, "error": "켬/끔 값이 달라요"})
+            try:
+                claude_cli.set_save(b["on"])
+            except OSError:
+                return self._send(500, {"ok": False, "error": "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            log("클로드 아껴 쓰기를 " + ("켰어요" if b["on"] else "껐어요 (예전처럼 모두 Opus)"))
+            return self._send(200, dict(claude_cli.saver(), ok=True))
         if path in ("/api/claude/install", "/api/claude/login", "/api/claude/token"):
             try:
                 if path == "/api/claude/install":

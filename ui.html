@@ -151,6 +151,9 @@
   .ccard details.adv summary { cursor: pointer; font-size: 12px; color: var(--ink-3); }
   .ccard details.adv .row2 { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .ccard details.adv input { flex: 1 1 220px; min-width: 0; }
+  .ccard .csave { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .ccard .csave label { display: inline-flex; gap: 6px; align-items: center; font-weight: 700; color: var(--ink); cursor: pointer; }
+  .ccard .csave .ctoday { font-size: 12px; color: var(--ink-3); }
 
   .btn { border: 1px solid var(--line); background: var(--surface); padding: 9px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; white-space: nowrap; }
   .btn:hover { background: var(--surface-2); }
@@ -2226,6 +2229,8 @@ function renderClaude() {
   const btn = v.state === "missing" ? `<button class="btn primary" id="cInstall" data-pc-only>설치하기</button>` : v.state === "ready" ? "" : `<button class="btn primary" id="cLogin" data-pc-only>로그인</button>`;
   $("claudeBody").innerHTML = `<div>${esc(t[1])}</div><div class="cbtns">${btn}<button class="btn" id="cCheck">다시 확인</button>${btn ? `<span class="rm-note">설치·로그인은 PC에서 해 주세요</span>` : ""}</div>
     ${v.state && v.state !== "missing" ? `<details class="adv" data-pc-only><summary>고급: 로그인 코드 붙여 넣기 (claude setup-token)</summary><div class="row2"><input class="inp" id="cToken" type="password" autocomplete="off" placeholder="sk-ant-oat… (이 PC의 사용자 폴더에만 저장돼요)"><button class="btn" id="cTokSave">저장</button>${v.hasToken ? `<button class="btn" id="cTokClear">지우기</button>` : ""}</div></details>` : ""}
+    ${v.state ? `<div class="csave"><label><input type="checkbox" id="cSave"${v.save !== false ? " checked" : ""}> 클로드 아껴 쓰기</label><span class="ctoday">${esc(claudeToday(v.today))}</span></div>
+    <div class="up-hint" style="margin:0">켜 두면 일에 맞는 모델(대부분 Sonnet)·짧은 지시·작게 줄인 그림·저장해 둔 대답으로 내 클로드 사용량을 줄여요. 끄면 예전처럼 모두 Opus로 새로 물어봐요.</div>` : ""}
     <div class="up-hint" style="margin:0">클로드 판단은 버튼을 누를 때만, 레퍼런스 영상의 대사 일부와 장면 그림 몇 장을 내 클로드 계정으로 보내요. 무료로 쓰려면 카드의 [Claude에게 물어볼 내용 복사]로 claude.ai 에 붙여 넣어도 돼요.</div>`;
   const on = (id, f) => { const e = $(id); if (e) e.onclick = f; };
   on("cInstall", async () => {
@@ -2236,6 +2241,18 @@ function renderClaude() {
   on("cCheck", () => claudeStatus(true));
   on("cTokSave", async () => { const r = await api("/api/claude/token", { token: $("cToken").value.trim() }); if (r.ok) { toast("로그인 코드를 저장했어요"); claudeStatus(true); } });
   on("cTokClear", async () => { const r = await api("/api/claude/token", { clear: true }); if (r.ok) { toast("로그인 코드를 지웠어요"); claudeStatus(true); } });
+  const sv = $("cSave");
+  if (sv) sv.onchange = async () => {  // 클로드 아껴 쓰기 켬/끔 (D-390)
+    const r = await api("/api/claude/save", { on: sv.checked });
+    if (r && r.ok) { claude.state = Object.assign({}, claude.state, { save: r.save, today: r.today }); toast(r.save ? "클로드 아껴 쓰기를 켰어요" : "클로드 아껴 쓰기를 껐어요 · 예전처럼 모두 Opus로 물어봐요"); renderClaude(); }
+    else sv.checked = !sv.checked;
+  };
+}
+function tokKo(n) { n = Math.round(+n || 0); const k = Math.round(n / 1000); return n < 1000 ? String(n) : k < 100 ? `${k}천` : `${Math.round(n / 10000)}만`; }  // claude_cli.tokens_ko 와 같음
+function claudeToday(t) {  // 오늘 쓴 양 (claude_usage.json · 숫자만)
+  t = t || {};
+  if (!t.calls && !t.hits) return "오늘은 아직 클로드를 안 썼어요";
+  return `오늘 클로드 ${t.calls || 0}번` + (t.total ? ` · 약 ${tokKo(t.total)} 토큰` : "") + (t.hits ? ` (저장해 둔 대답 ${t.hits}번 다시 씀)` : "");
 }
 async function claudeStatus(refresh) {
   if (refresh) { claude.state = null; renderClaude(); }

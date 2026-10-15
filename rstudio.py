@@ -384,6 +384,7 @@ POLICY = {
         "/api/strategy/checkup", "/api/strategy/todo", "/api/strategy/takeaway", "/api/strategy/settings", "/api/strategy/ai",
         "/api/strategy/ai_paste",
         "/api/youtube/settings", "/api/youtube/playlists", "/api/youtube/check", "/api/youtube/discard", "/api/youtube/pause",
+        "/api/claude/save",  # 클로드 아껴 쓰기 켬/끔 (D-390)
         # 끝까지 자동으로 (D-200~D-207): 시작·이어서 하기 · 편집실 MSG 설정 · 썸네일 그리기 맡기/풀기/보내기 · 효과음 꺼내기
         "/api/auto", "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb", "/api/edit/sfx",
         # 쇼츠 첫머리 주제 줄 켜기·끄기 (BR-120 · D-220)

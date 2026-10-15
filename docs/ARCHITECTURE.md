@@ -91,7 +91,7 @@
   - `tactic` → `core`. `editor`(원본 크기 `probe`·키프레임 `kf_at`)·`detect`(선수 찾기)는 함수 안에서 지연 import한다 (`editor`가 `tactic`을 import하므로 순환을 피함 · D-180). `editor`·`msg`·`app`(`/api/edit/track`)이 쓴다.
   - `style` → `core`, `plan` · `qa`·`hooks` → `core`
   - `plan` → `core`. `style`·`avmodels`·`face`·`source`·`claude_cli`는 함수 안에서 지연 import한다 (`style`이 `plan`을 import하므로 순환을 피함).
-  - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만). `app`이 `claude_cli`·`plan`을 직접 쓴다.
+  - `avmodels` → `core`, `thumb`(모델 받기 `fetch_model`) · `claude_cli` → (표준 라이브러리만 · 그림 줄이기만 함수 안에서 Pillow, 없으면 그대로). `app`이 `claude_cli`·`plan`을 직접 쓴다.
   - `takes` → (표준 라이브러리만). `editor`는 함수 안에서 지연 import한다.
   - `worker` → `core`(자식은 `core.popen` · 진행 표시 `set_progress`), `updater`(`py_env` · 파이썬 자식 UTF-8), `studiolog`(자식 오류 출력 끝). 자식은 `worker.py` 를 바로 실행해 `모듈:함수` 를 importlib 로 부른다(인자·결과는 표준 입출력 JSON). `editor`(`_mem_workers`)·`hwdec`(`_mem_ok`)는 남은 메모리 `avail_mb` 만 함수 안에서 지연 import한다 (D-051·D-057).
   - `cutout_worker` → `worker`, `core`(`_DLL_RE`·`vc_runtime_msg`), `studiolog`. `thumb`·`onnxruntime` 은 자식 안의 함수에서만 import한다. `app`(`/api/thumb/cut` 손 누끼)과 `thumb`(분석 자동 누끼 `_auto_cuts` · 함수 안 지연 import)이 쓴다 — 누끼 모델(`thumb.remove_bg`·`cut_auto`)은 자식 프로세스만 부른다 (D-051·D-068·D-069).
@@ -144,7 +144,7 @@
 | idle | `idle.py` | 마지막 작업 뒤 5분 동안 작업이 없으면 불러 둔 모델(얼굴·선수·공 찾기·글자·소리·앱 안 누끼·받아쓰기)을 내려놓고 메모리 반환 (D-055 · detect 는 D-069) |
 | exportplan | `exportplan.py` | 내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 묶음(구간 그래프 그대로 + trim · split 앞 원본 형식 못박기 · 자막은 끝에 한 번 · 프레임 같음 · HDR·다시 보기는 안 묶음) (D-054) |
 | hwdec | `hwdec.py` | Windows·HDR 영상에서 확인(화소·속도 · 20초 제한 · ✕ 로 끔)이 된 경우에만 `-hwaccel d3d11va` · 실패하면 일반 방식 (D-053, 실기 미검증 I-086) |
-| claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) |
+| claude_cli | `claude_cli.py` | 사용자 PC의 Claude Code CLI(사용자 클로드 계정)로 판단 받기: 실행 파일 찾기·`--help` 옵션 확인·`auth status`·보이는 창으로 설치/로그인·로그인 코드 저장·`run`(빈 임시 폴더, Read만, stdin, 제한 시간·멈추기, 한국어 오류) · 클로드 아껴 쓰기(D-390~D-395: 일마다 모델 `TASK_MODEL`·짧은 지시·그림 stream-json·저장해 둔 대답 `claude_cache/`·쓴 양 `claude_usage.json`·작업 기록 한 줄 `job_begin`/`job_end`) |
 | qa | `qa.py` | `check_video`: 규격(16:9 / 9:16)·쇼츠 길이·검은 화면·멈춘 화면·소리 끊김·LUFS·피크를 점수로 |
 | autorun | `autorun.py` | 끝까지 자동으로 (E7 · D-200~D-207 · BR-110·BR-113): `run`(작업 하나 · 9단계 `STEPS`·`STEP_FN` · 단계마다 기록 `analysis/<영상>/auto_run.json` · 실패는 적고 다음 단계 · 편집점 찾기·가편집만 멈춤 · 멈추기 `Stopped` · 이어서 하기 `resume` — 이미 있는 키트는 `upload.keep_kit`(썸네일 칸만 새로) · 사람이 저장한 결과물 썸네일 `own_thumb` · 검수만 다시 `qaDone` · `load` 는 지금 영상 이름으로 · 새 기록 전에 `archive` · D-207), `options`(화면·휴대폰 값 정리 · 휴대폰이 안 보낸 받아쓰기·MSG 설정은 PC 화면이 남긴 작업 폴더 `auto_prefs.json` — `save_prefs`·`load_prefs` · D-206)·`default_style`, 쇼츠 제목 `short_hook`(순서 말뿐이면 예전 규칙 · D-206), 프로젝트에 더하기 `add_to_project`(꼬리표 `autoRun`·`autoKey`), 확인할 것 `checklist`·`caption_checks`, 썸네일 그리기 다리 `request_thumb`·`pending`·`claim`·`release`·`deliver`(화면이 보이지 않는 틀로 썸네일 편집기 `?autothumb=` 를 열어 그려 보냄 · 떠나는 화면은 맡기를 풂 · 저장 실패도 바로 작업에 · D-201·D-207)·그리는 화면이 받을 분석 `analysis_for`(작업이 작업 자리를 잡고 있어 새 분석을 못 띄움 · D-207), 지금 단계 `LIVE`(/api/state `auto`) · 열어 둔 편집실과 합치기는 `editor.save_project`(`AUTO_CLIENT` · BR-113) |
 | bundle | `bundle.py` | `make_bundle`: 촬영 시각 순서로 정렬해 같은 규격이면 그대로 이어 붙이고(copy concat), 다르면 다시 인코딩. 원본은 보존. 끝나면 app이 이어서 편집점 찾기 |

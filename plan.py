@@ -2104,7 +2104,8 @@ def _run_ai(style_name, d, imgs, log, cancel):
         core.set_progress(label="클로드로 더 깊게 보기", item=style_name, pct=None,
                           detail=f"클로드가 영상 기획을 판단하는 중… (내 클로드 계정 사용 · {sec}초)")
     try:
-        res = claude_cli.run(prompt, images=[(f, nm) for f, nm, _ in imgs], cancel=cancel, on_tick=tick)
+        res = claude_cli.run(prompt, images=[(f, nm) for f, nm, _ in imgs], cancel=cancel, on_tick=tick,
+                             task="plan", check=lambda t: parse_ai(t, by="claude-cli"))  # 아껴 쓰기 (D-390)
     except claude_cli.ClaudeError as e:
         log(f"클로드 판단 · {e.kind}")  # 종류만 (프롬프트·대답은 남기지 않음)
         return {"ok": False, "error": str(e), "kind": e.kind}

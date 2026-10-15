@@ -2820,7 +2820,8 @@ def run_ai(log=print, cancel=None):
     def tick(sec):
         core.set_progress(label=JOB_AI, pct=None, detail=f"클로드가 전략을 보는 중… (내 클로드 계정 사용 · {sec}초)")
     try:
-        res = claude_cli.run(prompt, cancel=cancel, on_tick=tick)
+        res = claude_cli.run(prompt, cancel=cancel, on_tick=tick, task="strategy",
+                             check=lambda t: parse_ai(t, by="claude-cli"))  # 사용자가 누르는 깊은 판단 — 아껴 쓰기에서도 Opus (D-390)
     except claude_cli.ClaudeError as e:
         log(f"클로드 전략 · {e.kind}")  # 종류만 (프롬프트·대답은 남기지 않음)
         return {"ok": False, "error": str(e), "kind": e.kind}

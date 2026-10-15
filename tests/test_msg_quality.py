@@ -154,7 +154,7 @@ class EnsureTranscriptTest(unittest.TestCase):
             import claude_cli
             asked = []
 
-            def run(prompt, images=None, timeout=None, cancel=None, on_tick=None):
+            def run(prompt, images=None, timeout=None, cancel=None, on_tick=None, **k):  # task·check (아껴 쓰기 D-390)
                 asked.append(prompt)
                 return {"text": '{"fix":[{"i":2,"t":"왜 다들 첫 터치에서 공을 놓칠까요?"}]}', "model": "m"}
             with mock.patch.object(claude_cli, "status", return_value={"state": "login"}), mock.patch.object(claude_cli, "run", run):

@@ -844,17 +844,19 @@ def run_ai(name, log=print, cancel=None, progress=True):
         if progress:
             core.set_progress(label="클로드로 문구 만들기", item=name, pct=None, detail=f"클로드가 썸네일 문구를 만드는 중… (내 클로드 계정 사용 · {sec}초)")
     fail = {"failSig": _sig(name), "failAt": int(time.time())}
-    try:
-        res = claude_cli.run(prompt(name), cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT)
+    texts = _texts(name)
+    body, tp = " ".join(texts), topics(nice_title(name), texts)
+    try:  # 아껴 쓰기 일 이름 'copy' (D-390) · 근거 없는·모양이 틀린 대답은 저장하지 않음
+        res = claude_cli.run(prompt(name), cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT, task="copy", check=lambda t: parse_ai(t, body, tp))
     except claude_cli.ClaudeError as e:
         log(f"클로드 문구 · {e.kind}")  # 종류만 (대답·프롬프트는 남기지 않음)
         if e.kind != "cancel" and load_ai(name) is None:
             _save_cache(name, fail)  # 판정 4회차: 실패도 기억 (1시간 동안 분석이 다시 부르지 않음)
         return {"ok": False, "error": str(e), "kind": e.kind}
-    _PROVEN["ok"] = True
+    if not res.get("cached"):  # 저장해 둔 대답(D-393)은 로그인 증거가 아님
+        _PROVEN["ok"] = True
     try:
-        texts = _texts(name)
-        items = parse_ai(res.get("text"), " ".join(texts), topics(nice_title(name), texts))
+        items = parse_ai(res.get("text"), body, tp)
     except Ungrounded as e:
         log("클로드 문구 · 대사 근거 없음")
         if load_ai(name) is None:
@@ -921,7 +923,7 @@ def judge(small_data, full_data, cancel=None):
         def tick(sec):
             core.set_progress(label="클로드에게 평가받기", pct=None, detail=f"클로드가 썸네일을 보는 중… (내 클로드 계정 사용 · {sec}초)")
         try:
-            res = claude_cli.run(JUDGE_PROMPT, images=imgs, cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT)
+            res = claude_cli.run(JUDGE_PROMPT, images=imgs, cancel=cancel, on_tick=tick, timeout=AI_TIMEOUT, task="judge", check=parse_judge)
         except claude_cli.ClaudeError as e:
             return {"ok": False, "error": str(e), "kind": e.kind}
     try:

@@ -13,6 +13,7 @@
 - 시크릿은 환경변수(또는 시크릿 매니저)로만 주입한다. 현재 앱에는 **시크릿이 없다**.
   - API 키·서버·로그인이 없다. `config.json`에는 공개값(채널 주소·작업 폴더·업데이트 주소)만 있다.
   - 예외 하나: 사용자가 '클로드 계정으로 쓰기'의 고급 칸에 붙여 넣은 로그인 코드(`claude setup-token`, `sk-ant-oat…`)는 `~/.futsal-studio/claude_token`(사용자 폴더, 앱 폴더·`config.json` 밖, 권한 600)에 둔다. 자식 프로세스 환경 변수 `CLAUDE_CODE_OAUTH_TOKEN`으로만 넘기고 기록·응답·화면에 내보내지 않는다. [지우기]로 지운다 (D-021).
+  - 클로드 아껴 쓰기(D-393·D-394): `~/.futsal-studio/claude_cache/` 에는 클로드 대답만(열쇠는 내용 해시 · 프롬프트·그림 없음 · 400개/30MB), `claude_usage.json` 에는 날마다 숫자만 둔다. 작업 기록에는 '클로드 N번 · 약 X 토큰' 숫자 줄만 남긴다.
   - 또 하나의 예외: '휴대폰으로 보기'(D-027)의 기기 열쇠(휴대폰마다 서명용·비콘용 32바이트)·ntfy 주제는 `~/.futsal-studio/remote.json`(사용자 폴더, 앱 폴더·`config.json`·작업 폴더 밖, 권한 600, 바꿔 끼우기 저장)에만 둔다. 연결 코드는 10분 동안 메모리에만 있다(PC 화면에 보여 주려고).
     - **기록·응답·문서에 남기지 않는 것**: 연결 코드, 기기 열쇠, ntfy 주제, 터널 주소(`*.trycloudflare.com`), `Authorization` 머리글, 미디어 표(ticket), cloudflared 출력 줄(주소가 들어 있음). cloudflared 는 `--loglevel info` 만 쓴다(`debug` 는 요청 머리글을 찍음). 원격 리스너는 접속 기록(`log_message`)을 남기지 않는다.
     - 휴대폰 쪽 열쇠는 가져오기 전용(non-extractable) WebCrypto 키로 IndexedDB 에만 둔다(원래 바이트는 짝짓기 대답을 푼 순간에만 있음).

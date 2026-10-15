@@ -6,8 +6,15 @@
 - 자식 환경에서 ANTHROPIC_API_KEY·ANTHROPIC_AUTH_TOKEN 을 지움 (그게 있으면 계정 로그인보다 먼저 쓰여 요금이 나감).
   선택: 'claude setup-token' 으로 받은 로그인 코드는 ~/.futsal-studio/claude_token 에 두고 CLAUDE_CODE_OAUTH_TOKEN 으로만 넘김.
 - 프롬프트·대답·토큰은 기록(studio.log)에 남기지 않음. 호출부는 결과 종류만 기록.
-문서: code.claude.com/docs (headless · cli-reference · authentication · setup)."""
+- 클로드 아껴 쓰기(기본 켬 · D-390~D-395): 일마다 모델(TASK_MODEL · 대부분 Sonnet, 채널 전략 '더 깊게'만 Opus) · 짧은 일 전용 지시(--system-prompt ·
+  Claude Code 의 긴 기본 지시를 대신함) · 그림은 줄여서 메시지에 바로(--input-format stream-json · Read 도구 차례 없이) · 같은 물음은 저장해 둔 대답
+  (~/.futsal-studio/claude_cache · 400개/30MB) · 쓴 양은 숫자만 ~/.futsal-studio/claude_usage.json. 끄면 예전 그대로(모두 Opus·기본 지시·Read).
+  옵션은 모두 'claude --help' 에 있을 때만 넣음 (예전 판은 예전 명령 그대로).
+문서: code.claude.com/docs (headless · cli-reference · authentication · setup).
+"""
 import base64
+import hashlib
+import io
 import json
 import os
 import re
@@ -33,6 +40,36 @@ NO_WINDOW, NEW_GROUP, NEW_CONSOLE = 0x08000000, 0x00000200, 0x00000010
 _LOCK = threading.Lock()
 _FEAT = {}
 _STATUS = {"t": 0.0, "v": None}
+
+# ---------- 클로드 아껴 쓰기 (D-390~D-395) ----------
+# 일 이름 → 모델 별칭. 아껴 쓰기를 끄면 모두 MODEL(Opus). 채널 전략 '클로드로 더 깊게'는 사용자가 직접 누르는 깊은 판단이라 Opus 그대로.
+TASK_MODEL = {"proofread": "sonnet", "writer": "sonnet", "frames": "sonnet", "copy": "sonnet", "judge": "sonnet", "plan": "sonnet",
+              "strategy": "opus"}
+# Claude Code 의 긴 기본 지시(도구 사용법·코딩 규칙 등) 대신 쓰는 짧은 지시 (--system-prompt). 한 줄 · 큰따옴표·&|<>^%!() 없음 —
+# npm 의 claude.cmd 는 cmd.exe 를 거쳐 인자가 넘어가므로 (시험 test_system_prompts_cmd_safe).
+SYS_BASE = ("당신은 풋살 레슨 유튜브 채널 풋살사관학교의 영상 제작 앱이 부른 한국어 도우미예요. 대화 없이 이 요청 하나에만 바로 답해요. "
+            "요청이 정한 대답 형식 그대로만 쓰고 인사나 덧붙이는 설명은 쓰지 않아요.")
+SYS_TASK = {"proofread": "할 일은 자동 받아쓰기에서 잘못 들은 글자 고치기예요.",
+            "writer": "할 일은 레슨 영상의 짧은 재미 자막 쓰기예요.",
+            "frames": "할 일은 썸네일 배경으로 쓸 장면에 점수 매기기예요.",
+            "copy": "할 일은 썸네일 문구 만들기예요.",
+            "judge": "할 일은 썸네일 그림 평가하기예요.",
+            "plan": "할 일은 잘 되는 유튜브 영상의 기획 분석이에요.",
+            "strategy": "할 일은 유튜브 채널을 키울 전략 세우기예요."}
+SYS_IMG = ("그림 파일은 이 메시지에 바로 붙어 있고 각 그림 바로 앞의 [그림 이름]이 그 파일 이름이에요. "
+           "글에서 Read 도구로 열어 보라거나 같은 폴더에 있다고 한 그림은 붙어 있는 그 그림이니 도구 없이 바로 보고 답해요.")
+MAX_TURNS = 2                   # 도구가 없을 때 (--max-turns 가 있는 판만)
+IMG_SIDE, IMG_PIXELS, IMG_Q = 1568, 1_150_000, 80   # 그림 긴 변·화소 수 한도(클로드가 더 크면 어차피 줄여 봄) · 줄일 때 JPEG 품질
+IMG_BYTES = 3_500_000           # 이보다 큰 그림 파일은 크기가 작아도 다시 저장 (한 그림 5MB 한도 아래로)
+PREFS_FILE = "claude_prefs.json"   # 아껴 쓰기 켬/끔 (HOME 안 · 숫자·참거짓만)
+USAGE_FILE = "claude_usage.json"   # 날마다 쓴 양 (숫자만 · 프롬프트·대답 없음)
+USAGE_DAYS = 31
+CACHE_DIR = "claude_cache"         # 저장해 둔 대답 (열쇠는 내용 해시 · 프롬프트는 남기지 않음)
+CACHE_MAX_N, CACHE_MAX_BYTES = 400, 30 << 20
+CACHE_VER = 1
+_ULOCK = threading.Lock()          # 쓴 양·저장해 둔 대답 파일
+_JOB = {"on": False}               # 지금 작업(app.start_job)의 클로드 사용 합계
+_INLINE_BAD = set()                # 그림 바로 보내기가 결과 없이 끝난 실행 파일 (이번 실행 동안은 Read 로)
 
 
 class ClaudeError(Exception):
@@ -198,7 +235,10 @@ def features(exe=None):
         return {}  # 모름: 기억하지 않음 (다음에 다시 확인)
     f = {"permission_prompts": "--permission-prompts" in out, "restricted": "--restricted" in out,
          "no_session": "--no-session-persistence" in out, "strict_mcp": "--strict-mcp-config" in out,
-         "setting_sources": "--setting-sources" in out, "tools": "--tools" in out, "auth": bool(re.search(r"^\s+auth\b", out, re.M))}
+         "setting_sources": "--setting-sources" in out, "tools": "--tools" in out, "auth": bool(re.search(r"^\s+auth\b", out, re.M)),
+         # 아껴 쓰기 (D-391·D-392): 짧은 지시 · 차례 수 한도 · 그림을 메시지에 바로 (입력·출력 모두 stream-json 이고 --verbose 가 있어야 함)
+         "system_prompt": bool(re.search(r"--system-prompt(?![-\w])", out)), "max_turns": "--max-turns" in out,
+         "stream_in": bool(re.search(r"--input-format\b", out)) and "stream-json" in out and "--verbose" in out}
     with _LOCK:
         _FEAT[exe] = f
     return f
@@ -264,11 +304,21 @@ def login():
 
 # ---------- headless 실행 ----------
 
-def build_cmd(exe, with_images, feat=None):
-    """claude -p 명령 (프롬프트는 stdin). 그림이 있으면 Read 도구만 (작업 폴더 안), 없으면 도구 없음."""
+def _args_ok(exe):
+    """띄어쓰기가 든 인자(짧은 지시)를 넘겨도 되는지 — claude.cmd 는 cmd.exe /c 를 거치는데, 실행 파일 경로가 따옴표로 묶이면(경로에 띄어쓰기)
+    따옴표가 셋 이상일 때 cmd 가 처음·마지막 따옴표를 떼어 명령이 깨짐 → 그때는 짧은 지시를 넣지 않음 (기본 지시 그대로)."""
+    return not _is_cmd(exe) or " " not in str(exe)
+
+
+def build_cmd(exe, with_images, feat=None, model=MODEL, system=None, inline=False):
+    """claude -p 명령 (프롬프트는 stdin). 그림이 있으면 Read 도구만 (작업 폴더 안), 없으면 도구 없음.
+    아껴 쓰기(D-391·D-392): model · system(짧은 지시, --system-prompt 가 있는 판만) · inline(그림을 stdin 메시지에 바로 — stream-json 입출력, 도구 없음)."""
     f = feat if feat is not None else features(exe)
+    read = with_images and not inline   # Read 도구가 있어야 하는지 (그림을 폴더에서 읽을 때만)
     # 도구·설정·MCP·세션 제한은 판을 모르면(확인 실패) 늘 넣음 — CLI 가 모르는 옵션이라고 하면 '업데이트해 주세요' 로 안내 (제한 없이 돌리지 않음)
-    cmd = _base(exe) + ["-p", "--output-format", "json", "--model", MODEL]
+    cmd = _base(exe) + ["-p", "--output-format", "stream-json" if inline else "json", "--model", model]
+    if inline:
+        cmd += ["--input-format", "stream-json", "--verbose"]  # stream-json 출력은 -p 에서 --verbose 가 있어야 함
     if f.get("no_session", True):
         cmd.append("--no-session-persistence")
     if f.get("strict_mcp", True):
@@ -281,12 +331,16 @@ def build_cmd(exe, with_images, feat=None):
     if f.get("restricted"):
         cmd.append("--restricted")
     if f.get("tools", True):
-        if with_images:
+        if read:
             cmd += ["--tools", "Read"]
         elif not _is_cmd(exe):
             cmd += ["--tools", ""]
         else:
             cmd += ["--tools", "Read"]  # 빈 인자를 못 넘김 → Read 만 (빈 임시 폴더 안)
+    if system and f.get("system_prompt") and _args_ok(exe):
+        cmd += ["--system-prompt", system]
+    if system and not read and f.get("max_turns"):  # system: 아껴 쓰기일 때만 줌 · 도구가 없으니 한 번이면 끝 (여유 1)
+        cmd += ["--max-turns", str(MAX_TURNS)]
     return cmd
 
 
@@ -307,14 +361,17 @@ def _kill(p):
 def explain(code, out, err):
     """종료 코드·JSON·오류 글 → (종류, 결과 dict 또는 None)."""
     d = None
-    for ln in reversed((out or "").strip().splitlines()):
+    for ln in reversed((out or "").strip().splitlines()):  # stream-json(그림 바로 보내기)은 여러 줄 — 'result' 줄을 먼저
         ln = ln.strip()
         if ln.startswith("{"):
             try:
-                d = json.loads(ln)
-                break
+                x = json.loads(ln)
             except ValueError:
                 continue
+            if d is None or (isinstance(x, dict) and x.get("type") == "result"):
+                d = x
+            if isinstance(x, dict) and x.get("type") == "result":
+                break
     if d is None:
         m = re.search(r"\{.*\}", out or "", re.S)
         try:
@@ -336,27 +393,308 @@ def explain(code, out, err):
     return "error", d
 
 
-def _model_of(d):
+def _model_of(d, default=MODEL):
     mu = (d or {}).get("modelUsage") or {}
     names = [k for k in mu if "haiku" not in k] or list(mu)
-    return names[0] if names else MODEL
+    return names[0] if names else default
 
 
-def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None):
-    """프롬프트(+그림 파일 [(원본 경로, 넣을 이름)]) → {"text", "model"}. 실패하면 ClaudeError (한국어 안내).
-    cancel: threading.Event (멈추기 ✕) · on_tick(초): 0.5초마다 (진행 표시용)."""
-    exe = find_exe()
-    if not exe:
-        raise ClaudeError("missing", MSG["missing"])
-    feat = features(exe)
-    with tempfile.TemporaryDirectory(prefix="futsal-claude-", ignore_cleanup_errors=True) as tmp:
-        for src, nm in images or []:
+# ---------- 아껴 쓰기: 설정 · 그림 줄이기 · 저장해 둔 대답 · 쓴 양 (D-390~D-395) ----------
+
+def save_on():
+    """'클로드 아껴 쓰기' 켬(기본) / 끔 — HOME/claude_prefs.json."""
+    try:
+        d = json.loads((HOME / PREFS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    v = d.get("save") if isinstance(d, dict) else None
+    return v if isinstance(v, bool) else True
+
+
+def _write_json(f, data):
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f"{f.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def set_save(on):
+    _write_json(HOME / PREFS_FILE, {"save": bool(on)})
+    return bool(on)
+
+
+def model_for(task, save=None):
+    """일 이름 → 모델 별칭 (아껴 쓰기를 끄면·일 이름이 없으면 MODEL)."""
+    save = save_on() if save is None else save
+    return TASK_MODEL.get(task, MODEL) if save and task else MODEL
+
+
+def system_prompt(task, inline=False):
+    """일 전용 짧은 지시 (그림을 메시지에 바로 붙일 때는 그 뜻을 한 줄 더)."""
+    s = " ".join(x for x in (SYS_BASE, SYS_TASK.get(task, "")) if x)
+    return f"{s} {SYS_IMG}" if inline else s
+
+
+def _app_ver():
+    """앱 판의 앞 두 자리 ('2.21.1' → '2.21') — 판이 바뀌면 저장해 둔 대답을 새로."""
+    try:
+        v = (Path(__file__).resolve().parent / "version.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return ".".join(v.split(".")[:2])
+
+
+def _read_images(images):
+    """[(원본 경로, 넣을 이름)] → [(이름, 바이트)] (못 읽는 파일은 빼고 · 예전처럼)."""
+    out = []
+    for src, nm in images or []:
+        try:
+            out.append((Path(nm).name, Path(src).read_bytes()))
+        except OSError:
+            pass
+    return out
+
+
+def _mime(data):
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def prep_image(nm, data):
+    """그림을 클로드가 보는 크기로 (긴 변 IMG_SIDE · 화소 IMG_PIXELS 안) → (이름, 바이트, 종류).
+    이미 작으면 그대로 (토큰은 화소 수로 정해져 다시 저장해도 줄지 않음 · 썸네일 평가 그림의 화질을 지킴).
+    줄일 때만 JPEG 품질 IMG_Q (이름이 .png 면 PNG) — 번호를 붙인 장면 시트(16장)도 번호가 읽히는 크기 (약 1400px)."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            w, h = im.size
+            k = min(1.0, IMG_SIDE / max(w, h), (IMG_PIXELS / float(w * h)) ** 0.5)
+            if k >= 1.0 and len(data) <= IMG_BYTES:
+                return nm, data, _mime(data)
+            png = nm.lower().endswith(".png")
+            im2 = im.convert("RGBA" if png and im.mode in ("RGBA", "LA", "P") else "RGB")
+            if k < 1.0:
+                im2 = im2.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
+            buf = io.BytesIO()
+            if png:
+                im2.save(buf, "PNG", optimize=True)
+            else:
+                im2.save(buf, "JPEG", quality=IMG_Q, optimize=True)
+            return nm, buf.getvalue(), "image/png" if png else "image/jpeg"
+    except Exception:  # noqa: BLE001 — Pillow 가 없거나 그림이 아니면 그대로 (예전처럼)
+        return nm, data, _mime(data)
+
+
+def stream_message(prompt, imgs):
+    """stdin 한 줄 (stream-json 입력): 사용자 메시지 = 그림마다 [그림 이름] 글 + base64 그림 → 마지막에 프롬프트.
+    모양은 Claude Agent SDK 와 같음: {"type":"user","message":{"role":"user","content":[…]}}."""
+    content = []
+    for nm, data, mt in imgs:
+        content.append({"type": "text", "text": f"[그림 {nm}]"})
+        content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": base64.b64encode(data).decode("ascii")}})
+    content.append({"type": "text", "text": str(prompt)})
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False) + "\n"
+
+
+def cache_key(task, model, prompt, imgs):
+    """내용 해시: 일 · 모델 · 짧은 지시 · 프롬프트 · 그림 바이트 · 앱 판(앞 두 자리)."""
+    h = hashlib.sha256()
+    for part in (f"v{CACHE_VER}", str(task or ""), str(model), system_prompt(task), _app_ver(), str(prompt)):
+        h.update(part.encode("utf-8", "replace"))
+        h.update(b"\0")
+    for nm, data in imgs:
+        h.update(nm.encode("utf-8", "replace"))
+        h.update(b"\0")
+        h.update(hashlib.sha256(data).digest())
+    return h.hexdigest()[:40]
+
+
+def _cache_dir():
+    return HOME / CACHE_DIR
+
+
+def cache_get(key):
+    f = _cache_dir() / f"{key}.json"
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("text"), str) or not d["text"].strip():
+        return None
+    try:
+        os.utime(f)  # 최근에 쓴 것 (LRU)
+    except OSError:
+        pass
+    return d
+
+
+def cache_put(key, text, model):
+    with _ULOCK:
+        try:
+            _write_json(_cache_dir() / f"{key}.json", {"text": text, "model": model, "t": int(time.time())})
+            _cache_prune()
+        except OSError:
+            pass
+
+
+def _cache_prune():
+    """CACHE_MAX_N 개 · CACHE_MAX_BYTES 를 넘으면 오래 안 쓴 것부터 지움 (os.utime 으로 다시 쓴 때를 남김 · LRU)."""
+    try:
+        fs = []
+        for f in _cache_dir().glob("*.json"):
             try:
-                shutil.copy2(src, Path(tmp) / Path(nm).name)
+                st = f.stat()
+                fs.append((st.st_mtime, st.st_size, f))
             except OSError:
                 pass
-        has_img = any(Path(tmp).iterdir())
-        cmd = build_cmd(exe, has_img, feat)
+    except OSError:
+        return
+    fs.sort(key=lambda x: x[0])
+    n, size = len(fs), sum(x[1] for x in fs)
+    for _, sz, f in fs[:-1]:  # 막 넣은 것(가장 최근)은 남김
+        if n <= CACHE_MAX_N and size <= CACHE_MAX_BYTES:
+            break
+        try:
+            f.unlink()
+        except OSError:
+            continue
+        n, size = n - 1, size - sz
+
+
+def usage_of(d):
+    """결과 JSON → {"input","output","cacheRead","cacheWrite","total"} (modelUsage 를 모두 더함 · 없으면 usage)."""
+    keys = (("input", "inputTokens", "input_tokens"), ("output", "outputTokens", "output_tokens"),
+            ("cacheRead", "cacheReadInputTokens", "cache_read_input_tokens"), ("cacheWrite", "cacheCreationInputTokens", "cache_creation_input_tokens"))
+    out = {k: 0 for k, _, _ in keys}
+
+    def num(x):
+        return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 else 0
+    mu = (d or {}).get("modelUsage")
+    got = False
+    if isinstance(mu, dict):
+        for v in mu.values():
+            if isinstance(v, dict):
+                for k, a, _ in keys:
+                    if a in v:
+                        got = True
+                    out[k] += num(v.get(a))
+    if not got:
+        u = (d or {}).get("usage")
+        if isinstance(u, dict):
+            for k, _, b in keys:
+                out[k] += num(u.get(b))
+    out["total"] = sum(out[k] for k, _, _ in keys)
+    return out
+
+
+def _today():
+    return time.strftime("%Y-%m-%d")
+
+
+def _load_usage():
+    try:
+        d = json.loads((HOME / USAGE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    days = d.get("days") if isinstance(d, dict) else None
+    return days if isinstance(days, dict) else {}
+
+
+def usage_today():
+    """오늘 쓴 양 {calls, hits, total, input, output, cacheRead, cacheWrite} (숫자만)."""
+    with _ULOCK:
+        t = _load_usage().get(_today())
+    base = {"calls": 0, "hits": 0, "total": 0, "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+    if isinstance(t, dict):
+        base.update({k: int(t[k]) for k in base if isinstance(t.get(k), (int, float))})
+    return base
+
+
+def _record(usage=None, cached=False, save=True):
+    """한 번 물음(또는 저장해 둔 대답) → 지금 작업 합계 + 오늘 합계 (claude_usage.json · 숫자만)."""
+    u = usage or {}
+    with _ULOCK:
+        if _JOB.get("on"):
+            _JOB["hits" if cached else "calls"] += 1
+            _JOB["total"] += int(u.get("total") or 0)
+            _JOB["save"] = _JOB["save"] or bool(save)
+            _JOB["old"] = _JOB["old"] or not save
+        days = _load_usage()
+        t = days.setdefault(_today(), {})
+        t["hits" if cached else "calls"] = int(t.get("hits" if cached else "calls") or 0) + 1
+        for k in ("input", "output", "cacheRead", "cacheWrite", "total"):
+            t[k] = int(t.get(k) or 0) + int(u.get(k) or 0)
+        keep = dict(sorted(days.items())[-USAGE_DAYS:])
+        try:
+            _write_json(HOME / USAGE_FILE, {"v": 1, "days": keep})
+        except OSError:
+            pass
+
+
+def tokens_ko(n):
+    """12345 → '12천' · 99999 → '10만' · 250000 → '25만' · 850 → '850'."""
+    n = int(n or 0)
+    if n < 1000:
+        return str(n)
+    k = round(n / 1000)
+    return f"{k}천" if k < 100 else f"{round(n / 10000)}만"
+
+
+def job_begin():
+    """작업 시작 (app.start_job) — 이 작업의 클로드 사용 합계를 새로."""
+    with _ULOCK:
+        _JOB.clear()
+        _JOB.update(on=True, calls=0, hits=0, total=0, save=False, old=False)
+
+
+def job_end():
+    """작업 끝 → 작업 기록 한 줄 (클로드를 안 썼으면 None). 예: '클로드 3번 · 약 12천 토큰 · 아껴 쓰기 (저장해 둔 대답 2번 다시 씀)'."""
+    with _ULOCK:
+        j = dict(_JOB)
+        _JOB.clear()
+        _JOB["on"] = False
+    calls, hits = int(j.get("calls") or 0), int(j.get("hits") or 0)
+    if not calls and not hits:
+        return None
+    parts = [f"클로드 {calls}번" if calls else "클로드는 새로 안 부름"]
+    if calls and j.get("total"):
+        parts.append(f"약 {tokens_ko(j['total'])} 토큰")
+    mode = "아껴 쓰기" if j.get("save") else "예전처럼 (모두 Opus)"
+    if hits:
+        mode += f" (저장해 둔 대답 {hits}번 다시 씀)"
+    parts.append(mode)
+    return " · ".join(parts)
+
+
+def saver():
+    """화면용: 아껴 쓰기 켬/끔 + 오늘 쓴 양."""
+    return {"save": save_on(), "today": usage_today()}
+
+
+# ---------- 실행 ----------
+
+def _exec(cmd, stdin_data, files, timeout, cancel, on_tick):
+    """빈 임시 폴더(+그림 파일)에서 명령 실행 → (종료 코드, 표준 출력, 표준 오류, 멈춘 까닭 또는 None)."""
+    with tempfile.TemporaryDirectory(prefix="futsal-claude-", ignore_cleanup_errors=True) as tmp:
+        for nm, data in files:
+            try:
+                (Path(tmp) / nm).write_bytes(data)
+            except OSError:
+                pass
         try:
             p = subprocess.Popen(cmd, cwd=tmp, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env=child_env(), **_flags())
@@ -367,7 +705,7 @@ def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None):
 
         def feed():
             try:  # 넣고 바로 닫음 (명령줄 길이 제한·프로세스 목록 노출 없이)
-                p.stdin.write(str(prompt).encode("utf-8"))
+                p.stdin.write(stdin_data)
             except OSError:
                 pass
             finally:
@@ -419,9 +757,48 @@ def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None):
                 s.close()
             except OSError:
                 pass
-    if why:
-        raise ClaudeError(why, MSG[why])
-    kind, d = explain(p.returncode, res.get("out", ""), res.get("err", ""))
+    return p.returncode, res.get("out", ""), res.get("err", ""), why
+
+
+def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None, task=None, check=None):
+    """프롬프트(+그림 파일 [(원본 경로, 넣을 이름)]) → {"text", "model", "usage", "cached"}. 실패하면 ClaudeError (한국어 안내).
+    cancel: threading.Event (멈추기 ✕) · on_tick(초): 0.5초마다 (진행 표시용).
+    task: 일 이름 (TASK_MODEL) — 주면 '클로드 아껴 쓰기'(켰을 때)를 씀: 일에 맞는 모델 · 짧은 지시 · 그림 바로 보내기 · 저장해 둔 대답.
+    check(대답 글): 저장하기 전 확인 — 예외가 나면 저장하지 않음 (대답은 그대로 돌려줌 · 부른 쪽이 예전처럼 처리).
+    오류·멈춤·시간 초과는 저장하지 않음. 쓴 양(usage)은 숫자만 남김."""
+    exe = find_exe()
+    if not exe:
+        raise ClaudeError("missing", MSG["missing"])
+    save = bool(task) and save_on()
+    model = model_for(task, save)
+    imgs = _read_images(images)
+    key = cache_key(task, model, prompt, imgs) if save else None
+    if key:
+        hit = cache_get(key)
+        if hit is not None:
+            _record(None, cached=True, save=True)
+            return {"text": hit["text"], "model": hit.get("model") or model, "usage": {}, "cached": True}
+    feat = features(exe)
+    if save:
+        imgs = [prep_image(nm, data) for nm, data in imgs]
+    else:
+        imgs = [(nm, data, _mime(data)) for nm, data in imgs]
+    inline = bool(save and imgs and feat.get("stream_in") and exe not in _INLINE_BAD)
+    while True:
+        system = system_prompt(task, inline) if save else None
+        cmd = build_cmd(exe, bool(imgs), feat, model=model, system=system, inline=inline)
+        data = stream_message(prompt, imgs) if inline else str(prompt)
+        code, out, err, why = _exec(cmd, data.encode("utf-8"), [] if inline else [(nm, b) for nm, b, _ in imgs], timeout, cancel, on_tick)
+        if why:
+            raise ClaudeError(why, MSG[why])
+        kind, d = explain(code, out, err)
+        if inline and d is None and kind in ("error", "update"):
+            _INLINE_BAD.add(exe)  # 그림 바로 보내기를 이 판이 못 받음 (결과 없이 끝남) → 이번 실행 동안은 예전처럼 폴더의 그림을 Read 로
+            inline = False
+            continue
+        break
+    if d is not None:
+        _record(usage_of(d), save=save)
     if kind != "ok":
         if kind == "login":
             reset_status()
@@ -429,4 +806,12 @@ def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None):
     text = str(d.get("result") or "")
     if not text.strip():
         raise ClaudeError("error", MSG["error"])
-    return {"text": text, "model": _model_of(d)}
+    name = _model_of(d, model)
+    if key:
+        try:
+            if check is not None:
+                check(text)
+            cache_put(key, text, name)
+        except Exception:  # noqa: BLE001 — 모양이 틀린 대답은 저장하지 않음 (다시 누르면 새로 물음)
+            pass
+    return {"text": text, "model": name, "usage": usage_of(d), "cached": False}

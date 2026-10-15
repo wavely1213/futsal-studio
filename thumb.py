@@ -1383,13 +1383,15 @@ def run_ai_frames(name, items, log=print, cancel=None):
         tp = thumbcopy.topics(title, thumbcopy._texts(name))
         prompt = AI_FRAMES_PROMPT.format(title=title, topics=", ".join(tp) or "풋살", n=len(items))
         try:
-            res = claude_cli.run(prompt, images=[(sheet, "frames.jpg")], cancel=cancel, timeout=thumbcopy.AI_TIMEOUT)
+            res = claude_cli.run(prompt, images=[(sheet, "frames.jpg")], cancel=cancel, timeout=thumbcopy.AI_TIMEOUT,
+                                 task="frames", check=lambda t: parse_ai_frames(t, len(items)))  # 아껴 쓰기 (D-390)
         except claude_cli.ClaudeError as e:
             log(f"  클로드 장면 고르기 · {e.kind}")
             if e.kind != "cancel":
                 _save_ai_frames(name, {"failSig": _frames_sig(items), "failAt": int(time.time())})
             return None
-    thumbcopy._PROVEN["ok"] = True  # 클로드가 대답함 → 이번 실행의 '확인 늦음'은 로그인된 것으로
+    if not res.get("cached"):  # 저장해 둔 대답(D-393)은 로그인 증거가 아님
+        thumbcopy._PROVEN["ok"] = True  # 클로드가 대답함 → 이번 실행의 '확인 늦음'은 로그인된 것으로
     try:
         sc = parse_ai_frames(res.get("text"), len(items))
     except ValueError:

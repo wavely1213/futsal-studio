@@ -166,8 +166,9 @@ def _batches(lines):
 def proofread(segs, title="", terms=(), cancel=None, run=None):
     """받아쓰기 구간 → (고친 구간 목록, 고친 줄 수, 쓴 모델). run: 시험용 (claude_cli.run 흉내)."""
     if run is None:
-        import claude_cli
-        run = claude_cli.run
+        import functools
+        import claude_cli  # 아껴 쓰기 일 이름 'proofread' (D-390) · 모양이 틀린 대답은 저장하지 않음
+        run = functools.partial(claude_cli.run, task="proofread", check=lambda t: parse(t, 1))
     idx = [k for k, s in enumerate(segs) if str(s.get("text") or "").strip()]
     lines = [re.sub(r"\s+", " ", str(segs[k]["text"])).strip() for k in idx]
     fixes, model = {}, None

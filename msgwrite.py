@@ -164,8 +164,9 @@ def write(cache_file, moms, lines, title="", cancel=None, run=None, log=print, j
     except (OSError, ValueError, TypeError):
         pass
     if run is None:
-        import claude_cli
-        run = claude_cli.run
+        import functools
+        import claude_cli  # 아껴 쓰기 일 이름 'writer' (D-390) · 모양이 틀린 대답은 저장하지 않음
+        run = functools.partial(claude_cli.run, task="writer", check=lambda t: parse(t, cands))
     res = run(build_prompt(cands, title), timeout=TIMEOUT, cancel=cancel)
     out = parse(res.get("text"), cands)
     tmp = f"{cache_file}.{os.getpid()}.tmp"
