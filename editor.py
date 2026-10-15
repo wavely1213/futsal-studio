@@ -14,6 +14,7 @@ import time
 import traceback
 import unicodedata
 import uuid
+import wave
 import xml.etree.ElementTree as ET
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -175,6 +176,49 @@ def media_entry(f, src="videos", mid=None):
     if i["kind"] == "video" and (i.get("start") or 0.0) > 0.005:  # 시작 시각이 0 보다 큰 파일만 (미리보기 재생기에 더함 · D-324)
         e["t0"] = round(i["start"], 3)  # 0 보다 작은 시작(.webm·Opus 의 -0.007 등)은 브라우저가 0 으로 당겨 읽음 → 더하면 한 프레임 일찍 보임
     return e
+
+
+def _wav_dur(p):
+    """WAV 파일 길이(초) · 읽지 못하면 None."""
+    try:
+        with wave.open(str(p), "rb") as w:
+            return w.getnframes() / float(w.getframerate() or 1)
+    except (OSError, EOFError, wave.Error):
+        return None
+
+
+def refresh_sfx_lengths(seqs_items, media):
+    """예전 판 편집본의 효과음 클립 (D-370 · D-379): 효과음 파일(edit_media/효과음_*.wav)을 원본에서 다시 만들어 예전 캐시보다 길어졌으면
+    예전 파일 끝까지 쓰던 클립(자르지 않은 클립)을 새 길이까지 늘림 (같은 트랙 다음 클립 앞까지 · 1배속만) · 미디어 길이도 새 파일 길이로.
+    예전: 다시 만든 레벨업2(0.324초)를 예전 길이(0.175초)까지만 냄. seqs_items: 편집본마다 클립 목록 [[…], …] (미디어는 프로젝트에 하나라
+    모든 편집본을 한 번에) · media: 미디어 기록 목록(제자리에서 고침) → 늘린 클립 수."""
+    import sfxlib   # (늦게 · sfxlib 이 core 만 씀)
+    n = 0
+    for m in media:
+        if not isinstance(m, dict) or m.get("src") != "assets" or not str(m.get("file") or "").startswith("효과음_"):
+            continue
+        nm = str(m["file"])[4:-4] if str(m["file"]).endswith(".wav") else None
+        if nm in sfxlib.CATALOG:
+            try:   # 예전 판 캐시(잘린 원본 · 원본 지문 없음)면 여기서 한 번 다시 만듦 — 예전 편집본을 열거나 내보내기만 해도 제 소리
+                sfxlib.ensure_sfx(nm, ASSETS)
+            except (OSError, RuntimeError, ValueError):
+                pass
+        new = _wav_dur(media_path(m["file"], "assets"))
+        old = float(m.get("dur") or 0.0)
+        if new is None or new <= old + 0.005:
+            continue
+        for items in seqs_items:
+            for it in items:
+                if it.get("media") != m["id"] or abs(float(it.get("speed") or 1.0) - 1.0) > 1e-3 or abs(float(it["out"]) - old) > 0.01:
+                    continue
+                st = float(it["start"])
+                nxt = min([float(o["start"]) for o in items if o is not it and o.get("track") == it.get("track") and float(o["start"]) > st + 1e-3] or [1e9])
+                end = min(new, float(it["in"]) + (nxt - st))
+                if end > float(it["out"]) + 1e-3:
+                    it["out"] = round(end, 4)
+                    n += 1
+        m["dur"] = round(new, 3)
+    return n
 
 
 def tonemap_chain(hdr, max_w=None):
@@ -1850,6 +1894,7 @@ def migrate_project(name, proj):
             if ln and len(ln) > 16:
                 it["link"] = lm.setdefault(ln, _nid())
     media = proj.setdefault("media", [])
+    refresh_sfx_lengths([s.get("items") or [] for s in proj["sequences"]], media)   # 다시 만든 효과음 길이 (D-379)
     if not any(m["id"] == "main" for m in media):
         i = proj["info"]
         media.insert(0, {"id": "main", "kind": "video", "src": "videos", "file": name, "dur": i["duration"], "w": i["width"],
@@ -5875,7 +5920,10 @@ def _export_prep(name, proj, opts, log):
     if media["main"].get("audio") and media["main"].get("src", "videos") == "videos" and not _has_audio(media["main"]["file"]):
         # 소리 줄기가 없는 원본(화면 녹화 등): 대사 클립을 읽지 않음 — 예전 프로젝트는 늘 '소리 있음'으로 적혀 있어 내보내기가 실패했음
         media["main"] = dict(media["main"], audio=False)
-    proj["media"] = list(media.values())
+    proj["media"] = [dict(m) for m in media.values()]
+    media = {m["id"]: m for m in proj["media"]}
+    proj["items"] = [dict(it) for it in proj["items"]]
+    refresh_sfx_lengths([proj["items"]], proj["media"])   # 예전 편집본도 다시 만든 효과음을 제 길이로 (D-379)
     bad = [it for it in proj["items"] if it.get("media") not in media or it["out"] - it["in"] <= 1e-3]
     if bad:  # 프로젝트에 없는 미디어·길이가 0인 클립은 빼고 진행
         log(f"  빈 클립 {len(bad)}개는 건너뛰어요")

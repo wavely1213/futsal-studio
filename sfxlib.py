@@ -6,7 +6,9 @@
 처음 쓸 때 편집실 미디어 폴더(edit_media)에 `효과음_<이름>.wav` · `배경음악_<분위기>_<시드>.wav` 로 만들어 둔다
 (편집실 파일 주소·내보내기가 그대로 씀 · 인터넷을 쓰지 않음).
 """
+import hashlib
 import io
+import json
 import math
 import os
 import subprocess
@@ -68,6 +70,7 @@ CATALOG = {
 # 소리 모양 (D-371): 맞출 점(hit) — 부딪히는 소리는 첫소리, 점점 커지는 소리(아래)는 가장 큰 곳을 화면·소리 사건에 맞춤
 SWELL = {"휙", "슝", "라이저", "두둥", "띠로리", "두구두구"}
 SOFT = {"뽁", "뽁2", "팡", "딸깍", "틱", "틱2"}   # 짧고 작은 소리 (말 위에 작게 놓아도 됨 · D-372)
+LOUD_DB = 12.0   # 크게 들리는 부분 = 최대보다 이만큼(dB) 작아질 때까지 (말 지키기 · D-372 · D-379)
 MOODS = {  # 배경음악 분위기: 빠르기(bpm), 장조/단조, 설명
     "신남": (120, "major", "인트로·하이라이트용 신나는 음악"),
     "잔잔": (88, "major", "설명 장면 밑에 까는 잔잔한 음악"),
@@ -387,6 +390,68 @@ def peak_db(path):
     return _PEAKS[key]
 
 
+def k_weight(x, sr=SR):
+    """소리 → 사람 귀 크기 무게를 준 소리 (ITU-R BS.1770 K 무게: 1.7kHz 위 +4dB 선반 · 38Hz 아래 깎음) — 주파수 쪽에서 크기만 곱함
+    (위상은 그대로 · 크기 재기용)."""
+    np = _np()
+    x = np.asarray(x, np.float64)
+    n = len(x)
+    if n < 4:
+        return x
+    w = 2 * math.pi * np.fft.rfftfreq(n, 1.0 / sr) / sr
+    z1, z2 = np.exp(-1j * w), np.exp(-2j * w)
+
+    def biquad(b, a):
+        return np.abs((b[0] + b[1] * z1 + b[2] * z2) / (1.0 + a[0] * z1 + a[1] * z2))
+    f0, g, q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
+    k = math.tan(math.pi * f0 / sr)
+    vh, vb = 10 ** (g / 20), (10 ** (g / 20)) ** 0.4996667741545416
+    a0 = 1 + k / q + k * k
+    h = biquad(((vh + vb * k / q + k * k) / a0, 2 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0), (2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0))
+    f0, q = 38.13547087602444, 0.5003270373238773
+    k = math.tan(math.pi * f0 / sr)
+    a0 = 1 + k / q + k * k
+    h = h * biquad((1.0, -2.0, 1.0), (2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0))
+    return np.fft.irfft(np.fft.rfft(x) * h, n)
+
+
+def st_loud_db(x, sr=SR, win=0.4):
+    """소리 → 가장 큰 짧은 구간(win 초) 귀 크기 (dB · K 무게 RMS · 0.1초씩 밀며 잼)."""
+    np = _np()
+    y = k_weight(x, sr) ** 2
+    n = int(win * sr)
+    if len(y) <= n:
+        return round(10 * math.log10(float(y.mean()) + 1e-12), 2) if len(y) else -120.0
+    c = np.concatenate([[0.0], np.cumsum(y)])
+    hop = max(1, int(0.1 * sr))
+    e = (c[n::hop] - c[:len(c) - n:hop]) / n
+    return round(10 * math.log10(float(e.max()) + 1e-12), 2)
+
+
+_LOUD = {}
+
+
+def loud_db(path):
+    """WAV 효과음 파일의 가장 큰 0.4초 귀 크기(dB · K 무게) — 파일이 그대로면 다시 안 잼. 최대 크기(peak_db)가 같아도 길게 울리는 높은 소리
+    (호루라기)는 이것이 4~15dB 커서 더 크게 들림 (D-379). 읽지 못하면 None."""
+    path = Path(path)
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in _LOUD:
+        np = _np()
+        try:
+            with wave.open(str(path), "rb") as w:
+                sr = w.getframerate()
+                x = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float64).reshape(-1, w.getnchannels()).mean(axis=1) / 32767.0
+            _LOUD[key] = st_loud_db(x, sr) if len(x) else None
+        except (OSError, EOFError, wave.Error, ValueError):
+            _LOUD[key] = None
+    return _LOUD[key]
+
+
 _CUT = {}
 
 
@@ -417,7 +482,9 @@ _SHAPE = {}
 def shape(name, path):
     """효과음 파일의 소리 모양 (초 · 5ms 창으로 잼 · 파일이 그대로면 다시 안 잼) — D-371·D-372:
     dur 길이 · attack 최대보다 10dB 작은 크기를 처음 넘는 때 · hit 맞출 점 (SWELL 은 가장 큰 10ms, 나머지는 attack) ·
-    loud 들리는 큰 부분의 끝 (에너지 90%) · audible 최대보다 30dB 안쪽 길이 · soft 짧고 작은 소리(SOFT)."""
+    loud 크게 들리는 부분의 끝 (최대보다 LOUD_DB 작아지는 마지막 때 · 에너지 90% 가 더 늦으면 그때) · audible 최대보다 30dB 안쪽 길이 ·
+    soft 짧고 작은 소리(SOFT).
+    (예전 loud = 에너지 90% 만: 딩동은 그 뒤에도 최대보다 8dB · 휙은 봉우리 뒤 0.1초 동안 10dB 안쪽이라 다음 낱말 첫소리를 가렸음 · D-379)"""
     path = Path(path)
     try:
         st = path.stat()
@@ -440,9 +507,11 @@ def shape(name, path):
         pk = int(np.argmax(np.convolve(e2, np.ones(2), "same")))
         cum = np.cumsum(e2) / e2.sum()
         loud = np.nonzero(db >= db.max() - 30)[0]
+        big = np.nonzero(db >= db.max() - LOUD_DB)[0]
         a = att * 0.005
         r = {"dur": round(len(x) / sr, 3), "attack": round(a, 3), "hit": round(pk * 0.005 if name in SWELL else a, 3),
-             "loud": round(max(a + 0.02, float(np.argmax(cum >= 0.9)) * 0.005), 3), "audible": round(float(loud[-1] - loud[0] + 1) * 0.005, 3)}
+             "loud": round(max(a + 0.02, float(np.argmax(cum >= 0.9)) * 0.005, float(big[-1] + 1) * 0.005), 3),
+             "audible": round(float(loud[-1] - loud[0] + 1) * 0.005, 3)}
     except (OSError, EOFError, wave.Error, ValueError):
         pass
     r["soft"] = name in SOFT
@@ -451,19 +520,49 @@ def shape(name, path):
     return r
 
 
+SRC_BOOK = ".효과음_원본.json"   # edit_media 안: 실은 소리로 만든 캐시마다 원본(sfx/*.ogg) 지문 (미디어 목록에 안 잡히는 이름 · D-379)
+_SRC_SHA = {}
+
+
+def _src_sha(p):
+    """실은 효과음 원본 파일의 지문 (sha256 앞 16자 · 파일이 그대로면 다시 안 잼)."""
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    key = (str(p), st.st_size, st.st_mtime_ns)
+    if key not in _SRC_SHA:
+        _SRC_SHA[key] = hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+    return _SRC_SHA[key]
+
+
+def _book(assets):
+    try:
+        d = json.loads((Path(assets) / SRC_BOOK).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def ensure_sfx(name, assets):
     """효과음 하나를 편집실 미디어 폴더에 준비 → 파일 이름. 실은 소리는 WAV 로 바꾸며 최대 크기를 PEAK_DB 로 맞춤
-    (모든 PC에서 미리 듣기가 되게). 예전 판(v2.0.0)이 크기를 맞추지 않고 만든 파일 · 예전 판(v2.21.1 까지)의 잘린 sfx/*.ogg 로 만든 파일
-    (앞 5ms 뒤 무음 · cut_short · D-370)은 한 번 다시 만듦 — 파일 이름이 같아 예전 편집본도 다음 내보내기부터 제 소리."""
+    (모든 PC에서 미리 듣기가 되게). 실은 소리로 만든 캐시는 원본 지문(SRC_BOOK)이 지금 sfx/*.ogg 와 같을 때만 그대로 씀 — 지문이 없거나 다르면
+    (예전 판이 만든 파일 · v2.21.1 까지의 잘린 원본으로 만든 5ms 틱처럼 짐작으로는 못 가리는 것까지) 한 번 다시 만듦 (D-370 · D-379) —
+    파일 이름이 같아 예전 편집본도 다음 내보내기부터 제 소리."""
     if name not in CATALOG:
         raise KeyError(f"모르는 효과음이에요 · {name}")
     assets = Path(assets)
     assets.mkdir(parents=True, exist_ok=True)
     out = assets / sfx_file_name(name)
     src = CATALOG[name][0]
+    sha = None if src.startswith("@") else _src_sha(SHIP / src)
 
     def ready():
-        return out.exists() and out.stat().st_size > 44 and (src.startswith("@") or (peak_db(out) >= PEAK_DB - 1.0 and not cut_short(out)))
+        if not (out.exists() and out.stat().st_size > 44):
+            return False
+        if src.startswith("@"):
+            return True
+        return _book(assets).get(name) == sha and peak_db(out) >= PEAK_DB - 1.0 and not cut_short(out)
     if ready():
         return out.name
     with _LOCK:
@@ -486,6 +585,9 @@ def ensure_sfx(name, assets):
             if pk > 1e-6:  # 최대 크기를 PEAK_DB 로 (작은 소리는 키우고 큰 소리는 줄임)
                 x = x * (10 ** (PEAK_DB / 20) / pk)
             _write_atomic(out, _wav_bytes(x))
+            book = _book(assets)
+            book[name] = sha
+            _write_atomic(assets / SRC_BOOK, json.dumps(book, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return out.name
 
 

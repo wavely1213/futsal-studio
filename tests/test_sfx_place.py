@@ -113,7 +113,8 @@ class MomentsTest(unittest.TestCase):
         """'그리고 마지막으로 …'도 다음 포인트 · 쉼에서 쪼개진 '하나,' / '둘, 셋 리듬으로 …'도 숫자 세기 (시각은 '하나')."""
         segs = [_seg(1.0, 2.5, "그리고 마지막으로 고개를 드세요."), _seg(4.0, 4.3, "하나,"), _seg(5.0, 7.0, "둘, 셋 리듬으로 움직여요.")]
         moms = msg.moments(self.SIG, segs)
-        self.assertTrue(any(m["kind"] == "section" and m["t"] == 1.0 for m in moms), moms)
+        # (순간 시각은 군말 '그리고' 뒤 '마지막으로' · D-379)
+        self.assertTrue(any(m["kind"] == "section" and m["a"] == 1.0 and m["t"] == segs[0]["words"][1]["s"] for m in moms), moms)
         cnt = [m for m in moms if m["kind"] == "count"]
         self.assertEqual(len(cnt), 1, moms)
         self.assertEqual(cnt[0]["t"], 4.0)
@@ -159,8 +160,9 @@ class LearnedStyleTest(unittest.TestCase):
         self.assertEqual(pal, "variety")
         self.assertEqual(at["caption"], 0.5)
         self.assertEqual(msg.learned_sound({"fun": {"sfxAt": {"n": 10, "cut": 8, "other": 2}}}, {"sfx": 4.0}, "variety")[0], "clean")
-        # 예전 판 분석(자리 기록 없음): 참고 영상에 효과음이 없으면 깔끔한 소리 (예전: 늘 예능 소리 · 무게 0.3)
-        self.assertEqual(msg.learned_sound({"fun": {"items": []}}, {}, "variety"), ("clean", None))
+        # 참고 영상에서 효과음을 못 찾았으면(자리 기록 없음·효과음 양 0) 자막 성격을 따름 (D-379 — 예능 자막 스타일이 깔끔한 소리로 바뀌던 것)
+        self.assertEqual(msg.learned_sound({"fun": {"items": []}}, {}, "variety"), ("variety", None))
+        self.assertEqual(msg.learned_sound({"fun": {"items": []}}, {"sfx": 0.0}, "speech"), ("clean", None))
         self.assertEqual(msg.learned_sound({}, {"sfx": 2.0}, "mixed"), ("variety", None))
         st = msg.learned_aspects({"params": {}, "plan": {"fun": {"items": [], "sfxAt": {"n": 6, "zoom": 1, "cut": 5}}}})
         self.assertEqual(st["sound"]["palette"], "clean")
@@ -324,11 +326,312 @@ class FixtureEditsTest(unittest.TestCase, _Placed):
             over_word = re.search(r"작은 제목|쇼츠 첫 장면|엔드", r["why"]) and r["why"].endswith("에 맞춤 · 말 위라 작게")
             self.assertGreaterEqual(rise, 0.5 if over_word else 1.0 if r["soft"] else 3.0, (r, round(rise, 2)))
 
+    def test_msg_list_shows_the_placed_sound(self):
+        """MSG 목록의 소리만 사건: 실제로 놓인 소리 이름 · 그 맞출 점 (D-379 — 예전: 예약한 '휙'·예약 시각이 남아 팡·뽁이 나는 곳을 '휙'으로)."""
+        n = 0
+        for r in self.res.values():
+            for q in r["sequences"]:
+                items = {it["id"]: it for it in q["items"]}
+                for e in q["msg"]["events"]:
+                    snd = [items[i] for i in (e.get("refs") or {}).get("items") or [] if i in items and items[i]["track"] in ("A2", "A5")]
+                    if e["kind"] != "sfx" or not snd:
+                        continue
+                    nm = re.match(r"자동 효과음 '([^']+)'", snd[0]["why"])[1]
+                    sh = sfxlib.shape(nm, editor.ASSETS / sfxlib.sfx_file_name(nm))
+                    self.assertEqual(e["text"], nm, e)
+                    self.assertAlmostEqual(e["t"], max(0.0, float(snd[0]["start"]) + sh["hit"] - float(snd[0]["in"])), delta=0.011)
+                    n += 1
+        self.assertGreater(n, 0)
+
     def test_mild_is_calmer(self):
         n = {k: len(self.sfx_rows(r["sequences"][0])) for k, r in self.res.items()}
         self.assertLessEqual(n["담백"], n["보통"])
         self.assertLessEqual(n["보통"], n["듬뿍"])
 
+
+def _mix_on_off(w, q, captions, media):
+    """편집본 하나를 실제로 섞음 (내보내기와 같은 editor._mix_audio) → (효과음 켬, 효과음만 끔, 말만, 내보내기 준비한 편집본)."""
+    import numpy as np
+    info = editor.media_info(w.name)
+    proj = dict(q, captions=captions or [], info=info, source=w.name, media=list(media or []))
+    proj, _, _, _, _, _, _, md, _ = editor._export_prep(w.name, proj, {"preset": "youtube"}, lambda *a: None)
+    total = editor.seq_total(proj)
+
+    def mix(mute):
+        pj = json.loads(json.dumps(proj))
+        for tr in pj["tracks"]:
+            if tr["id"] in mute:
+                tr["mute"] = True
+        tmp = Path(tempfile.mkdtemp(prefix="효과음 섞기 "))
+        try:
+            p, _ = editor._mix_audio(pj, md, 0.0, total, tmp, editor.valid_trans(pj), lambda x: None)
+            return np.array(np.memmap(p, np.float32, "r")).reshape(-1, 2).mean(axis=1)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return mix(()), mix(("A2", "A5")), mix(("A2", "A3", "A4", "A5")), proj
+
+
+class PlaceReviewTest(unittest.TestCase):
+    """D-379 (검토 고침): 꼭 넣을 소리가 소수점 찌꺼기·휙 꼬리 때문에 빠지던 것 · 컷 앞 창 · 크게 들리는 부분 · 소리 크기."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="효과음 자리 "))
+        self.p = mock.patch.object(editor, "ASSETS", self.tmp)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def place(self, B, words, pal="clean", level="보통"):
+        return msg.place_sfx(B, {"voicePk": -10.0}, level, words, msg.SFX_PALETTE[pal])[0]
+
+    def test_float_noise_word_start_keeps_every_tick(self):
+        """받아쓰기 시각 105.57999999999997 처럼 소수점 찌꺼기가 있어도 숫자마다 틱 — 예전: 딱 맞는 틈이 0.0005초 겹쳐 빠짐 (틱 186개 중 50개)."""
+        B = msg._Build("x.mp4", {"duration": 120.0}, "long")
+        B.clip(0.0, 120.0, main=True)
+        words = [(105.0, 105.3, "자,", 0), (105.57999999999997, 105.9, "하나,", 1), (106.4, 106.7, "둘,", 1), (107.2, 107.5, "셋!", 1)]
+        for w0, n in ((105.57999999999997, "1"), (106.4, "2"), (107.2, "3")):
+            t = B.title(n, w0, 0.8, {})
+            msg._sfx_at(B, t["start"], "틱", None, "count", title=t["id"], must=True, group="count:105.58")
+        placed = self.place(B, words)
+        self.assertEqual(len(placed), 3, [(c["name"], c["how"]) for c in placed])
+        for c in placed:   # 틱은 숫자 말 첫소리 바로 앞 · 낱말과 안 겹침
+            self.assertFalse([w for w in words if w[0] - 0.02 < c["hi"] - 1e-6 and c["lo"] < w[1] - 0.01 - 1e-6], c)
+        self.assertEqual((msg._ms_down(105.5395), msg._ms_up(105.3201), msg._ms_down(105.53999999999997)), (105.539, 105.321, 105.54))
+
+    def test_next_point_whoosh_at_the_cut_before_the_title(self):
+        """'세 번째 포인트'가 컷 바로 뒤에서 시작: 휙 봉우리를 컷에 (글자도 컷으로) — 예전: 글자 첫 장면(첫 낱말)에 맞추면 휙 꼬리가 낱말에 걸려
+        늦추거나 작은 소리만 봐서 빠짐 (S1 '포인트 ③' 20편 중 14편)."""
+        B = msg._Build("x.mp4", {"duration": 60.0}, "long")
+        B.clip(10.0, 15.0, main=True)   # 타임라인 0~5 (끝 2.4초는 말 없음)
+        B.clip(20.0, 30.0, main=True)   # 타임라인 5~15 · 컷 5.0
+        words = [(12.0, 12.6, "설명했어요.", 0), (20.12, 20.15, "세", 1), (20.15, 20.43, "번째", 1), (20.43, 21.1, "포인트.", 1), (21.3, 22.0, "고개를", 1)]
+        t = B.title("포인트 ③", 5.12, 2.2, {})
+        k = msg._sfx_at(B, 5.12, "휙", None, "situ", title=t["id"], must=True, mk="section")
+        B.event("situ", 5.12, "포인트 ③", "", refs={"titles": [t["id"]], "sfx": [k]})
+        placed = self.place(B, words, "variety")
+        self.assertEqual(len(placed), 1)
+        c = placed[0]
+        self.assertEqual((c["name"], c["soft"]), ("휙", False), c["how"])
+        self.assertAlmostEqual(c["hit"], 5.0, delta=0.01)
+        self.assertLessEqual(c["hi"], 5.12 - 0.02 + 1e-6)   # 크게 들리는 부분(최대 -12dB 까지)이 '세' 앞에서 끝남
+        self.assertAlmostEqual(t["start"], 5.0, delta=0.01)   # 글자도 컷으로 (끝은 그대로)
+        self.assertAlmostEqual(t["start"] + t["dur"], 7.32, delta=0.01)
+
+    def test_sound_only_window_reaches_back_across_the_cut(self):
+        """다음 포인트 소리만인 창은 컷 앞 조각의 말 없는 꼬리까지 (D-379 · 예전: 컷에서 잘려 S2 '두번째 동작은' 창 0.1초 · 18편 모두 빠짐)."""
+        B = msg._Build("x.mp4", {"duration": 60.0}, "long")
+        B.clip(10.0, 15.0, main=True)
+        B.clip(20.0, 30.0, main=True)
+        self.assertEqual(msg._tl_win(B, 20.0, 5.0, 19.4, 20.1), (5.0, 5.1))
+        self.assertEqual(msg._tl_win(B, 20.0, 5.0, 19.4, 20.1, back=True), (4.4, 5.1))
+        words = [(12.0, 14.3, "말했어요.", 0), (20.0, 20.5, "두번째", 1), (20.5, 21.0, "동작은", 1)]
+        k = msg._sfx_at(B, 5.0, "휙", None, "accent", win=msg._tl_win(B, 20.0, 5.0, 19.4, 20.1, back=True), must=True, mk="section")
+        B.event("sfx", 5.0, "휙", "", refs={"sfx": [k]})
+        placed = self.place(B, words, "variety")
+        self.assertEqual(len(placed), 1)
+        self.assertLess(placed[0]["hit"], 5.0 + 1e-6)
+        self.assertLessEqual(placed[0]["hi"], 5.0 - 0.02 + 1e-6)
+
+    def test_every_must_sound_placed_after_a_pause(self):
+        """꼭 넣을 소리 앞에 0.4초 넘는 쉼이 있으면 늘 들어감 (다음 포인트 · 성공 · 글자에 붙은 것 · 컷 없음)."""
+        for name, mk, pal in (("휙", "section", "variety"), ("레벨업", "success", "variety"), ("딩동", "success", "clean")):
+            B = msg._Build("x.mp4", {"duration": 60.0}, "long")
+            B.clip(0.0, 60.0, main=True)
+            words = [(8.0, 9.5, "그렇죠.", 0), (10.0, 10.4, "꽂혔다!", 1), (10.4, 11.5, "완벽해요.", 1)]
+            t = B.title("꽂혔다!", 10.0, 1.1, {})
+            msg._sfx_at(B, 10.0, name, None, "fx" if mk == "success" else "situ", title=t["id"], must=True, mk=mk)
+            placed = self.place(B, words, pal)
+            self.assertEqual(len(placed), 1, (name, mk))
+            self.assertFalse([w for w in words if w[0] < placed[0]["hi"] - 0.02 and w[1] > placed[0]["lo"] + 0.02] and not placed[0]["soft"], placed[0])
+
+    def test_loud_part_runs_to_minus_12db(self):
+        """크게 들리는 부분 = 최대보다 12dB 작아질 때까지 (예전 에너지 90%: 딩동은 그 뒤에도 -8dB · 휙은 봉우리 뒤 0.1초 동안 -10dB 안쪽 · D-379)."""
+        import numpy as np
+        for n in ("딩동", "휙", "짠", "레벨업"):
+            sh = sfxlib.shape(n, self.tmp / sfxlib.ensure_sfx(n, self.tmp))
+            x = read_wav(self.tmp / sfxlib.sfx_file_name(n)).mean(axis=1)
+            hop = int(sfxlib.SR * 0.005)
+            e = (x[:len(x) // hop * hop].reshape(-1, hop) ** 2).mean(axis=1) + 1e-18
+            db = 10 * np.log10(e)
+            after = db[int(round(msg._loud_part(0.0, sh)[1] / 0.005)):]
+            self.assertTrue(len(after) == 0 or after.max() < db.max() - 11.9, (n, sh))
+
+    def test_sustained_whistle_is_not_louder_than_impacts(self):
+        """호루라기(길게 울리는 높은 소리)는 귀 크기로도 맞춤 — 최대 크기만 맞추면 딩동·짠보다 8dB 넘게 크게 들림 (D-379)."""
+        sig = {"voicePk": -12.0}
+        loud = {}
+        for n in ("호루라기", "딩동", "짠", "휙", "레벨업", "띠로리"):
+            f = self.tmp / sfxlib.ensure_sfx(n, self.tmp)
+            ld = sfxlib.loud_db(f)
+            lv = msg._sfx_level(sig, n, "accent", sfxlib.peak_db(f), file_loud=ld)
+            loud[n] = lv + ld
+            self.assertLessEqual(loud[n], -12.0 - msg.SFX_GAP - msg.SFX_CREST + 0.11, n)
+        self.assertLessEqual(loud["호루라기"], max(loud["딩동"], loud["짠"]) + 0.5, loud)
+        f = self.tmp / sfxlib.sfx_file_name("딩동")   # 부딪히는 소리는 그대로 (최대 크기로 맞춘 값)
+        self.assertEqual(msg._sfx_level(sig, "딩동", "accent", sfxlib.peak_db(f), file_loud=sfxlib.loud_db(f)), msg._sfx_level(sig, "딩동", "accent", -3.0))
+
+
+class CacheReviewTest(unittest.TestCase):
+    """D-379: 예전 판이 만든 캐시는 원본 지문으로 가림 (5ms 틱은 cut_short 로 못 가렸음) · 예전 편집본 클립도 새 길이로."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="효과음 캐시 "))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_old_5ms_tick_cache_is_rebuilt(self):
+        fn = sfxlib.sfx_file_name("틱")
+        (self.tmp / fn).write_bytes(sfxlib._wav_bytes([[0.7, 0.7]] * int(0.005 * sfxlib.SR)))
+        self.assertFalse(sfxlib.cut_short(self.tmp / fn))   # (짐작으로는 못 가리는 예전 파일)
+        sfxlib.ensure_sfx("틱", self.tmp)
+        self.assertGreater(len(read_wav(self.tmp / fn)) / sfxlib.SR, 0.02)
+        book = json.loads((self.tmp / sfxlib.SRC_BOOK).read_text(encoding="utf-8"))
+        self.assertEqual(book["틱"], sfxlib._src_sha(sfxlib.SHIP / sfxlib.CATALOG["틱"][0]))
+        m0 = (self.tmp / fn).stat().st_mtime_ns
+        sfxlib.ensure_sfx("틱", self.tmp)   # 지문이 같으면 그대로
+        self.assertEqual((self.tmp / fn).stat().st_mtime_ns, m0)
+        (self.tmp / sfxlib.SRC_BOOK).write_text(json.dumps({"틱": "0000"}), encoding="utf-8")   # 원본이 바뀌면 다시
+        sfxlib.ensure_sfx("틱", self.tmp)
+        self.assertEqual(json.loads((self.tmp / sfxlib.SRC_BOOK).read_text(encoding="utf-8"))["틱"], book["틱"])
+        self.assertNotIn(Path(sfxlib.SRC_BOOK).suffix, editor.MEDIA_EXTS)   # (편집실 미디어 목록에 안 잡힘)
+
+    def test_old_edit_clips_grow_to_the_rebuilt_length(self):
+        """예전 편집본: 예전 캐시 길이(0.175초)로 끝나던 자동 효과음 클립 → 다시 만든 길이까지 (같은 트랙 다음 클립 앞까지 · 자른 클립은 그대로)."""
+        fn = sfxlib.sfx_file_name("레벨업2")
+        (self.tmp / fn).write_bytes(sfxlib._wav_bytes([[0.5, 0.5]] * int(0.175 * sfxlib.SR)))
+        media = [{"id": "m1", "kind": "audio", "src": "assets", "file": fn, "dur": 0.175}]
+        items = [{"id": "a", "track": "A2", "media": "m1", "start": 1.0, "in": 0.0, "out": 0.175, "speed": 1.0},
+                 {"id": "b", "track": "A2", "media": "m1", "start": 5.0, "in": 0.0, "out": 0.1, "speed": 1.0},
+                 {"id": "c", "track": "A5", "media": "m1", "start": 8.0, "in": 0.0, "out": 0.175, "speed": 1.0},
+                 {"id": "d", "track": "A5", "media": "m1", "start": 8.2, "in": 0.0, "out": 0.175, "speed": 1.0}]
+        other = [{"id": "e", "track": "A2", "media": "m1", "start": 3.0, "in": 0.0, "out": 0.175, "speed": 1.0}]   # 같은 프로젝트의 다른 편집본
+        with mock.patch.object(editor, "ASSETS", self.tmp):
+            n = editor.refresh_sfx_lengths([items, other], media)
+        new = len(read_wav(self.tmp / fn)) / sfxlib.SR
+        self.assertGreater(new, 0.3)
+        self.assertEqual(n, 4)
+        self.assertAlmostEqual(items[0]["out"], new, places=3)
+        self.assertAlmostEqual(other[0]["out"], new, places=3)
+        self.assertEqual(items[1]["out"], 0.1)   # 자른 클립
+        self.assertAlmostEqual(items[2]["out"], 0.2, places=3)   # 같은 트랙 다음 클립 앞까지
+        self.assertAlmostEqual(media[0]["dur"], new, places=3)
+        with mock.patch.object(editor, "ASSETS", self.tmp):
+            self.assertEqual(editor.refresh_sfx_lengths([items, other], media), 0)   # 두 번 해도 같음
+
+
+    def test_opening_an_old_project_grows_its_clips(self):
+        """예전 프로젝트를 열 때(migrate_project) 캐시를 다시 만들고 모든 편집본의 예전 길이 클립을 늘림."""
+        fn = sfxlib.sfx_file_name("딩동")
+        (self.tmp / fn).write_bytes(sfxlib._wav_bytes([[0.5, 0.5]] * int(0.1 * sfxlib.SR)))
+        proj = {"source": "x.mp4", "info": {"duration": 30.0, "width": 1920, "height": 1080, "fps": 30.0}, "speech": [],
+                "media": [{"id": "main", "kind": "video", "src": "videos", "file": "x.mp4", "dur": 30.0, "w": 1920, "h": 1080, "fps": 30.0, "audio": True},
+                          {"id": "m1", "kind": "audio", "src": "assets", "file": fn, "dur": 0.1}],
+                "sequences": [{"id": f"s{k}", "name": f"편집본 {k}", "auto": "user", "format": "long", "v": 2, "items": [
+                    {"id": f"a{k}", "track": "A2", "media": "m1", "start": 2.0, "in": 0.0, "out": 0.1, "speed": 1.0}]} for k in (1, 2)]}
+        with mock.patch.object(editor, "ASSETS", self.tmp), mock.patch.object(editor, "_has_audio", lambda name: True):
+            editor.migrate_project("x.mp4", proj)
+        new = len(read_wav(self.tmp / fn)) / sfxlib.SR
+        self.assertGreater(new, 0.2)
+        self.assertEqual([s["items"][0]["out"] for s in proj["sequences"]], [round(new, 4)] * 2)
+
+
+class MomentsReviewTest(unittest.TestCase):
+    """D-379: 군말 뒤 다음 포인트 · 시작 신호 맥락 · 한 반응 묶음은 성공 하나 · 실수 뒤 확대에 휙 없음."""
+    SIG = MomentsTest.SIG
+
+    def test_next_point_after_junk_lead(self):
+        """'자, 첫번째 포인트.'의 '자,'가 정리할 군말이어도 다음 포인트 (시각은 '첫번째') — 예전: 순간째 빠짐 (S1 36편 모두)."""
+        segs = [_seg(24.58, 26.0, "자, 첫번째 포인트.")]
+        w0 = segs[0]["words"][1]["s"]
+        sig = dict(self.SIG, junk=[[24.5, w0 - 0.02]])
+        sec = [m for m in msg.moments(sig, segs) if m["kind"] == "section"]
+        self.assertEqual(len(sec), 1, msg.moments(sig, segs))
+        self.assertAlmostEqual(sec[0]["t"], w0, delta=0.01)
+        self.assertEqual(sec[0]["a"], 24.58)
+
+    def test_start_cue_needs_context(self):
+        """'시작'·'가자'로 끝나는 보통 말에는 호루라기 없음 — 준비·경고·숫자 말이 앞에 있거나 분명한 시작 말 뒤 3초 안에 공 소리일 때만."""
+        def cues(lines, onsets=()):
+            segs = [_seg(2.0 + 3 * k, 4.0 + 3 * k, t) for k, t in enumerate(lines)]
+            return [m for m in msg.moments(dict(self.SIG, onsets=list(onsets)), segs) if m["kind"] == "cue"]
+        for line in ("오늘은 패스부터 시작.", "오늘 수업 시작", "천천히 가자.", "다음 영상에서 또 만나요. 가자!"):
+            self.assertFalse(cues([line], onsets=[5.0]), line)
+        self.assertEqual(len(cues(["준비, 시작!"])), 1)
+        self.assertEqual(len(cues(["그리고 뒤에 말하면", "혼난다. 시작!"])), 1)
+        self.assertEqual(len(cues(["자, 시작!"], onsets=[5.0])), 1)
+        self.assertFalse(cues(["자, 시작!"]))
+
+    def test_one_reaction_group_is_one_success(self):
+        """'들어갔어요.' + '나이스.' (한 반응 묶음 · 같은 react0) → 성공 하나 (예전: 같은 골에 레벨업2·레벨업 두 번)."""
+        segs = [_seg(5.0, 5.8, "들어갔어요."), _seg(6.2, 6.8, "나이스.")]
+        win = [m for m in msg.moments(dict(self.SIG, onsets=[4.0]), segs) if m["kind"] == "success"]
+        self.assertEqual(len(win), 1, win)
+        self.assertEqual((win[0]["react0"], win[0]["b"]), (5.0, 6.76))   # (두 줄 끝까지)
+
+    def test_zoom_whoosh_needs_laugh_and_no_recent_fail(self):
+        self.assertEqual(msg._sfx_key({"kind": "punch", "src": "reaction"}, "보통"), (None, False))   # 얼굴만 (웃음소리 없음)
+        self.assertEqual(msg._sfx_key({"kind": "punch", "src": "reaction", "laugh": 3.0}, "보통"), ("zoom", False))
+        self.assertEqual(msg._sfx_key({"kind": "punch", "src": "reaction", "laugh": 3.0, "nosfx": True}, "보통"), (None, False))
+        moms = [{"kind": "fail", "a": 9.5, "b": 10.5, "t": 10.0, "score": 1.0, "text": "아, 아깝다.", "why": ""},
+                {"kind": "reaction", "a": 10.8, "b": 12.3, "t": 11.3, "score": 1.0, "text": "", "why": ""}]
+        sig = dict(self.SIG, tags={"laugh": [0.0] * 22 + [0.5, 0.5, 0.5] + [0.0] * 40})
+        st = msg.resolve({"kind": "preset", "name": "예능 MSG형"})
+        picked, _ = msg.plan_events(sig, moms, st, "듬뿍", "long", 7, [{"in": 0.0, "out": 30.0}], [(9.6, 10.4, "아깝다.", 0)])
+        punch = [c for c in picked if c["kind"] == "punch" and c["src"] == "reaction"]
+        self.assertTrue(punch)
+        self.assertFalse([c for c in punch if c.get("sfx")], punch)
+
+    def test_hook_said_point_drops_its_sound_too(self):
+        """쇼츠 첫머리가 이미 말한 포인트의 상황 자막을 빼면 그 휙도 뺌 (예전: 훅 길이로 정해진 2.6초에 같은 포인트 휙 · 쇼츠 25/126)."""
+        B = msg._Build("x.mp4", {"duration": 30.0}, "shorts")
+        B.clip(0.0, 20.0, main=True)
+        hk = B.title("두 번째 포인트는 디딤발!", 0.0, 2.5, {})
+        t = B.title("포인트 ②", msg.SHORTS_HOOK_SEC + 0.1, 2.0, {})
+        k = msg._sfx_at(B, t["start"], "휙", None, "situ", title=t["id"], must=True, mk="section")
+        B.event("situ", t["start"], "포인트 ②", "", refs={"titles": [t["id"]], "sfx": [k]})
+        self.assertEqual(msg._drop_said_order(B, hk, None), 1)
+        self.assertIsNone(B.sfx[k])
+        self.assertFalse([e for e in B.events if e["kind"] in ("situ", "sfx")])
+
+
+class LearnedRefSfxTest(unittest.TestCase, _Placed):
+    """D-377 · D-379: 참고 영상 효과음 자리(sfxAt)가 있는 배운 스타일로 만든 편집본 — 컷에 붙던 스타일은 깔끔한 소리 · 더 넣는 소리(강조)는
+    안 붙이고 뜻 소리(다음 포인트·성공·끝)는 그대로 · 글자·확대·웃음에 붙던 스타일은 예능 소리 (농담 뒤 바둠츠)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import style
+        cls.w = F.MsgWork()
+        cls.words = msg._words(editor._segments_of(cls.w.name))
+        prof = json.loads((Path(__file__).parent / "fixtures" / "style_v17.json").read_text(encoding="utf-8"))
+        for nm, at in (("컷 효과음 스타일", {"n": 10, "caption": 0, "cut": 9, "zoom": 0, "laugh": 0, "other": 1}),
+                       ("글자 효과음 스타일", {"n": 10, "caption": 6, "cut": 1, "zoom": 2, "laugh": 1, "other": 0})):
+            p = dict(prof, plan={"fun": {"items": [{"key": "punch_zoom", "perMin": 4.0}], "sfxAt": at}, "captions": {"style": "variety", "perMin": {"emph": 10.0}}})
+            (style.STYLES / f"{nm}.json").write_text(json.dumps(p, ensure_ascii=False), encoding="utf-8")
+        cls.res = msg.build_variants(cls.w.name, [{"kind": "style", "name": n} for n in ("컷 효과음 스타일", "글자 효과음 스타일")], "보통", ("long",),
+                                     lambda m: None)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.w.close()
+
+    def test_palette_and_places_follow_the_reference(self):
+        by = {q["msg"]["style"]["label"]: q for q in self.res["sequences"]}
+        self.assertEqual(set(by), {"컷 효과음 스타일", "글자 효과음 스타일"})
+        for lab, q in by.items():
+            rows = self.check_seq(q, self.words)
+            whys = " | ".join(r["why"] for r in rows)
+            for want in ("다음 순서로 넘어감", "성공 반응", "엔드"):   # 꼭 넣을 뜻 소리는 자리 비율과 상관없이
+                self.assertIn(want, whys, (lab, whys))
+            if lab == "컷 효과음 스타일":
+                self.assertEqual(q["msg"]["style"]["sfx"], "clean")
+                self.assertFalse([r for r in rows if "강조 글자" in r["why"] or r["name"] in ("바둠츠", "뽁")], whys)
+            else:
+                self.assertEqual(q["msg"]["style"]["sfx"], "variety")
+                self.assertTrue([r for r in rows if r["name"] == "바둠츠"], whys)
 
 OWNER = {"NAME": "20261015_OWNER_세 마디 [시험].mp4", "DUR": 27.0,
          "LINES": [(0.3, 2.0, "감독님, 요 세 마디만 하면 돼."), (2.2, 3.0, "다른 말 하지 마,"), (3.1, 4.4, "순두시지 마, 감독님."), (4.6, 5.6, "그리고 뒤에 말하면"),
@@ -372,6 +675,19 @@ class OwnerShortTest(unittest.TestCase, _Placed):
                 if fmt == "shorts":
                     self.assertTrue(any("쇼츠 첫 장면" in x["why"] for x in rows))
                     self.assertGreaterEqual(len(rows) / (editor.seq_total(q) / 60.0), msg.SFX_BAND["shorts"]["보통"][0], [x["why"] for x in rows])
+
+    def test_whistle_is_not_louder_than_speech(self):
+        """'시작!' 호루라기의 귀 크기(0.4초 K 무게)가 말 낱말 귀 크기 중앙값보다 크지 않음 — 예전: 최대 크기로만 맞춰 가장 큰 말보다 7dB 크게 (D-379)."""
+        import numpy as np
+        r = self.res["shorts"]
+        on, off, voice, proj = _mix_on_off(self.w, r["sequences"][0], r.get("captions"), r.get("media"))
+        wh = next(x for x in self.sfx_rows(proj) if x["name"] == "호루라기")
+        a = int(wh["start"] * editor.SR)
+        fx = sfxlib.st_loud_db(on[a:a + int(0.38 * editor.SR)] - off[a:a + int(0.38 * editor.SR)], editor.SR)
+        words = [10 * np.log10(float(np.mean(sfxlib.k_weight(voice[int(s0 * editor.SR):int(e0 * editor.SR)], editor.SR) ** 2)) + 1e-12)
+                 for s0, e0, _ in _talk_tl(proj, self.words) if e0 - s0 >= 0.15]
+        self.assertGreaterEqual(len(words), 5)
+        self.assertLessEqual(fx, float(np.median(words)), (fx, np.median(words)))
 
     def test_reasons_are_saved_on_clips(self):
         """편집실 효과음 클립에 넣은 이유가 그대로 저장됨 (클립 위 이름·마우스 올리면 보임 · D-378)."""

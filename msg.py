@@ -48,6 +48,10 @@ SUCCESS = re.compile(r"성공|됐다|됐어요|들어갔|골인|나이스|완벽
 WEAK_WIN = re.compile(r"좋아요|좋습니다|완벽")   # 설명하다가도 쓰는 칭찬 — 바로 앞 공 소리 + 반응으로 시작하는 말일 때만 성공 (D-376)
 KICK_REACT = 3.0     # 약한 칭찬('좋아요')이 성공 반응이려면 반응 말 시작 이만큼(초) 안 앞에 실제 공 소리 (D-376)
 CUE = re.compile(r"(?:^|[\s,.!?…])(?:시작|출발|스타트|레디 ?고|고고|가자|갑니다)[!.~…]*$")   # 시작 신호 말 ('혼난다. 시작!' · '준비, 시작!' · D-373)
+CUE_STRONG = re.compile(r"시작|출발|스타트|레디")   # 분명한 시작 말 (가자·갑니다·고고는 앞에 준비·경고 말이 있어야)
+CUE_CTX = re.compile(r"준비|레디|하면|혼난|카운트|휘슬|호루라기|하나[,\s]+둘|둘[,\s]+셋|(?:^|\s)셋[,.!]")   # 시작 신호 앞 준비·경고·숫자 세기 말
+CUE_FREE = re.compile(r"(?:준비|레디|하나|둘|셋|자|그럼|이제)[,.!~]*")   # 신호 구절 낱말 수에 안 세는 말 ('준비, 시작!' · '자 시작!')
+CUE_PLAY = 3.0   # 분명한 시작 말 뒤 이만큼(초) 안에 공 소리·시범이 이어지면 시작 신호 (앞에 준비 말이 없어도)
 FAIL = re.compile(r"아깝|놓쳤|실수|안 ?돼|아이고|아이구|빗나|안 ?들어|아쉽|틀렸|망했")
 SURPRISE = re.compile(r"(?:^|[\s,.!?])(?:와|우와|와우|대박|헐|미쳤|오오+|어\?!|어머)(?:[\s,.!?~]|$)")
 JOKE = re.compile(r"농담|ㅋㅋ|웃기|장난(?:이|입|이에|이고)|제가 원래|저도 .{0,12}못|저도 몰라")
@@ -57,6 +61,7 @@ LAUGH_NOISE = 0.06   # 이 웃음·환호 점수 안의 '순간 큰 소리'는 �
 EMPH_MORE = ("무조건", "절대", "생명", "핵심", "중요", "차이", "비밀", "비결", "꼭", "달라", "완벽", "정확", "제일", "가장")  # 앞의 것부터
 COUNT = re.compile(r"하나[,\s]+둘[,\s]+셋(?![가-힣])")   # 실제로 세는 말 ('하나, 둘, 셋!') · '셋에 맞춰서'처럼 예고하는 말은 아님
 # (앞의 '자'·'그리고'·'그럼'·'이제'는 건너뜀 — '그리고 마지막으로 …'가 다음 포인트인데 못 찾던 것 · editor.SECTION 과 같게 · D-373)
+SECTION_LEAD = re.compile(r"(?:자|그리고|그럼|이제|어|음|아|그|네)[,.…\s]*")   # 다음 포인트 말 앞 군말 낱말 (순간 시각은 그 뒤 · D-379)
 SECTION = re.compile(r"^(?:(?:자|그리고|그럼|이제)[,\s]*)?(?:(?:마지막,?\s*)?(?:첫|두|세|네|다섯|여섯|일곱) ?번째|다음은|다음으로|이번엔|이번에는|그 ?다음|마지막으로|자 이제)")
 CLOSING = re.compile(r"오늘은 여기까지|오늘 영상은 여기|감사합니다|구독|다음 시간|다음 영상")
 DEMO_W = re.compile(r"보여 ?드릴|시범|한 ?번 (?:해 ?)?볼게요|다시 (?:한 ?번 )?해 ?볼게요|직접 해 ?볼게요|해 ?보겠습니다")
@@ -1257,6 +1262,29 @@ def _recap_cards(m, words):
     return out
 
 
+def _cue_ok(lines, k, acts=()):
+    """줄 k 의 시작 신호 말(CUE)이 정말 시작 신호인지 (D-373 · D-379): 신호 낱말이 짧은 마지막 구절(쉼표·마침표 뒤 · 준비·숫자 말 빼고 한
+    낱말 더까지)에 있고, 그 줄이나 바로 앞 줄(2초 안)에 준비·경고·숫자 세기 말('준비'·'하면 … 혼난다'·'하나 둘')이 있거나, 분명한 시작 말
+    ('시작'·'출발')이면 CUE_PLAY 초 안에 공 소리·시범(acts · 원본 시각)이 이어질 때만. 예전: CUE 만 봐서 '오늘은 패스부터 시작.'·'천천히 가자.'·
+    '다음 영상에서 또 만나요. 가자!'에도 꼭 넣을 호루라기."""
+    txt = str(lines[k].get("text") or "").strip()
+    m = CUE.search(txt)
+    if not m:
+        return False
+    head = txt[:m.start() + 1] if m.group(0)[:1] in ",.!?…" else txt[:m.start()]
+    last = re.split(r"[,.!?…]", head)[-1]
+    if len([w for w in last.split() if not CUE_FREE.fullmatch(w)]) > 1:
+        return False
+    a = float(lines[k]["start"])
+    ctx = head + m.group(0)   # ('레디 고!'는 그 자체가 준비 말)
+    if k > 0 and a - float(lines[k - 1]["end"]) <= 2.0:
+        ctx = str(lines[k - 1].get("text") or "") + " " + ctx
+    if CUE_CTX.search(ctx):
+        return True
+    end = float(lines[k]["end"])
+    return bool(CUE_STRONG.search(m.group(0))) and any(end - 0.2 <= float(x) <= end + CUE_PLAY for x in acts)
+
+
 def moments(sig, segs=None):
     """재미 순간 목록 [{kind, a, b, t, score(0~1), text, why}] — 정리할 곳(NG·추임새) 안의 것은 뺌."""
     segs = lines_of(segs if segs is not None else editor._segments_of(sig["name"]))
@@ -1367,7 +1395,9 @@ def moments(sig, segs=None):
             t_c = _word_at(words, r"^하나", k)
             add("count", a, c_b, a if t_c is None else t_c, 1.0, c_txt, "숫자 세기")
         if SECTION.search(txt):
-            add("section", a, b, a, 1.0, txt, "다음 순서로 넘어감")
+            # 순간 시각은 군말('자,'·'그리고') 뒤 첫 낱말 — 줄 시작이면 '자,'가 정리할 군말 안이라 순간째 빠졌음 (S1 '자, 첫 번째 포인트' 0/36 · D-379)
+            t_s = next((w0 for w0, _, w, j in words if j == k and not SECTION_LEAD.fullmatch(w.strip())), a)
+            add("section", a, b, t_s, 1.0, txt, "다음 순서로 넘어감")
         tt = TOTAL.search(txt)
         if tt and a < dur * 0.3:  # 챌린지 전체 횟수 ('다섯 번 차서')
             add("total", a, b, a, 1.0, tt[1], "챌린지 횟수")
@@ -1404,7 +1434,7 @@ def moments(sig, segs=None):
             if 0 <= la - b <= 1.5:
                 add("punchline", a, b, b - 0.1, 3.0, txt, "말 끝에 웃음소리", laugh=la)
                 break
-        if CUE.search(txt):  # 시작 신호 ('혼난다. 시작!') — 신호 말 끝에 호루라기 (D-373)
+        if CUE.search(txt) and _cue_ok(segs, k, onsets + [p["a"] for p in out if p["kind"] == "play"]):  # 시작 신호 ('혼난다. 시작!') — 신호 말 끝에 호루라기 (D-373)
             w_end = max([e for s0, e, w, j in words if j == k] or [b])
             add("cue", a, b, w_end, 1.0, txt, "시작 신호 말")
     # 훅 문장: 앞 30% 안의 첫 질문, 없으면 강한 낱말이 든 말
@@ -1425,6 +1455,10 @@ def moments(sig, segs=None):
     out.sort(key=lambda m: (m["kind"], m["t"]))
     dedup = []
     for m in out:
+        if m["kind"] == "success" and dedup and dedup[-1]["kind"] == "success" and dedup[-1].get("react0") == m.get("react0"):
+            # 한 반응 묶음('들어갔어요.' + '나이스.')은 성공 하나 — 예전: 줄마다 성공 소리 둘(같은 골에 레벨업2·레벨업) · D-379
+            dedup[-1]["b"] = max(dedup[-1]["b"], m["b"])
+            continue
         if dedup and dedup[-1]["kind"] == m["kind"] and abs(dedup[-1]["t"] - m["t"]) < {"closing": 6.0, "section": 3.0, "question": 3.0}.get(m["kind"], 1.0):
             if m["score"] > dedup[-1]["score"]:
                 dedup[-1] = m
@@ -1567,15 +1601,15 @@ SFX_AT_MIN = 3   # 참고 영상 효과음이 이만큼 넘게 잡혀야 자리 
 
 def learned_sound(pl, fun_pm, cap_style):
     """배운 스타일의 효과음 성격 (D-377) → (팔레트, 자리 비율 {caption, cut, zoom, laugh} | None).
-    참고 영상 효과음이 글자·확대·웃음에 붙으면 예능 소리(variety) · 컷에 붙거나 거의 없으면 깔끔한 소리(clean) —
-    예전: 늘 예능 소리 · 효과음 양만 배움 (효과음이 없는 참고 영상도 무게 0.3 으로 예능 소리)."""
+    참고 영상 효과음이 글자·확대·웃음에 붙으면 예능 소리(variety) · 컷에 붙으면 깔끔한 소리(clean) · 효과음을 못 찾았으면 자막 성격
+    (예능·섞인 자막 → 예능 소리) — 예전: 늘 예능 소리 · 효과음 양만 배움. fun_pm: 참고 영상 재미 요소 1분 개수 (지금은 안 봄 · 부르는 쪽 그대로)."""
     at = (pl.get("fun") or {}).get("sfxAt") if isinstance(pl, dict) else None
     if isinstance(at, dict) and int(at.get("n") or 0) >= SFX_AT_MIN:
         n = float(at["n"])
         sh = {k: round(int(at.get(k) or 0) / n, 2) for k in ("caption", "cut", "zoom", "laugh")}
         return ("variety" if sh["caption"] + sh["zoom"] + sh["laugh"] >= 0.4 else "clean"), sh
-    if float(fun_pm.get("sfx") or 0) <= 0:   # 참고 영상에 효과음이 거의 없음 → 깔끔한 소리로 뜻 소리(제목·다음 포인트·성공·끝)만
-        return "clean", None
+    # 참고 영상에서 효과음을 못 찾았거나 자리를 셀 만큼 없으면 자막 성격을 따름 (예능 자막·쾅 확대가 많은 스타일은 예능 소리 · D-379 —
+    # 예전: 효과음 양이 0 이면 자막을 보기 전에 깔끔한 소리 → 도블락 스타일(예능 자막 1분 56개) 30편이 모두 바둠츠·레벨업·뻥을 잃음)
     return ("variety" if cap_style in ("variety", "mixed") else "clean"), None
 
 
@@ -2256,7 +2290,9 @@ def _keep_sound_only(B, e, why):
         x = B.sfx[k]
         tl = float(x[0])
         src = B.tl_to_src(tl)
-        win = _tl_win(B, src, tl, src - 0.3, src + 0.6) if src is not None else (round(tl - 0.3, 3), round(tl + 0.6, 3))
+        win = _tl_win(B, src, tl, src - 0.3, src + 0.6, back=_meta(x).get("mk") == "section") if src is not None else (round(tl - 0.3, 3), round(tl + 0.6, 3))
+        if _meta(x).get("lead") is not None and win[0] > _meta(x)["lead"] - 0.4:   # 다음 포인트: 남은 군말('자,') 앞 쉼까지 (D-379)
+            win = (round(float(_meta(x)["lead"]) - 0.4, 3), win[1])
         B.sfx[k] = (tl,) + tuple(x[1:4]) + (dict(_meta(x), title=None, win=None if _meta(x).get("group") else win,
                                                  why=f"{_meta(x).get('why') or ''} · 글자 없이 소리만"),)
     e.update(kind="sfx", text=B.sfx[snd[0]][1], why=f"{e.get('why') or ''} · 소리만 ({why})", refs={"sfx": snd}, accent=True,
@@ -2264,8 +2300,8 @@ def _keep_sound_only(B, e, why):
     return True
 
 
-def _drop(B, title_ids=(), event_ids=()):
-    """글자·사건 빼기 (그 사건의 효과음·확대도 함께)."""
+def _drop(B, title_ids=(), event_ids=(), keep_sound=True):
+    """글자·사건 빼기 (그 사건의 효과음·확대도 함께 · keep_sound 면 꼭 넣을 뜻 소리는 소리만 남김 · D-375)."""
     title_ids, event_ids = set(title_ids), set(event_ids)
     by = {it["id"]: it for it in B.items}
     keep = []
@@ -2276,7 +2312,7 @@ def _drop(B, title_ids=(), event_ids=()):
         if e["id"] in event_ids or (e["kind"] in TEXT_KINDS and "titles" in r and not r["titles"]):
             if e["kind"] in TEXT_KINDS:
                 old_titles = set(r.get("titles") or [])
-                if _keep_sound_only(B, e, "글자를 뺌"):   # 꼭 넣을 뜻 소리는 글자를 빼도 소리만 남김 (D-375)
+                if keep_sound and _keep_sound_only(B, e, "글자를 뺌"):   # 꼭 넣을 뜻 소리는 글자를 빼도 소리만 남김 (D-375)
                     title_ids |= old_titles
                     keep.append(e)
                     continue
@@ -2823,11 +2859,12 @@ def _sfx_key(c, intensity):
         return "count", intensity != "담백"   # 담백: 양 안에서 (첫 숫자에만 · _compile_once)
     if k == "accent":   # 소리만 (plan_events 가 더한 것 · 순간 종류 그대로)
         return {"success": "success", "punchline": "punchline", "section": "section", "cue": "cue", "count": "count"}.get(c["src"]), True
-    if k == "punch" and (c["src"] == "reaction" or (c["src"] == "punchline" and c.get("laugh") is not None)):
-        return "zoom", False   # 웃음·반응 순간의 쾅 확대만 (말하는 중 강조 확대·오래 멈춘 곳 확대에는 소리 없음 · D-375)
+    if k == "punch" and c["src"] in ("reaction", "punchline") and c.get("laugh") is not None and not c.get("nosfx"):
+        return "zoom", False   # 웃음소리가 잡힌 웃음·반응 순간의 쾅 확대만 (말하는 중 강조 확대·오래 멈춘 곳 확대·실수 뒤 얼굴에는 소리 없음 · D-375 · D-379)
     return None, False
 
 
+ZOOM_FAIL_CLEAR = 3.0   # 실수 순간 뒤 이만큼(초) 안의 반응 확대에는 휙을 안 붙임 (D-379)
 OPT_AT = {"emphasis": ("caption",), "surprise": ("caption",), "kick": ("caption", "cut"), "zoom": ("zoom", "laugh")}   # 더 넣는 소리 → 참고 영상의 자리
 OPT_AT_MIN = 0.1   # 배운 스타일에서 그 자리 효과음 비율이 이보다 적으면 더 넣는 소리를 안 붙임 (D-377)
 
@@ -2850,8 +2887,9 @@ def _moment_slot(m, words, kept_at):
     elif m["kind"] == "punchline":
         la = float(m["laugh"]) if m.get("laugh") is not None else b + 0.3
         t, lo, hi = b + 0.1, b + 0.05, max(b + 0.3, la + 0.1)
-    elif m["kind"] == "section":
-        t, lo, hi = a - 0.25, a - 0.6, a + 0.1
+    elif m["kind"] == "section":   # (m["t"] = 군말 뒤 첫 낱말 · 군말('자,')이 편집본에 남았으면 그 앞 · D-379)
+        ts = float(m["t"])
+        t, lo, hi = (a - 0.25 if a < ts - 0.01 and kept_at(a - 0.25) else ts - 0.25), min(a, ts) - 0.6, ts + 0.1
     elif m["kind"] == "count":
         t, lo, hi = float(m["t"]), float(m["t"]) - 0.1, float(m["t"]) + 3.0
     else:   # cue
@@ -2966,6 +3004,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
 
     fails = [m["t"] for m in moms if m["kind"] == "fail"]
     wins = [m["t"] for m in moms if m["kind"] == "success"]
+    laughs = _spans((sig.get("tags") or {}).get("laugh"), sig.get("tagStep", 0.48), LAUGH_JOKE)
     for m in moms:
         k, sc = m["kind"], m["score"]
         txt = m.get("text") or ""
@@ -2973,7 +3012,7 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
         if k == "emphasis":
             cand("emphasis", m, 2.0 + sc, text=m["text"] or None, dur=1.6)
         elif k == "section" or (k == "demo_call" and any(0.0 <= p["a"] - m["b"] <= 8.0 for p in plays)):  # 시범 예고는 곧 시범이 이어질 때만
-            cand("situ", m, 1.6 + sc, text=_situ_text(m, near_words(m["t"], 30.0)), dur=2.2)
+            cand("situ", m, 1.6 + sc, text=_situ_text(m, near_words(m["t"], 30.0)), dur=2.2, lead=m["a"] if m["a"] < m["t"] - 0.01 else None)
         elif k == "count" and re.search(r"하나[,\s]+둘", txt):
             cand("count", m, 1.5, text="하나 둘 셋", dur=0.7)
         elif k == "punchline":
@@ -3000,7 +3039,10 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
             cand("fx", m, 1.3 + sc, text=ai_txt(m, "fx") or pick(FX_TEXTS["surprise"], txt), dur=1.0, look="surprise")
             cand("shake", m, 1.0 + sc, dur=0.35)
         elif k == "reaction":
-            cand("punch", m, 1.5 + sc, dur=2.0, t=m["a"])
+            # 확대 휙은 웃음소리가 함께 잡힌 반응에만 · 실수 바로 뒤(3초 안)의 얼굴은 웃음이 아니라 아쉬움 (얼굴만 보고 '웃는 얼굴 쾅 확대' 휙 →
+            # '아, 아깝다.' 뒤 휙이 다음 말을 가림 · 판정에서 예전이 나았던 단 두 편 · D-379)
+            la = next((x for x, y in laughs if x - 0.5 <= float(m["b"]) and y + 0.5 >= float(m["a"])), None)
+            cand("punch", m, 1.5 + sc, dur=2.0, t=m["a"], laugh=la, nosfx=any(0.0 <= float(m["t"]) - f <= ZOOM_FAIL_CLEAR for f in fails))
         elif k == "question":
             cand("inner", m, 1.0 + sc, text=ai_txt(m, "inner") or pick(INNER_TEXTS["question"]), dur=1.5, t=m["b"] + 0.1)
         elif k == "aside":  # 딴소리·여담 ('물 좀 마시고 할게요' → '(물 타임)') · 클로드가 쓴 글이 있으면 그것
@@ -3138,8 +3180,8 @@ def plan_events(sig, moms, st, intensity, fmt, seed, kept, words, knobs=None, av
         name = pal.get(key) if key else None
         if not name or (mild and name not in CLEAN_ONLY):
             continue
-        if not must and at and sum(float(at.get(x) or 0) for x in OPT_AT.get(key, ())) < OPT_AT_MIN:
-            continue
+        if not must and at and key in OPT_AT and sum(float(at.get(x) or 0) for x in OPT_AT[key]) < OPT_AT_MIN:
+            continue   # (OPT_AT 에 없는 뜻 소리(실수·농담·다음 포인트·숫자)는 자리 비율과 상관없이 · 예전: 없으면 0 이라 늘 빠짐 · D-379)
         if not must:
             if sfx_budget <= 0:
                 continue
@@ -3342,11 +3384,17 @@ def _meta(x):
     return x[4] if x and len(x) > 4 and isinstance(x[4], dict) else {}
 
 
-def _tl_win(B, src_t, tl, lo, hi):
-    """원본 시각 창 (lo, hi) → 타임라인 창 — tl 이 든 본편 조각 안으로 (컷을 넘어 다른 장면으로 가지 않게)."""
+def _tl_win(B, src_t, tl, lo, hi, back=False):
+    """원본 시각 창 (lo, hi) → 타임라인 창 — tl 이 든 본편 조각 안으로 (컷을 넘어 다른 장면으로 가지 않게).
+    back: 다음 포인트 소리 — 조각이 컷으로 시작하면 바로 앞 조각의 끝(말이 쉬는 꼬리)까지 앞으로 (컷에서 넘어가는 휙 · 예전: 컷에서 잘려
+    S2 '두번째 동작은' 창 37.98~38.08 · 18편 모두 빠짐 · D-379)."""
     it = next((x for x in B.main if float(x["start"]) - 1e-6 <= tl < editor.i_end(x)), None)
     a0, a1 = (float(it["start"]), editor.i_end(it)) if it is not None else (tl - 0.5, tl + 0.5)
     sp = editor.i_sp(it) if it is not None else 1.0
+    if back and it is not None:
+        prev = next((x for x in B.main if abs(editor.i_end(x) - a0) < 0.02 and x is not it and abs(editor.i_sp(x) - 1.0) < 1e-3), None)
+        if prev is not None:
+            a0 = float(prev["start"])
     return (round(max(a0, tl + (float(lo) - float(src_t)) / sp), 3), round(min(a1, tl + (float(hi) - float(src_t)) / sp), 3))
 
 
@@ -3484,16 +3532,20 @@ SFX_GAP = 3.3        # 효과음 최대 크기 = 보정한 말소리 최대 크�
 SFX_SOFT = 4.3       # 글자에 붙는 작은 소리·짧은 음악은 조금 더 작게
 SFX_FLOOR = -60.0    # 효과음·배경음악 레벨 아래 끝 (예전 -30 은 말이 아주 작은 원본(멀리 둔 카메라)에서 효과음이 말보다 커짐 · 소리 크기 맞추기가 전체를 다시 키움)
 QUIET_VOICE = -36.0  # 보정한 말소리 최대가 이보다 작으면 알림 (마이크 없이 멀리서 찍은 영상)
+SFX_CREST = 10.0     # 효과음 귀 크기(0.4초 K 무게)는 목표 최대 크기보다 이만큼 작게까지 (부딪히는 소리 딩동·짠·휙·레벨업은 9.8~13dB · 호루라기 2dB · D-379)
 SFX_DUCK = 9.0       # 효과음 꼬리가 말과 겹치면 이만큼 줄임 (말이 가려지지 않게)
 SFX_DUCK_MIN = 0.8   # 이보다 긴 효과음만 꼬리를 줄임 (앞 0.5초는 그대로)
 STINGS = ("짠", "짠2", "짠3", "경쾌 짧은 음악", "경쾌 짧은 음악2", "경쾌 짧은 음악3", "맑은 짧은 음악", "맑은 짧은 음악2", "맑은 짧은 음악3",
           "라이저", "두구두구")
 
 
-def _sfx_level(sig, name, kind, file_pk=None, gap=None):
+def _sfx_level(sig, name, kind, file_pk=None, gap=None, file_loud=None):
     """효과음 레벨(dB) = 목표 최대 크기(말 최대 크기 - 3~4dB) - 이 파일의 실제 최대 크기.
     파일 크기를 재서 맞춤 (예전 판처럼 '모든 효과음 파일은 -3 dBFS' 라고 가정하면 작은 파일은 안 들리고 큰 파일은 말보다 튐).
-    gap: 말보다 이만큼(dB) 작게 (말 위에 작게 놓는 소리 · SFX_OVER_TALK)."""
+    gap: 말보다 이만큼(dB) 작게 (말 위에 작게 놓는 소리 · SFX_OVER_TALK).
+    file_loud: 파일의 가장 큰 0.4초 귀 크기(sfxlib.loud_db) — 길게 울리는 높은 소리(호루라기)는 최대 크기가 같아도 귀 크기가 10dB 가까이 커서
+    귀 크기가 '목표 최대 크기 - SFX_CREST' 를 넘지 않게 줄임 (부딪히는 소리 딩동·짠·휙은 그대로 · D-379 — 예전: 최대 크기로만 맞춰
+    호루라기 -6 dBFS 로 만든 3dB 덜기(SOFTER)도 사라지고 가장 큰 말보다 7dB 크게 들림)."""
     sp = sig.get("voicePk")  # 목소리 보정을 거친 말소리 (효과음은 보정 없이 섞음)
     if sp is None:
         raw = sig.get("speechPk")
@@ -3503,7 +3555,10 @@ def _sfx_level(sig, name, kind, file_pk=None, gap=None):
     if gap is None:
         gap = SFX_SOFT if kind in ("emphasis", "count", "section", "inner") or name in STINGS else SFX_GAP
     pk = sfxlib.PEAK_DB if file_pk is None else float(file_pk)
-    return round(min(18.0, max(SFX_FLOOR, float(sp) - gap - pk)), 1)
+    lv = float(sp) - gap - pk
+    if file_loud is not None:
+        lv = min(lv, float(sp) - gap - SFX_CREST - float(file_loud))
+    return round(min(18.0, max(SFX_FLOOR, lv)), 1)
 
 
 # 양 범위(DENSITY)를 넘으면 차례로 줄이는 구성: 쉼 자르기 → 몽타주 → 정지 화면 → 숫자 세기 → 다시 보기 1개 → 티저 장면 → 다시 보기 0개
@@ -3915,6 +3970,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             if shorts_hook and c["kind"] in ("situ", "score") and tl < SHORTS_HOOK_SEC + 0.1:
                 # 쇼츠 첫 훅 글자(맨 위) 동안 위쪽 상황·점수 글자는 그 뒤에 (판정 round5 최종: '포인트 2'가 훅 글자와 겹쳐 가려짐)
                 d, tl = max(1.0, d - (SHORTS_HOOK_SEC + 0.1 - tl)), SHORTS_HOOK_SEC + 0.1
+                if c["src"] == "section":
+                    c["sfx"] = None   # 쇼츠가 그 포인트로 시작: 첫 장면 훅 소리(짠)가 맡음 — 훅 길이로 정해진 2.6초에 휙을 또 넣지 않음 (D-379)
             if c["kind"] == "count":
                 # 숫자가 하나씩 옆으로 쌓임 ('1' → '1 2' → '1 2 3') · 마지막 숫자 뒤 0.6초까지 · 겹치지 않게 자리를 나눔
                 ws = [x for x in words if c["t"] - 0.1 <= x[0] <= c["t"] + 3.0 and re.fullmatch(r"(하나|둘|셋|넷)[,.!]*", x[2])][:4]
@@ -3956,8 +4013,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             t_anchor = next((t_["start"] for t_ in B.titles if t_["id"] == tid), tl) if tid else tl
             win = None
             if only_snd:
-                lo, hi = c.get("win") or (c["t"] - 0.3, c["t"] + 0.8)
-                win = _tl_win(B, c["t"], tl, lo, hi)
+                lo, hi = c.get("win") or (min(c["t"], c.get("lead") or c["t"]) - 0.3, c["t"] + 0.8)
+                win = _tl_win(B, c["t"], tl, lo, hi, back=c["src"] == "section")
             if c.get("ticks"):   # 숫자 세기 (글자 없이): 숫자 말마다 틱 한 묶음
                 grp = f"count:{tl:.2f}"
                 refs["sfx"] = [_sfx_at(B, B.src_to_tl(w0), c["sfx"], None, "count", why=f"숫자 세기 (글자 없이) {k_ + 1}", must=True, group=grp)
@@ -3965,7 +4022,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             else:
                 refs["sfx"] = [_sfx_at(B, t_anchor, c["sfx"], -4.0 if c.get("look") == "fail" else None, "accent" if only_snd else c["kind"],
                                        why=_sfx_reason(c, "" if only_snd else text), title=tid, win=win, must=bool(c.get("sfxMust")),
-                                       soft=c.get("look") == "fail", group=None, mk=_sfx_key(c, intensity)[0] or c["src"])]
+                                       soft=c.get("look") == "fail", group=None, mk=_sfx_key(c, intensity)[0] or c["src"],
+                                       lead=B.src_to_tl(c["lead"]) if c.get("lead") is not None else None)]   # (다음 포인트 줄 시작 · 군말 앞)
         ev = B.event(c["kind"] if c["kind"] in TEXT_KINDS and not only_snd else "sfx", tl, (text if not only_snd else "") or c.get("sfx") or "", c["why"],
                      src=c["t"], refs=refs)
         ev["moment"] = {"kind": c["src"]}
@@ -4665,7 +4723,8 @@ def _drop_said_order(B, hk, kt):
     on = _ord_num(hk["text"]) or (_ord_num(kt["text"]) if kt else None)
     dup = [e["id"] for e in B.events if on and e["kind"] == "situ" and float(e["t"]) <= SHORTS_HOOK_SEC + 1.5 and _ord_num(e.get("text")) == on]
     if dup:
-        _drop(B, event_ids=dup)
+        # 소리도 함께 뺌 — 첫머리(훅 짠)가 이미 그 포인트를 알림 · 남기면 훅 길이로 정해진 2.6초에 같은 포인트 휙이 또 남 (쇼츠 25/126 · D-379)
+        _drop(B, event_ids=dup, keep_sound=False)
     return len(dup)
 
 
@@ -5195,6 +5254,8 @@ SFX_PRI = {"title": 9, "end": 9, "replay": 8, "freeze": 8, "score": 8, "fx": 7, 
 SFX_BAND = {"long": {"담백": (1.0, 3.0), "보통": (2.5, 6.6), "듬뿍": (5.0, 11.5)},
             "shorts": {"담백": (2.0, 4.0), "보통": (4.0, 8.0), "듬뿍": (6.0, 12.0)}}
 SFX_OVER_TALK = 6.0  # 말 위에 작게 놓는 짧은 소리: 보정한 말소리 최대보다 이만큼(dB) 작게 (D-372)
+EARLY = {"section": 0.35, "success": 0.8}   # 꼭 넣을 다음 포인트·성공 소리는 글자 첫 장면보다 이만큼(초)까지 앞(그 말 앞 컷·쉼)에서도 (D-379)
+MISSED_CLEAR = 2.0   # 꼭 넣을 소리가 못 들어간 순간 앞뒤 이만큼(초)에는 더 넣는 소리도 안 넣음 (D-379)
 SFX_SHIFT = {"situ": 0.6, "emphasis": 0.6, "fx": 0.6, "inner": 0.6, "score": 0.6, "title": 1.0, "end": 1.0}   # 말을 가리면 글자와 함께 늦출 수 있는 만큼(초)
 SFX_ANCHOR_KO = {"title": "글자 첫 장면", "hook": "글자 첫 장면", "end": "글자 첫 장면", "situ": "글자 첫 장면", "emphasis": "글자 첫 장면", "fx": "글자 첫 장면",
                  "inner": "글자 첫 장면", "count": "숫자 글자 첫 장면", "score": "글자 첫 장면", "replay": "장면이 바뀌는 컷", "freeze": "장면이 바뀌는 컷",
@@ -5215,8 +5276,22 @@ def _talk_tl(B, words):
     return sorted(out)
 
 
+EPS = 1e-6   # 시각 비교 여유 (받아쓰기 시각의 소수점 찌꺼기 105.57999999999997 같은 것)
+
+
+def _ms_down(t):
+    """초 → 1ms 단위로 내림 (다음 낱말 바로 앞 자리 · 반올림하면 낱말 쪽으로 0.0005초 넘어갈 수 있음)."""
+    return math.floor(t * 1000.0 + EPS) / 1000.0
+
+
+def _ms_up(t):
+    """초 → 1ms 단위로 올림 (앞 낱말 끝 바로 뒤 자리)."""
+    return math.ceil(t * 1000.0 - EPS) / 1000.0
+
+
 def _loud_part(start, shp, i0=0.0):
-    """효과음의 크게 들리는 부분 (타임라인 [앞, 뒤]) — 첫소리부터 에너지 90% (점점 커지는 소리는 봉우리 뒤 0.05초까지)."""
+    """효과음의 크게 들리는 부분 (타임라인 [앞, 뒤]) — 첫소리부터 최대보다 12dB 작아질 때까지(sfxlib.shape 의 loud · D-379) (점점 커지는 소리는
+    봉우리 뒤 0.05초 넘게)."""
     lo = max(shp["attack"], i0)
     hi = max(shp["loud"], shp["hit"] + (0.05 if shp["hit"] > shp["attack"] + 0.01 else 0.02), shp["attack"] + 0.02)
     return start + lo - i0, start + max(lo + 0.02, hi) - i0
@@ -5348,43 +5423,81 @@ def place_sfx(B, sig, intensity, words=(), pal=None):
             return False
         return a0 + d0 - (a0 + shift) >= max(MIN_TEXT, 0.6 * d0) - 1e-6
 
-    def soft_take(c, nm, at, ak, structural=False):
+    def soft_take(c, nm, at, ak, structural=False, back=0.25):
         """작은 소리(말 위에 작게): 낱말 위에 놓으면 실제 섞기에서 안 들림 → 그 자리 · 낱말 끝 바로 뒤 · 다음 낱말 바로 앞 중
-        크게 들리는 부분이 낱말과 안 겹치는 가장 가까운 낱말 사이 틈 (글자에 붙은 소리는 글자도 함께 · 앞 0.25초~뒤 SFX_SHIFT) ·
-        없으면 뺌 (제목·훅·엔드는 그 자리에 작게)."""
+        크게 들리는 부분이 낱말과 안 겹치는 가장 가까운 낱말 사이 틈 (글자에 붙은 소리는 글자도 함께 · 앞 back 초(꼭 넣을 다음 포인트·성공은
+        EARLY)~뒤 SFX_SHIFT) · 없으면 뺌 (제목·훅·엔드는 그 자리에 작게)."""
         s_ = shp(nm)
         l0, l1 = _loud_part(0.0, s_)   # 크게 들리는 부분 (소리 시작 기준)
         if c["title"] is not None:
-            lo_w, hi_w = at - 0.25, at + SFX_SHIFT.get(c["kind"], 0.3)
-        else:   # 소리만: 그 순간 창 안에서도 맞출 점 가까이만 (멀리 가면 다른 말에 붙은 소리처럼 들림)
-            w0, w1 = c["meta"].get("win") or (at - 0.25, at + 0.3)
-            lo_w, hi_w = max(w0, at - 0.25), min(w1, at + 0.3)
+            lo_w, hi_w = at - back, at + SFX_SHIFT.get(c["kind"], 0.3)
+        else:   # 소리만: 그 순간 창 안에서도 맞출 점 가까이만 (멀리 가면 다른 말에 붙은 소리처럼 들림 · 성공은 반응 말 앞 back 초까지)
+            w0, w1 = c["meta"].get("win") or (at - back, at + 0.3)
+            # (꼭 넣을 성공 소리는 창 끝 = 반응 말 끝 뒤까지 — 반응 말 앞이 컷으로 붙어 틈이 없을 때 · D-379)
+            lo_w, hi_w = max(w0, at - back), (w1 if c["must"] and c["meta"].get("mk") == "success" else min(w1, at + 0.3))
         lo_w, hi_w = min(lo_w, at), max(hi_w, at)
         if c["meta"].get("group"):   # 숫자 세기 틱: 숫자 말 바로 앞 틈까지만 (다음 숫자로 넘어가지 않게)
             hi_w = at + 0.05
         near_w = [(s0, e0) for s0, e0 in talk if lo_w - 1.0 <= e0 and s0 <= hi_w + 1.0]
-        pts = {round(at, 3)} | {round(e0 + 0.02 - l0 + s_["hit"], 3) for _, e0 in near_w} | {round(s0 - 0.02 - l1 + s_["hit"], 3) for s0, _ in near_w}
+        # 낱말 끝 바로 뒤 자리는 올림 · 다음 낱말 바로 앞 자리는 내림 (1ms) — 반올림하면 딱 맞는 틈이 소수점 찌꺼기로 0.0005초 겹쳐 빠졌음
+        # (S1 '포인트 ③' 낱말 105.57999999999997 · 숫자 세기 틱 186개 중 50개 · D-379)
+        pts = ({round(at, 3)} | {_ms_up(e0 + 0.02 - l0 + s_["hit"]) for _, e0 in near_w}
+               | {_ms_down(s0 - 0.02 - l1 + s_["hit"]) for s0, _ in near_w})
         pts = sorted((v for v in pts if lo_w - 1e-6 <= v <= hi_w + 1e-6), key=lambda v: (abs(v - at), v))
         for v in pts:
             st = v - s_["hit"]
             lo, hi = _loud_part(st, s_)
-            # 낱말과 안 겹치는 낱말 사이 틈만 (낱말 한가운데에 작게 놓으면 실제 섞기에서 안 들림 · 첫소리 앞 0.02초도 비움)
-            if any(s0 - 0.02 < hi and lo < e0 - 0.01 for s0, e0 in near_w) or not fits(c, st, nm, True):
+            # 낱말과 안 겹치는 낱말 사이 틈만 (낱말 한가운데에 작게 놓으면 실제 섞기에서 안 들림 · 첫소리 앞 0.02초도 비움 · 1µs 넘게 겹쳐야 겹침)
+            if any(s0 - 0.02 < hi - EPS and lo < e0 - 0.01 - EPS for s0, e0 in near_w) or not fits(c, st, nm, True):
                 continue
-            if c["title"] is not None and abs(v - at) > 1e-3 and not title_can_move(c, v - at):
-                continue
+            move = c["title"] is not None and abs(v - at) > 1e-3
+            if move and not title_can_move(c, v - at):
+                if not (c["must"] and v < at and c["meta"].get("mk") == "section"):   # 꼭 넣을 다음 포인트 소리는 컷 앞 쉼에도 (글자는 그대로 · D-379)
+                    continue
+                move = False
             take(c, st, nm, True, (f"{ak}에 맞춤" if abs(v - at) < 1e-3 else f"{ak} 옆 낱말 사이 틈 ({v - at:+.2f}초)") + " · 말 위라 작게"
-                 + (f" ('{nm}')" if nm != c["name"] else ""), shift=(v - at) if c["title"] is not None else 0.0)
+                 + (f" ('{nm}')" if nm != c["name"] else ""), shift=(v - at) if move else 0.0)
             return True
         if structural and fits(c, at - s_["hit"], nm, True):
             take(c, at - s_["hit"], nm, True, f"{ak}에 맞춤 · 말 위라 작게")
             return True
         return False
 
+    def early_take(c, names, back):
+        """다음 포인트·성공 소리 (D-379): 글자 첫 장면이 그 말 첫 낱말이라 휙의 봉우리 뒤 꼬리(0.1초)·성공 소리가 늘 낱말에 걸림 → 그 앞 back 초
+        안의 컷 · 첫 낱말 바로 앞 쉼 · 앞 낱말 끝 바로 뒤에 맞춤 (글자는 컷을 넘지 않으면 함께 앞당김 · 끝은 그대로). 예전: 제자리·늦추기·
+        작은 소리만 봐서 긴 쉼(3초) 뒤 컷에서 시작하는 '세 번째 포인트'도 소리가 빠짐 (S1 '포인트 ③' 14/20 · S2 '동작 ①' 17/22)."""
+        at = c["t"]
+        for nm in names:
+            s_ = shp(nm)
+            l0, l1 = _loud_part(0.0, s_)
+            pts = [x for x in cuts if not any(s0 + 0.02 < x < e0 - 0.02 for s0, e0 in talk)]
+            # 낱말 바로 앞(그 말 첫 낱말 · 반응 말 첫 낱말) · 앞 낱말 끝 바로 뒤
+            pts += [_ms_down(s0 - 0.03 - (l1 - s_["hit"])) for s0, _ in talk if at - back <= s0 < at + 0.3]
+            pts += [_ms_up(e0 + 0.03 + s_["hit"] - l0) for _, e0 in talk if at - back - 0.5 <= e0 < at]
+            # 성공 소리는 그 장면 안에서만 (컷 앞은 다른 장면 · 다시 보기 — 그 순간 소리가 아님) · 다음 포인트는 컷에서 넘어가는 휙이라 컷 앞도
+            floor = max([x for x in cuts if x <= at + EPS] or [-1e9]) - EPS if c["meta"].get("mk") == "success" else -1e9
+            sec = c["meta"].get("mk") == "section"   # (다음 포인트는 컷이 먼저 — 장면이 바뀌며 휙)
+            for h in sorted({round(v, 3) for v in pts if max(at - back, floor) - EPS <= v < at - 0.01},
+                            key=lambda v: (not (sec and any(abs(v - x) < 1e-3 for x in cuts)), at - v)):
+                st = h - s_["hit"]
+                if not (_sfx_clean(talk, st, s_) and fits(c, st, nm, False)):
+                    continue
+                move = c["title"] is not None and title_can_move(c, h - at)
+                at_cut = any(abs(h - x) < 1e-3 for x in cuts)
+                take(c, st, nm, False, f"{'소리 봉우리' if nm in sfxlib.SWELL else '첫소리'}를 {'장면이 바뀌는 컷' if at_cut else '그 말 앞 쉬는 틈'}에 맞춤 "
+                     f"({h - at:+.2f}초{' · 글자도 함께' if move else ''})" + (f" · 더 짧은 '{nm}'" if nm != c["name"] else ""),
+                     shift=(h - at) if move else 0.0)
+                return True
+        return False
+
     order = sorted(cands, key=lambda c: (not c["must"], -SFX_PRI.get(c["kind"], 4), c["t"]))
+    missed = []   # 못 넣은 꼭 넣을 소리의 맞출 점
     for c in order:
         if not c["must"] and len({o["meta"].get("group") or id(o) for o in kept}) >= cap_n:
             continue
+        if not c["must"] and any(abs(c["t"] - x) < MISSED_CLEAR for x in missed):
+            continue   # 꼭 넣을 소리가 못 들어간 순간 옆에 다른 뜻 소리를 넣지 않음 (그 순간의 소리로 들림 · '꽂혔다!' 성공 대신 1.7초 뒤 뽁 · D-379)
         names = [c["name"]] + [n for n in SFX_ALT.get(c["name"], ()) if n in sfxlib.CATALOG]
         ak = SFX_ANCHOR_KO.get(c["kind"], "예약한 자리")
         if c["title"] is None and ak.endswith("글자 첫 장면"):
@@ -5399,16 +5512,24 @@ def place_sfx(B, sig, intensity, words=(), pal=None):
                 take(c, st, nm, False, f"{'소리 봉우리' if nm in sfxlib.SWELL else '첫소리'}를 {ak}에 맞춤" + (f" · 말 틈이 짧아 더 짧은 '{nm}'" if nm != c["name"] else ""))
                 done = True
                 break
+        early = EARLY.get(c["meta"].get("mk")) if c["must"] and (c["title"] is not None or not c["meta"].get("win")) else None
+        if early and c["meta"].get("lead") is not None:   # 다음 포인트 줄 앞 군말('자,')이 남았으면 그 앞 쉼까지 (D-379)
+            early = min(1.2, max(early, c["t"] - float(c["meta"]["lead"]) + EARLY["section"]))
+        if not done and early:
+            done = early_take(c, names, early)   # 1b) 다음 포인트·성공: 그 말 앞 컷·쉼으로 조금 앞당김
         if not done and c["meta"].get("win"):   # 2) 소리만인 소리: 창 안의 말 틈으로
             lo, hi = c["meta"]["win"]
             # 낱말 끝 바로 뒤(0.05초)부터 — 창 끝(앞·뒤)은 그런 틈이 없을 때만 (창 끝은 말 없는 곳 한가운데라 맞출 점이 흐려짐)
-            slots = sorted(set(round(v, 3) for v in [c["t"]] + [e0 + 0.05 for _, e0 in talk if lo <= e0 + 0.05 <= hi]), key=lambda v: abs(v - c["t"]))
+            # (다음 포인트는 창 안의 컷도 — 컷에서 넘어가는 휙 · 창 끝(말 앞 0.6초)보다 그 말에 가까움 · D-379)
+            cut_in = [x for x in cuts if lo <= x <= hi and not any(s0 + 0.02 < x < e0 - 0.02 for s0, e0 in talk)] if c["meta"].get("mk") == "section" else []
+            slots = sorted(set(round(v, 3) for v in [c["t"]] + [e0 + 0.05 for _, e0 in talk if lo <= e0 + 0.05 <= hi] + cut_in), key=lambda v: abs(v - c["t"]))
             slots += [v for v in (round(lo, 3), round(hi, 3)) if v not in slots]
             for sl in slots:
                 for nm in names:
                     st = sl - shp(nm)["hit"]
                     if _sfx_clean(talk, st, shp(nm)) and fits(c, st, nm, False):
-                        take(c, st, nm, False, f"말이 쉬는 틈에 ({sl - c['t']:+.2f}초)" + (f" · 더 짧은 '{nm}'" if nm != c["name"] else ""))
+                        where = "장면이 바뀌는 컷에 맞춤" if sl in cut_in else "말이 쉬는 틈에"
+                        take(c, st, nm, False, f"{where} ({sl - c['t']:+.2f}초)" + (f" · 더 짧은 '{nm}'" if nm != c["name"] else ""))
                         done = True
                         break
                 if done:
@@ -5446,8 +5567,12 @@ def place_sfx(B, sig, intensity, words=(), pal=None):
                 near = [x for x in cuts if lo - 0.05 <= x <= hi + 0.05 and not any(s0 < x < e0 for s0, e0 in talk)]   # (낱말 한가운데의 컷은 아님)
                 at = min(near, key=lambda x: abs(x - at)) if near else at
             for nm in soft_opts:
-                if soft_take(c, nm, at, "장면이 바뀌는 컷" if at != c["t"] else ak, structural=c["kind"] in ("title", "hook", "end")):
+                if soft_take(c, nm, at, "장면이 바뀌는 컷" if at != c["t"] else ak, structural=c["kind"] in ("title", "hook", "end"),
+                             back=max(0.25, early or 0.0, EARLY.get(mk, 0.0) if c["must"] else 0.0)):
+                    done = True
                     break
+        if not done and c["must"]:
+            missed.append(c["t"])
     # 옮긴 글자 (그 사건의 같은 때 글자·도형 함께 · 작은 소리는 낱말 사이 틈으로 조금 앞당길 수도)
     for c in kept:
         if abs(c["shift"]) > 1e-6 and c["title"] is not None:
@@ -5504,10 +5629,10 @@ def _audio_items(B, sig, sections, seed, snd, intensity, words=()):
         tr = "A2" if t >= ends["A2"] else "A5" if t >= ends["A5"] else None
         if tr is None:
             continue
-        pk = sfxlib.peak_db(assets / fn)
-        lv = _sfx_level(sig, name, c["kind"], pk) + (c["lvl"] or 0.0)  # lvl: 이 소리만 더 작게(dB)
+        pk, ld = sfxlib.peak_db(assets / fn), sfxlib.loud_db(assets / fn)
+        lv = _sfx_level(sig, name, c["kind"], pk, file_loud=ld) + (c["lvl"] or 0.0)  # lvl: 이 소리만 더 작게(dB)
         if c["soft"]:
-            lv = min(lv, _sfx_level(sig, name, c["kind"], pk, gap=SFX_OVER_TALK))
+            lv = min(lv, _sfx_level(sig, name, c["kind"], pk, gap=SFX_OVER_TALK, file_loud=ld))
         it = aitem(tr, mid, t, i0, out_, lv, fo=min(0.15, (out_ - i0) / 3) if out_ < d - 1e-3 else 0.0,
                    keys=_sfx_duck([a for a in starts if a < t + out_ - i0], t, out_ - i0, lv))
         it["why"] = f"자동 효과음 '{name}' · {c['meta'].get('why') or SFX_ANCHOR_KO.get(c['kind'], '')} · {c['how']}"
@@ -5517,10 +5642,17 @@ def _audio_items(B, sig, sections, seed, snd, intensity, words=()):
     for k, x in enumerate(B.sfx):
         if x and k not in idmap:
             B.sfx[k] = None   # 말을 가리거나 양·간격 때문에 못 놓은 소리
-    # 사건 기록의 효과음 번호 → 클립 id
+    # 사건 기록의 효과음 번호 → 클립 id · 소리만인 사건은 MSG 목록에 실제로 놓인 소리 이름·맞출 점 (place_sfx 가 더 짧은 소리·작은 소리로 바꾸고
+    # 자리를 옮김 — 예전: 예약한 이름 '휙'·예약 시각이 남아 목록이 팡·뽁이 나는 곳을 '휙'으로 · 소리만 사건 341개 중 109개 · D-379)
+    by_k = {c["k"]: c for c in placed if c["k"] in idmap}
     for e in B.events:
         if "sfx" in e["refs"]:
-            e["refs"]["items"] = e["refs"].get("items", []) + [idmap[k] for k in e["refs"].pop("sfx") if idmap.get(k)]
+            ks = e["refs"].pop("sfx")
+            pl = [by_k[k] for k in ks if k in by_k]
+            if e["kind"] == "sfx" and pl:
+                e["text"] = pl[0]["name"]
+                e["t"] = round(max(0.0, pl[0]["hit"]), 2)
+            e["refs"]["items"] = e["refs"].get("items", []) + [idmap[k] for k in ks if idmap.get(k)]
     # 배경음악
     # 말이 없을 때 배경음악 평균 크기 = 말 평균 크기(채널 기준) + bgmDb · 말할 때는 duck(-7~-8dB)만큼 더 줄어 보정한 말보다 약 21~23dB 작게
     # (판정 round5: 예전 bgmDb -7~-10 · duck -13~-14 는 말보다 30dB 남짓 작아 '배경음악이 거의 안 들림' · 판정 기준은 15dB 넘게 작게 ·
