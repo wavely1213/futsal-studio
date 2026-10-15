@@ -1,6 +1,8 @@
 {
   "version": "2.21.1",
   "notes": "실행기 ON/OFF(다른 PC·휴대폰에서 사이트로 스튜디오 쓰기) · 자동 업데이트(쉴 때 저절로) · 편집실: 미리보기에서 눌러 고르고 끌기 · 자막 끌어 옮기기·시간 맞추기·여러 개 고르기 · 오른쪽 클릭 메뉴 · 프리미어 단축키 맞춤 · SRT 가져오기·프리미어 XML·투명 자막 영상·지금 화면 PNG",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/bb38d815705967b46bbe1641b7fbf16b97cd39a6.zip",
+  "commit": "bb38d815705967b46bbe1641b7fbf16b97cd39a6",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "5076d989e794686a44459b647230c015a0a7d294e5d5028c38e1e678c84de847",
