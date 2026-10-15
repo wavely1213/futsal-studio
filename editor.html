@@ -1257,9 +1257,10 @@ function capSplitPlan(cap, src, k = null) {
 }
 // 나누기 (기록 없이) → 뒤 자막 — 앞은 원래 자막(id 그대로) · 둘 다 트랙·모양·손으로 맞춘 시간(tm)·'이 자막만' 자리(capPos)·이 편집본에서 지움(capOff) 그대로
 // 단어 시각은 앞뒤로 나눠 가짐 (노래방·컷 안 낱말) · 쇼츠 한 줄 나눔(sh)도 낱말 번호로 나눠 가짐 (나눈 자리는 쇼츠에서도 경계 · 조각이 다시 합쳐지지 않음)
+// 둘 다 '손으로 나눈 자막'(ms) 표시 — '자막 다시 나누기'·'한 줄씩 나누기'가 다시 묶거나 나누지 않음 (D-384 · D-387)
 function capSplitDo(cap, plan) {
   const { k, c, a, b: tb, toks } = plan, n = toks.length, ws = capWords(cap), sh = shOk(cap, n) ? cap.sh.map(x => Math.trunc(Number(x))) : null;
-  const b = JSON.parse(JSON.stringify(cap)); b.id = nid();
+  cap.ms = 1; const b = JSON.parse(JSON.stringify(cap)); b.id = nid();
   cap.text = a; b.text = tb; cap.end = c; b.start = c;
   if (ws) { capSetWords(cap, ws.slice(0, k)); capSetWords(b, ws.slice(k)); } else { capSetWords(cap, null); capSetWords(b, null); }
   if (sh) { setSh(cap, sh.filter(x => x < k), k); setSh(b, sh.filter(x => x > k).map(x => x - k), n - k); } else { setSh(cap, null, k); setSh(b, null, n - k); }
@@ -1268,27 +1269,39 @@ function capSplitDo(cap, plan) {
   P.captions.push(b); P.captions.sort((x, y) => x.start - y.start); return b;
 }
 const capCut = (s, n = 14) => { s = String(s).replace(/\s+/g, " "); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
-// 같은 자막 트랙의 바로 다음 자막 (시작 순)
-function capNextOf(cap) {
-  const tk = otCap(cap), ls = P.captions.filter(c => otCap(c) === tk).map((c, i) => [c, i]).sort((x, y) => x[0].start - y[0].start || x[1] - y[1]).map(x => x[0]);
+// 같은 자막 트랙에서 이 편집본에 걸친 바로 다음 자막 (시작 순 · 편집본 밖 자막은 건너뜀 · 이 편집본에서 지운 자막은 셈 → capMergeCheck 가 막음 · D-386)
+function capNextOf(cap, inEdit = capInEdit()) {
+  const tk = otCap(cap), ls = P.captions.filter(c => otCap(c) === tk && (c === cap || inEdit(c))).map((c, i) => [c, i]).sort((x, y) => x[0].start - y[0].start || x[1] - y[1]).map(x => x[0]);
   return ls[ls.indexOf(cap) + 1] || null;
+}
+const CAP_GAP_MAX = 1.2; // captions.GAP_MAX — 다음 자막과 이만큼 넘게 떨어져 있으면 묻고 합침 (합치면 말이 없는 동안에도 자막이 떠 있음)
+// 합치기 전에 살펴보기 (바꾸지 않음) → { nx, far } 또는 { why } — far: 두 자막 사이 빈 시간이 CAP_GAP_MAX 넘으면 그 초 (아니면 0)
+function capMergeCheck(cap, inEdit = capInEdit()) {
+  if (capOffSet().has(cap.id)) return { why: "이 편집본에서 지운 자막이에요 · ↺ 로 되살린 뒤 합쳐 주세요" };
+  if (!inEdit(cap)) return { why: "이 편집본에 나오지 않는 자막이에요 · 이 편집본에 나오는 자막끼리만 합쳐요" };
+  const nx = capNextOf(cap, inEdit); if (!nx) return { why: "이 편집본에 같은 트랙의 다음 자막이 없어요" };
+  if (capOffSet().has(nx.id)) return { why: "다음 자막은 이 편집본에서 지운 자막이에요 · ↺ 로 되살린 뒤 합쳐 주세요" };
+  if (otLockOf(nx, "c")) return { why: otLockNote };
+  const gap = nx.start - cap.end;
+  return { nx, far: gap > CAP_GAP_MAX + 1e-6 ? gap : 0 };
 }
 // 쇼츠 한 줄 규칙(13글자 · 2.2초 · captions.LIMITS) 안에 드나 — 낱말 ws[a..b)
 const SH_LIM = { chars: 13, dur: 2.2 };
 const shFits = (ws, a, b, s, e) => ws.slice(a, b).reduce((x, w) => x + String(w.w).replace(/\s+/g, "").length, 0) <= SH_LIM.chars && e - s <= SH_LIM.dur + 1e-9;
 // 다음 자막과 합치기 (기록 없이) → 못 하면 까닭 글 · 글은 띄어쓰기로 잇고 시작은 앞, 끝은 뒤 · 단어 시각은 둘 다 있으면 이어 붙임
 // 가로 영상 자막의 쇼츠 한 줄 나눔(sh)은 두 자막의 나눔을 잇고, 이음매 앞뒤 조각을 합쳐도 쇼츠 한 줄에 들면 합침 (둘 다 짧으면 쇼츠에서도 한 자막)
-function capMergeDo(cap) {
-  const nx = capNextOf(cap); if (!nx) return { why: "같은 트랙에 다음 자막이 없어요" };
-  if (capOffSet().has(nx.id)) return { why: "다음 자막은 이 편집본에서 지운 자막이에요 · ↺ 로 되살린 뒤 합쳐 주세요" };
-  if (otLockOf(nx, "c")) return { why: otLockNote };
-  const ta = capToks(cap.text), tb = capToks(nx.text), na = ta.length, nb = tb.length;
+// 다음 자막이 CAP_GAP_MAX 넘게 떨어져 있으면 force 일 때만 (capMergeSel 이 먼저 물음) · 합친 자막은 '손으로 합친 자막'(ms · D-386)
+function capMergeDo(cap, force = false) {
+  const ck = capMergeCheck(cap); if (ck.why) return ck;
+  if (ck.far && !force) return { why: `다음 자막과 ${ck.far.toFixed(1)}초 떨어져 있어요`, far: ck.far };
+  const nx = ck.nx, ta = capToks(cap.text), tb = capToks(nx.text), na = ta.length, nb = tb.length;
   if (!na || !nb) return { why: "빈 자막이에요" };
   const wa = capWords(cap), wb = capWords(nx), sha = shOk(cap, na) ? cap.sh.map(Number) : [], shb = shOk(nx, nb) ? nx.sh.map(Number) : [];
   const long = (P.info || {}).width > (P.info || {}).height, s0 = cap.start, e0 = Math.max(cap.end, nx.end);
   cap.text = cap.text.trimEnd() + " " + nx.text.trimStart(); cap.start = s0; cap.end = e0;
   if (wa && wb) capSetWords(cap, wa.concat(wb)); else capSetWords(cap, null);
   if (cap.tm || nx.tm) cap.tm = 1;
+  cap.ms = 1;
   if (long) { // 쇼츠 편집본에서 쓸 한 줄 나눔
     const { ws } = capTimes(cap), n = na + nb, at = j => j === 0 ? cap.start : +ws[j].s, to = j => j === n ? cap.end : +ws[j].s;
     let sh = [...sha, na, ...shb.map(x => x + na)];
@@ -4537,6 +4550,8 @@ function addGfx(name, at, row) {  // row: 끌어다 놓은 줄 (같은 종류면
 let capKey = "";
 // 자막(원본 시각)이 지금 편집본에 들어 있나 — 자막이 따라가는 원본 클립(capItems · capsTL 과 같은 규칙 · D-283·D-285)
 function capInSeq() { const vids = capItems().filter(x => (x.media || "main") === "main"), off = capOffSet(); return c => !off.has(c.id) && vids.some(x => c.end > x.in && c.start < x.out); } // 이 편집본에서 지운 자막(capOff · D-344)은 흐리게
+// 이 편집본 영상(원본 구간)에 걸친 자막인지 — capInSeq 와 같되 이 편집본에서 지운 자막도 셈 (다음 자막과 합치기 · D-386)
+function capInEdit() { const vids = capItems().filter(x => (x.media || "main") === "main"); return c => vids.some(x => c.end > x.in && c.start < x.out); }
 function refreshCapOut() { // 목록은 그대로 두고 흐림만 다시 (changed(false) 뒤)
   const box = $("capList"); if (!box || !P) return;
   const inSeq = capInSeq(), byCap = new Map(P.captions.map(c => [c.id, c]));
@@ -4687,14 +4702,19 @@ function capSplitText(ta) {
   setTimeout(() => { const t2 = panel ? $("pCapText") : document.querySelector(`#capList [data-cap="${b.id}"]`); if (t2) { t2.focus(); t2.setSelectionRange(0, 0); } }, 30);
 }
 // 다음 자막과 합치기 (Ctrl+J · 오른쪽 클릭 · '다음 자막과 합치기' · D-386) — 여러 자막을 골랐으면 같은 트랙에서 차례로 이어진 것끼리 모두 하나로 · 되돌리기 한 단계
+// 이 편집본에 나오는 자막끼리만 (편집본 밖 자막·이 편집본에서 지운 자막은 까닭만) · 다음 자막이 1.2초(CAP_GAP_MAX) 넘게 떨어져 있으면 먼저 물음 (D-386)
 function capMergeSel(ta) {
   const many = !ta && multiSel() ? selOvs().filter(o => o.k === "caption").map(o => P.captions.find(c => c.id === o.id)).filter(Boolean).sort((a, b) => a.start - b.start) : [];
   const cap = many.length > 1 ? many[0] : ta ? capOfTa(ta) : selCap(); if (!cap) return toast("먼저 자막을 골라 주세요");
-  if (many.length > 1) { for (let i = 1; i < many.length; i++) if (capNextOf(many[i - 1]) !== many[i]) return toast("같은 자막 트랙에서 바로 이어진 자막끼리만 합칠 수 있어요"); }
+  const inEdit = capInEdit();
+  if (many.length > 1) { for (let i = 1; i < many.length; i++) if (capNextOf(many[i - 1], inEdit) !== many[i]) return toast("같은 자막 트랙에서 이 편집본에 바로 이어 나오는 자막끼리만 합칠 수 있어요"); }
   if ([cap, ...many].some(c => otLockOf(c, "c"))) return toast(otLockNote);
+  let far = 0;
+  for (const c of many.length > 1 ? many.slice(0, -1) : [cap]) { const ck = capMergeCheck(c, inEdit); if (ck.why) return toast(ck.why); far = Math.max(far, ck.far); }
+  if (far && !confirm(`다음 자막과 ${far.toFixed(1)}초 떨어져 있어요.\n합치면 말이 없는 동안에도 자막이 떠 있어요. 그래도 합칠까요? (Ctrl+Z 로 되돌릴 수 있어요)`)) return toast("합치지 않았어요 · 떨어진 자막은 그대로 두는 게 좋아요");
   if (ta) ta.blur();
   commit("자막 합치기"); let r = null, done = 0;
-  for (let i = 0; i < Math.max(1, many.length - 1); i++) { r = capMergeDo(cap); if (r.why) break; done++; }
+  for (let i = 0; i < Math.max(1, many.length - 1); i++) { r = capMergeDo(cap, true); if (r.why) break; done++; }
   if (!done) { uncommit(); return toast(r.why); }
   selX = { k: "caption", id: cap.id }; selO = []; selI.clear(); changed();
   toast(`${many.length > 2 ? `자막 ${many.length}개를` : "다음 자막과"} 합쳤어요: '${capCut(cap.text, 26)}' · 되돌리기 Ctrl+Z`);

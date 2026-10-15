@@ -2067,9 +2067,10 @@ def _captions_of(segs, info, silences=()):
 def oneline_captions(caps, info, silences=(), terms=None, src_of=None):
     """편집실 '자막 한 줄씩 나누기': 프로젝트 자막을 모두 한 줄 자막으로 → (새 자막 목록, 나눈 자막 수).
     지금 글(사용자가 고친 글) 그대로 나누고, 단어 시각(wt)이 글과 맞으면 그 시각대로, 아니면 글자 수대로 (silences: 조용한 곳).
-    길지 않아도 따로 한 말이 한 자막에 든 것('혼난다. 시작!' · 단어 시각이 있으면 말 경계 · 없으면 글 속 . ? !)도 나눔 (D-387).
+    길지 않아도 따로 한 말이 한 자막에 든 것('혼난다. 시작!' · 단어 시각이 있으면 말 경계 · 없으면 글 속 . ? !)도 나눔 (D-387) —
+    단, 손으로 맞추거나 쓴 자막(tm · SRT · Shift+T)과 손으로 나누거나 합친 자막(ms · Ctrl+K · Ctrl+Enter · Ctrl+J)은 길 때만 (D-387 검토 고침).
     이미 한 줄이고 짧은 자막은 그대로 (두 번 눌러도 같음) · 나뉜 첫 자막은 원래 id, 다른 값(위치·모양 등)은 나뉜 자막마다 그대로.
-    가로 영상 자막은 쇼츠 편집본에서 나눌 곳(sh)도 지금 규칙으로 다시 (글·단어 시각은 그대로).
+    가로 영상 자막은 쇼츠 편집본에서 나눌 곳(sh)도 지금 규칙으로 다시 (글·단어 시각은 그대로 · tm·ms 자막은 쇼츠 한 줄에 안 들 때만).
     src_of(dict)를 주면 새 id 를 받은 조각 → 원래 자막 id 를 적어 줌 (편집본마다 둔 '이 자막만' 자리 capPos 를 조각마다 옮기게 · D-321)."""
     fmt = _cap_fmt(info)
     terms = _terms() if terms is None else terms
@@ -2077,10 +2078,17 @@ def oneline_captions(caps, info, silences=(), terms=None, src_of=None):
     for c in sorted((c for c in caps or () if isinstance(c, dict)), key=lambda c: float(c.get("start") or 0)):
         text = str(c.get("text") or "")
         ws = _cap_words(c)
-        if not captions.needs_split(text, fmt) and not captions.merged_utterances(text, ws, terms):
+        hand = _cap_hand(c)  # 손으로 맞춘·쓴·나눈·합친 자막: 따로 한 말 규칙으로는 안 나눔 (길 때만 · D-387)
+        if not captions.needs_split(text, fmt) and (hand or not captions.merged_utterances(text, ws, terms)):
             if fmt == "long" and text.strip() and len(text.split()) > 1:  # 쇼츠 편집본에서 나눌 곳만 새로 (글·단어 시각·줄바꿈은 그대로)
+                n_tok = len(text.split())
                 try:
-                    sh = _shorts_cuts(text, float(c["start"]), float(c["end"]), terms, ws)
+                    if hand and isinstance(c.get("sh"), list) and c.get("sh") and c.get("shn") == n_tok:
+                        sh = None  # 손으로 나누거나 합칠 때 정한 쇼츠 나눔 그대로
+                    elif hand and not captions.needs_split(text, "shorts"):
+                        sh = []  # 쇼츠 한 줄에 들면 안 나눔 ('혼난다. 시작!' 을 Ctrl+J 로 합친 것)
+                    else:
+                        sh = _shorts_cuts(text, float(c["start"]), float(c["end"]), terms, ws)
                 except (TypeError, ValueError, KeyError):
                     sh = None
                 if sh is not None and (sh != (c.get("sh") or []) or (sh and c.get("shn") != len(text.split()))):
@@ -2110,11 +2118,17 @@ def long_captions(caps, info):
     return sum(1 for c in caps or () if isinstance(c, dict) and captions.needs_split(c.get("text"), fmt))
 
 
+def _cap_hand(c):
+    """손으로 맞추거나 쓴 자막(tm · SRT · Shift+T · 시간 고침) · 손으로 나누거나 합친 자막(ms · Ctrl+K · Ctrl+Enter · Ctrl+J · D-384 · D-386)
+    — '자막 다시 나누기'·'한 줄씩 나누기'가 따로 한 말 규칙으로 다시 나누거나 이웃과 다시 묶지 않음."""
+    return bool(c.get("tm") or c.get("ms"))
+
+
 def merged_captions(caps):
-    """따로 한 말이 한 자막에 합쳐진 자막 수 (편집실이 열 때 '자막 다시 나누기' 안내를 띄울지 · D-387) — 손으로 맞춘 시간(tm)은 뺌."""
+    """따로 한 말이 한 자막에 합쳐진 자막 수 (편집실이 열 때 '자막 다시 나누기' 안내를 띄울지 · D-387) — 손으로 맞추거나 나누거나 합친 자막(tm · ms)은 뺌."""
     n = 0
     for c in caps or ():
-        if isinstance(c, dict) and not c.get("tm"):
+        if isinstance(c, dict) and not _cap_hand(c):
             try:
                 n += captions.merged_utterances(c.get("text"), _cap_words(c))
             except (TypeError, ValueError, KeyError):
@@ -2139,8 +2153,9 @@ def resplit_captions(caps, info, ids=None, terms=None, src_of=None, seg_ends=())
     """편집실 '자막 다시 나누기' (D-380 · D-387): 고른 자막(ids · None 이면 모두)을 새 규칙(따로 한 말은 따로 자막)으로 다시 나눔
     → (새 자막 목록, 바뀐 묶음 수). 같은 자막 트랙에서 차례로 이어지는 자막들(단어 시각이 글과 맞고 손으로 시간을 맞추지 않은 것)의
     낱말을 이어 받아쓴 자막을 만들 때와 같은 규칙(captions.segment · 그 뒤 _tidy)으로 다시 나눔 — 고친 글·단어 시각 그대로, 짧은 대답도 따로,
-    한 말은 길이 한도 안에서 다시 묶음. 단어 시각이 없거나 손으로 맞춘(tm) 자막은 '자막 한 줄씩 나누기'처럼 글 속 문장부호에서만 나누고
-    (oneline_captions) 그 앞뒤로는 잇지 않음. 조각은 첫 낱말이 있던 자막의 다른 값(트랙·모양 등)과 id 를 이어받고(이미 쓴 id 면 새 id ·
+    한 말은 길이 한도 안에서 다시 묶음. 단어 시각이 없는 자막은 '자막 한 줄씩 나누기'처럼 글 속 문장부호에서만 나누고
+    (oneline_captions) 그 앞뒤로는 잇지 않음 · 손으로 맞추거나 나누거나 합친 자막(tm · ms · D-387)은 그대로 두고 잇지 않음 ·
+    시간이 겹쳐 둔 자막(두 사람이 겹쳐 말함)은 낱말을 섞지 않게 따로 묶음. 조각은 첫 낱말이 있던 자막의 다른 값(트랙·모양 등)과 id 를 이어받고(이미 쓴 id 면 새 id ·
     src_of[새 id] = 원래 id), 가로 영상 자막은 쇼츠 편집본에서 나눌 곳(sh)도 새로. 두 번 눌러도 같음.
     seg_ends: 받아쓰기 구간 끝 낱말의 끝 시각(1/100초 정수 · _seg_end_times) — 그 낱말 뒤를 조금 쉬었으면 말 경계로 봄."""
     fmt = _cap_fmt(info)
@@ -2156,7 +2171,7 @@ def resplit_captions(caps, info, ids=None, terms=None, src_of=None, seg_ends=())
     def take(c, words=None):
         if words is None:
             words = _cap_words(c)
-        ok = (want is None or str(c.get("id")) in want) and not c.get("tm") and words is not None
+        ok = (want is None or str(c.get("id")) in want) and not _cap_hand(c) and words is not None
         return ok, words
 
     for trk, lane in by_trk.items():
@@ -2165,12 +2180,15 @@ def resplit_captions(caps, info, ids=None, terms=None, src_of=None, seg_ends=())
         for c in lane:
             ok, ws = take(c)
             if ok:
+                if cur and float(c.get("start") or 0) < max(float(x.get("end") or 0) for x, _ in cur) - 0.05:
+                    chains.append(cur)  # 앞 자막과 시간이 겹침 (두 사람이 겹쳐 말함): 낱말을 섞지 않게 여기서 끊음
+                    cur = []
                 cur.append((c, ws))
                 continue
             if cur:
                 chains.append(cur)
                 cur = []
-            if (want is None or str(c.get("id")) in want) and not c.get("tm"):  # 단어 시각이 없는 자막: 글 속 문장부호에서만 (한 줄씩 나누기와 같음)
+            if (want is None or str(c.get("id")) in want) and not _cap_hand(c):  # 단어 시각이 없는 자막: 글 속 문장부호에서만 (한 줄씩 나누기와 같음)
                 part, k = oneline_captions([c], info, terms=terms, src_of=src_of)
                 n += k
                 out.extend(part)
@@ -2186,7 +2204,7 @@ def resplit_captions(caps, info, ids=None, terms=None, src_of=None, seg_ends=())
                 for w in ws:
                     flat.append({"w": w["w"], "s": float(w["s"]), "e": float(w["e"])})
                     owner.append(c)
-            order = sorted(range(len(flat)), key=lambda i: (flat[i]["s"], i))  # 겹쳐 둔 자막이 있어도 시간 순으로
+            order = sorted(range(len(flat)), key=lambda i: (flat[i]["s"], i))  # 살짝(0.05초 안) 겹친 낱말도 시간 순으로
             flat, owner = [flat[i] for i in order], [owner[i] for i in order]
             ends = {i for i, w in enumerate(flat) if int(round(w["e"] * 100)) in seg_ends}
             parts = captions.segment(flat, fmt, ends, terms)

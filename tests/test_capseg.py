@@ -120,15 +120,69 @@ class SegmentTest(unittest.TestCase):
         self.assertEqual(brk([("해", 0.3), ("주세요", 0)]), set())            # 붙여 읽는 풀이말
         self.assertEqual(brk([("할", 0.3), ("수", 0.0), ("있어요", 0)]), set())  # 기대는 말 앞
         self.assertEqual(brk([("두", 0.3), ("개", 0)]), set())                # 꾸미는 말 뒤
-        self.assertEqual(brk([("선수가", 0.2), ("공을", 0)]), set())          # '~가'는 조사일 때가 많아 0.3초 넘게 쉴 때만
-        self.assertEqual(brk([("선수가", 0.35), ("공을", 0)]), {0})
+        self.assertEqual(brk([("선수가", 0.2), ("공을", 0)]), set())          # '~가'는 조사일 때가 많아
+        self.assertEqual(brk([("선수가", 0.35), ("공을", 0)]), set())         # 쉬어도 뒤가 새 말이 아니면 안 나눔 (검토: '수비수가' | '따라오면 패스')
+        self.assertEqual(brk([("알겠니", 0.35), ("네", 0)]), {0})             # 뒤가 대답이면 나눔
         self.assertEqual(brk([("자,", 0.4), ("첫", 0.0), ("번째", 0)]), set())  # '자,' 는 뒤 말의 머리 · 쉼표만으로는 안 나눔
-        self.assertEqual(brk([("감독님,", 0.2), ("이거", 0)]), {0})            # 부르는 말 + 쉼표
+        self.assertEqual(brk([("감독님,", 0.25), ("이거", 0)]), set())         # 말 머리의 부르는 말은 뒤 말과 함께 (검토: '감독님,' 혼자 떨어짐)
+        self.assertEqual(brk([("감독님,", 0.6), ("이거", 0)]), {0})            # 오래 쉬면 나눔
+        self.assertEqual(brk([("하지", 0.0), ("마", 0.0), ("감독님", 0.3), ("그리고", 0)]), {2})  # 앞말 뒤에 붙은 부르는 말 뒤
         self.assertEqual(brk([("요", 0.2), ("세", 0)]), set())                # 혼자 쓴 '요'는 '이'
         self.assertEqual(brk([("공을", 0.6), ("차요", 0)]), {0})              # 0.6초 넘게 쉼
         self.assertEqual(brk([("퍼스트", 0.7), ("터치", 0)], terms=["퍼스트 터치"]), set())  # 여러 단어 용어 안은 안 나눔
         self.assertEqual(brk([("시작!", 0), ("하자", 0)], est=True), {0})     # 어림한 시각: 문장부호만
         self.assertEqual(brk([("혼난다", 0.3), ("시작", 0)], est=True), set())
+
+    def test_latched_fast_replies(self):
+        """검토(I-381): 쉼 없이 바로 받는 두 사람 말 — 받아쓰기가 마침표 뒤를 0.04~0.10초로 잡아도 . ? ! 뒤는 나눔 (예전 6/16 · 검토 시점 5/16 합쳐짐)."""
+        fx = json.loads((ROOT / "tests" / "fixtures" / "capseg_latched.json").read_text(encoding="utf-8"))
+        bounds = [(a["end"] + b["start"]) / 2 for a, b in zip(fx["truth"], fx["truth"][1:])]
+        for fmt in ("shorts", "long"):
+            caps = captions.from_segments(fx["segments"], fmt, captions.DEFAULT_TERMS)
+            merged = sum(1 for t in bounds if any(any(w["e"] <= t + 0.12 and nx["s"] >= t - 0.12 for w, nx in zip(c["words"], c["words"][1:])) for c in caps))
+            self.assertLessEqual(merged, 1, (fmt, texts(caps)))
+            for want in ("이것도 들어갔어요.", "아, 아깝다.", "볼 때 맞았어요.", "다시 할게요.", "괜찮아요.", "좋아요.", "와, 이거죠."):
+                self.assertIn(want, texts(caps), fmt)
+
+    def test_owner_script_zero_gap(self):
+        """검토: 소유자 대본을 쉼 0~0.08초로 받아써도 마침표·느낌표 뒤는 나눔 ('그리고 뒤에 말하면 혼난다.' | '시작!')."""
+        for gap in (0.0, 0.08):
+            t, ws = 0.0, []
+            for k, w in enumerate("감독님, 요 세 마디만 하면 돼. 다른 말 하지 마, 순두시지 마, 감독님. 그리고 뒤에 말하면 혼난다. 시작!".split()):
+                ws.append({"w": w, "s": round(t, 3), "e": round(t + 0.25, 3)})
+                t += 0.25 + (gap if w[-1] in ",.!" else 0.02)
+            segs = [{"start": ws[0]["s"], "end": ws[-1]["e"], "text": " ".join(w["w"] for w in ws), "words": ws}]
+            self.assertEqual(texts(captions.from_segments(segs, "shorts", captions.DEFAULT_TERMS)),
+                             ["감독님, 요 세 마디만 하면 돼.", "다른 말 하지 마,", "순두시지 마, 감독님.", "그리고 뒤에 말하면 혼난다.", "시작!"], gap)
+
+    def test_no_forced_breaks_inside_speech(self):
+        """검토: 꾸미는 말·이음말 뒤 · 주어(~가) · 이음꼴 ~아/~어 · 이름씨 '플레이어' · 이음꼴+요 · 말 머리 부르는 말은 쉬어도 혼자 떨어지지 않음."""
+        def segs(spec):
+            t, ws = 0.0, []
+            for tok in spec.split():
+                g = 0.02
+                if "|" in tok:
+                    tok, g = tok.split("|")
+                    g = float(g)
+                d = max(0.12, len(tok) * 0.07)
+                ws.append({"w": tok, "s": round(t, 3), "e": round(t + d, 3)})
+                t += d + g
+            return ws
+        for spec, bad in (("공을 받아|0.2 바로 슈팅", "공을 받아"), ("수비수가|0.35 따라오면 패스", "수비수가"), ("플레이어|0.2 위치를 봐", "플레이어"),
+                          ("윙어|0.2 쪽으로 벌려", "윙어"), ("패스하고 그|1.27 자리에 서 있으면 왜 안 될까요?", "패스하고 그"),
+                          ("그리고|0.8 이건 그냥 참고로만 들으세요.", "그리고"), ("여기서요|0.15 이렇게 딱 잡고요|0.15 돌아서요|0.15 슈팅", "여기서요"),
+                          ("감독님,|0.25 이거 맞아요?", "감독님,"), ("민수야,|0.2 패스 줘", "민수야,"), ("감독님,|0.3 요 세 마디만 하면 돼.", "감독님,"),
+                          ("Mr.|0.0 Kim 패스", "Mr."), ("음…|0.3 이건 좀 어렵네", "음…")):
+            with self.subTest(spec=spec):
+                self.assertNotIn(bad, texts(captions.segment(segs(spec), "shorts")))
+                self.assertFalse(captions.utterance_breaks(segs(spec)), spec)
+        for spec, want in (("고개 들어|0.2 이렇게 하면 돼", ["고개 들어", "이렇게 하면 돼"]), ("잡아|0.2 그렇지", ["잡아", "그렇지"]),
+                           ("알겠니|0.3 네", ["알겠니", "네"]), ("순두시지 마,|0.3 감독님.", ["순두시지 마,", "감독님."]),
+                           ("혼난다.|0.0 시작!", ["혼난다.", "시작!"]), ("알겠지?|0.0 네!", ["알겠지?", "네!"])):
+            with self.subTest(spec=spec):
+                self.assertEqual(texts(captions.segment(segs(spec), "shorts")), want)
+        self.assertFalse(captions.merged_utterances("Mr. Kim 패스"))  # 단어 시각 없을 때도 줄임말은 문장 끝이 아님
+        self.assertFalse(captions.merged_utterances("음… 이건 좀 어렵네"))
 
     def test_split_text_and_merged(self):
         parts = captions.split_text("혼난다. 시작!", 30.0, 31.2, "shorts")
@@ -203,6 +257,38 @@ class EditorResplitTest(unittest.TestCase):
         again, n2 = editor.oneline_captions(out, TALL, terms=[])
         self.assertEqual((texts(again), n2), (texts(out), 0))
 
+    def test_hand_captions_kept(self):
+        """검토 (D-387): 손으로 맞추거나 쓴 자막(tm · SRT · Shift+T)과 손으로 나누거나 합친 자막(ms)은 '한 줄씩 나누기'·'다시 나누기'가
+        따로 한 말 규칙으로 다시 나누지 않음 (길면 길이 규칙은 그대로) · 줄임말 'Mr.' 은 문장 끝이 아님."""
+        caps = [{"id": "s", "start": 1.0, "end": 2.2, "text": "네. 알겠습니다.", "tm": 1},           # SRT·손으로 쓴 자막
+                {"id": "m", "start": 3.0, "end": 4.0, "text": "Mr. Kim 패스"},                    # 줄임말
+                {"id": "j", "start": 5.0, "end": 6.2, "text": "혼난다. 시작!", "ms": 1},          # Ctrl+J 로 합친 자막
+                {"id": "l", "start": 7.0, "end": 12.0, "tm": 1, "text": "오늘은 왼발 인사이드로 공을 받아서 수비수를 등지고 돌아서는 동작을 연습해 볼게요."}]
+        out, n = editor.oneline_captions(caps, TALL, terms=[])
+        self.assertEqual(texts(out)[:3], ["네. 알겠습니다.", "Mr. Kim 패스", "혼난다. 시작!"])
+        self.assertEqual(n, 1)  # 긴 tm 자막만 (길이 규칙)
+        self.assertTrue(all(c.get("tm") for c in out[3:]))
+        self.assertEqual(editor.merged_captions(caps), 0)  # 열 때 안내도 안 셈
+        land, _ = editor.oneline_captions([dict(caps[2], sh=[], shn=2), dict(caps[2], id="j2", start=7.0, end=8.2)], LAND, terms=[])
+        self.assertEqual([c.get("sh") or None for c in land], [None, None])  # 합친 자막은 쇼츠 한 줄에 들면 쇼츠에서도 한 자막
+        # '자막 다시 나누기': ms 자막은 그대로 · 그 앞뒤와 잇지 않음
+        old = old_caps(build(OWNER), "shorts")
+        hand = next(c for c in old if c["text"] == "혼난다. 시작!")
+        hand["ms"] = 1
+        new, _ = editor.resplit_captions(old, TALL, None, terms=[])
+        self.assertIn("혼난다. 시작!", texts(new))
+        self.assertIn("그리고 뒤에 말하면", texts(new))  # ms 자막 앞에서 사슬이 끊겨 '혼난다.' 와 다시 묶지 않음
+
+    def test_resplit_overlapping_speakers(self):
+        """검토 (D-387): 같은 트랙에 시간이 겹친 두 자막(두 사람이 겹쳐 말함)은 낱말을 섞지 않음."""
+        wt = lambda ws: [{"w": w, "s": a, "e": b} for w, a, b in ws]  # noqa: E731
+        a = editor._make_cap({"start": 10.0, "end": 11.4, "text": "왼쪽으로 돌아서 슈팅해",
+                              "words": wt([("왼쪽으로", 10.0, 10.5), ("돌아서", 10.5, 10.9), ("슈팅해", 10.95, 11.4)])}, "shorts", [])
+        b = editor._make_cap({"start": 10.55, "end": 10.85, "text": "오른쪽!", "words": wt([("오른쪽!", 10.55, 10.85)])}, "shorts", [])
+        a["id"], b["id"] = "a", "b"
+        new, _ = editor.resplit_captions([a, b], TALL, None, terms=[])
+        self.assertEqual(sorted(texts(new)), sorted(["왼쪽으로 돌아서 슈팅해", "오른쪽!"]), texts(new))
+
     def test_shorts_cuts_follow_new_rules(self):
         segs = build(OWNER, "one")
         ws = [w for s in segs for w in s["words"]]
@@ -273,7 +359,8 @@ class EditorJsTest(unittest.TestCase):
         self.assertNotIn("document", blk)
         prog = ("const FPS = 30, r6c = v => Math.round(v * 1e6) / 1e6, clamp = (v, a, b) => Math.min(b, Math.max(a, v));\n"
                 "let nidN = 0; const nid = () => 'n' + (++nidN), CAPNEW = new Map(), otLockNote = '잠김';\n"
-                "const otCap = c => c && typeof c.trk === 'string' ? c.trk : 'C1', capOffSet = () => new Set(), otLockOf = () => false;\n"
+                "let OFF = new Set(), INEDIT = () => true; const capOffSet = () => OFF, capInEdit = () => INEDIT;\n"
+                "const otCap = c => c && typeof c.trk === 'string' ? c.trk : 'C1', otLockOf = () => false;\n"
                 "let P = { captions: [], sequences: [], info: { width: 1920, height: 1080 } };\n" + blk + "\n" + body)
         r = subprocess.run([NODE, "-e", prog], capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -345,6 +432,31 @@ process.stdout.write(JSON.stringify({ merged, short, long, rt, sh: t.sh || null,
         self.assertTrue(15.3 - 1e-6 <= rt[-1][1] and rt[-1][2] <= 15.6 + 1e-6)  # 더한 낱말은 끝 빈 곳
         self.assertEqual(out["rt2"], ["감독님,", "다른", "말", "하지", "마,", "알겠지?"])
         self.assertEqual((out["sh"], out["shn"]), ([1], 6))  # 쇼츠 조각 경계('다른' 앞)도 같은 낱말에
+
+    def test_merge_rules_in_edit(self):
+        """검토 (D-386): 다음 자막은 이 편집본에 걸친 것만 · 1.2초 넘게 떨어지면 force 일 때만 · 이 편집본에서 지운 자막(지금 자막도)은 안 합침 · 나누고 합친 자막은 ms."""
+        out = self.run_js("""
+const mk = () => [{ id: 'a', start: 37.0, end: 37.8, text: '대박.' }, { id: 'z', start: 45.0, end: 46.2, text: '다음 영상에서 만나요.' },
+                  { id: 'e', start: 30.0, end: 31.2, text: '혼난다. 시작!' }, { id: 'v', start: 34.0, end: 35.6, text: '순두시지 마, 감독님.' }];
+P.captions = mk(); INEDIT = c => c.start < 40;  // 이 편집본: 원본 10~40초
+const outside = capMergeDo(P.captions[0]);
+P.captions = mk(); INEDIT = () => true;
+const far = capMergeDo(P.captions.find(c => c.id === 'e')), n1 = P.captions.length;
+const forced = capMergeDo(P.captions.find(c => c.id === 'e'), true), e = P.captions.find(c => c.id === 'e');
+P.captions = mk(); OFF = new Set(['v']);
+const offCur = capMergeDo(P.captions.find(c => c.id === 'v')), offNext = capMergeDo(P.captions.find(c => c.id === 'e'), true);
+OFF = new Set(); P.captions = [{ id: 'x', start: 1.0, end: 1.6, text: '혼난다.' }, { id: 'y', start: 1.6, end: 2.1, text: '시작!' }];
+capMergeDo(P.captions[0]); const ms1 = P.captions[0].ms || 0;
+const s = { id: 's', start: 0, end: 2, text: '오늘은 왼발 인사이드로 받아볼게요.' }; P.captions = [s];
+const t = capSplitDo(s, capSplitPlan(s, 1.0));
+process.stdout.write(JSON.stringify({ outside: outside.why, far: [far.why, far.far, n1], forced: [forced.why || '', e.text, e.end, e.ms], offCur: offCur.why, offNext: offNext.why, ms1, ms2: [s.ms, t.ms] }));""")
+        self.assertIn("다음 자막이 없어요", out["outside"])  # 편집본 밖 '다음 영상에서 만나요.'(45초)와 합치지 않음
+        self.assertTrue(out["far"][0] and out["far"][1] > 2.7 and out["far"][2] == 4, out["far"])  # 2.8초 떨어짐 → 그냥은 안 합침
+        self.assertEqual(out["forced"][:2], ["", "혼난다. 시작! 순두시지 마, 감독님."])  # 물어본 뒤(force)에는 합침
+        self.assertEqual(out["forced"][3], 1)
+        self.assertIn("이 편집본에서 지운 자막", out["offCur"])  # 지금 자막이 이 편집본에서 지운 자막
+        self.assertIn("다음 자막은 이 편집본에서 지운 자막", out["offNext"])
+        self.assertEqual((out["ms1"], out["ms2"]), (1, [1, 1]))
 
 
 if __name__ == "__main__":
