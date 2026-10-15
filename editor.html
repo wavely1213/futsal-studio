@@ -2426,6 +2426,9 @@ const PLAY_LEAD = 0.015 * 1000;  // ms — 재생기를 시계보다 이만큼 �
    모두 그 자리에서 기다렸다가 같이 출발. 예전엔 시계가 그냥 가고 0.3초 넘게 늦은 재생기를 '지금 + 0.06초'로 건너뛰게 했는데, 느린 인터넷(밖에서 작업)에서는
    건너뛴 곳도 아직 못 받아 받던 것을 버리고 다시 받는 사이 또 늦어 또 건너뛰며 소리가 계속 끊기고 일부가 빠졌음 (I-360). PC 화면은 거의 늘 준비돼 있어 예전과 같음. */
 const HOLD_GRACE = 150, HOLD_MAX = 8000;  // ms — 잠깐(0.15초) 못 받는 것은 그냥 둠 · 8초 넘게 못 받는 재생기는 한동안 안 기다림
+// 빠르게 훑기(L 두 번 이상 · 4·8배)는 예전처럼 쫓아감 — 0.3초·1.5초가 원본 시간이라 8배에서는 37ms 만 어긋나도 멈췄다 출발해 그림·소리가 멎고
+// 실제로 6~7배밖에 안 갔음 (D-361 검토 고침) · 2배까지(보통 재생 · L 한 번)만 기다림 · 옮겨서 받아 두기(seek)는 속도와 상관없이 그대로
+const HOLD_FAST = 2;
 let HOLD = null, NEEDF = [], NEEDT = -1, holdNeed = 0.5, holdLast = -1e9, holdTick = 0;  // holdNeed: 다시 출발할 때 앞에 받아 둘 길이(초) · 곧 또 기다리면 늘림
 function bufAt(el, x) { try { const b = el.buffered; for (let i = 0; i < b.length; i++) if (b.start(i) <= x + 0.02 && b.end(i) >= x + 0.1) return true; } catch (e) {} return false; }
 function bufAhead(el) { try { const b = el.buffered, t = el.currentTime; for (let i = 0; i < b.length; i++) if (b.start(i) <= t + 0.05 && b.end(i) > t) return b.end(i) - t; } catch (e) {} return 0; }
@@ -2443,7 +2446,7 @@ function needEl(e, it, t) { if (e.needF === FRN) return; e.needF = FRN; e.needLe
 function holdStart(why, t) {
   const now = performance.now();
   if (now - holdLast > 30000) holdNeed = 0.5;  // 한동안 잘 나왔으면 처음처럼
-  else if (why === "starve" || why === "far") holdNeed = Math.min(4, holdNeed * 2);  // 곧 또 끊기면 더 많이 받아 두고 출발 (짧게 자주 끊기지 않게)
+  else if (why === "starve" || why === "far") holdNeed = Math.min(4, holdNeed * 2);  // 곧 또 끊기면 더 많이 받아 두고 출발 (짧게 자주 끊기지 않게 · 빠르게 훑기(HOLD_FAST 넘게)는 이 둘이 안 생김)
   if (t != null) T = clamp(t, Math.max(0, T - 0.5), T);  // 멈춘 그 자리부터 (소리를 건너뛰지 않음 · 많아야 0.5초 앞으로)
   HOLD = { since: now, why, need: holdNeed, lead: why === "seek" ? 40 : 80, frn: FRN };
   for (const e of POOL.values()) { if (e.el.pause && !e.el.paused) e.el.pause(); e.starve = null; }
@@ -2460,7 +2463,7 @@ function holdCheck(now) {
     return;
   }
   if (now < clock.at) return;
-  if (gap > 120) { for (const e of NEEDF) e.starve = null; return; }  // 화면이 한동안 멈췄던 뒤(무거운 계산·글꼴 바꿈)는 못 받은 줄로 치지 않음 — 다음 화면에서 다시 봄
+  if (gap > 120 || shuttle > HOLD_FAST) { for (const e of NEEDF) e.starve = null; return; }  // 화면이 한동안 멈췄던 뒤(무거운 계산·글꼴 바꿈)는 못 받은 줄로 치지 않음 — 다음 화면에서 다시 봄 · 빠르게 훑기는 안 기다림
   let at = null;
   for (const e of NEEDF) {
     const el = e.el;
@@ -2491,7 +2494,7 @@ function syncEl(e, it, t, need = true) {
       const d = el.currentTime - m, now = performance.now();
       if (Math.abs(d) > 0.3) {
         // 받아 둔 곳이면 예전처럼 바로 맞춤 · 아직 못 받은 곳이거나 방금 맞췄는데 또 어긋나면 쫓아가지 않고 시계를 멈춰 모두 기다림 (D-361)
-        if (need && !elDead(e) && (!bufAt(el, m + 0.06 * want) || now - (e.hardAt || -1e9) < 1500)) return holdStart("far");
+        if (need && shuttle <= HOLD_FAST && !elDead(e) && (!bufAt(el, m + 0.06 * want) || now - (e.hardAt || -1e9) < 1500)) return holdStart("far");
         e.hardAt = now; el.currentTime = m + 0.06 * want;
       } else {
         // 재생 속도로 살짝 맞추기 (D-365): 거의 맞으면(40ms 안) 정확히 원래 속도 — 예전엔 매 화면 ±10% 안에서 바꿔 소리를 늘였다 줄였다 함 · 어긋나도 ±5% 안에서
@@ -2781,7 +2784,7 @@ function play(r = 1) {
   ensureAudio();
   if (total() <= 0) return;
   if (r > 0 && T >= total() - 0.05) T = 0;
-  shuttle = r; playing = true; clock = { t0: T, at: performance.now() + 80 }; HOLD = null;
+  shuttle = r; playing = true; clock = { t0: T, at: performance.now() + 80 }; HOLD = null; holdBadge(false);  // J·L 로 바꾸면 남은 '불러오는 중…'도 지움 (D-360 검토 고침)
   // 아직 안 받은 곳에서 바로 시계를 출발시키면 소리가 비다가 건너뜀 → 필요한 재생기가 받아 둘 때까지 기다렸다 출발 (D-362) · 이미 받아 둔 곳(보통 PC)은 예전처럼 바로
   if (r > 0 && !(NEEDT === T && NEEDF.every(e => elReady(e, holdNeed)))) holdStart("start");
   $("bPlay").textContent = "❚❚"; frameDirty = true;

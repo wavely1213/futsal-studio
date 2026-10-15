@@ -6,7 +6,7 @@
     세션 쿠키(__Host-fs_s · HttpOnly · Secure · SameSite=Strict · 메모리에만) → 스튜디오 화면.
   - 경계 순서 (Host·본문 방식·잠금·요청 수는 remote 가 먼저): 메서드 → 밖에서 작업 허용 → Sec-Fetch-Site → 세션 쿠키 →
     (POST) Origin·CSRF → 길 분류(POLICY · 분류 안 된 길은 막음) → 본문(종류·크기·쿠키 칸) → 처리 (앱의 화면 처리기를 그대로 부름).
-  - 응답은 늘 private·no-store(+ Vary: Cookie) · 쪽(HTML)은 nonce CSP · 화면 쪽 스크립트는 remote_ui.js(심)가 CSRF 머리글을 붙임.
+  - 응답은 늘 private·no-store(+ Vary: Cookie · 정적 파일만 private 7일 + Vary: Accept-Encoding) · 쪽(HTML)은 nonce CSP · 화면 쪽 스크립트는 remote_ui.js(심)가 CSRF 머리글을 붙임.
 app·remote 를 import 하지 않는다 — remote.Service 를 svc 로, app 의 화면 처리기(StudioHandler)를 svc.bridge.studio 로 받는다.
 """
 import collections
@@ -20,6 +20,8 @@ import os
 import re
 import secrets
 import shutil
+import socket
+import struct
 import threading
 import time
 import unicodedata
@@ -127,8 +129,10 @@ class Sessions:
     def _forget(self, rec, code, why):
         self.items.pop(rec["hash"], None)
         _lru_put(self.gone, rec["hash"], (code, self.clock(), bool(rec.get("guest"))), GONE_MAX)
-        rec["endedWhy"] = why
+        rec["endedWhy"], rec["endedCode"] = why, code
         self.seen[rec["device"]] = self.clock()
+        for c in list(rec.get("conns") or ()):  # 보내는 중인 미디어도 바로 끊음 (로그아웃·PC 에서 끊기·새 연결 · D-368 검토 고침)
+            _cut(c)
 
     def create(self, dev, net):
         """→ (토큰, 세션, 끝낸 옛 세션들). 같은 기기의 옛 세션은 끝냄 (탭들은 새 쿠키를 같이 씀)."""
@@ -211,6 +215,44 @@ class Sessions:
 
 class TooMany(Exception):
     pass
+
+
+def _cut(sock):
+    """끝난 세션의 미디어 연결을 끊음: 멈춘 재생기라 막혀 있던 보내기는 곧 오류로 끝나고(자리·스레드 돌려줌), 닫을 때 남은 보낼 몫은
+    버림(SO_LINGER 0 → RST · 예전처럼 120초 동안 다시 읽으면 8MB 조각 나머지가 가던 것을 막음 · I-365)."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("HH" if os.name == "nt" else "ii", 1, 0))
+    except (OSError, AttributeError, ValueError):
+        pass
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
+class _SessWriter:
+    """미디어를 보내는 동안의 wfile: 조각(256KB)마다 세션이 살아 있는지 봄 — 끝났으면 ConnectionAbortedError (app._file 이 '화면이 끊음'처럼
+    조용히 멈춤 · _cut 이 소켓을 못 끊는 경우에도 더 보내지 않음 · D-368 검토 고침)."""
+    PIECE = 256 << 10
+
+    def __init__(self, w, sess):
+        self._w, self._sess = w, sess
+
+    def write(self, b):
+        mv = memoryview(b)
+        for i in range(0, len(mv), self.PIECE):
+            if "endedWhy" in self._sess:
+                raise ConnectionAbortedError("세션이 끝났어요")
+            try:
+                self._w.write(mv[i:i + self.PIECE])
+            except OSError:
+                if "endedWhy" in self._sess:  # _cut 이 끊은 것 (Windows 는 WSAESHUTDOWN 등) → '끊김'으로
+                    raise ConnectionAbortedError("세션이 끝났어요") from None
+                raise
+        return len(mv)
+
+    def __getattr__(self, k):
+        return getattr(self._w, k)
 
 
 class Handoffs:
@@ -423,7 +465,12 @@ def bucket_of(path):
 
 def hardening(h):
     """스튜디오 응답에 늘 붙는 머리글 (app.StudioHandler.end_headers 가 아직 안 보낸 것만 붙임)."""
-    vary = "Cookie, Accept-Encoding" if getattr(h, "_studio_vary_ae", False) else "Cookie"
+    if getattr(h, "_studio_cache", None) == STATIC_AGE:
+        # 정적 파일(글꼴·스티커·심·hello.js)은 어느 세션에나 같은 바이트이고 비밀이 없음 → 쿠키로 나누지 않음. 'Vary: Cookie' 면 새 연결(넘겨주기마다
+        # 새 쿠키)마다 브라우저가 7일 보관한 글꼴 2.45MB 를 다시 받았음 (D-366 검토 고침) · 받을 때는 늘 세션 검사 · private 이라 Cloudflare 는 안 둠
+        vary = "Accept-Encoding"
+    else:
+        vary = "Cookie, Accept-Encoding" if getattr(h, "_studio_vary_ae", False) else "Cookie"
     return [("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
             ("X-Frame-Options", "SAMEORIGIN" if getattr(h, "_studio_frame_self", False) else "DENY"),
             ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
@@ -878,13 +925,23 @@ def _media(h, svc, sess, path, u):
 def _media_file(h, svc, sess, fn):
     if not media_slot(svc, sess):
         return send(h, 503, {"ok": False, "error": MSG["busy_media"]}, extra={"Retry-After": "3"})
-    try:  # 보내는 동안은 느린 망(멈춘 재생기)에서도 20초에 끊지 않음 — 예전엔 8MB 중 3~4MB 만 보내고 끊겨 다시 받아야 했음 (D-368)
-        h.connection.settimeout(MEDIA_SEND_TIMEOUT)
-    except (AttributeError, OSError):
-        pass
+    conn, conns, w = getattr(h, "connection", None), sess.setdefault("conns", set()), h.wfile
+    if conn is not None:
+        conns.add(conn)  # 세션이 끝나면 _forget 이 끊음 (보내는 동안만 올려 둠)
     try:
+        if "endedWhy" in sess:  # 자리를 기다리는 사이 연결이 끝남
+            code = sess.get("endedCode") or "none"
+            return send(h, 401, {"ok": False, "code": code, "error": (sess.get("guest") and MSG_GUEST.get(code)) or MSG.get(code) or MSG["none"],
+                                 "site": svc.site()})
+        try:  # 보내는 동안은 느린 망(멈춘 재생기)에서도 20초에 끊지 않음 — 예전엔 8MB 중 3~4MB 만 보내고 끊겨 다시 받아야 했음 (D-368)
+            conn.settimeout(MEDIA_SEND_TIMEOUT)
+        except (AttributeError, OSError):
+            pass
+        h.wfile = _SessWriter(w, sess)  # 대신 세션이 끝나면 120초를 기다리지 않고 바로 멈춤 (D-368 검토 고침)
         return fn()
     finally:
+        h.wfile = w
+        conns.discard(conn)
         svc.limiter.media_leave(sess["device"])
 
 

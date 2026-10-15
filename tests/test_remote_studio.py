@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -914,6 +915,63 @@ class GateHttpTest(StudioBase):
         self.assertEqual(rstudio._media_file(h, self.svc, sess, lambda: "sent"), "sent")
         self.assertEqual(seen, [rstudio.MEDIA_SEND_TIMEOUT])
         self.assertEqual(self.svc.limiter.media["d1"], 0)
+        self.assertEqual(sess["conns"], set())  # 보내는 동안만 올려 둠
+
+    def test_media_slot_after_session_end(self):
+        """미디어 자리를 기다리는 사이(최대 15초) 연결이 끝났으면 보내지 않고 401 (D-368 검토 고침) · 자리는 돌려줌."""
+        h = mock.Mock()
+        sess = {"device": "d1", "endedWhy": "밖에서 연결 끝냄", "endedCode": "logout"}
+        sent = []
+        with mock.patch.object(rstudio, "send", lambda hh, code, body, *a, **kw: sent.append((code, body["code"]))):
+            rstudio._media_file(h, self.svc, sess, lambda: self.fail("끝난 세션에 미디어를 보냄"))
+        self.assertEqual(sent, [(401, "logout")])
+        self.assertEqual(self.svc.limiter.media["d1"], 0)
+
+    @unittest.skipIf(sys.platform == "win32", "shutdown 이 막힌 보내기를 바로 깨우는지는 운영체제마다 다름 (리눅스·맥에서 확인 · I-365)")
+    def test_media_cut_on_logout(self):
+        """검토 재현: 멈춘 재생기(안 읽음)의 미디어 응답이 로그아웃(·PC 에서 끊기·새 연결) 뒤에도 120초 동안 살아 있다가, 다시 읽으면 8MB 조각
+        나머지(8.3MB)를 받았음 (11bf533 은 20초에 끊겨 커널에 쌓인 2MB) → 이제 세션이 끝나는 순간 그 연결을 끊음: 자리가 곧 돌아오고,
+        다시 읽어도 1MB 안 (보낼 몫은 버림 · D-368 검토 고침)."""
+        self.login()
+        pp = editor.proxy_path(NAME)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        pp.write_bytes(os.urandom(16 << 20))
+        dev = self.svc.studio.sessions.all()[0]["device"]
+        s = socket.socket()
+        self.addCleanup(s.close)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        s.connect(("127.0.0.1", self.port))
+        s.sendall((f"GET /media?name={quote(NAME)} HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nCookie: {self.cookie}\r\n"
+                   "Range: bytes=0-\r\nSec-Fetch-Site: same-origin\r\n\r\n").encode())
+        got = b""
+        while b"\r\n\r\n" not in got:
+            got += s.recv(4096)
+        head, body = got.split(b"\r\n\r\n", 1)
+        self.assertTrue(head.startswith(b"HTTP/1.0 206") or head.startswith(b"HTTP/1.1 206"), head[:40])
+        n0 = len(body)
+        while n0 < 65536:
+            n0 += len(s.recv(4096))
+        end = time.time() + 5
+        while self.svc.limiter.media[dev] == 0 and time.time() < end:  # 보내는 중 (자리 하나)
+            time.sleep(0.02)
+        self.assertEqual(self.svc.limiter.media[dev], 1)
+        time.sleep(0.5)  # 재생기가 멈춤 — 보내는 쪽이 꽉 차 막힘
+        self.assertEqual(self.jreq("POST", "/s/logout", {})[0], 200)
+        end = time.time() + 5
+        while self.svc.limiter.media[dev] and time.time() < end:  # 막혀 있던 보내기가 곧 끝나 자리를 돌려줌 (예전엔 120초)
+            time.sleep(0.02)
+        self.assertEqual(self.svc.limiter.media[dev], 0)
+        s.settimeout(5)
+        n1 = 0
+        try:
+            while True:
+                c = s.recv(1 << 16)
+                if not c:
+                    break
+                n1 += len(c)
+        except (ConnectionError, socket.timeout):
+            pass
+        self.assertLess(n1, 1 << 20, n1)
 
     def test_fonts_gzip_private(self):
         """글꼴은 gzip 으로 (자막 글꼴 4MB → 2.4MB · 처음 열 때 첫 소리와 망을 덜 다툼 · D-366) · 7일 보관은 그대로 private."""
@@ -923,12 +981,31 @@ class GateHttpTest(StudioBase):
         self.assertEqual(st, 200)
         self.assertEqual(self.hget(hd, "Content-Encoding"), ["gzip"])
         self.assertEqual(self.hget(hd, "Cache-Control"), [rstudio.STATIC_AGE])
-        self.assertIn("Accept-Encoding", self.hget(hd, "Vary")[0])
+        self.assertEqual(self.hget(hd, "Vary"), ["Accept-Encoding"])  # 쿠키로 나누지 않음 — 새 연결(새 쿠키) 뒤에도 7일 보관이 들음 (D-366 검토 고침)
         self.assertLess(int(self.hget(hd, "Content-Length")[0]), f.stat().st_size)
         self.assertEqual(out, f.read_bytes())  # raw() 가 풀어 줌
         st, hd, out = self.req("GET", "/fonts/Pretendard-Bold.otf")  # gzip 을 모르는 곳은 그대로
         self.assertEqual((st, self.hget(hd, "Content-Encoding"), len(out)), (200, [], f.stat().st_size))
         self.assertEqual(self.req("GET", "/fonts/nope.otf", headers={"Accept-Encoding": "gzip"})[0], 404)
+
+    def test_static_vary_without_cookie(self):
+        """검토 재현: 글꼴·스티커·심은 'private, max-age=7일' 인데 'Vary: Cookie' 라 넘겨주기마다 새 쿠키 → 브라우저가 글꼴 2.45MB 를 다시 받았음 ·
+        이제 정적 파일만 'Vary: Accept-Encoding' (모든 세션에 같은 바이트 · 비밀 없음) · 화면·JSON·미디어는 그대로 쿠키로 나누고 no-store ·
+        세션 없는 요청은 정적 파일이어도 401 + no-store (받을 때는 늘 세션 검사)."""
+        self.login()
+        for path in ("/fonts/Pretendard-Bold.otf", "/s/remote.js", "/s/remote.css", "/stickers/1st-place-medal.png"):
+            st, hd, _ = self.req("GET", path, headers={"Accept-Encoding": "gzip"})
+            self.assertEqual((st, self.hget(hd, "Cache-Control"), self.hget(hd, "Vary")), (200, [rstudio.STATIC_AGE], ["Accept-Encoding"]), path)
+        pp = editor.proxy_path(NAME)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        pp.write_bytes(b"P" * 1000)
+        for path in ("/", "/api/state", "/media?name=" + quote(NAME)):
+            st, hd, _ = self.req("GET", path, headers={"Accept-Encoding": "gzip"})
+            self.assertEqual(self.hget(hd, "Cache-Control"), ["private, no-store"], path)
+            self.assertIn("Cookie", self.hget(hd, "Vary")[0], path)
+        st, hd, _ = self.req("GET", "/fonts/Pretendard-Bold.otf", cookie=False)
+        self.assertEqual((st, self.hget(hd, "Cache-Control")), (401, ["private, no-store"]))
+        self.assertIn("Cookie", self.hget(hd, "Vary")[0])
 
 
 def quote(s):
