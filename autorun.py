@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 
+import claude_cli
 import core
 import editor
 import studiolog
@@ -245,6 +246,11 @@ def _say(e):
 
 
 def run(name, opts, log=print, analyze=None, resume=False):
+    with claude_cli.reuse_answers():  # 같은 영상을 다시 돌리면 클로드에 같은 물음을 다시 하지 않음 (D-393)
+        return _run(name, opts, log, analyze, resume)
+
+
+def _run(name, opts, log=print, analyze=None, resume=False):
     """끝까지 자동으로 (작업 함수). resume: 저장된 기록이 끝나지 않았으면 이어서 (설정도 그때 것) · 아니면 처음부터.
     analyze(b): 편집점 찾기 + 1차 가편집 (app.Handler._analyze). → public(기록)."""
     editor.video_path(name)

@@ -313,19 +313,46 @@ class TestImages(SaverBase):
 
 class TestCacheAndUsage(SaverBase):
     def test_cache_hit_avoids_second_call(self):
-        r1 = claude_cli.run("같은 물음", task="copy")
-        r2 = claude_cli.run("같은 물음", task="copy")
-        self.assertEqual(len(self.calls()), 1, "두 번째는 저장해 둔 대답")
-        self.assertFalse(r1["cached"])
-        self.assertTrue(r2["cached"])
-        self.assertEqual((r2["text"], r2["model"]), (r1["text"], r1["model"]))
-        claude_cli.run("다른 물음", task="copy")
-        claude_cli.run("같은 물음", task="writer")
-        self.assertEqual(len(self.calls()), 3, "물음·일(모델)이 다르면 새로")
+        with claude_cli.reuse_answers():
+            r1 = claude_cli.run("같은 물음", task="copy")
+            r2 = claude_cli.run("같은 물음", task="copy")
+            self.assertEqual(len(self.calls()), 1, "두 번째는 저장해 둔 대답")
+            self.assertFalse(r1["cached"])
+            self.assertTrue(r2["cached"])
+            self.assertEqual((r2["text"], r2["model"]), (r1["text"], r1["model"]))
+            claude_cli.run("다른 물음", task="copy")
+            claude_cli.run("같은 물음", task="writer")
+            self.assertEqual(len(self.calls()), 3, "물음·일(모델)이 다르면 새로")
         for f in (claude_cli.HOME / claude_cli.CACHE_DIR).glob("*.json"):
             self.assertNotIn("같은 물음", f.read_text(encoding="utf-8"), "프롬프트는 남기지 않음")
 
+    def test_manual_call_asks_again_but_saves(self):
+        r1 = claude_cli.run("같은 물음", task="copy")
+        r2 = claude_cli.run("같은 물음", task="copy")
+        self.assertEqual(len(self.calls()), 2, "사람이 다시 누르면 새로 물음 (다른 대답을 원해서 누름)")
+        self.assertFalse(r2["cached"])
+        with claude_cli.reuse_answers():
+            r3 = claude_cli.run("같은 물음", task="copy")
+            with claude_cli.reuse_answers():
+                pass
+            r4 = claude_cli.run("같은 물음", task="copy")
+        self.assertEqual(len(self.calls()), 2, "자동으로 돌릴 때는 저장해 둔 대답 (겹쳐 써도 그대로)")
+        self.assertTrue(r3["cached"] and r4["cached"])
+        self.assertEqual(r3["text"], r2["text"], "가장 최근 대답")
+        claude_cli.run("같은 물음", task="copy")
+        self.assertEqual(len(self.calls()), 3, "with 밖으로 나오면 다시 새로 물음")
+
+    def test_autorun_reuses_answers(self):
+        import autorun
+        seen = []
+        with mock.patch.object(autorun, "_run", side_effect=lambda *a, **k: seen.append(getattr(claude_cli._REUSE, "on", False)) or "ok"):
+            self.assertEqual(autorun.run("v.mp4", {}), "ok")
+        self.assertEqual(seen, [True])
+        self.assertFalse(getattr(claude_cli._REUSE, "on", False), "끝나면 원래대로")
+
     def test_image_bytes_and_version_in_key(self):
+        claude_cli._REUSE.on = True
+        self.addCleanup(setattr, claude_cli._REUSE, "on", False)
         a = self.img("a.jpg", 320, 180)
         claude_cli.run("점수", images=[(a, "frames.jpg")], task="frames")
         claude_cli.run("점수", images=[(a, "frames.jpg")], task="frames")
@@ -339,6 +366,8 @@ class TestCacheAndUsage(SaverBase):
         self.assertRegex(claude_cli._app_ver(), r"^\d+\.\d+$")
 
     def test_errors_and_bad_answers_not_cached(self):
+        claude_cli._REUSE.on = True
+        self.addCleanup(setattr, claude_cli._REUSE, "on", False)
         os.environ["FAKE_MODE"] = "limit"
         with self.assertRaises(claude_cli.ClaudeError) as cm:
             claude_cli.run("한도", task="copy")
@@ -379,6 +408,8 @@ class TestCacheAndUsage(SaverBase):
             self.assertIsNotNone(claude_cli.cache_get("e" * 40), "막 넣은 것은 남음")
 
     def test_usage_job_line_and_daily(self):
+        claude_cli._REUSE.on = True
+        self.addCleanup(setattr, claude_cli._REUSE, "on", False)
         claude_cli.job_begin()
         r = claude_cli.run("첫 물음", task="copy")
         self.assertEqual(r["usage"], {"input": 3, "output": 40, "cacheRead": 200, "cacheWrite": 500, "total": 743})
@@ -425,6 +456,8 @@ class TestCacheAndUsage(SaverBase):
 class TestCallers(SaverBase):
     def test_proofread_reuses_answer_for_unchanged_transcript(self):
         import proofread
+        claude_cli._REUSE.on = True   # 끝까지 자동으로 안 (autorun.run)
+        self.addCleanup(setattr, claude_cli._REUSE, "on", False)
         os.environ["FAKE_REPLY"] = '{"fix":[{"i":1,"t":"공을 놓칠까요?"}]}'
         segs = [{"start": 0, "end": 2, "text": "공으로 칠까요?", "words": [{"w": "공으로", "s": 0, "e": 1, "p": 1}, {"w": "칠까요?", "s": 1, "e": 2, "p": 1}]}]
         new, n, model = proofread.proofread(segs, "퍼스트 터치")
@@ -501,8 +534,9 @@ class TestAppRoutes(SaverBase):
 
     def test_job_logs_one_line(self):
         def job():
-            claude_cli.run("물음", task="copy")
-            claude_cli.run("물음", task="copy")
+            with claude_cli.reuse_answers():   # 작업 스레드 안 (끝까지 자동으로와 같은 모양)
+                claude_cli.run("물음", task="copy")
+                claude_cli.run("물음", task="copy")
             return {"ok": True}
         n0 = len(self.app.LOG)
         self.assertTrue(self.app.start_job("시험 작업", job))

@@ -527,6 +527,22 @@ def _cache_dir():
     return HOME / CACHE_DIR
 
 
+_REUSE = threading.local()   # 저장해 둔 대답을 다시 쓰는 때: '끝까지 자동으로' 안에서만 (사람이 다시 누르면 새로 물음 · I-392)
+
+
+class reuse_answers:
+    """with claude_cli.reuse_answers(): 이 스레드의 클로드 부르기는 같은 물음이면 저장해 둔 대답을 다시 씀 (밖에서는 저장만 함)."""
+
+    def __enter__(self):
+        self._old = getattr(_REUSE, "on", False)
+        _REUSE.on = True
+        return self
+
+    def __exit__(self, *a):
+        _REUSE.on = self._old
+        return False
+
+
 def cache_get(key):
     f = _cache_dir() / f"{key}.json"
     try:
@@ -773,7 +789,7 @@ def run(prompt, images=None, timeout=TIMEOUT, cancel=None, on_tick=None, task=No
     model = model_for(task, save)
     imgs = _read_images(images)
     key = cache_key(task, model, prompt, imgs) if save else None
-    if key:
+    if key and getattr(_REUSE, "on", False):
         hit = cache_get(key)
         if hit is not None:
             _record(None, cached=True, save=True)
