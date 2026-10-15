@@ -1352,6 +1352,34 @@ def judge_captions(pe, d, segs, sev):
             "sizeRange": size, "bigRatio": big, "followsSpeech": follows, "pos": pos, "keywordPerMin": kw_pm, "conf": _conf(conf), "ev": evs}
 
 
+SFX_NEAR = 0.6   # 참고 영상 효과음이 이만큼(초) 안의 사건에 붙은 것으로 봄 (소리 종류는 0.48초 · 글자 읽기는 1초마다라 넉넉히 · D-377)
+SFX_AT_KEYS = ("caption", "cut", "zoom", "laugh", "other")
+
+
+def sfx_anchors(ev, caps, sev):
+    """참고 영상 효과음이 어디에 붙었나 (D-377 · 스타일 배우기가 효과음 자리도 배우게): 효과음마다 SFX_NEAR 초 안의 가장 가까운 사건 —
+    caption(말 자막이 아닌 글자가 뜨는 때) · cut(컷) · zoom(확대) · laugh(웃음 시작) · other(가까운 사건 없음) → 개수 {n, caption, …, capKinds}."""
+    cuts = [float(c) for c in (sev or {}).get("cuts") or []]
+    zooms = [float(z["t"]) for z in (sev or {}).get("zooms") or [] if isinstance(z, dict) and z.get("t") is not None]
+    caps_t = [(float(c["a"]), c.get("kind")) for c in caps or [] if c.get("kind") not in (None, "speech")]
+    laughs = [float(x[0]) for x in ev.get("laugh") or []]
+    out = {"n": 0, **{k: 0 for k in SFX_AT_KEYS}, "capKinds": {}}
+    for t in ev.get("sfx") or []:
+        t = float(t)
+        near = [(abs(t - x), "caption", k) for x, k in caps_t] + [(abs(t - x), "cut", None) for x in cuts] + \
+               [(abs(t - x), "zoom", None) for x in zooms] + [(abs(t - x), "laugh", None) for x in laughs]
+        near = [x for x in near if x[0] <= SFX_NEAR]
+        out["n"] += 1
+        if not near:
+            out["other"] += 1
+            continue
+        _, kind, ck = min(near, key=lambda x: x[0])
+        out[kind] += 1
+        if ck:
+            out["capKinds"][ck] = out["capKinds"].get(ck, 0) + 1
+    return out
+
+
 def judge_fun(pe, d, segs, sev):
     dur = float(pe.get("duration") or 1)
     mins = max(dur / 60, 0.25)
@@ -1391,7 +1419,8 @@ def judge_fun(pe, d, segs, sev):
     if notes:
         label += f" ({' · '.join(notes)})"
     conf = 0.65 if S["audio"] else 0.45
-    return {"items": items, "label": label, "conf": conf, "ev": [e for x in shown[:2] for e in x["ev"][:1]], "approx": not S["audio"]}
+    return {"items": items, "label": label, "conf": conf, "ev": [e for x in shown[:2] for e in x["ev"][:1]], "approx": not S["audio"],
+            "sfxAt": sfx_anchors(ev, d.get("caps"), sev)}
 
 
 def judge_genre(pe, d, segs, title, fun, caps_j, spk):
@@ -1799,6 +1828,13 @@ def merge_plans(plans):
     fun = {"items": items, "label": ", ".join(f"{x['label']}({x['level']})" for x in shown) or "눈에 띄는 편집 재미 요소는 적어요 (내용·말 위주)",
            "conf": _conf(sum(p["fun"]["conf"] for p in plans) / n), "ev": [e for x in shown[:2] for e in x["ev"][:1]],
            "approx": any(p["fun"].get("approx") for p in plans)}
+    ats = [p["fun"]["sfxAt"] for p in plans if isinstance(p["fun"].get("sfxAt"), dict)]
+    if ats:  # 효과음 자리: 영상마다 센 것을 더함 (D-377 · 예전 판 분석에는 없음)
+        ck = {}
+        for a in ats:
+            for k, v in (a.get("capKinds") or {}).items():
+                ck[k] = ck.get(k, 0) + int(v or 0)
+        fun["sfxAt"] = {"n": sum(int(a.get("n") or 0) for a in ats), **{k: sum(int(a.get(k) or 0) for a in ats) for k in SFX_AT_KEYS}, "capKinds": ck}
     if fun["approx"]:
         fun["label"] += " (웃음소리는 소리 모델이 없어 몰라요)"
     tz = [p["intro"].get("teaserSec") or 0 for p in plans if p["intro"]["type"] == "teaser"]

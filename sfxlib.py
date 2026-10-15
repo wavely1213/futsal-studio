@@ -1,7 +1,7 @@
 """효과음·배경음악 (MSG 자동 편집용, D-141).
 
 - 실어 둔 효과음: 저장소 `sfx/` 의 Kenney CC0 소리 (출처는 sfx/LICENSE.txt)
-- PC에서 만드는 효과음: 휙·띠용·바둠츠·띠로리·두둥·두구두구·찰칵·라이저·팡·박수 (numpy · 정해진 시드 → 늘 같은 소리)
+- PC에서 만드는 효과음: 휙·띠용·바둠츠·띠로리·두둥·두구두구·찰칵·라이저·팡·박수·호루라기 (numpy · 정해진 시드 → 늘 같은 소리)
 - PC에서 만드는 배경음악: 분위기 5가지(신남·잔잔·경쾌·감성·코믹) · 이어 붙여도 이음새가 없는 마디 묶음
 처음 쓸 때 편집실 미디어 폴더(edit_media)에 `효과음_<이름>.wav` · `배경음악_<분위기>_<시드>.wav` 로 만들어 둔다
 (편집실 파일 주소·내보내기가 그대로 씀 · 인터넷을 쓰지 않음).
@@ -63,7 +63,11 @@ CATALOG = {
     "라이저": ("@riser", "점점 고조"),
     "팡": ("@pang", "작은 강조"),
     "박수": ("@claps", "박수"),
+    "호루라기": ("@whistle", "시작 신호"),
 }
+# 소리 모양 (D-371): 맞출 점(hit) — 부딪히는 소리는 첫소리, 점점 커지는 소리(아래)는 가장 큰 곳을 화면·소리 사건에 맞춤
+SWELL = {"휙", "슝", "라이저", "두둥", "띠로리", "두구두구"}
+SOFT = {"뽁", "뽁2", "팡", "딸깍", "틱", "틱2"}   # 짧고 작은 소리 (말 위에 작게 놓아도 됨 · D-372)
 MOODS = {  # 배경음악 분위기: 빠르기(bpm), 장조/단조, 설명
     "신남": (120, "major", "인트로·하이라이트용 신나는 음악"),
     "잔잔": (88, "major", "설명 장면 밑에 까는 잔잔한 음악"),
@@ -329,11 +333,22 @@ def _claps(rng):
     return out * np.minimum(1, (n - np.arange(n)) / (0.3 * SR))[:, None]
 
 
+def _whistle(rng):
+    """호루라기 '삑!' (약 0.38초): 3kHz 언저리 소리를 구슬이 떨리듯(초당 34번) 흔들고 숨소리를 조금."""
+    np = _np()
+    t = _t(0.38)
+    f = 2950 * (1 + 0.022 * np.sin(2 * np.pi * 34 * t))
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    am = 0.78 + 0.22 * np.sin(2 * np.pi * 34 * t + 0.6)
+    x = (np.sin(ph) + 0.16 * np.sin(2 * ph) + 0.04 * np.sin(3 * ph)) * am + 0.06 * _band(_noise(rng, len(t)), 2000, 6000)
+    return x * np.minimum(1, t / 0.012) * np.minimum(1, (t[-1] - t) / 0.05)
+
+
 _GEN = {"whoosh": _whoosh, "boing": _boing, "rimshot": _rimshot, "sad": _sad, "dudung": _dudung, "drumroll": _drumroll,
-        "shutter": _shutter, "riser": _riser, "pang": _pang, "claps": _claps}
+        "shutter": _shutter, "riser": _riser, "pang": _pang, "claps": _claps, "whistle": _whistle}
 
 
-SOFTER = {"shutter": -5.0}  # 아주 짧은 딸깍 소리는 크게 들려 조금 작게 (소리 크기 맞추기에서 리미터가 세게 누르지 않게)
+SOFTER = {"shutter": -5.0, "whistle": -3.0}  # 아주 짧은 딸깍 소리·높은 호루라기는 크게 들려 조금 작게 (소리 크기 맞추기에서 리미터가 세게 누르지 않게)
 
 
 def synth(kind, seed=7):
@@ -372,10 +387,74 @@ def peak_db(path):
     return _PEAKS[key]
 
 
+_CUT = {}
+
+
+def cut_short(path):
+    """예전 판(v2.21.1 까지)의 잘린 효과음인지 — 앞 몇 ms 만 소리가 있고 나머지가 모두 0(디지털 무음)인 파일 (D-370 · sfx/*.ogg 를
+    처음 실을 때 소리 앞 5ms 남짓만 남기고 0 으로 채움). 소리가 있는 마지막 표본이 파일 길이의 절반도 안 되면 잘린 것. 읽지 못하면 False."""
+    path = Path(path)
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in _CUT:
+        np = _np()
+        try:
+            with wave.open(str(path), "rb") as w:
+                x = np.frombuffer(w.readframes(w.getnframes()), "<i2").reshape(-1, w.getnchannels())
+            nz = np.nonzero(np.abs(x.astype(np.int32)).max(axis=1) > 0)[0]
+            _CUT[key] = len(x) > int(0.03 * SR) and (not len(nz) or nz[-1] + 1 < len(x) // 2)
+        except (OSError, EOFError, wave.Error, ValueError):
+            _CUT[key] = False
+    return _CUT[key]
+
+
+_SHAPE = {}
+
+
+def shape(name, path):
+    """효과음 파일의 소리 모양 (초 · 5ms 창으로 잼 · 파일이 그대로면 다시 안 잼) — D-371·D-372:
+    dur 길이 · attack 최대보다 10dB 작은 크기를 처음 넘는 때 · hit 맞출 점 (SWELL 은 가장 큰 10ms, 나머지는 attack) ·
+    loud 들리는 큰 부분의 끝 (에너지 90%) · audible 최대보다 30dB 안쪽 길이 · soft 짧고 작은 소리(SOFT)."""
+    path = Path(path)
+    try:
+        st = path.stat()
+        key = (str(path), st.st_size, st.st_mtime_ns, name)
+    except OSError:
+        key = None
+    if key is not None and key in _SHAPE:
+        return _SHAPE[key]
+    np = _np()
+    r = {"dur": 0.5, "attack": 0.0, "hit": 0.0, "loud": 0.3, "audible": 0.3}
+    try:
+        with wave.open(str(path), "rb") as w:
+            sr = w.getframerate()
+            x = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float64).reshape(-1, w.getnchannels()).mean(axis=1) / 32767.0
+        hop = max(1, int(sr * 0.005))
+        n = max(1, int(math.ceil(len(x) / hop)))
+        e2 = (np.pad(x, (0, n * hop - len(x))).reshape(n, hop) ** 2).mean(axis=1) + 1e-18
+        db = 10 * np.log10(e2)
+        att = int(np.argmax(db >= db.max() - 10))
+        pk = int(np.argmax(np.convolve(e2, np.ones(2), "same")))
+        cum = np.cumsum(e2) / e2.sum()
+        loud = np.nonzero(db >= db.max() - 30)[0]
+        a = att * 0.005
+        r = {"dur": round(len(x) / sr, 3), "attack": round(a, 3), "hit": round(pk * 0.005 if name in SWELL else a, 3),
+             "loud": round(max(a + 0.02, float(np.argmax(cum >= 0.9)) * 0.005), 3), "audible": round(float(loud[-1] - loud[0] + 1) * 0.005, 3)}
+    except (OSError, EOFError, wave.Error, ValueError):
+        pass
+    r["soft"] = name in SOFT
+    if key is not None:
+        _SHAPE[key] = r
+    return r
+
+
 def ensure_sfx(name, assets):
     """효과음 하나를 편집실 미디어 폴더에 준비 → 파일 이름. 실은 소리는 WAV 로 바꾸며 최대 크기를 PEAK_DB 로 맞춤
-    (Kenney 소리 중에는 원래 -50 dBFS 처럼 아주 작은 것이 있어 그대로 쓰면 편집본에서 안 들림 · 모든 PC에서 미리 듣기가 되게).
-    예전 판(v2.0.0)이 크기를 맞추지 않고 만든 파일은 한 번 다시 만듦."""
+    (모든 PC에서 미리 듣기가 되게). 예전 판(v2.0.0)이 크기를 맞추지 않고 만든 파일 · 예전 판(v2.21.1 까지)의 잘린 sfx/*.ogg 로 만든 파일
+    (앞 5ms 뒤 무음 · cut_short · D-370)은 한 번 다시 만듦 — 파일 이름이 같아 예전 편집본도 다음 내보내기부터 제 소리."""
     if name not in CATALOG:
         raise KeyError(f"모르는 효과음이에요 · {name}")
     assets = Path(assets)
@@ -384,7 +463,7 @@ def ensure_sfx(name, assets):
     src = CATALOG[name][0]
 
     def ready():
-        return out.exists() and out.stat().st_size > 44 and (src.startswith("@") or peak_db(out) >= PEAK_DB - 1.0)
+        return out.exists() and out.stat().st_size > 44 and (src.startswith("@") or (peak_db(out) >= PEAK_DB - 1.0 and not cut_short(out)))
     if ready():
         return out.name
     with _LOCK:

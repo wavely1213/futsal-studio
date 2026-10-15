@@ -4,6 +4,7 @@
 이 폴더의 .ogg 파일은 Kenney(www.kenney.nl)의 오디오 팩에서 골라 48kHz 로 다시 만든 것이에요
 (앞뒤 무음 자르기 · 최대 크기 -3 dBFS 로 맞추기). 원본은 모두 CC0(퍼블릭 도메인)이라 영상에 써도
 출처 표시 의무가 없어요. 이 폴더에 없는 효과음과 배경음악은 앱(sfxlib.py)이 PC에서 직접 만들어요.
+2026-10-15 아래 zip 에서 tests/make_sfx_assets.py 로 다시 만듦 (예전 변환은 소리 앞 5ms 만 남아 있었음 · D-370).
 
 License (copied from each pack's License.txt, checked 2026-10-07):
   License: (Creative Commons Zero, CC0)

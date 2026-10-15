@@ -267,10 +267,12 @@ class TextTest(unittest.TestCase):
 
     def test_verbatim_long_emphasis_is_not_shown_twice(self):
         """판정: 강조 '발 쪽으로 정확하게 패스해주세요!'가 바로 위 대사 자막을 거의 그대로 되풀이 → 글자는 안 띄우고 순간(확대)만."""
-        segs = [{"start": 102.46, "end": 108.74, "text": "그리고 마지막으로 받는 사람 발 쪽으로 정확하게 패스해주세요.",
-                 "words": [{"w": w, "s": 102.46 + k * 0.7, "e": 102.46 + k * 0.7 + 0.6} for k, w in
-                           enumerate("그리고 마지막으로 받는 사람 발 쪽으로 정확하게 패스해주세요.".split())]}]
+        def segs_of(t):
+            return [{"start": 102.46, "end": 108.74, "text": t, "words": [{"w": w, "s": 102.46 + k * 0.7, "e": 102.46 + k * 0.7 + 0.6} for k, w in enumerate(t.split())]}]
         sig = {"name": "x", "duration": 200.0, "tidy": [{"in": 0.0, "out": 200.0}], "junk": [], "onsets": [], "motion": [0.0] * 10, "motionStep": 0.5}
+        # (원래 말 '그리고 마지막으로 …'는 이제 다음 포인트(장 나눔)로 봄 — 강조 대신 상황 자막·휙 · D-373)
+        self.assertEqual([m["kind"] for m in msg.moments(sig, segs_of("그리고 마지막으로 받는 사람 발 쪽으로 정확하게 패스해주세요."))], ["section"])
+        segs = segs_of("그리고 받는 사람 발 쪽으로 정확하게 패스해주세요.")
         em = [m for m in msg.moments(sig, segs) if m["kind"] == "emphasis"]
         self.assertTrue(em)
         self.assertEqual(em[0]["text"], "")

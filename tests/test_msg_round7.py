@@ -340,7 +340,7 @@ class VitalMomentTest(unittest.TestCase):
         self.assertFalse([(x, y) for x, y in main if min(y, b - 0.1) - max(x, a + 0.1) > 0.05], (a, b, main))
 
     def test_more_key_moments_get_an_event(self):
-        """사건이 붙은 재미 순간 수: 순간마다 사건 하나 + 지키기(D-262 · 듬뿍만 · D-269) ≥ 예전(끄고 만든 것) · 적어도 한 스타일은 더 많음 ·
+        """사건이 붙은 재미 순간 수: 순간마다 사건 하나 + 지키기(D-262 · 듬뿍만 · D-269) ≥ 예전(끄고 만든 것) ·
         양 범위는 그대로 지킴 (보통은 켜고 끈 것이 같음)."""
         moms = self.key_moments()
         self.assertTrue(moms)
@@ -355,7 +355,9 @@ class VitalMomentTest(unittest.TestCase):
                 n_ev = len(msg.visual_events(q["items"], q["titles"], q["shapes"], tot))
                 n_ev0 = len(msg.visual_events(q0["items"], q0["titles"], q0["shapes"], editor.seq_total(q0)))
                 self.assertLessEqual(n_ev, max(n_ev0, msg.DENSITY[lv][1] * max(0.25, tot / 60.0)) + 0.5, (name, lv))
-        self.assertGreater(gain, 0)
+        # (D-375 부터는 지키기를 꺼도 꼭 넣을 뜻 소리(성공·다음 포인트·웃음 뒤 농담 …)가 '소리만' 사건으로 그 순간을 덮어 차이가 0 일 수 있음 —
+        #  지키기를 켠 쪽이 덜 덮지만 않으면 됨)
+        self.assertGreaterEqual(gain, 0)
 
     def test_tight_amount_keeps_moments_as_sound(self):
         """듬뿍 양을 아주 좁히면 그 순간의 하나뿐인 사건은 소리만 (D-262 · 듬뿍만 · D-269)."""

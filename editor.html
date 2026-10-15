@@ -3377,6 +3377,8 @@ function kfTimes(it) {
   for (const k of isV(it) ? ["pos", "scale", "rot", "opacity"] : ["level"]) for (const f of prm(it, k).k) s.add(tlOf(it, f.t));
   return [...s];
 }
+// 자동 효과음 이유 ('자동 효과음 '휙' · 다음 순서로 넘어감 · 글자 …') → 클립 위 짧은 이름 ('휙 · 다음 순서로 넘어감')
+const sfxWhyShort = w => String(w).replace(/^자동 효과음 /, "").replace(/'/g, "").split(" · ").slice(0, 2).join(" · ");
 function itemHTML(it, v0, v1) {
   const s = it.start, e = iEnd(it); if (e < v0 || s > v1) return "";
   const md = mdOf(it), w = Math.max(2, (e - s) * zoom), v = isV(it), tr = TRK(it.track);
@@ -3394,9 +3396,12 @@ function itemHTML(it, v0, v1) {
     if (it.fadeOut > 0) inner += `<div class="fd" style="right:0;width:${it.fadeOut * zoom}px;background:linear-gradient(to top left, rgba(0,0,0,.55) 50%, transparent 50%)"></div>`;
   }
   const name = md.id === "main" ? niceName(NAME) : niceName(md.file);
-  const lab = v ? `${esc(name)}${badges}` : `${it.mute ? "음소거" : fmtDb(prm(it, "level").v + (it.gain || 0))}${prm(it, "level").k.length ? " · 키프레임" : ""}${badges}`;
-  if (w < 4) return `<div class="clip ${v ? "vclip" : "aclip"} ${selI.has(it.id) ? "sel" : ""}" data-id="${it.id}" style="left:${s * zoom}px;width:${w}px"></div>`;
-  return `<div class="clip ${v ? "vclip" : "aclip"} ${md.kind === "image" ? "img" : ""} ${!v && tr.role === "music" ? "music" : ""} ${selI.has(it.id) ? "sel" : ""} ${it.mute ? "muted" : ""} ${md.missing ? "missing" : ""}" data-id="${it.id}"${md.missing ? ' title="파일을 찾을 수 없어요"' : ""} style="left:${s * zoom}px;width:${w}px;${bg}">
+  // 자동 효과음(MSG)은 넣은 이유를 클립 이름 앞에 짧게 · 마우스를 올리면 전부 (D-378)
+  const why = !v && it.why ? `<b class="why">${esc(sfxWhyShort(it.why))}</b> ` : "";
+  const lab = v ? `${esc(name)}${badges}` : `${why}${it.mute ? "음소거" : fmtDb(prm(it, "level").v + (it.gain || 0))}${prm(it, "level").k.length ? " · 키프레임" : ""}${badges}`;
+  const tip = md.missing ? "파일을 찾을 수 없어요" : !v && it.why ? it.why : "";
+  if (w < 4) return `<div class="clip ${v ? "vclip" : "aclip"} ${selI.has(it.id) ? "sel" : ""}" data-id="${it.id}"${tip ? ` title="${esc(tip)}"` : ""} style="left:${s * zoom}px;width:${w}px"></div>`;
+  return `<div class="clip ${v ? "vclip" : "aclip"} ${md.kind === "image" ? "img" : ""} ${!v && tr.role === "music" ? "music" : ""} ${selI.has(it.id) ? "sel" : ""} ${it.mute ? "muted" : ""} ${md.missing ? "missing" : ""}" data-id="${it.id}"${tip ? ` title="${esc(tip)}"` : ""} style="left:${s * zoom}px;width:${w}px;${bg}">
     <div class="eh l"></div>${inner}<div class="lbl">${lab}</div><div class="eh r"></div></div>`;
 }
 function renderTimeline() {
@@ -5176,6 +5181,7 @@ function renderFx() {
   const a = v ? its.find(x => !isV(x) && x.link && x.link === v.link) || null : (pr || its.find(x => !isV(x)));
   const main = v || a, md = mdOf(main);
   let h = `<div class="ech"><b>${esc(md.id === "main" ? niceName(NAME) : niceName(md.file))}</b><span class="hint">${tc(main.start)} · ${mmss(iLen(main))}</span></div>`;
+  if (a && a.why) h += `<div class="pg hint" id="pWhy" style="padding:6px 12px">넣은 이유: ${esc(a.why.replace(/^자동 효과음 /, ""))}</div>`; // 자동 효과음 (D-378)
   if (its.length > (v && a ? 2 : 1)) h += `<div class="pg hint" style="padding:6px 12px">${its.length}개 선택됨 · 아래 값은 첫 클립 기준이에요</div>`;
   if (v) {
     h += fxGroup("motion", "모션", "var(--video)", kfRow(v, "pos") + kfRow(v, "scale") + kfRow(v, "rot") +

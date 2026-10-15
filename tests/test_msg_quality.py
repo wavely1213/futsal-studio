@@ -5,6 +5,7 @@
 글자: 안전 영역·말 자막 줄·겹침·한꺼번에 2개 · 숫자 세기 · 짧은 자막 · 낱말 조각 강조 안 함 · 무례한 문구 없음
 양: 화면 사건 수·멈춘 화면 한도·컷과 같은 때 뜬 글자 빼기 · 담백 레슨형은 다른 자막 모양 · 챌린지 최종 결과."""
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -218,26 +219,6 @@ class SoundAlignTest(unittest.TestCase):
         self.assertEqual(len(out), len(cuts))
 
 
-class SfxTopUpTest(unittest.TestCase):
-    def test_quiet_style_gets_soft_sounds_up_to_band(self):
-        """효과음을 아끼는 스타일(다큐)도 보통이면 소리 사건이 1분 범위 아래쪽까지는 있게 — 소리 없는 확대 순간에 휙을 고르게 더함 (담백은 그대로)."""
-        def make():
-            ev = [{"id": f"p{k}", "kind": "punch", "t": t, "src": None, "refs": {"items": []}} for k, t in enumerate((10.0, 11.0, 24.0, 55.0))]
-            ev.append({"id": "s", "kind": "situ", "t": 40.0, "src": None, "refs": {"titles": ["t1"], "sfx": [0]}})  # 이미 소리 있음
-            return types.SimpleNamespace(pos=60.0, titles=[{"id": "t1", "start": 40.0}], events=ev, sfx=[(40.0, "딸깍", None, "situ")])
-        B = make()
-        kept = [40.0]
-        n = msg._top_up_sfx(B, {"palette": "cinematic"}, "보통", 1, kept, ())
-        self.assertEqual(n, 2)  # 1분 3.3 → 4개 = 곡 1 + 있던 효과음 1 + 더한 2
-        added = sorted(x[0] for x in B.sfx[1:])
-        self.assertEqual(added, [10.0, 55.0])  # 다른 소리에서 가장 먼 곳부터 (11초는 10초 바로 옆이라 안 고름)
-        self.assertTrue(all(x[1] == "휙" and x[2] < 0 for x in B.sfx[1:]))
-        self.assertTrue(all(abs(a - b) >= msg.TOPUP_GAP for a in kept for b in kept if a != b))
-        self.assertEqual(sum(1 for e in B.events if (e["refs"].get("sfx") or []) and e["kind"] == "punch"), 2)  # 사건에 묶여 함께 빠짐
-        B = make()
-        self.assertEqual(msg._top_up_sfx(B, {"palette": "cinematic"}, "담백", 1, [40.0], ()), 0)
-
-
 class SfxLevelTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="효과음 크기 "))
@@ -246,7 +227,7 @@ class SfxLevelTest(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_quiet_shipped_sound_is_normalized_and_old_cache_redone(self):
-        fn = sfxlib.ensure_sfx("뻥", self.tmp)  # kick_1.ogg 는 원래 -50 dBFS 안팎
+        fn = sfxlib.ensure_sfx("뻥", self.tmp)  # (실은 소리도 PEAK_DB 로 맞춤 · 예전 판 kick_1.ogg 가 -50 dBFS 로 보인 것은 잘린 파일 탓 · D-370)
         self.assertAlmostEqual(sfxlib.peak_db(self.tmp / fn), sfxlib.PEAK_DB, delta=0.3)
         # 예전 판이 만든 작은 파일 → 다시 만듦
         x = [[0.003, 0.003]] * 4800
@@ -385,12 +366,18 @@ class BuildTest(unittest.TestCase):
         cls.w.close()
 
     def test_sfx_spacing_and_audio_budget(self):
+        """효과음 맞출 점 사이 SFX_MIN_GAP (숫자 세기 틱 묶음 안은 빼고) · 꼭 넣을 뜻 소리 말고는 1분 SFX_BAND 위쪽까지 (배경음악 곡은 안 셈 · D-374)."""
+        names = {msg._mid(sfxlib.sfx_file_name(n)): n for n in sfxlib.CATALOG}
         for k, r in self.res.items():
             for q in r["sequences"]:
-                sfx = sorted(it["start"] for it in q["items"] if it["track"] in ("A2", "A5"))
-                self.assertTrue(all(b - a >= msg.SFX_MIN_GAP - 1e-6 for a, b in zip(sfx, sfx[1:])), (q["name"], sfx))
+                rows = sorted((it["start"] + sfxlib.shape(names[it["media"]], editor.ASSETS / sfxlib.sfx_file_name(names[it["media"]]))["hit"]
+                               - float(it.get("in") or 0), it.get("why") or "") for it in q["items"] if it["track"] in ("A2", "A5"))
+                for (a, wa), (b, wb) in zip(rows, rows[1:]):
+                    if not ("숫자 세기" in wa and "숫자 세기" in wb):
+                        self.assertGreaterEqual(b - a, msg.SFX_MIN_GAP - 1e-3, (q["name"], rows))
                 mins = editor.seq_total(q) / 60.0
-                self.assertLessEqual(len(sfx), max(0, int(msg.AUDIO_DENSITY[k][1] * mins) - len(q["msg"]["bgm"])), q["name"])
+                must = sum(1 for _, w in rows if re.search(r"작은 제목|엔드|다음 순서|성공 반응|농담 뒤|숫자 세기|시작 신호", w))
+                self.assertLessEqual(len(rows) - must, max(1, int(msg.SFX_BAND["long"][k][1] * max(0.25, mins) + 0.5)), q["name"])
                 self.assertLessEqual(len(q["msg"]["bgm"]), max(2, int(msg.AUDIO_DENSITY[k][1] * mins * 0.45)), q["name"])
                 self.assertEqual(q["master"]["lufs"], -14.0)
 
