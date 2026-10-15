@@ -51,6 +51,8 @@ CHUNK = 8 << 20                # 조각 올리기 기본 조각 (Cloudflare 빠�
 CHUNK_MAX = 16 << 20
 HANDOFF_BODY_MAX = 1024
 MEDIA_WAIT = 15.0              # 미디어 동시 수가 꽉 찼으면 이만큼 기다려 봄 (편집실이 영상 여러 개를 한꺼번에 열 때)
+MEDIA_SEND_TIMEOUT = 120       # 미디어를 보내는 동안의 소켓 기다림 (PC 화면 app.Handler.timeout 과 같게 · 요청을 읽을 때는 RemoteHandler 20초 그대로 · D-368)
+FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}   # app.FONT_TYPES 와 같음
 STATIC_AGE = "private, max-age=604800"
 NO_STORE = "private, no-store"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -509,6 +511,21 @@ def _static_file(st, name):
     return hit[1], hit[2]
 
 
+def _font_gz(st, path):
+    """글꼴(/fonts/<이름>) gzip 바이트 · 종류 — 한 번 줄여 두고 다시 씀 (파일이 바뀌면 다시) · 없는 글꼴·다른 확장자는 None (앱이 404)."""
+    p = (editor.FONTS / Path(path).name).resolve()
+    ct = FONT_TYPES.get(p.suffix.lower())
+    if not ct or ct == "font/woff2" or p.parent != editor.FONTS.resolve() or not p.is_file():  # woff2 는 이미 압축됨
+        return None
+    stt = p.stat()
+    key = ("font", p.name)
+    hit = st._static.get(key)
+    if not hit or hit[0] != (stt.st_mtime_ns, stt.st_size):
+        hit = ((stt.st_mtime_ns, stt.st_size), gzip.compress(p.read_bytes(), 6), ct)
+        st._static[key] = hit
+    return hit[1], hit[2]
+
+
 PAGES = {"/": "ui.html", "/editor": "editor.html", "/thumb": "thumb.html"}
 
 
@@ -698,9 +715,14 @@ def gate(h, method, svc, ip):
         return _page(h, svc, sess, path)
     if kind == STATIC:
         h._studio_cache = STATIC_AGE
+        if path.startswith("/fonts/") and _wants_gzip(h) and not h.headers.get("Range"):
+            hit = _font_gz(st, path)
+            if hit:  # 자막·타이틀 글꼴 4MB → gzip 2.4MB (처음 열 때 첫 소리·첫 화면과 망을 덜 다툼 · 7일 보관은 그대로 · D-366)
+                h._studio_vary_ae = True
+                return send(h, 200, hit[0], hit[1], extra={"Content-Encoding": "gzip"})
         if path in ("/s/remote.js", "/s/remote.css"):
             data, _ = _static_file(st, "remote_ui.js" if path.endswith(".js") else "remote_ui.css")
-            return send(h, 200, data, "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
+            return send(h, 200, data, "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8", gz=True)  # 심 42KB → 12KB (D-366)
         return _dispatch(h, svc, sess, method, path, b)
     if kind == ADAPT:
         return _adapt(h, svc, sess, path, b)
@@ -856,6 +878,10 @@ def _media(h, svc, sess, path, u):
 def _media_file(h, svc, sess, fn):
     if not media_slot(svc, sess):
         return send(h, 503, {"ok": False, "error": MSG["busy_media"]}, extra={"Retry-After": "3"})
+    try:  # 보내는 동안은 느린 망(멈춘 재생기)에서도 20초에 끊지 않음 — 예전엔 8MB 중 3~4MB 만 보내고 끊겨 다시 받아야 했음 (D-368)
+        h.connection.settimeout(MEDIA_SEND_TIMEOUT)
+    except (AttributeError, OSError):
+        pass
     try:
         return fn()
     finally:

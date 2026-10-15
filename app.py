@@ -6,6 +6,7 @@ import faulthandler
 import json
 import mimetypes
 import os
+import re
 import time
 import subprocess
 import sys
@@ -625,14 +626,27 @@ class Handler(BaseHTTPRequestHandler):
         return core.clean_json(json.loads(self.rfile.read(n) or b"{}"))  # 반쪽 이모지('\ud83d')는 여기서 '�'로 (모든 POST)
 
     def _file(self, path, ctype):
-        """영상은 구간 요청(Range)을 지원해야 미리보기에서 앞뒤로 이동 가능."""
+        """영상은 구간 요청(Range)을 지원해야 미리보기에서 앞뒤로 이동 가능.
+        받을 수 없는 구간(파일 끝 뒤 · bytes=-0 · 끝이 시작보다 앞)은 416 · 여러 구간·알 수 없는 꼴은 무시하고 전체 (remote._send_range 와 같은 규칙 ·
+        예전엔 206 에 길이 0·음수를 보내거나 처리 중 오류로 답이 없었음 · I-363)."""
         size = path.stat().st_size
-        rng = self.headers.get("Range")
+        rng = (self.headers.get("Range") or "").strip()
         start, end = 0, size - 1
-        if rng and rng.startswith("bytes="):
-            a, _, b = rng[6:].partition("-")
-            start = int(a) if a else max(0, size - int(b))
-            end = min(int(b) if a and b else size - 1, start + (8 << 20) - 1)  # 8MB씩: 편집실이 영상 여러 개를 열어도 연결이 막히지 않게
+        m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng) if rng and "," not in rng else None
+        if m and (m.group(1) or m.group(2)):
+            a, b = m.group(1), m.group(2)
+            if a:
+                start, end = int(a), (min(int(b), size - 1) if b else size - 1)
+            else:
+                start = size - int(b) if int(b) else size
+                start = max(0, start)
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            end = min(end, start + (8 << 20) - 1)  # 8MB씩: 편집실이 영상 여러 개를 열어도 연결이 막히지 않게
             self.send_response(206)
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         else:
@@ -786,6 +800,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "not found"})
             if not p.exists() or p.parent not in (core.VIDEOS.resolve(), editor.ASSETS.resolve()):
                 return self._send(404, {"error": "not found"})
+            lite = (q.get("lite") or [""])[0]
+            if lite in editor.LITE_KINDS:  # 밖에서 작업: 가벼운 소리·그림 (원격 화면만 달라고 함 · PC 화면은 원본 · D-363)
+                try:
+                    lp = editor.lite_file(p.name, q.get("src", ["videos"])[0], lite)
+                except (OSError, ValueError):
+                    lp = None
+                if lp:
+                    return self._file(lp, editor.LITE_TYPES[lite])
             if q.get("proxy") and editor.proxy_path(p.name, q.get("src", ["videos"])[0]).exists():
                 return self._file(editor.proxy_path(p.name, q.get("src", ["videos"])[0]), "video/mp4")
             return self._file(p, mimetypes.guess_type(p.name)[0] or "application/octet-stream")
@@ -824,6 +846,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 proj = editor.load_project(n)
                 rec = proj.pop("_recovered", None)
+                lite = (q.get("lite") or [""])[0]
+                if lite in ("opus", "aac"):  # 원격 편집실: 소리·그림 미리보기를 뒤에서 미리 만들어 둠 (D-363)
+                    editor.lite_warm([(m.get("src", "assets"), m.get("file"), m.get("kind")) for m in proj.get("media") or []
+                                      if m.get("file") and m.get("kind") in ("audio", "image")], {"audio": lite, "image": "webp"})
                 return self._send(200, {"project": proj, "waveform": editor.waveform(n), "recovered": rec,
                                         "capLong": editor.long_captions(proj.get("captions"), proj.get("info")),
                                         "capMerged": editor.merged_captions(proj.get("captions")),

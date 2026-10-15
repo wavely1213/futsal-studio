@@ -854,6 +854,82 @@ class GateHttpTest(StudioBase):
         (self.work / "edit_media" / "a.png").write_bytes(b"\x89PNG")
         self.assertEqual(self.req("GET", "/api/edit/file?src=assets&f=a.png")[0], 200)  # 그림은 그대로
 
+    def test_media_lite_sound_image(self):
+        """밖에서 작업: 배경음악·효과음(WAV)과 큰 그림은 화면이 lite=… 로 달라고 하면 PC 가 만든 가벼운 파일 (D-363 · D-366) ·
+        영상 파일은 lite 를 붙여도 미리보기 파일 길(원본을 흘리지 않음) · 원본 화질·lite 없음은 원본 그대로 · 늘 private, no-store."""
+        self.login()
+        wav = self.work / "edit_media" / "배경음악_시험.wav"
+        r = core.run([core.ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=4:r=48000", "-ac", "2", "-c:a", "pcm_s16le", str(wav)])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        u = "/api/edit/file?src=assets&f=" + quote(wav.name)
+        for kind in ("opus", "aac"):
+            st, hd, out = self.req("GET", u + "&lite=" + kind, headers={"Range": "bytes=0-"})
+            self.assertEqual(st, 206, kind)
+            self.assertEqual(self.hget(hd, "Content-Type"), ["audio/mp4"])
+            self.assertEqual(self.hget(hd, "Cache-Control"), ["private, no-store"])
+            self.assertEqual(out[4:8], b"ftyp")
+            self.assertLess(len(out), wav.stat().st_size / 5)
+            self.assertTrue(editor.lite_path(wav.name, "assets", kind).is_file())
+        st, hd, out = self.req("GET", u)  # lite 없음(PC 화면과 같은 길) → 원본 WAV
+        self.assertEqual((st, out[:4]), (200, b"RIFF"))
+        st, j = self.jreq("GET", "/api/edit/file?src=videos&f=" + quote(NAME) + "&lite=opus")
+        self.assertEqual((st, j["code"]), (403, "need_proxy"))  # 영상 원본은 lite 로도 안 나감
+        from PIL import Image
+        import random
+        rnd = random.Random(7)
+        im = Image.frombytes("RGB", (700, 700), bytes(rnd.getrandbits(8) for _ in range(700 * 700 * 3)))
+        im.save(self.work / "edit_media" / "정지_큰.png")
+        Image.new("RGB", (64, 64), (10, 20, 30)).save(self.work / "edit_media" / "작은.png")
+        st, hd, out = self.req("GET", "/api/edit/file?src=assets&f=" + quote("정지_큰.png") + "&lite=webp")
+        self.assertEqual((st, out[:4], out[8:12]), (200, b"RIFF", b"WEBP"))
+        self.assertEqual(self.hget(hd, "Content-Type"), ["image/webp"])
+        st, hd, out = self.req("GET", "/api/edit/file?src=assets&f=" + quote("작은.png") + "&lite=webp")
+        self.assertEqual((st, out[:4]), (200, b"\x89PNG"))  # 작은 그림은 원본 그대로
+        st, hd, out = self.req("GET", u + "&lite=evil")
+        self.assertEqual((st, out[:4]), (200, b"RIFF"))  # 모르는 종류는 무시
+
+    def test_media_range_edges(self):
+        """구간 요청 끝 쪽: 받을 수 없는 구간은 416 + 'bytes */크기' · 여러 구간은 무시하고 전체 (예전엔 길이 0·음수 206 이나 답 없음 · I-363)."""
+        self.login()
+        pp = editor.proxy_path(NAME)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        pp.write_bytes(b"P" * 1000)
+        u = "/media?name=" + quote(NAME)
+        for rng in ("bytes=1000-", "bytes=5000-6000", "bytes=-0", "bytes=50-10"):
+            st, hd, out = self.req("GET", u, headers={"Range": rng})
+            self.assertEqual((st, self.hget(hd, "Content-Range"), out), (416, ["bytes */1000"], b""), rng)
+        st, hd, out = self.req("GET", u, headers={"Range": "bytes=0-1,5-6"})
+        self.assertEqual((st, len(out)), (200, 1000))
+        st, hd, out = self.req("GET", u, headers={"Range": "bytes=-10"})
+        self.assertEqual((st, self.hget(hd, "Content-Range"), out), (206, ["bytes 990-999/1000"], b"P" * 10))
+        st, hd, out = self.req("GET", u, headers={"Range": "bytes=990-5000"})
+        self.assertEqual((st, len(out)), (206, 10))
+
+    def test_media_send_timeout(self):
+        """미디어를 보내는 동안은 소켓 기다림 120초 (요청을 읽는 20초에 끊겨 8MB 중 3~4MB 만 가지 않게 · D-368) · 자리는 꼭 돌려줌."""
+        seen = []
+        h = mock.Mock()
+        h.connection.settimeout.side_effect = seen.append
+        sess = {"device": "d1"}
+        self.assertEqual(rstudio._media_file(h, self.svc, sess, lambda: "sent"), "sent")
+        self.assertEqual(seen, [rstudio.MEDIA_SEND_TIMEOUT])
+        self.assertEqual(self.svc.limiter.media["d1"], 0)
+
+    def test_fonts_gzip_private(self):
+        """글꼴은 gzip 으로 (자막 글꼴 4MB → 2.4MB · 처음 열 때 첫 소리와 망을 덜 다툼 · D-366) · 7일 보관은 그대로 private."""
+        self.login()
+        f = editor.FONTS / "Pretendard-Bold.otf"
+        st, hd, out = self.req("GET", "/fonts/Pretendard-Bold.otf", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(st, 200)
+        self.assertEqual(self.hget(hd, "Content-Encoding"), ["gzip"])
+        self.assertEqual(self.hget(hd, "Cache-Control"), [rstudio.STATIC_AGE])
+        self.assertIn("Accept-Encoding", self.hget(hd, "Vary")[0])
+        self.assertLess(int(self.hget(hd, "Content-Length")[0]), f.stat().st_size)
+        self.assertEqual(out, f.read_bytes())  # raw() 가 풀어 줌
+        st, hd, out = self.req("GET", "/fonts/Pretendard-Bold.otf")  # gzip 을 모르는 곳은 그대로
+        self.assertEqual((st, self.hget(hd, "Content-Encoding"), len(out)), (200, [], f.stat().st_size))
+        self.assertEqual(self.req("GET", "/fonts/nope.otf", headers={"Accept-Encoding": "gzip"})[0], 404)
+
 
 def quote(s):
     from urllib.parse import quote as q

@@ -262,7 +262,8 @@ def _encode_540p(p, tmp, label, item):
     # (960 으로 더 줄이면 CPU 가 조금 더 줄지만 예전과 SSIM 0.9797 이라 예전 크기 1920 그대로)
     vf = (["fps=30"] + tonemap_chain(info["hdr"], 1920) + ["scale=-2:540"]) if info.get("hdr") else ["scale=-2:540", "fps=30"]
     cmd = [core.ffmpeg(), "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(p), "-vf", ",".join(vf),
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-maxrate", "1600k", "-bufsize", "3200k",  # 복잡한 장면(잔디·흔들림)도 1.6Mb/s 안 (밖에서 6Mb/s 망 · D-367)
+           "-g", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-ac", "2", "-movflags", "+faststart", str(tmp)]
     proc = core.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     _PROCS.add(proc)
@@ -301,6 +302,117 @@ def make_proxy(f, src="videos", log=print):
         raise RuntimeError(f"미리보기 파일을 만들었지만 제자리에 두지 못했어요 (백신이 검사 중일 수 있어요). 잠시 뒤 다시 눌러 주세요 · {e}")
     log(f"  미리보기 파일 완료 · {Path(f).name}")
     return {"src": src, "file": Path(f).name}
+
+
+# ---------- 밖에서 작업용 가벼운 소리·그림 (D-363 · D-366) ----------
+# 영상은 미리보기 파일(proxy.mp4)로 보는데 배경음악·효과음은 원본 WAV(48kHz 16비트 스테레오 = 1.5Mb/s · 한 곡이 영상 미리보기의 1.5배)를
+# 그대로 흘려보내, 느린 인터넷(6Mb/s 쯤)에서는 처음 30초에 망이 꽉 차 소리가 끊겼음 (I-360). 원격 화면이 lite=… 로 달라고 할 때만
+# PC 가 한 번 만들어 미리보기 파일 옆에 둠 — PC 화면·내보내기는 늘 원본 그대로.
+#   opus · aac: 소리 128k 를 MP4 에 (목차를 앞에 · 어디로 옮겨도 바로 찾아감 — Ogg 는 찾기가 느림) · Opus 를 못 푸는 브라우저는 AAC
+#   webp: 400KB 넘는 그림 (정지 화면 PNG 3MB → 수백 KB) · 긴 변 2560 까지 · 투명도 그대로
+LITE_KINDS = ("opus", "aac", "webp")
+LITE_TYPES = {"opus": "audio/mp4", "aac": "audio/mp4", "webp": "image/webp"}
+LITE_AUDIO = {"opus": ["-c:a", "libopus", "-b:a", "128k"], "aac": ["-c:a", "aac", "-b:a", "160k"]}
+LITE_IMAGE_MIN = 400 << 10   # 이보다 작은 그림은 원본 그대로
+LITE_IMAGE_SIDE = 2560
+LITE_AUDIO_KEEP = 200_000    # 이미 압축된 소리(mp3·m4a·aac)가 이 비트레이트(bps) 이하면 원본 그대로
+_LITE_SKIP = {}              # (파일, 크기, 바뀐 시각, 종류) → True: 원본이 더 가볍거나 못 만듦 (다시 안 해 봄)
+
+
+def lite_path(f, src, kind):
+    return _cache_dir(f, src) / (f"lite_{kind}." + ("webp" if kind == "webp" else "mp4"))
+
+
+def lite_file(f, src, kind):
+    """원격 미리보기용 가벼운 파일 경로 (없으면 만듦 · 같은 파일을 여러 요청이 동시에 달라고 해도 한 번만) · 원본 그대로 보내면 될 때는 None."""
+    if kind not in LITE_KINDS:
+        return None
+    p = media_path(f, src)
+    if not p.is_file():
+        raise FileNotFoundError(f"파일을 찾지 못했어요 · {f}")
+    ext = p.suffix.lower()
+    if ext not in (IMAGE_EXTS if kind == "webp" else AUDIO_EXTS):  # 영상 파일은 늘 미리보기 파일(proxy) 길로 (원본을 흘려보내지 않음 · D-232)
+        return None
+    st = p.stat()
+    key = (str(p), st.st_size, st.st_mtime_ns, kind)
+    if _LITE_SKIP.get(key):
+        return None
+    out = lite_path(f, src, kind)
+
+    def fresh(o):
+        try:
+            return o.stat().st_mtime >= st.st_mtime and o.stat().st_size > 0
+        except OSError:
+            return False
+    if fresh(out):
+        return out
+    if kind == "opus" and fresh(lite_path(f, src, "aac")):  # Opus 를 못 만드는 ffmpeg 였으면 AAC (Opus 를 푸는 브라우저는 AAC 도 풂)
+        return lite_path(f, src, "aac")
+    with _gen_lock(str(out)):
+        if fresh(out):
+            return out
+        if _LITE_SKIP.get(key):
+            return None
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f"lite.{threading.get_ident()}.part" + out.suffix)
+        try:
+            ok = _lite_image(p, tmp, st.st_size) if kind == "webp" else _lite_audio(p, tmp, kind, ext, st.st_size)
+            if ok == "aac":  # Opus 를 못 만듦 → AAC 로 만든 것을 그 자리(lite_aac)에
+                out = lite_path(f, src, "aac")
+            if ok:
+                updater.replace_retry(tmp, out)
+                return out
+        except Exception as e:  # 만들지 못하면 원본 그대로 (재생은 되게)
+            studiolog.trace(e, "가벼운 미리보기 파일")
+        finally:
+            tmp.unlink(missing_ok=True)
+        _LITE_SKIP[key] = True
+        return None
+
+
+def _lite_audio(p, tmp, kind, ext, size):
+    if ext in (".mp3", ".m4a", ".aac"):  # 이미 가벼운 소리는 그대로 (다시 압축하면 음질만 나빠짐)
+        dur = probe(p)["duration"]
+        if dur > 0 and size * 8 / dur <= LITE_AUDIO_KEEP:
+            return False
+    for k in ([kind, "aac"] if kind == "opus" else [kind]):
+        cmd = [core.ffmpeg(), "-y", "-v", "error", "-i", str(p), "-map", "0:a:0", "-vn", "-af", AUDIO_T0, *LITE_AUDIO[k],
+               "-ac", "2", "-ar", "48000", "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+        with _GEN_SEM:
+            r = core.run(cmd, stdin=subprocess.DEVNULL)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            return True if k == kind else "aac"
+        tmp.unlink(missing_ok=True)
+    return False
+
+
+def _lite_image(p, tmp, size):
+    if size < LITE_IMAGE_MIN:
+        return False
+    from PIL import Image, ImageOps, features
+    if not features.check("webp"):
+        return False
+    with Image.open(p) as im:
+        im = ImageOps.exif_transpose(im)  # 브라우저가 원본을 세워 보여주는 방향 그대로
+        alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+        im = im.convert("RGBA" if alpha else "RGB")
+        if max(im.size) > LITE_IMAGE_SIDE:
+            im.thumbnail((LITE_IMAGE_SIDE, LITE_IMAGE_SIDE), Image.LANCZOS)
+        im.save(tmp, "WEBP", quality=88, method=4)
+    return tmp.stat().st_size < size * 0.8  # 크게 줄지 않으면 원본 그대로
+
+
+def lite_warm(items, kinds):
+    """원격 편집실을 열 때: 그 편집본의 소리·그림 미리보기를 뒤에서 미리 만들어 둠 (재생하려 할 때 기다리지 않게). items = [(src, file, kind)]."""
+    def run():
+        for src, f, k in items:
+            want = kinds.get(k)
+            if want:
+                try:
+                    lite_file(f, src, want)
+                except Exception:  # noqa: BLE001  (없는 파일 등 — 열 때 따로 알려 줌)
+                    pass
+    threading.Thread(target=run, daemon=True, name="lite-warm").start()
 
 
 # ---------- 원격 실행기 (remote.py) 가 쓰는 것 ----------

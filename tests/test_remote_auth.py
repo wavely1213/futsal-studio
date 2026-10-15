@@ -271,8 +271,8 @@ class LimiterTests(unittest.TestCase):
         self.assertTrue(self.l.action_ok("d1"))
 
     def test_media_concurrency_per_device_and_total(self):
-        self.assertEqual(sum(self.l.media_enter("d1") for _ in range(8)), remote.MEDIA_PER_DEVICE)
-        self.assertEqual(sum(self.l.media_enter("d2") for _ in range(8)), remote.MEDIA_TOTAL - remote.MEDIA_PER_DEVICE)
+        self.assertEqual(sum(self.l.media_enter("d1") for _ in range(30)), remote.MEDIA_PER_DEVICE)
+        self.assertEqual(sum(self.l.media_enter("d2") for _ in range(30)), remote.MEDIA_TOTAL - remote.MEDIA_PER_DEVICE)
         self.l.media_leave("d1")
         self.assertTrue(self.l.media_enter("d2"))
 
