@@ -5292,11 +5292,12 @@ def slow_mode(it, md, fps):
 
 
 def _rate_filter(mode, fps):
-    """slow_mode → 프레임 수를 fps 로 맞추는 필터 (framerate·minterpolate 는 장면이 바뀌는 곳에서는 섞지 않음)."""
+    """slow_mode → 프레임 수를 fps 로 맞추는 필터 (framerate·minterpolate 는 장면이 바뀌는 곳에서는 섞지 않음).
+    framerate·minterpolate 는 원본 시간 단위(예 1/15360)를 그대로 두어 전환(xfade)이 '시간 단위가 달라요'로 멈춤 → fps 처럼 1/fps 로 맞춤 (D-417)."""
     if mode == "blend":
-        return f"framerate=fps={fps}"
+        return f"framerate=fps={fps},settb=1/{fps}"
     if mode == "motion":
-        return f"minterpolate=fps={fps}:mi_mode=mci"
+        return f"minterpolate=fps={fps}:mi_mode=mci,settb=1/{fps}"
     return f"fps={fps}"
 
 

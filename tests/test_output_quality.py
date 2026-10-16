@@ -162,6 +162,18 @@ class SlowMotionTest(Base):
         self.assertEqual(n, b)
         self.assertGreaterEqual(n, 121)
 
+    def test_slow_clip_next_to_transitions_exports(self):
+        """회귀(끝까지 자동으로 롱폼이 '영상을 만들지 못했어요'): 느린 클립 앞뒤 흰 화면 번쩍임·디졸브 — 섞기·아주 부드럽게 모두 내보내짐 (D-417)."""
+        for smooth in (None, "motion"):
+            kw = {"smooth": smooth} if smooth else {}
+            its = pair("x", "m30", 0, 0.0, 1.0) + pair("y", "m30", 1.0, 1.0, 2.0, speed=0.5, **kw) + pair("z", "m30", 3.0, 2.0, 3.0)
+            tr = [{"id": "t1", "track": "V1", "a": "vx", "b": "vy", "type": "white", "dur": 0.2, "align": "center"},
+                  {"id": "t2", "track": "V1", "a": "vy", "b": "vz", "type": "dissolve", "dur": 0.4, "align": "center"}]
+            fr = gray(self.export(self.proj(f"느린 클립 전환 {smooth}", its, 4.0, trans=tr)))
+            self.assertEqual(len(fr), 120, smooth)
+        self.assertIn("settb=1/30", editor._rate_filter("blend", 30))
+        self.assertIn("settb=1/30", editor._rate_filter("motion", 30))
+
     def test_motion_filter_pads_before_interpolation(self):
         """움직임 보간 앞에 마지막 장면을 몇 장 더 붙임 (섞기·보통은 그대로)."""
         p = self.proj("필터", pair("x", "m30", 0, 3.0, 4.0, speed=0.5, smooth="motion"), 2.0)
