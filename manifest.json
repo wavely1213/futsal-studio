@@ -1,6 +1,8 @@
 {
   "version": "2.22.0",
   "notes": "완성본: 느린 장면 부드럽게 · 컷마다 '뚝' 소리 없앰 · 문장 첫 '음…/어…' 빼기 · 한쪽 귀 마이크 양쪽으로 · 고친 것이 사라지지 않게: 용어 사전 자동 저장 · 뒤로 가기 때 최신 내용 · 저장 실패 때 내려받기·나가기 · 다시 찾기가 손으로 고친 자막 지킴 · 새 가편집 바로 열기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/53b21322adaedd6a4a21b4ccef2f40bfcdf46f93.zip",
+  "commit": "53b21322adaedd6a4a21b4ccef2f40bfcdf46f93",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f35e1d5edbd07249da3addd1b963c1ed2bae022ac6effd7e1f8517fc8909c3c8",
