@@ -1,6 +1,8 @@
 {
   "version": "2.21.3",
   "notes": "클로드 아껴 쓰기: 일마다 맞는 모델(대부분 Sonnet · 전략 '더 깊게'만 Opus) · 짧은 지시 · 그림은 줄여 바로 보내기 · '끝까지 자동으로' 안 같은 물음은 저장해 둔 대답 · 쓴 양 작업 기록·오늘 합계 · 끄면 예전 그대로",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/e531d6234c6050cd47759498647ec361138d19f0.zip",
+  "commit": "e531d6234c6050cd47759498647ec361138d19f0",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f35e1d5edbd07249da3addd1b963c1ed2bae022ac6effd7e1f8517fc8909c3c8",
