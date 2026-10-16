@@ -5555,13 +5555,18 @@ function renderFx() {
 }
 // 느리게 한 클립 (D-400): 내보낼 때 앞뒤 장면을 섞어 끊김 없이 (기본) · '아주 부드럽게'는 움직임을 따라 사이 장면을 새로 그림
 // (MOTION_MAX 초 이하 · 오래 걸림) · 60fps 촬영본처럼 장면이 넉넉하면 원래 장면 그대로 — editor.py slow_mode 와 같은 규칙
+// 내보낼 초당 장면(30·60)은 내보내기 창에서 고름 → 60 으로도 넉넉하면(또는 60 을 못 고르는 영상이면 30 으로 넉넉하면) 칸을 숨김 ·
+// 30 으로만 넉넉하면 60 으로 내보낼 때만 쓰인다고 알림 · MOTION_MAX 초 넘는 클립은 칸을 끔 (D-405)
 const MOTION_MAX = 6;
 function smoothRow(v) {
   if (!v || mdOf(v).kind !== "video" || sp(v) >= 1 - 1e-6) return "";
-  const hint = (mdOf(v).fps || 30) * sp(v) >= FPS - 0.5 ? "60fps 촬영본이라 원래 장면 그대로도 부드러워요."
-    : iLen(v) > MOTION_MAX + 1e-6 ? `${MOTION_MAX}초 넘는 클립은 앞뒤 장면을 섞어 부드럽게 해요.`
+  const per = (mdOf(v).fps || 30) * sp(v), can60 = (P.info.fps || 30) >= 49;
+  if (per >= (can60 ? 60 : FPS) - 0.5) return `<div class="hint" id="pSmoothHint">느린 장면 · 촬영본 장면이 넉넉해서 그대로도 부드러워요.</div>`;
+  const long = iLen(v) > MOTION_MAX + 1e-6;
+  const hint = per >= FPS - 0.5 ? "촬영본 장면이 넉넉해서 그대로도 부드러워요. '아주 부드럽게'는 초당 장면 60으로 내보낼 때만 쓰여요."
+    : long ? `${MOTION_MAX}초 넘는 클립은 앞뒤 장면을 섞어 부드럽게 해요.`
     : v.smooth === "motion" ? "사이 장면을 새로 그려요. 내보내기가 오래 걸려요." : "앞뒤 장면을 섞어 부드럽게 해요. 짧은 다시 보기는 '아주 부드럽게'를 켜 보세요.";
-  return `<div class="f" style="margin-top:6px"><label>느린 장면</label><label class="tog"><input type="checkbox" id="pSmooth" ${v.smooth === "motion" ? "checked" : ""}> 아주 부드럽게</label><span></span></div>
+  return `<div class="f" style="margin-top:6px"><label>느린 장면</label><label class="tog"><input type="checkbox" id="pSmooth" ${v.smooth === "motion" && !long ? "checked" : ""}${long ? " disabled" : ""}> 아주 부드럽게</label><span></span></div>
     <div class="hint" id="pSmoothHint">${hint}</div>`;
 }
 function bindFx(v, a, main, its) {

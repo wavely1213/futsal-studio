@@ -611,8 +611,9 @@ CHAN_FLOOR_DB = -60.0  # 큰 쪽도 이보다 작으면(소리가 거의 없음)
 _CHAN_MEMO = {}
 
 
-def channel_levels(name, src="videos"):
-    """원본 소리의 [왼쪽, 오른쪽] 크기 (dBFS · 8kHz 로 읽어 잼 · 캐시 — 파일 크기·시각이 바뀌면 다시) — 소리가 없거나 못 읽으면 None."""
+def channel_levels(name, src="videos", abort=None):
+    """원본 소리의 [왼쪽, 오른쪽] 크기 (dBFS · 8kHz 로 읽어 잼 · 캐시 — 파일 크기·시각이 바뀌면 다시) — 소리가 없거나 못 읽으면 None.
+    멈추기(✕)·abort 면 ffmpeg 를 끄고 Cancelled (캐시에 남기지 않음 · D-405)."""
     cache = _cache_dir(name, src) / "chan_v1.json"
     st = media_path(name, src).stat()
     sig = [st.st_size, round(st.st_mtime, 3)]
@@ -628,16 +629,28 @@ def channel_levels(name, src="videos"):
         with _GEN_SEM:
             with core.popen([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-af", AUDIO_T0, "-ac", "2", "-ar", "8000",
                              "-f", "s16le", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL) as proc:
-                while True:
-                    raw = proc.stdout.read(8000 * 4 * 10)
-                    if not raw:
-                        break
-                    x = np.frombuffer(raw[: len(raw) // 4 * 4], np.int16).reshape(-1, 2).astype(np.float64) / 32768.0
-                    acc += (x * x).sum(axis=0)
-                    cnt += len(x)
+                _PROCS.add(proc)  # 긴 원본은 다 읽는 데 오래 걸림 → 멈추기(✕)가 끌 수 있게
+                try:
+                    while True:
+                        if CANCEL.is_set() or (abort is not None and abort.is_set()):
+                            proc.kill()
+                            break
+                        raw = proc.stdout.read(8000 * 4 * 10)
+                        if not raw:
+                            break
+                        x = np.frombuffer(raw[: len(raw) // 4 * 4], np.int16).reshape(-1, 2).astype(np.float64) / 32768.0
+                        acc += (x * x).sum(axis=0)
+                        cnt += len(x)
+                finally:
+                    _PROCS.discard(proc)
+        if CANCEL.is_set() or (abort is not None and abort.is_set()):
+            raise Cancelled()
         lr = [round(10 * math.log10(max(1e-12, float(v) / cnt)), 1) for v in acc] if cnt and proc.returncode == 0 else None
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        _write_atomic(cache, json.dumps({"lr": lr, "sig": sig}))
+        try:  # 캐시를 못 써도(디스크 가득·잠긴 파일) 잰 값은 씀
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(cache, json.dumps({"lr": lr, "sig": sig}))
+        except OSError as e:
+            studiolog.trace(e, "소리 채널 캐시")
         return lr
 
 
@@ -648,18 +661,22 @@ def one_sided(lr):
     return 0 if lr[0] > lr[1] else 1
 
 
-def _chan_fill(md):
-    """대사 클립 원본이 한쪽만 녹음됐으면 큰 쪽을 양쪽에 채우는 소리 필터 목록 (아니면 []) — 원본마다 한 번만 잼."""
+def _chan_fill(md, abort=None):
+    """대사 클립 원본이 한쪽만 녹음됐으면 큰 쪽을 양쪽에 채우는 소리 필터 목록 (아니면 []) — 원본마다 한 번만 잼 (못 재도 한 번만)."""
     f, src = md.get("file"), md.get("src", "videos")
+    key, k = None, None
     try:
         st = media_path(f, src).stat()
         key = (f, src, st.st_size, st.st_mtime)
         if key not in _CHAN_MEMO:
-            _CHAN_MEMO[key] = one_sided(channel_levels(f, src))
+            _CHAN_MEMO[key] = one_sided(channel_levels(f, src, abort))
         k = _CHAN_MEMO[key]
-    except Exception as e:  # noqa: BLE001 — 못 재면 예전처럼 그대로
+    except Cancelled:
+        raise
+    except Exception as e:  # noqa: BLE001 — 못 재면 예전처럼 그대로 (캐시를 못 써도 같은 원본 클립마다 다시 읽지 않게 · D-405)
         studiolog.trace(e, "소리 채널 재기")
-        k = None
+        if key is not None:
+            _CHAN_MEMO[key] = None
     return [] if k is None else ["aformat=channel_layouts=stereo", f"pan=stereo|c0=c{k}|c1=c{k}"]
 
 
@@ -5064,6 +5081,7 @@ def _color_filters(it):
 
 # 느리게 한 클립 (D-400): 원본 프레임이 모자라면 fps 가 같은 장면을 두 번씩 보여 줘 뚝뚝 끊김 (30fps 촬영본 0.5배 = 초당 15장)
 MOTION_MAX = 6.0  # '아주 부드럽게'(움직임 보간)는 타임라인 길이 이 초 이하 클립만 — 1080p 3초에 1분 넘게 걸림 (더 길면 장면 섞기로)
+MOTION_TAIL = 3   # 움직임 보간 앞에 마지막 원본 장면을 이만큼 더 붙임 (끝 장면을 먹어도 n 프레임을 다 채우게 · D-405)
 
 
 def slow_mode(it, md, fps):
@@ -5176,9 +5194,12 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             if it.get("rev"):
                 chain += tm + [f"trim=duration={max(0.04, hi - ss):.4f}", "reverse", "setpts=PTS-STARTPTS"]
                 tm = []
+            mode = slow_mode(it, md, fps)
+            if mode == "motion":  # 움직임 보간은 끝 몇 장을 내보내지 않고, 원본이 2장 이하인 구간은 0장 → 뒤 장면이 소리보다 일찍 (D-405)
+                chain.append(f"tpad=stop_mode=clone:stop={MOTION_TAIL}")
             if abs(sp - 1) > 1e-6:
                 chain.append(f"setpts=PTS/{sp:.5f}")
-            chain.append(_rate_filter(slow_mode(it, md, fps), fps))
+            chain.append(_rate_filter(mode, fps))
             chain += tm
             if pre_pad > 1e-3:
                 chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
@@ -5605,7 +5626,8 @@ def _cut_edges(it, md, track_items):
         for x in track_items:
             if x is it or abs(other_t(x) - t) > 1e-3:
                 continue
-            if x.get("media") == it.get("media") and bool(x.get("rev")) == bool(it.get("rev")) and abs(i_sp(x) - i_sp(it)) < 1e-6 \
+            # 빠르기는 달라도 됨 — 말 빠르기 맞추기(_apply_tempo)·나눈 뒤 한쪽만 빠르기를 바꾼 곳도 원본은 이어짐 (D-405)
+            if x.get("media") == it.get("media") and bool(x.get("rev")) == bool(it.get("rev")) \
                     and abs(i_mt(x, other_t(x)) - i_mt(it, t)) < 2e-3:
                 return True
         return False
@@ -5789,7 +5811,7 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         head, tail = _cut_edges(it, md, on_track[it["track"]])
         edges = (head and not any(sd == "in" for _, sd, _ in tgain), tail and not any(sd == "out" for _, sd, _ in tgain))  # 전환 쪽은 전환이 섞음
         music = tr.get("role", "dialog") != "dialog"
-        fill = _chan_fill(md) if not music and tr.get("voiceFx") is not False else []  # 한쪽만 녹음된 대사 → 양쪽에 (D-404 · 음악·효과음은 그대로)
+        fill = _chan_fill(md, abort) if not music and tr.get("voiceFx") is not False else []  # 한쪽만 녹음된 대사 → 양쪽에 (D-404 · 음악·효과음은 그대로)
         jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, edges, fill, music))
     # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게 — 'voiceFx: false' 트랙(효과음)은 보정 없이 그 뒤에 더함
     # (효과음이 압축기를 지나면 말과 함께 눌렸다 키워져 정한 크기보다 커지고 말소리도 같이 눌림 · 판정: 띠로리가 말보다 큼)
