@@ -994,19 +994,20 @@ let gone = "";  // 이 영상의 이름이 바뀌었거나 보관함에서 빠�
 function markGone(msg) { gone = msg || gone || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); }  // 저장·그림 내보내기·A/B 가 같은 알림 (D-078)
 // 다른 곳(뒤로 가기로 다시 나온 예전 화면 · 다른 창)이 더 최근에 저장함 (서버 409 conflict · D-411) → 덮어쓰지 않고 한 번 물어봄
 // (기본 [확인] = 최근 내용 다시 불러오기 · [취소] = 이 화면 내용으로 저장하고 그 전 디자인은 사본으로)
-let conflict = false;
+// 다시 불러오기를 골랐으면 saveNow 는 "reload" (나가기 버튼이 '저장하지 못했어요' 를 또 묻지 않게 · D-416)
+let conflict = false, reloading = false;
 async function onConflict() {
   conflict = true; clearTimeout(saveTimer); saveTimer = null;
   $("saved").textContent = "저장 멈춤 · 다른 곳에서 더 최근에 저장했어요";
   if (confirm("이 썸네일 디자인이 다른 곳에서 더 최근에 저장됐어요 (뒤로 가기로 예전 화면이 다시 열렸을 수 있어요).\n\n[확인] 최근 내용 다시 불러오기 (이 화면에서 방금 바꾼 것은 사라져요)\n[취소] 이 화면 내용으로 저장하기 (최근 내용은 사본으로 남겨요)")) {
-    location.reload(); return false;
+    reloading = true; location.reload(); return "reload";
   }
   conflict = false; return saveNow(true);
 }
 async function saveNow(force) {
   clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
   if (gone) { $("saved").textContent = "저장 안 함 · " + gone; return true; }
-  if (conflict) return false;
+  if (conflict) return reloading ? "reload" : false;
   let r = null;
   try { r = await postRaw("/api/thumb/save", saveBody(force)); } catch (e) {}
   if (r && r.gone) { markGone(r.error); return true; }
@@ -2708,7 +2709,9 @@ function drawSafe() {
 $("safeBtn").onclick = () => { showSafe = !showSafe; $("safeBtn").classList.toggle("on", showSafe); drawSafe(); toast(showSafe ? "빨간 빗금 = 유튜브 화면에서 가려지는 곳이에요. 중요한 글자·얼굴은 피하세요" : "가려지는 영역 숨김"); };
 $("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패하면 물어봄 · 예전: 실패하면 아무 반응 없음)
   clearTimeout(saveTimer); saveTimer = null;
-  if (await saveNow() || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
+  const ok = await saveNow();
+  if (ok === "reload") return;  // 다른 곳 최근 내용을 다시 불러오는 중 (방금 고른 것과 다른 것을 또 묻지 않음)
+  if (ok || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
 };
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 

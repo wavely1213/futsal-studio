@@ -129,6 +129,65 @@ class KeepEditedCaptionsTest(unittest.TestCase):
             self.assertTrue(all(editor._cap_untouched(c, base_of(segs), set()) for c in caps), fmt)
 
 
+    def test_caption_moved_to_other_track_is_not_doubled(self):
+        """리뷰: 받아쓴 그대로인 자막을 C2 줄로 옮기면(trk) 남기는데, 새 C1 자막도 같은 말로 들어가 두 번 보였음."""
+        old = [dict(c) for c in self.old]
+        find(old, "안쪽으로")["trk"] = "C2"  # 옮김 (C1 에는 그 말 자막이 없음)
+        out, kept, skipped = editor.keep_edited_captions(old, self.new, self.before)
+        self.assertEqual([c.get("trk") for c in out if "안쪽으로" in c["text"]], ["C2"], "옮긴 자막 하나만 (새 C1 자막은 안 넣음)")
+        self.assertEqual((kept, skipped), (1, 1))
+        self.assertIn("피벗을 해 봐요.", [c["text"] for c in out], "그 밖은 새 받아쓰기")
+        # 복사(C1 원래 자막은 그대로 둔 채 C2 에 하나 더): C1 은 새 받아쓰기로, C2 사본은 그대로
+        old = [dict(c) for c in self.old] + [dict(find(self.old, "안쪽으로"), id="copy", trk="C2")]
+        out, kept, _ = editor.keep_edited_captions(old, self.new, self.before)
+        self.assertEqual(sorted(editor.cap_trk(c) for c in out if "안쪽으로" in c["text"]), ["C1", "C2"])
+
+    def test_split_boundaries_move_keeps_every_word(self):
+        """리뷰: 새 받아쓰기가 자막을 다른 곳에서 나누면, 고친 자막과 겹친 새 자막을 통째로 빼서 옆 말('라')이 자막 없이 남았음."""
+        ws = [W(t, k * 0.5, k * 0.5 + 0.5) for k, t in enumerate("가 나 다 라 마 바".split())]
+
+        def mk(xs):
+            return editor._make_cap({"start": xs[0]["s"], "end": xs[-1]["e"], "text": " ".join(w["w"] for w in xs), "words": xs}, "long", ())
+        before = [(w["s"], w["e"], w["w"], True) for w in ws]
+        a, b = mk(ws[:3]), mk(ws[3:])
+        self.assertTrue(editor._cap_untouched(a, before, set()) and editor._cap_untouched(b, before, set()))
+        new = [mk(ws[:4]), mk(ws[4:])]  # [가 나 다 라] [마 바]
+        out, kept, skipped = editor.keep_edited_captions([dict(a, text="가 나 따"), b], new, before)
+        self.assertEqual([(c["text"], c["start"], c["end"]) for c in out], [("가 나 따", 0.0, 1.5), ("라", 1.5, 2.0), ("마 바", 2.0, 3.0)],
+                         "고친 자막 자리 낱말만 빼고 남은 '라'는 새 자막으로")
+        self.assertEqual((kept, skipped), (1, 1))
+        self.assertEqual(editor._cap_words(out[1])[0]["w"], "라", "다시 만든 자막도 단어 시각(wt)이 맞음")
+        # 지운 자막 자리와 걸친 새 자막도 지운 말만 빠짐 (B 를 지움 → [가 나 다 라] 는 [가 나 다] 로 · [마 바] 는 안 넣음)
+        out, kept, skipped = editor.keep_edited_captions([a], new, before)
+        self.assertEqual([c["text"] for c in out], ["가 나 다"])
+        self.assertEqual(out[0]["id"], a["id"], "줄인 결과가 예전과 시간·글이 같으면 예전 id")
+        self.assertEqual((kept, skipped), (0, 2))
+
+    def test_deleted_lines_vs_new_words_in_long_pause(self):
+        """지운 말 자리는 이어진 낱말을 한 구간으로 (짧은 틈에 걸친 새 낱말이 조각 자막으로 안 살아남) · 긴 쉼(1초 넘게)에 새로 들린 말은 넣음."""
+        ws = [W("가", 0, 0.4), W("나", 0.5, 0.9), W("다", 5.0, 5.4), W("라", 5.5, 5.9)]
+
+        def mk(xs):
+            return editor._make_cap({"start": xs[0]["s"], "end": xs[-1]["e"], "text": " ".join(w["w"] for w in xs), "words": xs}, "long", ())
+        new = [mk([W("가", 0, 0.4)]), mk([W("음", 0.42, 0.48)]), mk([W("새말", 2.5, 3.0)]), mk([W("다", 5.0, 5.4), W("라", 5.5, 5.9)])]
+        out, kept, skipped = editor.keep_edited_captions([], new, [(w["s"], w["e"], w["w"], True) for w in ws])  # 자막을 모두 지움
+        self.assertEqual(([c["text"] for c in out], kept, skipped), (["새말"], 0, 3))
+
+    def test_long_lesson_merges_fast(self):
+        """리뷰: 자막 수 × 낱말 수로 느려져 2시간 영상이면 '가편집 만드는 중' 99% 에서 수십 초 멈췄음 (이 PC 에서 1,400줄 4.5초)."""
+        segs, t = [], 0.0
+        for i in range(1400):
+            ws = [W(f"말{i}_{j}", t + j * 0.45, t + j * 0.45 + 0.4) for j in range(3)]
+            segs.append({"start": ws[0]["s"], "end": ws[-1]["e"], "text": " ".join(w["w"] for w in ws), "words": ws})
+            t += 2.85
+        old, new, before = caps_of(segs), caps_of(segs), base_of(segs)
+        old[5]["fill"] = "#FFD400"
+        t0 = editor.time.perf_counter()
+        out, kept, skipped = editor.keep_edited_captions(old, new, before)
+        self.assertLess(editor.time.perf_counter() - t0, 2.0)
+        self.assertEqual((len(out), kept, skipped), (len(old), 1, 1))
+
+
 class ReanalyzeTest(WorkDir):
     """editor.reanalyze_project · app._analyze — 새 롱폼 가편집을 열 편집본으로 · fresh · 고친 자막 지킴 · 화면 알림 again (D-413 · D-414)."""
 
@@ -369,6 +428,87 @@ class DictAutosaveTest(unittest.TestCase):
         src = (REPO / "ui.html").read_text(encoding="utf-8")
         self.assertIn('const DICT_JOBS = ["/api/analyze", "/api/auto"];', src)
         self.assertIn("(DICT_JOBS.includes(path) ? dictFlush().catch(() => {}) : Promise.resolve()).then(() => api(path, body))", src)
+
+
+NODE_FRESH = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const a = src.indexOf("function seqSig(q)"), b = src.indexOf("function hideFreshBan()", a);
+let P = null;
+eval(src.slice(a, b) + "globalThis.F = { seqSig, signFresh, oldFresh };");
+const seq = (id, name, auto) => ({ id, name, auto, format: "long", items: [{ id: id + "i", track: "V1", start: 0, in: 0, out: 5 }], titles: [] });
+const out = {};
+// 1번째 다시 찾기 뒤 처음 열 때: 이번에 만든 것에 지문
+P = { active: "n1", fresh: { ids: ["n1", "n2"] }, sequences: [seq("u", "롱폼 가편집", "rough"), seq("n1", "롱폼 정리본 (새로 찾음)", "rough"), seq("n2", "쇼츠 1 (새로 찾음)", "rough")] };
+F.signFresh();
+out.signed = P.sequences.map(q => !!q.fsig);
+const s1 = P.sequences[1].fsig; F.signFresh(); out.stable = P.sequences[1].fsig === s1;
+// 저녁 내내 n1 을 다듬음 (이름은 그대로 · auto 도 'rough' 그대로) · n2 는 안 건드림 → 저장 → 다시 엶
+P.sequences[1].items[0].out = 3; P.sequences[1].titles.push({ text: "오늘의 기술" });
+P = JSON.parse(JSON.stringify(P)); delete P.fresh;
+// 2번째 다시 찾기 (새 n3 를 엶)
+P.fresh = { ids: ["n3"] }; P.active = "n3"; P.sequences.push(seq("n3", "롱폼 정리본 (새로 찾음) 2", "rough"));
+P.sequences.push(seq("x", "옛 버전이 만든 (새로 찾음)", "rough"));  // 지문이 없는 예전 것
+F.signFresh();
+out.offer = F.oldFresh().map(q => q.id);
+console.log(JSON.stringify(out));
+"""
+
+
+NODE_THUMB_LEAVE = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const a = src.indexOf("let gone = "), b = src.indexOf("// 창을 닫거나 숨길 때", a);
+const c = src.indexOf('$("back").onclick = async'), d = src.indexOf("\n};\n", c) + 4;
+const els = {};
+const $ = id => els[id] || (els[id] = { textContent: "", onclick: null });
+let D = {}, DOCS = {}, saveTimer = null, saveGen = 0, reloads = 0, asks = [];
+const toast = () => {}, renderDesigns = () => {}, saveBody = () => "{}";
+const location = { href: "", reload() { reloads++; } };
+let answer = true;
+const confirm = m => { asks.push(m.slice(0, 16)); return answer; };
+let reply = { ok: false, conflict: true, rev: 5 };
+const postRaw = async () => reply;
+eval(src.slice(a, b) + src.slice(c, d));
+(async () => {
+  const out = {};
+  await $("back").onclick();  // 다른 곳이 더 최근에 저장 → [확인] 다시 불러오기
+  out.reload = { asks: asks.length, reloads, href: location.href };
+  await $("back").onclick();  // 다시 불러오는 중에 또 눌러도 '저장하지 못했어요'를 묻지 않음
+  out.again = { asks: asks.length, href: location.href };
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+class FreshCleanupPageTest(unittest.TestCase):
+    """editor.html 예전 '(새로 찾음)' 정리 (D-416) — 리뷰: auto 표시는 복제·이름 바꾸기에만 바뀌어, 손으로 다듬은 '(새로 찾음)'도 지우자고 했음."""
+
+    def test_only_untouched_fresh_cuts_are_offered(self):
+        if not shutil.which("node"):
+            self.skipTest("node 없음")
+        r = subprocess.run(["node", "-e", NODE_FRESH, str(REPO / "editor.html")], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["signed"], [False, True, True], "이번에 만든 편집본만 지문")
+        self.assertTrue(out["stable"])
+        self.assertEqual(out["offer"], ["n2"], "다듬은 n1 · 지문 없는 예전 것 · 지금 연 n3 는 지우자고 안 함")
+        src = (REPO / "editor.html").read_text(encoding="utf-8")
+        self.assertIn("P.sequences.forEach(ensureSeq); signFresh();", src, "화면에 묶기 전에 지문")
+        self.assertNotIn("내가 만든 편집본은 그대로예요", src)
+
+
+class ThumbLeaveTest(unittest.TestCase):
+    """thumb.html 나가기 (D-416) — 리뷰: 다른 곳 최근 내용 [확인](다시 불러오기) 바로 뒤에 '저장하지 못했어요. 그래도 나갈까요?'를 또 물었음."""
+
+    def test_reload_choice_does_not_ask_again(self):
+        if not shutil.which("node"):
+            self.skipTest("node 없음")
+        r = subprocess.run(["node", "-e", NODE_THUMB_LEAVE, str(REPO / "thumb.html")], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["reload"], {"asks": 1, "reloads": 1, "href": ""}, "한 번만 묻고 다시 불러옴 (홈으로 가지 않음)")
+        self.assertEqual(out["again"], {"asks": 1, "href": ""})
 
 
 class EditorPageTest(unittest.TestCase):

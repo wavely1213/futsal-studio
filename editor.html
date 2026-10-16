@@ -4953,10 +4953,23 @@ function showCapBan(n, merged = 0) {
 }
 
 // 편집점을 다시 찾은 뒤 처음 열 때 (P.fresh · editor.reanalyze_project · D-414): 새 롱폼 가편집을 열었다고 한 번 알리고, 예전에 다시 찾아 만든
-// '(새로 찾음)' 편집본(자동 가편집 그대로 표시 · 지금 연 것 빼고)이 있으면 정리를 물어봄 — 지우기 전에 이름을 보여 주고 확인 · Ctrl+Z 로 되돌림
+// '(새로 찾음)' 편집본(지금 연 것 빼고 · 만들어진 뒤 한 번도 안 고친 것만)이 있으면 정리를 물어봄 — 지우기 전에 이름을 보여 주고 확인 · Ctrl+Z 로 되돌림
+// 안 고쳤는지는 처음 열 때 남긴 내용 지문(q.fsig · D-416)과 지금 내용이 같은지로 가림 (auto 표시는 복제·이름 바꾸기에만 바뀌어 손으로 다듬은 것도 'rough') ·
+// 지문이 없는 예전 '(새로 찾음)'이나 지문이 안 맞으면 고친 것으로 봐서 지우자고 하지 않음
+function seqSig(q) {
+  const { fsig, ...r } = q, s = JSON.stringify(r); let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36) + "." + s.length.toString(36);
+}
+// 이번에 만든 그대로의 지문 — 열자마자(편집본 정리 ensureSeq 바로 뒤 · 화면에 묶기 전) 남김 (다음에 다시 찾을 때 정리 대상인지 가림)
+function signFresh() {
+  const ids = (P.fresh && Array.isArray(P.fresh.ids) && P.fresh.ids) || [];
+  for (const q of P.sequences) if (ids.includes(q.id) && !q.fsig) q.fsig = seqSig(q);
+}
 function oldFresh() {
   const now = new Set((P.fresh && P.fresh.ids) || []);
-  return P.sequences.filter(q => String(q.name || "").includes("(새로 찾음)") && !now.has(q.id) && q.id !== P.active && (q.auto === "rough" || q.auto === "style"));
+  return P.sequences.filter(q => String(q.name || "").includes("(새로 찾음)") && !now.has(q.id) && q.id !== P.active && (q.auto === "rough" || q.auto === "style")
+    && q.fsig && q.fsig === seqSig(q));
 }
 function hideFreshBan() { $("capBan").style.display = "none"; if (P && P.fresh) { delete P.fresh; scheduleSave(); } }
 function showFreshBan() {
@@ -4971,7 +4984,7 @@ function showFreshBan() {
   $("capBanNo").onclick = hideFreshBan;
   if (old.length) $("capBanGo").onclick = () => {
     const o = oldFresh();
-    if (!o.length || !confirm(`예전에 다시 찾아 만든 편집본 ${o.length}개를 지울까요?\n${o.map(q => "· " + q.name).join("\n")}\n(지금 연 편집본·내가 만든 편집본은 그대로예요 · Ctrl+Z 로 되돌릴 수 있어요)`)) return;
+    if (!o.length || !confirm(`예전에 다시 찾아 만든 편집본 ${o.length}개를 지울까요?\n${o.map(q => "· " + q.name).join("\n")}\n(만든 뒤 한 번도 안 고친 것만이에요 · 지금 연 편집본·손댄 편집본은 그대로예요 · Ctrl+Z 로 되돌릴 수 있어요)`)) return;
     commit("예전 '(새로 찾음)' 정리");
     const rm = new Set(o.map(q => q.id));
     rm.forEach(id => AUTO_KEPT.seqs.delete(id)); P.sequences = P.sequences.filter(q => !rm.has(q.id)); delete P.fresh;
@@ -7895,7 +7908,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   const r = await fetch("/api/edit/open?name=" + encodeURIComponent(NAME) + (liteOf({ kind: "audio" }) ? "&lite=" + liteOf({ kind: "audio" }) : ""));  // 밖에서: 가벼운 소리·그림을 PC 가 미리 만들어 둠
   const j = await r.json();
   if (!r.ok) { $("saved").textContent = j.error || "열지 못했어요"; return; }
-  P = j.project; P.sequences.forEach(ensureSeq);
+  P = j.project; P.sequences.forEach(ensureSeq); signFresh();
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
   bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0;

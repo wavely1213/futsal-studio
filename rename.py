@@ -260,7 +260,7 @@ def _move_backups(pl, old, new, out, log):
 
 def _move_thumbs(pl, old, new, out, assets=None):
     with thumb._SAVE_LOCK:  # 썸네일 화면이 그 사이 저장해도 섞이지 않게
-        for suf in (".json", ".json.bak"):
+        for suf in (".json", ".json.bak", ".덮어쓰기전.json.bak"):  # 덮어쓰기전: 다른 곳 최근 디자인 사본 (thumb.save_docs force · D-411)
             s, d = pl["old_doc"].with_suffix(suf), pl["new_doc"].with_suffix(suf)
             if s.exists():
                 _rewrite(s, d, old, new, assets=assets)

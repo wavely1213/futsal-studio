@@ -447,6 +447,8 @@ class ActionTests(Base):
         st, _, b = self.act("analyze", {"names": [NAME]})
         self.assertEqual(st, 200)
         self.assertIn("이미 편집점을 찾은 영상이 1개", b["confirm"]["text"])
+        self.assertIn("손으로 고치거나 지운 자막은 그대로 두고, 나머지 자막만 새로 받아쓴 것으로 바뀌어요", b["confirm"]["text"],
+                      "PC 화면(ui.html againMsg)과 같은 말 (D-413 · 고친 자막은 지킴)")
         tok = b["confirm"]["token"]
         self.assertEqual(self.fb.started, [])
         other = pair_device(self.svc, "다른 폰")  # 다른 기기는 이 표를 못 씀

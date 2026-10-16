@@ -56,6 +56,7 @@ class Base(Server):
         (editor.PROJECTS / "backup" / f"{editor._ppath(name).stem}__20261007_101010.json").write_text(json.dumps(proj, ensure_ascii=False), encoding="utf-8")
         doc = {"designs": [{"layers": [{"type": "image", "src": frame(name, 3.2)}, {"type": "image", "src": "/asset/cut_1.png", "orig": frame(name, 3.2)}]}]}
         thumb._doc_path(name).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        thumb._doc_path(name).with_suffix(".덮어쓰기전.json.bak").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")  # 썸네일 덮어쓰기 전 사본 (D-411)
         source.mark_footage(name, "local")
         return v
 
@@ -93,8 +94,10 @@ class RenameTests(Base):
         self.assertEqual(source.describe(NEW)["kind"], "footage")
         self.assertNotIn(OLD, source.load()["files"])
         self.assertEqual(json.loads((editor.PROJECTS / "다른 영상.json").read_text(encoding="utf-8"))["media"][0]["file"], NEW)
-        for p in (core.ANALYSIS / "IMG_4830", editor.PROJECTS / "IMG_4830.json", thumb.THUMBS / "IMG_4830.json"):
+        for p in (core.ANALYSIS / "IMG_4830", editor.PROJECTS / "IMG_4830.json", thumb.THUMBS / "IMG_4830.json", thumb.THUMBS / "IMG_4830.덮어쓰기전.json.bak"):
             self.assertFalse(p.exists(), p)
+        cp = json.loads(thumb._doc_path(NEW).with_suffix(".덮어쓰기전.json.bak").read_text(encoding="utf-8"))
+        self.assertEqual(parse_qs(urlparse(cp["designs"][0]["layers"][0]["src"]).query)["name"], [NEW], "덮어쓰기 전 사본도 새 이름 옆으로 (주소도 새 이름)")
         self.assertTrue(any("이름을 바꿨어요 · IMG_4830.mp4 → " in m for m in app.LOG[-5:]), app.LOG[-5:])
         # 옛 이름으로 열어 둔 편집실이 저장해도 옛 이름 편집본을 새로 만들지 않음 (스튜디오에서 다시 열라고 안내)
         code, j = self.call("/api/edit/save", {"name": OLD, "project": proj, "rev": 7})

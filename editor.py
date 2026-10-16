@@ -1,4 +1,5 @@
 """편집실: 영상 정보·파형·썸네일·프로젝트 저장(멀티 트랙)·자동 추천·내보내기(영상/프리미어 XML/SRT)."""
+import bisect
 import hashlib
 import html as _html
 import itertools
@@ -2683,8 +2684,9 @@ def _uniq_name(n, names):
 
 
 CAP_AUTO_KEYS = {"id", "start", "end", "text", "wt", "sh", "shn", "words"}  # 받아쓰기로 만든 자막이 가진 값 (_make_cap) — 그 밖의 값(색·자리·줄 trk·손 시간 tm·손 나눔 ms)이 있으면 사용자가 고친 자막
-CAP_KEEP_OVERLAP = 0.1  # 새 자막이 남겨 둔(고친) 자막과 같은 줄에서 이만큼(초) 넘게 겹치면 넣지 않음 (같은 말이 두 번 보이지 않게)
-CAP_DELETED_PART = 0.5  # 새 자막 길이의 이만큼 넘게가 사용자가 지운 말 자리면 넣지 않음 (지운 자막이 되살아나지 않게)
+CAP_KEEP_OVERLAP = 0.1  # (단어 시각이 없는 새 자막) 남겨 둔(고친) C1 자막과 이만큼(초) 넘게 겹치면 넣지 않음 (같은 말이 두 번 보이지 않게)
+CAP_DELETED_PART = 0.5  # (단어 시각이 없는 새 자막) 길이의 이만큼 넘게가 사용자가 지운 말 자리면 넣지 않음 (지운 자막이 되살아나지 않게)
+CAP_GONE_GAP = 1.0  # 지운 말 자리: 이어진 지운 낱말 사이가 이만큼(초) 안이면 한 구간 (그 틈에 걸친 새 낱말이 조각 자막으로 되살아나지 않게 · 긴 쉼은 새로 들린 말 자리)
 
 
 def caption_baseline(name):
@@ -2709,10 +2711,20 @@ def _flat(t):
     return "".join(str(t or "").split())
 
 
-def _cap_untouched(c, before, marked):
+def _said(before):
+    """다시 찾기 전 받아쓴 낱말: (시작, 끝) 1/100초 → 그 시각의 낱말들 (받아쓰기가 시각을 못 맞춘 낱말은 여럿이 같은 시각)."""
+    said = {}
+    for u in before or ():
+        if u[3]:
+            said.setdefault((int(round(u[0] * 100)), int(round(u[1] * 100))), set()).add(_flat(u[2]))
+    return said
+
+
+def _cap_untouched(c, before, marked, said=None):
     """받아쓴 그대로인 자막인지: 받아쓰기로 만든 값만 있고(CAP_AUTO_KEYS) · 어느 편집본에서도 지우거나('이 편집본에서 지운' capOff)
     자리를 옮기지('이 자막만' capPos) 않았고 · 낱말마다 단어 시각(wt)이 다시 찾기 전 받아쓴 낱말과 시각·글이 같음
-    (글을 고쳐 낱말 수가 바뀌면 wt 가 안 맞음 → 고친 자막) · 단어 시각이 없는 자막(예전 받아쓰기)은 겹치는 받아쓰기 구간 글 안의 글이면."""
+    (글을 고쳐 낱말 수가 바뀌면 wt 가 안 맞음 → 고친 자막) · 단어 시각이 없는 자막(예전 받아쓰기)은 겹치는 받아쓰기 구간 글 안의 글이면.
+    said: _said(before) (여러 자막을 볼 때 한 번만 만들어 넘김)."""
     if not isinstance(c, dict) or set(c) - CAP_AUTO_KEYS or c.get("id") in marked:
         return False
     txt = _flat(c.get("text"))
@@ -2720,10 +2732,7 @@ def _cap_untouched(c, before, marked):
         return False
     ws = _cap_words(c)
     if ws:
-        said = {}  # (시작, 끝) 1/100초 → 그 시각의 낱말들 (받아쓰기가 시각을 못 맞춘 낱말은 여럿이 같은 시각)
-        for u in before:
-            if u[3]:
-                said.setdefault((int(round(u[0] * 100)), int(round(u[1] * 100))), set()).add(_flat(u[2]))
+        said = _said(before) if said is None else said
         return all(_flat(w["w"]) in said.get((int(round(float(w["s"]) * 100)), int(round(float(w["e"]) * 100))), ()) for w in ws)
     if c.get("wt") is not None or c.get("words"):
         return False
@@ -2735,39 +2744,100 @@ def _cap_untouched(c, before, marked):
     return bool(segs) and txt in "".join(_flat(u[2]) for u in segs)
 
 
-def keep_edited_captions(old, new, before, seqs=()):
-    """편집점 다시 찾기 뒤 자막 합치기 (D-413): 받아쓴 그대로인 자막만 새로 받아쓴 자막으로 바꾸고, 사용자가 고친 자막(글·색·자리·줄·시간·
-    나눔 · 편집본에서 지움)은 그대로 둠 · 사용자가 목록에서 지운 말 자리(받아쓴 말인데 자막이 없음)에는 새 자막을 넣지 않음.
+def _spans(xs):
+    """구간들 → 겹치거나 맞닿은 것을 합친 차례대로의 구간 + 시작 시각 목록 (bisect 로 찾게)."""
+    out = []
+    for a, b in sorted(xs):
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out, [x[0] for x in out]
+
+
+def _in_spans(t, sp):
+    k = bisect.bisect_right(sp[1], t) - 1
+    return k >= 0 and t <= sp[0][k][1]
+
+
+def _span_overlap(a, b, sp):
+    """a~b 가 합친 구간들과 겹치는 길이 (초)."""
+    tot, k = 0.0, max(0, bisect.bisect_right(sp[1], a) - 1)
+    while k < len(sp[0]) and sp[0][k][0] < b:
+        tot += max(0.0, min(b, sp[0][k][1]) - max(a, sp[0][k][0]))
+        k += 1
+    return tot
+
+
+def keep_edited_captions(old, new, before, seqs=(), fmt="long", terms=()):
+    """편집점 다시 찾기 뒤 자막 합치기 (D-413 · D-415): 받아쓴 그대로인 자막만 새로 받아쓴 자막으로 바꾸고, 사용자가 고친 자막(글·색·자리·줄·시간·
+    나눔 · 편집본에서 지움)은 그대로 둠 · 사용자가 목록에서 지운 말 자리(받아쓴 말인데 C1 줄에 자막이 없음 — 다른 자막 줄 C2~C9 로 옮긴 말도)에는
+    새 자막을 넣지 않음. 새 자막은 늘 C1 이라 C1 만 봄. 단어 시각이 있는 새 자막은 낱말마다 가려서, 남긴 자막·지운 말 자리에 든 낱말만 빼고
+    나머지 낱말로 자막을 다시 만듦 (나눈 곳이 예전과 달라도 고치지 않은 말이 자막 없이 남지 않게 · fmt·terms 는 그때 _make_cap 에).
     before: caption_baseline (다시 찾기 전 받아쓰기) · seqs: 편집본들 (capOff·capPos 를 봄).
-    새 자막이 예전과 시간·글이 같으면 예전 id 를 그대로 (편집본마다 둔 자리 등이 이어지게). → (자막, 남긴 고친 자막 수, 안 넣은 새 자막 수)."""
+    새 자막이 예전과 시간·글이 같으면 예전 id 를 그대로 (편집본마다 둔 자리 등이 이어지게). → (자막, 남긴 고친 자막 수, 다 빼거나 줄인 새 자막 수)."""
     marked = set()
     for q in seqs or ():
         if isinstance(q, dict):
             marked |= {x for x in q.get("capOff") or () if isinstance(x, str)} if isinstance(q.get("capOff"), list) else set()
             marked |= set(q["capPos"]) if isinstance(q.get("capPos"), dict) else set()
     old = [c for c in old or () if isinstance(c, dict)]
-    auto = [c for c in old if _cap_untouched(c, before, marked)]
-    kept = [c for c in old if not any(c is x for x in auto)]
-    wins = []
+    said = _said(before)
+    auto = [c for c in old if _cap_untouched(c, before, marked, said)]
+    autoid = {id(c) for c in auto}
+    kept = [c for c in old if id(c) not in autoid]
+    wins, keepw = [], []  # C1 줄 예전 자막 자리 (앞뒤 0.05초 여유) · 그중 남긴 자막 자리
     for c in old:
+        if cap_trk(c) != "C1":
+            continue
         try:
-            wins.append((float(c["start"]) - 0.05, float(c["end"]) + 0.05))
+            a, b = float(c["start"]), float(c["end"])
         except (KeyError, TypeError, ValueError):
             continue
-    gone = [(u[0], u[1]) for u in before if not any(  # 받아쓴 말인데 그 자리에 자막이 하나도 없음 = 사용자가 지운 말
-        (a <= (u[0] + u[1]) / 2 <= b) if u[3] else (min(b, u[1]) - max(a, u[0]) > 0) for a, b in wins)]
+        wins.append((a - 0.05, b + 0.05))
+        if id(c) not in autoid:
+            keepw.append((a, b))
+    wins, keepw = _spans(wins), _spans(keepw)
+    gone, run = [], None  # 받아쓴 말인데 C1 줄 그 자리에 자막이 하나도 없음 = 사용자가 지운(또는 다른 줄로 옮긴) 말 · 이어진 낱말은 한 구간으로
+    for u in sorted(before or ()):
+        miss = not (_in_spans((u[0] + u[1]) / 2, wins) if u[3] else _span_overlap(u[0], u[1], wins) > 0)
+        if run and (not miss or u[0] - run[1] > CAP_GONE_GAP):
+            gone.append(tuple(run))
+            run = None
+        if miss:
+            run = [run[0], max(run[1], u[1])] if run else [u[0], u[1]]
+    if run:
+        gone.append(tuple(run))
+    gone = _spans(gone)
     same = {(round(float(c["start"]), 3), round(float(c["end"]), 3), c.get("text")): c["id"] for c in auto if c.get("id")}
     out, skipped = list(kept), 0
     for n in new or ():
         a, b = float(n["start"]), float(n["end"])
-        hit = any(cap_trk(k) == cap_trk(n) and min(b, float(k["end"])) - max(a, float(k["start"])) > CAP_KEEP_OVERLAP for k in kept
-                  if isinstance(k.get("start"), (int, float)) and isinstance(k.get("end"), (int, float)))
-        lost = sum(max(0.0, min(b, y) - max(a, x)) for x, y in gone)
-        if hit or (b > a and lost > CAP_DELETED_PART * (b - a)):
-            skipped += 1
-            continue
-        k = (round(a, 3), round(b, 3), n.get("text"))
-        out.append(dict(n, id=same.pop(k)) if k in same else n)
+        ws = _cap_words(n)
+        if ws:
+            mids = [(float(w["s"]) + float(w["e"])) / 2 for w in ws]
+            keep = [not _in_spans(m, keepw) and not _in_spans(m, gone) for m in mids]
+            if all(keep):
+                parts = [n]
+            else:
+                skipped += 1
+                parts, cur = [], []
+                for w, ok in zip(ws + [None], keep + [False]):
+                    if ok:
+                        cur.append(w)
+                    elif cur:
+                        parts.append(_make_cap({"start": float(cur[0]["s"]), "end": float(cur[-1]["e"]), "text": " ".join(x["w"] for x in cur),
+                                                "words": cur}, fmt, terms))
+                        cur = []
+        else:
+            lost = _span_overlap(a, b, gone)
+            if _span_overlap(a, b, keepw) > CAP_KEEP_OVERLAP or (b > a and lost > CAP_DELETED_PART * (b - a)):
+                skipped += 1
+                continue
+            parts = [n]
+        for c in parts:
+            k = (round(float(c["start"]), 3), round(float(c["end"]), 3), c.get("text"))
+            out.append(dict(c, id=same.pop(k)) if k in same else c)
     out.sort(key=lambda c: float(c.get("start") or 0))
     return out, len(kept), skipped
 
@@ -2790,7 +2860,7 @@ def reanalyze_project(name, before=None):
     caps = _captions_of(segs, info, silences_of(name))
     kept = 0
     if before:
-        caps, kept, _ = keep_edited_captions(proj.get("captions"), caps, before, proj.get("sequences"))
+        caps, kept, _ = keep_edited_captions(proj.get("captions"), caps, before, proj.get("sequences"), _cap_fmt(info), _terms())
     changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
     proj["captions"] = caps
     proj["speech"] = speech_words(segs)

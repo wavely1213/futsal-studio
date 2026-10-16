@@ -406,7 +406,9 @@ function drawSafe() {
 $("safeBtn").onclick = () => { showSafe = !showSafe; $("safeBtn").classList.toggle("on", showSafe); drawSafe(); toast(showSafe ? "빨간 빗금 = 유튜브 화면에서 가려지는 곳이에요. 중요한 글자·얼굴은 피하세요" : "가려지는 영역 숨김"); };
 $("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패하면 물어봄 · 예전: 실패하면 아무 반응 없음)
   clearTimeout(saveTimer); saveTimer = null;
-  if (await saveNow() || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
+  const ok = await saveNow();
+  if (ok === "reload") return;  // 다른 곳 최근 내용을 다시 불러오는 중 (방금 고른 것과 다른 것을 또 묻지 않음)
+  if (ok || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
 };
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 
