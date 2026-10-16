@@ -319,22 +319,42 @@ def find_junk(segs, silences=(), peaks=()):
 # ---------- 단어 단위 추임새 ('음' · '어' …) — 받아쓰기에 단어 시각(words)이 있을 때만 ----------
 FILLER_WORDS = {"음", "어", "아", "그", "으", "엄", "흠", "에"}  # 늘인 소리('어어', '음~')도 같은 말로 봄
 FILLER_GAP = 0.12  # 앞뒤로 이만큼 이상 비어 홀로 떨어진 것만 ('그 공을'처럼 말에 붙은 '그'는 그대로)
+# 받아쓰기는 늘인 추임새 끝과 다음 낱말 시작을 딱 붙여 적음 ('음...' 11.92~12.74 → '패스를' 12.74) → 이만큼(초) 넘게 늘인 추임새는
+# 말줄임표가 붙었거나 줄 첫머리의 망설이는 소리('음'·'어' …)면 뒤가 붙어 있어도 뺌 (D-403 · BR-220) — '아,' '아!'(반응)·'그'(그 공을)는 그대로
+FILLER_LONG = 0.4
+FILLER_HESITATE = {"음", "어", "으", "엄", "흠", "에"}
+_ELLIPSIS = re.compile(r"(?:\.\.|…)")
+
+
+def _long_filler(w, t, first):
+    """뒤가 붙어 있어도 뺄 늘인 추임새인지 (FILLER_LONG 초 넘게 · 느낌표·물음표가 없고 · 말줄임표가 붙었거나 줄 첫머리 망설임)."""
+    raw = str(w.get("w") or "")
+    if float(w["e"]) - float(w["s"]) < FILLER_LONG or re.search(r"[!?]", raw):
+        return False
+    return bool(_ELLIPSIS.search(raw)) or (first and t in FILLER_HESITATE)
 
 
 def find_fillers(segs):
     """단어 시각이 있는 받아쓰기 → 홀로 떨어진 추임새 단어 구간 [(a, b, '추임새')] (단어 시각이 없으면 []).
-    단어 앞뒤 빈 곳의 절반(0.1초까지)도 함께 빼서, 남은 말 사이가 자연스럽게 이어지게 함."""
-    words = [w for s in segs or () for w in s.get("words") or () if str(w.get("w") or "").strip()]
-    words.sort(key=lambda w: w["s"])
+    단어 앞뒤 빈 곳의 절반(0.1초까지)도 함께 빼서, 남은 말 사이가 자연스럽게 이어지게 함.
+    늘인 추임새(_long_filler)는 앞뒤가 붙어 있어도 뺌 — 붙은 쪽은 낱말 끝까지만."""
+    words = []
+    for s in segs or ():
+        prev = ""
+        for w in s.get("words") or ():
+            if str(w.get("w") or "").strip():
+                words.append((w, not prev or bool(re.search(r"[.?!…]\W*$", prev))))  # 줄 첫머리: 구간 첫 낱말이거나 앞 낱말이 문장 끝
+                prev = str(w["w"]).strip()
+    words.sort(key=lambda x: x[0]["s"])
     out = []
-    for k, w in enumerate(words):
+    for k, (w, first) in enumerate(words):
         t = re.sub(r"(.)\1+", r"\1", re.sub(r"[\s.,!?~…·\-]+", "", w["w"]))
         if t not in FILLER_WORDS:
             continue
-        before = w["s"] - words[k - 1]["e"] if k else float("inf")
-        after = words[k + 1]["s"] - w["e"] if k + 1 < len(words) else float("inf")
-        if before >= FILLER_GAP and after >= FILLER_GAP:
-            out.append((round(max(0.0, w["s"] - min(0.1, before / 2)), 2), round(w["e"] + min(0.1, after / 2), 2), "추임새"))
+        before = w["s"] - words[k - 1][0]["e"] if k else float("inf")
+        after = words[k + 1][0]["s"] - w["e"] if k + 1 < len(words) else float("inf")
+        if (before >= FILLER_GAP and after >= FILLER_GAP) or _long_filler(w, t, first):
+            out.append((round(max(0.0, w["s"] - min(0.1, max(0.0, before) / 2)), 2), round(w["e"] + min(0.1, max(0.0, after) / 2), 2), "추임새"))
     return out
 
 

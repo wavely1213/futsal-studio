@@ -2,7 +2,7 @@
 
 - 크기·비율 (롱폼 16:9 / 쇼츠 9:16), 쇼츠 길이
 - 검은 화면, 멈춘 화면, 소리가 끊긴 구간
-- 소리 크기(LUFS)·최대 피크(클리핑)
+- 소리 크기(LUFS)·최대 피크(클리핑)·좌우 소리 차이(한쪽 귀로만 들림)
 """
 import re
 
@@ -12,11 +12,21 @@ import core
 QUIET, LOUD, PEAK_MAX = -16.0, -10.0, -1.0
 ON_TARGET = 1.0     # 목표와 이만큼(dB) 안이면 '목표대로' · 넘으면 얼마나 모자란지·넘치는지 경고 (유튜브는 작은 소리를 키우지 않음)
 RAISE_MAX = -12.0   # '목표를 올려 다시 내보내세요' 안내의 가장 큰 값 (한 번 맞추기가 모자란 정도는 영상마다 달라 너무 올리면 다른 영상이 커짐)
+LR_WARN = 10.0      # 왼쪽·오른쪽 소리 크기가 이만큼(dB) 넘게 다르면 경고 — 이어폰으로 보면 한쪽으로 쏠려 들림 (D-404)
+LR_SILENT = -70.0   # 이보다 작은 쪽은 '소리가 거의 없음'
 
 
 def _t(s):
     s = max(0, int(round(s)))
     return f"{s // 60:02d}:{s % 60:02d}"
+
+
+def _lr_levels(err):
+    """astats 채널별 출력 → [왼쪽, 오른쪽] 소리 크기(dB · 무음은 -inf) · 두 채널이 아니면 None."""
+    v = re.findall(r"Channel: (\d+)\s*\n[^\n]*RMS level dB: (-?inf|-?[\d.]+)", err)
+    if len(v) != 2:
+        return None
+    return [float(x) if "inf" not in x else float("-inf") for _, x in v]
 
 
 def check_video(path, fmt=None, master=None, run=None):
@@ -31,7 +41,8 @@ def check_video(path, fmt=None, master=None, run=None):
     core.set_progress(label="영상 검수 중", pct=None, detail="화면·소리 살펴보는 중")
     r = (run or core.run)([core.ffmpeg(), "-hide_banner", "-i", path,
                            "-vf", "blackdetect=d=0.4:pix_th=0.08,freezedetect=n=-55dB:d=2.5",
-                           "-af", "silencedetect=n=-45dB:d=1.2,ebur128=peak=true", "-f", "null", "-"])
+                           "-af", "silencedetect=n=-45dB:d=1.2,astats=measure_overall=none:measure_perchannel=RMS_level,ebur128=peak=true",
+                           "-f", "null", "-"])
     err = r.stderr or ""
     m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
     dur = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
@@ -105,6 +116,14 @@ def check_video(path, fmt=None, master=None, run=None):
             add("ok", "소리 크기", f"{lufs:.1f} LUFS — 적당해요.")
         if peak is not None and peak > PEAK_MAX:
             add("warn", "소리 깨짐 가능", f"최대 피크 {peak:.1f} dBTP — 유튜브 권장(-1 dBTP 이하)보다 커서 소리가 찢어질 수 있어요.")
+        lr = _lr_levels(err)
+        if lr and max(lr) > LR_SILENT and abs(lr[0] - lr[1]) > LR_WARN:
+            big, small = ("왼쪽", "오른쪽") if lr[0] > lr[1] else ("오른쪽", "왼쪽")
+            if min(lr) <= LR_SILENT:
+                add("warn", "좌우 소리 차이", f"{small} 소리가 거의 없어요 — 이어폰으로 보면 {big} 귀로만 들려요. "
+                    "촬영본 마이크가 한쪽만 녹음됐는지 확인해 주세요.")
+            else:
+                add("warn", "좌우 소리 차이", f"{big} 소리가 {abs(lr[0] - lr[1]):.0f}dB 더 커요 — 이어폰으로 보면 한쪽으로 쏠려 들려요.")
     bad = sum(i["lv"] == "bad" for i in items)
     warn = sum(i["lv"] == "warn" for i in items)
     order = {"bad": 0, "warn": 1, "ok": 2}

@@ -5539,7 +5539,7 @@ function renderFx() {
       ${S.format === "shorts" && v.track === "V1" ? `<div style="margin-top:8px">${slider("pReframe", "화면 좌우", v.reframe ?? 0.5, 0, 1, 0.01, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데")}</div>` : ""}</div>`);
   }
   h += fxGroup("speed", "속도 · 시간", "#8b4fc6", `<div class="ecr" style="padding:6px 12px"><div class="f"><label>속도</label><div class="nud"><button class="btn sm" data-spd="0.5">0.5×</button><button class="btn sm" data-spd="1">1×</button><button class="btn sm" data-spd="2">2×</button></div><span class="v">${Math.round(sp(main) * 100)}%${main.rev ? " · 거꾸로" : ""}</span></div>
-    <button class="btn sm" id="pSpeedDlg">속도 · 길이… (Ctrl+R)</button>${v && mdOf(v).kind === "video" ? ` <button class="btn sm" id="pFreeze" title="재생 위치의 장면을 2초 멈춰 보여줘요 (프레임 고정)">정지 화면 넣기</button>` : ""}</div>`);
+    <button class="btn sm" id="pSpeedDlg">속도 · 길이… (Ctrl+R)</button>${v && mdOf(v).kind === "video" ? ` <button class="btn sm" id="pFreeze" title="재생 위치의 장면을 2초 멈춰 보여줘요 (프레임 고정)">정지 화면 넣기</button>` : ""}${smoothRow(v)}</div>`);
   if (a) {
     h += fxGroup("vol", "볼륨", "var(--audio)", kfRow(a, "level") + `<div class="ecr" style="padding:4px 12px 10px">
       ${slider("pGain", "클립 게인", a.gain || 0, -24, 24, 0.5, fmtDb)}
@@ -5552,6 +5552,17 @@ function renderFx() {
   h += `<div class="pg"><div class="presets" style="margin:0"><button class="btn sm" id="pDel">지우기</button><button class="btn sm" id="pRipDel">잔물결 삭제</button>${main.link ? `<button class="btn sm" id="pUnlink">연결 해제</button>` : ""}<button class="btn sm" id="pDup">복제</button></div></div>`;
   el.innerHTML = h;
   bindFx(v, a, main, its);
+}
+// 느리게 한 클립 (D-400): 내보낼 때 앞뒤 장면을 섞어 끊김 없이 (기본) · '아주 부드럽게'는 움직임을 따라 사이 장면을 새로 그림
+// (MOTION_MAX 초 이하 · 오래 걸림) · 60fps 촬영본처럼 장면이 넉넉하면 원래 장면 그대로 — editor.py slow_mode 와 같은 규칙
+const MOTION_MAX = 6;
+function smoothRow(v) {
+  if (!v || mdOf(v).kind !== "video" || sp(v) >= 1 - 1e-6) return "";
+  const hint = (mdOf(v).fps || 30) * sp(v) >= FPS - 0.5 ? "60fps 촬영본이라 원래 장면 그대로도 부드러워요."
+    : iLen(v) > MOTION_MAX + 1e-6 ? `${MOTION_MAX}초 넘는 클립은 앞뒤 장면을 섞어 부드럽게 해요.`
+    : v.smooth === "motion" ? "사이 장면을 새로 그려요. 내보내기가 오래 걸려요." : "앞뒤 장면을 섞어 부드럽게 해요. 짧은 다시 보기는 '아주 부드럽게'를 켜 보세요.";
+  return `<div class="f" style="margin-top:6px"><label>느린 장면</label><label class="tog"><input type="checkbox" id="pSmooth" ${v.smooth === "motion" ? "checked" : ""}> 아주 부드럽게</label><span></span></div>
+    <div class="hint" id="pSmoothHint">${hint}</div>`;
 }
 function bindFx(v, a, main, its) {
   const el = $("rt-fx");
@@ -5608,6 +5619,7 @@ function bindFx(v, a, main, its) {
   if ($("pReframe")) bindRange("pReframe", x => v.reframe = x, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데", "화면 좌우 위치");
   el.querySelectorAll("[data-spd]").forEach(b => b.onclick = () => setSpeed(its.filter(x => unlocked(x.track)), +b.dataset.spd, true));
   $("pSpeedDlg").onclick = openSpeed; if ($("pFreeze")) $("pFreeze").onclick = freezeFrame;
+  if ($("pSmooth")) $("pSmooth").onchange = e => { commit("느린 장면 부드럽게"); if (e.target.checked) v.smooth = "motion"; else delete v.smooth; changed(false); };
   if (a) {
     bindRange("pGain", x => a.gain = x, fmtDb, "클립 게인"); bindRange("pFin", x => a.fadeIn = x, x => (+x).toFixed(1) + "초", "페이드 인"); bindRange("pFout", x => a.fadeOut = x, x => (+x).toFixed(1) + "초", "페이드 아웃");
     $("pMute").onchange = e => { commit("음소거"); a.mute = e.target.checked; changed(false); };

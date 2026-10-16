@@ -605,6 +605,64 @@ def waveform(name, per_sec=50, src="videos"):
         return data
 
 
+# 한쪽만 녹음된 마이크 (D-404): 무선 마이크 수신기를 나눔(split) 모드로 꽂거나 카메라 마이크 입력 1번만 쓰면 왼쪽만 녹음됨
+CHAN_FILL_DB = 20.0    # 대사 클립 원본의 한쪽 채널이 다른 쪽보다 이만큼(dB) 넘게 작으면 큰 쪽 소리를 양쪽에 (카메라 내장 마이크 좌우 차이는 몇 dB)
+CHAN_FLOOR_DB = -60.0  # 큰 쪽도 이보다 작으면(소리가 거의 없음) 그대로
+_CHAN_MEMO = {}
+
+
+def channel_levels(name, src="videos"):
+    """원본 소리의 [왼쪽, 오른쪽] 크기 (dBFS · 8kHz 로 읽어 잼 · 캐시 — 파일 크기·시각이 바뀌면 다시) — 소리가 없거나 못 읽으면 None."""
+    cache = _cache_dir(name, src) / "chan_v1.json"
+    st = media_path(name, src).stat()
+    sig = [st.st_size, round(st.st_mtime, 3)]
+    try:
+        c = json.loads(cache.read_text(encoding="utf-8"))
+        if c.get("sig") == sig:
+            return c.get("lr")
+    except (OSError, ValueError, AttributeError):
+        pass
+    with _gen_lock(str(cache)):
+        import numpy as np
+        acc, cnt = np.zeros(2), 0
+        with _GEN_SEM:
+            with core.popen([core.ffmpeg(), "-v", "error", "-i", str(media_path(name, src)), "-vn", "-af", AUDIO_T0, "-ac", "2", "-ar", "8000",
+                             "-f", "s16le", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL) as proc:
+                while True:
+                    raw = proc.stdout.read(8000 * 4 * 10)
+                    if not raw:
+                        break
+                    x = np.frombuffer(raw[: len(raw) // 4 * 4], np.int16).reshape(-1, 2).astype(np.float64) / 32768.0
+                    acc += (x * x).sum(axis=0)
+                    cnt += len(x)
+        lr = [round(10 * math.log10(max(1e-12, float(v) / cnt)), 1) for v in acc] if cnt and proc.returncode == 0 else None
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(cache, json.dumps({"lr": lr, "sig": sig}))
+        return lr
+
+
+def one_sided(lr):
+    """[왼쪽, 오른쪽] 크기 → 양쪽에 채울 채널 번호 (0 왼쪽 · 1 오른쪽) · 고르면 None (D-404)."""
+    if not lr or len(lr) != 2 or max(lr) < CHAN_FLOOR_DB or abs(lr[0] - lr[1]) < CHAN_FILL_DB:
+        return None
+    return 0 if lr[0] > lr[1] else 1
+
+
+def _chan_fill(md):
+    """대사 클립 원본이 한쪽만 녹음됐으면 큰 쪽을 양쪽에 채우는 소리 필터 목록 (아니면 []) — 원본마다 한 번만 잼."""
+    f, src = md.get("file"), md.get("src", "videos")
+    try:
+        st = media_path(f, src).stat()
+        key = (f, src, st.st_size, st.st_mtime)
+        if key not in _CHAN_MEMO:
+            _CHAN_MEMO[key] = one_sided(channel_levels(f, src))
+        k = _CHAN_MEMO[key]
+    except Exception as e:  # noqa: BLE001 — 못 재면 예전처럼 그대로
+        studiolog.trace(e, "소리 채널 재기")
+        k = None
+    return [] if k is None else ["aformat=channel_layouts=stereo", f"pan=stereo|c0=c{k}|c1=c{k}"]
+
+
 def thumbs(name, src="videos"):
     """타임라인용 썸네일 띠 (가로로 이어붙인 한 장). 키프레임만 읽어 빠르게 (전체 디코딩의 수십 분의 1)."""
     d = _cache_dir(name, src)
@@ -1862,6 +1920,39 @@ def default_style_params():
     return dict(p, styleName=n) if p else None
 
 
+EDGE_LOOK = 0.15   # 가편집 컷 끝·시작에서 아직 소리가 나면 이 초 안에서 바깥쪽 조용한 곳으로 옮김 (말끝·첫소리 잘림 막기 · D-402)
+EDGE_QUIET = 0.06  # 조용하다고 볼 소리 크기 (편집실 파형 값 · 그 영상 큰 소리의 약 -24dB)
+
+
+def _quiet_edges(cuts, wf, units, dur=None):
+    """가편집 컷 [{in, out}] 의 끝이 아직 소리가 나는 곳이면 EDGE_LOOK 초 안의 바깥쪽 첫 조용한 곳으로 옮김 (D-402) —
+    컷 끝은 늦게, 컷 시작은 일찍만 (말을 더 자르지 않음) · 받아쓴 다른 낱말(units: [(시작, 끝, …)])·옆 컷·파일 끝을 넘지 않음 ·
+    조용한 곳을 못 찾으면 그대로. wf: waveform() 결과 (1초에 per_sec 개 · 0~1)."""
+    pk, per = (wf or {}).get("peaks") or [], float((wf or {}).get("per_sec") or 0)
+    if not pk or per <= 0:
+        return cuts
+    n = len(pk)
+    lvl = [float(x) for x in pk]
+    out = [dict(c) for c in cuts]
+    for c in out:
+        a, b = float(c["in"]), float(c["out"])
+        kb = int(b * per)
+        if 0 <= kb < n and lvl[kb] > EDGE_QUIET:
+            lim = min([b + EDGE_LOOK, n / per] + ([dur] if dur else []) + [u[0] - 0.02 for u in units if u[0] >= b - 0.02]
+                      + [float(x["in"]) for x in out if float(x["in"]) >= b - 1e-6 and x is not c])
+            k = next((k for k in range(kb + 1, min(n, int(lim * per) + 1)) if lvl[k] <= EDGE_QUIET and (k + 0.5) / per <= lim), None)
+            if k is not None:
+                c["out"] = round((k + 0.5) / per, 3)
+        ka = int(a * per) - 1
+        if 0 <= ka < n and lvl[ka] > EDGE_QUIET:
+            lim = max([a - EDGE_LOOK, 0.0] + [u[1] + 0.02 for u in units if u[1] <= a + 0.02]
+                      + [float(x["out"]) for x in out if float(x["out"]) <= a + 1e-6 and x is not c])
+            k = next((k for k in range(ka - 1, max(-1, int(lim * per) - 1), -1) if lvl[k] <= EDGE_QUIET and (k + 0.5) / per >= lim), None)
+            if k is not None:
+                c["in"] = round((k + 0.5) / per, 3)
+    return out
+
+
 def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
     """1차 가편집: 롱폼 군더더기 정리본 + 쇼츠 추천 구간별 편집본.
     rec: 이미 고른 추천({shorts, tidy}) — 끝까지 자동으로가 MSG 를 못 넣은 쇼츠 하나를 가편집으로 만들 때 (없으면 recommend).
@@ -1893,18 +1984,19 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
         return c
 
     caps_on = bool(st.get("captions", True))
+    try:  # 컷 끝·시작이 아직 소리 나는 곳이면 가까운 조용한 곳으로 (D-402) — 소리 크기를 못 읽으면 그대로
+        wf = waveform(name)
+    except Exception:  # noqa: BLE001
+        wf = None
+    units = _rhythm_words(segs) or [(float(s["start"]), float(s["end"]), 0) for s in segs]
     seqs = []
     if "long" in kinds:
-        tidy = rec["tidy"] or [{"in": 0.0, "out": info["duration"]}]
+        tidy = _quiet_edges(rec["tidy"], wf, units, info.get("duration")) or [{"in": 0.0, "out": info["duration"]}]
         items, extra = _items_from_cuts(_rhythm(tidy, segs, st, every, caps), zoom=zoom), {}
         tz, em = st.get("introTeaser") or {}, st.get("emphasisTitles") or {}
         titles = []
         if tz.get("on") and float(tz.get("sec") or 0) > 0:  # 기획 분석: 티저형 인트로 스타일
-            try:  # 소리 크기(편집실 파형, 없으면 만듦 · 몇 초) — 못 읽으면 말이 적은 곳만 보고 고름
-                peaks = waveform(name)
-            except Exception:  # noqa: BLE001
-                peaks = None
-            items, titles = _intro_teaser(items, rec, tidy, min(6.0, max(3.0, float(tz["sec"]))), segs, peaks)
+            items, titles = _intro_teaser(items, rec, tidy, min(6.0, max(3.0, float(tz["sec"]))), segs, wf)
         cl = cap(LONG_STYLE)
         if float(em.get("perMin") or 0) > 0:  # 기획 분석: 핵심 낱말 강조 자막 (그 장면 얼굴·대사 자막을 피한 자리)
             titles += _emphasis_titles(items, segs, min(4.0, float(em["perMin"])), em.get("color"), titles[0]["dur"] if titles else 0.0,
@@ -1921,7 +2013,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                              master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
         for i, r in enumerate(rec["shorts"], 1):
-            items = _items_from_cuts(_rhythm(r["cuts"], segs, st, every, caps), 0.3, zoom=zoom)
+            items = _items_from_cuts(_rhythm(_quiet_edges(r["cuts"], wf, units, info.get("duration")), segs, st, every, caps), 0.3, zoom=zoom)
             length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
             hook = {"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}
             cs = cap(SHORTS_STYLE)
@@ -3057,7 +3149,9 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None,
     junk |= {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in junk_iv)}  # 그 안에 든 말도 군더더기
     # 단어 시각이 있으면: 말 사이에 홀로 떨어진 '음'·'어' 같은 추임새 단어도 뺌 (이미 빠지는 곳에 든 것은 셈하지 않음)
     gone = [(segs[k]["start"], segs[k]["end"]) for k in junk] + [(a, b) for a, b, _ in junk_iv]
-    fill_iv = [f for f in takes.find_fillers(segs) if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
+    fill_all = takes.find_fillers(segs)
+    fill_iv = [f for f in fill_all if not any(a <= (f[0] + f[1]) / 2 <= b for a, b in gone)]
+    # 자를 때는 이미 빠지는 곳에 든 추임새도 함께 — 군더더기 문장('음...')을 뺀 뒤 다음 말 앞 여유(pre)에 남는 꼬리까지 (D-403)
     sjunk = junk | {i for i, s in enumerate(segs) if any(a <= (s["start"] + s["end"]) / 2 < b for a, b, _ in off_iv)}  # 쇼츠는 영상 밖 말도 뺌
     aside = ASIDE if pt else ASIDE_OLD
     sjunk |= {i for i, s in enumerate(segs) if aside.search(s["text"]) and len(_norm(s["text"])) <= ASIDE_LEN}  # 여담도 쇼츠에서만 뺌
@@ -3172,7 +3266,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None,
         if cur:
             cuts.append(cur)
         cuts = _keep_demos(cuts, [d for d in demos if s0 - 0.05 <= d[0] and d[1] <= e0 + 0.05])  # 쇼츠 안 말 없는 시범·환호 (E2)
-        cuts = _minus(_minus(_minus(cuts, junk_iv + off_iv + line_junk + hallu_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
+        cuts = _minus(_minus(_minus(cuts, junk_iv + off_iv + line_junk + hallu_iv, pre), fill_all), [(segs[k]["start"], segs[k]["end"]) for k in held])
         if cuts and post_a is not None and post_a - 0.6 <= cuts[-1]["out"] < post_a:  # 끝인사로 끝나면 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리)
             cuts[-1] = dict(cuts[-1], out=round(post_a, 2))
         if not cuts or e0 - s0 - _covered(junk_iv + off_iv, s0, e0) < min_len:  # NG 구간을 빼면 너무 짧아지는 후보는 버림
@@ -3241,7 +3335,7 @@ def recommend(name, min_len=20.0, max_len=55.0, n=3, keep_pause=None, segs=None,
     if cur:
         tidy.append(cur)
     tidy = _keep_demos(tidy, demos)
-    tidy = _minus(_minus(_minus(tidy, junk_iv + edge_iv + line_junk + hallu_iv, pre), fill_iv), [(segs[k]["start"], segs[k]["end"]) for k in held])
+    tidy = _minus(_minus(_minus(tidy, junk_iv + edge_iv + line_junk + hallu_iv, pre), fill_all), [(segs[k]["start"], segs[k]["end"]) for k in held])
     if post_a is not None and tidy and post_a - 0.6 <= tidy[-1]["out"] < post_a:  # 마지막 끝인사는 촬영 끝 말 바로 앞까지 (끝 낱말 꼬리가 잘리지 않게)
         tidy[-1] = dict(tidy[-1], out=round(post_a, 2))
     lj = line_junk + hallu_iv + hallu_show
@@ -4968,6 +5062,29 @@ def _color_filters(it):
     return out
 
 
+# 느리게 한 클립 (D-400): 원본 프레임이 모자라면 fps 가 같은 장면을 두 번씩 보여 줘 뚝뚝 끊김 (30fps 촬영본 0.5배 = 초당 15장)
+MOTION_MAX = 6.0  # '아주 부드럽게'(움직임 보간)는 타임라인 길이 이 초 이하 클립만 — 1080p 3초에 1분 넘게 걸림 (더 길면 장면 섞기로)
+
+
+def slow_mode(it, md, fps):
+    """느리게 한 영상 클립을 내보내는 방법 — None: 원래 프레임 그대로 (1배·빠르게 · 60fps 촬영본 0.5배처럼 프레임이 넉넉함) ·
+    "blend": 앞뒤 장면을 섞어 사이 장면을 만듦 (기본) · "motion": 움직임을 따라 사이 장면을 새로 그림 (클립 smooth 가 "motion" 이고
+    MOTION_MAX 초 이하일 때만 · 오래 걸림). editor.html smoothRow 와 같은 규칙."""
+    sp = i_sp(it)
+    if sp >= 1 - 1e-6 or md.get("kind") == "image" or float(md.get("fps") or 30.0) * sp >= fps - 0.5:
+        return None
+    return "motion" if it.get("smooth") == "motion" and i_len(it) <= MOTION_MAX + 1e-6 else "blend"
+
+
+def _rate_filter(mode, fps):
+    """slow_mode → 프레임 수를 fps 로 맞추는 필터 (framerate·minterpolate 는 장면이 바뀌는 곳에서는 섞지 않음)."""
+    if mode == "blend":
+        return f"framerate=fps={fps}"
+    if mode == "motion":
+        return f"minterpolate=fps={fps}:mi_mode=mci"
+    return f"fps={fps}"
+
+
 def _segments(seq, t_lo, t_hi, fps, trans, media=None):
     """장면이 바뀌는 지점마다 나눈 구간 목록 [(f0, f1)].
     같은 트랙 전환 안쪽의 편집점은 나누지 않음 → 전환 하나가 한 구간 (빠른 xfade)."""
@@ -5061,7 +5178,7 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
                 tm = []
             if abs(sp - 1) > 1e-6:
                 chain.append(f"setpts=PTS/{sp:.5f}")
-            chain.append(f"fps={fps}")
+            chain.append(_rate_filter(slow_mode(it, md, fps), fps))
             chain += tm
             if pre_pad > 1e-3:
                 chain.append(f"tpad=start_mode=clone:start_duration={pre_pad:.4f}")
@@ -5472,6 +5589,29 @@ def _kf_np(p, m, np):
 SR = 48000
 ATEMPO_PAD = 0.1  # 빠르기 바꾼 소리는 이만큼(초) 더 읽음 — atempo 가 끝을 1~3ms 덜 내보내 생기는 무음 틈 메우기
 AFFTDN_DELAY = int(round(SR * 0.025))  # 잡음 줄이기(afftdn)가 소리를 25ms(1200샘플) 늦게 내보냄 → 그만큼 당김
+EDGE_FADE = 0.012  # 컷 자리 소리 페이드(초) — 이어 붙인 곳 파형이 끊겨 '틱' 하는 소리 막기 (D-401 · 10~20ms 는 말소리에서 들리지 않음)
+
+
+def _cut_edges(it, md, track_items):
+    """소리 클립의 (앞 끝, 뒤 끝)이 원본 소리 한가운데를 자른 컷인지 — 원본 처음·끝 그대로이거나, 같은 트랙 바로 옆 클립이 같은 원본을
+    끊김 없이 이어 가면(나누기만 한 곳 · 확대 컷·말 빠르기 나누기) 페이드하지 않음 (D-401)."""
+    mdur = float(md.get("dur") or 1e9)
+    st, en = it["start"], i_end(it)
+
+    def cuts_source(m):
+        return 1e-3 < m < mdur - 1e-3
+
+    def joined(t, other_t):
+        for x in track_items:
+            if x is it or abs(other_t(x) - t) > 1e-3:
+                continue
+            if x.get("media") == it.get("media") and bool(x.get("rev")) == bool(it.get("rev")) and abs(i_sp(x) - i_sp(it)) < 1e-6 \
+                    and abs(i_mt(x, other_t(x)) - i_mt(it, t)) < 2e-3:
+                return True
+        return False
+    head = cuts_source(i_mt(it, st)) and not joined(st, i_end)
+    tail = cuts_source(i_mt(it, en)) and not joined(en, lambda x: x["start"])
+    return head, tail
 
 
 DUCK_PAD = 0.2   # 배경음악 줄이기: 받아쓴 말(자막) 앞뒤 이만큼(초)도 말하는 중으로 봄 (E2 · BR-095)
@@ -5615,7 +5755,9 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
     tracks = {t["id"]: t for t in seq["tracks"] if t["k"] == "a"}
     solo = any(t.get("solo") for t in tracks.values())
     by = {it["id"]: it for it in seq["items"]}
-    jobs = []
+    jobs, on_track = [], {}
+    for it in seq["items"]:
+        on_track.setdefault(it["track"], []).append(it)
     for it in seq["items"]:
         if it["track"] not in tracks:
             continue
@@ -5644,7 +5786,11 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
         p_in = media_path(md["file"], md["src"])
         if not p_in.exists():
             raise RuntimeError(f"미디어 파일이 없어요 · {md['file']}")
-        jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, tr.get("role", "dialog") != "dialog"))
+        head, tail = _cut_edges(it, md, on_track[it["track"]])
+        edges = (head and not any(sd == "in" for _, sd, _ in tgain), tail and not any(sd == "out" for _, sd, _ in tgain))  # 전환 쪽은 전환이 섞음
+        music = tr.get("role", "dialog") != "dialog"
+        fill = _chan_fill(md) if not music and tr.get("voiceFx") is not False else []  # 한쪽만 녹음된 대사 → 양쪽에 (D-404 · 음악·효과음은 그대로)
+        jobs.append((it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, edges, fill, music))
     # 목소리 보정 (대사 트랙들): 웅웅거림 제거 · 잡음 줄이기 · 크기 고르게 — 'voiceFx: false' 트랙(효과음)은 보정 없이 그 뒤에 더함
     # (효과음이 압축기를 지나면 말과 함께 눌렸다 키워져 정한 크기보다 커지고 말소리도 같이 눌림 · 판정: 띠로리가 말보다 큼)
     vf = voice_filters(seq.get("voice"))
@@ -5665,12 +5811,12 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
             return CANCEL.is_set() or stop.is_set() or (abort is not None and abort.is_set())
 
         def one(job):
-            it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, music = job
+            it, tr, md, p_in, a_lo, a_hi, lo, hi, tgain, edges, fill, music = job
             if halted():
                 raise Cancelled()
             sp = i_sp(it)
             tl_start = i_tl(it, hi if it.get("rev") else lo)  # 디코딩 시작점이 타임라인 어디인지
-            af = [AUDIO_T0] + (["areverse"] if it.get("rev") else []) + _atempo(sp)  # 늦게 시작하는 소리 줄기는 앞을 비워 제자리 (D-324)
+            af = [AUDIO_T0] + fill + (["areverse"] if it.get("rev") else []) + _atempo(sp)  # 늦게 시작하는 소리 줄기는 앞을 비워 제자리 (D-324)
             d_lo, d_hi = lo, hi
             if abs(sp - 1) > 1e-6:  # atempo 는 끝이 몇 ms 모자라게 나옴 → 조금 더 읽고 남는 건 아래에서 버림 (빠르게 한 컷 사이 '틱' 막기)
                 if it.get("rev"):
@@ -5716,6 +5862,10 @@ def _mix_audio_impl(seq, media, t_lo, t_hi, tmp, trans, progress, abort):
                             g = g * np.clip((tau - st) / fi, 0, 1)
                         if fo > 0:
                             g = g * np.clip((en - tau) / fo, 0, 1)
+                        if edges[0]:
+                            g = g * np.clip((tau - st) / EDGE_FADE, 0, 1)
+                        if edges[1]:
+                            g = g * np.clip((en - tau) / EDGE_FADE, 0, 1)
                         for (r0, r1), side, typ in tgain:
                             pr = np.clip((tau - r0) / max(1e-4, r1 - r0), 0, 1)
                             if typ == "cgain":

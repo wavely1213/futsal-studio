@@ -532,6 +532,33 @@ class EditorCaptionTest(WorkDir):
         self.assertEqual(takes.find_fillers([{"words": [W("어어", 0.0, 0.3), W("오늘은", 0.5, 0.9)]}]), [(0.0, 0.4, FILLER)])
         self.assertEqual(takes.find_fillers([{"words": [W("아", 0.0, 0.3), W("오늘은", 0.35, 0.9)]}]), [])
 
+    def test_recommend_cuts_glued_long_fillers(self):
+        """받아쓰기가 늘인 추임새 끝과 다음 낱말 시작을 붙여 적어도 (D-403 · BR-220): 줄 첫머리 '음...'·말줄임표 '어...'(0.4초 넘게)는
+        소리에서도 자막에서도 빠짐 — 예전에는 뒤가 0.12초 넘게 비지 않아 그대로 남음."""
+        name = self.video("붙은 추임새.mp4", "320x180", 6.0)
+        segs = [{"start": 0.5, "end": 3.0, "text": "음... 패스를 이렇게 해요.",
+                 "words": [W("음...", 0.5, 1.3), W("패스를", 1.3, 1.8), W("이렇게", 1.8, 2.3), W("해요.", 2.3, 3.0)]},
+                {"start": 3.4, "end": 5.5, "text": "왜 어... 왜 그럴까요?",
+                 "words": [W("왜", 3.4, 3.6), W("어...", 3.6, 4.4), W("왜", 4.4, 4.7), W("그럴까요?", 4.7, 5.5)]}]
+        self.transcript(name, segs)
+        self.assertEqual(takes.find_fillers(segs), [(0.4, 1.3, FILLER), (3.6, 4.4, FILLER)])
+        r = editor.recommend(name, min_len=2.0, max_len=10.0)
+        self.assertEqual(r["tidy"], [{"in": 1.3, "out": 3.6}, {"in": 4.4, "out": 5.75}])
+        seq = editor.auto_sequences(name, editor.media_info(name), kinds=("long",))[0]
+        proj = dict(seq, captions=editor.load_project(name)["captions"], media=[])
+        texts = " ".join(c["text"] for c in editor.timeline_captions(proj))
+        self.assertNotIn("음", texts)
+        self.assertNotIn("어...", texts)
+        self.assertIn("패스를 이렇게 해요.", texts)
+        # 그대로 두는 것: 반응 '아,'·말에 붙은 '그'·짧은 '음'·외친 '어!'·줄 가운데 말줄임표 없는 '어'
+        for words in ([W("아,", 15.8, 16.96), W("아깝다.", 16.96, 17.74)], [W("그", 1.0, 1.5), W("공을", 1.5, 1.8)],
+                      [W("음", 1.0, 1.3), W("패스를", 1.3, 1.8)], [W("어!", 1.0, 1.6), W("들어갔다", 1.6, 2.0)],
+                      [W("패스", 0.5, 1.0), W("어", 1.0, 1.6), W("이렇게", 1.6, 2.0)]):
+            with self.subTest(words=words[0]["w"]):
+                self.assertEqual(takes.find_fillers([{"words": words}]), [])
+        # 앞 문장이 끝난 뒤 첫머리 망설임은 같은 구간 안이어도 뺌
+        self.assertEqual(takes.find_fillers([{"words": [W("패스.", 0.5, 1.0), W("어", 1.0, 1.6), W("이렇게", 1.6, 2.0)]}]), [(1.0, 1.6, FILLER)])
+
 
 class DictRouteTest(WorkDir):
     """app.py /api/dict (실제 HTTP 서버로)."""

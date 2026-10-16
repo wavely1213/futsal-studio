@@ -418,9 +418,9 @@ class TestTempoAudio(unittest.TestCase):
         x = np.fromfile(out / "dialog.f32", np.float32).reshape(-1, 2)[:, 0]
         return x, [editor.i_end(i) for i in items[:-1]]
 
-    def zero_runs(self, x):
+    def zero_runs(self, x, eps=1e-4):
         import numpy as np
-        z = np.abs(x[480:-480]) < 1e-4  # 처음·끝 10ms 빼고
+        z = np.abs(x[480:-480]) < eps  # 처음·끝 10ms 빼고
         runs, k = [], 0
         while k < len(z):
             if z[k]:
@@ -438,7 +438,9 @@ class TestTempoAudio(unittest.TestCase):
         import numpy as np
         for rev in (False, True):
             x, bounds = self.mix(1.12, rev)
-            self.assertEqual(self.zero_runs(x), [], f"빠르게 한 컷 사이 무음 틈 (rev={rev})")
+            # 거꾸로 이은 조각은 원본이 끊기는 진짜 컷이라 이은 곳마다 12ms 페이드(D-401)가 들어감 — 페이드 끝이 톤이 0을 지나는 때와 겹치면
+            # 몇 샘플이 1e-4 밑으로 내려감 · 무음 틈(아무 소리도 안 더해진 곳)은 정확히 0이라 그것만 셈
+            self.assertEqual(self.zero_runs(x, 1e-7 if rev else 1e-4), [], f"빠르게 한 컷 사이 무음 틈 (rev={rev})")
             for t in bounds:  # 이은 곳에서 소리가 겹쳐 커지지도 않음
                 i = int(t * editor.SR)
                 self.assertLess(float(np.max(np.abs(x[i - 480:i + 480]))), 1.05 * float(np.max(np.abs(x[48000:52000]))))

@@ -1,0 +1,269 @@
+"""완성본 소리·영상 품질 (C1 · D-400~D-404) — 저장소 폴더에서 python3 -m unittest tests.test_output_quality
+
+- 느리게 한 클립: 같은 장면이 두 번씩 나오지 않게 앞뒤 장면 섞기(기본)·'아주 부드럽게'(움직임 보간) · 60fps 촬영본은 원래 장면 (editor.slow_mode)
+- 컷 자리 소리: 원본 소리 한가운데를 자른 끝마다 짧은 페이드 (editor._cut_edges · EDGE_FADE) · 가편집 컷 끝이 소리 나는 곳이면 조용한 곳으로 (_quiet_edges)
+- 한쪽만 녹음된 대사: 큰 쪽 소리를 양쪽에 (editor.channel_levels·one_sided) · 검수 '좌우 소리 차이' (qa.check_video)
+진짜 ffmpeg 로 몇 초짜리 시험 영상을 만들어 내보낸 파일을 잼."""
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import core  # noqa: E402
+import editor  # noqa: E402
+import qa  # noqa: E402
+
+FF = core.ffmpeg()
+
+
+def ff(*a):
+    r = subprocess.run([FF, "-v", "error", "-y", *a], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-300:]
+
+
+def gray(path, w=64, h=36):
+    raw = subprocess.run([FF, "-v", "error", "-i", str(path), "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                         capture_output=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, h, w).astype(np.float32)
+
+
+def pcm(path):
+    raw = subprocess.run([FF, "-v", "error", "-i", str(path), "-vn", "-ac", "2", "-ar", "48000", "-f", "f32le", "-"], capture_output=True).stdout
+    return np.frombuffer(raw, np.float32).reshape(-1, 2)
+
+
+def rms_db(x):
+    return 20 * np.log10(max(1e-12, float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))))
+
+
+def item(iid, media, track, start, a, b, **kw):
+    d = {"id": iid, "track": track, "media": media, "start": start, "in": a, "out": b, "speed": 1, "rev": False, "link": None, "fit": "auto",
+         "fx": {}, "color": {}, "reframe": 0.5}
+    if track.startswith("A"):
+        d.update(gain=0, fadeIn=0, fadeOut=0, mute=False)
+    d.update(kw)
+    return d
+
+
+def pair(k, media, start, a, b, **kw):
+    return [item("v" + k, media, "V1", start, a, b, link=k, **kw), item("a" + k, media, "A1", start, a, b, link=k, **kw)]
+
+
+class Base(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="완성본 품질 테스트 "))
+        work = cls.tmp / "작업 폴더"
+        dirs = {"WORK": work, "VIDEOS": work / "videos", "ANALYSIS": work / "analysis", "OUT": work / "out"}
+        for d in list(dirs.values()) + [work / "edit_media"]:
+            d.mkdir(parents=True, exist_ok=True)
+        cls.patches = [mock.patch.object(core, k, v) for k, v in dirs.items()] + [mock.patch.object(editor, "ASSETS", work / "edit_media")]
+        for p in cls.patches:
+            p.start()
+        cls.A = work / "edit_media"
+        cls.media = []
+        cls.make()
+
+    @classmethod
+    def tearDownClass(cls):
+        for p in cls.patches:
+            p.stop()
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @classmethod
+    def add(cls, k, f, fps=30.0, dur=4.0):
+        cls.media.append({"id": k, "kind": "video", "src": "assets", "file": f, "dur": dur, "w": 320, "h": 180, "fps": fps, "audio": True})
+
+    def proj(self, name, items, dur, trans=(), tracks=None):
+        return {"id": "s", "name": name, "format": "long", "v": 2, "captionsOn": False, "captionStyle": dict(editor.LONG_STYLE), "titles": [],
+                "shapes": [], "layout": {"mode": "fill"}, "master": {"volume": 1, "normalize": False, "lufs": -14},
+                "duck": {"on": False, "amount": -14}, "tracks": tracks or editor.default_tracks(), "items": items, "trans": list(trans),
+                "markers": [], "captions": [], "info": {"duration": dur, "width": 320, "height": 180, "fps": 30.0}, "source": "테스트.mp4",
+                "media": self.media}
+
+    def export(self, p):
+        out = editor.export("테스트.mp4", p, {"preset": "small", "hw": False, "xml": False, "srt": False}, lambda *_: None)
+        return core.OUT / out[0]
+
+
+class SlowMotionTest(Base):
+    @classmethod
+    def make(cls):
+        for fps in (30, 60):
+            ff("-f", "lavfi", "-i", f"testsrc2=s=320x180:r={fps}:d=4", "-f", "lavfi", "-i", "sine=f=440:d=4", "-c:v", "libx264", "-preset",
+               "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(cls.A / f"m{fps}.mp4"))
+            cls.add(f"m{fps}", f"m{fps}.mp4", float(fps))
+
+    def test_slow_mode_rules(self):
+        """30fps 0.5배 → 섞기 · 60fps 0.5배는 원래 장면(30fps 로 내보낼 때) · 1배·빠르게·사진은 그대로 · 아주 부드럽게는 6초 이하만."""
+        m30, m60 = {"fps": 30.0, "kind": "video"}, {"fps": 60.0, "kind": "video"}
+        it = item("v", "m30", "V1", 0, 1.0, 2.0, speed=0.5)
+        self.assertEqual(editor.slow_mode(it, m30, 30), "blend")
+        self.assertIsNone(editor.slow_mode(it, m60, 30))
+        self.assertEqual(editor.slow_mode(it, m60, 60), "blend")   # 60fps 로 내보내면 60fps 촬영본도 모자람
+        self.assertIsNone(editor.slow_mode(dict(it, speed=1), m30, 30))
+        self.assertIsNone(editor.slow_mode(dict(it, speed=2), m30, 30))
+        self.assertIsNone(editor.slow_mode(it, {"fps": 30.0, "kind": "image"}, 30))
+        self.assertEqual(editor.slow_mode(dict(it, smooth="motion"), m30, 30), "motion")
+        self.assertEqual(editor.slow_mode(dict(it, smooth="motion", out=1.0 + 3.5), m30, 30), "blend")  # 7초짜리 → 섞기로
+        self.assertEqual(editor._rate_filter(None, 30), "fps=30")
+
+    def check_no_repeats(self, f, n):
+        fr = gray(f)
+        self.assertEqual(len(fr), n)
+        d = np.abs(np.diff(fr, axis=0)).mean(axis=(1, 2))
+        self.assertEqual(int((d < 0.05).sum()), 0, d[:10])
+        return fr
+
+    def test_half_speed_30fps_blends_between_frames(self):
+        """예전: 0.5배 120장 중 60장이 앞 장면과 같음 → 섞은 장면 (짝수 장면은 원본 그대로 · 홀수는 앞뒤 원본의 중간)."""
+        f = self.export(self.proj("느리게 30", pair("x", "m30", 0, 1.0, 3.0, speed=0.5), 4.0))
+        fr = self.check_no_repeats(f, 120)
+        src = gray(self.A / "m30.mp4")
+        self.assertLess(max(np.abs(fr[2 * j] - src[30 + j]).mean() for j in range(20)), 1.5)            # 시각이 밀리지 않음
+        self.assertLess(max(np.abs(fr[2 * j + 1] - (src[30 + j] + src[31 + j]) / 2).mean() for j in range(20)), 1.5)
+
+    def test_half_speed_60fps_uses_native_frames(self):
+        f = self.export(self.proj("느리게 60", pair("x", "m60", 0, 1.0, 3.0, speed=0.5), 4.0))
+        fr = self.check_no_repeats(f, 120)
+        src = gray(self.A / "m60.mp4")
+        self.assertLess(max(np.abs(fr[j] - src[60 + j]).mean() for j in range(40)), 1.5)
+
+    def test_motion_interpolation_short_clip(self):
+        f = self.export(self.proj("아주 부드럽게", pair("x", "m30", 0, 1.0, 2.0, speed=0.5, smooth="motion"), 2.0))
+        self.check_no_repeats(f, 60)
+
+
+class CutFadeTest(Base):
+    @classmethod
+    def make(cls):
+        ff("-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=5", "-f", "lavfi", "-i",
+           "aevalsrc=0.5*sin(2*PI*440*t)|0.5*sin(2*PI*440*t):s=48000:d=5",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(cls.A / "tone.mov"))
+        cls.add("tone", "tone.mov", dur=5.0)
+
+    def test_cut_edges_rules(self):
+        md = {"dur": 5.0}
+        a, b = item("a", "tone", "A1", 0, 1.0, 2.0), item("b", "tone", "A1", 1.0, 2.5, 3.5)
+        self.assertEqual(editor._cut_edges(a, md, [a, b]), (True, True))
+        head = item("h", "tone", "A1", 0, 0.0, 1.0)  # 원본 처음부터 → 앞은 자른 곳이 아님
+        self.assertEqual(editor._cut_edges(head, md, [head]), (False, True))
+        c = item("c", "tone", "A1", 1.0, 2.0, 3.0)  # a 를 나누기만 한 것 (원본이 끊김 없이 이어짐)
+        self.assertEqual(editor._cut_edges(a, md, [a, c]), (True, False))
+        self.assertEqual(editor._cut_edges(c, md, [a, c]), (False, True))
+        other = dict(c, media="x")
+        self.assertEqual(editor._cut_edges(a, md, [a, other]), (True, True))
+
+    def test_jump_cut_has_no_click(self):
+        """위상이 어긋난 곳에서 이어 붙인 사인 — 예전: 컷 자리 샘플 차이 0.29 (다른 곳 최대 0.03의 10배) → 다른 곳만큼."""
+        f = self.export(self.proj("컷 소리", pair("1", "tone", 0, 1.0, 2.0) + pair("2", "tone", 1.0, 2.5037, 3.5), 2.0))
+        x = pcm(f)[:, 0]
+        d = np.abs(np.diff(x))
+        self.assertLess(float(d[48000 - 240:48000 + 240].max()), 1.2 * float(d[4800:48000 - 2400].max()))
+        # 페이드는 컷 앞뒤 12ms 만 — 그 밖은 그대로
+        self.assertGreater(float(np.abs(x[48000 - 1200:48000 - 720]).max()), 0.45)
+        self.assertGreater(float(np.abs(x[48000 + 720:48000 + 1200]).max()), 0.45)
+
+    def test_split_without_cut_keeps_level(self):
+        """나누기만 한 곳(원본이 이어짐)은 페이드하지 않음 — 소리가 움푹 꺼지지 않음."""
+        f = self.export(self.proj("나눈 곳", pair("1", "tone", 0, 1.0, 2.0) + pair("2", "tone", 1.0, 2.0, 3.0), 2.0))
+        x = pcm(f)[:, 0]
+        self.assertGreater(float(np.abs(x[48000 - 200:48000 + 200]).max()), 0.45)
+
+
+class QuietEdgeTest(unittest.TestCase):
+    """가편집 컷 끝·시작 옮기기 (_quiet_edges · 1초에 50칸 파형)."""
+
+    @staticmethod
+    def wave(loud):
+        pk = [0.01] * 500
+        for a, b in loud:
+            for k in range(int(a * 50), int(b * 50)):
+                pk[k] = 0.5
+        return {"per_sec": 50, "peaks": pk}
+
+    def test_tail_still_sounding_moves_to_quiet(self):
+        wf = self.wave([(1.0, 3.08)])  # 말이 3.08초까지 소리 남 (받아쓰기 끝 + 여유 = 3.0)
+        got = editor._quiet_edges([{"in": 0.9, "out": 3.0}], wf, [(1.0, 2.75, 3)])
+        self.assertEqual(got, [{"in": 0.9, "out": 3.09}])
+
+    def test_head_onset_before_cut_moves_earlier(self):
+        wf = self.wave([(0.92, 2.0)])
+        self.assertEqual(editor._quiet_edges([{"in": 1.0, "out": 2.5}], wf, [(1.05, 2.0, 3)]), [{"in": 0.91, "out": 2.5}])
+
+    def test_limits(self):
+        wf = self.wave([(1.0, 3.3)])  # 0.15초 안에 조용한 곳이 없음 → 그대로
+        self.assertEqual(editor._quiet_edges([{"in": 1.2, "out": 3.0}], wf, []), [{"in": 1.2, "out": 3.0}])
+        wf = self.wave([(1.0, 3.08)])
+        # 다음 낱말(잘라 낸 추임새)이 바로 뒤에 있으면 넘어가지 않음 · 다음 컷 시작도 넘지 않음
+        self.assertEqual(editor._quiet_edges([{"in": 0.9, "out": 3.0}], wf, [(3.01, 3.4, 1)]), [{"in": 0.9, "out": 3.0}])
+        self.assertEqual(editor._quiet_edges([{"in": 0.9, "out": 3.0}, {"in": 3.05, "out": 4.0}], wf, [])[0]["out"], 3.0)
+        # 파형이 없으면 그대로 · 이미 조용하면 그대로
+        self.assertEqual(editor._quiet_edges([{"in": 0.9, "out": 3.0}], None, []), [{"in": 0.9, "out": 3.0}])
+        self.assertEqual(editor._quiet_edges([{"in": 0.5, "out": 3.5}], wf, []), [{"in": 0.5, "out": 3.5}])
+        # 앞 낱말 끝(잘라 낸 말)보다 앞으로는 안 감
+        wf = self.wave([(0.92, 2.0)])
+        self.assertEqual(editor._quiet_edges([{"in": 1.0, "out": 2.5}], wf, [(0.6, 0.99, 2)]), [{"in": 1.0, "out": 2.5}])
+
+
+class ChannelTest(Base):
+    @classmethod
+    def make(cls):
+        ff("-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=4", "-f", "lavfi", "-i",
+           "aevalsrc=0.2*sin(2*PI*300*t)*(0.6+0.4*sin(2*PI*2*t))|0:s=48000:d=4",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", str(cls.A / "left.mp4"))
+        ff("-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=4", "-f", "lavfi", "-i",
+           "aevalsrc=0.2*sin(2*PI*300*t)|0.15*sin(2*PI*500*t):s=48000:d=4",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", str(cls.A / "both.mp4"))
+        cls.add("left", "left.mp4")
+        cls.add("both", "both.mp4")
+
+    def test_levels_and_decision(self):
+        lr = editor.channel_levels("left.mp4", "assets")
+        self.assertGreater(lr[0], -30)
+        self.assertLess(lr[1], -60)
+        self.assertEqual(editor.one_sided(lr), 0)
+        self.assertEqual(editor.one_sided([-80.0, -20.0]), 1)
+        self.assertIsNone(editor.one_sided(editor.channel_levels("both.mp4", "assets")))
+        self.assertIsNone(editor.one_sided([-75.0, -120.0]))   # 둘 다 거의 무음 → 그대로
+        self.assertIsNone(editor.one_sided(None))
+
+    def test_one_sided_dialog_fills_both_ears(self):
+        """예전: 왼쪽 -20.6dB · 오른쪽 무음 그대로 → 양쪽 같은 소리."""
+        y = pcm(self.export(self.proj("한쪽 소리", pair("x", "left", 0, 0.0, 4.0), 4.0)))
+        self.assertAlmostEqual(rms_db(y[:, 0]), rms_db(y[:, 1]), delta=0.5)
+        self.assertGreater(rms_db(y[:, 1]), -30)
+        y = pcm(self.export(self.proj("양쪽 소리", pair("x", "both", 0, 0.0, 4.0), 4.0)))  # 고른 것은 그대로
+        self.assertGreater(rms_db(y[:, 0]) - rms_db(y[:, 1]), 1.5)
+
+    def test_music_track_left_alone(self):
+        tr = editor.default_tracks()
+        its = [item("v", "both", "V1", 0, 0.0, 4.0), item("m", "left", "A2", 0, 0.0, 4.0)]  # A2 = 음악 트랙
+        y = pcm(self.export(self.proj("음악 한쪽", its, 4.0, tracks=tr)))
+        self.assertLess(rms_db(y[:, 1]), -60)
+
+    def test_qa_warns_on_one_sided_file(self):
+        with mock.patch.object(core, "set_progress"):
+            r = qa.check_video(self.A / "left.mp4", "long", None)
+            ok = qa.check_video(self.A / "both.mp4", "long", None)
+        w = [i for i in r["items"] if i["title"] == "좌우 소리 차이"]
+        self.assertEqual(len(w), 1, r["items"])
+        self.assertEqual(w[0]["lv"], "warn")
+        self.assertIn("오른쪽 소리가 거의 없어요", w[0]["msg"])
+        self.assertFalse([i for i in ok["items"] if i["title"] == "좌우 소리 차이"])
+
+    def test_qa_lr_parse(self):
+        log = "[Parsed_astats_1 @ 0x1] Channel: 1\n[Parsed_astats_1 @ 0x1] RMS level dB: -17.0\n" \
+              "[Parsed_astats_1 @ 0x1] Channel: 2\n[Parsed_astats_1 @ 0x1] RMS level dB: -inf\n"
+        self.assertEqual(qa._lr_levels(log), [-17.0, float("-inf")])
+        self.assertIsNone(qa._lr_levels(log.split("[Parsed_astats_1 @ 0x1] Channel: 2")[0]))   # 한 채널(모노)
+
+
+if __name__ == "__main__":
+    unittest.main()
