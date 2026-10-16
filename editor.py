@@ -2175,7 +2175,36 @@ def _disk_rev(p):
     return r
 
 
-BK_TAGS = {"재분석전": "편집점 다시 찾기 전", "덮어쓰기전": "다른 창 내용으로 덮어쓰기 전", "변환전": "새 형식으로 바꾸기 전"}
+BK_TAGS = {"재분석전": "편집점 다시 찾기 전", "덮어쓰기전": "다른 창 내용으로 덮어쓰기 전", "변환전": "새 형식으로 바꾸기 전",
+           "저장못함": "저장하지 못한 창 내용"}
+
+
+def rescue_copy(name, proj):
+    """편집실 저장이 계속 안 될 때 '편집본 파일로 내려받기' (D-412): 그 창의 내용을 저장 못 한 편집본 파일 대신 다른 곳에 —
+    자동 백업('기록' 탭에서 되돌릴 수 있음 · 표시 '저장하지 못한 창 내용')과 다운로드 폴더 둘 다, 둘 다 안 되면 완성본 폴더 → 쓴 파일 [경로].
+    한 곳도 못 쓰면 마지막 OSError (디스크가 가득 차 있으면 어디에도 못 씀 → 화면이 그 기기로 내려받기를 한 번 더 해 봄)."""
+    if not isinstance(proj, dict) or not isinstance(proj.get("sequences"), list):
+        raise ValueError("편집본 내용이 아니에요")
+    stem, ts = _ppath(name).stem, time.strftime("%Y%m%d_%H%M%S")
+    data = core.clean_text(json.dumps(proj, ensure_ascii=False))
+    out, err = [], None
+    for d, fn, last in ((PROJECTS / "backup", f"{stem}__{ts}_저장못함.json", False), (Path.home() / "Downloads", f"{stem}_편집본_{ts}.json", False),
+                        (core.OUT, f"{stem}_편집본_{ts}.json", True)):
+        if last and out:
+            break
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            updater.write_atomic(d / fn, data)
+            out.append(d / fn)
+        except OSError as e:
+            err = e
+    if not out:
+        raise err
+    try:
+        _prune_backups(stem)
+    except OSError:
+        pass
+    return out
 
 
 def _backup_files(stem):
@@ -2653,9 +2682,101 @@ def _uniq_name(n, names):
     return f"{n} {k}"
 
 
-def reanalyze_project(name):
-    """편집점 다시 찾기 뒤: 사용자가 만든 편집본은 하나도 지우지 않고, 자막·영상 정보만 새로 받아쓴 내용으로 +
-    새 가편집은 옆에 추가 (이전 상태는 '편집점 다시 찾기 전' 백업으로 남김)."""
+CAP_AUTO_KEYS = {"id", "start", "end", "text", "wt", "sh", "shn", "words"}  # 받아쓰기로 만든 자막이 가진 값 (_make_cap) — 그 밖의 값(색·자리·줄 trk·손 시간 tm·손 나눔 ms)이 있으면 사용자가 고친 자막
+CAP_KEEP_OVERLAP = 0.1  # 새 자막이 남겨 둔(고친) 자막과 같은 줄에서 이만큼(초) 넘게 겹치면 넣지 않음 (같은 말이 두 번 보이지 않게)
+CAP_DELETED_PART = 0.5  # 새 자막 길이의 이만큼 넘게가 사용자가 지운 말 자리면 넣지 않음 (지운 자막이 되살아나지 않게)
+
+
+def caption_baseline(name):
+    """편집점 다시 찾기 전 받아쓰기의 말 조각 [(시작, 끝, 글, 낱말인지)] — 다시 찾은 뒤 어느 자막이 받아쓴 그대로이고 어느 자막을
+    사용자가 고치거나 지웠는지 가릴 때 (app._analyze 가 받아쓰기를 새로 하기 전에 읽어 둠 · D-413). 단어 시각이 없는 구간(예전 받아쓰기)은
+    구간 통째로 · 받아쓰기가 없거나 못 읽으면 None."""
+    try:
+        segs = _segments_of(name)
+    except Exception:  # noqa: BLE001 — 깨진 받아쓰기: 가릴 수 없으면 예전처럼 자막을 모두 새로
+        return None
+    out = []
+    for s in segs:
+        ws = [w for w in s.get("words") or () if isinstance(w, dict) and str(w.get("w") or "").strip()]
+        try:
+            out += [(float(w["s"]), float(w["e"]), str(w["w"]), True) for w in ws] if ws else [(float(s["start"]), float(s["end"]), str(s["text"]), False)]
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out or None
+
+
+def _flat(t):
+    return "".join(str(t or "").split())
+
+
+def _cap_untouched(c, before, marked):
+    """받아쓴 그대로인 자막인지: 받아쓰기로 만든 값만 있고(CAP_AUTO_KEYS) · 어느 편집본에서도 지우거나('이 편집본에서 지운' capOff)
+    자리를 옮기지('이 자막만' capPos) 않았고 · 낱말마다 단어 시각(wt)이 다시 찾기 전 받아쓴 낱말과 시각·글이 같음
+    (글을 고쳐 낱말 수가 바뀌면 wt 가 안 맞음 → 고친 자막) · 단어 시각이 없는 자막(예전 받아쓰기)은 겹치는 받아쓰기 구간 글 안의 글이면."""
+    if not isinstance(c, dict) or set(c) - CAP_AUTO_KEYS or c.get("id") in marked:
+        return False
+    txt = _flat(c.get("text"))
+    if not txt:
+        return False
+    ws = _cap_words(c)
+    if ws:
+        said = {}  # (시작, 끝) 1/100초 → 그 시각의 낱말들 (받아쓰기가 시각을 못 맞춘 낱말은 여럿이 같은 시각)
+        for u in before:
+            if u[3]:
+                said.setdefault((int(round(u[0] * 100)), int(round(u[1] * 100))), set()).add(_flat(u[2]))
+        return all(_flat(w["w"]) in said.get((int(round(float(w["s"]) * 100)), int(round(float(w["e"]) * 100))), ()) for w in ws)
+    if c.get("wt") is not None or c.get("words"):
+        return False
+    try:
+        a, b = float(c["start"]), float(c["end"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    segs = sorted(u for u in before if not u[3] and min(b, u[1]) - max(a, u[0]) > 0)
+    return bool(segs) and txt in "".join(_flat(u[2]) for u in segs)
+
+
+def keep_edited_captions(old, new, before, seqs=()):
+    """편집점 다시 찾기 뒤 자막 합치기 (D-413): 받아쓴 그대로인 자막만 새로 받아쓴 자막으로 바꾸고, 사용자가 고친 자막(글·색·자리·줄·시간·
+    나눔 · 편집본에서 지움)은 그대로 둠 · 사용자가 목록에서 지운 말 자리(받아쓴 말인데 자막이 없음)에는 새 자막을 넣지 않음.
+    before: caption_baseline (다시 찾기 전 받아쓰기) · seqs: 편집본들 (capOff·capPos 를 봄).
+    새 자막이 예전과 시간·글이 같으면 예전 id 를 그대로 (편집본마다 둔 자리 등이 이어지게). → (자막, 남긴 고친 자막 수, 안 넣은 새 자막 수)."""
+    marked = set()
+    for q in seqs or ():
+        if isinstance(q, dict):
+            marked |= {x for x in q.get("capOff") or () if isinstance(x, str)} if isinstance(q.get("capOff"), list) else set()
+            marked |= set(q["capPos"]) if isinstance(q.get("capPos"), dict) else set()
+    old = [c for c in old or () if isinstance(c, dict)]
+    auto = [c for c in old if _cap_untouched(c, before, marked)]
+    kept = [c for c in old if not any(c is x for x in auto)]
+    wins = []
+    for c in old:
+        try:
+            wins.append((float(c["start"]) - 0.05, float(c["end"]) + 0.05))
+        except (KeyError, TypeError, ValueError):
+            continue
+    gone = [(u[0], u[1]) for u in before if not any(  # 받아쓴 말인데 그 자리에 자막이 하나도 없음 = 사용자가 지운 말
+        (a <= (u[0] + u[1]) / 2 <= b) if u[3] else (min(b, u[1]) - max(a, u[0]) > 0) for a, b in wins)]
+    same = {(round(float(c["start"]), 3), round(float(c["end"]), 3), c.get("text")): c["id"] for c in auto if c.get("id")}
+    out, skipped = list(kept), 0
+    for n in new or ():
+        a, b = float(n["start"]), float(n["end"])
+        hit = any(cap_trk(k) == cap_trk(n) and min(b, float(k["end"])) - max(a, float(k["start"])) > CAP_KEEP_OVERLAP for k in kept
+                  if isinstance(k.get("start"), (int, float)) and isinstance(k.get("end"), (int, float)))
+        lost = sum(max(0.0, min(b, y) - max(a, x)) for x, y in gone)
+        if hit or (b > a and lost > CAP_DELETED_PART * (b - a)):
+            skipped += 1
+            continue
+        k = (round(a, 3), round(b, 3), n.get("text"))
+        out.append(dict(n, id=same.pop(k)) if k in same else n)
+    out.sort(key=lambda c: float(c.get("start") or 0))
+    return out, len(kept), skipped
+
+
+def reanalyze_project(name, before=None):
+    """편집점 다시 찾기 뒤: 사용자가 만든 편집본은 하나도 지우지 않고, 영상 정보 + 받아쓴 그대로인 자막만 새로 받아쓴 내용으로
+    (before: 다시 찾기 전 받아쓰기 caption_baseline — 있으면 고치거나 지운 자막은 그대로 · 없으면 예전처럼 자막을 모두 새로) +
+    새 가편집은 옆에 추가하고 새 롱폼 가편집을 열 편집본(active)으로 (fresh: 이번에 더한 편집본 id · 편집실이 한 번 알리고 예전 '(새로 찾음)'
+    정리를 물어봄 · D-414) · 이전 상태는 '편집점 다시 찾기 전' 백업으로 남김."""
     p = _ppath(name)
     if not p.exists():
         return load_project(name), 0, False
@@ -2667,6 +2788,9 @@ def reanalyze_project(name):
     proj["info"] = info
     segs = _segments_of(name)
     caps = _captions_of(segs, info, silences_of(name))
+    kept = 0
+    if before:
+        caps, kept, _ = keep_edited_captions(proj.get("captions"), caps, before, proj.get("sequences"))
     changed_caps = [(c["start"], c["end"], c["text"]) for c in proj.get("captions") or []] != [(c["start"], c["end"], c["text"]) for c in caps]
     proj["captions"] = caps
     proj["speech"] = speech_words(segs)
@@ -2679,6 +2803,9 @@ def reanalyze_project(name):
         q["name"] = _uniq_name(q["name"] + " (새로 찾음)", names)
         names.add(q["name"])
     proj["sequences"] += fresh
+    if fresh:  # 편집실은 새 롱폼 가편집으로 열림 (예전: 처음 열던 예전 편집본 그대로라 고친 사전이 '안 바뀐' 것처럼 보였음)
+        proj["active"] = next((q["id"] for q in fresh if q.get("format") == "long"), fresh[0]["id"])
+        proj["fresh"] = {"ids": [q["id"] for q in fresh], "kept": kept}
     save_project(name, proj)
     return proj, len(fresh), changed_caps
 

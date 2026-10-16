@@ -547,6 +547,25 @@ def _redirect_to_updater():
 
 
 GONE_MSG = "이 영상의 이름이 바뀌었거나 보관함에서 빠졌어요 · 스튜디오에서 다시 열어 주세요"  # 옛 이름으로 열린 편집실·썸네일의 저장 (404 gone)
+# 편집실 저장이 안 된 까닭 (trouble.explain 의 종류 → 머리줄에 보일 쉬운 한 줄 · D-412) — 같은 까닭은 SAVE_FAIL_EVERY 초에 한 번만 기록
+SAVE_WHY = {"disk": "저장 공간이 모자라요 · 필요 없는 파일을 지워 공간을 비워 주세요",
+            "locked": "다른 프로그램(OneDrive·백신 등)이 편집본 파일을 잡고 있어요 · 잠시 뒤 저절로 다시 저장해요",
+            "other": "작업 폴더의 편집본 파일에 쓰지 못했어요"}
+SAVE_FAIL_EVERY = 60  # 편집실은 3초마다 다시 저장함 → studio.log 가 같은 줄로 차지 않게
+_SAVE_FAIL = {}  # 영상 이름 → (마지막으로 남긴 까닭, 시각)
+
+
+def _save_fail(name, e):
+    """편집본 저장 실패 → 쉬운 까닭 (화면에 보냄) · studio.log 에 한 번 (영어 원문은 studio.log 에만)."""
+    why = SAVE_WHY.get(trouble.explain(e)["kind"], SAVE_WHY["other"])
+    last = _SAVE_FAIL.get(name)
+    if not last or last[0] != why or time.time() - last[1] > SAVE_FAIL_EVERY:
+        _SAVE_FAIL[name] = (why, time.time())
+        log(f"편집본을 저장하지 못했어요 · {name} · {why}")
+        studiolog.write(f"  원문 · {type(e).__name__}: {e}")
+    return why
+
+
 CRASH = {}  # 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 → 보관함 카드 '○○ 영상' + [다시 하기]·[빠르게로 다시 하기] (/api/state · D-072)
 CRASH_RETRY = ("/api/analyze", "/api/bundle", autorun.PATH)  # 보관함에서 같은 영상으로 다시 할 수 있는 작업 (끝까지 자동으로는 [이어서 하기] · D-202)
 
@@ -623,6 +642,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            if ctype.startswith(("application/json", "text/html")):  # 뒤로·앞으로 가기에 캐시해 둔 예전 화면·내용을 쓰지 않게 (D-411)
+                self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
         except ConnectionError:  # 화면이 먼저 끊음 (Windows: ConnectionAbortedError 10053 도)
@@ -1237,12 +1258,14 @@ class Handler(BaseHTTPRequestHandler):
             log(f"썸네일 저장 · {out.name}")
             return self._send(200, {"ok": True, "file": out.name})
         if path == "/api/thumb/save":
-            try:
-                thumb.save_docs(b["name"], b["docs"])
-            except (OSError, ValueError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐
+            try:  # rev: 썸네일 창이 받은 판 번호 → 그 사이 다른 창이 저장했으면 덮어쓰지 않고 알려 줌 (편집실과 같게 · D-411)
+                rev = thumb.save_docs(b["name"], b["docs"], b.get("client"), bool(b.get("force")))
+            except thumb.Conflict as e:
+                return self._send(409, {"ok": False, "conflict": True, "rev": e.rev, "error": str(e)})
+            except (OSError, ValueError, TypeError) as e:  # 응답 없이 끊기면 화면이 '저장 중…'에 멈추고 바뀐 디자인이 사라짐
                 log(f"썸네일 디자인을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "저장하지 못했어요 · 잠시 뒤 다시 저장할게요"})
-            return self._send(200, {"ok": True})
+            return self._send(200, {"ok": True, "rev": rev or None})
         if path == "/api/edit/save":
             try:  # 이름을 바꿨거나 보관함에서 빠진 영상이면 옛 이름 편집본을 새로 만들지 않음 (이름 바꾸기 D-073)
                 editor.video_path(b.get("name"))
@@ -1254,9 +1277,32 @@ class Handler(BaseHTTPRequestHandler):
                 rev = editor.save_project(b["name"], b["project"], b.get("rev"), bool(b.get("force")), client, b.get("seq"), merged=merged)
             except editor.Conflict as e:
                 return self._send(409, {"ok": False, "conflict": True, "rev": e.rev, "error": str(e)})
-            except (OSError, ValueError) as e:
+            except OSError as e:  # 디스크 가득·OneDrive/백신 잠금 등: 쉬운 까닭을 화면(머리줄 · 나가기 창)에 · studio.log 에 기록 (D-412)
+                why = _save_fail(b["name"], e)
+                return self._send(500, {"ok": False, "error": f"저장하지 못했어요 · {why}", "why": why})
+            except ValueError as e:
                 return self._send(500, {"ok": False, "error": f"저장하지 못했어요 · {e}"})
+            if _SAVE_FAIL.pop(b["name"], None):
+                log(f"편집본을 다시 저장했어요 · {b['name']}")
             return self._send(200, dict({"ok": True, "rev": rev}, **({"autoAdded": merged} if merged else {})))
+        if path == "/api/edit/rescue":  # 저장이 계속 안 될 때 '편집본 파일로 내려받기': 창 내용을 자동 백업·다운로드 폴더에 따로 (D-412)
+            try:
+                files = editor.rescue_copy(b.get("name"), b.get("project"))
+            except (ValueError, TypeError) as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                why = SAVE_WHY.get(trouble.explain(e)["kind"], SAVE_WHY["other"])
+                studiolog.write(f"저장하지 못한 편집본을 따로 남기지도 못했어요 · {type(e).__name__}: {e}")
+                return self._send(500, {"ok": False, "error": f"따로 남기지도 못했어요 · {why}"})
+            where = ["편집실 '기록' 탭 자동 백업" if f.parent.name == "backup" else "다운로드 폴더" if f.parent.name == "Downloads" else "완성본 폴더" for f in files]
+            log(f"저장하지 못한 편집본을 따로 남겼어요 · {b.get('name')} · " + ", ".join(f"{w}의 {f.name}" for w, f in zip(where, files)))
+            shown = next((f for f in files if f.parent.name != "backup"), None)
+            if shown and not getattr(self, "_studio_req", False):  # 밖에서 작업은 그 기기가 내려받음 (PC 탐색기를 열지 않음)
+                try:
+                    reveal(shown)
+                except OSError:
+                    pass  # 탐색기를 못 열어도 파일은 남음 (곁가지)
+            return self._send(200, {"ok": True, "where": where, "file": shown.name if shown else files[0].name})
         if path == "/api/edit/oneline":  # 편집실 '자막 한 줄씩 나누기' (지금 글 그대로 나눔 · 저장은 편집실이 함)
             caps = b.get("captions")
             if not isinstance(caps, list):
@@ -1973,27 +2019,33 @@ class Handler(BaseHTTPRequestHandler):
     def _analyze(b):
         model = core.model_of(b.get("model"))  # 안 보냈거나 모르는 값이면 이 PC 사양에 맞는 기본값
         studiolog.target(path="/api/analyze", names=list(b["names"]), model=model)  # 갑자기 꺼지면 다음에 켤 때 이 영상으로 [다시 하기]
+        # 다시 찾는 영상: 받아쓰기를 새로 하기 전 글을 읽어 둠 → 사용자가 고치거나 지운 자막은 그대로 (D-413)
+        before = {n: editor.caption_baseline(n) for n in b["names"] if editor._ppath(n).exists()}
         out = core.analyze_many(b["names"], log, model)
         failed = getattr(out, "failed", None) or {}  # 여러 개 중 그 파일만의 문제(깨짐 등)로 건너뛴 영상 → 쉬운 안내
+        again = {}  # 다시 찾은 영상: {이름: {added: 더한 새 가편집 수, kept: 남긴 고친 자막 수}} → 화면 알림 (D-414)
         # 편집점 찾기 직후 1차 가편집(롱폼 정리본 + 쇼츠 편집본)까지 만들어 둠
         for n in b["names"]:
             if n in failed:
                 continue
             core.set_progress(label="가편집 만드는 중", item=n, pct=99, detail="컷 정리·쇼츠 구간 고르는 중")
             had = editor._ppath(n).exists()
-            # 이미 편집하던 영상이면 만든 편집본은 그대로 두고, 자막만 새로 + 새 가편집은 옆에 추가 (이전 상태는 백업)
-            proj, added, caps_changed = editor.reanalyze_project(n)
+            # 이미 편집하던 영상이면 만든 편집본은 그대로 두고, 받아쓴 그대로인 자막만 새로 + 새 가편집은 옆에 추가 (이전 상태는 백업)
+            proj, added, caps_changed = editor.reanalyze_project(n, before.get(n))
             editor.thumbs(n)
             editor.waveform(n)
             if had:
-                log(f"  편집본은 그대로 두고 새 가편집 {added}개를 추가했어요 · 자막은 새로 받아쓴 내용으로 바꿨어요"
+                kept = int((proj.get("fresh") or {}).get("kept") or 0)
+                again[n] = {"added": added, "kept": kept}
+                log(f"  편집본은 그대로 두고 새 가편집 {added}개를 추가했어요 · "
+                    + (f"손으로 고친 자막 {kept}줄은 그대로 두고 나머지 자막을 새로 받아쓴 내용으로 바꿨어요" if kept else "자막은 새로 받아쓴 내용으로 바꿨어요")
                     + (" (예전 자막은 편집실 '기록' 탭의 '편집점 다시 찾기 전' 백업에 있어요)" if caps_changed else ""))
             else:
                 names = ", ".join(q["name"] for q in proj["sequences"])
                 log(f"  가편집 완료 · {names}")
         if failed:  # 일부만 실패: 화면이 '몇 개 중 몇 개' 카드 + 다시 하기는 실패한 영상만
-            return {"done": out, "failed": list(failed), "why": failed}
-        return out
+            return dict({"done": out, "failed": list(failed), "why": failed}, **({"again": again} if again else {}))
+        return {"done": out, "again": again} if again else out
 
     @staticmethod
     def _download(b, ck):

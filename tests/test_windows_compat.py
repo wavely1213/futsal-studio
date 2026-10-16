@@ -576,7 +576,7 @@ class Locks(Work):
                 mock.patch.object(updater.os, "replace", locked(lambda s: s.name.startswith(p.name + "."), 99)):
             with self.assertRaises(PermissionError):
                 thumb.save_docs(f"{JAMO}.mp4", {"designs": [{"v": 2}]})
-        self.assertEqual(thumb.load_docs(f"{JAMO}.mp4"), {"designs": [{"v": 1}]})
+        self.assertEqual(thumb.load_docs(f"{JAMO}.mp4")["designs"], [{"v": 1}])  # (판 번호 rev 도 함께 저장됨 · D-411)
         self.assertTrue(p.exists())
 
     def test_save_project_backup_failure_is_not_save_failure(self):

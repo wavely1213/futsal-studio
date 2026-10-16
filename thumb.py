@@ -1652,22 +1652,71 @@ def load_docs(name):
 
 
 
-def save_docs(name, docs):
-    """안전하게 저장: 빈 목록은 거절, 임시 파일에 쓴 뒤 바꿔치기, 바로 전 저장본은 .bak 으로 복사.
+class Conflict(Exception):
+    """썸네일 창이 연 뒤에 다른 창(뒤로 가기로 다시 나온 예전 화면 등)이 디자인을 저장함 → 덮어쓰지 않음 (D-411 · editor.Conflict 와 같은 뜻)."""
+
+    def __init__(self, rev):
+        super().__init__("다른 곳에서 이 썸네일 디자인이 더 최근에 저장됐어요")
+        self.rev = rev
+
+
+_REVC = {}    # 파일별 (바뀐 시각, 판 번호) — 큰 디자인 파일을 저장마다 다시 읽지 않게
+_WRITER = {}  # 파일별 마지막으로 저장한 썸네일 창 (창 id, 판)
+
+
+def _disk_rev(p):
+    try:
+        st = p.stat()
+    except OSError:
+        return 0
+    c = _REVC.get(str(p))
+    if c and c[0] == st.st_mtime_ns:
+        return c[1]
+    try:
+        r = int(json.loads(p.read_text(encoding="utf-8")).get("rev") or 0)
+    except Exception:  # noqa: BLE001 — 깨진 파일은 덮어써도 됨 (load_docs 가 .bak 으로 엶)
+        return -1
+    _REVC[str(p)] = (st.st_mtime_ns, r)
+    return r
+
+
+def save_docs(name, docs, client=None, force=False):
+    """안전하게 저장: 빈 목록은 거절, 임시 파일에 쓴 뒤 바꿔치기, 바로 전 저장본은 .bak 으로 복사 → 새 판 번호(docs.rev).
     지금 파일은 끝까지 제자리에 둠 (예전에는 .bak 으로 먼저 옮긴 뒤 바꿔치기가 Windows 잠금으로 실패하면 지금 파일이 없어져
-    다시 열 때 예전 디자인이 보였음) · 잠겨 있으면 잠깐 뒤 다시."""
+    다시 열 때 예전 디자인이 보였음) · 잠겨 있으면 잠깐 뒤 다시.
+    판 번호 (D-411): docs.rev 는 썸네일 창이 열 때·저장할 때 받은 판 — 그 사이 다른 창이 저장했으면 Conflict (뒤로 가기로 다시 나온
+    예전 화면이 최근 디자인을 말없이 덮지 않게) · 마지막으로 저장한 것이 같은 창(client)이면 이어서 (닫을 때 보낸 신호 저장의 답을 못 받음) ·
+    rev 가 없는 예전 화면은 확인 없이 · force: 그래도 이 창 내용으로 (그 전 디자인은 '<이름>.덮어쓰기전.json.bak' 사본)."""
     if not isinstance(docs, dict) or not docs.get("designs"):
         return False
     p = _doc_path(name)
-    data = core.clean_text(json.dumps(docs, ensure_ascii=False))
+    client = str(client)[:40] if client else None
     with _SAVE_LOCK:
+        disk = _disk_rev(p) if p.exists() else 0
+        base = docs.get("rev")
+        if isinstance(base, (int, float)) and not isinstance(base, bool) and not force and disk >= 0 and int(base) != disk:
+            w = _WRITER.get(str(p))
+            if not (client and w and w[0] == client and w[1] == disk):
+                raise Conflict(disk)
+        if force and p.exists():
+            try:
+                updater.write_atomic(p.with_name(p.stem + ".덮어쓰기전.json.bak"), p.read_bytes())
+            except OSError:
+                pass  # 사본은 곁가지
+        docs["rev"] = max(disk, 0) + 1
+        data = core.clean_text(json.dumps(docs, ensure_ascii=False))
         if p.exists():
             try:
                 updater.write_atomic(p.with_suffix(".json.bak"), p.read_bytes())
             except OSError:
                 pass  # 백업은 곁가지
         updater.write_atomic(p, data)
-    return True
+        try:
+            _REVC[str(p)] = (p.stat().st_mtime_ns, docs["rev"])
+        except OSError:
+            pass
+        _WRITER[str(p)] = (client, docs["rev"])
+    return docs["rev"]
 
 
 def export_image(name, data_url, fmt="jpg", label="썸네일"):

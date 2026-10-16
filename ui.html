@@ -937,7 +937,7 @@
       <!-- 2-2. 용어 사전: 받아쓰기가 풋살 용어·이름을 잘 알아듣게 -->
       <h2 class="sh">용어 사전</h2>
       <div class="card dict" id="dictCard">
-        <p class="hint">받아쓰기에 풋살 용어와 이름을 미리 알려 줘서 더 정확하게 받아써요. 앞에 있는 말부터 알려 줘요(너무 많으면 뒤쪽은 빠질 수 있어요). 저장하면 다음 '편집점 찾기'부터 적용돼요.</p>
+        <p class="hint">받아쓰기에 풋살 용어와 이름을 미리 알려 줘서 더 정확하게 받아써요. 앞에 있는 말부터 알려 줘요(너무 많으면 뒤쪽은 빠질 수 있어요). 넣거나 빼면 바로 저장되고, 다음 '편집점 찾기'부터 적용돼요.</p>
         <div class="dict-terms" id="dictTerms"><span class="dict-none">불러오는 중…</span></div>
         <div class="dict-add"><input class="inp" id="dictTerm" maxlength="30" placeholder="넣을 용어 (예: 파라렐라)"><button class="btn" id="dictTermAdd">용어 넣기</button></div>
         <h3>자주 틀리게 받아쓰는 말 고치기</h3>
@@ -1620,7 +1620,7 @@ function analyzeNames(names, changedFile) {
   job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
 }
 function againMsg(again, changedFile) {  // 이미 편집점을 찾은 영상을 다시 찾을 때 확인 (보관함 버튼 · 꺼짐 카드의 다시 하기)
-  return `${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 자막은 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`;
+  return `${changedFile ? "편집점을 찾은 뒤 파일이 바뀌었어요 (복사가 덜 된 채로 찾았을 수 있어요).\n" : `이미 편집점을 찾은 영상이 ${again}개 있어요.\n`}다시 찾으면 편집실에서 만든 내 편집본은 그대로 두고, 새 가편집을 '(새로 찾음)'으로 옆에 추가해요. 손으로 고치거나 지운 자막은 그대로 두고, 나머지 자막만 새로 받아쓴 것으로 바뀌어요 (이전 상태는 백업돼요).\n계속할까요?`;
 }
 /* 2-1b. 지난번에 편집점 찾기·묶기 중에 갑자기 꺼짐 (서버 app.CRASH · D-072): 다시 하는 곳(보관함)에 그 영상 이름 +
    [다시 하기]·[빠르게로 다시 하기] 카드 · 줄에도 표시 · ✕ 나 다시 하기를 누르면 서버에서도 내림.
@@ -1671,10 +1671,16 @@ function showCrash(c) {
   const card = failSlot("p-library").querySelector(".card.fail");
   if (card) card.querySelector(".fx").addEventListener("click", dismiss);
 }
+function againDone(res) {  // 편집점을 다시 찾은 영상 (서버 again · D-414): 새 가편집 수 + 그대로 둔 고친 자막 수 · 처음 찾은 영상만이면 ""
+  const ag = Object.values((res && res.again) || {});
+  if (!ag.length) return "";
+  const add = ag.reduce((n, a) => n + (+a.added || 0), 0), kept = ag.reduce((n, a) => n + (+a.kept || 0), 0);
+  return `편집점을 다시 찾았어요 · 새 가편집 ${add}개를 더하고 편집실은 새 롱폼 가편집으로 열려요` + (kept ? ` · 손으로 고친 자막 ${kept}줄은 그대로 뒀어요` : "");
+}
 function analyzed(res) {  // 여러 개 중 깨진 영상은 건너뛰고 끝남 → '몇 개 중 몇 개' 카드 + 그 영상만 고른 채로 (다시 하기도 그 영상만)
   const jb = lastJob || {}, body = jb.body || { names: [] }, total = (body.names || []).length;
   const failed = (res && res.failed) || [];
-  if (!failed.length) { showPointsNext((body.names || [])[0], "편집점을 찾고 1차 가편집까지 만들었어요"); return; }
+  if (!failed.length) { showPointsNext((body.names || [])[0], againDone(res) || "편집점을 찾고 1차 가편집까지 만들었어요"); return; }
   toast(`${total - failed.length}개는 편집점을 찾았어요 · ${failed.length}개 실패`);
   libSel.clear(); failed.forEach(n => libSel.add(n)); lastLocalKey = ""; renderLocal();
   const f = partFail(failed, res.why, total, "편집점을 찾지");
@@ -1751,8 +1757,10 @@ $("btnBundle").onclick = () => {
   job("/api/bundle", { names, title: t.trim() || "촬영본", model: segVal("modelSeg") }, bundleDone);
 };
 
-/* 2-2. 용어 사전: 받아쓰기에 알려 줄 용어 + 자주 틀리게 받아쓰는 말 고치기 (저장하면 다음 편집점 찾기부터) */
-let dict = null, dictDefaults = null, dictSaved = "";
+/* 2-2. 용어 사전: 받아쓰기에 알려 줄 용어 + 자주 틀리게 받아쓰는 말 고치기 (다음 편집점 찾기부터)
+   넣거나 빼면 1초 뒤 저절로 저장 (올리기 키트처럼 · D-410) · 편집점 찾기·끝까지 자동으로 직전(job)과 창을 닫거나 다른 화면으로 갈 때도
+   (예전: '저장'을 안 누르면 말없이 사라져 60분 받아쓰기를 다시 돌림) · [저장]은 저장이 안 됐을 때 다시 누르는 단추로 남김 */
+let dict = null, dictDefaults = null, dictSaved = "", dictTimer = 0, dictChain = Promise.resolve(), dictErr = false;
 const dictKey = () => JSON.stringify(dict), dictClean = s => s.replace(/\s+/g, " ").trim();
 const dictEnter = (e, fn) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) fn(); };  // 한글 조합 중 Enter 는 글자 확정만
 function renderDict() {
@@ -1762,11 +1770,36 @@ function renderDict() {
   const fx = Object.entries(dict.fix);
   $("dictFixes").innerHTML = fx.length ? fx.map(([a, b]) => `<div class="dfix"><span>${esc(a)}</span><span class="arr">→</span><b>${esc(b)}</b><button class="linkbtn" data-dfix="${esc(a)}">빼기</button></div>`).join("")
     : `<span class="dict-none">아직 없어요 · 받아쓰기에서 자꾸 틀리게 나오는 말이 있으면 넣어 주세요</span>`;
-  document.querySelectorAll("[data-dterm]").forEach(b => (b.onclick = () => { dict.terms.splice(+b.dataset.dterm, 1); renderDict(); }));
-  document.querySelectorAll("[data-dfix]").forEach(b => (b.onclick = () => { delete dict.fix[b.dataset.dfix]; renderDict(); }));
+  document.querySelectorAll("[data-dterm]").forEach(b => (b.onclick = () => { dict.terms.splice(+b.dataset.dterm, 1); dictChanged(); }));
+  document.querySelectorAll("[data-dfix]").forEach(b => (b.onclick = () => { delete dict.fix[b.dataset.dfix]; dictChanged(); }));
   const dirty = dictKey() !== dictSaved;
   $("dictSave").disabled = !dirty;
-  $("dictState").textContent = dirty ? "저장하지 않은 내용이 있어요" : "";
+  $("dictState").textContent = !dirty ? "" : dictErr ? "저장하지 못했어요 · '저장'을 눌러 다시 해 주세요" : "저장 중…";
+}
+function dictChanged() {  // 넣기·빼기·되돌리기 뒤: 1초 뒤 저장 (잇달아 고치면 한 번에)
+  dictErr = false; renderDict();
+  clearTimeout(dictTimer); dictTimer = 0;
+  if (dictKey() !== dictSaved) dictTimer = setTimeout(() => { dictTimer = 0; dictSave(); }, 1000);
+}
+function dictSave() {  // 하나씩 차례로 (늦게 보낸 내용이 먼저 저장된 내용을 덮지 않게)
+  dictChain = dictChain.then(async () => {
+    if (!dict || dictKey() === dictSaved) return;
+    const sent = dictKey();
+    try {
+      const j = await api("/api/dict", JSON.parse(sent));
+      if (!j.ok) { dictErr = true; return renderDict(); }  // 이유는 api() 가 알림으로 보여 줌
+      const got = { terms: j.terms, fix: j.fix };
+      if (dictKey() === sent) dict = got;  // 보내는 사이 더 고치지 않았으면 서버가 정리한 그대로 (겹친 용어·띄어쓰기)
+      dictSaved = JSON.stringify(got);  // 그 사이 더 고쳤으면 그 고침이 1초 뒤 또 저장됨 (dictChanged)
+      dictErr = false; renderDict();
+      if (dictKey() === dictSaved) $("dictState").textContent = "저장됨 · 다음 '편집점 찾기'부터 적용돼요";
+    } catch (e) { dictErr = true; renderDict(); }
+  });
+  return dictChain;
+}
+async function dictFlush() {  // 기다리던 저장을 바로 보내고 끝날 때까지
+  if (dictTimer) { clearTimeout(dictTimer); dictTimer = 0; dictSave(); }
+  await dictChain;
 }
 async function loadDict() {
   try {
@@ -1779,32 +1812,38 @@ function addTerm() {
   const t = dictClean($("dictTerm").value);
   if (!t || !dict) return;
   if (dict.terms.includes(t)) return toast("이미 있는 용어예요");
-  dict.terms.unshift(t); $("dictTerm").value = ""; renderDict(); $("dictTerm").focus();
+  dict.terms.unshift(t); $("dictTerm").value = ""; dictChanged(); $("dictTerm").focus();
 }
 function addFix() {
   const a = dictClean($("dictWrong").value), b = dictClean($("dictRight").value);
   if (!dict) return;
   if (!a || !b) return toast("틀리게 나온 말과 바른 말을 둘 다 써 주세요");
   if (a === b) return toast("두 말이 같아요");
-  dict.fix[a] = b; $("dictWrong").value = ""; $("dictRight").value = ""; renderDict(); $("dictWrong").focus();
+  dict.fix[a] = b; $("dictWrong").value = ""; $("dictRight").value = ""; dictChanged(); $("dictWrong").focus();
 }
 $("dictTermAdd").onclick = addTerm;
 $("dictTerm").onkeydown = e => dictEnter(e, addTerm);
 $("dictFixAdd").onclick = addFix;
 $("dictRight").onkeydown = e => dictEnter(e, addFix);
 $("dictReset").onclick = () => {
-  if (!dictDefaults || !confirm("처음 들어 있던 용어와 고칠 말로 되돌릴까요?\n(저장을 눌러야 바뀌어요)")) return;
-  dict = JSON.parse(JSON.stringify(dictDefaults)); renderDict();
+  if (!dictDefaults || !confirm("처음 들어 있던 용어와 고칠 말로 되돌릴까요?")) return;
+  dict = JSON.parse(JSON.stringify(dictDefaults)); dictChanged();
 };
 $("dictSave").onclick = async () => {
-  $("dictSave").disabled = true;
-  try {
-    const j = await api("/api/dict", dict);
-    if (!j.ok) return renderDict();  // 이유는 api() 가 알림으로 보여 줌
-    dict = { terms: j.terms, fix: j.fix }; dictSaved = dictKey(); renderDict();
-    toast("용어 사전을 저장했어요 · 다음 '편집점 찾기'부터 적용돼요");
-  } catch (e) { renderDict(); toast("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); }
+  $("dictSave").disabled = true; dictErr = false;
+  clearTimeout(dictTimer); dictTimer = 0;
+  await dictSave();
+  if (!dictErr && dictKey() === dictSaved) toast("용어 사전을 저장했어요 · 다음 '편집점 찾기'부터 적용돼요");
 };
+{  // 창을 닫거나 다른 화면(편집실·썸네일)으로 갈 때 기다리던 사전 저장
+  const prevFlushDict = window.flushBeforeClose;
+  window.flushBeforeClose = async () => { await dictFlush(); return prevFlushDict ? prevFlushDict() : true; };
+  window.addEventListener("pagehide", () => {
+    if (!dict || dictKey() === dictSaved) return;
+    clearTimeout(dictTimer); dictTimer = 0;
+    try { navigator.sendBeacon("/api/dict", new Blob([dictKey()], { type: "text/plain;charset=UTF-8" })); } catch (e) {}  // 서버는 내용만 JSON 으로 읽음
+  });
+}
 loadDict();
 
 /* 6. 스타일 배우기 — 6-0. 학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로 · 서버 refs.py) */
@@ -2490,9 +2529,10 @@ function sync() {
   $("btnAnalyze").textContent = nl ? `편집점 찾기 (${nl})` : "편집점 찾기";
   watchModelSel();
 }
+const DICT_JOBS = ["/api/analyze", "/api/auto"];  // 받아쓰기를 하는 작업: 기다리던 용어 사전 저장을 먼저 (D-410)
 function job(path, body, done) {
   const panel = curPanel();
-  api(path, body).then(j => {
+  (DICT_JOBS.includes(path) ? dictFlush().catch(() => {}) : Promise.resolve()).then(() => api(path, body)).then(j => {
     if (j.ok) { clearFail(panel); lastJob = { path, body, done: done || null, panel, mine: true }; waitFor(j, done); }
     else if (j.fail) showFail(j.fail, { path, body, done, panel });  // 바로 거절 (예: 아직 복사 중)
   });

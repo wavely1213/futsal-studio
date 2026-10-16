@@ -378,7 +378,7 @@ POLICY = {
         "/api/thumb/save",
         "/api/edit/save", "/api/edit/oneline", "/api/edit/resplit", "/api/edit/export", "/api/edit/restore", "/api/edit/freeze", "/api/edit/track",
         "/api/edit/qa", "/api/edit/proxy", "/api/edit/cancel", "/api/edit/msg", "/api/edit/autoseq", "/api/edit/upload",
-        "/api/edit/srt", "/api/edit/frame",  # 자막 파일(SRT) 가져오기 (읽기만 · D-345) · 지금 화면 그림으로 저장 (완성본 폴더 · D-349)
+        "/api/edit/srt", "/api/edit/frame", "/api/edit/rescue",  # 저장이 계속 안 될 때 따로 남기기 (D-412) · 자막 파일(SRT) 가져오기 (읽기만 · D-345) · 지금 화면 그림으로 저장 (완성본 폴더 · D-349)
         "/api/upload/kit",
         "/api/strategy/draft", "/api/strategy/save", "/api/strategy/channels", "/api/strategy/refresh", "/api/strategy/pause",
         "/api/strategy/checkup", "/api/strategy/todo", "/api/strategy/takeaway", "/api/strategy/settings", "/api/strategy/ai",

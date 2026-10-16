@@ -34,17 +34,33 @@ let liveBefore = null, liveOwner = null;
 function liveStart() { if (liveBefore === null && D) { liveBefore = snapshot(); liveOwner = D; } }
 function liveEnd() { if (liveBefore !== null && D && liveOwner === D && liveBefore !== snapshot()) { pushUndo(liveBefore, "속성 변경"); scheduleSave(); } liveBefore = null; liveOwner = null; geoBase = null; }
 const cleanDocs = () => JSON.parse(JSON.stringify(DOCS, dropPriv));
-const saveBody = () => JSON.stringify({ name: NAME, docs: DOCS }, dropPriv);  // 저장할 글 한 번에 (글→객체→글 두 번 돌리지 않게)
+// 이 창 id (판 번호 rev 와 함께 · 닫을 때 보낸 신호 저장의 답을 못 받아 판이 뒤처져도 같은 창의 저장은 이어서 받게 · D-411)
+const TCID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const saveBody = (force) => JSON.stringify({ name: NAME, docs: DOCS, client: TCID, ...(force ? { force: true } : {}) }, dropPriv);  // 저장할 글 한 번에 (글→객체→글 두 번 돌리지 않게)
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
 function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
 let gone = "";  // 이 영상의 이름이 바뀌었거나 보관함에서 빠짐 (서버 404 gone · D-073) → 더 저장하지 않고 알림 · 나가기는 막지 않음
 function markGone(msg) { gone = msg || gone || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); }  // 저장·그림 내보내기·A/B 가 같은 알림 (D-078)
-async function saveNow() {
+// 다른 곳(뒤로 가기로 다시 나온 예전 화면 · 다른 창)이 더 최근에 저장함 (서버 409 conflict · D-411) → 덮어쓰지 않고 한 번 물어봄
+// (기본 [확인] = 최근 내용 다시 불러오기 · [취소] = 이 화면 내용으로 저장하고 그 전 디자인은 사본으로)
+let conflict = false;
+async function onConflict() {
+  conflict = true; clearTimeout(saveTimer); saveTimer = null;
+  $("saved").textContent = "저장 멈춤 · 다른 곳에서 더 최근에 저장했어요";
+  if (confirm("이 썸네일 디자인이 다른 곳에서 더 최근에 저장됐어요 (뒤로 가기로 예전 화면이 다시 열렸을 수 있어요).\n\n[확인] 최근 내용 다시 불러오기 (이 화면에서 방금 바꾼 것은 사라져요)\n[취소] 이 화면 내용으로 저장하기 (최근 내용은 사본으로 남겨요)")) {
+    location.reload(); return false;
+  }
+  conflict = false; return saveNow(true);
+}
+async function saveNow(force) {
   clearTimeout(saveTimer); saveTimer = null; if (!D) return true; const g = saveGen;
   if (gone) { $("saved").textContent = "저장 안 함 · " + gone; return true; }
+  if (conflict) return false;
   let r = null;
-  try { r = await postRaw("/api/thumb/save", saveBody()); } catch (e) {}
+  try { r = await postRaw("/api/thumb/save", saveBody(force)); } catch (e) {}
   if (r && r.gone) { markGone(r.error); return true; }
+  if (r && r.conflict) return onConflict();
+  if (r && r.ok && r.rev != null) DOCS.rev = r.rev;
   if (!r || r.ok === false) {  // 저장 실패(Windows: 백신·OneDrive 가 잠깐 잡음 등) → 알리고 잠시 뒤 다시 (예전: '저장 중…'에 멈춤)
     if (g === saveGen) { $("saved").textContent = "저장 실패 · 잠시 뒤 다시 저장할게요"; saveTimer = setTimeout(saveNow, 3000); }
     return false;
@@ -55,7 +71,7 @@ async function saveNow() {
 }
 // 창을 닫거나 숨길 때 남은 변경을 바로 보냄 (keepalive)
 if (window.FS_REMOTE) FS_REMOTE.isDirty = () => !!saveTimer;  // 밖에서 작업: 저장이 남았으면 끊겨도 저절로 원격 홈으로 가지 않음 (D-230)
-function flushSave() { if (!D || gone || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: saveBody() }); } catch (e) {} }
+function flushSave() { if (!D || gone || conflict || (!saveTimer && !editing)) return; clearTimeout(saveTimer); saveTimer = null; try { fetch("/api/thumb/save", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: saveBody() }); } catch (e) {} }
 addEventListener("pagehide", flushSave); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
 
 /* ---------- 화면 (확대 · 이동) ---------- */
