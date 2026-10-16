@@ -1,6 +1,8 @@
 {
   "version": "2.21.2",
   "notes": "밖에서 작업(사이트) 편집실 소리 끊김·불러오기 고침 · 효과음이 제자리에(망가진 효과음 다시 만듦·맞출 순간) · 따로 한 말은 따로 자막 · 합쳐진 자막 쉽게 나누기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/8195a0d916659715f58e7ad17f7e3e4e175a0f8c.zip",
+  "commit": "8195a0d916659715f58e7ad17f7e3e4e175a0f8c",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f35e1d5edbd07249da3addd1b963c1ed2bae022ac6effd7e1f8517fc8909c3c8",
