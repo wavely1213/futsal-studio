@@ -22,7 +22,7 @@ LINES = ("const FPS =", "const fr =", "const linkId =", "const byId =", "const m
          "const unlocked =", "const mDur =", "const linkedOf =", "const r6 =", "const r3 =", "const headTopic =", "const roleOf =", "const ROLE_NAME =",
          "const lbl =", "const isSfxMd =", "const isTalkMd =", "const sfxOnly =", "const MCAPS =", "const TAC_REFOLLOW =", "const seqLen =",
          "const DUCK_PAD =", "let SPEECH =", "const inIv =", "const targetOf =", "const BGM_FADE =", "const MSG_KIND =")
-FUNCS = ("mergeIv", "tlRemap", "swapIn", "topicAfter", "capItems", "minusIv", "noDuckSpans", "ndRange", "speechSpans", "tacRefollow", "tacFollowCut",
+FUNCS = ("mergeIv", "tlRemap", "swapIn", "epFacts", "topicAfter", "capItems", "minusIv", "noDuckSpans", "ndRange", "speechSpans", "tacRefollow", "tacFollowCut",
          "tacFollowHold", "tacRippleCut", "tacRippleHold", "neighbor", "prevEnd", "nextStart", "edgeOp", "setSpeed", "msgRemove", "autoDest",
          "ensureTrack", "setRole", "videoEnd", "placeMedia", "dropOn", "otherCapNote")
 STUBS = r"""

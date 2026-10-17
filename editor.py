@@ -1508,7 +1508,8 @@ def swap_in(top, kt):
 # 편집실 템플릿 '은평 스타일'(editor.html EP · epCard)과 같은 값·셈 — 한쪽을 고치면 다른 쪽도.
 EP_KEY = "eunpyeong"
 EP_BAR = "#1F4FD1"     # 띠 색 (진한 파랑 · 편집실 '박스 색'으로 바꿀 수 있음)
-EP_LAYOUT = {"mode": "box", "bar": EP_BAR, "zoom": 1.32, "vpos": 0.48, "cropTop": 0.0, "cropBottom": 0.0}
+EP_LAYOUT = {"mode": "box", "bar": EP_BAR, "zoom": 1.32, "vpos": 0.48, "cropTop": 0.0, "cropBottom": 0.0,
+             "win": True}   # win: 확대·이동해도 영상은 영상 창 안에서만 (띠·위 글자·말 자막 띠로 안 넘침 · D-424)
 EP_BOX = {"x": 0.05, "y": 0.095, "w": 0.9, "h": 0.06}   # 흰 상자 (화면 비율 · 아래 끝 0.155)
 EP_PAD = 28            # 상자 안 글 양옆 여백 (화소 · 1080 기준)
 EP_SIZES = (72, 68, 64, 60, 56, 52, 48)   # 큰 제목 글자 크기 (한 줄로 상자에 들어가는 가장 큰 것)
@@ -5255,7 +5256,7 @@ def _fit(it, md, seq, W, H):
         zh = _even(vh * zw / sw)
         ch = min(zh, H)
         return {"chain": pre + f"scale={zw}:{zh},crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}", "bw": W, "bh": ch, "bx": 0,
-                "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"]}
+                "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
     if fit == "auto":  # 위 트랙: 영상은 화면에 맞춤, 이미지는 작으면 원래 크기 (정지 화면은 원래 영상처럼 화면에 맞춤)
         fit = "native" if md["kind"] == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
     cover = fit == "cover"
@@ -5620,7 +5621,15 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         ofmt = "yuv444" if (s_anim or px_anim or py_anim) and "format=rgba" not in chain else "auto"
         if bg:
             ly = lab("y")
-            overlay(bgl, fg, X, Y, ofmt, ly)
+            if fit.get("win") and motion:
+                # 은평 스타일(layout.win · D-424): 확대·이동·회전한 그림은 영상 창(by ~ by+bh) 안에서만 — 창 크기 띠 색 바탕에 먼저 얹고 그 창을 제자리에
+                # (창 위 끝은 yuv420 겹치기처럼 짝수 칸 = 움직이지 않는 클립의 창과 같은 자리 · 글 아래 끝 floor 로 같은 칸)
+                wy, wl, lw = int(by) & ~1, lab("g"), lab("y")
+                fc.append(f"color=c=0x{fit['bar'].lstrip('#')}:s={W}x{int(bh)}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n}[{wl}]")
+                overlay(wl, fg, X, f"floor({Y})-{wy}", ofmt, lw)
+                overlay(bgl, lw, "0", str(wy), "auto", ly)
+            else:
+                overlay(bgl, fg, X, Y, ofmt, ly)
             return ("full", ly)
         if full_plain and not has_op:
             return ("full", fg)

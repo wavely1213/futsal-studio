@@ -361,7 +361,7 @@ class LayoutTest(WorkMixin, unittest.TestCase):
 
 
 JS_DEFS = ("FPS,EPS,fr,sp,iEnd,iLen,tlOf,mt,DEF,prm,emOf,cutText,isMainAV,r6,mergeIv,tlRemap,cutPieces,moveItem,remapSeq,tidySeq,"
-           "TOPIC,TOPIC_STYLE,txtBox,textW,oneLine,topicFill,capBand,videoTop,topicTitle,r3,swapIn,topicUnder,headTopic,topicAfter,topicGone,"
+           "TOPIC,TOPIC_STYLE,txtBox,textW,oneLine,topicFill,capBand,videoTop,topicTitle,r3,swapIn,topicUnder,headTopic,epFacts,topicAfter,topicGone,"
            "placeTopic,gfxCut,EP,epTitleStyle,epOn,epCard,epOff,tplTitle,TEMPLATES").split(",")
 
 

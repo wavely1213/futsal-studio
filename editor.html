@@ -1081,6 +1081,14 @@ function swapIn(top, k) { // 바꿔 끼운 주제 줄(k) 뒤로 큰 제목(top)�
   if (k && k.swap && top.start < k.start + k.dur - 1e-6) { const e = top.start + top.dur; top.start = r3(k.start + k.dur); top.dur = r3(e - top.start); }
 }
 const headTopic = g => g.plan === "topic" && g.start < 0.05;  // 쇼츠 맨 앞 주제 줄 — 앞을 잘라도(Q·대사 잘라내기·군더더기 정리) 맨 앞 그대로
+// 은평 스타일 사실 줄(BR-241): 맨 앞 주제 줄이지만 흰 상자 큰 제목과 같이 끝까지 — 앞을 잘라도 맨 앞 그대로가 아니라 큰 제목처럼 줄고 늚 (D-425)
+// (고치기 전에 셈: 큰 제목 길이가 먼저 바뀌어도 같은 줄로 봄)
+function epFacts(q) {
+  if (!(q.shapes || []).some(g => g.plan === "card")) return new Set();  // (= epOn · 흰 상자가 있는 편집본만)
+  return new Set((q.titles || []).filter(g => {
+    if (!headTopic(g)) return false; const t = q.titles.find(x => x.id === g.under); return !!t && t.start < 0.05 && Math.abs(t.dur - g.dur) < 0.05;
+  }).map(g => g.id));
+}
 function topicAfter(titles) { for (const k of titles) if (k.plan === "topic" && k.swap) { const top = titles.find(x => x.id === k.under); if (top) swapIn(top, k); } }
 function remapSeq(q, cut, ins, extra) {
   const f = tlRemap(cut, ins), links = new Map(), first = new Map(), last = new Map(), items = [];
@@ -1096,9 +1104,9 @@ function remapSeq(q, cut, ins, extra) {
     }
   }
   items.push(...extra(f));
-  const end0 = Math.max(0, ...q.items.map(iEnd));
+  const end0 = Math.max(0, ...q.items.map(iEnd)), facts = epFacts(q);
   const span = x => { // 늘어나는 건 끝까지 덮던 것만 (쇼츠 내내 뜨는 제목) · 강조 글씨 같은 짧은 글씨는 원래 길이까지만
-    if (x.full || headTopic(x)) return { ...x }; // 쇼츠 맨 앞 주제 줄은 앞이 줄거나 늘어도 맨 앞 그대로 (BR-120)
+    if (x.full || (headTopic(x) && !facts.has(x.id))) return { ...x }; // 쇼츠 맨 앞 주제 줄은 앞이 줄거나 늘어도 맨 앞 그대로 (BR-120 · 은평 스타일 사실 줄은 큰 제목처럼)
     const s = f(x.start, false), m = r6(f(x.start + x.dur, true) - s), d = x.start + x.dur >= end0 - 0.05 ? m : Math.min(m, x.dur);
     if (x.plan === "emphasis" && inCut(x.start)) return null; // 그 말이 잘려 나감
     if (!(d >= Math.min(0.3, x.dur) - EPS)) return null;
@@ -1881,10 +1889,11 @@ function renderMarkers() {
     row.querySelector("[data-mx]").onclick = () => { commit("마커 지우기"); S.markers.splice(S.markers.indexOf(m), 1); changed(false); };
   });
 }
-function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기 (쇼츠 맨 앞 주제 줄은 그대로 맨 앞 · BR-120)
+function gfxCut(a, b) { // 타이틀·도형에서 [a,b] 빼기 (쇼츠 맨 앞 주제 줄은 그대로 맨 앞 · BR-120 · 은평 스타일 사실 줄은 큰 제목처럼 줄임)
+  const facts = epFacts(S);
   for (const g of [...S.titles, ...S.shapes.filter(x => !x.full), ...S.tactics]) {
     const s = g.start, e = g.start + g.dur;
-    if (e <= a || s >= b || headTopic(g)) continue;
+    if (e <= a || s >= b || (headTopic(g) && !facts.has(g.id))) continue;
     const keep = Math.max(0, a - s) + Math.max(0, e - b);
     if (g.follow && g.follow.length) g.follow = tacFollowCut(g, a, b).follow;  // 따라가는 전술 그림: 잘린 만큼 기록도 당김
     g.start = Math.min(s, a); g.dur = keep;
@@ -2553,7 +2562,8 @@ function fitRect(it, md) {
     if (lay.mode !== "box" && lay.mode !== "blur") { const s = Math.max(W / sw, H / vh), scw = Math.max(W, sw * s), sch = Math.max(H, vh * s);
       return { bx: 0, by: 0, bw: W, bh: H, mw: sw * s, mh: sh * s, mx: -(scw - W) * rf, my: -(sch - H) / 2 - ct * sh * s, bg: null }; }
     const zw = W * Math.max(1, lay.zoom), s = zw / sw, zh = vh * s, ch = Math.min(zh, H);
-    return { bx: 0, by: (H - ch) * lay.vpos, bw: W, bh: ch, mw: zw, mh: sh * s, mx: -(zw - W) * rf, my: -(zh - ch) / 2 - ct * sh * s, bg: lay.mode, bar: lay.bar };
+    return { bx: 0, by: (H - ch) * lay.vpos, bw: W, bh: ch, mw: zw, mh: sh * s, mx: -(zw - W) * rf, my: -(zh - ch) / 2 - ct * sh * s, bg: lay.mode, bar: lay.bar,
+      win: lay.mode === "box" && !!lay.win };
   }
   if (fit === "auto") fit = md.kind === "image" && !md.freeze && sw <= W && sh <= H ? "native" : "contain"; // 정지 화면은 원래 영상처럼
   const s = fit === "native" ? 1 : fit === "cover" ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh), scw = sw * s, sch = sh * s;
@@ -2612,8 +2622,20 @@ function showItem(it, t, z, mod, used) {
   css(e.el, "left", f.mx * k + "px"); css(e.el, "top", f.my * k + "px"); css(e.el, "width", f.mw * k + "px"); css(e.el, "height", f.mh * k + "px");
   css(e.fg, "transformOrigin", `${mo.anc[0] * 100}% ${mo.anc[1] * 100}%`);
   css(e.fg, "transform", `translate(${((mo.pos[0] - 0.5) * W * k).toFixed(2)}px,${((mo.pos[1] - 0.5) * H * k).toFixed(2)}px) rotate(${mo.rot.toFixed(3)}deg) scale(${mo.sc.toFixed(4)})`);
+  css(e.fg, "clipPath", f.win ? winClip(f, mo, k, W, H) : "none");
   css(e.fg, "opacity", String(op));
   css(e.el, "filter", colorFilter(it));
+}
+// 은평 스타일(layout.win · D-424): 확대·이동·회전한 클립도 영상 창(화면의 f.by ~ f.by+f.bh) 안만 보이게 — 창 네 모서리를 클립 상자 안 자리로 거꾸로 옮긴
+// 다각형 (transform = 기준점 둘레 translate·rotate·scale · editor.py layer 의 창 겹치기와 같은 그림) · 움직임이 없으면 창 = 클립 상자라 자르지 않음
+function winClip(f, mo, k, W, H) {
+  const sc = mo.sc || 1e-6, a = -mo.rot * Math.PI / 180, ox = mo.anc[0] * f.bw * k, oy = mo.anc[1] * f.bh * k;
+  const tx = (mo.pos[0] - 0.5) * W * k, ty = (mo.pos[1] - 0.5) * H * k;
+  if (Math.abs(sc - 1) < 1e-6 && !mo.rot && Math.abs(tx) < 1e-6 && Math.abs(ty) < 1e-6) return "none";
+  const pt = (qx, qy) => { const dx = (qx - ox - tx) / sc, dy = (qy - oy - ty) / sc;
+    return `${(ox + dx * Math.cos(a) - dy * Math.sin(a)).toFixed(2)}px ${(oy + dx * Math.sin(a) + dy * Math.cos(a)).toFixed(2)}px`; };
+  const w = f.bw * k, h = f.bh * k;
+  return `polygon(${pt(0, 0)}, ${pt(w, 0)}, ${pt(w, h)}, ${pt(0, h)})`;
 }
 const DIPS = {}, TGRP = {};
 function dipEl(tid) { if (!DIPS[tid]) { const d = document.createElement("div"); d.className = "dip"; $("layers").appendChild(d); DIPS[tid] = d; } return DIPS[tid]; }
@@ -4638,8 +4660,8 @@ const TEMPLATES = {
 // + 그 아래 작은 흰 사실 줄(주제 줄 · 끝까지 · 바꿔 끼우기 없음) · 말 자막은 아래 띠
 const EP = {
   BAR: "#1F4FD1", ZOOM: 1.32, VPOS: 0.48, BOX: { x: 0.05, y: 0.095, w: 0.9, h: 0.06 }, PAD: 28, SIZES: [72, 68, 64, 60, 56, 52, 48], CAP_Y: 0.8,
-  TITLE: { weight: "Black", fill: "#111111", stroke: "#111111", strokeW: 0, bgOn: false, x: 0.5, align: "center", effect: "none" },
-  FACT: { weight: "Bold", size: 42, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, x: 0.5, align: "center", effect: "none", y: 0.195 },
+  TITLE: { weight: "Black", fill: "#111111", stroke: "#111111", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
+  FACT: { weight: "Bold", size: 42, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", y: 0.195 },
 };
 function epTitleStyle(text) {  // 흰 상자 안(양옆 PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝)
   const room = EP.BOX.w * 1080 - 2 * EP.PAD, size = EP.SIZES.find(z => textW(text, { ...EP.TITLE, size: z }) <= room) ?? EP.SIZES[EP.SIZES.length - 1];
@@ -4648,7 +4670,7 @@ function epTitleStyle(text) {  // 흰 상자 안(양옆 PAD) 한 줄로 들어�
 const epOn = q => (q.shapes || []).some(g => g.plan === "card");
 // 편집본 q 를 은평 스타일로 (L = 길이): 화면 구성 · 말 자막은 아래 띠로 · 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · 없으면 편집본 이름) · 그 주제 줄 · 흰 상자
 function epCard(q, L) {
-  q.layout = Object.assign(q.layout || {}, { mode: "box", bar: EP.BAR, zoom: EP.ZOOM, vpos: EP.VPOS });
+  q.layout = Object.assign(q.layout || {}, { mode: "box", bar: EP.BAR, zoom: EP.ZOOM, vpos: EP.VPOS, win: true });
   if (+(q.captionStyle.y ?? EP.CAP_Y) < EP.CAP_Y) q.captionStyle.y = EP.CAP_Y;
   for (const k of q.titles) if (k.plan === "topic" && k.swap) {  // 바꿔 끼운 주제 줄 뒤로 옮겨 둔 큰 제목은 다시 처음부터
     const t = q.titles.find(x => x.id === k.under); if (t && Math.abs(t.start - (k.start + k.dur)) < 0.05) { t.dur = r3(t.dur + t.start - k.start); t.start = k.start; }
@@ -4656,14 +4678,17 @@ function epCard(q, L) {
   let top = q.titles.filter(t => t.plan !== "topic" && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
   if (!top) { top = { id: nid(), text: cutText(q.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: L, style: { ...q.captionStyle } }; q.titles.unshift(top); }
   const topics = q.titles.filter(t => t.plan === "topic" && topicUnder(t, q.titles) === top);
-  top.text = String(top.text || "").split(/\s+/).filter(Boolean).join(" "); top.start = 0; top.dur = r3(L); Object.assign(top.style, epTitleStyle(top.text));
-  for (const t of topics) { delete t.swap; t.under = top.id; t.start = 0; t.dur = r3(L); Object.assign(t.style, EP.FACT); }
+  top.text = String(top.text || "").split(/\s+/).filter(Boolean).join(" "); top.start = 0; top.dur = r3(L);
+  // 모양은 통째로 바꿈 (서버 ep_title_style·EP_FACT 와 같은 값 — MSG 강조 글꼴(font)·회전 같은 다른 값이 남으면 글자 폭 셈과 그림이 어긋남)
+  top.style = epTitleStyle(top.text);
+  for (const t of topics) { delete t.swap; t.under = top.id; t.start = 0; t.dur = r3(L); t.style = { ...EP.FACT }; }
   const box = (q.shapes || []).find(g => g.plan === "card"), bx = { ...EP.BOX, color: "#FFFFFF", opacity: 1, radius: 0, start: 0, dur: r3(L), full: true };
   if (box) Object.assign(box, bx); else (q.shapes = q.shapes || []).push({ id: nid(), name: "제목 상자", ...bx, plan: "card" });
 }
 // 다른 템플릿을 고르면 은평 스타일 흰 상자를 지우고 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · MSG 강조 글씨 등은 그대로) 크기·나타나기를 보통으로,
 // 그 사실 줄은 첫머리 주제 줄(처음 SEC 초 · 모양은 tplTitle 의 placeTopic 이 다시 놓음)로 (예전 편집본에는 흰 상자가 없어 그대로)
 function epOff(q) {
+  if (q.layout) delete q.layout.win;  // 영상 창 밖 자르기(D-424)도 은평 스타일에서만
   if (!epOn(q)) return;
   q.shapes = q.shapes.filter(g => g.plan !== "card");
   const top = q.titles.filter(t => t.plan !== "topic" && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
@@ -5340,9 +5365,10 @@ function msgRemove(evId) {
       if (it.start < a - 1e-3 && e > a + 1e-3) it.out = fr(it.out - Math.min(d, e - a) * sp(it)); // 앞에서 시작해 걸침: 걸친 만큼 뒤를 줄임
       else if (it.start >= a - 1e-3 && it.start < b - 1e-3 && e > b + 1e-3) { it.in = fr(it.in + (b - it.start) * sp(it)); it.start = b; } // 안에서 시작해 뒤로 나감
     }
+    const facts = epFacts(q);
     for (const t of [...q.titles, ...q.shapes, ...(q.tactics || [])]) {
       const e = t.start + t.dur;
-      if (headTopic(t)) continue; // 쇼츠 맨 앞 주제 줄은 그대로 (BR-120)
+      if (headTopic(t) && !facts.has(t.id)) continue; // 쇼츠 맨 앞 주제 줄은 그대로 (BR-120 · 은평 스타일 사실 줄은 큰 제목처럼 줄임)
       if (t.start < a - 1e-3 && e > a + 1e-3 && t.follow && t.follow.length) t.follow = tacFollowCut(t, a, b).follow; // 따라가는 전술 그림: 빠진 장면만큼 기록도 당김
       if (t.start < a - 1e-3 && e > a + 1e-3) t.dur = fr(t.dur - Math.min(d, e - a));
     }

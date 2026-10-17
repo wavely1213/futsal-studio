@@ -22,7 +22,7 @@ import core  # noqa: E402
 import editor  # noqa: E402
 import msg  # noqa: E402
 import style  # noqa: E402
-from test_shorts_topic import FIX, WorkMixin, run_js, video_band  # noqa: E402
+from test_shorts_topic import FIX, JS_DEFS, WorkMixin, js_defs, run_js, video_band  # noqa: E402
 
 W, H = editor.frame_size("shorts")
 FF = shutil.which("ffmpeg")
@@ -60,7 +60,7 @@ class SettingTest(unittest.TestCase):
         self.assertEqual(style.set_shorts_layout(""), "")
         self.assertFalse(editor.shorts_card_on())
         f = style._shorts_layout_file()
-        for bad in ("{", '{"layout": "kangwon"}', '["eunpyeong"]'):
+        for bad in ("{", '{"layout": "orange"}', '["eunpyeong"]'):
             f.write_text(bad, encoding="utf-8")
             self.assertEqual(style.shorts_layout(), "", bad)
 
@@ -349,13 +349,9 @@ for (const swap of [false, true]) {{
             kt = next(t for t in r["titles"] if t["id"] == "k")
             self.assertNotIn("\n", big["text"])
             self.assertEqual((big["start"], big["dur"]), (0, 30))
-            ref = editor.ep_title_style(big["text"])
-            for key in ("size", "y", "fill", "strokeW", "bgOn", "effect", "weight", "x", "align"):
-                self.assertEqual(big["style"][key], ref[key], key)
+            self.assertEqual(big["style"], editor.ep_title_style(big["text"]))   # 모양 통째로 서버와 같음 (D-426)
             self.assertEqual((kt["start"], kt["dur"], kt.get("swap")), (0, 30, None))
-            for key, v in editor.EP_FACT.items():
-                if key in ("size", "y", "fill", "strokeW", "bgOn", "effect", "weight", "x", "align"):
-                    self.assertEqual(kt["style"][key], v, key)
+            self.assertEqual(kt["style"], editor.EP_FACT)
             [box] = r["shapes"]
             py = editor.ep_box(30)
             for key in ("x", "y", "w", "h", "color", "opacity", "radius", "start", "dur", "full", "plan"):
@@ -365,9 +361,159 @@ for (const swap of [false, true]) {{
             self.assertEqual(after["shapes"], [])
             self.assertEqual((after["big"]["size"], after["big"]["effect"], after["big"]["fill"]), (100, "pop", "#FFE14D"))
             self.assertEqual(after["layout"]["bar"], "#000000")
+            self.assertNotIn("win", after["layout"])   # 영상 창 밖 자르기도 은평 스타일에서만 (D-424)
             self.assertEqual((after["k"]["dur"], after["k"]["style"]["size"], after["k"]["style"]["weight"]), (editor.TOPIC_SEC, 72, "Black"))   # 다시 첫머리 주제 줄
             kb, tb = editor.text_box(after["k"]["text"], after["k"]["style"], W, H), editor.text_box("트래핑 꿀팁", after["big"], W, H)
             self.assertFalse(inter(kb, tb))
+
+    def test_msg_hook_font_is_replaced(self):
+        """검토: MSG 로 만든 쇼츠의 큰 줄은 강조 글꼴(Black Han Sans)·stamp·회전을 가짐 → 템플릿 뒤에도 남으면 Pretendard 폭으로 고른 크기와
+        그림이 어긋나고 자동으로 만든 은평 스타일과 달라짐 · 이제 서버 ep_title_style·EP_FACT 와 똑같은 모양 (D-426)."""
+        got = run_js(self.SHORT + """
+S = rough(false);
+S.titles[0].style = { ...BIG, font: "Black Han Sans", size: 96, effect: "stamp", rot: 3 };
+S.titles[1].style = { ...TOPIC_STYLE, font: "Black Han Sans", size: 64, y: 0.133 };
+TEMPLATES["은평 스타일"]();
+out = { big: S.titles.find(t => t.id === "big"), k: S.titles.find(t => t.id === "k") };""")
+        self.assertEqual(got["big"]["style"], editor.ep_title_style(got["big"]["text"]))
+        self.assertNotIn("font", got["big"]["style"])
+        self.assertEqual(got["k"]["style"], editor.EP_FACT)
+
+
+def run_js2(body, extra=("newPair", "fullSeq", "winClip", "fitRect")):
+    """run_js 와 같되 함수 몇 개 더 (원본 전체로 fullSeq · 영상 창 자르기 winClip · fitRect)."""
+    prog = ("let N = 0; const nid = () => 'n' + (++N);\nlet S = null, P = { info: { width: 1920, height: 1080 } }, out = null;\n"
+            "const total = () => Math.max(0, ...S.items.map(iEnd));\nconst tacFollowCut = g => g, tacRefollow = g => g.follow;\n"
+            "const BW = () => 1080, BH = () => 1920;\n" + js_defs(list(JS_DEFS) + list(extra)) + "\n" + body + "\nprocess.stdout.write(JSON.stringify(out));")
+    r = subprocess.run([shutil.which("node"), "-e", prog], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    if r.returncode:
+        raise AssertionError(r.stderr[-2000:])
+    return json.loads(r.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "node 가 없어요")
+class EditorRemapTest(unittest.TestCase):
+    """검토: 은평 스타일 사실 줄(끝까지)은 '맨 앞 주제 줄 = 앞이 줄거나 늘어도 그대로(BR-120)' 규칙 때문에 원본 전체로·군더더기 정리·잘라내기 뒤
+    큰 제목·흰 상자와 길이가 어긋났음 (사실 줄만 먼저 사라지거나 영상 끝 뒤까지 남음) · 이제 큰 제목처럼 줄고 늚 (D-425)."""
+    SHORT = EditorTemplateTest.SHORT
+
+    def test_fact_line_follows_title(self):
+        got = run_js2(self.SHORT + """
+const row = () => { const b = S.titles.find(t => t.id === "big"), k = S.titles.find(t => t.id === "k"); return { b: [b.start, b.dur], k: [k.start, k.dur], L: total() }; };
+const ep = () => { S = rough(false); TEMPLATES["은평 스타일"](); };
+const apply = r => { S = { ...S, ...r }; };
+out = {};
+ep(); apply(fullSeq(S, null, null)); out.full = row();                                   // 원본 전체로: 가운데 10초가 들어감 → 40초
+ep(); apply(tidySeq(S, [{ in: 10, out: 15 }, { in: 30, out: 50 }])); out.tidy = row();   // 군더더기 정리: 5초 빠짐 → 25초
+ep(); gfxCut(0, 3); out.cut0 = row();                                                     // 잘라내기(글자·도형): 앞 3초
+ep(); gfxCut(12, 16); out.cut1 = row();
+S = rough(false); apply(fullSeq(S, null, null)); out.plain = row();                       // 은평 스타일이 아니면 예전처럼 맨 앞 2.5초 그대로
+""")
+        self.assertEqual(got["full"], {"b": [0, 40], "k": [0, 40], "L": 40})
+        self.assertEqual(got["tidy"], {"b": [0, 25], "k": [0, 25], "L": 25})
+        self.assertEqual(got["cut0"]["b"], [0, 27])
+        self.assertEqual(got["cut0"]["k"], [0, 27])
+        self.assertEqual(got["cut1"]["k"], got["cut1"]["b"])
+        self.assertEqual(got["plain"]["k"], [0, 2.5])
+        self.assertEqual(got["plain"]["b"], [0, 40])
+
+    def test_win_clip_polygon(self):
+        """미리보기 영상 창 자르기(winClip): 다각형을 클립 transform 으로 옮기면 정확히 영상 창 네 모서리 · 움직임 없으면 자르지 않음 ·
+        fitRect 의 win 은 box 배치 + layout.win 일 때만 (editor._fit 과 같음)."""
+        got = run_js2("""
+const f = { bx: 0, by: 539, bw: 1080, bh: 802, win: true }, k = 0.5;
+out = { cases: [], none: winClip(f, { sc: 1, rot: 0, pos: [0.5, 0.5], anc: [0.5, 0.5] }, k, 1080, 1920) };
+for (const mo of [{ sc: 1.6, rot: 0, pos: [0.5, 0.5], anc: [0.5, 0.5] }, { sc: 1.35, rot: 12, pos: [0.53, 0.46], anc: [0.3, 0.7] }, { sc: 0.8, rot: 0, pos: [0.5, 0.52], anc: [0.5, 0.5] }])
+  out.cases.push({ mo, poly: winClip(f, mo, k, 1080, 1920) });
+const md = { kind: "video", w: 1920, h: 1080 }, it = { track: "V1", fit: "auto" };
+S = { format: "shorts", layout: { ...EP_L, win: true } }; out.on = fitRect(it, md);
+S = { format: "shorts", layout: { ...EP_L } }; out.off = fitRect(it, md).win;
+S = { format: "shorts", layout: { ...EP_L, mode: "blur", win: true } }; out.blur = fitRect(it, md).win;
+""".replace("EP_L", json.dumps(dict(editor.EP_LAYOUT, win=None))))
+        import math
+        import re
+        self.assertEqual(got["none"], "none")
+        w, h = 1080 * 0.5, 802 * 0.5
+        for c in got["cases"]:
+            mo = c["mo"]
+            pts = [tuple(map(float, re.findall(r"-?[\d.]+", p))) for p in c["poly"][len("polygon("):-1].split(",")]
+            ox, oy = mo["anc"][0] * w, mo["anc"][1] * h
+            tx, ty = (mo["pos"][0] - 0.5) * 1080 * 0.5, (mo["pos"][1] - 0.5) * 1920 * 0.5
+            a = math.radians(mo["rot"])
+            fwd = [(ox + tx + mo["sc"] * ((x - ox) * math.cos(a) - (y - oy) * math.sin(a)), oy + ty + mo["sc"] * ((x - ox) * math.sin(a) + (y - oy) * math.cos(a)))
+                   for x, y in pts]
+            for (x, y), (ex, ey) in zip(fwd, [(0, 0), (w, 0), (w, h), (0, h)]):
+                self.assertAlmostEqual(x, ex, delta=0.02, msg=c)
+                self.assertAlmostEqual(y, ey, delta=0.02, msg=c)
+        self.assertTrue(got["on"]["win"])
+        py = editor._fit({"track": "V1", "fit": "auto"}, {"kind": "video", "w": 1920, "h": 1080}, {"format": "shorts", "layout": editor.EP_LAYOUT}, 1080, 1920)
+        self.assertTrue(py["win"])
+        self.assertAlmostEqual(got["on"]["by"], py["by"], delta=1)
+        self.assertAlmostEqual(got["on"]["bh"], py["bh"], delta=1)
+        self.assertFalse(got["off"])
+        self.assertFalse(got["blur"])
+        self.assertFalse(editor._fit({"track": "V1", "fit": "auto"}, {"kind": "video", "w": 1920, "h": 1080},
+                                     {"format": "shorts", "layout": dict(editor.EP_LAYOUT, win=False)}, 1080, 1920)["win"])
+
+
+@unittest.skipUnless(FF, "ffmpeg 가 없어요")
+class ZoomWindowExportTest(WorkMixin, unittest.TestCase):
+    """검토: 줌 컷·MSG 펀치 확대가 영상 창(0.28~0.70) 밖 파란 띠·사실 줄·상황 자막 줄·말 자막 띠로 넘쳤음 → 은평 스타일(layout.win)이면
+    확대·이동·회전해도 영상 창 안에서만 (실제 내보내기 720×1280 · 고정 확대 160% · 움직이는 확대+이동 · 회전 · D-424).
+    win 을 빼면(예전 box 배치) 그대로 넘침 = 시험이 실제로 차이를 봄."""
+
+    def render(self, name, win):
+        d = 1.2
+        items = []
+        for i, fx in enumerate(({}, {"scale": {"v": 160, "k": []}},
+                                {"scale": {"v": 100, "k": [{"t": 2 * d, "v": 100}, {"t": 3 * d, "v": 175}]}, "pos": {"v": [0.5, 0.5], "k": [{"t": 2 * d, "v": [0.5, 0.5]}, {"t": 3 * d, "v": [0.55, 0.44]}]}},
+                                {"scale": {"v": 140, "k": []}, "rot": {"v": 8, "k": []}})):
+            v, a = editor._pair(i * d, (i + 1) * d, start=i * d)
+            v["fx"] = fx
+            items += [v, a]
+        lay = dict(editor.EP_LAYOUT) if win else {k: v for k, v in editor.EP_LAYOUT.items() if k != "win"}
+        q = editor._new_seq("쇼츠 1", "shorts", items, captionStyle=dict(editor.SHORTS_STYLE), layout=lay, titles=[], shapes=[])
+        proj = dict(q, captions=[], info=self.info, source=name, media=[], master={"volume": 1, "normalize": False, "lufs": -14})
+        out = editor.export(name, proj, {"preset": "small", "hw": False, "xml": False, "srt": False}, lambda m: None)
+        frames = []
+        for t in (0.6, 1.8, 3.3, 4.2):
+            raw = subprocess.run([FF, "-v", "error", "-ss", str(t), "-i", str(core.OUT / out[0]), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                 capture_output=True).stdout
+            frames.append(raw)
+        return frames
+
+    def test_zoom_stays_in_window(self):
+        import numpy as np
+        name = self.fix("MSGRAW01")
+        d = 4.8
+        r = subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x808080:s=640x360:r=30:d={d}", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+                            "-t", str(d), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(core.VIDEOS / name)], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        self.info = {"duration": d, "width": 640, "height": 360, "fps": 30.0}
+        Hh, Ww = 1280, 720
+        fit = editor._fit({"track": "V1", "fit": "auto"}, {"kind": "video", "w": 640, "h": 360}, {"format": "shorts", "layout": editor.EP_LAYOUT}, Ww, Hh)
+        wy0, wy1 = int(fit["by"]) & ~1, (int(fit["by"]) & ~1) + fit["bh"]
+
+        def gray_rows(raw, x):
+            a = np.frombuffer(raw, np.uint8).reshape(Hh, Ww, 3).astype(int)
+            g = np.where((abs(a[:, int(x * Ww)] - 128) < 20).all(axis=1))[0]
+            return a, g
+        on = self.render(name, True)
+        for i, raw in enumerate(on):
+            a, g = gray_rows(raw, 0.5)
+            self.assertGreater(len(g), 100, i)
+            self.assertGreaterEqual(g.min(), wy0 - 1, i)          # 영상은 창 안에서만
+            self.assertLessEqual(g.max(), wy1, i)
+            for y in (0.05, 0.2, 0.26, 0.71, 0.8, 0.95):          # 띠는 파랑 그대로 (가운데·양 끝)
+                for x in (0.02, 0.5, 0.98):
+                    p = a[int(y * Hh), int(x * Ww)]
+                    self.assertTrue(all(abs(int(p[c]) - BLUE[c]) <= 24 for c in range(3)), (i, y, x, p))
+            if i in (1, 2):
+                self.assertLessEqual(abs(g.min() - wy0), 2, i)    # 확대한 클립도 창을 꽉 채움 (창 크기는 그대로)
+                self.assertLessEqual(abs(g.max() - (wy1 - 1)), 2, i)
+        off = self.render(name, False)
+        _, g = gray_rows(off[1], 0.5)
+        self.assertLess(g.min(), wy0 - 40, "예전 box 배치는 확대가 띠로 넘침 (시험이 차이를 봄)")
 
 
 if __name__ == "__main__":
