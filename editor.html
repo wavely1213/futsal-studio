@@ -1080,7 +1080,8 @@ const r3 = t => Math.round(t * 1000) / 1000;
 function swapIn(top, k) { // 바꿔 끼운 주제 줄(k) 뒤로 큰 제목(top)을 옮김 — 주제 줄이 끝난 때부터 원래 끝까지
   if (k && k.swap && top.start < k.start + k.dur - 1e-6) { const e = top.start + top.dur; top.start = r3(k.start + k.dur); top.dur = r3(e - top.start); }
 }
-const headTopic = g => g.plan === "topic" && g.start < 0.05;  // 쇼츠 맨 앞 주제 줄 — 앞을 잘라도(Q·대사 잘라내기·군더더기 정리) 맨 앞 그대로
+const headTopic = g => g.plan === "topic" && g.start < 0.05;
+const epFrame = g => g.plan === "series" || g.plan === "longline";  // 은평 스타일 이름표·전체 강좌 줄 (큰 제목·줄 기본 모양 고르기에서 뺌 · BR-245 · BR-246)  // 쇼츠 맨 앞 주제 줄 — 앞을 잘라도(Q·대사 잘라내기·군더더기 정리) 맨 앞 그대로
 // 은평 스타일 사실 줄(BR-241): 맨 앞 주제 줄이지만 흰 상자 큰 제목과 같이 끝까지 — 앞을 잘라도 맨 앞 그대로가 아니라 큰 제목처럼 줄고 늚 (D-425)
 // (고치기 전에 셈: 큰 제목 길이가 먼저 바뀌어도 같은 줄로 봄)
 function epFacts(q) {
@@ -1551,7 +1552,7 @@ function topicTitle(text, top, cap, len, said, vtop) {
 function topicUnder(t, titles = S.titles) {
   const k = titles.find(x => x.id === t.under && x.plan !== "topic"); if (k) return k;
   const end = t.start + t.dur;
-  return titles.filter(x => x.plan !== "topic" && x.start <= (t.swap ? end : t.start) + 0.05 && x.start + x.dur >= end - 0.05).sort((a, b) => b.dur - a.dur)[0] || null;
+  return titles.filter(x => x.plan !== "topic" && !epFrame(x) && x.start <= (t.swap ? end : t.start) + 0.05 && x.start + x.dur >= end - 0.05).sort((a, b) => b.dur - a.dur)[0] || null;
 }
 function topicGone(k) { // 바꿔 끼운 주제 줄을 지우면 뒤의 큰 제목을 다시 그 자리부터 (첫머리가 비지 않게)
   if (!k || k.plan !== "topic" || !k.swap) return;
@@ -4662,7 +4663,35 @@ const EP = {
   BAR: "#1F4FD1", ZOOM: 1.32, VPOS: 0.48, BOX: { x: 0.05, y: 0.095, w: 0.9, h: 0.06 }, PAD: 28, SIZES: [72, 68, 64, 60, 56, 52, 48], CAP_Y: 0.8,
   TITLE: { weight: "Black", fill: "#111111", stroke: "#111111", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
   FACT: { weight: "Bold", size: 42, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", y: 0.195 },
+  // 덧붙임 (BR-245 · BR-246 · editor.py EP_TAG·EP_TAG_BOX·EP_TAG_PAD·EP_LINK·LONG_LINE): 시리즈 이름표(검은 상자 · 흰 글씨) · 전체 강좌 줄
+  TAG: { weight: "Black", size: 40, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
+  TAG_BOX: { y: 0.052, h: 0.036 }, TAG_PAD: 22, LONG: "전체 강좌는 채널에서 ▶",
+  LINK: { weight: "Bold", size: 36, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", y: 0.865 },
 };
+let EPX = null;  // 스타일 화면 덧붙임 {series, seriesName, longLine, next(다음 시리즈 번호 · 보기)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx)
+function epSeriesFit(t, g) {  // 이름표 상자 폭을 글에 맞춤 (editor.py ep_series_fit 과 같음)
+  const w = Math.min(0.9, (textW(t.text, t.style) + 2 * EP.TAG_PAD) / 1080);
+  g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
+}
+// 은평 스타일 덧붙임 (editor.py ep_extras · ep_series · ep_longline 과 같은 값): 고른 것만 · 이미 있으면 때만 다시 맞춤 (두 번 눌러도 하나) · 번호는 보기 번호(내보낼 때 정함)
+function epExtras(q, L) {
+  const x = EPX || {}, tag = q.titles.find(t => t.plan === "series"), line = q.titles.find(t => t.plan === "longline");
+  if (!tag && x.series) {
+    const n = +x.next || 1; x.next = n + 1;
+    const t = { id: nid(), text: `${x.seriesName || "1분 레슨"} (${n})`, start: 0, dur: r3(L), plan: "series", seriesN: n,
+      style: { ...EP.TAG, y: Math.round((EP.TAG_BOX.y + EP.TAG_BOX.h / 2 + TOPIC.LINE * EP.TAG.size / 2 / 1920) * 1e4) / 1e4 } };
+    q.titles.push(t);
+  } else if (tag) { tag.start = 0; tag.dur = r3(L); }
+  const t = q.titles.find(k => k.plan === "series");
+  if (t) {
+    let g = (q.shapes || []).find(k => k.plan === "series");
+    if (!g) (q.shapes = q.shapes || []).push(g = { id: nid(), name: "이름표 상자", x: 0, y: EP.TAG_BOX.y, w: 0, h: EP.TAG_BOX.h, color: "#000000", opacity: 1, radius: 0, start: 0, dur: r3(L), full: true, plan: "series" });
+    else Object.assign(g, { start: 0, dur: r3(L), full: true });
+    epSeriesFit(t, g);
+  }
+  if (!line && x.longLine) q.titles.push({ id: nid(), text: EP.LONG, start: 0, dur: r3(L), style: { ...EP.LINK }, plan: "longline" });
+  else if (line) { line.start = 0; line.dur = r3(L); }
+}
 function epTitleStyle(text) {  // 흰 상자 안(양옆 PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝)
   const room = EP.BOX.w * 1080 - 2 * EP.PAD, size = EP.SIZES.find(z => textW(text, { ...EP.TITLE, size: z }) <= room) ?? EP.SIZES[EP.SIZES.length - 1];
   return { ...EP.TITLE, size, y: Math.round((EP.BOX.y + EP.BOX.h / 2 + TOPIC.LINE * size / 2 / 1920) * 1e4) / 1e4 };
@@ -4675,7 +4704,7 @@ function epCard(q, L) {
   for (const k of q.titles) if (k.plan === "topic" && k.swap) {  // 바꿔 끼운 주제 줄 뒤로 옮겨 둔 큰 제목은 다시 처음부터
     const t = q.titles.find(x => x.id === k.under); if (t && Math.abs(t.start - (k.start + k.dur)) < 0.05) { t.dur = r3(t.dur + t.start - k.start); t.start = k.start; }
   }
-  let top = q.titles.filter(t => t.plan !== "topic" && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
+  let top = q.titles.filter(t => t.plan !== "topic" && !epFrame(t) && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
   if (!top) { top = { id: nid(), text: cutText(q.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: L, style: { ...q.captionStyle } }; q.titles.unshift(top); }
   const topics = q.titles.filter(t => t.plan === "topic" && topicUnder(t, q.titles) === top);
   top.text = String(top.text || "").split(/\s+/).filter(Boolean).join(" "); top.start = 0; top.dur = r3(L);
@@ -4684,14 +4713,16 @@ function epCard(q, L) {
   for (const t of topics) { delete t.swap; t.under = top.id; t.start = 0; t.dur = r3(L); t.style = { ...EP.FACT }; }
   const box = (q.shapes || []).find(g => g.plan === "card"), bx = { ...EP.BOX, color: "#FFFFFF", opacity: 1, radius: 0, start: 0, dur: r3(L), full: true };
   if (box) Object.assign(box, bx); else (q.shapes = q.shapes || []).push({ id: nid(), name: "제목 상자", ...bx, plan: "card" });
+  epExtras(q, L);
 }
 // 다른 템플릿을 고르면 은평 스타일 흰 상자를 지우고 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · MSG 강조 글씨 등은 그대로) 크기·나타나기를 보통으로,
 // 그 사실 줄은 첫머리 주제 줄(처음 SEC 초 · 모양은 tplTitle 의 placeTopic 이 다시 놓음)로 (예전 편집본에는 흰 상자가 없어 그대로)
 function epOff(q) {
   if (q.layout) delete q.layout.win;  // 영상 창 밖 자르기(D-424)도 은평 스타일에서만
   if (!epOn(q)) return;
-  q.shapes = q.shapes.filter(g => g.plan !== "card");
-  const top = q.titles.filter(t => t.plan !== "topic" && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
+  q.shapes = q.shapes.filter(g => g.plan !== "card" && g.plan !== "series");   // 이름표·전체 강좌 줄도 은평 스타일에서만 (BR-245 · BR-246)
+  q.titles = q.titles.filter(t => t.plan !== "series" && t.plan !== "longline");
+  const top = q.titles.filter(t => t.plan !== "topic" && !epFrame(t) && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
   if (!top) return;
   Object.assign(top.style, { size: 100, effect: "pop" });
   for (const t of q.titles) if (t.plan === "topic" && topicUnder(t, q.titles) === top) { Object.assign(t.style, TOPIC_STYLE); t.dur = r3(Math.min(t.dur, TOPIC.SEC)); }
@@ -5068,7 +5099,7 @@ function recTopic(s, on, top, cap, layout, items) {
   return txt && top ? topicTitle(txt, top, cap, s.length, !!s.hookSaid, videoTop(layout, items, (P.info || {}).width, (P.info || {}).height)) : null;
 }
 function recBase() {  // 새 쇼츠의 바탕: 첫 쇼츠 편집본의 큰 제목 모양·자막 모양 (위쪽 자막이면 큰 제목 아래로 · editor.py _stack_below 와 같은 뜻 · E4③)
-  const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic") || null;
+  const base = P.sequences.find(q => q.format === "shorts") || S, top0 = base.titles.find(t => t.plan !== "topic" && !epFrame(t)) || null;
   const cap = JSON.parse(JSON.stringify(base.captionStyle)); if (top0 && cap && (cap.y ?? 0.8) < 0.3) cap.y = 0.3;
   return { base, top0, cap };
 }
@@ -5547,7 +5578,7 @@ function bindStyle(prefix, getSt, root, after) {  // after(k, v): 값을 바꾼 
 }
 // 줄 설정 (D-302): 이름 · 보이기 · 잠그기 · 앞뒤 순서 · 빈 줄 지우기 · 자막 줄은 자막 모양 전체 · 타이틀 줄은 기본 모양 (글자 모양은 그 줄 타이틀에도)
 const OT_LOOK = ["weight", "size", "fill", "stroke", "strokeW", "bgOn", "bg", "bgOpacity", "effect", "highlight", "font"];
-const otRowStyle = o => o.style || ((S.titles.find(t => trkOf(t, "t") === o.id && t.plan !== "topic") || {}).style) || baseTitle(); // T 줄 기본 모양 (없으면 그 줄 첫 타이틀)
+const otRowStyle = o => o.style || ((S.titles.find(t => trkOf(t, "t") === o.id && t.plan !== "topic" && !epFrame(t)) || {}).style) || baseTitle(); // T 줄 기본 모양 (없으면 그 줄 첫 타이틀)
 // 자막 트랙 모양을 고칠 대상: C1 은 captionStyle · 다른 트랙은 그 트랙 style 에 고친 값만 (D-308)
 // → 색만 바꿔도 높이·크기는 자막 1 을 계속 따라감 (높이는 '세로 위치'를 직접 옮겼을 때만 그 트랙 값)
 const capStyleTarget = o => o.id === "C1" ? S.captionStyle : (o.style && typeof o.style === "object" ? o.style : (o.style = {}));
@@ -5558,7 +5589,7 @@ function bindCapStyle(o, el) {
 function bindRowTitleStyle(o, el) {
   bindStyle("ts_", () => (o.style = o.style || { ...otRowStyle(o) }), el, (k, v) => {
     if (!OT_LOOK.includes(k)) return; // 자리(가로·세로·정렬·기울기)는 새로 넣는 타이틀부터
-    for (const t of S.titles) if (trkOf(t, "t") === o.id && t.plan !== "topic") { if (v === undefined) delete t.style[k]; else t.style[k] = v; }
+    for (const t of S.titles) if (trkOf(t, "t") === o.id && t.plan !== "topic" && !epFrame(t)) { if (v === undefined) delete t.style[k]; else t.style[k] = v; }
     S.titles.filter(t => t.plan === "topic").forEach(t => placeTopic(t, topicUnder(t) || S.titles.find(x => x.plan !== "topic"))); // 첫머리 주제 줄은 큰 제목에 다시 맞춤 (tplTitle 과 같음)
   });
 }
@@ -6011,7 +6042,8 @@ function renderGfxPanel(el) {
   }
   if (tt) {
     const ta = $("pTitleText"); let before = null;
-    ta.oninput = () => { if (!before) before = JSON.stringify(P); tt.text = ta.value; scheduleSave(); frameDirty = true; };
+    ta.oninput = () => { if (!before) before = JSON.stringify(P); tt.text = ta.value; if (tt.plan === "series") { const g = S.shapes.find(x => x.plan === "series"); if (g) epSeriesFit(tt, g); }  // 이름표 상자는 글 폭에 맞춤
+      scheduleSave(); frameDirty = true; };
     ta.onblur = () => { if (before) { pushHist("타이틀 글자", before); before = null; renderTimeline(); } };
     $("pTitleDel").onclick = deleteGfx;
     bindTimeRows(el);
@@ -6714,8 +6746,17 @@ async function startExport() {  // 내보내기 시작 (실패 카드의 [다시
   hideEdFail();
   EXP_JOB = { ...LAST_EXPORT.job };
   const r = await (await post("/api/edit/export", LAST_EXPORT.body)).json();
+  if (r.series) seriesTook(r.series);
   if (!r.ok) return toast(r.error || "지금은 내보낼 수 없어요");
   toast("내보내기 시작 · 그동안 계속 편집해도 돼요"); watchJob("내보내기", r.jobId);
+}
+// 내보낼 때 서버가 정한 시리즈 번호(editor.py series_apply)를 그 편집본 이름표에도 (같은 글·상자 폭 · 다음 저장 때 함께 · BR-245)
+function seriesTook(sr) {
+  const q = P.sequences.find(x => x.id === sr.seq), t = q && q.titles.find(x => x.id === sr.id); if (!t) return;
+  if (t.text === sr.text && t.seriesN === sr.n) return;
+  t.text = sr.text; t.seriesN = sr.n;
+  const g = q.shapes.find(x => x.plan === "series"); if (g && sr.w != null) { g.x = sr.x; g.w = sr.w; }
+  ver++; frameDirty = true; scheduleSave(); if (q === S) renderPanels();
 }
 let EXP_JOB = { t0: 0, fmt: null, seq: null, master: null }, JOBNAME = "", LAST_EXPORT = null;
 // 편집실에서 쓰는 실패 안내: 내보내기에서 변환 도구가 멈춘 경우는 내보내기에 맞는 말 · 편집실에 없는 [업데이트 확인]은 스튜디오 창을 가리킴
@@ -7982,7 +8023,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   P = j.project; P.sequences.forEach(ensureSeq); signFresh();
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
-  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0;
+  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null;
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;

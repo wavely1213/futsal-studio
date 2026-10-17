@@ -4052,6 +4052,12 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             B.shapes.append(box)
             refs["shapes"] = [box["id"]]
             B.fixed |= set(refs["titles"])
+            xt, xg = editor.ep_extras(B.pos)   # 시리즈 이름표(큰 제목과 한 묶음 · 빼면 같이 빠짐)·전체 강좌 줄(따로) · 고른 것만 (BR-245 · BR-246)
+            B.titles += xt
+            B.shapes += xg
+            B.fixed |= {t["id"] for t in xt}
+            refs["titles"] += [t["id"] for t in xt if t["plan"] == "series"]
+            refs["shapes"] += [g["id"] for g in xg]
         B.event("hook", 0.0, f"{kt['text']} · {hk['text']}" if kt else hk["text"],
                 ("쇼츠 내내 흰 상자 제목 + 사실 줄" if kt else "쇼츠 내내 흰 상자 제목") if B.card else
                 "쇼츠 첫 2.5초 주제 줄 + 포인트" if kt else "쇼츠 첫 2.5초 훅 자막", refs=refs)
@@ -4124,7 +4130,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     seq["auto"] = "msg"
     if B.card:  # 은평 스타일 큰 제목·사실 줄·흰 상자는 편집본 끝까지 (끝에 남는 효과음·배경음악 꼬리까지 · BR-241)
         end = round(editor.seq_total(seq), 3)
-        for x in [t for t in B.titles if t["id"] in B.fixed] + [g for g in B.shapes if g.get("plan") == "card"]:
+        for x in [t for t in B.titles if t["id"] in B.fixed] + [g for g in B.shapes if g.get("plan") in ("card", "series")]:
             x["dur"] = end
     summ = summary_of(B.events, sections, total, seq_items_audio)
     seq["msg"] = {"v": 1, "style": {"label": st.get("label"), "kind": st.get("kind"), "sources": st.get("sources"), "sfx": snd.get("palette") or "variety"},
@@ -4458,7 +4464,7 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
     # 은평 스타일 쇼츠(BR-242): 위 띠의 흰 제목 상자·큰 제목·사실 줄은 그 자리 그대로 · 다른 글자는 그 둘레를 피함 (화면 글자 2개 셈에는 안 넣음)
     fixed = getattr(B, "fixed", None) or set()
     fboxes = [text_box(t["text"], t["style"], W, H) for t in B.titles if t["id"] in fixed]
-    fboxes += [[s["x"] * W, s["y"] * H, (s["x"] + s["w"]) * W, (s["y"] + s["h"]) * H] for s in B.shapes if s.get("plan") == "card"]
+    fboxes += [[s["x"] * W, s["y"] * H, (s["x"] + s["w"]) * W, (s["y"] + s["h"]) * H] for s in B.shapes if s.get("plan") in ("card", "series")]
     for t in sorted(B.titles, key=lambda t: (LAYOUT_PRI.get(kind_of.get(t["id"]), 9), t["start"])):
         if t["id"] in fixed:
             continue

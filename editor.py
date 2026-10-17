@@ -1566,6 +1566,103 @@ def ep_caption(cs):
     return c
 
 
+# 은평 스타일 덧붙임 (BR-245 · BR-246 · D-428~D-430 · 스타일 화면에서 고름 · 기본 끔) — editor.html EP.TAG·EP.LINK·epSeries·epSeriesFit·epExtras 와 같은 값·셈
+# 시리즈 이름표: 흰 상자 위 작은 검은 상자(도형 plan "series" · 폭은 글에 맞춤) 안 흰 글씨 '1분 레슨 (n)' · 처음부터 끝까지
+# 전체 강좌 줄: 아래 띠 말 자막 아래 작은 흰 글씨 '전체 강좌는 채널에서 ▶' (plan "longline") · 처음부터 끝까지
+EP_TAG = dict(DEFAULT_STYLE, weight="Black", size=40, fill="#FFFFFF", stroke="#000000", strokeW=0, bgOn=False, x=0.5, align="center", effect="none")
+EP_TAG_BOX = {"y": 0.052, "h": 0.036}   # 이름표 상자 (화면 비율 · 아래 끝 0.088 = 흰 상자 위 끝 0.095 위 틈)
+EP_TAG_PAD = 22        # 이름표 상자 안 글 양옆 여백 (화소 · 1080 기준)
+EP_LINK = dict(DEFAULT_STYLE, weight="Bold", size=36, fill="#FFFFFF", stroke="#000000", strokeW=0, bgOn=False, x=0.5, align="center", effect="none",
+               y=0.865)   # 글 아래 끝 (말 자막 0.8 아래 · 두 줄 자막과도 안 겹침)
+LONG_LINE = "전체 강좌는 채널에서 ▶"
+_SER_NO = re.compile(r"\(\s*(\d{1,6})\s*\)\s*$")   # 이름표 끝 '(n)'
+
+
+def ep_series_text(name, n):
+    return f"{name} ({n})"
+
+
+def ep_series_fit(t, g):
+    """이름표 상자 폭을 글에 맞춤 (가운데 · 양옆 EP_TAG_PAD)."""
+    W, _ = frame_size("shorts")
+    w = min(0.9, (_text_w(t["text"], t["style"]) + 2 * EP_TAG_PAD) / W)
+    g["w"], g["x"] = round(w, 4), round(0.5 - w / 2, 4)
+
+
+def ep_series(name, n, length):
+    """시리즈 이름표 (타이틀, 도형) — seriesN: 글에 넣은 번호 (내보낼 때 정한 번호와 다르면 사용자가 고친 번호로 봄 · series_apply)."""
+    _, H = frame_size("shorts")
+    st = dict(EP_TAG, y=round(EP_TAG_BOX["y"] + EP_TAG_BOX["h"] / 2 + TXT_LINE * EP_TAG["size"] / 2 / H, 4))
+    t = {"id": _nid(), "text": ep_series_text(name, n), "start": 0.0, "dur": round(float(length), 2), "style": st, "plan": "series", "seriesN": int(n)}
+    g = {"id": _nid(), "name": "이름표 상자", "x": 0.0, "y": EP_TAG_BOX["y"], "w": 0.0, "h": EP_TAG_BOX["h"], "color": "#000000", "opacity": 1.0, "radius": 0,
+         "start": 0.0, "dur": round(float(length), 3), "full": True, "plan": "series"}
+    ep_series_fit(t, g)
+    return t, g
+
+
+def ep_longline(length):
+    return {"id": _nid(), "text": LONG_LINE, "start": 0.0, "dur": round(float(length), 2), "style": dict(EP_LINK), "plan": "longline"}
+
+
+def ep_extras(length, ahead=0):
+    """스타일 화면에서 고른 덧붙임 → (더할 타이틀, 더할 도형) · 이름표 번호는 아직 정하지 않은 보기 번호(다음 번호 + ahead · 내보낼 때 정함)."""
+    try:
+        import style as _style
+        ex = _style.card_extras()
+        n = _style.series_peek(ahead=ahead) if ex["series"] else 0
+    except Exception:  # noqa: BLE001 — 설정을 못 읽으면 덧붙이지 않음
+        return [], []
+    titles, shapes = [], []
+    if ex["series"]:
+        t, g = ep_series(ex["seriesName"], n, length)
+        titles.append(t)
+        shapes.append(g)
+    if ex["longLine"]:
+        titles.append(ep_longline(length))
+    return titles, shapes
+
+
+def series_apply(name, seq):
+    """쇼츠 편집본의 시리즈 이름표 번호를 정해 글에 넣음 (처음 내보낼 때·올리기 키트를 만들 때 · seq 를 고침) → {seq, id, n, text, x, w} · 이름표가 없으면 None.
+    글의 번호가 넣어 둔 번호(seriesN)와 다르면 사용자가 고친 번호로 그대로 씀 · 같으면 정해 둔 번호(없으면 새 번호)."""
+    if (seq or {}).get("format") != "shorts" or not seq.get("id"):
+        return None
+    t = next((x for x in seq.get("titles") or [] if x.get("plan") == "series"), None)
+    if not t:
+        return None
+    import style as _style
+    m = _SER_NO.search(str(t.get("text") or ""))
+    shown = int(m.group(1)) if m else None
+    want = shown if shown and shown != t.get("seriesN") else None
+    n = _style.series_assign(name, seq["id"], want)
+    base = _SER_NO.sub("", str(t.get("text") or "")).strip() or _style.card_extras()["seriesName"]
+    t["text"], t["seriesN"] = ep_series_text(base, n), n
+    g = next((x for x in seq.get("shapes") or [] if x.get("plan") == "series"), None)
+    if g:
+        ep_series_fit(t, g)
+    return {"seq": seq["id"], "id": t["id"], "n": n, "text": t["text"], **({"x": g["x"], "w": g["w"]} if g else {})}
+
+
+def series_view(name, proj):
+    """편집실을 열 때: 다른 곳(휴대폰 내보내기·끝까지 자동으로·올리기 키트)에서 정한 번호를 이름표 글에 보여 줌 (사용자가 고친 번호는 그대로) ·
+    저장은 편집실이 고칠 때 함께."""
+    try:
+        import style as _style
+        nums = _style.series_numbers(name)
+    except Exception:  # noqa: BLE001
+        return proj
+    for q in proj.get("sequences") or []:
+        t = next((x for x in q.get("titles") or [] if x.get("plan") == "series"), None) if isinstance(q, dict) else None
+        n = nums.get(q.get("id")) if t else None
+        m = _SER_NO.search(str(t.get("text") or "")) if n else None
+        if m and int(m.group(1)) == t.get("seriesN") and n != t.get("seriesN"):
+            t["text"], t["seriesN"] = ep_series_text(_SER_NO.sub("", t["text"]).strip(), n), n
+            g = next((x for x in q.get("shapes") or [] if x.get("plan") == "series"), None)
+            if g:
+                ep_series_fit(t, g)
+    return proj
+
+
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
 TXT_LINE = 1.25   # 글 상자 한 줄 높이 = 글자 크기 × 1.25 (editor.html .txt line-height · 내보내기 ASS 도 같은 크기)
 TXT_GAP = 0.012   # 자동으로 놓는 글 상자끼리 띄울 틈 (화면 높이 비율)
@@ -2104,8 +2201,9 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                 cs = ep_caption(cs)
                 kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
                 shapes = ep_card(hook, kt, length)
+                xt, xg = ep_extras(length, ahead=i - 1)   # 시리즈 이름표·전체 강좌 줄 (고른 것만 · BR-245 · BR-246)
                 seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(EP_LAYOUT), master=dict(master),
-                                     captionsOn=caps_on, titles=[hook] + ([kt] if kt else []), shapes=shapes))
+                                     captionsOn=caps_on, titles=[hook] + ([kt] if kt else []) + xt, shapes=shapes + xg))
                 continue
             W, H = frame_size("shorts")
             tb = text_box(hook["text"], hook["style"], W, H)
@@ -6633,6 +6731,12 @@ def export(name, proj, opts, log):
     overlay(글자·도형만 투명 영상 · D-348) · preset · fps · hw · range([시작, 끝] 초)."""
     CANCEL.clear()
     proj, fmt, BW, BH, W, H, fps, media, pr = _export_prep(name, proj, opts, log)
+    try:  # 시리즈 이름표 번호: 처음 내보낼 때 정하고 다시 내보내면 그대로 (BR-245 · 편집실에서 시킨 것은 app 이 이미 정함 · 같은 번호)
+        proj["titles"] = [dict(t) for t in proj.get("titles") or []]
+        proj["shapes"] = [dict(g) for g in proj.get("shapes") or []]
+        series_apply(name, proj)
+    except OSError as e:
+        log(f"  시리즈 번호를 저장하지 못해서 이름표 글 그대로 내보내요 · {e}")
     stem = _export_stem(name, proj, fmt)
     outputs = []
     total = seq_total(proj)

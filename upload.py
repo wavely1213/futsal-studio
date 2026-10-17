@@ -1000,7 +1000,7 @@ def _msg_opening(sq):
     if not ev:
         return ""
     ids = set((ev.get("refs") or {}).get("titles") or [])
-    t = next((t for t in sq.get("titles") or [] if t.get("id") in ids and t.get("plan") != "topic"), None)
+    t = next((t for t in sq.get("titles") or [] if t.get("id") in ids and t.get("plan") not in ("topic", "series")), None)  # (시리즈 이름표도 빼고 · BR-245)
     return str(t.get("text") or "") if t else ""
 
 
@@ -1060,7 +1060,8 @@ def build_kit(name, seq=None, save=True):
     elif mg.get("hook"):  # MSG 편집본: 맨 앞 훅 자막이 곧 제목 후보
         hook = _oneline(mg["hook"], 40) or None
     if sq and fmt == "shorts" and not hook and not mg.get("opening"):  # 쇼츠 편집본의 큰 제목 글자가 곧 훅 (자동으로 자른 첫 문장 조각·인사·순서 말은 빼고)
-        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text")) and t.get("plan") != "topic"), None)  # 첫머리 주제 줄(BR-120)은 빼고
+        hook = next((_oneline(t.get("text"), 40) for t in overlays or [] if _oneline(t.get("text")) and t.get("plan") not in ("topic", "series", "longline")),
+                    None)  # 첫머리 주제 줄(BR-120)·은평 스타일 이름표·전체 강좌 줄(BR-245 · BR-246)은 빼고
         hook = _overlay_hook(hook, texts)
     if not hook and segs:
         try:
@@ -1090,6 +1091,9 @@ def build_kit(name, seq=None, save=True):
     kit["seriesFit"] = series_fit(texts, flow, dur, proj, sq, about=Path(name).stem)  # '[N가지 총정리]'·대결 시리즈를 붙여도 되는지 (게스트를 바꿀 때도)
     kit["titlePool"] = list(titles)  # 게스트를 뺐을 때 후보를 다시 채울 바탕 (D-085)
     shape_titles(kit, hints, others, guests=clean_guests(prev.get("guests")), flow=flow, notes=notes)  # 게스트·시리즈·질문형 + 겹침 순서
+    if sq and fmt == "shorts":  # 화면에 시리즈 이름표가 있는 쇼츠: 제목 앞에도 같은 회차 '[1분 레슨 #n]' (번호는 이때 정함 · BR-245)
+        kit["series"] = series_tag(name, sq)
+        _tag_titles(kit)
     kit["hashtags"] = todo_hashtags(kit["hashtags"], hints, fmt)
     quote_avoid = [_kit_quote(k) for k in others if k.get("name") == name]  # 같은 촬영본의 다른 키트가 쓴 첫 줄 인용
     kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur, quote_avoid), chs, kit["hashtags"], kit["title"], topics, notes=notes)
@@ -1102,6 +1106,9 @@ def build_kit(name, seq=None, save=True):
     kit["prompt"] = claude_prompt(kit, segs)
     kit["promo"] = promo_lines(_transcript(d) or segs)  # 영상에서 말한 레슨 홍보 → 설명 '▶ 레슨 문의' (쇼츠·티저에서는 뺀 말 · E12)
     kit["description"] = add_promo(kit["description"], kit["promo"], notes)
+    if sq and fmt == "shorts" and _long_link_on():  # 설명에 전체 강좌(같은 원본 롱폼 · 모르면 우리 채널) 주소 (BR-246)
+        kit["longLink"] = long_link(name)
+        kit["description"] = add_long_link(kit["description"], kit["longLink"], notes)
     if foreign:  # 다른 채널 클립이 든 편집본: 설명에 출처 · 원본이 다른 채널이면 '출연' 줄 빼기 · 알림 (E2)
         kit["description"] = fit_description(_credit(kit["description"], foreign, _main_other(kit), (kit.get("guestAuto") or {}).get("lines") or ()), notes)
         kit["foreign"] = foreign
@@ -1113,6 +1120,82 @@ def build_kit(name, seq=None, save=True):
     if save:
         _store(kit, name, seq, sq)
     return kit
+
+
+# ---- 시리즈 회차 · 전체 강좌 링크 (은평 스타일 덧붙임 · BR-245 · BR-246 · D-430) ----
+
+_TAG_HEAD = re.compile(r"^\[[^\]]*#\d+\]\s*")   # 제목 앞 회차 '[1분 레슨 #12] ' (hooks._SERIES 가 배울 때 지우는 모양)
+
+
+def series_tag(name, sq):
+    """쇼츠 편집본에 시리즈 이름표가 있으면 회차를 정함(editor.series_apply · 편집본 파일은 그대로 · 번호는 시리즈 번호 파일) → {"n", "tag"} · 없으면 None."""
+    try:
+        r = editor.series_apply(name, copy.deepcopy(sq))
+    except OSError as e:
+        studio_log(f"시리즈 번호를 저장하지 못했어요 · {e}")
+        return None
+    if not r:
+        return None
+    return {"n": r["n"], "tag": f"[{editor._SER_NO.sub('', r['text']).strip()} #{r['n']}]"}
+
+
+def _tag_titles(kit, title=True):
+    """제목 후보(·고른 제목·게스트 자동 제목) 앞에 회차 — 이미 붙은 회차는 바꿈 · 회차가 없는 키트는 그대로."""
+    tag = (kit.get("series") or {}).get("tag")
+    if not tag:
+        return kit
+    put = lambda t: f"{tag} {_TAG_HEAD.sub('', str(t or ''))}".strip()  # noqa: E731
+    kit["titles"] = [put(t) for t in kit.get("titles") or []]
+    ga = kit.get("guestAuto") or {}
+    if ga.get("titles"):
+        ga["titles"] = [put(t) for t in ga["titles"]]
+    if title and kit.get("title"):
+        kit["title"] = put(kit["title"])
+    return kit
+
+
+def _long_link_on():
+    try:
+        import style
+        return style.card_extras()["longLine"]
+    except Exception:  # noqa: BLE001 — 설정을 못 읽으면 넣지 않음
+        return False
+
+
+def long_link(name):
+    """같은 원본(name)으로 만든 롱폼의 유튜브 주소 → {"url", "how"}: 유튜브에 바로 올린 기록(공개·일부 공개·공개 예약) "history" →
+    롱폼 키트 제목이 우리 채널 영상 제목과 같으면 그 영상 "kit" → 아니면 우리 채널 주소 "channel" (설정 channel_url · 없으면 None)."""
+    try:
+        import strategy
+        import youtube_upload
+        for h in youtube_upload.history(youtube_upload.HISTORY_MAX)["items"]:  # 최근 것부터
+            if h.get("name") == name and not h.get("shorts") and strategy.published(h):
+                return {"url": youtube_upload.links(h["videoId"])["url"], "how": "history"}
+    except Exception:  # noqa: BLE001 — 기록을 못 읽으면 다음 방법
+        pass
+    try:
+        rows = hooks.own_rows()
+        ids = {hooks.norm_title(r.get("title")): str(r["id"]) for r in rows.get("videos") or [] if r.get("id")}
+        for k in _all_kits():
+            if k.get("name") == name and k.get("format") == "long" and k.get("title"):
+                vid = ids.get(hooks.norm_title(k["title"]))
+                if vid and re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+                    return {"url": f"https://youtu.be/{vid}", "how": "kit"}
+    except Exception:  # noqa: BLE001
+        pass
+    url = str(core.CONFIG.get("channel_url") or "").strip()
+    return {"url": url, "how": "channel"} if re.match(r"https://(?:www\.)?youtube\.com/", url) else None
+
+
+def add_long_link(text, link, notes=None):
+    """설명 첫 단락(훅) 바로 뒤에 '▶ 전체 강좌 보기 + 주소' (모르면 '▶ 전체 강좌는 채널에서 + 채널 주소') · 링크가 없으면 그대로."""
+    if not link or not link.get("url"):
+        return text
+    block = ("▶ 전체 강좌는 채널에서" if link["how"] == "channel" else "▶ 전체 강좌 보기") + "\n" + link["url"]
+    if notes is not None and link["how"] == "channel":
+        notes.append("이 쇼츠의 전체 강좌 영상을 아직 몰라서 설명에 우리 채널 주소를 넣었어요 · 롱폼을 올린 뒤 '다시 만들기'를 누르면 그 영상 주소로 바뀌어요")
+    head, _, rest = str(text or "").partition("\n\n")
+    return fit_description(head + "\n\n" + block + ("\n\n" + rest if rest else ""), notes)
 
 
 def kit_text(kit):
@@ -1828,6 +1911,7 @@ def set_guests(name, seq, guests):
             kit["title"] = kit["titles"][0]
         _apply_guests(kit, guests)
         shape_titles(kit, hints, others, guests, keep_title=picked)
+        _tag_titles(kit, title=not picked)  # 시리즈 이름표 쇼츠: 다시 채운 후보에도 회차 (손으로 고른 제목은 그대로)
         remember_guests(guests, name, seq)
         _store(kit, name, seq, sq)
         return annotate(kit, hints, others)

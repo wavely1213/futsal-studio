@@ -6,7 +6,9 @@
 - MSG 쇼츠: 모든 기본 스타일 × 보통·듬뿍 — 큰 제목·사실 줄·흰 상자가 편집본 끝까지 · 다른 화면 글자(상황 자막·다시 보기 ▶·점수판·강조)는
   제목 상자·사실 줄·말 자막 띠와 안 겹침 · 전술 그림 배치도 같은 화면 구성
 - 실제 내보내기(720×1280): 띠 파랑 · 흰 상자 자리 · 제목 글자는 어둡게 상자 가운데 · 영상 창 자리 · 사실 줄 · 말 자막은 아래 띠
-- 편집실(editor.html 함수를 node 로 그대로): 템플릿 '은평 스타일' = 서버와 같은 모양·자리 · 다른 템플릿을 고르면 흰 상자를 지우고 큰 제목을 보통으로."""
+- 편집실(editor.html 함수를 node 로 그대로): 템플릿 '은평 스타일' = 서버와 같은 모양·자리 · 다른 템플릿을 고르면 흰 상자를 지우고 큰 제목을 보통으로.
+- 덧붙임(BR-245 · BR-246): 설정 · 시리즈 번호 셈(정하기·다시 쓰기·사용자 번호·겹치지 않음·채널마다) · 가편집·MSG 쇼츠의 이름표·전체 강좌 줄 자리 ·
+  실제 내보내기(번호를 정해 이름표에 · 다시 내보내도 같은 번호) · 편집실 템플릿 · 길(/api/style/card_extras · 내보내기 응답) · 올리기 키트 제목 회차·설명 링크."""
 import json
 import shutil
 import subprocess
@@ -514,6 +516,389 @@ class ZoomWindowExportTest(WorkMixin, unittest.TestCase):
         off = self.render(name, False)
         _, g = gray_rows(off[1], 0.5)
         self.assertLess(g.min(), wy0 - 40, "예전 box 배치는 확대가 띠로 넘침 (시험이 차이를 봄)")
+
+
+# ---------- 덧붙임: 시리즈 이름표 · 전체 강좌 줄 (BR-245 · BR-246 · D-428~D-430) ----------
+
+class ExtrasSettingTest(unittest.TestCase):
+    setUp, tearDown = SettingTest.setUp, SettingTest.tearDown
+    def test_defaults_set_and_clean(self):
+        self.assertEqual(style.card_extras(), {"series": False, "seriesName": "1분 레슨", "longLine": False})
+        self.assertEqual(editor.ep_extras(10.0), ([], []))
+        self.assertEqual(style.set_card_extras(series=True), {"series": True, "seriesName": "1분 레슨", "longLine": False})
+        self.assertEqual(style.set_card_extras(long_line=True)["longLine"], True)
+        self.assertTrue(style.card_extras()["series"])   # 준 값만 바뀜
+        for raw, want in (("  기본기  (특강) ", "기본기 특강"), ("[원 #3]", "원 3"), ("", "1분 레슨"), ("가" * 20, "가" * 12), ("줄\n바꿈", "줄 바꿈")):
+            self.assertEqual(style.clean_series_name(raw), want, raw)
+        self.assertEqual(style.set_card_extras(name="2분  특강")["seriesName"], "2분 특강")
+        f = style._card_extra_file()
+        for bad in ("{", "[1]", '{"series": "yes", "longLine": 1}'):
+            f.write_text(bad, encoding="utf-8")
+            self.assertEqual(style.card_extras(), {"series": False, "seriesName": "1분 레슨", "longLine": False}, bad)
+
+    def test_counter_assign_reuse_edit_no_dup(self):
+        self.assertEqual(style.series_peek(), 1)
+        self.assertEqual(style.series_peek(ahead=2), 3)
+        self.assertEqual(style.series_assign("a.mp4", "s1"), 1)
+        self.assertEqual(style.series_assign("a.mp4", "s1"), 1)        # 다시 내보내도 그대로
+        self.assertEqual(style.series_assign("a.mp4", "s2"), 2)
+        self.assertEqual(style.series_assign("b.mp4", "s1"), 3)        # 다른 영상의 같은 id 도 따로
+        self.assertEqual(style.series_peek("a.mp4", "s2"), 2)
+        self.assertEqual(style.series_assign("a.mp4", "s1", want=10), 10)   # 사용자가 고친 번호
+        self.assertEqual(style.series_assign("c.mp4", "s9"), 11)       # 다음 번호는 가장 큰 번호 뒤 (겹치지 않음)
+        self.assertEqual(style.series_numbers("a.mp4"), {"s1": 10, "s2": 2})
+        d = json.loads(style._series_file().read_text(encoding="utf-8"))
+        d["note"] = "다른 판이 더한 칸"
+        style._series_file().write_text(json.dumps(d), encoding="utf-8")
+        style.series_assign("d.mp4", "s1")
+        self.assertEqual(json.loads(style._series_file().read_text(encoding="utf-8"))["note"], "다른 판이 더한 칸")   # 모르는 칸은 그대로
+        with mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/@another"}):   # 채널마다 따로 셈
+            self.assertEqual(style.series_peek(), 1)
+            self.assertEqual(style.series_assign("a.mp4", "s1"), 1)
+        self.assertEqual(style.series_peek("a.mp4", "s1"), 10)
+        style._series_file().write_text("{", encoding="utf-8")
+        self.assertEqual(style.series_peek(), 1)                       # 깨진 파일 = 처음부터 (화면은 열림)
+
+    def test_apply_and_view(self):
+        style.set_card_extras(series=True)
+        t, g = editor.ep_series("1분 레슨", 5, 30)
+        seq = {"id": "s1", "format": "shorts", "titles": [t], "shapes": [g]}
+        r = editor.series_apply("a.mp4", seq)
+        self.assertEqual((r["n"], t["text"], t["seriesN"]), (1, "1분 레슨 (1)", 1))   # 보기 번호 5 → 처음 내보낼 때 정한 1
+        self.assertEqual((r["x"], r["w"]), (g["x"], g["w"]))
+        t["text"] = "1분 레슨 (7)"                                       # 편집실에서 번호를 고침
+        self.assertEqual(editor.series_apply("a.mp4", seq)["n"], 7)
+        self.assertEqual(style.series_numbers("a.mp4"), {"s1": 7})
+        self.assertEqual(editor.series_apply("a.mp4", seq)["n"], 7)    # 다시 내보내도 그대로
+        t["text"] = "기본기 (7)"                                         # 이름만 고침 → 번호 그대로 · 이름도 그대로
+        self.assertEqual(editor.series_apply("a.mp4", seq)["text"], "기본기 (7)")
+        w0 = g["w"]
+        t["text"] = "기본기 특강 (7)"
+        editor.series_apply("a.mp4", seq)
+        self.assertGreater(g["w"], w0)                                  # 상자는 글 폭에 맞춤
+        self.assertIsNone(editor.series_apply("a.mp4", {"id": "s2", "format": "long", "titles": [dict(t)]}))
+        self.assertIsNone(editor.series_apply("a.mp4", {"id": "s3", "format": "shorts", "titles": []}))
+        # 편집실을 열 때: 다른 곳에서 정한 번호를 보여 줌 (보기 번호 그대로인 이름표만 · 고친 번호는 그대로)
+        t2, g2 = editor.ep_series("1분 레슨", 3, 30)
+        t3, g3 = editor.ep_series("1분 레슨", 4, 30)
+        t3["text"] = "1분 레슨 (40)"
+        style.series_assign("a.mp4", "s4")
+        style.series_assign("a.mp4", "s5")
+        proj = {"sequences": [{"id": "s4", "format": "shorts", "titles": [t2], "shapes": [g2]}, {"id": "s5", "format": "shorts", "titles": [t3], "shapes": [g3]}]}
+        editor.series_view("a.mp4", proj)
+        self.assertEqual((t2["text"], t2["seriesN"]), ("1분 레슨 (8)", 8))
+        self.assertEqual(t3["text"], "1분 레슨 (40)")
+
+    def test_learned_title_skeleton_still_drops_episode(self):
+        """hooks._SERIES 는 배운 제목 틀에서 회차를 일부러 지움 — 업로드 제목 앞 '[1분 레슨 #12]' 도 같이 지워지고 겹침 열쇠에도 안 들어감."""
+        import hooks
+        self.assertEqual(hooks._clean_title("[1분 레슨 #12] 트래핑 꿀팁"), "트래핑 꿀팁")
+        self.assertEqual(hooks.norm_title("[1분 레슨 #12] 트래핑 꿀팁"), hooks.norm_title("트래핑 꿀팁"))
+
+
+class ExtrasLayoutTest(unittest.TestCase):
+    def test_tag_and_line_places(self):
+        t, g = editor.ep_series("1분 레슨", 12, 30)
+        self.assertEqual((t["plan"], t["text"], t["seriesN"], t["start"], t["dur"]), ("series", "1분 레슨 (12)", 12, 0.0, 30.0))
+        self.assertEqual((g["plan"], g["full"], g["color"], g["opacity"], g["radius"]), ("series", True, "#000000", 1.0, 0))
+        tb = ebox(t)
+        self.assertLess(g["y"] + g["h"], editor.EP_BOX["y"])                   # 흰 상자 위
+        self.assertGreaterEqual(g["y"], 0.05)                                  # 화면 맨 위 아이콘 줄은 비움
+        self.assertTrue(g["x"] < tb[0] and tb[2] < g["x"] + g["w"] and g["y"] <= tb[1] and tb[3] <= g["y"] + g["h"], (tb, g))   # (글 상자는 화면 비율)
+        self.assertAlmostEqual(g["x"] + g["w"] / 2, 0.5, places=3)
+        self.assertAlmostEqual((tb[1] + tb[3]) / 2, g["y"] + g["h"] / 2, places=3)
+        ln = editor.ep_longline(30)
+        lb = ebox(ln)
+        cap = editor._cap_band(editor.ep_caption(dict(editor.SHORTS_STYLE)), H, 2)
+        self.assertGreater(lb[1] * H, cap[1])                                  # 말 자막(두 줄 · 화소) 아래
+        self.assertGreater(lb[1], video_band(editor.EP_LAYOUT)[1])             # 아래 띠
+        self.assertLess(lb[3], 0.9)
+        self.assertEqual(ln["text"], "전체 강좌는 채널에서 ▶")
+
+
+class ExtrasRoughTest(WorkMixin, unittest.TestCase):
+    INFO, strip = RoughCardTest.INFO, RoughCardTest.strip
+    def test_rough_card_with_extras(self):
+        name = self.fix("MSGRAW01")
+        style.set_shorts_layout("eunpyeong")
+        plain = self.strip(editor.auto_sequences(name, self.INFO, None, ("shorts",)))
+        for q in json.loads(plain):   # 덧붙임을 고르지 않으면 R1 그대로 (이름표·줄 없음)
+            self.assertFalse([t for t in q["titles"] if t.get("plan") in ("series", "longline")])
+        style.set_card_extras(series=True, long_line=True)
+        qs = editor.auto_sequences(name, self.INFO, None, ("shorts",))
+        self.assertGreater(len(qs), 1)
+        for i, q in enumerate(qs):
+            L = round(editor.seq_total(q), 2)
+            [tag] = [t for t in q["titles"] if t.get("plan") == "series"]
+            [line] = [t for t in q["titles"] if t.get("plan") == "longline"]
+            [g] = [x for x in q["shapes"] if x.get("plan") == "series"]
+            self.assertEqual(tag["text"], f"1분 레슨 ({i + 1})")            # 보기 번호는 차례로 (아직 정하지 않음)
+            self.assertEqual((tag["start"], tag["dur"], line["start"], line["dur"]), (0.0, L, 0.0, L))
+            others = [ebox(t) for t in q["titles"] if t is not tag and t is not line]
+            others.append([editor.EP_BOX["x"], editor.EP_BOX["y"], editor.EP_BOX["x"] + editor.EP_BOX["w"], editor.EP_BOX["y"] + editor.EP_BOX["h"]])
+            cb = editor._cap_band(q["captionStyle"], H, 2)
+            others.append([0, cb[0] / H, 1, cb[1] / H])   # 두 줄 말 자막
+            for o in others:
+                self.assertFalse(inter(ebox(tag), o))
+                self.assertFalse(inter([g["x"], g["y"], g["x"] + g["w"], g["y"] + g["h"]], o))
+                self.assertFalse(inter(ebox(line), o))
+        self.assertFalse(style._series_file().exists())                       # 만들 때는 번호를 정하지 않음
+
+
+class ExtrasMsgTest(unittest.TestCase):
+    """MSG 쇼츠 (은평 스타일 + 이름표·전체 강좌 줄): 둘 다 끝까지 · 다른 MSG 글자는 피함 · 이름표는 첫머리 사건과 한 묶음."""
+
+    @classmethod
+    def setUpClass(cls):
+        from make_msg_fixture import MsgWork
+        cls.w = MsgWork()
+        style.set_shorts_layout("eunpyeong")
+        style.set_card_extras(series=True, long_line=True)
+        specs = [{"kind": "preset", "name": n} for n in msg.PRESETS]
+        cls.qs = msg.build_variants(cls.w.name, specs[:2], "듬뿍", ("shorts",), lambda m: None)["sequences"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.w.close()
+
+    def test_extras_fixed_and_avoided(self):
+        self.assertTrue(self.qs)
+        for q in self.qs:
+            L = round(editor.seq_total(q), 3)
+            ev = next(e for e in q["msg"]["events"] if e["kind"] == "hook")
+            [tag] = [t for t in q["titles"] if t.get("plan") == "series"]
+            [line] = [t for t in q["titles"] if t.get("plan") == "longline"]
+            [g] = [x for x in q["shapes"] if x.get("plan") == "series"]
+            self.assertIn(tag["id"], ev["refs"]["titles"])
+            self.assertIn(g["id"], ev["refs"]["shapes"])
+            self.assertNotIn(line["id"], ev["refs"]["titles"])
+            for x in (tag, line, g):
+                self.assertEqual((x["start"], x["dur"]), (0.0, L), q["name"])
+            fixed = [msg.text_box(tag["text"], tag["style"], W, H), msg.text_box(line["text"], line["style"], W, H),
+                     [g["x"] * W, g["y"] * H, (g["x"] + g["w"]) * W, (g["y"] + g["h"]) * H]]
+            for t in q["titles"]:
+                if t["id"] in ev["refs"]["titles"] or t is line:
+                    continue
+                b = msg.text_box(t["text"], t["style"], W, H)
+                for o in fixed:
+                    self.assertFalse(inter(b, o), (q["name"], t["text"], b, o))
+
+
+@unittest.skipUnless(FF, "ffmpeg 가 없어요")
+class ExtrasExportTest(WorkMixin, unittest.TestCase):
+    """실제 내보내기 (720×1280): 처음 내보낼 때 번호를 정해 이름표에 · 다시 내보내도 같은 번호 · 다른 쇼츠는 다음 번호 · 화소 (검은 이름표 · 흰 글씨 · 전체 강좌 줄)."""
+
+    def frame(self, out, t=1.0):
+        import numpy as np
+        raw = subprocess.run([FF, "-v", "error", "-ss", str(t), "-i", str(core.OUT / out), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                             capture_output=True).stdout
+        return np.frombuffer(raw, np.uint8).reshape(1280, 720, 3).astype(int)
+
+    def test_export_assigns_and_draws(self):
+        import numpy as np
+        name = self.fix("MSGRAW01")
+        d = 3.0
+        r = subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x808080:s=640x360:r=30:d={d}", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+                            "-t", str(d), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(core.VIDEOS / name)], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        style.set_card_extras(series=True, long_line=True)
+        info = {"duration": d, "width": 640, "height": 360, "fps": 30.0}
+
+        def make(label):
+            top = {"id": "t" + label, "text": "트래핑 꿀팁", "start": 0.0, "dur": d, "style": dict(editor.TITLE_STYLE)}
+            shapes = editor.ep_card(top, None, d)
+            xt, xg = editor.ep_extras(d)
+            q = editor._new_seq(label, "shorts", editor._items_from_cuts([{"in": 0.0, "out": d}]), captionStyle=editor.ep_caption(dict(editor.SHORTS_STYLE)),
+                                layout=dict(editor.EP_LAYOUT), titles=[top] + xt, shapes=shapes + xg)
+            return dict(q, captions=[], info=info, source=name, media=[], master={"volume": 1, "normalize": False, "lufs": -14})
+        opts = {"preset": "small", "hw": False, "xml": False, "srt": False}
+        a, b = make("쇼츠 1"), make("쇼츠 2")
+        self.assertEqual(next(t for t in a["titles"] if t.get("plan") == "series")["text"], "1분 레슨 (1)")
+        out_b = editor.export(name, b, opts, lambda m: None)                   # 두 번째 쇼츠를 먼저 내보냄 → 1
+        out_a = editor.export(name, a, opts, lambda m: None)                   # 그다음 → 2 (보기 번호 1 은 이미 씀 · 겹치지 않음)
+        out_a2 = editor.export(name, a, opts, lambda m: None)                  # 다시 → 그대로 2
+        self.assertEqual(style.series_numbers(name), {b["id"]: 1, a["id"]: 2})
+        self.assertNotEqual(out_a[0], out_a2[0])
+        Hh, Ww = 1280, 720
+        dark = []
+        for out in (out_b, out_a, out_a2):
+            f = self.frame(out[0])
+            band = f[int(0.054 * Hh):int(0.086 * Hh)]
+            blk = (band.max(axis=2) < 40)
+            cols = np.where(blk.any(axis=0))[0]
+            self.assertGreater(len(cols), 50, "검은 이름표 상자")
+            self.assertAlmostEqual((cols.min() + cols.max()) / 2 / Ww, 0.5, delta=0.01)
+            white = (band.min(axis=2) > 215)[:, cols.min():cols.max() + 1]
+            self.assertGreater(white.sum(), 40, "이름표 흰 글씨")
+            self.assertTrue(all(abs(int(f[int(0.07 * Hh), 20][c]) - BLUE[c]) <= 24 for c in range(3)))   # 이름표 옆은 파란 띠
+            line = f[int(0.835 * Hh):int(0.87 * Hh)]
+            lrows = np.where((line.min(axis=2) > 215).sum(axis=1) > 3)[0]
+            self.assertGreater(len(lrows), 5, "전체 강좌 줄 흰 글씨")
+            dark.append(cols.max() - cols.min())
+        self.assertEqual(dark[1], dark[2])   # 다시 내보내도 같은 번호 = 같은 이름표
+
+
+@unittest.skipUnless(shutil.which("node"), "node 가 없어요")
+class ExtrasEditorTest(unittest.TestCase):
+    """editor.html epCard·epExtras·epSeriesFit·epOff 를 node 로 그대로 → 서버 ep_series·ep_longline 과 같은 값."""
+
+    def test_template_adds_same_as_server(self):
+        got = run_js(EditorTemplateTest.SHORT + """
+out = [];
+EPX = { series: true, seriesName: "1분 레슨", longLine: true, next: 12 };
+S = rough(false); TEMPLATES["은평 스타일"](); TEMPLATES["은평 스타일"]();
+const cp = x => JSON.parse(JSON.stringify(x));
+out.push(cp({ titles: S.titles, shapes: S.shapes }));
+const tg = S.titles.find(t => t.plan === "series"); tg.text = "1분 레슨 (123)"; epSeriesFit(tg, S.shapes.find(g => g.plan === "series"));
+out.push(cp(S.shapes.find(g => g.plan === "series")));
+TEMPLATES["위아래 검정 박스"](); out.push(cp({ titles: S.titles, shapes: S.shapes }));
+EPX = null; S = rough(false); TEMPLATES["은평 스타일"](); out.push(cp({ titles: S.titles, shapes: S.shapes }));""")
+        on, wide, off, none = got
+        tags = [t for t in on["titles"] if t.get("plan") == "series"]
+        lines = [t for t in on["titles"] if t.get("plan") == "longline"]
+        gs = [g for g in on["shapes"] if g.get("plan") == "series"]
+        self.assertEqual((len(tags), len(lines), len(gs)), (1, 1, 1))          # 두 번 눌러도 하나
+        pt, pg = editor.ep_series("1분 레슨", 12, 30)
+        self.assertEqual((tags[0]["text"], tags[0]["seriesN"], tags[0]["style"]), (pt["text"], 12, pt["style"]))
+        for k in ("x", "y", "w", "h", "color", "opacity", "radius", "full", "plan"):
+            self.assertEqual(gs[0][k], pg[k], k)
+        self.assertEqual(lines[0]["style"], editor.ep_longline(30)["style"])
+        self.assertEqual(lines[0]["text"], editor.LONG_LINE)
+        t2 = dict(pt, text="1분 레슨 (123)")
+        g2 = dict(pg)
+        editor.ep_series_fit(t2, g2)
+        self.assertEqual((wide["x"], wide["w"]), (g2["x"], g2["w"]))
+        self.assertGreater(wide["w"], gs[0]["w"])
+        self.assertFalse([t for t in off["titles"] if t.get("plan") in ("series", "longline")])   # 다른 템플릿은 지움
+        self.assertFalse([g for g in off["shapes"] if g.get("plan") == "series"])
+        self.assertFalse([t for t in none["titles"] if t.get("plan") in ("series", "longline")])  # 고르지 않았으면 안 넣음
+        big = next(t for t in on["titles"] if t["id"] == "big")
+        self.assertEqual(big["style"], editor.ep_title_style(big["text"]))     # 큰 제목은 이름표가 아님 (가장 긴 타이틀 고르기에서 뺌)
+
+
+class ExtrasRouteTest(unittest.TestCase):
+    def test_routes(self):
+        from test_windows_compat import Server
+
+        class T(Server):
+            def runTest(self):
+                pass
+        t = T()
+        t.setUp()
+        try:
+            self.assertEqual(t.call("/api/style/card_extras"), (200, {"series": False, "seriesName": "1분 레슨", "longLine": False}))
+            self.assertEqual(t.call("/api/style/card_extras", {"series": True, "seriesName": "기본기 (특강)"}),
+                             (200, {"ok": True, "series": True, "seriesName": "기본기 특강", "longLine": False}))
+            self.assertEqual(t.call("/api/style/card_extras", {"longLine": True, "series": "yes"})[1]["series"], True)   # 잘못된 값은 안 바꿈
+            self.assertEqual(t.call("/api/style/list")[1]["cardExtras"]["longLine"], True)
+            # 내보내기: 작업을 시작하기 전에 번호를 정해 돌려줌 (편집실 이름표도 같은 번호)
+            tg, g = editor.ep_series("기본기 특강", 9, 3)
+            proj = {"id": "s1", "format": "shorts", "titles": [tg], "shapes": [g]}
+            with mock.patch.object(editor, "export", lambda *a, **k: []):
+                st, j = t.call("/api/edit/export", {"name": "a.mp4", "project": proj, "opts": {}})
+                t.wait_job()
+                self.assertEqual(st, 200)
+                self.assertEqual((j["series"]["seq"], j["series"]["n"], j["series"]["text"]), ("s1", 1, "기본기 특강 (1)"))
+                st, j = t.call("/api/edit/export", {"name": "a.mp4", "project": {"id": "s2", "format": "long", "titles": []}, "opts": {}})
+                t.wait_job()
+                self.assertNotIn("series", j)
+        finally:
+            t.doCleanups()
+        import rstudio
+        txt = Path(rstudio.__file__).read_text(encoding="utf-8")
+        self.assertEqual(txt.count('"/api/style/card_extras"'), 2)
+
+
+@unittest.skipUnless(FF, "ffmpeg 가 없어요")
+class ExtrasKitTest(unittest.TestCase):
+    """올리기 키트: 이름표가 있는 쇼츠 = 제목 후보 앞 '[이름 #n]' (내보낸 번호와 같음) · 전체 강좌 링크 (올린 롱폼 → 롱폼 키트 제목 → 채널)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from test_upload import KitBase
+        cls.KB = KitBase
+        KitBase.setUpClass.__func__(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.KB.tearDownClass.__func__(cls)
+
+    def setUp(self):
+        self.KB.setUp(self)
+        self.st = mock.patch.object(style, "STYLES", self.work / "styles")
+        self.st.start()
+
+    def tearDown(self):
+        self.st.stop()
+        self.KB.tearDown(self)
+
+    def project(self, name, tag=True):
+        from test_upload import fixture_segments
+        caps = [{"id": str(i), "start": s["start"], "end": s["end"], "text": s["text"]} for i, s in enumerate(fixture_segments())]
+        items = [{"id": "v", "track": "V1", "media": "main", "in": 0.0, "out": 45.0, "start": 0.0, "speed": 1.0, "link": "l"},
+                 {"id": "a", "track": "A1", "media": "main", "in": 0.0, "out": 45.0, "start": 0.0, "speed": 1.0, "link": "l"}]
+        tg, g = editor.ep_series("1분 레슨", 1, 45)
+        titles = [{"id": "t", "text": "퍼스트 터치 꿀팁", "start": 0, "dur": 45}] + ([tg] if tag else [])
+        proj = {"source": name, "info": {"duration": 720.0, "width": 160, "height": 90}, "captions": caps, "v": 2, "rev": 3,
+                "sequences": [{"id": "s1", "name": "쇼츠 1", "format": "shorts", "v": 2, "items": items, "markers": [], "titles": titles,
+                               "shapes": [g] if tag else [], "tracks": editor.default_tracks()},
+                              {"id": "L", "name": "롱폼 가편집", "format": "long", "v": 2, "items": [dict(it, out=720.0) for it in items], "markers": [],
+                               "titles": [], "tracks": editor.default_tracks()}]}
+        editor._ppath(name).write_text(json.dumps(proj, ensure_ascii=False), encoding="utf-8")
+
+    def test_series_title(self):
+        import upload
+        name = self.KB.add_video(self, self.KB.NAME)
+        self.project(name)
+        style.series_assign("other.mp4", "x")            # 다른 쇼츠가 1번을 이미 씀
+        kit = upload.build_kit(name, "s1")
+        self.assertEqual(kit["series"], {"n": 2, "tag": "[1분 레슨 #2]"})
+        self.assertTrue(all(t.startswith("[1분 레슨 #2] ") for t in kit["titles"]), kit["titles"])
+        self.assertEqual(kit["title"], kit["titles"][0])
+        self.assertNotIn("1분 레슨 (", kit["title"])      # 큰 제목 고르기에서 이름표는 뺌
+        self.assertEqual(upload.build_kit(name, "s1")["title"], kit["title"])   # 다시 만들어도 같은 번호 (두 번 붙지 않음)
+        self.assertEqual(style.series_numbers(name), {"s1": 2})
+        kit2 = upload.set_guests(name, "s1", [{"name": "김코치"}])
+        self.assertTrue(all(t.startswith("[1분 레슨 #2] ") and not t.startswith("[1분 레슨 #2] [") for t in kit2["titles"]), kit2["titles"])
+        self.assertNotIn("전체 강좌", kit["description"])   # 강좌 줄을 고르지 않으면 설명 그대로
+
+    def test_no_tag_no_change(self):
+        import upload
+        name = self.KB.add_video(self, self.KB.NAME)
+        self.project(name, tag=False)
+        kit = upload.build_kit(name, "s1")
+        self.assertIsNone(kit["series"])
+        self.assertFalse(any(t.startswith("[") for t in kit["titles"]))
+        self.assertFalse(style._series_file().exists())
+
+    def test_long_link(self):
+        import upload
+        import youtube_upload
+        name = self.KB.add_video(self, self.KB.NAME)
+        self.project(name, tag=False)
+        style.set_card_extras(long_line=True)
+        with mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx"}):
+            kit = upload.build_kit(name, "s1")
+            self.assertEqual(kit["longLink"], {"url": "https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx", "how": "channel"})
+            head, block = kit["description"].split("\n\n")[:2]
+            self.assertEqual(block, "▶ 전체 강좌는 채널에서\nhttps://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx")
+            self.assertTrue(any("우리 채널 주소" in n for n in kit["notes"]))
+            # 롱폼 키트 제목 = 우리 채널 영상 제목 → 그 영상
+            lk = upload.build_kit(name, "L")
+            self.assertNotIn("전체 강좌", lk["description"])     # 롱폼 키트는 그대로
+            import hooks
+            with mock.patch.object(hooks, "own_rows", lambda cache=None: {"videos": [{"title": lk["title"], "id": "abcdefghijk"}], "shorts": []}):
+                self.assertEqual(upload.long_link(name), {"url": "https://youtu.be/abcdefghijk", "how": "kit"})
+            # 유튜브에 바로 올린 롱폼 기록이 가장 먼저 (공개만 · 쇼츠·다른 영상은 아님)
+            hist = {"items": [{"videoId": "zzzzzzzzzzz", "name": name, "shorts": True, "privacy": "public"},
+                              {"videoId": "yyyyyyyyyyy", "name": "다른 영상.mp4", "shorts": False, "privacy": "public"},
+                              {"videoId": "xxxxxxxxxxx", "name": name, "shorts": False, "privacy": "private"},
+                              {"videoId": "wwwwwwwwwww", "name": name, "shorts": False, "privacy": "unlisted"}]}
+            with mock.patch.object(youtube_upload, "history", lambda n=10: hist):
+                kit = upload.build_kit(name, "s1")
+            self.assertEqual(kit["longLink"], {"url": "https://youtu.be/wwwwwwwwwww", "how": "history"})
+            self.assertIn("\n\n▶ 전체 강좌 보기\nhttps://youtu.be/wwwwwwwwwww\n\n", kit["description"])
+            self.assertLessEqual(len(kit["description"]), upload.DESC_MAX)
 
 
 if __name__ == "__main__":

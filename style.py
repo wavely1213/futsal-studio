@@ -950,6 +950,116 @@ def set_shorts_layout(v):
     return v
 
 
+# 은평 스타일 덧붙임 (BR-245 · BR-246 · D-428): 시리즈 이름표 '1분 레슨 (n)' · 아래 띠 '전체 강좌는 채널에서 ▶' 줄 — 둘 다 고르는 것 (기본 끔)
+SERIES_DEFAULT = "1분 레슨"
+SERIES_NAME_MAX = 12   # 이름표 글자 수 (작은 검은 상자 한 줄)
+_SERIES_BAD = re.compile(r"[\[\]()#<>\r\n\t]")   # 이름표 '(n)'·업로드 제목 '[이름 #n]' 모양을 깨는 글자
+
+
+def _card_extra_file():
+    return STYLES / ROUGH_DIR_NAME / "은평 스타일 덧붙임.json"
+
+
+def clean_series_name(v):
+    """시리즈 이름 정리 (괄호·#·줄바꿈 빼고 띄어쓰기 하나로 · 12자 · 비면 기본 '1분 레슨')."""
+    s = " ".join(_SERIES_BAD.sub(" ", str(v or "")).split())
+    return "".join(list(s)[:SERIES_NAME_MAX]).strip() or SERIES_DEFAULT
+
+
+def card_extras():
+    """{"series": 이름표를 넣는지, "seriesName": 시리즈 이름, "longLine": 전체 강좌 줄·설명 링크를 넣는지} — 파일이 없거나 못 읽으면 둘 다 끔."""
+    try:
+        d = json.loads(_card_extra_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    return {"series": d.get("series") is True, "seriesName": clean_series_name(d.get("seriesName")), "longLine": d.get("longLine") is True}
+
+
+def set_card_extras(series=None, name=None, long_line=None):
+    """덧붙임 바꾸기 (준 값만 · styles/설정/은평 스타일 덧붙임.json) → 바뀐 card_extras()."""
+    cur = card_extras()
+    if series is not None:
+        cur["series"] = bool(series)
+    if name is not None:
+        cur["seriesName"] = clean_series_name(name)
+    if long_line is not None:
+        cur["longLine"] = bool(long_line)
+    f = _card_extra_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps(dict(cur, set=time.strftime("%Y-%m-%d %H:%M")), ensure_ascii=False))
+    return cur
+
+
+# 시리즈 번호 (BR-245 · D-429): 채널마다 하나의 셈 · 쇼츠 편집본마다 처음 내보낼 때(또는 올리기 키트를 만들 때) 한 번 정하고 다시 내보내도 그대로
+_SERIES_LOCK = threading.Lock()
+
+
+def _series_file():
+    return STYLES / ROUGH_DIR_NAME / "시리즈 번호.json"
+
+
+def _series_channel():
+    """번호를 세는 채널 열쇠: 설정 channel_url 의 끝 칸 (UC… · @핸들) · 없으면 'own'."""
+    return (str(core.CONFIG.get("channel_url") or "").rstrip("/").split("/")[-1].lower() or "own")
+
+
+def _series_read():
+    try:
+        d = json.loads(_series_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    chs = d.get("channels") if isinstance(d.get("channels"), dict) else {}
+    ch = chs.get(_series_channel()) if isinstance(chs.get(_series_channel()), dict) else {}
+    seqs = {str(k): int(v) for k, v in (ch.get("seqs") or {}).items() if isinstance(v, int) and not isinstance(v, bool) and v > 0} \
+        if isinstance(ch.get("seqs"), dict) else {}
+    last = ch.get("last") if isinstance(ch.get("last"), int) and not isinstance(ch.get("last"), bool) else 0
+    return d, chs, {"last": max([last] + list(seqs.values())), "seqs": seqs}
+
+
+def series_key(name, seq_id):
+    return f"{name}|{seq_id}"   # 영상 이름은 파일 이름이라 '|' 가 없음
+
+
+def series_peek(name=None, seq_id=None, ahead=0):
+    """번호를 정하지 않고 볼 때: 정해 둔 편집본이면 그 번호 · 아니면 다음 번호 (+ahead · 한 번에 여러 쇼츠를 만들 때 보기 번호)."""
+    _, _, ch = _series_read()
+    if name and seq_id and series_key(name, seq_id) in ch["seqs"]:
+        return ch["seqs"][series_key(name, seq_id)]
+    return ch["last"] + 1 + int(ahead)
+
+
+def series_numbers(name):
+    """이 영상의 편집본마다 정해 둔 번호 {편집본 id: 번호}."""
+    _, _, ch = _series_read()
+    pre = f"{name}|"
+    return {k[len(pre):]: v for k, v in ch["seqs"].items() if k.startswith(pre)}
+
+
+def series_assign(name, seq_id, want=None):
+    """이 쇼츠 편집본의 번호 정하기 → 번호. 정해 둔 것이 있으면 그대로(다시 내보내기) · want(사용자가 고친 번호)가 있으면 그 번호 ·
+    아니면 지금까지 쓴 가장 큰 번호 + 1 (같은 번호를 두 번 주지 않음). 파일을 못 쓰면 OSError."""
+    with _SERIES_LOCK:
+        d, chs, ch = _series_read()
+        k = series_key(name, seq_id)
+        if isinstance(want, int) and want > 0:
+            n = want
+        elif k in ch["seqs"]:
+            return ch["seqs"][k]
+        else:
+            n = ch["last"] + 1
+        if ch["seqs"].get(k) == n:
+            return n
+        ch["seqs"][k] = n
+        chs[_series_channel()] = {"last": max(ch["last"], n), "seqs": ch["seqs"]}
+        f = _series_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        updater.write_atomic(f, json.dumps({"v": 1, "channels": chs, **{x: y for x, y in d.items() if x not in ("v", "channels")}},
+                                           ensure_ascii=False, indent=1))
+        return n
+
+
 def rough_params():
     """(이름, edit_params) — 첫 가편집에 쓸 스타일이 없거나 못 읽으면 (None, None)."""
     n = rough_default()

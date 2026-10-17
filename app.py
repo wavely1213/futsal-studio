@@ -753,11 +753,14 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/style/list":
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
-                                    "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout()})
+                                    "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(),
+                                    "cardExtras": style.card_extras()})
         if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
             return self._send(200, {"on": style.shorts_topic_on()})
         if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · BR-240)
             return self._send(200, {"layout": style.shorts_layout()})
+        if u.path == "/api/style/card_extras":  # 은평 스타일 덧붙임 (시리즈 이름표·전체 강좌 줄 · BR-245 · BR-246) 지금 값
+            return self._send(200, style.card_extras())
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
             return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
@@ -874,7 +877,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/edit/open":
             n = q["name"][0]
             try:
-                proj = editor.load_project(n)
+                proj = editor.series_view(n, editor.load_project(n))   # 다른 곳에서 정한 시리즈 번호를 이름표에 (BR-245)
                 rec = proj.pop("_recovered", None)
                 lite = (q.get("lite") or [""])[0]
                 if lite in ("opus", "aac"):  # 원격 편집실: 소리·그림 미리보기를 뒤에서 미리 만들어 둠 (D-363)
@@ -884,7 +887,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "capLong": editor.long_captions(proj.get("captions"), proj.get("info")),
                                         "capMerged": editor.merged_captions(proj.get("captions")),
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
-                                        "recommend": editor.recommend(n)})
+                                        "recommend": editor.recommend(n),
+                                        "epx": dict(style.card_extras(), next=style.series_peek())})   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
             except Exception as e:
                 studiolog.trace(e)
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
@@ -1107,6 +1111,14 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(200, {"ok": True, "layout": v})
+        if path == "/api/style/card_extras":  # 스타일 화면 시리즈 이름표·전체 강좌 줄 (준 값만 바꿈 · 다음에 만드는 은평 스타일 쇼츠부터)
+            try:
+                v = style.set_card_extras(b.get("series") if isinstance(b.get("series"), bool) else None,
+                                          b.get("seriesName") if isinstance(b.get("seriesName"), str) else None,
+                                          b.get("longLine") if isinstance(b.get("longLine"), bool) else None)
+            except OSError:
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, dict(v, ok=True))
         # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
         if path == "/api/style/tempo":
             try:
@@ -1340,8 +1352,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": f"자막을 다시 나누지 못했어요 · {e}"})
             return self._send(200, {"captions": out, "changed": n, "from": src_of})
         if path == "/api/edit/export":
+            ser = None
+            try:  # 시리즈 이름표 번호를 먼저 정해 편집실에 돌려줌 (화면 이름표도 같은 번호 · 작업 안 내보내기도 같은 번호 · BR-245)
+                editor.safe_name(b["name"])
+                ser = editor.series_apply(b["name"], b["project"]) if isinstance(b.get("project"), dict) else None
+            except (KeyError, ValueError, TypeError, OSError):
+                ser = None
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
-            return self._send(200 if ok else 409, _started(ok))
+            return self._send(200 if ok else 409, dict(_started(ok), **({"series": ser} if ser else {})))
         if path == "/api/edit/srt":  # 자막 파일(SRT) 가져오기: 글자만 읽어 돌려줌 (어디에·어느 트랙에 놓을지는 편집실이 정하고 저장도 편집실이 함 · D-345)
             try:
                 raw = base64.b64decode(str(b.get("data") or ""), validate=True)
