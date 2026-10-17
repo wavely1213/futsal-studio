@@ -1622,6 +1622,19 @@ def ep_extras(length, ahead=0):
     return titles, shapes
 
 
+def ep_cap_clear(cs, titles):
+    """전체 강좌 줄(plan longline)이 있으면 말 자막 아래 끝을 그 줄 위 끝에서 TXT_GAP 위로 (배운 스타일 '아래' 자막 0.85 는 줄과 겹침 ·
+    0.8 처럼 이미 위면 그대로) — editor.html epCapClear 와 같은 셈."""
+    ln = next((t for t in titles or [] if t.get("plan") == "longline"), None)
+    if not ln:
+        return cs
+    _, H = frame_size("shorts")
+    lim = math.floor((_cap_band(ln["style"], H)[0] - TXT_GAP) * 1000 + 1e-6) / 1000   # 내림: 반올림으로 틈이 줄지 않게
+    if float(cs.get("y", EP_CAP_Y)) > lim:
+        cs["y"] = lim
+    return cs
+
+
 def series_apply(name, seq):
     """쇼츠 편집본의 시리즈 이름표 번호를 정해 글에 넣음 (처음 내보낼 때·올리기 키트를 만들 때 · seq 를 고침) → {seq, id, n, text, x, w} · 이름표가 없으면 None.
     글의 번호가 넣어 둔 번호(seriesN)와 다르면 사용자가 고친 번호로 그대로 씀 · 같으면 정해 둔 번호(없으면 새 번호)."""
@@ -2202,6 +2215,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                 kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
                 shapes = ep_card(hook, kt, length)
                 xt, xg = ep_extras(length, ahead=i - 1)   # 시리즈 이름표·전체 강좌 줄 (고른 것만 · BR-245 · BR-246)
+                ep_cap_clear(cs, xt)   # 말 자막은 전체 강좌 줄 위로 (D-428)
                 seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(EP_LAYOUT), master=dict(master),
                                      captionsOn=caps_on, titles=[hook] + ([kt] if kt else []) + xt, shapes=shapes + xg))
                 continue

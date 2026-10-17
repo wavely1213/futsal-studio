@@ -1352,13 +1352,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": f"자막을 다시 나누지 못했어요 · {e}"})
             return self._send(200, {"captions": out, "changed": n, "from": src_of})
         if path == "/api/edit/export":
-            ser = None
-            try:  # 시리즈 이름표 번호를 먼저 정해 편집실에 돌려줌 (화면 이름표도 같은 번호 · 작업 안 내보내기도 같은 번호 · BR-245)
-                editor.safe_name(b["name"])
-                ser = editor.series_apply(b["name"], b["project"]) if isinstance(b.get("project"), dict) else None
-            except (KeyError, ValueError, TypeError, OSError):
-                ser = None
+            ser, pj = None, b.get("project")
+            snap = json.loads(json.dumps(pj)) if isinstance(pj, dict) else None   # 작업이 고치기 전 그대로 (번호 셈에만)
             ok = start_job("내보내기", lambda: editor.export(b["name"], b["project"], b.get("opts", {}), log))
+            if ok and snap is not None:
+                try:  # 시리즈 이름표 번호를 편집실에 돌려줌 (화면 이름표도 같은 번호 · BR-245) — 작업을 시작했을 때만 정함 (못 시작하면 번호를 안 씀 ·
+                    # 작업 안 editor.export 도 같은 편집본·같은 글로 정하므로 같은 번호 · 먼저 정한 쪽을 다른 쪽이 그대로 받음)
+                    editor.safe_name(b["name"])
+                    ser = editor.series_apply(b["name"], snap)
+                except (KeyError, ValueError, TypeError, OSError):
+                    ser = None
             return self._send(200 if ok else 409, dict(_started(ok), **({"series": ser} if ser else {})))
         if path == "/api/edit/srt":  # 자막 파일(SRT) 가져오기: 글자만 읽어 돌려줌 (어디에·어느 트랙에 놓을지는 편집실이 정하고 저장도 편집실이 함 · D-345)
             try:

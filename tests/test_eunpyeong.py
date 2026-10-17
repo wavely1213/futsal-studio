@@ -644,6 +644,26 @@ class ExtrasRoughTest(WorkMixin, unittest.TestCase):
                 self.assertFalse(inter(ebox(line), o))
         self.assertFalse(style._series_file().exists())                       # 만들 때는 번호를 정하지 않음
 
+    def test_learned_bottom_captions_clear_long_line(self):
+        """검토: 배운 스타일 자막 '아래'(0.85)는 전체 강좌 줄(0.842~0.865)과 겹쳤음 → 줄이 있으면 말 자막을 줄 위 끝 - 틈으로 (0.829) ·
+        줄이 없으면 그대로 0.85 (R1 그대로)."""
+        name = self.fix("MSGRAW01")
+        style.set_shorts_layout("eunpyeong")
+        st = {"captionPos": "bottom"}
+        for q in editor.auto_sequences(name, self.INFO, st, ("shorts",)):
+            self.assertEqual(q["captionStyle"]["y"], editor.CAP_Y["bottom"])
+        style.set_card_extras(long_line=True)
+        qs = editor.auto_sequences(name, self.INFO, st, ("shorts",))
+        self.assertTrue(qs)
+        for q in qs:
+            [line] = [t for t in q["titles"] if t.get("plan") == "longline"]
+            self.assertEqual(q["captionStyle"]["y"], 0.829)
+            cb = editor._cap_band(q["captionStyle"], H, 2)
+            self.assertLessEqual(cb[1] + editor.TXT_GAP, ebox(line)[1] + 1e-9)   # 말 자막 아래 끝 + 틈 ≤ 줄 위 끝
+            self.assertGreaterEqual(cb[0], video_band(q["layout"])[1])            # 두 줄 자막도 아직 아래 띠
+        cs = editor.ep_caption(dict(editor.SHORTS_STYLE))                         # 이미 위(0.8)면 그대로
+        self.assertEqual(editor.ep_cap_clear(cs, [editor.ep_longline(3)])["y"], editor.EP_CAP_Y)
+
 
 class ExtrasMsgTest(unittest.TestCase):
     """MSG 쇼츠 (은평 스타일 + 이름표·전체 강좌 줄): 둘 다 끝까지 · 다른 MSG 글자는 피함 · 이름표는 첫머리 사건과 한 묶음."""
@@ -775,6 +795,62 @@ EPX = null; S = rough(false); TEMPLATES["은평 스타일"](); out.push(cp({ tit
         big = next(t for t in on["titles"] if t["id"] == "big")
         self.assertEqual(big["style"], editor.ep_title_style(big["text"]))     # 큰 제목은 이름표가 아님 (가장 긴 타이틀 고르기에서 뺌)
 
+    def test_low_captions_clear_long_line(self):
+        """검토: 말 자막이 0.85~0.9 인 쇼츠에 템플릿을 고르면 전체 강좌 줄과 겹쳤음 → 서버 ep_cap_clear 와 같은 자리 · 줄이 없으면 그대로."""
+        got = run_js(EditorTemplateTest.SHORT + """
+out = [];
+for (const [y, line] of [[0.85, true], [0.9, true], [0.8, true], [0.85, false]]) {
+  EPX = { series: false, seriesName: "1분 레슨", longLine: line, next: 1 };
+  S = rough(false); S.captionStyle.y = y; TEMPLATES["은평 스타일"](); out.push(S.captionStyle.y);
+}""")
+        py = [editor.ep_cap_clear({"y": y}, [editor.ep_longline(3)])["y"] for y in (0.85, 0.9, 0.8)]
+        self.assertEqual(got, py + [0.85])
+        self.assertEqual(py, [0.829, 0.829, 0.8])
+
+    def test_other_template_after_box_deleted(self):
+        """검토: 흰 '제목 상자'를 먼저 지우고 다른 템플릿을 고르면 epOff 가 일찍 끝나 이름표·강좌 줄이 남고 큰 제목 모양(노란 글 · 같은 자리)으로
+        바뀌었음 → 이제 흰 상자가 없어도 둘 다 지우고, 남은 것이 있어도 템플릿 모양을 입히지 않음."""
+        got = run_js(EditorTemplateTest.SHORT + """
+EPX = { series: true, seriesName: "1분 레슨", longLine: true, next: 12 };
+S = rough(false); TEMPLATES["은평 스타일"]();
+S.shapes = S.shapes.filter(g => g.plan !== "card");   // 흰 상자만 지움
+TEMPLATES["위아래 검정 박스"]();
+const cp = x => JSON.parse(JSON.stringify(x));
+out = { a: cp({ titles: S.titles, shapes: S.shapes }) };
+S = rough(false); const keep = { id: "x", text: "1분 레슨 (3)", start: 0, dur: 30, plan: "series", style: { ...EP.TAG, y: 0.08 } };
+S.titles.push(keep); tplTitle({ y: 0.22, fill: "#FFE14D" });  // (epOff 가 지우지만) tplTitle 은 이름표·강좌 줄에 큰 제목 모양을 입히지 않음
+out.b = cp(keep.style);""")
+        a = got["a"]
+        self.assertFalse([t for t in a["titles"] if t.get("plan") in ("series", "longline")], a["titles"])
+        self.assertFalse([g for g in a["shapes"] if g.get("plan") == "series"])
+        big = next(t for t in a["titles"] if t["id"] == "big")
+        self.assertEqual((big["style"]["y"], big["style"]["fill"]), (0.22, "#FFE14D"))
+        self.assertEqual((got["b"]["y"], got["b"]["fill"]), (0.08, "#FFFFFF"))
+
+    def test_tag_and_box_go_together(self):
+        """검토: 이름표 글만 지우면 빈 검은 상자가 쇼츠 내내 남았음 → 글·상자 하나를 지우면 다른 하나도 (deleteGfx·deleteMulti 가 seriesGone 을 부름)."""
+        got = run_js2(EditorTemplateTest.SHORT + """
+EPX = { series: true, seriesName: "1분 레슨", longLine: true, next: 12 };
+const cp = x => JSON.parse(JSON.stringify(x));
+out = [];
+S = rough(false); TEMPLATES["은평 스타일"]();
+let g = S.titles.find(t => t.plan === "series"); S.titles = S.titles.filter(t => t !== g); seriesGone(S, [g]); out.push(cp(S));
+S = rough(false); TEMPLATES["은평 스타일"]();
+g = S.shapes.find(t => t.plan === "series"); S.shapes = S.shapes.filter(t => t !== g); seriesGone(S, [g]); out.push(cp(S));
+S = rough(false); TEMPLATES["은평 스타일"]();
+g = S.titles.find(t => t.plan === "longline"); S.titles = S.titles.filter(t => t !== g); seriesGone(S, [g]); out.push(cp(S));""", extra=("seriesGone",))
+        for q in got[:2]:
+            self.assertFalse([t for t in q["titles"] if t.get("plan") == "series"])
+            self.assertFalse([x for x in q["shapes"] if x.get("plan") == "series"])
+            self.assertEqual(len([x for x in q["shapes"] if x.get("plan") == "card"]), 1)    # 흰 상자·강좌 줄은 그대로
+            self.assertEqual(len([t for t in q["titles"] if t.get("plan") == "longline"]), 1)
+        self.assertEqual(len([t for t in got[2]["titles"] if t.get("plan") == "series"]), 1)  # 강좌 줄은 따로
+        self.assertEqual(len([x for x in got[2]["shapes"] if x.get("plan") == "series"]), 1)
+        src = (Path(__file__).resolve().parents[1] / "editor.html").read_text(encoding="utf-8")
+        for fn in ("deleteGfx", "deleteMulti"):
+            body = src[src.index(f"function {fn}("):]
+            self.assertIn("seriesGone(S, [g])", body[:body.index("\n}\n")], fn)
+
 
 class ExtrasRouteTest(unittest.TestCase):
     def test_routes(self):
@@ -802,6 +878,15 @@ class ExtrasRouteTest(unittest.TestCase):
                 st, j = t.call("/api/edit/export", {"name": "a.mp4", "project": {"id": "s2", "format": "long", "titles": []}, "opts": {}})
                 t.wait_job()
                 self.assertNotIn("series", j)
+            # 검토: 다른 작업이 돌아 내보내기를 못 시작하면(409) 번호를 쓰지 않음 (예전: 번호를 정하고 셈이 늘었음)
+            import app
+            tg3, g3 = editor.ep_series("기본기 특강", 9, 3)
+            with mock.patch.object(app, "start_job", lambda *a, **k: False):
+                st, j = t.call("/api/edit/export", {"name": "a.mp4", "project": {"id": "s3", "format": "shorts", "titles": [tg3], "shapes": [g3]}, "opts": {}})
+            self.assertEqual(st, 409)
+            self.assertNotIn("series", j)
+            self.assertNotIn("s3", style.series_numbers("a.mp4"))
+            self.assertEqual(style.series_peek(), 2)
         finally:
             t.doCleanups()
         import rstudio
@@ -861,6 +946,20 @@ class ExtrasKitTest(unittest.TestCase):
         kit2 = upload.set_guests(name, "s1", [{"name": "김코치"}])
         self.assertTrue(all(t.startswith("[1분 레슨 #2] ") and not t.startswith("[1분 레슨 #2] [") for t in kit2["titles"]), kit2["titles"])
         self.assertNotIn("전체 강좌", kit["description"])   # 강좌 줄을 고르지 않으면 설명 그대로
+
+    def test_saved_series_title_kept(self):
+        """검토: 전략에 저장한 시리즈 이름 후보 '[1분 풋살 기술] …' 앞에도 회차를 붙여 머리가 둘이 되고 '시리즈' 표시·전략 한 줄이 사라졌음 →
+        다른 대괄호 머리로 시작하는 후보는 그대로 · 나머지에만 회차."""
+        import upload
+        kit = {"name": "a.mp4", "source": {}, "format": "shorts", "titles": ["[1분 풋살 기술] 트래핑 꿀팁", "트래핑 꿀팁", "[1분 레슨 #3] 퍼스트 터치"],
+               "title": "트래핑 꿀팁", "series": {"n": 12, "tag": "[1분 레슨 #12]"}}
+        upload._tag_titles(kit)
+        self.assertEqual(kit["titles"], ["[1분 풋살 기술] 트래핑 꿀팁", "[1분 레슨 #12] 트래핑 꿀팁", "[1분 레슨 #12] 퍼스트 터치"])
+        self.assertEqual(kit["title"], "[1분 레슨 #12] 트래핑 꿀팁")
+        hints = {"series": [{"name": "[1분 풋살 기술]"}]}
+        upload.annotate(kit, hints, others=[])
+        self.assertEqual(kit["titleInfo"][0]["tags"], ["시리즈"])
+        self.assertTrue(any("저장한 시리즈 [1분 풋살 기술]" in a for a in kit["applied"]), kit["applied"])
 
     def test_no_tag_no_change(self):
         import upload

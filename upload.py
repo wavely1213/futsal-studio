@@ -1125,6 +1125,7 @@ def build_kit(name, seq=None, save=True):
 # ---- 시리즈 회차 · 전체 강좌 링크 (은평 스타일 덧붙임 · BR-245 · BR-246 · D-430) ----
 
 _TAG_HEAD = re.compile(r"^\[[^\]]*#\d+\]\s*")   # 제목 앞 회차 '[1분 레슨 #12] ' (hooks._SERIES 가 배울 때 지우는 모양)
+_HEAD = re.compile(r"^\s*[\[【]")   # 이미 대괄호 머리가 있는 제목 (전략에 저장한 시리즈 '[1분 풋살 기술] …' 등 · 회차를 앞에 또 붙이지 않음)
 
 
 def series_tag(name, sq):
@@ -1140,11 +1141,15 @@ def series_tag(name, sq):
 
 
 def _tag_titles(kit, title=True):
-    """제목 후보(·고른 제목·게스트 자동 제목) 앞에 회차 — 이미 붙은 회차는 바꿈 · 회차가 없는 키트는 그대로."""
+    """제목 후보(·고른 제목·게스트 자동 제목) 앞에 회차 — 이미 붙은 회차는 바꿈 · 회차가 없는 키트는 그대로 ·
+    다른 대괄호 머리로 시작하는 제목(전략에 저장한 시리즈 이름 후보 등)은 그대로 (머리가 둘이 되고 시리즈 표시가 사라지지 않게)."""
     tag = (kit.get("series") or {}).get("tag")
     if not tag:
         return kit
-    put = lambda t: f"{tag} {_TAG_HEAD.sub('', str(t or ''))}".strip()  # noqa: E731
+
+    def put(t):
+        rest = _TAG_HEAD.sub("", str(t or ""))
+        return rest.strip() if _HEAD.match(rest) else f"{tag} {rest}".strip()
     kit["titles"] = [put(t) for t in kit.get("titles") or []]
     ga = kit.get("guestAuto") or {}
     if ga.get("titles"):
