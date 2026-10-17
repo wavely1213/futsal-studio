@@ -1090,6 +1090,8 @@ def build_kit(name, seq=None, save=True):
     kit["guestHint"] = guest_hint(texts)
     kit["seriesFit"] = series_fit(texts, flow, dur, proj, sq, about=Path(name).stem)  # '[N가지 총정리]'·대결 시리즈를 붙여도 되는지 (게스트를 바꿀 때도)
     kit["titlePool"] = list(titles)  # 게스트를 뺐을 때 후보를 다시 채울 바탕 (D-085)
+    if fmt == "shorts":  # 쇼츠 새 말투 후보 — 이 쇼츠 받아쓰기·주제어로만 · 2·3번째에 (shape_titles · BR-250)
+        kit["titleNew"] = hooks.voice_titles(texts, topics, dur)
     shape_titles(kit, hints, others, guests=clean_guests(prev.get("guests")), flow=flow, notes=notes)  # 게스트·시리즈·질문형 + 겹침 순서
     if sq and fmt == "shorts":  # 화면에 시리즈 이름표가 있는 쇼츠: 제목 앞에도 같은 회차 '[1분 레슨 #n]' (번호는 이때 정함 · BR-245)
         kit["series"] = series_tag(name, sq)
@@ -1742,7 +1744,10 @@ def shape_titles(kit, hints, others, guests=(), flow=None, notes=None, keep_titl
     keep_title: 손으로 고른 제목은 그대로."""
     topics, fmt, dur = kit.get("topics") or [], kit.get("format"), kit.get("duration")
     src = kit.get("source") or {}
-    base = [t for t in kit.get("titles") or [] if t]
+    new = set(kit.get("titleNew") or [])
+    base = [t for t in kit.get("titles") or [] if t and t not in new]
+    if fmt == "shorts":  # 지난번에 붙인 이모지 후보는 빼고 다시 만듦 (_shorts_new)
+        base = [t for t in base if not any(t == hooks.emoji_title(x, (topics or [None])[0]) for x in base)]
     gt = guest_titles(list(guests), topics, dur, kit.get("name"), src.get("id"), hints.get("maxLen"))
     st = series_titles(hints, topics, fmt, dur, flow, guests, kit.get("seriesFit"))
     kit["guestAuto"] = dict(kit.get("guestAuto") or {}, titles=gt)
@@ -1767,7 +1772,7 @@ def shape_titles(kit, hints, others, guests=(), flow=None, notes=None, keep_titl
         if q is not None:
             order.remove(q)
             order.insert(1, q)
-    kit["titles"] = [pool[i] for i in order][:TITLE_KEEP]
+    kit["titles"] = _shorts_new([pool[i] for i in order], kit, hints, taken, st)[:TITLE_KEEP]
     kit["guestAuto"]["titles"] = [t for t in gt if t in kit["titles"]]
     if not (keep_title and kit.get("title")):
         kit["title"] = kit["titles"][0]
@@ -1775,6 +1780,45 @@ def shape_titles(kit, hints, others, guests=(), flow=None, notes=None, keep_titl
     if notes is not None and kept:
         notes.append(f"제목 후보 {len(kept)}개가 다른 키트·이미 올린 우리 영상 제목과 같아요 · '겹쳐요' 표시가 붙은 후보는 고쳐 써 주세요")
     return kit
+
+
+def _shorts_new(titles, kit, hints, taken, series=()):
+    """쇼츠 키트: 첫 후보(기본 제목)는 그대로 두고 새 말투 후보(titleNew · BR-250) → 첫 후보 끝에 이모지 하나 붙인 후보(BR-251)를
+    그 바로 뒤(2·3번째~)에 끼움 — 전략 할 일(질문형 먼저 · N자 넘으면 뒤로)·저장한 시리즈·게스트 순서는 shape_titles 와 같은 꼬리표로
+    지킴(같으면 새 후보가 앞). 다른 키트·이미 올린 우리 제목과 같거나 거의 같은 새 후보는 넣지 않음. 긴 영상 키트는 그대로."""
+    if kit.get("format") != "shorts" or not titles:
+        return titles
+
+    def rank(t):
+        m = _marks(t, kit, hints, taken, series)
+        pen = (1 if m.get("same") else 0) + (1 if m.get("long") else 0) + (1 if hints.get("question") and not m.get("question") else 0)
+        return (1 if m.get("dup") or m.get("near") else 0, pen - (2 if m.get("guest") else 1 if m.get("series") else 0))
+    keys, add = {hooks.norm_title(t) for t in titles}, []
+    for t in kit.get("titleNew") or []:
+        k = hooks.norm_title(t)
+        if k and k not in keys:
+            add.append(t)
+            keys.add(k)
+    e = hooks.emoji_title(titles[0], (kit.get("topics") or [None])[0])
+    add += [e] if e and e not in titles else []
+    rest, placed = list(titles[1:]), set()
+    ranks = {t: rank(t) for t in rest + add}
+    for t in add:
+        r = ranks[t]
+        if r[0]:  # 겹치는 새 후보는 안 넣음
+            continue
+        j = 0  # 꼬리표가 더 좋은 후보 · 먼저 넣은 같은 꼬리표 새 후보 뒤
+        while j < len(rest) and (ranks[rest[j]] < r or (rest[j] in placed and ranks[rest[j]] == r)):
+            j += 1
+        rest.insert(j, t)
+        placed.add(t)
+    return titles[:1] + rest
+
+
+def _emoji_twins(kit):
+    """후보 중 다른 후보 끝에 이모지만 붙인 것 (hooks.emoji_title)."""
+    ts, tp = kit.get("titles") or [], (kit.get("topics") or [None])[0]
+    return {e for e in (hooks.emoji_title(t, tp) for t in ts) if e and e in ts}
 
 
 def todo_hashtags(hashtags, hints, fmt):
@@ -1803,7 +1847,8 @@ def _applied(kit, hints, info=None):
     out = []
     if hints.get("question"):
         tags = [(info[i] if info and i < len(info) else {}).get("tags") or [] for i in range(len(kit.get("titles") or []))]
-        qs = [tg for t, tg in zip(kit.get("titles") or [], tags) if hooks.is_question(t) and "겹쳐요" not in tg]
+        tw = _emoji_twins(kit)  # 첫 후보에 이모지만 붙인 후보는 질문형을 하나 더 넣은 것으로 안 셈 (BR-251)
+        qs = [tg for t, tg in zip(kit.get("titles") or [], tags) if hooks.is_question(t) and "겹쳐요" not in tg and t not in tw]
         n = sum(1 for tg in qs if "같은 틀" not in tg)
         out.append(f"할 일 '짧은 질문형 제목' → 질문형 후보 {n}개를 앞쪽에 넣었어요" if n
                    else "할 일 '짧은 질문형 제목' → 질문형 틀을 이번 주 다른 키트가 이미 써서 '같은 틀'로 표시했어요" if qs

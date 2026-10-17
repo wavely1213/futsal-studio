@@ -11,6 +11,8 @@ AI 없이 규칙으로:
   용어가 없으면 기본 레슨 낱말(LESSON_TERMS) → 자주 나온 이름말 (풀이말 '차고'·'넓은'은 절대 안 씀 · 쇼츠·편집본은 원본 영상 주제를 먼저 물려받음 · kit_topics)
 - 우리 채널 틀은 주제 자리 밖에 그 영상만의 이야기('중앙을 파괴?')가 있으면 같은 갈래(드리블·패스·슈팅…)의 주제에만 쓰고,
   기본 제목(첫 후보)은 늘 기본 틀 (훅이 있으면 훅) · BR-021
+- 쇼츠 키트의 2·3번째 새 말투(감독님 한마디·묻고 답하기·반전 꼬리·'알아도 못 따라 하는 …')는 받아쓰기로만 (voice_titles · BR-250),
+  올리는 제목 끝 이모지 후보는 emoji_title (BR-251) — 순서는 upload.shape_titles
 """
 import json
 import os
@@ -672,6 +674,143 @@ def one_minute(dur):
         return 0 < float(dur) < 61
     except (TypeError, ValueError):
         return False
+
+
+# ---------- 쇼츠 제목 새 말투 · 올리는 제목 끝 이모지 (레퍼런스 쇼츠 · D-435 · D-436 · BR-250 · BR-251) ----------
+# 새 말투는 쇼츠 키트의 2·3번째 후보로만 (첫 후보 = 기본 제목은 그대로 · upload.shape_titles). 받아쓰기에 나온 문장·영상 주제어·
+# 쇼츠 길이로만 만듦 — 말하지 않은 숫자·장담은 넣지 않음. 글자 수는 쇼츠 위 큰 제목과 같은 셈(editor._norm: 띄어쓰기와
+# . , ! ? ~ … 는 안 세고 따옴표·괄호는 셈 · '(?)' = 2자)으로 editor.HOOK_MAX(16자) — 묻고 바로 답하는 꼴만 editor.HOOK_ASK(20자).
+VOICE_MAX = 2   # 쇼츠 키트에 넣는 새 말투 후보 수 (2·3번째)
+_ORDER_END = re.compile(r"(?:마세요|세요)$")   # 감독님이 시키는 말 끝 ('발로 하지 마세요' · '발목 힘 빼세요')
+_VOICE_SKIP = re.compile(r"구독|좋아요|알림|댓글|문의|신청|링크|채널|영상|시청|다음 시간|오늘 배운|감사|안녕|반갑")  # 인사·홍보 말
+_PLAIN_ORDER = re.compile(r"^(?:(?:꼭|한번|한 번|같이|직접|여러분도|천천히|잘)\s?)*(?:따라\s?)?(?:해|연습해|기억해|봐|보|주목해|집중해|확인해|참고해)"
+                          r"\s?(?:보)?세요$|(?<![가-힣])해\s?(?:보)?세요$")  # 뜻 없는 시키는 말 ('꼭 해 보세요' · '잘 보세요' · '이 꿀팁 꼭 해 보세요')
+_ASK_END = re.compile(r"\?$|(?:까요|나요|을까)$")  # 물음 (받아쓰기가 물음표를 빼먹어도 '…할까요'·'…하나요')
+_CHECK_ASK = re.compile(r"(?:죠|지요|아시겠|보이시|알겠|어때|어떠|괜찮)[가-힣]*\??$")  # 확인만 하는 물음 ('아시겠죠?')
+_SAID_IN = re.compile(r"(?<![\d가-힣])((?:\d+|한|두|세|네|다섯)\s?(?:초|분|번))\s?만에")  # 말한 걸린 시간 ('3초 만에')
+_FIX_WORDS = re.compile(r"고치|고쳐|고칠|교정|실수|안\s?돼|안\s?되")
+_LEAD_FILLER = re.compile(r"^(?:(?:자|어|음|아|네|그)[,.…]+\s*|(?:그래서|그러니까|그리고|이제|그럼|그러면|근데|자)\s+)+")
+EMOJI_DEF = "⚽"
+EMOJI_OF = {"shoot": "🔥", "defense": "🧱", "keeper": "🧱"}   # 주제어 갈래(category)별 업로드 제목 끝 이모지 (슛 🔥 · 수비·선방 🧱)
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿⌀-⏿‼⁉️]")
+
+
+def _hook_len(t):
+    """쇼츠 위 큰 제목과 같은 글자 수 셈 (editor._norm)."""
+    import editor
+    return len(editor._norm(t))
+
+
+def _sayings(texts):
+    """받아쓴 글 → 문장들 (앞 군말 '자,'·'그래서' 뗌 · 끝 마침표·느낌표 뗌 · 물음표는 그대로)."""
+    out = []
+    for t in texts or []:
+        for s in re.split(r"(?<=[.?!])\s+", re.sub(r"\s+", " ", str(t or "")).strip()):
+            s = re.sub(r"[.,…~!\s]+$", "", _LEAD_FILLER.sub("", s.strip()))
+            if s:
+                out.append(s)
+    return out
+
+
+_BODY_WORD = re.compile(r"(?<![가-힣])(?:공|발|몸|다리|허리|골대)(?:이|가|을|를|은|는|도|만|으로|로|에|과|와|의)?(?![가-힣])")  # 몸·공 낱말 ('발로' · '공을')
+
+
+def _has_term(t):
+    """레슨 말이 든 문장인지 (풋살 용어·기술 이름·기본 레슨 낱말·몸·공 낱말)."""
+    k = _compact(t)
+    return bool(_BODY_WORD.search(t or "")) or any(_compact(w) in k for w in TERMS + SKILLS + LESSON_TERMS if len(_compact(w)) >= 2)
+
+
+def _quote(said, topic):
+    """감독님 한마디(따옴표): 받아쓰기의 시키는 말 그대로 — 통째로 길면 쉼표 뒤 마지막 마디 · 주제어가 없으면 '주제어, ' 를 앞에.
+    하지 말라는 말('…하지 마세요')·레슨 낱말이 든 말을 먼저 · 그다음 짧은 것."""
+    import editor
+    best = None
+    for s in said:
+        if s.endswith("?") or _VOICE_SKIP.search(s) or re.search(_HONORIFIC, s):
+            continue
+        for part in dict.fromkeys([s, re.split(r",\s*", s)[-1]]):
+            if not _ORDER_END.search(part) or _PLAIN_ORDER.search(part) or _hook_len(part) < editor.HOOK_MIN:
+                continue
+            if not (_has_term(part) or (topic and _compact(topic) in _compact(part))):  # 레슨 낱말이 없는 말('참고로만 들으세요') X
+                continue
+            t = part if not topic or _compact(topic) in _compact(part) else f"{topic}, {part}"
+            if _hook_len(t) + 2 > editor.HOOK_MAX:
+                t = part
+            if _hook_len(t) + 2 > editor.HOOK_MAX:
+                continue
+            rank = (0 if re.search(r"지\s?마세요$", part) else 1, 0 if _has_term(part) else 1, _hook_len(t))
+            if best is None or rank < best[0]:
+                best = (rank, f'"{t}"')
+    return best[1] if best else None
+
+
+def _ask_answer(said):
+    """묻고 바로 답: 받아쓰기의 물음 + 바로 다음 문장(답 · 시키는 말 먼저) — 확인만 하는 물음('아시겠죠?')은 빼고, 레슨 낱말이 든 것만."""
+    import editor
+    found = []
+    for q, a in zip(said, said[1:]):
+        if not _ASK_END.search(q) or _CHECK_ASK.search(q) or _VOICE_SKIP.search(q + " " + a) or _hook_len(q) < editor.HOOK_MIN:
+            continue
+        if a.endswith("?") or is_question(a) or _hook_len(a) < 4 or not re.search(r"(?:요|다)$", a):
+            continue
+        t = f"{q if q.endswith('?') else q + '?'} {a}"
+        if _hook_len(t) <= editor.HOOK_ASK and _has_term(t):
+            found.append((0 if _ORDER_END.search(a) else 1, len(found), t))
+    return min(found)[2] if found else None
+
+
+def _reversal(said, topic, dur):
+    """반전 꼬리 '(?)': '{주제} 3초 만에 고치기(?)' — 걸린 시간은 받아쓰기에서 말한 것만, 없으면 1분 안 쇼츠의 '1분 만에'.
+    받아쓰기에 고치는 말(고치·실수·안 돼)이 있으면 '고치기', 아니면 '배우기'."""
+    import editor
+    body = " ".join(said)
+    m = _SAID_IN.search(body)
+    when = re.sub(r"(\d)\s+", r"\1", m.group(1)) + " 만에" if m else ("1분 만에" if one_minute(dur) else None)
+    if not (topic and when):
+        return None
+    t = f"{topic} {when} {'고치기' if _FIX_WORDS.search(body) else '배우기'}(?)"
+    return t if _hook_len(t) <= editor.HOOK_MAX else None
+
+
+def _cant_copy(topic):
+    """'알아도 못 따라 하는 {기술}' — 기술 이름(SKILLS)·드리블 갈래 주제어만 (숫자가 든 '1대1' X)."""
+    import editor
+    if not topic or re.search(r"\d", topic) or not (topic in _SKILL_SET or category(topic) == "dribble"):
+        return None
+    t = f"알아도 못 따라 하는 {topic}"
+    return t if _hook_len(t) <= editor.HOOK_MAX else None
+
+
+def voice_titles(texts, topics, dur=None, n=VOICE_MAX):
+    """쇼츠 제목 새 말투 후보 n개 (BR-250): 감독님 한마디(따옴표) → 묻고 바로 답 → 반전 꼬리 '(?)' → '알아도 못 따라 하는 {기술}'.
+    texts: 그 쇼츠 받아쓰기(문장) · topics: 키트 주제어(많이 나온 순) · dur: 쇼츠 길이(초). 첫 주제어가 풋살 용어·기술 이름·용어 사전
+    말이 아니면('풋살'·'기본 자세'·도움 낱말·자주 나온 이름말) 주제어가 드는 말투는 안 만듦. 이모지는 넣지 않음 (화면 큰 제목에도 쓸 수 있게)."""
+    topic = next((t for t in topics or [] if t), "")
+    known = {_compact(t) for t in topic_terms()} | {_compact(t) for t in LESSON_SKILLS}
+    topic = topic if slot_ok(topic) and _compact(topic) in known else ""  # 풋살 용어·기술 이름·용어 사전 말만 ('풋살'·'기본 자세'·'공을' X)
+    said = _sayings(texts)
+    out = []
+    for t in (_quote(said, topic), _ask_answer(said), _reversal(said, topic, dur), _cant_copy(topic)):
+        t = tidy_title(t) if t else ""
+        if t and not has_emoji(t) and norm_title(t) not in {norm_title(x) for x in out}:
+            out.append(t)
+    return out[:n]
+
+
+def has_emoji(t):
+    """제목에 이모지(그림 글자)가 이미 있는지 ('🔥풋살기술🔥 …' · '⚽')."""
+    return bool(_EMOJI.search(t or ""))
+
+
+def emoji_title(t, topic=None):
+    """올리는 제목 끝에 이모지 하나 붙인 후보 (BR-251): 주제어 갈래가 슈팅이면 🔥 · 수비·골키퍼면 🧱 · 그 밖 ⚽.
+    이미 이모지가 있거나 100자를 넘으면 None. 화면 글자(쇼츠 위 큰 제목·자막·썸네일)에는 쓰지 않음."""
+    t = tidy_title(t)
+    if not t or has_emoji(t):
+        return None
+    e = EMOJI_OF.get(category(topic) if topic else None, EMOJI_DEF)
+    return f"{t} {e}" if len(t) + 1 + len(e) <= 100 else None
 
 
 def title_candidates(topics, hook=None, fmt="long", cache=None, n=5, flow=None, dur=None):

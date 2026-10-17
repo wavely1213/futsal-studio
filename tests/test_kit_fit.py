@@ -381,8 +381,9 @@ class StrategyFitTests(WorkBase):
         k = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["퍼스트 터치"], "hashtags": [],
              "titles": ["퍼스트 터치 꿀팁", "퍼스트 터치 제대로 하는 법"]}
         upload.shape_titles(k, hints, others)
-        qs = [t for t in k["titles"] if hooks.is_question(t)]
+        qs = [t for t in k["titles"] if hooks.is_question(t) and not hooks.has_emoji(t)]  # 첫 후보 끝 이모지 후보(BR-251)는 질문형 틀이 아님
         self.assertEqual(qs, ["퍼스트 터치, 왜 자꾸 안 될까?", "퍼스트 터치 제대로 하고 있나요?"])
+        self.assertIn("퍼스트 터치, 왜 자꾸 안 될까? ⚽", k["titles"])
         others += [{"name": f"p{i}.mp4", "source": {"id": "x"}, "title": hooks.fill(t, ["드리블"]), "topics": ["드리블"]} for i, t in enumerate(hooks.QUESTION_TPL)]
         k = {"name": "x.mp4", "source": {"id": "a"}, "format": "long", "duration": 300.0, "topics": ["퍼스트 터치"], "hashtags": [], "titles": ["퍼스트 터치 꿀팁"]}
         upload.shape_titles(k, hints, others)
