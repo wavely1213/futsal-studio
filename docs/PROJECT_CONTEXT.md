@@ -72,7 +72,7 @@ youtube_api.py      Google OAuth(루프백·PKCE)·비밀 저장(DPAPI)·YouTube
 hooks.py            제목 후보 (우리 채널 제목 패턴·풋살 주제어)
 source.py           영상 출처 구분 (풋살사관학교·다른 채널(채널별)·내 촬영본) → videos/sources.json
 refs.py             학습용 영상 (스타일 배우기 전용 · 편집용 보관함과 따로) → WORK/refs/<채널>/ · refs/refs.json
-ref_channels.json   추천 채널 51곳·방향 A/B/C 추천 영상 (2026-10-07 조사 · 읽기만)
+ref_channels.json   추천 채널 52곳·방향 A/B/C 추천 영상 (2026-10-07 조사 + 쇼츠 레퍼런스 1곳 2026-10-17 · 읽기만)
 strategy.py         채널 전략 (경쟁 채널 숫자·가져올 점·우리 전략·30/60/90·점검) → WORK/strategy/
 forecast.py         채널 전략 '가능성(%)' 계산 (비교 채널로 보정한 Monte Carlo · 파일·네트워크 없음)
 intake.py           보관함에 들어오는 영상 살피기 (복사 중·못 쓰는 형식·편집점을 찾은 뒤 바뀐 파일)
@@ -83,7 +83,7 @@ cutout_worker.py    누끼를 따로 프로세스에서 (메모리가 모자라�
 exportplan.py       내보내기: 같은 원본에서 이어지는 짧은 구간들을 ffmpeg 하나로 (D-054)
 hwdec.py            그래픽카드로 영상 풀기 (Windows·HDR · 확인된 PC 에서만) (D-053)
 idle.py             쉬는 동안(5분) 불러 둔 모델 내려놓기 (얼굴·선수·공·글자·소리·받아쓰기) (D-055)
-strategy_seed.json  채널 전략 비교 데이터 (추천 51곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
+strategy_seed.json  채널 전략 비교 데이터 (추천 52곳 + 우리 채널 · 2026-10-07 · 읽기만 · 만드는 스크립트 tests/make_strategy_seed.py)
 remote.py           휴대폰으로 보기: 원격 리스너(/r/*)·짝짓기·기기 열쇠·서명·비콘·알림 (D-027) · 원격 홈 주소 SITE 한 줄 (D-233)
 rstudio.py          밖에서 작업: 세션·넘겨주기·길 분류(POLICY)·경계(gate)·올리기(조각)·받기 (D-230~D-232)
 rlogin.py           아이디·비밀번호로 연결의 순수 부분: canon·규칙·SRP-6a·PC 찾기 열쇠·잠김·미리 정해 둔 로그인(PRESET) (D-250~D-258)

@@ -1656,6 +1656,10 @@ def learned_aspects(st):
         snd["moods"]["intro"] = "잔잔"
     base["sound"] = snd
     base["desc"] = st.get("desc") or ""
+    # 고정 틀 쇼츠의 화면 배치 (BR-256): 쇼츠 값(섞어 배운 스타일이면 byFormat.shorts) · 알려 주기만 하고 MSG 화면 배치(seq_layout)에는 쓰지 않음
+    lay = ((p.get("byFormat") or {}).get("shorts") or {}).get("layout") or p.get("layout")
+    if isinstance(lay, dict):
+        base["layout"] = _copy(lay)
     return base
 
 

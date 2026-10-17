@@ -151,7 +151,7 @@ def main():
             n_old += 1
         else:
             print("자료 없음:", rec["name"])
-    data = {"v": 1, "at": "2026-10-07", "note": "채널 전략 비교 데이터: 추천 채널 51곳 + 우리 채널. 실제로 새로 고친 채널은 그날 숫자, 나머지는 2026-10-07 조사 숫자예요 (반올림된 값 · 날짜 없음).",
+    data = {"v": 1, "at": "2026-10-07", "note": f"채널 전략 비교 데이터: 추천 채널 {len(rc['channels'])}곳 + 우리 채널. 실제로 새로 고친 채널은 그날 숫자, 나머지는 2026-10-07 조사 숫자예요 (반올림된 값 · 날짜 없음).",
             "channels": out}
     out_path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"seed {out_path} · 채널 {len(out)} (새로 고친 것 {n_live} · 조사 원자료 {n_res} · 예전 비교 데이터 그대로 {n_old}) · {out_path.stat().st_size // 1024}KB")

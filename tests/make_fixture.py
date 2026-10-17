@@ -253,6 +253,75 @@ def make_plan_fixture(out, work=None):
             "transcript": PLAN_TRANSCRIPT}
 
 
+# ---- 고정 틀 세로 쇼츠 정답 영상 (style.frame_layout · BR-255) ----
+# 위 파랑 띠(흰 상자 + 검은 제목 + 흰 사실 줄 · 내내 그대로) · 가운데 움직이는 영상 창 · 아래 주황 띠(노란 말 자막이 바뀜 + 맨 아래 작은 흰 글씨 그대로)
+VW, VH, VDUR = 360, 640, 12.0
+FRAME_WIN = (0.30, 0.72)                 # 영상 창 [위, 아래] (화면 높이 비율)
+FRAME_TOP, FRAME_BOTTOM = "0x1E5AA8", "0xE8862A"
+FRAME_TITLE_BOX = (0.07, 0.09, 0.93, 0.17)     # 흰 제목 상자 [x0, y0, x1, y1]
+FRAME_TITLE = "발바닥으로 공 멈추기"
+FRAME_FACT = "트래핑 기본 · 두 번째 포인트"      # 제목 아래 흰 사실 줄 (내내 그대로)
+FRAME_CAPS = [(0.5, 2.3, "공이 오면 발을 살짝 들어요"), (2.8, 4.6, "발바닥으로 눌러 멈춰요"), (5.1, 7.0, "몸은 앞으로 기울여요"),
+              (7.5, 9.3, "다시 한 번 해 볼게요"), (9.8, 11.6, "천천히 해도 괜찮아요")]
+FRAME_CAP_COLOR = "#FFE14D"
+
+
+def _frame_ass(title=True, caps=True):
+    x0, y0, x1, y1 = FRAME_TITLE_BOX
+    head = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {VW}", f"PlayResY: {VH}", "WrapStyle: 2", "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+            "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            "Style: Title,Pretendard,40,&H00111111,&H00111111,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1",
+            "Style: Fact,Pretendard,24,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1",
+            "Style: Cap,Pretendard,26,&H004DE1FF,&H004DE1FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,2,10,10,90,1",
+            "Style: Foot,Pretendard,14,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,0,0,2,0,0,10,1",
+            "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    ev = []
+    if title:
+        ev += [f"Dialogue: 0,{_ts(0)},{_ts(VDUR + 1)},Title,,0,0,0,,{{\\pos({(x0 + x1) / 2 * VW:.0f},{(y0 + y1) / 2 * VH:.0f})}}{FRAME_TITLE}",
+               f"Dialogue: 0,{_ts(0)},{_ts(VDUR + 1)},Fact,,0,0,0,,{{\\pos({VW / 2:.0f},{0.215 * VH:.0f})}}{FRAME_FACT}",
+               f"Dialogue: 0,{_ts(0)},{_ts(VDUR + 1)},Foot,,0,0,0,,풋살 레슨 클립"]
+    if caps:
+        ev += [f"Dialogue: 1,{_ts(a)},{_ts(b)},Cap,,0,0,0,,{t}" for a, b, t in FRAME_CAPS]
+    return "\n".join(head + ev) + "\n"
+
+
+def make_frame_fixture(out, work=None, bands=True):
+    """고정 틀 세로 쇼츠(360×640 · 12초)를 out 에 만들고 정답(dict)을 돌려줌.
+    bands=False: 같은 움직이는 화면이 세로 화면 전체를 채우고 아래에 노란 말 자막만 (틀 없는 세로 쇼츠 · 예전과 같은 결과여야 함)."""
+    out = Path(out)
+    tmp = Path(work or tempfile.mkdtemp(prefix="스타일 정답 "))
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        (tmp / "fonts").mkdir(exist_ok=True)
+        shutil.copy2(core.APP_DIR / "fonts" / "Pretendard-Bold.otf", tmp / "fonts" / "Pretendard-Bold.otf")
+        (tmp / "f.ass").write_text(_frame_ass(title=bands), encoding="utf-8")
+        y0, y1 = int(FRAME_WIN[0] * VH), int(FRAME_WIN[1] * VH)
+        wh = (VH if not bands else y1 - y0) // 2 * 2
+        # 움직이는 화면: 부드러운 물결이 계속 흘러 모든 칸이 바뀜 (글자 같은 날카로운 경계는 없음)
+        mov = (f"color=c=black:s={VW}x{wh}:r={RATE}:d={VDUR},format=rgb24,"
+               "geq=r='128+100*sin(X/9+T*4)':g='128+90*cos(Y/7-T*3)':b='128+80*sin((X+Y)/11+T*5)'")
+        ins = ["-f", "lavfi", "-i", f"color=c={FRAME_TOP}:s={VW}x{VH}:r={RATE}:d={VDUR}", "-f", "lavfi", "-i", mov,
+               "-f", "lavfi", "-i", f"sine=f=220:sample_rate=48000:d={VDUR}"]
+        if bands:
+            bx0, by0, bx1, by1 = FRAME_TITLE_BOX
+            fc = (f"[0:v]drawbox=x=0:y={y1}:w=iw:h=ih-{y1}:color={FRAME_BOTTOM}:t=fill,"
+                  f"drawbox=x={bx0 * VW:.0f}:y={by0 * VH:.0f}:w={(bx1 - bx0) * VW:.0f}:h={(by1 - by0) * VH:.0f}:color=white:t=fill[bg];"
+                  f"[bg][1:v]overlay=x=0:y={y0}:shortest=1,format=yuv420p,subtitles=f.ass:fontsdir=fonts[v]")
+        else:
+            fc = "[1:v]format=yuv420p,subtitles=f.ass:fontsdir=fonts[v]"
+        _ff(ins + ["-filter_complex", fc, "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                   "-pix_fmt", "yuv420p", "-r", RATE, "-c:a", "aac", "-b:a", "96k", "-t", VDUR, "frame.mp4"], tmp)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(tmp / "frame.mp4"), str(out))
+    finally:
+        if work is None:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return {"duration": VDUR, "window": list(FRAME_WIN) if bands else None, "top": "#" + FRAME_TOP[2:], "bottom": "#" + FRAME_BOTTOM[2:],
+            "titleBox": list(FRAME_TITLE_BOX) if bands else None, "captionColor": FRAME_CAP_COLOR}
+
+
 if __name__ == "__main__":
     dst = Path(sys.argv[1] if len(sys.argv) > 1 else "style_fixture.mp4")
     t = make_fixture(dst)

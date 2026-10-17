@@ -898,6 +898,41 @@ def classify_caption(text, h=0.05, cname="white", pos="bottom", box=None, dur=1.
     return "speech" if pos == "bottom" else "situ"
 
 
+def fixed_text(sev):
+    """스타일 기록의 고정 틀(세로 쇼츠의 안 바뀌는 위·아래 띠 · BR-255) 속 늘 떠 있는 글자 자리 [[x0, y0, x1, y1]] —
+    틀이 없거나(가로 영상·예전 기록) 글자가 없으면 None (그때는 예전과 똑같이 모든 글자를 셈)."""
+    fr = (sev or {}).get("frame")
+    if not isinstance(fr, dict) or not fr.get("found"):
+        return None
+    out = [[float(v) for v in b] for b in fr.get("text") or [] if isinstance(b, list) and len(b) == 4]
+    return out or None
+
+
+FIXED_PAD = 0.01   # 늘 떠 있는 글자 자리를 이만큼(화면 비율) 넓혀 봄 — 틀 찾기 화면이 작아(90×160) 글자 끝이 조금 밖으로 나옴
+
+
+def in_fixed(box, fixed):
+    """글자 줄 상자가 고정 틀의 늘 떠 있는 글자 자리 안인지: 가운데가 그 자리 안이고 상자의 절반 넘게 겹침."""
+    if not fixed or not box:
+        return False
+    x0, y0, x1, y1 = (float(v) for v in box)
+    cx, cy, area = (x0 + x1) / 2, (y0 + y1) / 2, max(1e-6, (x1 - x0) * (y1 - y0))
+    for a, b, c, d in fixed:
+        a, b, c, d = a - FIXED_PAD, b - FIXED_PAD, c + FIXED_PAD, d + FIXED_PAD
+        if a <= cx <= c and b <= cy <= d and max(0.0, min(x1, c) - max(x0, a)) * max(0.0, min(y1, d) - max(y0, b)) >= 0.5 * area:
+            return True
+    return False
+
+
+def ocr_lines(pe, sev):
+    """기획 기록의 글자 읽기 결과 — 고정 틀에 늘 떠 있는 글자(제목·띠 글씨)는 뺌 (자막 종류·색·위치를 망치지 않게 · 가로 영상은 그대로)."""
+    ocr = pe.get("ocr")
+    fixed = fixed_text(sev)
+    if ocr is None or not fixed:
+        return ocr
+    return [dict(o, lines=[ln for ln in o.get("lines") or [] if not in_fixed(ln.get("box"), fixed)]) for o in ocr]
+
+
 def group_captions(ocr, segs, duration):
     """OCR 줄들 → 자막 사건 [{a, b, text, kind, h, cname, pos, box, sim}] (이어지는 초의 같은 글자·겹치는 상자는 하나로)."""
     events = []
@@ -961,7 +996,8 @@ def detect(pe, sev, segs):
     common = ((H <= TEASER_HAM) & far).mean(axis=1) if n else np.zeros(0)
     simple = flat <= max(0.02, float(np.percentile(flat, 10)) if n else 0.02)
     usable = (common < COMMON_FRAC) & ~simple
-    caps = group_captions(pe.get("ocr"), segs, dur) if pe.get("ocr") is not None else None
+    ocr = ocr_lines(pe, sev)
+    caps = group_captions(ocr, segs, dur) if ocr is not None else None
     ev = {k: [] for k in ("teaser", "title", "freeze", "replay", "insert", "shake", "montage", "laugh", "cheer", "sfx", "punchZoom", "reaction")}
     # 인트로 창
     W = int(max(INTRO_MIN, min(INTRO_MAX, dur * INTRO_FRAC)))
@@ -1038,7 +1074,7 @@ def detect(pe, sev, segs):
         ev["replay"].append([a, b, min(src), max(src) + 1, ratio])
     # 타이틀 카드: 큰 글씨가 가운데에 · 움직임이 적게 1초 이상 / 단순한 그래픽 화면
     mot_at = lambda t: float(motion[min(len(motion) - 1, int(t * 2))]) if len(motion) else 0.0  # noqa: E731
-    for o in pe.get("ocr") or []:
+    for o in ocr or []:
         for ln in o.get("lines") or []:
             bx = ln.get("box") or [0, 0, 0, 0]
             cx = (bx[0] + bx[2]) / 2
@@ -1127,7 +1163,7 @@ def detect(pe, sev, segs):
                 if mean_hist is not None:
                     p, q2 = S["hist"][s], mean_hist
                     chi = float(0.5 * (((p - q2) ** 2) / (p + q2 + 1e-6)).sum())
-                big_text = any(o["t"] == s and any(float(x.get("h") or 0) >= TITLE_H for x in o.get("lines") or []) for o in pe.get("ocr") or [])
+                big_text = any(o["t"] == s and any(float(x.get("h") or 0) >= TITLE_H for x in o.get("lines") or []) for o in ocr or [])
                 graphic = (flat[s] < 0.06 and sat[s] > 0.35) or (big_text and flat[s] < 0.1)
                 if far_ok and chi > 0.5 and graphic:
                     good += 1
@@ -1537,7 +1573,7 @@ def judge_format(pe, d, segs, sev, genre, fun, caps_j, spk):
     react = fpm.get("laugh", 0) + fpm.get("cheer", 0)
     if react >= 0.5 and (big_face or S["faces"] is None and react >= 1):
         labels.append("현장 리액션")
-    cap_secs = len({int(o["t"]) + k for o in pe.get("ocr") or [] for k in range(int(o.get("d") or 1)) if o.get("lines")})
+    cap_secs = len({int(o["t"]) + k for o in ocr_lines(pe, sev) or [] for k in range(int(o.get("d") or 1)) if o.get("lines")})
     if pe.get("ocr") is not None and cap_secs / max(1.0, dur) >= 0.7 and (talk or 0) <= 0.3:
         labels.append("자막 위주")
     demo = None
