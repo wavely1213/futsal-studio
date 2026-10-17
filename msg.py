@@ -2098,8 +2098,9 @@ def caption_y(st, fmt):
     return {"bottom": 0.9 if fmt == "long" else 0.8, "middle": 0.62 if fmt == "long" else 0.6, "top": 0.16}[pos]
 
 
-def text_looks(st, fmt, cap_y):
-    """사건별 글자 모양 (위치는 말 자막 자리에서 0.15 넘게 떨어뜨림)."""
+def text_looks(st, fmt, cap_y, card=False):
+    """사건별 글자 모양 (위치는 말 자막 자리에서 0.15 넘게 떨어뜨림).
+    card: 은평 스타일 쇼츠 — 위 띠의 흰 제목 상자·사실 줄(화면 위 0.095~0.2) 아래, 영상 창 위 끝(0.28) 바로 위로 상황 자막을 내림 (BR-242)."""
     c = st["captions"]
     sh = fmt == "shorts"
     low = cap_y < 0.5  # 말 자막이 위쪽이면 MSG 글자는 아래쪽으로
@@ -2125,6 +2126,8 @@ def text_looks(st, fmt, cap_y):
                  font="Black Han Sans", weight="Black", size=68 if not sh else 72)
     if sh:
         score.update(y=0.27)
+    if sh and card:
+        situ["y"] = EP_ROW
     return {"emphasis": emph, "situ": situ, "inner": inner, "fx": fx, "score": score,
             "count": dict(fx, fill="#FFFFFF", size=140 if sh else 120, effect="stamp")}
 
@@ -3301,6 +3304,8 @@ class _Build:
         self.events = []
         self.main = []     # 본편 V1 클립 (원본 → 타임라인 바꾸기용)
         self.lost = 0      # 양 범위 때문에 뺀 사건 중 그것만 보여 주던 재미 순간이 있던 것 (govern)
+        self.card = False  # 은평 스타일 쇼츠 (BR-240 · 위 띠 제목 상자·사실 줄은 글자 자리 정리에서 그대로 두고 피함)
+        self.fixed = set()  # 자리를 옮기지 않는 글자 id (은평 스타일 큰 제목·사실 줄)
 
     def clip(self, a, b, speed=1.0, fx=None, nocaps=False, mute=False, vol_db=0.0, main=False, color=None):
         v, au = editor._pair(a, b, start=round(self.pos, 4))
@@ -3753,8 +3758,11 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     _check()
     fc = zoom_anchor(face_center(sig) or [0.5, 0.38], face_box(sig))
     B = _Build(name, info, fmt)
+    B.card = fmt == "shorts" and editor.shorts_card_on()   # 은평 스타일 쇼츠 (BR-240 · 스타일 화면 '쇼츠 화면 배치')
     cap_y = caption_y(st, fmt)
-    looks = text_looks(st, fmt, cap_y)
+    if B.card:
+        cap_y = max(cap_y, editor.EP_CAP_Y)   # 말 자막은 아래 띠 (BR-242)
+    looks = text_looks(st, fmt, cap_y, card=B.card)
     snd = dict(st["sound"], moods=_moods_for(st["sound"].get("moods") or {}, moms))
     pal = SFX_PALETTE.get(snd.get("palette"), SFX_PALETTE["variety"])
     sections = []   # 배경음악 구간 (타임라인 시작, 끝, 분위기)
@@ -4038,8 +4046,15 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         hk, kt, opening = _shorts_intro(B, hook, short_r, rec.get("videoTopic") or "", editor.shorts_topic_on(), looks, st, cap_y, fmt, caps)
         topic_line = kt["text"] if kt else ""
         k_h = _sfx_at(B, 0.0, pal.get("title", "짠"), None, "hook", why="쇼츠 첫 장면 큰 글자", title=hk["id"], must=True)
-        B.event("hook", 0.0, f"{kt['text']} · {hk['text']}" if kt else hk["text"], "쇼츠 첫 2.5초 주제 줄 + 포인트" if kt else "쇼츠 첫 2.5초 훅 자막",
-                refs={"titles": [hk["id"]] + ([kt["id"]] if kt else []), "sfx": [k_h]})
+        refs = {"titles": [hk["id"]] + ([kt["id"]] if kt else []), "sfx": [k_h]}
+        if B.card:  # 은평 스타일: 큰 제목 밑 흰 상자 (도형 · 끝까지) — 큰 제목·사실 줄은 글자 자리 정리에서 옮기지 않음
+            box = editor.ep_box(B.pos)
+            B.shapes.append(box)
+            refs["shapes"] = [box["id"]]
+            B.fixed |= set(refs["titles"])
+        B.event("hook", 0.0, f"{kt['text']} · {hk['text']}" if kt else hk["text"],
+                ("쇼츠 내내 흰 상자 제목 + 사실 줄" if kt else "쇼츠 내내 흰 상자 제목") if B.card else
+                "쇼츠 첫 2.5초 주제 줄 + 포인트" if kt else "쇼츠 첫 2.5초 훅 자막", refs=refs)
         # 첫머리가 이미 말한 순서('동작 2' · '두 번째 포인트')를 바로 뒤 상황 자막이 또 띄우면 뺌 (검토: 2.6초에 '동작 2'가 다시 뜸)
         _drop_said_order(B, hk, kt)
 
@@ -4097,8 +4112,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     if any(it["track"] == "A5" for it in B.items):
         tracks.append({"id": "A5", "k": "a", "lock": False, "mute": False, "solo": False, "target": False, "h": 1, "vol": 0.0, "role": "dialog", "name": "효과음",
                        "voiceFx": False})
-    capst = _caption_style(st, fmt, cap_y)
-    layout = seq_layout(fmt)
+    capst = editor.ep_caption(_caption_style(st, fmt, cap_y)) if B.card else _caption_style(st, fmt, cap_y)   # (은평 스타일: 어두운 글씨는 흰 글씨)
+    layout = seq_layout(fmt, B.card)
     seq = editor._new_seq(label, fmt, B.items, trans=B.trans, titles=B.titles, shapes=B.shapes, tactics=B.tactics, markers=B.markers, captionStyle=capst,
                           captionsOn=bool(st["captions"].get("on", True)), layout=layout,
                           master={"volume": 1.0, "normalize": True, "lufs": float(snd.get("lufs") or -14.0)},
@@ -4107,6 +4122,10 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
                           voice=dict(VOICE))
     seq["tracks"] = tracks
     seq["auto"] = "msg"
+    if B.card:  # 은평 스타일 큰 제목·사실 줄·흰 상자는 편집본 끝까지 (끝에 남는 효과음·배경음악 꼬리까지 · BR-241)
+        end = round(editor.seq_total(seq), 3)
+        for x in [t for t in B.titles if t["id"] in B.fixed] + [g for g in B.shapes if g.get("plan") == "card"]:
+            x["dur"] = end
     summ = summary_of(B.events, sections, total, seq_items_audio)
     seq["msg"] = {"v": 1, "style": {"label": st.get("label"), "kind": st.get("kind"), "sources": st.get("sources"), "sfx": snd.get("palette") or "variety"},
                   "intensity": intensity, "seed": seed,
@@ -4265,8 +4284,10 @@ def _track_play(name, a, b, t, detect_fn=None):
     return out
 
 
-def seq_layout(fmt):
-    """MSG 편집본 화면 배치 (쇼츠는 흐린 배경 위 1.35배)."""
+def seq_layout(fmt, card=False):
+    """MSG 편집본 화면 배치 (쇼츠는 흐린 배경 위 1.35배 · card: 은평 스타일 파란 띠 · editor.EP_LAYOUT)."""
+    if fmt == "shorts" and card:
+        return dict(editor.EP_LAYOUT)
     if fmt == "shorts":
         return {"mode": "blur", "bar": "#000000", "zoom": 1.35, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0}
     return {"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0}
@@ -4283,7 +4304,7 @@ def place_tactics(B, name, sig, moms, intensity, fmt, detect_fn=None):
     main = [it for it in B.items if it["track"] == "V1" and it.get("media", "main") == "main"]
     mins = sum(editor.i_len(it) for it in main) / 60.0
     n_max = min(most, max(1, int(mins * per_min + 0.5)))
-    seq = {"format": fmt, "layout": seq_layout(fmt)}
+    seq = {"format": fmt, "layout": seq_layout(fmt, getattr(B, "card", False))}
     md = {"kind": "video", "w": B.info.get("width"), "h": B.info.get("height")}
     used, made = [], []
     cuts = sorted(float(c) for c in sig.get("cuts") or ())
@@ -4434,7 +4455,13 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
         for tid in (e.get("refs") or {}).get("titles") or []:
             kind_of.setdefault(tid, e["kind"])
     placed, gone = [], set()
+    # 은평 스타일 쇼츠(BR-242): 위 띠의 흰 제목 상자·큰 제목·사실 줄은 그 자리 그대로 · 다른 글자는 그 둘레를 피함 (화면 글자 2개 셈에는 안 넣음)
+    fixed = getattr(B, "fixed", None) or set()
+    fboxes = [text_box(t["text"], t["style"], W, H) for t in B.titles if t["id"] in fixed]
+    fboxes += [[s["x"] * W, s["y"] * H, (s["x"] + s["w"]) * W, (s["y"] + s["h"]) * H] for s in B.shapes if s.get("plan") == "card"]
     for t in sorted(B.titles, key=lambda t: (LAYOUT_PRI.get(kind_of.get(t["id"]), 9), t["start"])):
+        if t["id"] in fixed:
+            continue
         st = t["style"]
         if total - t["start"] < MIN_TEXT:  # 영상 끝에 걸려 읽을 틈 없이 스치는 글자는 뺌 (판정: 0.3초 글자)
             gone.add(t["id"])
@@ -4457,6 +4484,8 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
             if bx[1] < sy0 - 0.5 or bx[3] > sy1 + 0.5:
                 return False
             if avoid_face and not face_ok and _overlap(bx, fpx) > 0.12:
+                return False
+            if any(_overlap(bx, fb) > 0 for fb in fboxes):
                 return False
             if on_caps and min(bx[3], band[1]) - max(bx[1], band[0]) > 0:
                 return False
@@ -4709,9 +4738,12 @@ def _shorts_intro(B, hook, short_r, vt, topic_on, looks, st, cap_y, fmt, caps):
             while lim > 6 and len(re.sub(r"\s", "", glyph_safe(htxt, hlook.get("font")))) > 14:
                 lim -= 1
                 htxt = _short_text(hook, lim)
-        hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
+        if B.card:  # 은평 스타일: 흰 상자 안 한 줄 큰 제목 · 처음부터 끝까지 (BR-241)
+            hk = B.title(" ".join(htxt.split()), 0.0, B.pos, editor.ep_title_style(" ".join(htxt.split())))
+        else:
+            hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
         kick = editor.topic_line(vt, point, htxt) if topic_on else ""
-        kt = _topic_kicker(B, kick, hk, st, cap_y, fmt) if kick else None
+        kt = (_card_fact(B, kick, hk) if B.card else _topic_kicker(B, kick, hk, st, cap_y, fmt)) if kick else None
         if kt or not need:
             return hk, kt, (hk["text"] if main else "")
         B.titles.remove(hk)
@@ -4729,6 +4761,17 @@ def _drop_said_order(B, hk, kt):
 
 
 TOPIC_KICK = (64, 56)   # MSG 쇼츠 주제 줄 글자 크기 (큰 것부터 · 큰 줄 96 · 휴대폰에서 읽히는 크기)
+EP_ROW = 0.27   # 은평 스타일 쇼츠: 상황 자막·'다시 보기 ▶'·점수판 줄 (글 아래 끝 · 사실 줄 0.195 아래 · 영상 창 위 끝 0.28 위 · BR-242)
+
+
+def _card_fact(B, text, hk):
+    """은평 스타일 사실 줄 (BR-241): 흰 상자 큰 제목(hk) 아래 작은 흰 글씨 한 줄 · 큰 제목과 같은 때(끝까지) · 주제 줄(plan topic) —
+    길면(editor.TOPIC_MAX + 2 넘음) None (큰 제목만)."""
+    if len(re.sub(r"\s", "", text)) > editor.TOPIC_MAX + 2:
+        return None
+    kt = B.title(text, 0.0, float(hk["dur"]), dict(editor.EP_FACT))
+    kt["plan"], kt["under"] = "topic", hk["id"]
+    return kt
 
 
 def _topic_kicker(B, text, hk, st, cap_y, fmt="shorts"):
@@ -4903,9 +4946,9 @@ def _insert(B, c, name, sig, st, intensity, looks, pal, seed, cap_y):
         lt = dict(editor.TITLE_STYLE, weight="Black", size=54, fill="#FFFFFF", stroke="#000000", strokeW=12, bgOn=True, bg="#000000", bgOpacity=0.78,
                   x=0.93, y=0.14 if cap_y > 0.5 else 0.8, align="right", effect="fade")
         if B.fmt == "shorts":
-            lt.update(size=58, y=0.2)
+            lt.update(size=58, y=EP_ROW if B.card else 0.2)   # 은평 스타일: 사실 줄 아래 · 영상 창 바로 위 (BR-242)
         refs["titles"].append(B.title("다시 보기 ▶", s0 + 0.15, ln - 0.15, lt)["id"])
-        if st["fun"].get("replayLook") == "letterbox" and not (B.fmt == "long" and st["intro"].get("letterbox")):  # (늘 띠가 있으면 또 안 넣음)
+        if st["fun"].get("replayLook") == "letterbox" and not (B.fmt == "long" and st["intro"].get("letterbox")) and not B.card:  # (늘 띠가 있으면 또 안 넣음 · 은평 스타일은 띠 틀)
             refs["shapes"] += [B.shape(0, 0, 1, 0.1, "#000000", s0, ln, 1.0, 0, "검은 띠")["id"], B.shape(0, 0.9, 1, 0.1, "#000000", s0, ln, 1.0, 0, "검은 띠")["id"]]
         # 휙(다큐는 라이저) 봉우리를 다시 보기로 바뀌는 컷에 (예전: 컷 0.1초 앞에서 시작 → 봉우리가 컷 뒤 · D-371)
         refs["sfx"] = [_sfx_at(B, s0, pal.get("replay", "휙"), None, "replay", why=f"{mmss(c['t'])} 시범 다시 보기로 바뀌는 컷")]

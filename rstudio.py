@@ -363,7 +363,7 @@ POLICY = {
         "/api/strategy/preview", "/api/youtube/status", "/api/youtube/plan", "/api/youtube/history", "/api/dict",
         "/frame", "/thumbs.jpg", "/api/edit/thumbs.jpg", "/api/edit/poster.jpg", "/api/edit/revaudio",
         "/api/auto", "/api/auto/pending",  # 끝까지 자동으로: 마지막 기록·기본 설정 · 그려 줄 썸네일 요청
-        "/api/style/shorts_topic")},  # 쇼츠 첫머리 주제 줄 설정 (BR-120 · D-221)
+        "/api/style/shorts_topic", "/api/style/shorts_layout")},  # 쇼츠 첫머리 주제 줄 설정 (BR-120 · D-221) · 쇼츠 화면 배치 (BR-240)
     (_G, "/media"): MEDIA, (_G, "/api/edit/file"): MEDIA,
     # 바꾸기·작업 시작 (POST · CSRF)
     **{(_P, p): WRITE for p in (
@@ -387,8 +387,8 @@ POLICY = {
         "/api/claude/save",  # 클로드 아껴 쓰기 켬/끔 (D-390)
         # 끝까지 자동으로 (D-200~D-207): 시작·이어서 하기 · 편집실 MSG 설정 · 썸네일 그리기 맡기/풀기/보내기 · 효과음 꺼내기
         "/api/auto", "/api/auto/prefs", "/api/auto/claim", "/api/auto/release", "/api/auto/thumb", "/api/edit/sfx",
-        # 쇼츠 첫머리 주제 줄 켜기·끄기 (BR-120 · D-220)
-        "/api/style/shorts_topic")},
+        # 쇼츠 첫머리 주제 줄 켜기·끄기 (BR-120 · D-220) · 쇼츠 화면 배치 고르기 (BR-240)
+        "/api/style/shorts_topic", "/api/style/shorts_layout")},
     # 유튜브에 실제로 올리는 것: PC 가 만든 확인 문장 (428) 을 한 번 더
     (_P, "/api/youtube/upload"): CONFIRM, (_P, "/api/youtube/resume"): CONFIRM, (_P, "/api/youtube/finish"): CONFIRM,
     # 여기서 대신 답함 (PC 에서 폴더·브라우저를 열지 않음)

@@ -921,6 +921,35 @@ def set_shorts_topic(on):
     return bool(on)
 
 
+# 쇼츠 화면 배치 (BR-240 · D-420): '' = 지금처럼(가편집 검은 박스 · MSG 흐린 배경) · "eunpyeong" = 은평 스타일(파란 띠 + 흰 상자 제목)
+SHORTS_LAYOUTS = ("", "eunpyeong")
+
+
+def _shorts_layout_file():
+    return STYLES / ROUGH_DIR_NAME / "쇼츠 화면 배치.json"
+
+
+def shorts_layout():
+    """'쇼츠 화면 배치' (스타일 화면 · 자동으로 만드는 쇼츠 — 가편집·MSG·끝까지 자동으로) — 기본 ''(지금처럼 · 파일이 없거나 못 읽거나 모르는 값이면)."""
+    try:
+        d = json.loads(_shorts_layout_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    v = d.get("layout") if isinstance(d, dict) else ""
+    return v if v in SHORTS_LAYOUTS else ""
+
+
+def set_shorts_layout(v):
+    """쇼츠 화면 배치 정하기 (styles/설정/쇼츠 화면 배치.json) → 바뀐 값 (모르는 값은 ValueError)."""
+    v = str(v or "")
+    if v not in SHORTS_LAYOUTS:
+        raise ValueError(v)
+    f = _shorts_layout_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"layout": v, "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    return v
+
+
 def rough_params():
     """(이름, edit_params) — 첫 가편집에 쓸 스타일이 없거나 못 읽으면 (None, None)."""
     n = rough_default()

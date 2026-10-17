@@ -1502,6 +1502,69 @@ def swap_in(top, kt):
         top["dur"] = round(end - top["start"], 3)
 
 
+# ---------- 은평 스타일 쇼츠 (BR-240~BR-243 · D-420~D-423) ----------
+# 위아래 파란 띠 + 가운데 영상 창(16:9 원본을 1.32배 · 화면 높이 0.28~0.70) + 위 띠의 흰 상자(폭 고정) 안 검은 큰 제목 한 줄(처음부터 끝까지)
+# + 그 아래 작은 흰 사실 줄(주제 줄 글 · 끝까지) · 말 자막은 아래 띠. 스타일 화면 '쇼츠 화면 배치'에서 고름(기본은 지금처럼) ·
+# 편집실 템플릿 '은평 스타일'(editor.html EP · epCard)과 같은 값·셈 — 한쪽을 고치면 다른 쪽도.
+EP_KEY = "eunpyeong"
+EP_BAR = "#1F4FD1"     # 띠 색 (진한 파랑 · 편집실 '박스 색'으로 바꿀 수 있음)
+EP_LAYOUT = {"mode": "box", "bar": EP_BAR, "zoom": 1.32, "vpos": 0.48, "cropTop": 0.0, "cropBottom": 0.0}
+EP_BOX = {"x": 0.05, "y": 0.095, "w": 0.9, "h": 0.06}   # 흰 상자 (화면 비율 · 아래 끝 0.155)
+EP_PAD = 28            # 상자 안 글 양옆 여백 (화소 · 1080 기준)
+EP_SIZES = (72, 68, 64, 60, 56, 52, 48)   # 큰 제목 글자 크기 (한 줄로 상자에 들어가는 가장 큰 것)
+EP_TITLE = dict(DEFAULT_STYLE, weight="Black", size=72, fill="#111111", stroke="#111111", strokeW=0, bgOn=False, x=0.5, align="center",
+                effect="none")
+EP_FACT = dict(DEFAULT_STYLE, weight="Bold", size=42, fill="#FFFFFF", stroke="#000000", strokeW=0, bgOn=False, x=0.5, align="center",
+               effect="none", y=0.195)   # 사실 줄 (글 아래 끝 0.195 · 상자 아래 끝 + 틈 1.2% + 한 줄)
+EP_CAP_Y = 0.8         # 말 자막은 아래 띠 (이보다 위면 여기로)
+
+
+def shorts_card_on():
+    """스타일 화면 '쇼츠 화면 배치'가 은평 스타일인지 (못 읽으면 지금처럼 = False)."""
+    try:
+        import style as _style
+        return _style.shorts_layout() == EP_KEY
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ep_title_style(text):
+    """은평 스타일 큰 제목 모양 — 흰 상자 안(양옆 EP_PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝)."""
+    W, H = frame_size("shorts")
+    room = EP_BOX["w"] * W - 2 * EP_PAD
+    size = next((z for z in EP_SIZES if _text_w(text, dict(EP_TITLE, size=z)) <= room), EP_SIZES[-1])
+    return dict(EP_TITLE, size=size, y=round(EP_BOX["y"] + EP_BOX["h"] / 2 + TXT_LINE * size / 2 / H, 4))
+
+
+def ep_box(length):
+    """은평 스타일 흰 제목 상자 (도형 · 처음부터 끝까지 · plan "card" — 편집실이 다른 템플릿으로 바꾸면 지움)."""
+    return {"id": _nid(), "name": "제목 상자", "x": EP_BOX["x"], "y": EP_BOX["y"], "w": EP_BOX["w"], "h": EP_BOX["h"], "color": "#FFFFFF",
+            "opacity": 1.0, "radius": 0, "start": 0.0, "dur": round(float(length), 3), "full": True, "plan": "card"}
+
+
+def ep_card(top, kt, length):
+    """가편집 쇼츠를 은평 스타일로: 위 큰 제목(top)은 한 줄·흰 상자 안·처음부터 끝까지, 주제 줄(kt · 없어도 됨)은 그 아래 사실 줄
+    (바꿔 끼우기 없음 · 끝까지) → 더할 도형 [흰 상자]."""
+    top["text"] = " ".join(str(top.get("text") or "").split())
+    top["start"], top["dur"] = 0.0, round(float(length), 2)
+    top["style"] = ep_title_style(top["text"])
+    if kt:
+        kt.pop("swap", None)
+        kt.update(start=0.0, dur=round(float(length), 2), style=dict(EP_FACT), under=top.get("id"))
+    return [ep_box(length)]
+
+
+def ep_caption(cs):
+    """은평 스타일 말 자막: 아래 띠 (위쪽·가운데 자막 스타일이면 EP_CAP_Y 로 · 아래쪽이면 그대로) · 상자 없는 어두운 글씨(배운 스타일 색)는
+    파란 띠 위에서 안 읽혀 흰 글씨 + 검은 테두리 (_topic_fill 과 같은 밝기 셈)."""
+    c = dict(cs)
+    if float(c.get("y", EP_CAP_Y)) < EP_CAP_Y:
+        c["y"] = EP_CAP_Y
+    if not c.get("bgOn") and _topic_fill(c)[1] == "#FFFFFF":
+        c.update(fill="#FFFFFF", stroke="#000000", strokeW=max(6, int(c.get("strokeW") or 0)))
+    return c
+
+
 CAP_Y = {"bottom": 0.85, "middle": 0.55, "top": 0.15}
 TXT_LINE = 1.25   # 글 상자 한 줄 높이 = 글자 크기 × 1.25 (editor.html .txt line-height · 내보내기 ASS 도 같은 크기)
 TXT_GAP = 0.012   # 자동으로 놓는 글 상자끼리 띄울 틈 (화면 높이 비율)
@@ -2030,11 +2093,19 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                              layout={"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0},
                              master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
+        card = shorts_card_on()  # 스타일 화면 '쇼츠 화면 배치' (기본 지금처럼)
         for i, r in enumerate(rec["shorts"], 1):
             items = _items_from_cuts(_rhythm(_quiet_edges(r["cuts"], wf, units, info.get("duration")), segs, st, every, caps), 0.3, zoom=zoom)
             length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
             hook = {"id": _nid(), "text": _hook(r), "start": 0.0, "dur": round(length, 2), "style": dict(TITLE_STYLE)}
             cs = cap(SHORTS_STYLE)
+            if card:  # 은평 스타일 (BR-240): 흰 상자 큰 제목 · 그 아래 사실 줄 · 말 자막은 아래 띠
+                cs = ep_caption(cs)
+                kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
+                shapes = ep_card(hook, kt, length)
+                seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(EP_LAYOUT), master=dict(master),
+                                     captionsOn=caps_on, titles=[hook] + ([kt] if kt else []), shapes=shapes))
+                continue
             W, H = frame_size("shorts")
             tb = text_box(hook["text"], hook["style"], W, H)
             if _overlap(_cap_band(cs, H), (tb[1], tb[3]), TXT_GAP):  # 위쪽 자막 스타일: 쇼츠 내내 떠 있는 훅 제목 아래(영상 위 칸)로

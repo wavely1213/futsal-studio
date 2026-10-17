@@ -362,7 +362,7 @@ class LayoutTest(WorkMixin, unittest.TestCase):
 
 JS_DEFS = ("FPS,EPS,fr,sp,iEnd,iLen,tlOf,mt,DEF,prm,emOf,cutText,isMainAV,r6,mergeIv,tlRemap,cutPieces,moveItem,remapSeq,tidySeq,"
            "TOPIC,TOPIC_STYLE,txtBox,textW,oneLine,topicFill,capBand,videoTop,topicTitle,r3,swapIn,topicUnder,headTopic,topicAfter,topicGone,"
-           "placeTopic,gfxCut,tplTitle,TEMPLATES").split(",")
+           "placeTopic,gfxCut,EP,epTitleStyle,epOn,epCard,epOff,tplTitle,TEMPLATES").split(",")
 
 
 def js_defs(names=JS_DEFS):
@@ -505,7 +505,7 @@ const msgS = () => ({{ format: "shorts", name: "MSG 후보 A · 담백 레슨형
         for under in (True, False):
             got = run_js(self.msg_short(under) + """
 out = {};
-for (const name of Object.keys(TEMPLATES)) {
+for (const name of Object.keys(TEMPLATES).filter(k => k !== "은평 스타일")) {  // (은평 스타일은 큰 제목 아래 사실 줄 · tests.test_eunpyeong)
   S = msgS(); TEMPLATES[name]();
   const kt = S.titles.find(t => t.id === "kt"), hk = S.titles.find(t => t.id === "hk");
   out[name] = { k: txtBox(kt.text, kt.style, 1080, 1920), h: txtBox(hk.text, hk.style, 1080, 1920), kx: [kt.style.x, kt.style.align], hx: [hk.style.x, hk.style.align],
