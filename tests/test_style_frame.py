@@ -5,7 +5,9 @@
 - style.frame_layout: 안 바뀌는 띠와 움직이는 영상 창을 찾고, 띠에 늘 떠 있는 글자 자리를 남김 (세로 비율 그대로인 작은 화면으로)
 - 늘 떠 있는 글자는 자막 통계(captionPos·captionColor)와 기획 분석 자막(plan · 강조 색)에서 빠짐
 - 배운 화면 배치는 프로필 layout · edit_params 의 layout(쇼츠만 섞어 배우면 byFormat.shorts.layout) · msg.learned_aspects 의 layout 에 알려 주기만 함
-- 가로 영상·틀 없는 세로 쇼츠는 예전과 똑같음 (기록·프로필·값)
+- 그대로인 자막 상자 안에서 말 자막만 바뀌는 쇼츠는 그 말 자막을 그대로 셈 (상자를 늘 떠 있는 글자로 보지 않음)
+- 가로 영상·틀 없는 세로 쇼츠·쇼츠보다 긴 세로 영상은 예전과 똑같음 (기록·프로필·값 · 긴 세로 영상은 한 번 더 풀지 않음)
+- 스타일 카드·작업 기록의 띠 색은 쉬운 색 이름 (hex 는 저장 값에만)
 인터넷은 쓰지 않음 (글자 읽기 모델이 있으면 실제로 읽어 보는 시험도 함)."""
 import json
 import shutil
@@ -25,6 +27,7 @@ import style  # noqa: E402
 import make_fixture as fx  # noqa: E402
 
 FRAME, PLAIN, LAND, RAW = "고정 틀 쇼츠.mp4", "틀 없는 쇼츠.mp4", "가로로 편 영상.mp4", "고정 틀 쇼츠 (틀 안 봄).mp4"
+BOXCAP, LONGV = "자막 상자 쇼츠.mp4", "긴 세로 영상.mp4"
 LEGACY_EV = {"v", "sig", "source", "duration", "analyzed", "cuts", "zooms", "fps", "text", "capColors", "silences", "rmsStep", "rms",
              "motion", "lufs", "speech", "look"}
 M = {}
@@ -49,8 +52,11 @@ def setUpModule():
     fx.make_frame_fixture(v / PLAIN, bands=False)
     shutil.copy2(v / FRAME, v / RAW)
     fx.reencode(v / FRAME, v / LAND, size="640x360", crf=20)  # 같은 틀을 가로로 편 영상 — 가로 영상은 틀을 찾지 않음
+    shutil.copy2(v / FRAME, v / LONGV)  # 쇼츠보다 길다고 속여 살펴볼 세로 영상 (틀을 찾지 않음)
+    M["boxTruth"] = fx.make_frame_fixture(v / BOXCAP, capbox=True)
     M["ev"] = style.extract_events(FRAME, quiet)
     M["prof"] = style.summarize(M["ev"])
+    M["boxEv"] = style.extract_events(BOXCAP, quiet)
 
 
 def tearDownModule():
@@ -105,6 +111,9 @@ class FrameDetect(unittest.TestCase):
         d = style.describe(M["prof"])
         self.assertIn("고정 틀", d)
         self.assertIn("저절로 쓰지 않아요", d)
+        self.assertIn("위 띠 파랑 · 아래 띠 주황", d, "띠 색은 쉬운 색 이름으로")
+        self.assertNotRegex(d, r"#[0-9A-Fa-f]{6}", "스타일 카드에 색 코드(hex)를 보이지 않음")
+        self.assertTrue(lay["top"].startswith("#"), "저장 값은 hex 그대로")
         # 저장했다 다시 읽어도 (스타일 파일 = JSON) 그대로
         self.assertEqual(style.edit_params(json.loads(json.dumps(M["prof"])))["layout"], prm)
 
@@ -118,6 +127,40 @@ class FrameDetect(unittest.TestCase):
         self.assertAlmostEqual(y0, lay["window"][0], delta=0.02)
         self.assertAlmostEqual(y1, lay["window"][1], delta=0.02)
         self.assertEqual(f["bar"], lay["bar"])
+
+
+class CaptionBox(unittest.TestCase):
+    """아래 띠의 흰 자막 상자는 내내 그대로이고 그 안 짧은 검은 말 자막만 바뀌는 쇼츠 — 상자를 '늘 떠 있는 글자'로 보면 말 자막이 모두 빠졌음."""
+
+    def test_caption_rows_not_fixed(self):
+        fr = M["boxEv"]["frame"]
+        self.assertTrue(fr["found"], fr)
+        x0, y0, x1, y1 = M["boxTruth"]["titleBox"]
+        self.assertTrue(plan.in_fixed([x0 + 0.05, y0 + 0.01, x1 - 0.05, y1 - 0.01], fr["text"]), "위 띠 제목은 그대로 뺌")
+        for cap in ([0.40, 0.825, 0.60, 0.875], [0.30, 0.83, 0.70, 0.87]):  # 상자 가운데 말 자막 줄 (글자 읽기가 내는 크기)
+            self.assertFalse(plan.in_fixed(cap, fr["text"]), (cap, fr["text"]))
+
+    def test_plan_keeps_box_captions(self):
+        """글자 읽기 흉내: 바뀌는 상자 말 자막은 자막 사건으로 남고, 위 띠 제목만 빠짐."""
+        title = {"text": "발바닥으로 공 멈추기", "box": [0.116, 0.103, 0.889, 0.158], "h": 0.055, "conf": 0.95, "color": "#111111", "cname": "black", "boxed": True}
+        ocr = [{"t": int(a), "d": 2, "lines": [dict(title), {"text": t, "box": [0.40, 0.825, 0.60, 0.875], "h": 0.05, "conf": 0.95,
+                                                         "color": "#222222", "cname": "black", "boxed": True}]} for a, b, t in fx.FRAME_BOX_CAPS]
+        pe = {"duration": fx.VDUR, "ocr": ocr}
+        caps = plan.group_captions(plan.ocr_lines(pe, M["boxEv"]), [], pe["duration"])
+        self.assertEqual(sorted(c["text"] for c in caps), sorted(t for _, _, t in fx.FRAME_BOX_CAPS), caps)
+        self.assertTrue(all(c["pos"] == "bottom" for c in caps), caps)
+
+    @unittest.skipUnless(avmodels.ready("ocr"), "글자 읽기 모델이 없어요 (~/.futsal-studio/models)")
+    def test_real_ocr_box_captions(self):
+        with mock.patch.object(plan, "OCR_SLOW", float("inf")):
+            pe = plan.extract_plan(BOXCAP, M["boxEv"], quiet)
+        d = plan.detect(pe, M["boxEv"], [])
+        self.assertTrue(d["caps"] and all(c["pos"] == "bottom" for c in d["caps"]), d["caps"])
+        self.assertFalse([c for c in d["caps"] if "멈추기" in c["text"]], "위 띠 제목은 빠짐")
+        j = plan.judge_captions(pe, d, [], M["boxEv"])
+        self.assertNotEqual(j["style"], "minimal", j)
+        raw = plan.detect(pe, {k: v for k, v in M["boxEv"].items() if k != "frame"}, [])["caps"]
+        self.assertEqual({c["text"] for c in d["caps"]}, {c["text"] for c in raw if c["pos"] == "bottom"}, "말 자막은 틀을 모를 때와 같게 셈")
 
 
 def fr_win_top():
@@ -149,6 +192,27 @@ class OldBehaviour(unittest.TestCase):
         self.assertNotIn("layout", p)
         self.assertNotIn("layout", style.edit_params(p))
         self.assertNotIn("고정 틀", style.describe(p))
+
+    def test_long_vertical_skips_frame_pass(self):
+        """쇼츠보다 긴 세로 영상(내 세로 촬영본을 MSG·점수로 살펴볼 때 등)은 틀 찾기로 영상을 한 번 더 풀지 않음 — 기록도 예전과 같음."""
+        boom = mock.Mock(side_effect=AssertionError("쇼츠보다 긴 영상은 틀을 찾지 않음"))
+        with mock.patch.object(style, "_probe_duration", return_value=style.SHORTS_MAX + 20), \
+                mock.patch.object(style, "_frame_samples", boom), mock.patch.object(style, "frame_layout", boom):
+            ev = style.extract_events(LONGV, quiet)
+        self.assertEqual(set(ev), LEGACY_EV)
+        self.assertEqual(style._frame_of(core.video_file(FRAME), FRAME, style.SHORTS_MAX + 0.5, None, quiet, "l"), (None, None))
+
+    def test_log_uses_plain_color_names(self):
+        name = "고정 틀 쇼츠 (작업 기록).mp4"
+        shutil.copy2(core.video_file(FRAME), core.VIDEOS / name)
+        lines = []
+        style.extract_events(name, lines.append)
+        frame_line = [ln for ln in lines if "고정 틀이 보여요" in ln]
+        self.assertTrue(frame_line, lines)
+        self.assertIn("위 띠 파랑 · 아래 띠 주황", frame_line[0])
+        self.assertNotRegex(frame_line[0], r"#[0-9A-Fa-f]{6}")
+        self.assertEqual(style._band_ko("#FFFFFF"), "흰색")
+        self.assertEqual(style._band_ko(None), "—")
 
     def test_text_bands_without_mask_unchanged(self):
         import numpy as np
@@ -199,11 +263,15 @@ class FrameLayoutUnit(unittest.TestCase):
         self.assertEqual((lay["count"], lay["of"], lay["bar"]), (2, 3, "#111111"))
         self.assertEqual(lay["window"], [0.29, 0.71])
         self.assertIsNone(style._layout_of([f, no, no]), "고정 틀이 절반이 안 되면 배치를 배우지 않음")
+        self.assertIsNone(style._layout_of([f, no]), "딱 절반(2개 중 1개)도 배우지 않음 — 절반 넘게일 때만")
+        self.assertEqual(style._layout_of([f])["of"], 1)
         self.assertIsNone(style._layout_of([None, None]))
         # 기록 없이 프로필만 합칠 때도 같은 규칙
         p1, p2, p3 = {"layout": style._layout_of([f])}, {"layout": style._layout_of([g])}, {"format": "shorts"}
         self.assertEqual((style._merge_layouts([p1, p2, p3])["count"], style._merge_layouts([p1, p2, p3])["of"]), (2, 3))
         self.assertIsNone(style._merge_layouts([p1, p3, {"format": "shorts"}]))
+        self.assertIsNone(style._merge_layouts([p1, p3]), "딱 절반도 배우지 않음")
+        self.assertEqual(style._merge_layouts([p1, {"format": "long"}])["of"], 1, "긴 영상은 투표에 들지 않음")
         self.assertIsNone(style._merge_layouts([{"format": "long"}]))
 
     def test_merge_events_carries_frames(self):

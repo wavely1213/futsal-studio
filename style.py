@@ -54,6 +54,7 @@ FRAME_WIN_ROW = 0.6                  # 한 줄에서 바뀌는 칸이 이 비율
 FRAME_BAND_MIN = 0.06                # 위·아래 띠가 모두 화면 높이의 6% 넘어야 고정 틀
 FRAME_BAND_STILL = 0.7               # 띠 칸의 이 비율 넘게 안 바뀌어야 고정 틀 (띠 위 말 자막은 바뀌는 칸)
 FRAME_EDGE = 40                      # 늘 떠 있는 글자 찾기: 평균 화면에서 이웃 칸 밝기 차가 이보다 크면 글자 획·상자 테두리
+FRAME_LIVE = 2                       # 띠의 한 줄에 바뀌는 칸이 이만큼 있으면 '글자가 바뀌는 줄' (그대로인 자막 상자 안 말 자막 · 그 줄과 위아래 1줄은 늘 떠 있는 글자가 아님)
 BOX_SRC_H = (9 / 16) * (9 / 16)      # 16:9 화면을 9:16 화면 폭에 맞추면 높이의 31.6% (editor._fit 상자 배치 · 확대 1배)
 FORMATS = ("long", "shorts")
 FMT_KO = {"long": "긴 영상", "shorts": "쇼츠"}
@@ -264,7 +265,9 @@ def frame_layout(frames):
         return "#%02X%02X%02X" % tuple(int(round(x)) for x in np.median(mean[r0:r1][m], axis=0)) if m.any() else None
     top, bot = color(0, y0), color(y1, H)
     # 늘 떠 있는 글자: 띠 안(영상 창과 닿는 2줄은 빼고)의 강한 경계 — 경계 양쪽 칸이 모두 안 바뀌는 것만 (바뀌는 말 자막 둘레는 아님) —
-    # 이 모인 줄 묶음, 그 안쪽도 거의 다 안 바뀌어야 (말 자막이 바뀌는 상자 테두리만 그대로인 것은 아님)
+    # 이 모인 줄 묶음, 그 안쪽도 거의 다 안 바뀌어야 (말 자막이 바뀌는 상자 테두리만 그대로인 것은 아님).
+    # 띠에서 글자가 바뀌는 줄(바뀌는 칸 FRAME_LIVE 개 이상)과 그 위아래 1줄은 묶음에서 뺌 — 그대로인 흰 자막 상자 안에서 짧은 말 자막만
+    # 바뀌면 상자 전체가 '늘 떠 있는 글자'로 잡혀 그 안 말 자막까지 빠지던 것 (상자 위·아래 테두리 줄만 남아 글자 줄과 안 겹침)
     mg = mean @ lum
     ed = np.zeros((H, W), bool)
     ed[:, :-1] |= (np.abs(np.diff(mg, axis=1)) > FRAME_EDGE) & still[:, :-1] & still[:, 1:]
@@ -272,6 +275,8 @@ def frame_layout(frames):
     ok = rows.copy()
     ok[max(0, y0 - 2):y0] = False
     ok[y1:y1 + 2] = False
+    for r0, r1 in _runs_of(rows & (move.sum(axis=1) >= FRAME_LIVE)):
+        ok[max(0, r0 - 1):r1 + 1] = False
     txt = ed & ok[:, None]
     boxes = []
     for r0, r1 in _runs_of(txt.sum(axis=1) >= 2, gap=1):
@@ -314,7 +319,7 @@ def _layout_of(frames):
     import statistics as st
     fs = [f for f in frames or [] if isinstance(f, dict) and f.get("v") == 1]
     hits = [f for f in fs if f.get("found") and isinstance(f.get("win"), list) and len(f["win"]) == 2]
-    if not hits or 2 * len(hits) < len(fs):
+    if not hits or 2 * len(hits) <= len(fs):
         return None
     return _box_layout(st.median(float(f["win"][0]) for f in hits), st.median(float(f["win"][1]) for f in hits),
                        _most([f.get("top") for f in hits]), _most([f.get("bottom") for f in hits]), _most([f.get("bar") for f in hits]), len(hits), len(fs))
@@ -328,17 +333,26 @@ def _merge_layouts(profiles):
         return None
     n = sum(int(x.get("count") or 1) for x in lays)
     of = sum(int(x.get("of") or 1) for x in lays) + sum(1 for p in profiles if not isinstance(p.get("layout"), dict) and p.get("format") != "long")
-    if 2 * n < of:
+    if 2 * n <= of:
         return None
     return _box_layout(st.median(float(x["window"][0]) for x in lays), st.median(float(x["window"][1]) for x in lays),
                        _most([x.get("top") for x in lays]), _most([x.get("bottom") for x in lays]), _most([x.get("bar") for x in lays]), n, of)
+
+
+def _band_ko(hx):
+    """띠 색 hex → 쉬운 색 이름(흰색·검정·파랑·주황 …) — 스타일 카드·작업 기록에는 hex 대신 이것 (hex 는 저장 값에만)."""
+    rgb = _hex_rgb(hx) if hx else None
+    if rgb is None:
+        return "—"
+    ko = plan.CNAME_KO.get(plan.color_name(rgb), "—")
+    return "흰색" if ko == "흰" else ko
 
 
 def _layout_desc(lay):
     """화면 배치 → 스타일 카드 한 줄 (사장님이 숫자를 확인하는 곳)."""
     y0, y1 = lay["window"]
     return (f" 쇼츠 화면은 고정 틀이에요(배운 쇼츠 {lay.get('of', 1)}개 중 {lay.get('count', 1)}개): 가운데 영상 창이 화면 높이 {int(round(y0 * 100))}~{int(round(y1 * 100))}%"
-            f"(가로 영상을 {lay['zoom']}배로 키운 크기) · 위 띠 {lay.get('top') or '—'} · 아래 띠 {lay.get('bottom') or '—'}. 내 쇼츠에는 저절로 쓰지 않아요.")
+            f"(가로 영상을 {lay['zoom']}배로 키운 크기) · 위 띠 {_band_ko(lay.get('top'))} · 아래 띠 {_band_ko(lay.get('bottom'))}. 내 쇼츠에는 저절로 쓰지 않아요.")
 
 
 # ---------- 스타일 이벤트 기록 (영상 하나를 살펴본 결과 · 다시 쓰기) ----------
@@ -513,8 +527,11 @@ def _look_index(n, cuts, m, before):
 
 
 def _frame_of(path, name, dur, limit, log, label):
-    """세로 영상이면 고정 틀 찾기 (기록, 화면 분석 크기의 안 바뀌는 칸 또는 None) · 가로 영상은 (None, None) — 예전과 똑같이.
+    """쇼츠 길이(SHORTS_MAX 초 이하)의 세로 영상이면 고정 틀 찾기 (기록, 화면 분석 크기의 안 바뀌는 칸 또는 None)
+    · 가로 영상과 쇼츠보다 긴 세로 영상(내 세로 촬영본을 MSG·점수로 살펴볼 때 등)은 (None, None) — 예전과 똑같이 (영상을 한 번 더 풀지 않음).
     틀을 찾지 못해도 배우기는 계속 (그때는 예전처럼 화면 전체 글자를 자막으로 셈)."""
+    if dur and dur > SHORTS_MAX:
+        return None, None
     try:
         _, w, h = plan._probe(path)
     except Exception:  # noqa: BLE001 — 크기를 모르면 예전처럼
@@ -531,7 +548,7 @@ def _frame_of(path, name, dur, limit, log, label):
     if not frame.get("found"):
         return frame, None
     y0, y1 = frame["win"]
-    log(f"  고정 틀이 보여요 · 가운데 영상 창 {int(round(y0 * 100))}~{int(round(y1 * 100))}% · 위 띠 {frame.get('top')} · 아래 띠 {frame.get('bottom')}"
+    log(f"  고정 틀이 보여요 · 가운데 영상 창 {int(round(y0 * 100))}~{int(round(y1 * 100))}% · 위 띠 {_band_ko(frame.get('top'))} · 아래 띠 {_band_ko(frame.get('bottom'))}"
         f" (틀에 늘 떠 있는 글자 {len(frame.get('text') or [])}곳은 자막으로 세지 않아요)")
     return frame, _fixed_mask(still)
 
@@ -539,7 +556,7 @@ def _frame_of(path, name, dur, limit, log, label):
 def extract_events(name, log=print, label="스타일 배우는 중"):
     """영상 하나를 살펴본 기록(스타일 이벤트): 컷·확대 컷·띠별 글자 밀도(1초 2번)·자막 색 표본·무음·소리 세기(0.1초)·움직임(1초 2번)
     ·작은 흑백 화면(1초 2번 · 편집본 점수에서 점프 컷이 화면에 티가 나는지 볼 때)
-    ·세로 영상이면 고정 틀 frame(BR-255 · 틀에 늘 떠 있는 글자는 글자 밀도·자막 색 표본에서 뺌).
+    ·쇼츠 길이의 세로 영상이면 고정 틀 frame(BR-255 · 틀에 늘 떠 있는 글자는 글자 밀도·자막 색 표본에서 뺌).
     analysis/<영상>/style_events.json 에 남기고, 영상 파일(크기·수정 시각)이 그대로면 다시 살펴보지 않음.
     학습용 영상(refs)도 같은 이름으로 찾고, 배운 뒤 파일만 지운 영상은 남겨 둔 기록을 그대로 씀."""
     import numpy as np
