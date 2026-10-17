@@ -3,6 +3,7 @@
 - 새 말투(감독님 한마디 · 묻고 바로 답 · 반전 꼬리 '(?)' · '알아도 못 따라 하는 …')는 받아쓰기·주제어·쇼츠 길이로만 (말하지 않은 숫자 X)
 - 글자 수는 쇼츠 위 큰 제목 셈(editor._norm · 16자 · 묻고 답하는 꼴 20자) · 이모지 없음
 - 쇼츠 키트의 첫 후보(기본 제목)는 그대로 · 새 말투는 2·3번째 · 이모지는 첫 후보에 하나만(이미 있으면 안 붙임) · 화면 큰 제목에는 없음
+- 새 말투·이모지 후보는 올리기 키트 '쇼츠 새 말투·이모지 후보' 칸을 켰을 때만 (기본 꺼짐 = 예전 후보 그대로 · D-438)
 """
 import json
 import re
@@ -22,6 +23,7 @@ NUM = re.compile(r"\d+|한|두|세|네|다섯")
 # 트래핑 쇼츠: 시키는 말 · 물음 + 바로 답 · 인사·홍보 말
 TRAP = ["자, 오늘은 트래핑 알려 드릴게요.", "공 받을 때 발로 하지 마세요.", "공이 자꾸 튄다고요?", "발목 힘 빼세요.",
         "구독 꼭 해 주세요."]
+ON = {"newTitles": True}  # '쇼츠 새 말투·이모지 후보' 칸을 켠 hints (D-438)
 SHOOT = ["슈팅은 발등으로 낮게 차세요.", "슈팅이 왜 뜰까요?", "몸이 뒤로 눕기 때문이에요.", "이건 3초 만에 고칠 수 있어요."]
 
 
@@ -73,6 +75,11 @@ class VoiceTitleTests(unittest.TestCase):
         self.assertEqual(hooks.voice_titles(["공을 받을 때 몸이 앞으로 쏠리면, 무릎을 굽히세요"], ["트래핑"], 90),
                          ['"트래핑, 무릎을 굽히세요"'])
 
+    def test_whole_sentence_first(self):
+        """통째로 16자 안이면 감독님 말 그대로 (쉼표 뒤 마디로 바꾸지 않음 · 검토: '트래핑할 때,' 가 '트래핑,' 으로 바뀜)."""
+        self.assertEqual(hooks.voice_titles(["트래핑할 때, 무릎을 굽히세요"], ["트래핑"], 90), ['"트래핑할 때, 무릎을 굽히세요"'])
+        self.assertEqual(hooks.voice_titles(["공 받을 때, 발로 하지 마세요"], ["트래핑"], 90), ['"트래핑, 공 받을 때, 발로 하지 마세요"'])  # 통째로 + 주제어
+
     def test_skips_plain_and_promo_lines(self):
         """뜻 없는 시키는 말('꼭 해 보세요')·인사·홍보·확인만 하는 물음('아시겠죠?')·사람 이름 부른 말은 안 씀."""
         texts = ["이 드리블 꿀팁 꼭 해 보세요!", "구독과 좋아요 눌러 주세요.", "아시겠죠?", "네 좋아요.", "영재 선수 따라 하세요."]
@@ -95,6 +102,32 @@ class VoiceTitleTests(unittest.TestCase):
             self.assertFalse(hooks.has_emoji(t), t)
 
 
+class ReversalNotQuestionTests(unittest.TestCase):
+    """반전 꼬리 '(?)' 는 물음이 아님 (검토: '짧은 질문형 제목' 할 일에서 질문형으로 앞당기고 질문형 개수에 셈)."""
+
+    def test_is_question(self):
+        self.assertFalse(hooks.is_question("트래핑 1분 만에 배우기(?)"))
+        self.assertFalse(hooks.is_question("슈팅 3초 만에 고치기 (?)"))
+        self.assertTrue(hooks.is_question("트래핑이 안 된다면?"))
+        self.assertTrue(hooks.is_question("공이 자꾸 튄다고요? 발목 힘 빼세요"))
+        self.assertTrue(hooks.is_question("이거 될까(?)"))  # 꼬리 앞이 물음이면 물음
+
+    def test_question_todo_does_not_count_reversal(self):
+        hints = {"question": True, "newTitles": True}
+        k = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["트래핑"], "hashtags": [],
+             "titles": ["트래핑 꿀팁", "트래핑 제대로 하는 법"], "titleNew": ["트래핑 1분 만에 배우기(?)"]}
+        old = upload.shape_titles(dict(k, titles=list(k["titles"]), titleNew=[]), dict(hints, newTitles=False), [])
+        upload.shape_titles(k, hints, [])
+        upload.annotate(k, hints, [])
+        rev = k["titles"].index("트래핑 1분 만에 배우기(?)")
+        self.assertNotIn("질문형", k["titleInfo"][rev]["tags"])
+        qs = [t for t in k["titles"] if hooks.is_question(t) and t not in upload._emoji_twins(k)]  # 첫 후보 + 이모지는 따로 셈 (BR-251)
+        self.assertEqual(qs, [t for t in old["titles"] if hooks.is_question(t)])  # 질문형은 예전과 같은 것만
+        self.assertLess(k["titles"].index(qs[-1]), rev)  # 질문형 할 일: 질문형 후보가 반전 꼬리보다 앞
+        n = len(qs)
+        self.assertTrue(any(f"질문형 후보 {n}개" in a for a in k["applied"]), k["applied"])
+
+
 class EmojiTitleTests(unittest.TestCase):
     def test_topic_mapped(self):
         self.assertEqual(hooks.emoji_title("슈팅 1분 꿀팁", "슈팅"), "슈팅 1분 꿀팁 🔥")
@@ -113,6 +146,13 @@ class EmojiTitleTests(unittest.TestCase):
 class ShortsKitTitleTests(KitBase):
     """쇼츠 키트: 첫 후보 그대로 · 새 말투 2·3번째 · 이모지 후보 하나 · 화면 큰 제목에는 이모지 없음."""
     SEGS = [{"start": 1 + 4 * i, "end": 4 + 4 * i, "text": t} for i, t in enumerate(TRAP[:4] + ["트래핑은 공을 죽이는 거예요."])]
+
+    def setUp(self):
+        super().setUp()
+        self.prefs(True)
+
+    def prefs(self, on):
+        (self.work / "upload_settings.json").write_text(json.dumps({"newTitles": on}), encoding="utf-8")
 
     def kit_without_new(self, name, seq=None):
         with mock.patch.object(hooks, "voice_titles", return_value=[]), mock.patch.object(hooks, "emoji_title", return_value=None):
@@ -143,30 +183,30 @@ class ShortsKitTitleTests(KitBase):
     def test_emoji_not_doubled_on_emoji_first(self):
         k = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["슈팅"], "hashtags": [],
              "titles": ["🔥슈팅🔥 1분 꿀팁", "슈팅 제대로 하는 법"], "titleNew": ['"슈팅은 발등으로 낮게 차세요"']}
-        upload.shape_titles(k, {}, [])
+        upload.shape_titles(k, ON, [])
         self.assertEqual(k["titles"], ["🔥슈팅🔥 1분 꿀팁", '"슈팅은 발등으로 낮게 차세요"', "슈팅 제대로 하는 법"])
         k["titles"][0] = "슈팅 1분 꿀팁"
-        upload.shape_titles(k, {}, [])
+        upload.shape_titles(k, ON, [])
         self.assertEqual(k["titles"], ["슈팅 1분 꿀팁", '"슈팅은 발등으로 낮게 차세요"', "슈팅 1분 꿀팁 🔥", "슈팅 제대로 하는 법"])
-        upload.shape_titles(k, {}, [])  # 다시 세워도 같음 (이모지 후보·새 말투가 두 번 들어가지 않음)
+        upload.shape_titles(k, ON, [])  # 다시 세워도 같음 (이모지 후보·새 말투가 두 번 들어가지 않음)
         self.assertEqual(k["titles"], ["슈팅 1분 꿀팁", '"슈팅은 발등으로 낮게 차세요"', "슈팅 1분 꿀팁 🔥", "슈팅 제대로 하는 법"])
 
     def test_new_shapes_follow_strategy_and_overlap(self):
         """전략 할 일(N자 안쪽)·다른 키트와 겹침은 예전 꼬리표대로 — 긴 새 말투는 뒤로 · 이미 올린 제목과 같은 새 말투는 안 넣음."""
         k = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["트래핑"], "hashtags": [],
              "titles": ["트래핑 꿀팁", "트래핑 제대로 하는 법"], "titleNew": ['"트래핑, 공 받을 때 발로 하지 마세요"', "트래핑 1분 만에 배우기(?)"]}
-        upload.shape_titles(k, {"maxLen": 16}, [])
+        upload.shape_titles(k, dict(ON, maxLen=16), [])
         self.assertEqual(k["titles"][0], "트래핑 꿀팁")
         self.assertEqual(k["titles"][-1], '"트래핑, 공 받을 때 발로 하지 마세요"')  # 16자 넘는 후보는 뒤로
         others = [{"name": "o.mp4", "source": {"id": "x"}, "title": "트래핑 1분 만에 배우기(?)", "topics": ["트래핑"]}]
         k["titles"] = ["트래핑 꿀팁", "트래핑 제대로 하는 법"]
-        upload.shape_titles(k, {}, others)
+        upload.shape_titles(k, ON, others)
         self.assertNotIn("트래핑 1분 만에 배우기(?)", k["titles"])
         self.assertEqual(k["titles"][0], "트래핑 꿀팁")
 
     def test_question_todo_keeps_first(self):
         """'짧은 질문형 제목' 할 일이 켜져도 첫 후보는 예전과 같음 (새 말투·이모지 후보가 첫 자리로 오지 않음)."""
-        hints = {"question": True}
+        hints = {"question": True, "newTitles": True}
         base = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["트래핑"], "hashtags": [],
                 "titles": ["트래핑 꿀팁", "트래핑 제대로 하는 법"]}
         old = upload.shape_titles(dict(base, titles=list(base["titles"])), hints, [])
@@ -186,6 +226,104 @@ class ShortsKitTitleTests(KitBase):
         self.assertEqual(upload._emoji_twins(kit2), {hooks.emoji_title(kit2["titles"][0], "트래핑")})
         kit3 = upload.set_guests(name, None, [])
         self.assertEqual(kit3["titles"][:4], kit["titles"][:4])
+
+    def test_off_by_default_matches_old_list(self):
+        """칸을 켜지 않으면(설정 파일 없음 · 깨진 파일) 쇼츠 키트 제목 후보가 새 말투·이모지가 없던 때와 똑같음 · 켜고 끄면 되돌아옴 (D-438)."""
+        name = self.add_video("트래핑 쇼츠.mp4", "short", self.SEGS)
+        (self.work / "upload_settings.json").unlink()
+        old = self.kit_without_new(name)
+        kit = upload.build_kit(name)
+        self.assertEqual(kit["titles"], old["titles"])
+        self.assertEqual(kit["title"], old["title"])
+        self.assertFalse(kit["newTitles"])
+        self.assertTrue(kit["titleNew"])  # 남겨 둠 (켜면 바로 넣게)
+        (self.work / "upload_settings.json").write_text("{깨짐", encoding="utf-8")
+        self.assertEqual(upload.build_kit(name)["titles"], old["titles"])
+        on = upload.set_new_titles(name, None, True)
+        self.assertTrue(on["newTitles"])
+        self.assertEqual(json.loads((self.work / "upload_settings.json").read_text(encoding="utf-8")), {"newTitles": True})
+        self.assertEqual(on["title"], old["title"])
+        self.assertEqual(on["titles"][1:3], kit["titleNew"])
+        off = upload.set_new_titles(name, None, False)
+        self.assertEqual(off["titles"], old["titles"])  # 켰을 때 밀려난 예전 3~5번째도 돌아옴
+        self.assertFalse(upload.load_kit(name, live=True)["newTitles"])
+        upload.save_edits(name, None, title=on["titles"][1])  # 손으로 고른 새 말투 제목은 끄고 켜도 그대로
+        self.assertEqual(upload.set_new_titles(name, None, True)["title"], on["titles"][1])
+        self.assertEqual(upload.set_new_titles(name, None, False)["title"], on["titles"][1])
+        with mock.patch.object(upload, "_write_safe", side_effect=lambda p, t: p.with_name("upload_settings (2).json")):  # 잡혀 있음
+            with self.assertRaises(RuntimeError):
+                upload.set_new_titles(name, None, True)
+        self.assertFalse(upload.kit_prefs()["newTitles"])
+
+    def test_hook_equal_to_new_shape_stays_first(self):
+        """쇼츠 큰 제목(훅)에 새 말투를 그대로 옮겨 써 첫 후보가 새 말투와 같아도 기본 제목은 그 훅 그대로 (검토: 기본 제목이 바뀜)."""
+        k = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["트래핑"], "hashtags": [],
+             "titles": ['"트래핑, 공 받을 때 발로 하지 마세요"', "트래핑, 이것만 바꾸세요", "트래핑 꿀팁"],
+             "titleNew": ['"트래핑, 공 받을 때 발로 하지 마세요"', "공이 자꾸 튄다고요? 발목 힘 빼세요"]}
+        k["titlePool"] = list(k["titles"])
+        upload.shape_titles(k, ON, [])
+        self.assertEqual(k["title"], '"트래핑, 공 받을 때 발로 하지 마세요"')
+        self.assertEqual(k["titles"][:2], ['"트래핑, 공 받을 때 발로 하지 마세요"', "공이 자꾸 튄다고요? 발목 힘 빼세요"])
+        self.assertEqual(k["titles"].count('"트래핑, 공 받을 때 발로 하지 마세요"'), 1)
+        upload.shape_titles(k, ON, [])  # 다시 세워도 (게스트를 바꿀 때) 그대로
+        self.assertEqual(k["title"], '"트래핑, 공 받을 때 발로 하지 마세요"')
+        upload.shape_titles(k, {}, [])  # 꺼도 그대로
+        self.assertEqual(k["titles"], k["titlePool"])
+
+    def test_hook_equal_to_new_shape_in_real_kit(self):
+        name = self.add_video("트래핑 쇼츠.mp4", "short", self.SEGS)
+        first = upload.build_kit(name)["titlePool"][0]
+        with mock.patch.object(hooks, "voice_titles", return_value=[first, "공이 자꾸 튄다고요? 발목 힘 빼세요"]):
+            kit = upload.build_kit(name)
+        self.assertEqual(kit["title"], first)
+        self.assertEqual(kit["titles"][1], "공이 자꾸 튄다고요? 발목 힘 빼세요")
+        kit2 = upload.set_guests(name, None, [])
+        self.assertEqual(kit2["title"], first)
+
+    def test_guest_titles_keep_place_with_forced_question(self):
+        """게스트 + '짧은 질문형 제목' + 질문형 틀을 다른 키트가 다 씀 → 질문형을 2번째로 올린 순서에서도 게스트 제목이 새 후보에 밀려나지 않음."""
+        hints = {"question": True}
+        others = [{"name": f"p{i}.mp4", "source": {"id": "x"}, "title": hooks.fill(t, ["드리블"]), "topics": ["드리블"]}
+                  for i, t in enumerate(hooks.QUESTION_TPL)]
+        guests = [{"name": "이한울", "bio": "현 풋살 국가대표"}]
+        base = {"name": "x.mp4", "source": {"id": "a"}, "format": "shorts", "duration": 40.0, "topics": ["트래핑"], "hashtags": [],
+                "titles": hooks.title_candidates(["트래핑"], None, "shorts", dur=40.0, n=upload.TITLE_POOL)}
+        old = upload.shape_titles(json.loads(json.dumps(base)), hints, others, guests=guests)
+        q = old["titles"][1]
+        self.assertTrue(hooks.is_question(q), old["titles"])  # 예전: 질문형을 2번째로 올림 (뒤의 게스트 제목보다 꼬리표가 나쁨)
+        new = upload.shape_titles(dict(json.loads(json.dumps(base)), titleNew=['"트래핑, 공 받을 때 발로 하지 마세요"', "공이 자꾸 튄다고요? 발목 힘 빼세요"]),
+                                  dict(hints, newTitles=True), others, guests=guests)
+        self.assertGreaterEqual(len(old["guestAuto"]["titles"]), 2, old["titles"])
+        self.assertEqual(new["title"], old["title"])
+        self.assertEqual(new["guestAuto"]["titles"], old["guestAuto"]["titles"])  # 게스트 제목이 다 보임 (예전 그대로)
+        self.assertEqual(new["titles"][:3], old["titles"][:3])  # 게스트 제목 · 올린 질문형 · 게스트 제목 자리 그대로 · 새 후보는 그 뒤
+        self.assertEqual(new["titles"][3], "공이 자꾸 튄다고요? 발목 힘 빼세요")
+
+    def test_route_switch(self):
+        """POST /api/upload/kit {newTitles} (진짜 app.Handler)."""
+        from tests.test_upload import RouteTests
+        name = self.add_video("트래핑 쇼츠.mp4", "short", self.SEGS)
+        (self.work / "upload_settings.json").unlink()
+        old = upload.build_kit(name)
+        import threading
+        from http.server import ThreadingHTTPServer
+        import app
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        rt = RouteTests("test_routes")  # 그 묶음의 call() 만 빌려 씀
+        rt.base = f"http://127.0.0.1:{srv.server_address[1]}"
+        try:
+            with mock.patch.object(app, "PORT", srv.server_address[1]), mock.patch.object(app, "LOGFILE", self.work / "studio.log"):
+                code, j = rt.call("/api/upload/kit", {"name": name, "seq": "", "newTitles": True})
+                self.assertEqual(code, 200, j)
+                self.assertTrue(j["kit"]["newTitles"])
+                self.assertEqual(j["kit"]["titles"][1:3], old["titleNew"])
+                code, j = rt.call("/api/upload/kit", {"name": name, "seq": "", "newTitles": False})
+                self.assertEqual(j["kit"]["titles"], old["titles"])
+                self.assertEqual(rt.call("/api/upload/kit", {"name": "없음.mp4", "seq": "", "newTitles": True})[0], 400)
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
     def test_on_screen_titles_have_no_emoji(self):
         """쇼츠 위 큰 제목(editor.short_hooks)·MSG 첫머리에 이모지가 들어가지 않음 — 이모지는 올리는 제목 후보에만."""

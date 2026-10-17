@@ -1090,8 +1090,8 @@ def build_kit(name, seq=None, save=True):
     kit["guestHint"] = guest_hint(texts)
     kit["seriesFit"] = series_fit(texts, flow, dur, proj, sq, about=Path(name).stem)  # '[N가지 총정리]'·대결 시리즈를 붙여도 되는지 (게스트를 바꿀 때도)
     kit["titlePool"] = list(titles)  # 게스트를 뺐을 때 후보를 다시 채울 바탕 (D-085)
-    if fmt == "shorts":  # 쇼츠 새 말투 후보 — 이 쇼츠 받아쓰기·주제어로만 · 2·3번째에 (shape_titles · BR-250)
-        kit["titleNew"] = hooks.voice_titles(texts, topics, dur)
+    if fmt == "shorts":  # 쇼츠 새 말투 후보 — 이 쇼츠 받아쓰기·주제어로만 · '새 말투·이모지 후보' 칸을 켰을 때만 2·3번째에 (shape_titles · BR-250 · D-438)
+        kit["titleNew"] = hooks.voice_titles(texts, topics, dur)  # 꺼져 있어도 남겨 둠 (나중에 켜면 다시 만들지 않고 바로 넣게)
     shape_titles(kit, hints, others, guests=clean_guests(prev.get("guests")), flow=flow, notes=notes)  # 게스트·시리즈·질문형 + 겹침 순서
     if sq and fmt == "shorts":  # 화면에 시리즈 이름표가 있는 쇼츠: 제목 앞에도 같은 회차 '[1분 레슨 #n]' (번호는 이때 정함 · BR-245)
         kit["series"] = series_tag(name, sq)
@@ -1323,7 +1323,7 @@ TITLE_POOL, TITLE_KEEP = 8, 5  # 제목 후보를 넉넉히 만든 뒤 겹치지
 GUEST_MAX, GUEST_NAME_MAX, GUEST_BIO_MAX = 3, 20, 40
 GUEST_BOOK_MAX = 200
 # 열 때마다 새로 계산하는 칸 (파일에 저장하지 않음 · 다른 키트·전략·올린 기록이 바뀌면 달라짐)
-_LIVE_KEYS = ("alerts", "titleInfo", "taken", "applied", "schedule", "planSaved", "maxLen", "guestBook")
+_LIVE_KEYS = ("alerts", "titleInfo", "taken", "applied", "schedule", "planSaved", "maxLen", "guestBook", "newTitles")
 
 
 def _all_kits():
@@ -1419,8 +1419,10 @@ def _near_title(key, topics, taken):
 
 def strategy_hints():
     """채널 전략에서 키트에 맞출 것 (D-083) — 안 끝난 할 일 중 제목·올리기에 쓰는 것('쇼츠 운영'의 해시태그·제목 할 일도):
-    질문형 먼저 · 제목 N자 안쪽 · 해시태그 · 저장한 전략의 시리즈 이름. 전략을 못 읽으면 빈 것 (키트는 그대로 만듦)."""
-    out = {"todos": [], "question": None, "maxLen": None, "hashtags": [], "series": [], "saved": False}
+    질문형 먼저 · 제목 N자 안쪽 · 해시태그 · 저장한 전략의 시리즈 이름. 전략을 못 읽으면 빈 것 (키트는 그대로 만듦).
+    newTitles: 올리기 키트의 '쇼츠 새 말투·이모지 후보' 칸 (전략이 아닌 키트 설정 · 기본 꺼짐 · D-438)."""
+    out = {"todos": [], "question": None, "maxLen": None, "hashtags": [], "series": [], "saved": False,
+           "newTitles": kit_prefs()["newTitles"]}
     try:
         import strategy  # 지연 import: strategy → hooks → … (앱 시작을 가볍게)
         st = strategy.load_state()
@@ -1744,10 +1746,12 @@ def shape_titles(kit, hints, others, guests=(), flow=None, notes=None, keep_titl
     keep_title: 손으로 고른 제목은 그대로."""
     topics, fmt, dur = kit.get("topics") or [], kit.get("format"), kit.get("duration")
     src = kit.get("source") or {}
-    new = set(kit.get("titleNew") or [])
-    base = [t for t in kit.get("titles") or [] if t and t not in new]
-    if fmt == "shorts":  # 지난번에 붙인 이모지 후보는 빼고 다시 만듦 (_shorts_new)
-        base = [t for t in base if not any(t == hooks.emoji_title(x, (topics or [None])[0]) for x in base)]
+    new, pool0 = set(kit.get("titleNew") or []), set(kit.get("titlePool") or [])
+    # 지난번에 끼운 새 말투·이모지 후보는 빼고 다시 끼움 (_shorts_new) — 원래 후보 묶음(titlePool)에 있던 제목은 그대로
+    # (쇼츠 큰 제목에 새 말투를 그대로 옮겨 쓴 훅이 첫 후보면 기본 제목이 바뀌지 않게)
+    base = [t for t in kit.get("titles") or [] if t and (t not in new or t in pool0)]
+    if fmt == "shorts":
+        base = [t for t in base if t in pool0 or not any(t == hooks.emoji_title(x, (topics or [None])[0]) for x in base)]
     gt = guest_titles(list(guests), topics, dur, kit.get("name"), src.get("id"), hints.get("maxLen"))
     st = series_titles(hints, topics, fmt, dur, flow, guests, kit.get("seriesFit"))
     kit["guestAuto"] = dict(kit.get("guestAuto") or {}, titles=gt)
@@ -1785,8 +1789,9 @@ def shape_titles(kit, hints, others, guests=(), flow=None, notes=None, keep_titl
 def _shorts_new(titles, kit, hints, taken, series=()):
     """쇼츠 키트: 첫 후보(기본 제목)는 그대로 두고 새 말투 후보(titleNew · BR-250) → 첫 후보 끝에 이모지 하나 붙인 후보(BR-251)를
     그 바로 뒤(2·3번째~)에 끼움 — 전략 할 일(질문형 먼저 · N자 넘으면 뒤로)·저장한 시리즈·게스트 순서는 shape_titles 와 같은 꼬리표로
-    지킴(같으면 새 후보가 앞). 다른 키트·이미 올린 우리 제목과 같거나 거의 같은 새 후보는 넣지 않음. 긴 영상 키트는 그대로."""
-    if kit.get("format") != "shorts" or not titles:
+    지킴(같으면 새 후보가 앞). 다른 키트·이미 올린 우리 제목과 같거나 거의 같은 새 후보는 넣지 않음.
+    '쇼츠 새 말투·이모지 후보' 칸(hints["newTitles"] · D-438)이 꺼져 있거나 긴 영상 키트면 그대로."""
+    if kit.get("format") != "shorts" or not titles or not hints.get("newTitles"):
         return titles
 
     def rank(t):
@@ -1807,18 +1812,18 @@ def _shorts_new(titles, kit, hints, taken, series=()):
         r = ranks[t]
         if r[0]:  # 겹치는 새 후보는 안 넣음
             continue
-        j = 0  # 꼬리표가 더 좋은 후보 · 먼저 넣은 같은 꼬리표 새 후보 뒤
-        while j < len(rest) and (ranks[rest[j]] < r or (rest[j] in placed and ranks[rest[j]] == r)):
-            j += 1
+        # 꼬리표가 더 좋은 후보 · 먼저 넣은 같은 꼬리표 새 후보 가운데 맨 뒤의 것 바로 뒤 — rest 가 꼬리표 순이 아닐 때도
+        # (질문형이 하나는 보이게 2번째로 올린 후보 뒤의 게스트·시리즈 제목을 새 후보가 앞지르지 않게)
+        j = max((i + 1 for i, x in enumerate(rest) if ranks[x] < r or (x in placed and ranks[x] == r)), default=0)
         rest.insert(j, t)
         placed.add(t)
     return titles[:1] + rest
 
 
 def _emoji_twins(kit):
-    """후보 중 다른 후보 끝에 이모지만 붙인 것 (hooks.emoji_title)."""
-    ts, tp = kit.get("titles") or [], (kit.get("topics") or [None])[0]
-    return {e for e in (hooks.emoji_title(t, tp) for t in ts) if e and e in ts}
+    """후보 중 다른 후보 끝에 이모지만 붙인 것 (hooks.emoji_title · 원래 후보 묶음 titlePool 에 있던 제목은 빼고)."""
+    ts, tp, pool0 = kit.get("titles") or [], (kit.get("topics") or [None])[0], set(kit.get("titlePool") or [])
+    return {e for e in (hooks.emoji_title(t, tp) for t in ts) if e and e in ts and e not in pool0}
 
 
 def todo_hashtags(hashtags, hints, fmt):
@@ -1905,6 +1910,7 @@ def annotate(kit, hints=None, others=None):
         kit["guestBook"] = [{"name": g["name"], "bio": g["bio"], "n": g["n"]} for g in guest_book()[:30]]
         kit["schedule"] = kit_schedule(kit["name"], src.get("id"), kit.get("format"), kit.get("title"))
         kit["planSaved"] = bool(hints.get("saved"))
+        kit["newTitles"] = bool(hints.get("newTitles"))  # '쇼츠 새 말투·이모지 후보' 칸 (D-438)
         _remember_live(kit)
     except Exception as e:  # 꼬리표·올릴 날을 못 붙여도 키트는 보여 줌
         studio_log(f"올리기 키트 꼬리표를 붙이지 못했어요 · {e}")
@@ -1963,6 +1969,51 @@ def set_guests(name, seq, guests):
         shape_titles(kit, hints, others, guests, keep_title=picked)
         _tag_titles(kit, title=not picked)  # 시리즈 이름표 쇼츠: 다시 채운 후보에도 회차 (손으로 고른 제목은 그대로)
         remember_guests(guests, name, seq)
+        _store(kit, name, seq, sq)
+        return annotate(kit, hints, others)
+
+
+# ---- 키트 설정: 쇼츠 새 말투·이모지 후보 (D-438) ----
+
+KIT_PREFS_DEFAULT = {"newTitles": False}  # 새 말투·이모지 후보는 먼저 선택 사항 (켜야 쇼츠 키트 2·3번째에 들어감)
+
+
+def _prefs_path():
+    return core.WORK / "upload_settings.json"
+
+
+def kit_prefs():
+    """작업 폴더 upload_settings.json → {newTitles} (없거나 깨졌으면 기본값)."""
+    out = dict(KIT_PREFS_DEFAULT)
+    try:
+        d = json.loads(_prefs_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return out
+    if isinstance(d, dict) and isinstance(d.get("newTitles"), bool):
+        out["newTitles"] = d["newTitles"]
+    return out
+
+
+def set_new_titles(name, seq, on):
+    """'쇼츠 새 말투·이모지 후보' 칸 → 설정에 남기고(다음 키트부터도) 지금 키트의 제목 후보를 다시 세워 저장
+    (게스트를 바꿀 때와 같은 길 · 손으로 고른 제목은 그대로 · 저장한 새 말투 titleNew 를 씀 · 예전 판 키트는 '다시 만들기'부터)."""
+    with _LOCK:
+        sq, _ = _target(name, seq)
+        kit = load_kit(name, seq, live=False)
+        if kit is None:
+            raise LookupError("저장된 키트가 없어요 · '올리기 키트 만들기'를 먼저 눌러 주세요")
+        p = _prefs_path()
+        w = _write_safe(p, json.dumps(dict(kit_prefs(), newTitles=bool(on)), ensure_ascii=False, indent=1))
+        if w != p:  # 잡혀 있어 ' (2)' 이름으로 저장됨 → 다음에 못 읽으므로 지우고 알림
+            w.unlink(missing_ok=True)
+            raise RuntimeError(f"{p.name} 파일을 저장하지 못했어요 · 다른 프로그램에서 열려 있으면 닫고 다시 눌러 주세요")
+        old_auto = (kit.get("guestAuto") or {}).get("titles") or []
+        picked = kit.get("title") not in (kit.get("titles") or [])[:1] and kit.get("title") not in old_auto
+        hints, others = strategy_hints(), other_kits(name, seq)
+        kit["titles"] = [t for t in kit.get("titlePool") or kit.get("titles") or [] if t not in old_auto]  # 꺼서 밀려났던 예전 후보도 다시
+        if not picked and kit["titles"]:
+            kit["title"] = kit["titles"][0]
+        shape_titles(kit, hints, others, clean_guests(kit.get("guests")), keep_title=picked)
         _store(kit, name, seq, sq)
         return annotate(kit, hints, others)
 

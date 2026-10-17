@@ -12,7 +12,7 @@ AI 없이 규칙으로:
 - 우리 채널 틀은 주제 자리 밖에 그 영상만의 이야기('중앙을 파괴?')가 있으면 같은 갈래(드리블·패스·슈팅…)의 주제에만 쓰고,
   기본 제목(첫 후보)은 늘 기본 틀 (훅이 있으면 훅) · BR-021
 - 쇼츠 키트의 2·3번째 새 말투(감독님 한마디·묻고 답하기·반전 꼬리·'알아도 못 따라 하는 …')는 받아쓰기로만 (voice_titles · BR-250),
-  올리는 제목 끝 이모지 후보는 emoji_title (BR-251) — 순서는 upload.shape_titles
+  올리는 제목 끝 이모지 후보는 emoji_title (BR-251) — 순서는 upload.shape_titles · 올리기 키트 칸을 켰을 때만 (기본 꺼짐 · D-438)
 """
 import json
 import os
@@ -729,19 +729,20 @@ def _quote(said, topic):
     for s in said:
         if s.endswith("?") or _VOICE_SKIP.search(s) or re.search(_HONORIFIC, s):
             continue
-        for part in dict.fromkeys([s, re.split(r",\s*", s)[-1]]):
+        for part in dict.fromkeys([s, re.split(r",\s*", s)[-1]]):  # 통째로 → 통째로 길 때만 쉼표 뒤 마지막 마디
             if not _ORDER_END.search(part) or _PLAIN_ORDER.search(part) or _hook_len(part) < editor.HOOK_MIN:
-                continue
+                break
             if not (_has_term(part) or (topic and _compact(topic) in _compact(part))):  # 레슨 낱말이 없는 말('참고로만 들으세요') X
-                continue
+                break
             t = part if not topic or _compact(topic) in _compact(part) else f"{topic}, {part}"
             if _hook_len(t) + 2 > editor.HOOK_MAX:
                 t = part
             if _hook_len(t) + 2 > editor.HOOK_MAX:
-                continue
+                continue  # 길어서 못 씀 → 마지막 마디로
             rank = (0 if re.search(r"지\s?마세요$", part) else 1, 0 if _has_term(part) else 1, _hook_len(t))
             if best is None or rank < best[0]:
                 best = (rank, f'"{t}"')
+            break
     return best[1] if best else None
 
 
@@ -888,8 +889,8 @@ _QUESTION = re.compile(r"\?|？|(?:까|나요|가요|죠)[!.~]*$")
 
 
 def is_question(t):
-    """질문형 제목인지 ('… 안 된다면?' · '… 될까' · '… 하고 있나요')."""
-    return bool(_QUESTION.search((t or "").strip()))
+    """질문형 제목인지 ('… 안 된다면?' · '… 될까' · '… 하고 있나요'). 끝의 반전 꼬리 '(?)'('… 1분 만에 배우기(?)' · BR-250)는 물음이 아님."""
+    return bool(_QUESTION.search(re.sub(r"\(\?\)$", "", (t or "").strip()).strip()))
 
 
 def question_titles(topics, n=2):

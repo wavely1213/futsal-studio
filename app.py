@@ -1668,6 +1668,8 @@ class Handler(BaseHTTPRequestHandler):
                 e = b.get("edits")
                 if isinstance(b.get("guests"), list):  # 출연자·게스트 칸 → 제목 후보·태그·해시태그·설명 출연 줄 (D-085)
                     kit = upload.set_guests(n, b.get("seq") or None, b["guests"])
+                elif isinstance(b.get("newTitles"), bool):  # '쇼츠 새 말투·이모지 후보' 칸 → 설정 + 지금 키트 제목 후보 (D-438)
+                    kit = upload.set_new_titles(n, b.get("seq") or None, b["newTitles"])
                 elif isinstance(e, dict):
                     kit = upload.save_edits(n, b.get("seq") or None, e.get("title"), e.get("description"), e.get("tags"))
                 else:
