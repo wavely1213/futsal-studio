@@ -754,12 +754,14 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/style/list":
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
-                                    "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(),
+                                    "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(), "shortsLen": style.shorts_len_state(),
                                     "cardExtras": style.card_extras(), "cardPics": style.card_pics(), "cardFont": style.card_font_state()})
         if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
             return self._send(200, {"on": style.shorts_topic_on()})
         if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · BR-240)
             return self._send(200, {"layout": style.shorts_layout()})
+        if u.path == "/api/style/shorts_len":  # '쇼츠 길이' 지금 값 ('' 지금처럼 20~55초 · loop · point · explain · ref · BR-291)
+            return self._send(200, style.shorts_len_state())
         if u.path == "/api/style/card_extras":  # 은평 스타일 덧붙임 (시리즈 이름표·전체 강좌 줄 · BR-245 · BR-246) 지금 값
             return self._send(200, style.card_extras())
         if u.path == "/api/style/card_pic":  # 은평 스타일 띠 그림·로고 그림 (편집실 미리보기·스타일 화면 · 실은 그림 또는 작업 폴더의 바꾼 그림 · BR-280 · BR-281)
@@ -1138,6 +1140,14 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(200, {"ok": True, "layout": v})
+        if path == "/api/style/shorts_len":  # 스타일 화면 '쇼츠 길이' 고르기 (BR-291 · 다음에 고르는 쇼츠 후보부터)
+            try:
+                v = style.set_shorts_len(b.get("mode"))
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "모르는 쇼츠 길이예요"})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, dict(style.shorts_len_state(), ok=True, mode=v))
         if path == "/api/style/card_extras":  # 스타일 화면 시리즈 이름표·전체 강좌 줄 (준 값만 바꿈 · 다음에 만드는 은평 스타일 쇼츠부터)
             try:
                 v = style.set_card_extras(b.get("series") if isinstance(b.get("series"), bool) else None,
@@ -1187,6 +1197,16 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             return self._send(200, {"ok": True})
+        if path == "/api/style/long_caps":  # 스타일 카드의 '롱폼 말 자막' 켜기·작게 켜기·끄기 (스타일 파일에 저장 · BR-290)
+            try:
+                style.set_long_caps(str(b.get("name") or ""), b.get("mode"))
+            except style.StyleMissing as e:
+                return self._send(404, {"ok": False, "error": str(e)})
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "모르는 자막 설정이에요"})
+            except OSError:
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, {"ok": True, "mode": b.get("mode")})
         # ---- 스타일 일치 점수: 배운 스타일로 만든 자동 가편집이 그 스타일과 얼마나 닮았는지 (내보내지 않고 바로) ----
         # 원본 화면을 처음 보는 영상이면 작업으로 한 번 살펴본 뒤 매김 (결과는 작업 결과로) · 안내는 한국어만 화면에
         if path == "/api/style/score":

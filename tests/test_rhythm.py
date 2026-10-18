@@ -72,6 +72,12 @@ def ref_events(med=3.0, head=None, tail=None, cps=None, dur=300.0, seed=3):
             "speech": {"talk": 200.0, "chars": 200.0 * cps} if cps else None}
 
 
+def in_demo(it):
+    """그 컷의 대부분이 시범 구간(DEMO) 안인지 (말이 드문 시범 컷은 확대하지 않음 · BR-294)."""
+    a, b = float(it["in"]), float(it["out"])
+    return any(min(b, e) - max(a, s) > 0.5 * (b - a) for s, e in DEMO)
+
+
 class RhythmBase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="컷 리듬 테스트 "))
@@ -152,15 +158,20 @@ class TestSplitRhythm(RhythmBase):
         sp = [float(it.get("speed") or 1.0) for it in v]
         jumps = 0
         for k, (x, y) in enumerate(zip(v, v[1:])):
-            if abs(x["out"] - y["in"]) >= 1e-6:  # 잘라 낸 자리: 늘 뒤집음
+            if abs(x["out"] - y["in"]) >= 1e-6 and not (in_demo(x) or in_demo(y)):  # 잘라 낸 자리: 늘 뒤집음 (시범 컷은 늘 원래 크기 · BR-294)
                 jumps += 1
                 self.assertNotEqual(sc[k], sc[k + 1], (x, y))
-            elif sc[k] == sc[k + 1]:  # 이어진 곳에서 크기가 그대로면 말이 1초 넘게 쉬는 곳의 빠르기 바꾸기뿐
+            elif sc[k] == sc[k + 1] and not (in_demo(x) or in_demo(y)):  # 이어진 곳에서 크기가 그대로면 말이 1초 넘게 쉬는 곳의 빠르기 바꾸기뿐
+                # (시범 컷과 붙은 곳은 시범 앞 빠르기 바꾸기 — 시범 컷은 확대하지 않아 크기가 같음 · BR-294)
                 self.assertNotEqual(sp[k], sp[k + 1], (x, y))
                 prev = max(e for s_, e in self.words if e <= y["in"] + 0.2)
                 nxt = min(s_ for s_, e in self.words if s_ >= y["in"] - 0.2)
                 self.assertGreater(nxt - prev, editor.DEMO_GAP, (y["in"], prev, nxt))
-        self.assertGreater(jumps, 3)
+        self.assertGreaterEqual(jumps, 3)
+        self.assertTrue(any(in_demo(it) for it in v))
+        for k, it in enumerate(v):
+            if in_demo(it):
+                self.assertEqual(sc[k], 100.0, "시범 컷은 확대하지 않음 (BR-294)")
         self.assertEqual(sc[0], 100.0)
         self.assertEqual(max(sc), round(self.params["zoomScale"] * 100, 1))
 
@@ -177,7 +188,7 @@ class TestSplitRhythm(RhythmBase):
         sc = [float(((it.get("fx") or {}).get("scale") or {}).get("v", 100.0)) for it in v]
         self.assertEqual(set(sc), {100.0, 108.0})
         for k, (x, y) in enumerate(zip(v, v[1:])):
-            if abs(x["out"] - y["in"]) >= 1e-6:
+            if abs(x["out"] - y["in"]) >= 1e-6 and not (in_demo(x) or in_demo(y)):
                 self.assertNotEqual(sc[k], sc[k + 1], "잘라 낸 자리는 크기를 바꿔 점프 컷을 숨김")
 
     def test_median_shot_near_target(self):

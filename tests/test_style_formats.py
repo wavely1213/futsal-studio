@@ -175,7 +175,9 @@ class EditorWiringTest(Work):
         shorts = [q for q in seqs if q["format"] == "shorts"]
         self.assertEqual(len(long_), 1)
         self.assertTrue(shorts)
-        self.assertFalse(long_[0]["captionsOn"])  # 긴 영상은 자막을 거의 안 씀
+        # 긴 영상은 자막을 거의 안 씀 → 롱폼 가편집은 '작게 켜기' (예전: 끔 · BR-290) · 쇼츠는 늘 켬
+        self.assertTrue(long_[0]["captionsOn"])
+        self.assertEqual(long_[0]["captionStyle"]["size"], editor.LONG_SMALL)
         self.assertTrue(all(q["captionsOn"] for q in shorts))  # 쇼츠는 자막 위
         self.assertTrue(all(q["auto"] == "style" for q in seqs))
         import re

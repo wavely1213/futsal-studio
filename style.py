@@ -897,11 +897,26 @@ def formats_of(prof):
 
 
 def _with_user(sub, prof):
-    """형식별 프로필 + 스타일 전체에 둔 사용자 설정 (말 빠르기 맞추기 끔 tempoOn)."""
+    """형식별 프로필 + 스타일 전체에 둔 사용자 설정 (말 빠르기 맞추기 끔 tempoOn · 롱폼 말 자막 longCaps)."""
     out = dict(sub)
     if prof.get("tempoOn") is False:
         out["tempoOn"] = False
+    if prof.get("longCaps") in LONG_CAPS:
+        out["longCaps"] = prof["longCaps"]
     return out
+
+
+# 가편집 롱폼 말 자막 (BR-290 · D-480): 스타일 카드에서 고름 · 고르지 않았으면 배운 자막 비율이 25% 넘으면 '켜기', 아니면 '작게 켜기'
+# (예전: 25% 밑이면 롱폼·쇼츠 모두 끔 → 레슨·CC 자막 채널을 배우면 편집본마다 자막을 다시 켜야 했음). 쇼츠는 늘 켬 (소리 끄고 봄).
+LONG_CAPS = ("on", "small", "off")
+
+
+def long_caps_mode(prof):
+    """스타일 프로필 → 가편집 롱폼 말 자막 'on' | 'small' | 'off' (고른 값 · 없으면 배운 자막 비율로)."""
+    v = prof.get("longCaps") if isinstance(prof, dict) else None
+    if v in LONG_CAPS:
+        return v
+    return "on" if _num(prof, "captionRatio", 0) >= 0.25 else "small"
 
 
 def _auto_lufs(v):
@@ -933,7 +948,8 @@ def _params(prof):
         "targetShot": prof["medianShot"],              # 한 컷 길이 목표(초)
         "zoomEvery": zoom_every,                       # 몇 초마다 줌 컷(펀치인) — 0이면 안 함
         "zoomScale": min(1.6, max(1.08, prof["avgZoom"])),
-        "captions": prof["captionRatio"] >= 0.25,
+        "captions": prof["captionRatio"] >= 0.25,     # 배운 영상이 말 자막을 많이 쓰는지 (설명·점수용 · 가편집은 아래 longCaps · 쇼츠는 늘 켬)
+        "longCaps": long_caps_mode(prof),              # 가편집 롱폼 말 자막 (BR-290)
         "captionPos": prof["captionPos"], "captionColor": prof["captionColor"],
         "lufs": _auto_lufs(prof.get("lufs")),          # 소리 크기 목표: 유튜브 기준(-14~-13) 안으로 (레퍼런스가 -27 이어도)
         "splitShot": split, "curve3": c3 if split else [0, 0, 0],
@@ -1071,9 +1087,12 @@ def learn(style_name, names, log=print):
     if fm:
         prof["formats"] = fm
         log(f"  {FMT_KO['long']} {fm['long']['count']}개·{FMT_KO['shorts']} {fm['shorts']['count']}개를 따로 배웠어요 (롱폼엔 긴 영상 값, 쇼츠엔 쇼츠 값)")
-    try:  # 같은 이름으로 다시 배워도 '말 빠르기 맞추기'를 꺼 둔 것은 그대로
-        if json.loads((STYLES / f"{style_name}.json").read_text(encoding="utf-8")).get("tempoOn") is False:
+    try:  # 같은 이름으로 다시 배워도 '말 빠르기 맞추기'를 꺼 둔 것·고른 '롱폼 말 자막'은 그대로
+        was = json.loads((STYLES / f"{style_name}.json").read_text(encoding="utf-8"))
+        if was.get("tempoOn") is False:
             prof["tempoOn"] = False
+        if was.get("longCaps") in LONG_CAPS:
+            prof["longCaps"] = was["longCaps"]
     except (OSError, ValueError, AttributeError):
         pass
     STYLES.mkdir(parents=True, exist_ok=True)
@@ -1176,6 +1195,75 @@ def set_shorts_layout(v):
     f.parent.mkdir(parents=True, exist_ok=True)
     updater.write_atomic(f, json.dumps({"layout": v, "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
     return v
+
+
+# 자동 쇼츠 길이 (BR-291 · D-481): '' = 지금처럼(20~55초) · loop = 한 동작(10~20초) · point = 기술 하나(30~60초) · explain = 설명(60~120초) ·
+# ref = 첫 가편집 스타일이 배운 쇼츠 레퍼런스 길이에 맞춤 (보통 길이의 0.6~1.5배 · 쇼츠 레퍼런스가 없으면 지금처럼).
+# 가편집·재미있게 자동 편집·끝까지 자동으로·올리기 키트가 고르는 쇼츠 후보(editor.recommend) 모두 이 길이 (롱폼은 그대로).
+SHORTS_LENS = {"": (20.0, 55.0), "loop": (10.0, 20.0), "point": (30.0, 60.0), "explain": (60.0, 120.0)}
+SHORTS_LEN_MODES = ("", "loop", "point", "explain", "ref")
+REF_LEN = (0.6, 1.5)        # ref: 레퍼런스 쇼츠 보통 길이(가운데 값)의 이 배수 → 가장 짧게·길게
+REF_LEN_BOUNDS = (10.0, 120.0)
+
+
+def _shorts_len_file():
+    return STYLES / ROUGH_DIR_NAME / "쇼츠 길이.json"
+
+
+def shorts_len_mode():
+    """'쇼츠 길이' 고른 값 (기본 '' = 지금처럼 · 파일이 없거나 못 읽거나 모르는 값이면)."""
+    try:
+        d = json.loads(_shorts_len_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    v = d.get("mode") if isinstance(d, dict) else ""
+    return v if v in SHORTS_LEN_MODES else ""
+
+
+def set_shorts_len(v):
+    """쇼츠 길이 정하기 (styles/설정/쇼츠 길이.json) → 바뀐 값 (모르는 값은 ValueError)."""
+    v = str(v or "")
+    if v not in SHORTS_LEN_MODES:
+        raise ValueError(v)
+    f = _shorts_len_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"mode": v, "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    return v
+
+
+def ref_shorts_len():
+    """첫 가편집 스타일이 배운 쇼츠 레퍼런스 길이 → {"n": 쇼츠 수, "median": 보통 길이(초), "min", "max"} · 없으면 None."""
+    n = rough_default()
+    if not n:
+        return None
+    try:
+        prof = json.loads(style_file(n).read_text(encoding="utf-8"))
+    except (OSError, ValueError, StyleMissing):
+        return None
+    refs = [r for r in (prof.get("refs") or [prof]) if isinstance(r, dict)] if isinstance(prof, dict) else []
+    durs = sorted(float(r["duration"]) for r in refs if _fmt_of(r) == "shorts" and _num(r, "duration", 0) > 0)
+    if not durs:
+        return None
+    k = len(durs)
+    med = durs[k // 2] if k % 2 else (durs[k // 2 - 1] + durs[k // 2]) / 2
+    lo = min(REF_LEN_BOUNDS[1] - 10.0, max(REF_LEN_BOUNDS[0], round(med * REF_LEN[0])))
+    hi = min(REF_LEN_BOUNDS[1], max(lo + 10.0, round(med * REF_LEN[1])))
+    return {"n": k, "median": round(med, 1), "min": float(lo), "max": float(hi), "style": n}
+
+
+def shorts_len():
+    """자동 쇼츠 후보 길이 (가장 짧게, 가장 길게) 초 — 고른 '쇼츠 길이' (ref 인데 쇼츠 레퍼런스가 없으면 지금처럼 20~55초)."""
+    m = shorts_len_mode()
+    if m == "ref":
+        r = ref_shorts_len()
+        return (r["min"], r["max"]) if r else SHORTS_LENS[""]
+    return SHORTS_LENS[m]
+
+
+def shorts_len_state():
+    """스타일 화면 '쇼츠 길이' 줄: 고른 값 · 실제 쓰는 길이 · 레퍼런스 길이(있으면)."""
+    lo, hi = shorts_len()
+    return {"mode": shorts_len_mode(), "min": lo, "max": hi, "ref": ref_shorts_len()}
 
 
 # 은평 스타일 덧붙임 (BR-245 · BR-246 · D-428): 시리즈 이름표 '1분 레슨 (n)' · 아래 띠 '전체 강좌는 채널에서 ▶' 줄 — 둘 다 고르는 것 (기본 끔)
@@ -1533,6 +1621,13 @@ def update_style(style_name, fn):
                 raise
             time.sleep(0.1)
     return d
+
+
+def set_long_caps(style_name, mode):
+    """스타일 카드의 '롱폼 말 자막' 고르기 (켜기·작게 켜기·끄기) → 스타일 파일(longCaps)에 저장 (BR-290). 모르는 값은 ValueError."""
+    if mode not in LONG_CAPS:
+        raise ValueError(mode)
+    return update_style(style_name, lambda d: d.__setitem__("longCaps", mode))
 
 
 def set_tempo(style_name, on):

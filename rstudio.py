@@ -367,7 +367,8 @@ POLICY = {
         "/api/auto", "/api/auto/pending",  # 끝까지 자동으로: 마지막 기록·기본 설정 · 그려 줄 썸네일 요청
         "/api/style/shorts_topic", "/api/style/shorts_layout", "/api/style/card_extras",  # 쇼츠 첫머리 주제 줄 설정 (BR-120 · D-221) · 쇼츠 화면 배치 (BR-240) · 덧붙임 (BR-245)
         "/api/style/card_pic",  # 은평 스타일 띠 그림·로고 그림 (BR-280 · BR-281)
-        "/api/style/card_font", "/api/style/ep_font")},  # 은평 스타일 글꼴 줄 · 글꼴 파일 (편집실 미리보기 · BR-311 · BR-312)
+        "/api/style/card_font", "/api/style/ep_font",
+        "/api/style/shorts_len")},  # 쇼츠 길이 (BR-291)  # 은평 스타일 글꼴 줄 · 글꼴 파일 (편집실 미리보기 · BR-311 · BR-312)
     (_G, "/media"): MEDIA, (_G, "/api/edit/file"): MEDIA,
     # 바꾸기·작업 시작 (POST · CSRF)
     **{(_P, p): WRITE for p in (
@@ -395,7 +396,8 @@ POLICY = {
         # 쇼츠 첫머리 주제 줄 켜기·끄기 (BR-120 · D-220) · 쇼츠 화면 배치 고르기 (BR-240) · 시리즈 이름표·전체 강좌 줄 (BR-245 · BR-246)
         "/api/style/shorts_topic", "/api/style/shorts_layout", "/api/style/card_extras",
         "/api/style/card_pics", "/api/style/card_pic",  # 은평 스타일 띠 그림·로고 켜기/끄기 · 그림 바꾸기 (BR-282)
-        "/api/style/card_font")},  # 은평 스타일 '글꼴 파일 고르기'·'처음으로' (BR-312)
+        "/api/style/card_font",  # 은평 스타일 '글꼴 파일 고르기'·'처음으로' (BR-312)
+        "/api/style/long_caps", "/api/style/shorts_len")},  # 스타일 카드 롱폼 말 자막 (BR-290) · 쇼츠 길이 (BR-291)
     # 유튜브에 실제로 올리는 것: PC 가 만든 확인 문장 (428) 을 한 번 더
     (_P, "/api/youtube/upload"): CONFIRM, (_P, "/api/youtube/resume"): CONFIRM, (_P, "/api/youtube/finish"): CONFIRM,
     # 여기서 대신 답함 (PC 에서 폴더·브라우저를 열지 않음)

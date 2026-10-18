@@ -238,11 +238,12 @@ class TestOldStyleCompat(StyleFixtureBase):
         # git 998a5ee(v1.8.0) style.py 의 edit_params·describe 결과 그대로
         # 컷 리듬 맞추기(#7) 값은 새로 더해짐 (예전 스타일: 3구간 모두 가운데 컷 길이 · 말 빠르기는 배운 값)
         self.assertEqual({k: st["params"].pop(k) for k in ("splitShot", "curve3", "tempo")}, {"splitShot": 2.5, "curve3": [2.5] * 3, "tempo": 7.12})
+        self.assertEqual(st["params"].pop("longCaps"), "on")  # 가편집 롱폼 말 자막 (BR-290 · 새로 더해짐 · 자막 65% → 켜기)
         self.assertEqual(st["params"], {"keepPause": 0.41, "targetShot": 2.5, "zoomEvery": 16.8, "zoomScale": 1.22, "captions": True,
                                         "captionPos": "bottom", "captionColor": "#FFE14D", "lufs": -14.0})  # E6(D-045): 소리 목표는 -14~-13 안으로 (예전 -14.45)
         self.assertEqual(st["desc"], "컷이 3.16초마다 바뀌고(1분에 19.23번), 16.8초마다 확대 컷(약 1.22배)이 나와요. "
                                      "말 사이 0.41초 넘게 쉬면 잘라요. 자막이 화면의 65%에 아래쪽으로 깔려요.")
-        self.assertEqual({k: v for k, v in style.edit_params(self.old["refs"][0]).items() if k not in ("splitShot", "curve3", "tempo")}, {"keepPause": 0.38, "targetShot": 2.25, "zoomEvery": 14.3, "zoomScale": 1.24,
+        self.assertEqual({k: v for k, v in style.edit_params(self.old["refs"][0]).items() if k not in ("splitShot", "curve3", "tempo", "longCaps")}, {"keepPause": 0.38, "targetShot": 2.25, "zoomEvery": 14.3, "zoomScale": 1.24,
                                                                   "captions": True, "captionPos": "bottom", "captionColor": "#FFE14D", "lufs": -13.8})
 
     def test_merge_of_old_profiles_unchanged(self):

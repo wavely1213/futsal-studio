@@ -530,7 +530,9 @@ class TestEditorWiring(WorkBase):
         self.assertAlmostEqual(v1[1]["start"], teaser, delta=0.01)
         t0 = seq["titles"][0]
         self.assertEqual((t0["start"], t0["dur"]), (0.0, round(teaser, 2)))
-        em = seq["titles"][1:]
+        tag = [t for t in seq["titles"] if t.get("plan") == "teaserTag"]  # 작은 '미리보기' 표시 (BR-292)
+        self.assertEqual([(t["text"], t["start"], t["dur"]) for t in tag], [("미리보기", 0.0, round(teaser, 2))])
+        em = [t for t in seq["titles"] if t.get("plan") == "emphasis"]
         total = max(editor.i_end(it) for it in seq["items"])
         self.assertLessEqual(len(em), int(4 * total / 60))
         self.assertTrue(em, "강조 낱말(대박·진짜)이 있는 말")
