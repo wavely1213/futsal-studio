@@ -5,6 +5,8 @@
   열고 그냥 나가면 묻지 않음 · 고친 디자인은 나갈 때 [계속 고치기]·[그냥 나가기]·[저장하고 나가기](JPG) ·
   내보내면 디자인 파일에 exp(지문·파일 이름)를 적고 다시 열어도 '저장됨' · 그림이 지워졌으면 '아직 없음' ·
   AI 추천 카드 '이걸로 저장'은 디자인으로 불러와 JPG 로 저장(완성본 폴더는 안 엶) · '이미지로 저장' 단추는 예전처럼 고른 형식 + 폴더 엶
+- 검토 고침(D-494~D-497): 연 디자인이 아니어도 이 창에서 고친 디자인을 물어봄 · 2MB 넘는 PNG 는 '저장됨'(초록)이 아님 ·
+  [저장하고 나가기] 뒤 디자인 저장이 실패하면 물어봄 · 1280 너비에서 위 막대가 한 줄('저장됨' 줄바꿈 없음 · 영상 이름 안 잘림)
 Playwright·Chromium 이 없으면 화면 시험은 건너뜀. 인터넷은 쓰지 않음."""
 import json
 import shutil
@@ -81,6 +83,7 @@ class _Stub(BaseHTTPRequestHandler):
     docs = {"designs": []}
     outs = []
     saved, exported, opened = [], [], []
+    fail_after_export = False  # 그림을 내보낸 뒤의 디자인 저장만 실패 (Windows 백신·OneDrive 가 잠깐 잡음 흉내)
 
     def log_message(self, *a):
         pass
@@ -124,6 +127,8 @@ class _Stub(BaseHTTPRequestHandler):
         if self.path == "/api/thumb/frames":
             return self._send(200, {"ok": True, "frames": [{"t": float(t)} for t in (1, 3, 5, 7)]})
         if self.path == "/api/thumb/save":
+            if _Stub.fail_after_export and _Stub.exported:
+                return self._send(200, {"ok": False, "error": "잠김"})
             _Stub.saved.append(b)
             _Stub.docs = b["docs"]
             return self._send(200, {"ok": True, "rev": len(_Stub.saved)})
@@ -165,6 +170,7 @@ class ExportStatePageTests(unittest.TestCase):
     def setUp(self):
         _Stub.docs, _Stub.outs = {"designs": []}, []
         _Stub.saved, _Stub.exported, _Stub.opened = [], [], []
+        _Stub.fail_after_export = False
         self.page = self.browser.new_page(viewport={"width": 1500, "height": 900})
         self.errs = []
         self.page.on("pageerror", lambda e: self.errs.append(str(e)))
@@ -286,6 +292,115 @@ class ExportStatePageTests(unittest.TestCase):
         self.assertEqual(_Stub.docs["designs"][-1]["exp"]["file"], _Stub.exported[0]["file"])
         self.leave()
         self.assertTrue(self.at_home(), "이미 유튜브용 그림이 최신이라 묻지 않음")
+        self.assertEqual(self.errs, [])
+
+    def test_other_edited_design_asks(self):
+        """고친 디자인 2 를 두고 디자인 1 을 연 채 나가도 디자인 2 를 물어보고, [저장하고 나가기]는 그 디자인을 저장 (D-494)."""
+        pg = self.open()
+        pg.locator(".cand").first.click()  # 새 디자인(고침 · 그림 없음)
+        pg.wait_for_timeout(800)
+        name = pg.evaluate("D.name")
+        pg.evaluate("openDesign(0)")  # 처음 디자인(열 때 깐 배경만 · 고치지 않음)으로 돌아가 비교
+        pg.wait_for_timeout(300)
+        self.leave()
+        self.assertTrue(pg.is_visible("#leaveModal"), "연 디자인이 아니어도 이 창에서 고친 디자인을 살핌")
+        self.assertIn(f"'{name}'", pg.inner_text("#leaveMsg"))
+        self.assertIn(f"'{name}'", pg.inner_text("#leaveHint"), "[저장하고 나가기]가 무엇을 저장하는지 알려 줌")
+        pg.click("#leaveSave")
+        pg.wait_for_url(f"{self.base}/", timeout=20000)
+        self.assertEqual([e["label"] for e in _Stub.exported], [name], "그 디자인만 JPG 로")
+        self.assertEqual(_Stub.exported[0]["fmt"], "jpg")
+        d = next(x for x in _Stub.docs["designs"] if x["name"] == name)
+        self.assertEqual(d["exp"]["file"], _Stub.exported[0]["file"])
+        self.assertNotIn("exp", _Stub.docs["designs"][0], "열어 둔 디자인 1 은 그대로")
+        self.assertEqual(_Stub.opened, [])
+        self.assertEqual(self.errs, [])
+
+    def test_open_design_only_one_message(self):
+        """연 디자인 하나만 걸리면 예전 글 그대로 ('지금 디자인')."""
+        pg = self.open()
+        pg.locator(".cand").first.click()
+        pg.wait_for_timeout(800)
+        self.leave()
+        self.assertIn("지금 디자인을 JPG(유튜브용)로 저장하고 나가요", pg.inner_text("#leaveHint"))
+        self.assertNotIn("'", pg.inner_text("#leaveMsg"), "연 디자인이면 이름을 붙이지 않음")
+        pg.click("#leaveStay")
+        self.assertEqual(self.errs, [])
+
+    def test_save_fail_after_export_asks(self):
+        """[저장하고 나가기]: 그림은 만들었는데 디자인 저장(exp 기억)이 실패하면 '← 스튜디오'와 같이 물어봄 (D-496)."""
+        pg = self.open()
+        pg.locator(".cand").first.click()
+        pg.wait_for_timeout(800)
+        self.leave()
+        self.assertTrue(pg.is_visible("#leaveModal"))
+        _Stub.fail_after_export = True
+        asked = []
+        pg.once("dialog", lambda dl: (asked.append(dl.message), dl.dismiss()))
+        pg.click("#leaveSave")
+        pg.wait_for_timeout(2500)
+        self.assertEqual(len(_Stub.exported), 1)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("디자인을 저장하지 못했어요", asked[0])
+        self.assertFalse(self.at_home(), "[취소]면 남음 (예전: 그대로 나가 다음에 또 '아직 없음')")
+        self.assertFalse(pg.is_visible("#leaveModal"))
+        _Stub.fail_after_export = False  # 다시 저장되면 그대로 나감
+        self.leave()
+        self.at_home() or pg.wait_for_url(f"{self.base}/", timeout=10000)
+        self.assertTrue(self.at_home())
+        self.assertEqual(_Stub.docs["designs"][-1]["exp"]["file"], _Stub.exported[0]["file"])
+        self.assertEqual(self.errs, [])
+
+    def test_big_png_is_not_ok(self):
+        """2MB 넘는 PNG 를 그대로 두면 7단계 확인에 걸리므로 '저장됨'(초록)이 아니고 나갈 때 물어봄 (D-495)."""
+        import numpy as np
+        from PIL import Image
+        import io
+        old = _Stub.frame
+        buf = io.BytesIO()
+        Image.fromarray(np.random.default_rng(1).integers(0, 256, (720, 1280, 3), dtype=np.uint8)).save(buf, "JPEG", quality=95)
+        _Stub.frame = buf.getvalue()
+        self.addCleanup(setattr, _Stub, "frame", old)
+        pg = self.open()
+        pg.locator(".cand").first.click()
+        pg.wait_for_timeout(800)
+        pg.select_option("#exFmt", "png")
+        asked = []
+        pg.once("dialog", lambda dl: (asked.append(dl.message), dl.dismiss()))  # [취소] = PNG 그대로
+        pg.click("#exportBtn")
+        pg.wait_for_function("D.exp && D.exp.file", timeout=20000)
+        pg.wait_for_timeout(500)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("2MB", asked[0])
+        self.assertEqual(_Stub.exported[0]["fmt"], "png")
+        self.assertEqual(self.state(), ["big", "· 유튜브용 그림이 2MB 넘음 · 올리기에 걸림"])
+        self.assertIn("JPG", pg.get_attribute("#expState", "title"))
+        self.assertEqual(pg.evaluate("getComputedStyle(document.getElementById('expState')).color"), "rgb(245, 165, 36)", "주황")
+        self.leave()
+        self.assertTrue(pg.is_visible("#leaveModal"), "올리기에 걸리는 그림이면 물어봄")
+        self.assertIn("2MB", pg.inner_text("#leaveMsg"))
+        pg.click("#leaveSave")
+        pg.wait_for_url(f"{self.base}/", timeout=20000)
+        self.assertEqual([e["fmt"] for e in _Stub.exported], ["png", "jpg"])
+        self.assertNotIn("big", _Stub.docs["designs"][-1]["exp"], "JPG 로 다시 저장하면 '저장됨'")
+        self.assertEqual(self.errs, [])
+
+    def test_top_bar_one_line_at_1280(self):
+        """앱 창(1320, 줄인 화면은 더 좁음)에서 긴 상태 글이 '저장됨'·영상 이름을 밀지 않음 — 상태 글이 먼저 말줄임 (D-497)."""
+        self.page.set_viewport_size({"width": 1280, "height": 860})
+        pg = self.open()
+        pg.locator(".cand").first.click()
+        pg.wait_for_timeout(800)
+        pg.evaluate("D.exp = { sig: 'old', file: 'x.jpg' }; OUTS.add('x.jpg'); renderExp();")
+        self.assertEqual(self.state()[0], "stale")
+        m = pg.evaluate("""(() => { const r = id => document.getElementById(id).getBoundingClientRect(), s = document.getElementById('saved'), e = document.getElementById('expState'), n = document.getElementById('pname');
+          return { saved: r('saved').height, exps: r('expState').height, lh: parseFloat(getComputedStyle(s).fontSize), nameCut: n.scrollWidth > n.clientWidth + 1, top: r('saved').top - r('pname').top,
+                   title: e.title, savedText: s.textContent }; })()""")
+        self.assertLess(m["saved"], m["lh"] * 1.8, "'저장됨'은 한 줄")
+        self.assertLess(m["exps"], m["lh"] * 1.8, "상태 글도 한 줄 (모자라면 말줄임)")
+        self.assertFalse(m["nameCut"], "영상 이름은 예전처럼 다 보임")
+        self.assertIn("고친 뒤 유튜브용 그림 다시 안 만듦", m["title"], "잘린 글은 마우스를 올리면 다 보임")
+        self.assertEqual(m["savedText"], "저장됨")
         self.assertEqual(self.errs, [])
 
 

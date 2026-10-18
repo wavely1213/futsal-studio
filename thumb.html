@@ -117,7 +117,9 @@
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 15; }
   .modal.show { display: grid; }
   .modal .box { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 18px; width: 560px; max-height: 80vh; overflow: auto; }
-  .exps.none, .exps.stale { color: #f5a524; } .exps.ok { color: #2fbf6b; }  /* 유튜브용 그림 상태 (D-491) */
+  .exps.none, .exps.stale, .exps.big { color: #f5a524; } .exps.ok { color: #2fbf6b; }  /* 유튜브용 그림 상태 (D-491 · D-495) */
+  /* 위 막대는 한 줄: '저장됨'은 줄바꿈 없이, 유튜브용 그림 상태는 자리가 모자라면 먼저 말줄임(영상 이름보다 먼저 · 전체는 마우스를 올리면 · D-497) */
+  .top #saved { white-space: nowrap; } .top .exps { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1000 auto; }
   .keys { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 5px 12px; font-size: 12px; color: var(--ink-2); }
   .keys kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 5px; color: var(--ink); font: 11px ui-monospace, monospace; white-space: nowrap; }
   .readout { position: absolute; pointer-events: none; background: rgba(18,18,18,.94); color: #fff; border: 1px solid #4a4a4a; border-radius: 4px; padding: 3px 8px; font: 11.5px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre; z-index: 6; display: none; }
@@ -336,7 +338,7 @@
 <div class="modal" id="leaveModal"><div class="box" style="width:480px">
   <h3 style="margin:0 0 8px">유튜브용 그림으로 저장할까요?</h3>
   <div id="leaveMsg" style="line-height:1.55"></div>
-  <div class="hint" style="margin-top:6px">[저장하고 나가기]를 누르면 지금 디자인을 JPG(유튜브용)로 저장하고 나가요.</div>
+  <div class="hint" id="leaveHint" style="margin-top:6px">[저장하고 나가기]를 누르면 지금 디자인을 JPG(유튜브용)로 저장하고 나가요.</div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="leaveStay">계속 고치기</button><button class="btn" id="leaveGo">그냥 나가기</button><button class="btn pri" id="leaveSave">저장하고 나가기</button></div>
 </div></div>
 <div class="modal" id="brandModal"><div class="box" style="width:640px">
@@ -2581,23 +2583,27 @@ document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.
    → 디자인마다 마지막으로 내보낸 그림의 지문·파일 이름(designs[].exp)을 기억해 '아직 없음 / 고친 뒤 다시 안 만듦 / 저장됨'을 따로 보이고,
    이 창에서 고친 디자인이 아직 없음·고친 뒤면 나갈 때 물어봄 */
 let OUTS = new Set();  // 디자인이 기억한 그림 중 완성본 폴더에 지금 있는 것 (열 때 서버가 확인 · 이 창에서 내보내면 더함)
-const TOUCHED = new WeakSet();  // 이 창에서 고친 디자인 (열고 그냥 나가면 묻지 않게)
+const TOUCHED = new Set();  // 이 창에서 고친 디자인 (열고 그냥 나가면 묻지 않게 · 나갈 때 연 디자인 말고도 모두 살핌 · D-494)
 function docKey(doc) {  // 그림이 달라지는 내용(안내선 빼고)의 짧은 지문
   const s = JSON.stringify(Object.assign({}, doc, { guides: undefined }), dropPriv); let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0).toString(36) + "." + s.length.toString(36);
 }
-function expState(d) {  // → "empty"(보이는 레이어 없음) · "none"(아직 없음·그림이 지워짐) · "stale"(고친 뒤 다시 안 만듦) · "ok"
+function expState(d) {  // → "empty"(보이는 레이어 없음) · "none"(아직 없음·그림이 지워짐) · "stale"(고친 뒤 다시 안 만듦) · "big"(2MB 넘는 PNG · D-495) · "ok"
   if (!d || !d.doc.layers.some(l => !l.hidden)) return "empty";
   const e = d.exp; if (!e || !e.file || !OUTS.has(e.file)) return "none";
-  return e.sig === docKey(d.doc) ? "ok" : "stale";
+  return e.sig !== docKey(d.doc) ? "stale" : e.big ? "big" : "ok";
 }
-const EXP_TXT = { none: "유튜브용 그림 아직 없음", stale: "고친 뒤 유튜브용 그림 다시 안 만듦", ok: "유튜브용 그림 저장됨" };
+const EXP_TXT = { none: "유튜브용 그림 아직 없음", stale: "고친 뒤 유튜브용 그림 다시 안 만듦", big: "유튜브용 그림이 2MB 넘음 · 올리기에 걸림", ok: "유튜브용 그림 저장됨" };
+const EXP_TIP = "올리기(7단계)·유튜브 바로 올리기는 '이미지로 저장'한 그림을 써요 (디자인 '저장됨'과 따로예요)";
 function renderExp() {
   clearTimeout(expT); expT = null;
   const el = $("expState"); if (!el) return; const st = expState(D);
   el.className = "hint exps " + st; el.textContent = EXP_TXT[st] ? "· " + EXP_TXT[st] : "";
-  el.title = st === "ok" ? `올리기(7단계)에 쓰는 그림: ${D.exp.file}` : st === "empty" ? "" : "올리기(7단계)·유튜브 바로 올리기는 '이미지로 저장'한 그림을 써요 (디자인 '저장됨'과 따로예요)";
+  // 좁은 창에서는 글자가 말줄임으로 잘리므로(D-497) 마우스를 올리면 상태 글 전체도 보임
+  el.title = st === "ok" ? `${EXP_TXT.ok} · 올리기(7단계)에 쓰는 그림: ${D.exp.file}`
+    : st === "big" ? `${D.exp.file} 은 PNG 라 2MB 가 넘어 7단계 썸네일 확인에 걸려요. JPG 로 다시 '이미지로 저장'하면 돼요`
+    : st === "empty" ? "" : `${EXP_TXT[st]} · ${EXP_TIP}`;
 }
 let expT = null;
 function expSoon() { if (!expT) expT = setTimeout(renderExp, 300); }  // 끌기·속성 바꾸기마다 지문을 다시 세지 않게
@@ -2605,10 +2611,11 @@ function expSoon() { if (!expT) expT = setTimeout(renderExp, 300); }  // 끌기�
 /* ---------- 내보내기 ---------- */
 const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
 // o.fmt: "jpg" 면 고른 형식과 상관없이 JPG(유튜브용) · o.quiet: 완성본 폴더를 열지 않음 (나가기·AI 추천 '이걸로 저장') → 저장했으면 true
+// o.d: 그릴 디자인 (없으면 지금 연 디자인 · 나갈 때 연 디자인이 아닌 고친 디자인도 저장 · D-494)
 async function exportImg(o = {}) {
   if (!D) return false; if (editing) endEdit();
   if (gone) { markGone(); return false; }  // 옛 이름으로 열린 창: 완성본 폴더에 옛 이름 그림을 만들지 않음 (서버도 404 gone)
-  const d = D;  // 기다리는 사이 다른 디자인을 열어도 그린 디자인에 기억
+  const d = o.d || D;  // 기다리는 사이 다른 디자인을 열어도 그린 디자인에 기억
   const pend = d.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
   if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return false;
@@ -2623,7 +2630,8 @@ async function exportImg(o = {}) {
   const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: SAVE_LABEL || `${d.name}${d.doc.h > d.doc.w ? "_쇼츠" : ""}` });
   if (j.gone) { markGone(j.error); return false; }
   if (!j.ok) { toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return false; }
-  d.exp = { sig, file: j.file, at: Date.now() }; OUTS.add(j.file);  // 디자인 파일에 기억 (다음에 열어도 '저장됨' · 고치면 '다시 안 만듦')
+  d.exp = { sig, file: j.file, at: Date.now() }; OUTS.add(j.file);
+  if (fmt === "png" && data.length * 0.75 > PNG_LIMIT) d.exp.big = true;  // 2MB 넘는 PNG 를 그대로 둠 → 7단계 확인에 걸리므로 '저장됨'(초록)이 아님 (D-495)  // 디자인 파일에 기억 (다음에 열어도 '저장됨' · 고치면 '다시 안 만듦')
   if (d === D) scheduleSave(true); else saveNow(); renderExp();
   if (o.quiet) toast(`유튜브용 그림으로 저장했어요 · ${j.file} · 올리기(7단계)에 이 그림을 써요`);
   else { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
@@ -2758,13 +2766,28 @@ $("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패�
   location.href = "/";
 };
 // 이 창에서 고친 디자인의 유튜브용 그림이 아직 없거나 고친 뒤면 물어봄 (D-491 · '저장됨'만 보고 나가면 올리기에 썸네일이 없거나 고치기 전 그림)
+// 지금 연 디자인만이 아니라 이 창에서 고친 디자인 모두 (D-494 · 고친 디자인 2 를 두고 디자인 1 을 연 채 나가도) · 2MB 넘는 PNG 도 (D-495)
 // → 나가도 되면 true ([저장하고 나가기]는 JPG 로 저장한 뒤 · [그냥 나가기]) · [계속 고치기]·저장 실패면 false
+const LEAVE_ST = ["none", "stale", "big"];
+function leavePending() {  // 물어볼 디자인 (연 디자인을 맨 뒤에 → 여럿을 저장하면 7단계 키트(가장 최근 그림)가 화면에 보이는 디자인을 씀)
+  const list = DOCS.designs.filter(d => TOUCHED.has(d) && LEAVE_ST.includes(expState(d)));
+  return list.filter(d => d !== D).concat(list.filter(d => d === D));
+}
+function leaveText(list) {
+  if (list.length > 1) return `이 창에서 고친 디자인 ${list.length}개(${list.map(d => `'${d.name}'`).join(", ")})의 유튜브용 그림(JPG)이 아직 없거나, 만든 뒤에 고쳤거나, 2MB 가 넘어요. 올리기(7단계)는 유튜브용 그림만 써요.`;
+  const d = list[0], st = expState(d), who = d === D ? "" : `'${d.name}' — `;
+  return who + (st === "stale"
+    ? `유튜브용 그림(${d.exp.file})을 만든 뒤에 디자인을 고쳤어요. 이대로 나가면 올리기(7단계)에는 고치기 전 그림이 쓰여요.`
+    : st === "big" ? `유튜브용 그림(${d.exp.file})이 PNG 라 2MB 가 넘어서 올리기(7단계) 썸네일 확인에 걸려요.`
+    : d === D ? "디자인은 저장됐지만(저장됨), 올리기(7단계)와 유튜브 바로 올리기에 쓰는 유튜브용 그림(JPG)은 아직 만들지 않았어요."
+    : "이 창에서 고쳤는데, 올리기(7단계)와 유튜브 바로 올리기에 쓰는 유튜브용 그림(JPG)은 아직 만들지 않았어요.");
+}
 function leaveAsk() {
-  const st = expState(D);
-  if (!D || gone || !TOUCHED.has(D) || (st !== "none" && st !== "stale")) return Promise.resolve(true);
-  $("leaveMsg").textContent = st === "stale"
-    ? `유튜브용 그림(${D.exp.file})을 만든 뒤에 디자인을 고쳤어요. 이대로 나가면 올리기(7단계)에는 고치기 전 그림이 쓰여요.`
-    : "디자인은 저장됐지만(저장됨), 올리기(7단계)와 유튜브 바로 올리기에 쓰는 유튜브용 그림(JPG)은 아직 만들지 않았어요.";
+  const list = D && !gone ? leavePending() : [];
+  if (!list.length) return Promise.resolve(true);
+  $("leaveMsg").textContent = leaveText(list);
+  $("leaveHint").textContent = list.length === 1 && list[0] === D ? "[저장하고 나가기]를 누르면 지금 디자인을 JPG(유튜브용)로 저장하고 나가요."
+    : `[저장하고 나가기]를 누르면 ${list.map(d => `'${d.name}'`).join(", ")}을(를) JPG(유튜브용)로 저장하고 나가요.`;
   $("leaveModal").classList.add("show");
   return new Promise(resolve => {
     const done = v => { $("leaveModal").classList.remove("show"); ["leaveSave", "leaveGo", "leaveStay"].forEach(id => ($(id).onclick = null)); resolve(v); };
@@ -2772,7 +2795,13 @@ function leaveAsk() {
     $("leaveGo").onclick = () => done(true);
     $("leaveSave").onclick = async () => {
       $("leaveSave").disabled = true;
-      try { const r = await exportImg({ fmt: "jpg", quiet: true }); done(r ? (await saveNow()) !== "reload" : false); } finally { $("leaveSave").disabled = false; }
+      try {
+        for (const d of list) if (!(await exportImg({ fmt: "jpg", quiet: true, d }))) return done(false);
+        // 그림은 만들었는데 디자인 저장(exp 기억)이 실패하면 '← 스튜디오'와 같이 물어봄 (D-496 · 예전: 그대로 나가 다음에 또 '아직 없음')
+        const s = await saveNow();
+        if (s === "reload") return done(false);
+        done(s ? true : confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)"));
+      } finally { $("leaveSave").disabled = false; }
     };
   });
 }
