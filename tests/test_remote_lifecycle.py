@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import core  # noqa: E402
 import remote  # noqa: E402
 import tunnel  # noqa: E402
-from remote_fixture import FakeBridge, FakeNtfy, make_home, pair_device  # noqa: E402
+from remote_fixture import FakeBridge, FakeNtfy, make_home, pair_device, close_service  # noqa: E402
 
 FAKE_SRC = Path(__file__).resolve().parent / "fake_cloudflared.py"
 
@@ -68,7 +68,7 @@ class LifecycleBase(unittest.TestCase):
         self.fb = FakeBridge()
         self.svc = remote.Service(home=self.home / ".futsal-studio", ntfy=self.ntfy.url)
         self.svc.init(self.fb.bridge())
-        self.addCleanup(self.svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, self.svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         self.addCleanup(self.kill_all)
 
     def kill_all(self):

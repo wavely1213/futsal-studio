@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import core  # noqa: E402
 import remote  # noqa: E402
 import tunnel  # noqa: E402
-from remote_fixture import FakeBridge, make_home  # noqa: E402
+from remote_fixture import FakeBridge, make_home, close_service  # noqa: E402
 
 FAKE_SRC = Path(__file__).resolve().parent / "fake_cloudflared.py"
 
@@ -205,7 +205,7 @@ class TunnelTests(unittest.TestCase):
         fb = FakeBridge()
         svc = remote.Service(home=self.home, ntfy="http://127.0.0.1:1")
         svc.init(fb.bridge())
-        self.addCleanup(svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         with mock.patch.dict(os.environ, {"FUTSAL_CLOUDFLARED": str(self.exe)}), mock.patch.object(tunnel, "_self_check", lambda url: True), \
                 mock.patch.object(tunnel, "CHECK_BACKOFF", (0.01,)):
             self.assertTrue(svc.turn_on())

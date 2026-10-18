@@ -23,7 +23,7 @@ import core  # noqa: E402
 import remote  # noqa: E402
 import rlogin  # noqa: E402
 import rstudio  # noqa: E402
-from remote_fixture import ORIGIN, Clock, FakeBridge, FakeNtfy, dev_env, http, pair_device, signed, topics_of  # noqa: E402
+from remote_fixture import ORIGIN, Clock, FakeBridge, FakeNtfy, dev_env, http, pair_device, signed, topics_of, close_service  # noqa: E402
 
 PW = "노을축구공바다4827"
 PW_KEYS = rlogin.canon_pw(PW)
@@ -88,7 +88,7 @@ class LoginBase(unittest.TestCase):
         self.svc = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)
         self.svc.init(self.fb.bridge())
         self.svc._ctl_timeout = 3
-        self.addCleanup(self.svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, self.svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         self.lines = self.fb.lines
         if self.http_listener:
             self.assertTrue(self.svc.turn_on())
@@ -179,7 +179,7 @@ class SetupTests(LoginBase):
         svc2 = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)
         fb = FakeBridge()
         svc2.init(fb.bridge())
-        self.addCleanup(svc2.close)
+        self.addCleanup(close_service, svc2)
         self.assertTrue(svc2.store.login_bad)
         self.assertIsNone(svc2.store.login())
         self.assertEqual(len(svc2.store.data["devices"]), 1)
@@ -1028,7 +1028,7 @@ class ReviewFixTests(LoginBase):
             self.assertEqual(recs[-1]["reason"], why)
             svc2 = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)   # 앱을 다시 켬
             svc2.init(FakeBridge().bridge())
-            self.addCleanup(svc2.close)
+            self.addCleanup(close_service, svc2)
             svc2._collision_at = self.clock() + 1e9
             svc2.tick()
             self.assertTrue(self.wait(lambda: len(self.lookup_records()) == n + 1))
@@ -1310,7 +1310,7 @@ class PresetTests(LoginBase):
             fb = FakeBridge()
             svc.init(fb.bridge())
             self.addCleanup(svc.turn_off)
-            self.addCleanup(svc.close)
+            self.addCleanup(close_service, svc)
             if svc._preset_thread:
                 svc._preset_thread.join(15)
         return svc, fb

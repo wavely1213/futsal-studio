@@ -27,19 +27,21 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
-## I-511 | 2026-10-18 | 시험 뒤에 남는 다른 스레드 (getenv 와 무관) · close·remote-awake Windows 미검증
+## I-511 | 2026-10-18 | 시험 뒤에 남는 다른 스레드 (getenv 와 무관) · remote-awake 의 절전 막기 Windows 미검증
 - **상태**: 열림
 - **심각도**: 낮음(개발 환경)
-- **증상/내용**: I-510 을 고친 뒤에도 전체 시험에서 끝까지 남는 데몬 스레드가 있다 — `test_autoupdate` 의 `app-autoupdate`(10⁶초 잠) · `test_idle` 의 `idle-release`(`CHECK_SEC` 마다 확인) · `test_youtube_trouble` 의 로그인 기다림 `threading.Timer`(youtube_api · 끝나면 로컬 서버를 닫음) · 가짜 ntfy 의 흘려 보내기 처리 스레드. 둘 다 C getenv·HTTPS 를 부르지 않아 I-510 의 충돌은 만들지 않는다(남는 스레드 검사: `$SCRATCH/fxa_runs/tools/leakrun.py` · 저장소 밖). `intake` 의 `media-info`·`epfont` 의 '은평 글꼴 찾기'는 시험 안에서 끝났고(남지 않음) ffprobe(자식 프로세스)·글꼴 읽기는 부모에서 getenv 를 부르지 않았다(gdb 확인). `Service.close` 의 remote-awake 끝내기는 Windows 에서만 도는 길이라 미검증.
+- **증상/내용**: I-510 을 고친 뒤에도 전체 시험에서 끝까지 남는 데몬 스레드가 있다 — `test_autoupdate` 의 `app-autoupdate`(10⁶초 잠) · `test_idle` 의 `idle-release`(`CHECK_SEC` 마다 확인) · `test_youtube_trouble` 의 로그인 기다림 `threading.Timer`(youtube_api · 끝나면 로컬 서버를 닫음) · 가짜 ntfy 의 흘려 보내기 처리 스레드. 둘 다 C getenv·HTTPS 를 부르지 않아 I-510 의 충돌은 만들지 않는다(남는 스레드 검사: `$SCRATCH/fxa_runs/tools/leakrun.py` · 저장소 밖). `intake` 의 `media-info`·`epfont` 의 '은평 글꼴 찾기'는 시험 안에서 끝났고(남지 않음) ffprobe(자식 프로세스)·글꼴 읽기는 부모에서 getenv 를 부르지 않았다(gdb 확인). remote-awake 를 `close` 가 끝내고 기다리는 것은 리눅스에서 init 의 플랫폼만 Windows 로 바꿔 시험(`test_close_ends_windows_awake_thread`)했고, 그 스레드 안의 실제 절전 막기(`core.keep_awake`)는 Windows 미검증.
 - **위치**: `tests/test_autoupdate.py` `LoopTests` · `tests/test_idle.py` · `remote.Service.close`
 - **해결 방향**: 그 스레드들도 시험 끝에 멈출 길(멈춤 Event)이 생기면 정리한다.
 
 ## I-510 | 2026-10-18 | 전체 단위 시험이 부하 중 C getenv 에서 Segmentation fault — 원격 시험이 남긴 스레드 × os.environ 바꾸기
-- **상태**: 해결(2026-10-18)
+- **상태**: 해결(2026-10-18 · 다음 전체 회귀 `reg.sh` 몇 번에서 단위 시험 `exit 139` 가 다시 없는지 지켜봄)
 - **심각도**: 중간(개발 환경 · 배포 전 회귀를 막음)
 - **증상/내용**: 전체 회귀(단위 시험을 뒤에서 · 브라우저 e2e 를 앞에서)에서 단위 시험이 `exit 139` 로 두 번 죽음(v2.24.0·v2.25.0 후보 · 따로 돌리면 통과). dmesg: `segfault at 190 … in libc.so.6[48806…]` = `getenv+86`(`cmp (%rbx),%r13b` · environ 칸의 첫 글자 비교) · 주 스레드가 아닌 스택. 마지막 출력은 원격 시험의 남은 publisher 가 쓰는 '휴대폰 알림을 보내지 못했어요'.
 - **원인**: (1) 원격 시험이 만든 `remote.Service` 마다 `remote-watch`·`remote-publisher` 가 끝나지 않고 남았다(전체 실행에 수십 개). (2) 남은 publisher 의 `_post` → `updater._ssl_context` → OpenSSL `X509_STORE_set_default_paths` 가 **GIL 을 놓은 채** `getenv("SSL_CERT_FILE"/"SSL_CERT_DIR")`(gdb · `PyGILState_Check()=0`). (3) 같은 때 주 스레드의 시험이 `mock.patch.dict(os.environ)`(나올 때 `clear()`+`update()` = setenv/unsetenv 약 320번) → glibc 가 environ 배열을 realloc·free → getenv 가 풀린 배열을 읽음. 재현: GIL 없는 getenv 스레드(ctypes) + `patch.dict` 되풀이 → 몇 초 안에 같은 명령(`getenv+86`)에서 SIGSEGV(코어 덤프 확인). I-081(2026-10-08 faulthandler: `remote._loop` → `ssl.load_default_certs`)과 같은 원인.
-- **해결**: `remote.Service.close()` + 시험 정리(`remote_fixture.make_home` · `addCleanup(svc.close)`)로 남는 원격 스레드 없음(D-511). 앱도 돌아가는 동안 `os.environ` 을 바꾸지 않음(`core._use_deno` · D-510). 지키는 시험: `test_remote_notify.ThreadTests`(close · 시험 뒤 남는 스레드 없음) · `test_update.DenoTests`(환경 그대로).
+- **해결**: `remote.Service.close()` + 시험 정리(`remote_fixture.make_home` · `addCleanup(close_service, svc)` · 남은 스레드가 있으면 그 시험이 떨어짐)로 남는 원격 스레드 없음(D-511). 앱도 돌아가는 동안 `os.environ` 을 바꾸지 않음(`core._use_deno` · D-510). 지키는 시험: `test_remote_notify.ThreadTests`(close · 답 없는 ntfy 는 이름을 돌려줌 · remote-awake · 시험 뒤 남는 스레드 없음) · `test_update.DenoTests`(환경 그대로).
+- **근거의 한계**: 고쳤다는 근거는 (1) 위 재현(GIL 없는 getenv × `patch.dict` → `getenv+86` SIGSEGV · 그 코어 덤프와 회귀 dmesg 의 위치가 같음)과 gdb 의 publisher 스레드 `PyGILState_Check()=0`, (2) 전체 시험이 끝날 때 남은 원격 스레드 수(고치기 전 246·492·738 → 0)다. **전체 시험 전/후의 죽은 횟수로 보인 것은 아니다** — 같은 날 고치기 전 main(733622c)으로 돌린 전체 시험 둘도 죽지 않고 80분 제한(`exit 124`)에 걸렸다(`$SCRATCH/fxa_runs/base_u1.log`). 그래서 같은 시험 안에서 그 시험이 띄운 publisher 가 그 시험의 `patch.dict` 와 겹치는 드문 경우(남는 스레드 수에는 안 보임)가 남아 있어도 이 근거로는 구별되지 않는다.
+- **왜 v2.24.0·v2.25.0 후보 회귀에서야 보였나**: 새로 생긴 원인은 없다 — a65a505(v2.23.0)·604a217·733622c 모두 시험 안 `patch.dict(os.environ)` 52곳 · 원격 서비스를 만드는 곳 21곳으로 같고, 시험 수만 2,924 → 3,089 개(+6%)로 늘었다. 같은 경합은 I-081(2026-10-08)로 이미 보였으므로, 두 번 연달아 죽은 것은 운과 길어진 실행(남는 스레드가 더 오래 · 더 많이 겹침)으로 본다.
 - **위치**: `remote.py` `Service.close`·`_watch`·`Publisher.stop`·`_post` · `core._use_deno` · `tests/remote_fixture.py` · `tests/test_remote_*.py`
 
 ## I-482 | 2026-10-18 | 확대 컷 기준점 — 얼굴 모델이 있어야 함 · 가편집이 조금 더 걸림 · Windows 미검증
@@ -1327,7 +1329,7 @@
 - **해결 방향**: 백로그 '올린 영상 기록'(손으로 올림 표시 · RSS 제목과 비슷한 제목 맞추기)이 들어오면 `stock` 이 그 표시를 읽게.
 
 ## I-081 | 2026-10-08 | 개발 PC: 단위 테스트를 한 번에(discover) 돌리면 remote 시험 뒤 스레드의 인증서 읽기에서 Segmentation fault
-- **상태**: 해결(2026-10-18 · 원인과 고침은 I-510 · D-511)
+- **상태**: 해결(2026-10-18 · 원인과 고침은 I-510 · D-511 · 다음 전체 회귀 몇 번에서 `exit 139` 가 없는지 지켜본 뒤 아주 닫음)
 - **심각도**: 낮음(개발 환경)
 - **증상/내용**: `python3 -m unittest discover -s tests` 가 `test_remote_api` 정리(rmtree) 중 남아 있던 `remote._loop` 스레드의 `updater._ssl_context` → `ssl.load_default_certs` 에서 죽는다(139 · faulthandler 기록). 파일마다 따로 돌리면 모두 통과한다.
 - **위치**: `tests/test_remote_*.py`(뒤에 남는 알림 스레드), `remote.py` `_post`·`_send_beacon`, `updater._ssl_context`

@@ -192,7 +192,7 @@ UI 스냅샷·사소한 getter 테스트처럼 유지비용 대비 가치가 낮
 - 테스트 이름은 "조건 + 기대 결과"가 드러나게. 기존 관례는 영어 snake_case + 한국어 docstring: `test_hash_mismatch_leaves_app_unchanged`, `test_unchanged_requirements_zero_pip_calls`.
 - 파일 맨 위 docstring 에 무엇을 테스트하는지와 실행 명령을 적는다.
 - 테스트 간 독립성 유지 — 실행 순서·공유 상태에 의존하지 않는다. 시험 영상처럼 만들기 비싼 것만 `setUpClass` 로 공유한다.
-- **뒤 스레드를 다음 시험으로 남기지 않는다.** `remote.Service` 를 init 하면 `remote_fixture.make_home`+`service()` 를 쓰거나 `self.addCleanup(svc.close)` 를 단다(D-511). 남은 스레드가 HTTPS·C getenv 를 부르는 동안 다른 시험이 `mock.patch.dict(os.environ)` 를 하면 프로세스가 죽는다(I-510). 프로덕션 코드도 스레드가 도는 동안 `os.environ` 을 바꾸지 않는다(D-510).
+- **뒤 스레드를 다음 시험으로 남기지 않는다.** `remote.Service` 를 init 하면 `remote_fixture.make_home`+`service()` 를 쓰거나 `self.addCleanup(close_service, svc)` 를 단다(D-511 · `close()` 뒤에도 남은 스레드가 있으면 그 시험이 떨어짐 — 가짜 ntfy 는 연결을 거절하거나 바로 답하게). 남은 스레드가 HTTPS·C getenv 를 부르는 동안 다른 시험이 `mock.patch.dict(os.environ)` 를 하면 프로세스가 죽는다(I-510). 프로덕션 코드도 스레드가 도는 동안 `os.environ` 을 바꾸지 않는다(D-510).
 - **진짜 작업 폴더·사용자 폴더를 건드리지 않는다.** 작업 폴더는 테스트마다 임시 폴더(한글·띄어쓰기 포함, 예: `"풋살 작업 폴더"`)를 만들고 `mock.patch.object` 로 `core.WORK`·`VIDEOS`·`ANALYSIS`·`OUT`(+ 필요하면 `editor.PROJECTS`, `thumb.MODELS`, `core.ENGINE_HOME`)을 바꾼다. 업데이트 테스트는 `core.py` 를 임시 폴더에 복사해 따로 불러온다(`load_core`).
 - 외부 서비스는 모킹한다: 인터넷은 쓰지 않는다 (`urllib.request.urlopen` 을 막거나, 테스트 안의 `http.server`(8851~8855)로 manifest·zip 을 내려 줌), pip 는 `core.run` 을 가짜로. DB 는 없다 — 저장소는 위의 임시 작업 폴더다.
 - 시험 영상은 ffmpeg lavfi(`testsrc`·`sine`·`aevalsrc`)로 짧고 작게 만든다 (몇 초, 320×240 수준).

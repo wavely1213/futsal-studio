@@ -495,9 +495,56 @@ class ThreadTests(unittest.TestCase):
         ths = [svc.pub.thread, svc._watch_th]
         self.assertTrue(all(t.is_alive() for t in ths))
         t0 = time.monotonic()
-        svc.close()
+        left = svc.close()
         self.assertLess(time.monotonic() - t0, 4.0, "다시 해 보기(2초+5초)를 끝까지 기다리지 않음")
+        self.assertEqual(left, [])
         self.assertEqual([t.name for t in ths if t.is_alive()], [])
+
+    def test_close_reports_thread_still_sending_to_silent_ntfy(self):
+        """close: 연결은 받고 답하지 않는 ntfy 로 보내는 중이면(updater.urlopen 10초) 기다림 안에 못 끝냄 — 조용히 넘기지 않고
+        그 스레드 이름을 돌려줌(시험의 close_service 가 떨어뜨림) · 연결이 끊기면 다시 해 보지 않고 곧 끝남 (I-510 검토)."""
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(8)
+        self.addCleanup(srv.close)
+        conns, got = [], threading.Event()
+
+        def accept():  # 받기만 하고 읽지도 답하지도 않음
+            while True:
+                try:
+                    c, _ = srv.accept()
+                except OSError:
+                    return
+                conns.append(c)
+                got.set()
+        threading.Thread(target=accept, daemon=True).start()
+        svc, _ = service(home, ntfy=f"http://127.0.0.1:{srv.getsockname()[1]}")
+        pair_device(svc, "폰 A")   # 짝짓기 알림 → 답 없는 ntfy 로 보내는 중
+        self.assertTrue(got.wait(5))
+        t0 = time.monotonic()
+        left = svc.close(timeout=0.5)
+        self.assertLess(time.monotonic() - t0, 2.0)
+        self.assertIn("remote-publisher", left)
+        for c in conns:
+            c.close()   # ntfy 가 끊음 → 보내기 실패 → 멈춘 뒤라 다시 해 보지 않음
+        svc.pub.thread.join(5)
+        self.assertFalse(svc.pub.thread.is_alive())
+        self.assertEqual(svc.close(timeout=1), [])   # 이제 다 끝남 (make_home 정리도 통과)
+
+    def test_close_ends_windows_awake_thread(self):
+        """Windows 절전 막기 스레드(remote-awake)도 close 가 끝내고 기다림 — 예전에는 스레드를 갖고 있지 않아 알리기만 했음."""
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        with mock.patch.object(remote.sys, "platform", "win32"):   # init 의 'Windows 면 remote-awake 띄우기'만 (절전 막기는 원격이 꺼져 있어 안 함)
+            svc, _ = service(home)
+        th = svc._awake_th
+        self.assertIsNotNone(th)
+        self.assertTrue(th.is_alive())
+        self.assertEqual(th.name, "remote-awake")
+        self.assertEqual(svc.close(), [])
+        self.assertFalse(th.is_alive())
 
     def test_fixture_services_leave_no_threads_for_next_tests(self):
         """시험이 끝나면(make_home 정리) 그 시험이 만든 서비스의 뒤 스레드가 남지 않음 — 예전에는 서비스마다 remote-watch·

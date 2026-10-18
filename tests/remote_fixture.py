@@ -245,16 +245,26 @@ class FakeBridge:
 _LIVE = {}  # 시험 폴더 → 그 폴더로 만든 서비스들 (make_home 의 정리가 뒤 스레드를 끝냄)
 
 
+def close_service(svc, timeout=5.0):
+    """svc.close() — 기다린 뒤에도 남은 뒤 스레드가 있으면 그 시험을 떨어뜨림 (조용히 다음 시험으로 넘기지 않음 · I-510).
+    시험의 가짜 ntfy 는 연결을 거절하거나(http://127.0.0.1:1) 바로 답하므로 보통 곧 끝남 — 남았다면 답하지 않는 주소를 쓴 것."""
+    left = svc.close(timeout)
+    if left:
+        raise AssertionError(f"Service.close() 뒤에도 원격 스레드가 남음: {left}")
+
+
 def make_home():
-    """시험용 집 폴더와 정리 함수 — 정리는 이 폴더로 service() 가 만든 서비스의 뒤 스레드(remote-watch·remote-publisher)를
-    먼저 끝내고(Service.close) 폴더를 지움. 남은 스레드가 다음 시험까지 HTTPS 를 보내면 그 시험의 os.environ 바꾸기와 겹쳐
+    """시험용 집 폴더와 정리 함수 — 정리는 이 폴더로 service() 가 만든 서비스의 뒤 스레드(remote-watch·remote-publisher 등)를
+    먼저 끝내고(close_service) 폴더를 지움. 남은 스레드가 다음 시험까지 HTTPS 를 보내면 그 시험의 os.environ 바꾸기와 겹쳐
     C getenv 에서 죽을 수 있음 (I-510)."""
     d = Path(tempfile.mkdtemp(prefix="원격 시험 "))
 
     def cleanup():
-        for svc in _LIVE.pop(d, []):
-            svc.close()
-        shutil.rmtree(d, ignore_errors=True)
+        try:
+            for svc in _LIVE.pop(d, []):
+                close_service(svc)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
     return d, cleanup
 
 

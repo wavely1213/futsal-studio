@@ -25,7 +25,7 @@ import editor  # noqa: E402
 import refs  # noqa: E402
 import remote  # noqa: E402
 import style  # noqa: E402
-from remote_fixture import ORIGIN, Clock, FakeBridge, dev_env, http, open_pair, pair_body, pair_device, signed, topics_of  # noqa: E402
+from remote_fixture import ORIGIN, Clock, FakeBridge, dev_env, http, open_pair, pair_body, pair_device, signed, topics_of, close_service  # noqa: E402
 
 FF = core.ffmpeg()
 NAME = "20260101_AbCdEfGhIjK_시험 영상 [꿀팁].mp4"
@@ -69,7 +69,7 @@ class Base(unittest.TestCase):
         self.fb = FakeBridge()
         self.svc = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy="http://127.0.0.1:1")
         self.svc.init(self.fb.bridge())
-        self.addCleanup(self.svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, self.svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         self.fb.hooks.append(self.svc.job_hook)
         self.assertTrue(self.svc.turn_on())
         end = time.time() + 10

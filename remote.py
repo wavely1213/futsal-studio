@@ -1192,6 +1192,7 @@ class Service:
         self._ctl_stop = threading.Event()   # 앱을 끌 때 (데몬 스레드라 남아도 앱 끄기를 막지 않음)
         self._closed = threading.Event()     # close(): 뒤 스레드(remote-watch 등)를 끝냄
         self._watch_th = None
+        self._awake_th = None                # Windows 절전 막기 (remote-awake · close 가 기다림)
         self._preset_thread = None           # 미리 정한 로그인 넣기 (D-258 · 같은 아이디를 쓰는 PC 살피기)
 
     # ----- 준비 -----
@@ -1217,7 +1218,8 @@ class Service:
             self._watch_th = threading.Thread(target=self._watch, daemon=True, name="remote-watch")
             self._watch_th.start()
             if sys.platform == "win32":
-                threading.Thread(target=self._keep_awake, daemon=True, name="remote-awake").start()
+                self._awake_th = threading.Thread(target=self._keep_awake, daemon=True, name="remote-awake")
+                self._awake_th.start()
         return self
 
     def log(self, msg):
@@ -1641,20 +1643,24 @@ class Service:
             _trace()
 
     def close(self, timeout=5.0):
-        """init 이 띄운 뒤 스레드(remote-watch·remote-publisher·remote-login-control·미리 정한 로그인)를 끝내고 기다림.
-        앱은 서비스 하나(SVC)를 프로세스가 끝날 때까지 쓰므로 부르지 않음 — 서비스를 여럿 만드는 시험이 스레드를 다음 시험으로
-        남기지 않게 (남은 스레드의 HTTPS 보내기가 다른 시험의 os.environ 바꾸기와 겹치면 C getenv 에서 죽음 · I-510).
-        터널·리스너는 끄지 않음 (turn_off·shutdown 이 함)."""
+        """init 이 띄운 뒤 스레드(remote-watch·remote-awake·remote-publisher·remote-login-control·미리 정한 로그인)에 끝내라고
+        알리고 모두 합쳐 timeout 초까지 기다림 → 그때까지 안 끝난 스레드 이름 목록 (보통 []).
+        쉬는 중·줄 기다리는 중이면 바로 끝나지만, 지금 하고 있는 HTTPS 하나(알림 보내기 updater.urlopen 10초 · [끊기] 듣기
+        _ctl_timeout)는 끊지 못해 닿기만 하고 답하지 않는 ntfy 면 그만큼 더 남음 — 시험은 돌려준 목록이 비었는지 봄
+        (remote_fixture.close_service). 앱은 서비스 하나(SVC)를 프로세스가 끝날 때까지 쓰므로 부르지 않음 — 서비스를 여럿 만드는
+        시험이 스레드를 다음 시험으로 남기지 않게 (남은 스레드의 HTTPS 보내기가 다른 시험의 os.environ 바꾸기와 겹치면 C getenv
+        에서 죽음 · I-510). 터널·리스너는 끄지 않음 (turn_off·shutdown 이 함)."""
         self._closed.set()
         self._ctl_stop.set()
-        ths = [self._watch_th, self._ctl, self._preset_thread]
+        ths = [self._watch_th, self._awake_th, self._ctl, self._preset_thread]
         if self.pub:
             self.pub.stop()
             ths.append(self.pub.thread)
+        ths = [t for t in ths if t is not None and t is not threading.current_thread()]
         end = time.monotonic() + timeout
         for t in ths:
-            if t is not None and t is not threading.current_thread():
-                t.join(max(0.0, end - time.monotonic()))
+            t.join(max(0.0, end - time.monotonic()))
+        return [t.name for t in ths if t.is_alive()]
 
     # ----- 비콘 -----
     def beacon_body(self, state=None, reason=None, moved=None):

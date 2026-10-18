@@ -8,7 +8,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import remote  # noqa: E402
-from remote_fixture import Clock, FakeBridge, make_home  # noqa: E402
+from remote_fixture import Clock, FakeBridge, make_home, close_service  # noqa: E402
 
 
 class AlwaysOnTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class AlwaysOnTests(unittest.TestCase):
     def svc(self):
         svc = remote.Service(home=self.home, clock=Clock(), ntfy="http://127.0.0.1:1")
         svc.init(FakeBridge().bridge())
-        self.addCleanup(svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         return svc
 
     def test_settings_validate_and_turn_on_now(self):
@@ -65,7 +65,7 @@ class AlwaysOnTests(unittest.TestCase):
             st.save()
             with mock.patch.object(remote, "SVC", svc), mock.patch.object(svc, "turn_on") as on:
                 remote.init(FakeBridge().bridge())
-            svc.close()
+            close_service(svc)
             self.assertEqual(on.called, want, (always, enabled))
 
 
@@ -79,7 +79,7 @@ class SwitchTests(unittest.TestCase):
     def svc(self):
         svc = remote.Service(home=self.home, clock=Clock(), ntfy="http://127.0.0.1:1")
         svc.init(FakeBridge().bridge())
-        self.addCleanup(svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
+        self.addCleanup(close_service, svc)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         return svc
 
     def test_on_saves_always_on_and_turns_on(self):
@@ -105,11 +105,11 @@ class SwitchTests(unittest.TestCase):
             svc = self.svc()
             with mock.patch.object(svc, "turn_on", return_value=True), mock.patch.object(svc, "turn_off"):
                 svc.switch(on_)
-            svc.close()
+            close_service(svc)
             svc2 = remote.Service(home=self.home, clock=Clock(), ntfy="http://127.0.0.1:1")
             with mock.patch.object(remote, "SVC", svc2), mock.patch.object(svc2, "turn_on") as start:
                 remote.init(FakeBridge().bridge())
-            svc2.close()
+            close_service(svc2)
             self.assertEqual(start.called, want, on_)
 
     def test_other_settings_survive_switch(self):
