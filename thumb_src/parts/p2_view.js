@@ -38,7 +38,8 @@ const cleanDocs = () => JSON.parse(JSON.stringify(DOCS, dropPriv));
 const TCID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const saveBody = (force) => JSON.stringify({ name: NAME, docs: DOCS, client: TCID, ...(force ? { force: true } : {}) }, dropPriv);  // 저장할 글 한 번에 (글→객체→글 두 번 돌리지 않게)
 const postRaw = async (url, body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
-function scheduleSave() { if (!D) return; saveGen++; $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); }
+// quiet: 사람이 고친 것이 아님(열 때 깐 배경 · 내보낸 그림 기억) → '유튜브용 그림' 나가기 물음의 '이 창에서 고친 디자인'에 넣지 않음 (D-491)
+function scheduleSave(quiet) { if (!D) return; saveGen++; if (!quiet) TOUCHED.add(D); $("saved").textContent = "저장 중…"; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800); expSoon(); }
 let gone = "";  // 이 영상의 이름이 바뀌었거나 보관함에서 빠짐 (서버 404 gone · D-073) → 더 저장하지 않고 알림 · 나가기는 막지 않음
 function markGone(msg) { gone = msg || gone || "이 영상의 이름이 바뀌었어요"; $("saved").textContent = "저장 안 함 · " + gone; toast(gone); }  // 저장·그림 내보내기·A/B 가 같은 알림 (D-078)
 // 다른 곳(뒤로 가기로 다시 나온 예전 화면 · 다른 창)이 더 최근에 저장함 (서버 409 conflict · D-411) → 덮어쓰지 않고 한 번 물어봄

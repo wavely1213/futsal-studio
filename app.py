@@ -827,7 +827,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/thumb/open":
             n = q["name"][0]
             rec = editor.recommend(n)
-            return self._send(200, {"docs": thumb.load_docs(n), "hooks": [editor._hook(r) for r in rec["shorts"]],
+            docs = thumb.load_docs(n)
+            return self._send(200, {"docs": docs, "outs": thumb.exported_files(n, docs), "hooks": [editor._hook(r) for r in rec["shorts"]],
                                     "keywords": sorted({k for r in rec["shorts"] for k in r["keywords"]}),
                                     "title": n, "info": editor.media_info(n),
                                     "cached": thumb.cached_candidates(n) is not None})

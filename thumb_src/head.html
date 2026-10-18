@@ -117,6 +117,7 @@
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 15; }
   .modal.show { display: grid; }
   .modal .box { background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 18px; width: 560px; max-height: 80vh; overflow: auto; }
+  .exps.none, .exps.stale { color: #f5a524; } .exps.ok { color: #2fbf6b; }  /* 유튜브용 그림 상태 (D-491) */
   .keys { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 5px 12px; font-size: 12px; color: var(--ink-2); }
   .keys kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 5px; color: var(--ink); font: 11px ui-monospace, monospace; white-space: nowrap; }
   .readout { position: absolute; pointer-events: none; background: rgba(18,18,18,.94); color: #fff; border: 1px solid #4a4a4a; border-radius: 4px; padding: 3px 8px; font: 11.5px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre; z-index: 6; display: none; }
@@ -199,7 +200,7 @@
   .aicard canvas { display: block; width: 100%; }
   .aicard .meta { font-size: 11px; padding: 4px 6px 2px; line-height: 1.35; }
   .aicard .meta b { color: #ffd24d; }
-  .aicard .row { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 6px 6px; }
+  .aicard .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 6px 6px; }
   .copychips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
   .cchip { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 3px 9px; cursor: pointer; font-size: 11.5px; }
   .cchip:hover, .cchip.on { border-color: var(--accent); }
@@ -258,7 +259,8 @@
     <button class="btn" id="back">← 스튜디오</button>
     <div class="logo">FS</div>
     <div class="name" id="pname">썸네일</div>
-    <span class="hint" id="saved"></span>
+    <span class="hint" id="saved" title="디자인(고칠 수 있는 원본) 자동 저장 상태"></span>
+    <span class="hint exps" id="expState"></span>
     <span class="stpill" id="studioPill" hidden></span>
     <div class="sp"></div>
     <button class="ic" id="undo" title="되돌리기 (Ctrl+Z)">↶</button>
@@ -330,6 +332,12 @@
   <div id="mobPrev" class="mobprev"></div>
   <div id="judgeRes" class="hint" style="margin-top:8px"></div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="judgeBtn" title="내 클로드 계정으로 썸네일 평가 (선택)">🤖 클로드에게 평가받기</button><button class="btn" id="qaClose">닫기</button></div>
+</div></div>
+<div class="modal" id="leaveModal"><div class="box" style="width:480px">
+  <h3 style="margin:0 0 8px">유튜브용 그림으로 저장할까요?</h3>
+  <div id="leaveMsg" style="line-height:1.55"></div>
+  <div class="hint" style="margin-top:6px">[저장하고 나가기]를 누르면 지금 디자인을 JPG(유튜브용)로 저장하고 나가요.</div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="leaveStay">계속 고치기</button><button class="btn" id="leaveGo">그냥 나가기</button><button class="btn pri" id="leaveSave">저장하고 나가기</button></div>
 </div></div>
 <div class="modal" id="brandModal"><div class="box" style="width:640px">
   <h3 style="margin:0 0 4px">🎨 브랜드 키트 <span class="hint">AI 추천 썸네일에 쓰는 채널 로고·색·글꼴</span></h3>

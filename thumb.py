@@ -996,21 +996,73 @@ def _bg_mask(img, kind):
     return mask.filter(ImageFilter.GaussianBlur(0.6))
 
 
+DECON_SOLID = 0.98            # 색 정화: 알파가 이 이상이면 안쪽(불투명) 색 — 바꾸지 않고 가장자리 색을 가져올 곳
+DECON_WINS = (3, 7, 15, 31, 63)  # 가장자리마다 가까운 창부터 (한 변 화소 수) — 창 안에 안쪽 화소가 있으면 그 평균 색 · 63 보다 멀면 그대로
+
+
+def _integral(x, R):
+    """정수 배열(2차원 또는 [H, W, C])의 적분 영상 — 둘레를 R(+1) 만큼 0 으로 채움 · 창 합은 _win_at (int64 — float32 누적 합은 큰 누끼에서 색이 어긋남)."""
+    import numpy as np
+    return np.pad(x, [(R + 1, R), (R + 1, R)] + [(0, 0)] * (x.ndim - 2)).cumsum(0, dtype=np.int64).cumsum(1)
+
+
+def _win_at(c, R, ys, xs, k):
+    """적분 영상 c(_integral 의 R)에서 (ys, xs) 화소마다 가운데 k×k 창 합 (창 크기와 상관없이 네 번 읽기)."""
+    r = k // 2
+    a0, a1, b0, b1 = ys + R - r, ys + R + 1 + r, xs + R - r, xs + R + 1 + r
+    return c[a1, b1] - c[a0, b1] - c[a1, b0] + c[a0, b0]
+
+
+def decontaminate(img, mask):
+    """누끼 가장자리 색 정화 (포토샵 '색상 정화' · D-490): 누끼 모델은 원본 RGB 에 알파만 붙여서, 반투명 가장자리(0 < 알파 < DECON_SOLID)에
+    뒤 배경(잔디 초록)이 섞인 색이 그대로 남아 흰 외곽선·어두운 배경 위에서 손·다리·신발 둘레가 연두로 보였음 →
+    가장자리 화소의 RGB 를 가장 가까운 안쪽(불투명) 화소들의 평균 색으로 바꿈 (가까운 창부터 DECON_WINS).
+    초록을 빼는 것(despill)이 아니라 안쪽 색을 넓히는 것이라 초록 조끼·유니폼은 초록 그대로.
+    알파 0 인 곳·불투명한 곳·안쪽 화소에서 먼 가장자리는 그대로 · 알파는 건드리지 않음.
+    img: PIL RGB · mask: 같은 크기 L (0~255) → 새 RGB 이미지 (바꿀 것이 없으면 img 그대로)."""
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(mask, np.float32) / 255
+    edge, solid = (a > 0) & (a < DECON_SOLID), a >= DECON_SOLID
+    if not edge.any() or not solid.any():
+        return img
+    H, W = a.shape
+    ys, xs = np.nonzero(edge)
+    m = DECON_WINS[-1] // 2 + 1  # 가장자리 둘레만 계산 (넓은 장면의 작은 선수 누끼도 빠르게)
+    y0, y1, x0, x1 = max(0, int(ys.min()) - m), min(H, int(ys.max()) + m + 1), max(0, int(xs.min()) - m), min(W, int(xs.max()) + m + 1)
+    rgb = np.array(img.convert("RGB"), np.uint8)
+    s = solid[y0:y1, x0:x1].astype(np.int32)
+    R = DECON_WINS[-1] // 2
+    cs, cc = _integral(s, R), _integral(rgb[y0:y1, x0:x1].astype(np.int32) * s[..., None], R)  # 안쪽 화소 수 · 안쪽 색 합
+    ty, tx = ys - y0, xs - x0
+    for k in DECON_WINS:
+        n = _win_at(cs, R, ty, tx, k)
+        hit = n > 0  # 창 안에 안쪽 화소가 하나라도
+        if hit.any():
+            col = _win_at(cc, R, ty[hit], tx[hit], k) / n[hit][:, None]
+            rgb[ty[hit] + y0, tx[hit] + x0] = np.clip(np.rint(col), 0, 255).astype(np.uint8)
+            ty, tx = ty[~hit], tx[~hit]
+        if not len(ty):
+            break
+    return Image.fromarray(rgb, "RGB")
+
+
 def remove_bg(src_path, kind="hq"):
     """배경을 지운 PNG 경로 반환 (원본과 같은 크기 — 브러시로 복원할 때 위치가 맞도록).
     누끼 모델(고품질 최대 6.5GB)을 불러오므로 앱 프로세스에서는 부르지 않음 — /api/thumb/cut 은 cutout_worker.remove_bg(따로 프로세스)가 이걸 부름."""
     from PIL import Image, ImageOps
     core.set_progress(label="누끼 따는 중", pct=None, detail="인물·사물만 남기는 중 (20~40초)")
     img = ImageOps.exif_transpose(Image.open(src_path)).convert("RGB")  # 휴대폰 사진 회전 정보 반영 (브라우저와 같은 방향)
-    out = img.convert("RGBA")
-    out.putalpha(_bg_mask(img, kind))
+    mask = _bg_mask(img, kind)
+    out = decontaminate(img, mask).convert("RGBA")  # 가장자리 잔디 초록을 안쪽 색으로 (D-490)
+    out.putalpha(mask)
     dst = ASSETS / f"cut_{int(time.time() * 1000)}.png"
     out.save(dst)
     return dst
 
 
 CUT_MARGIN = 1.6   # 자동 누끼: 주인공 상자를 이만큼 넓혀 잘라서 모델에 넣음 (넓은 장면의 작은 선수도 또렷하게)
-CUT_VER = 3        # 자동 누끼 판 (마스크 다듬기·품질 검사가 바뀌면 올림 → 다시 땀)
+CUT_VER = 4        # 자동 누끼 판 (마스크 다듬기·품질 검사·색이 바뀌면 올림 → 다시 땀 · 4: 가장자리 색 정화 D-490)
 CUT_LO, CUT_HI = 0.2, 0.8   # 다듬기: 알파 0.2 아래는 버리고 0.8 위는 꽉 채움 (흐린 잔상·반투명 번짐이 외곽선·광선을 끌고 다니지 않게)
 # 누끼 품질 합격선 (판정: 작은·흐린 선수 누끼가 얼굴이 하얗게 번지고 외곽선이 벽으로 샘)
 CUT_Q = {"leak": 0.12, "fill": 0.22, "comp": 0.8, "face": 0.8, "soft": 0.35}
@@ -1146,7 +1198,7 @@ def cut_auto(name, t, box=None, kind="fast", faces=None, tboxes=None):
         full = _bg_mask(img, kind)
     full = clean_mask(full, box, tboxes, [f["box"] for f in faces or []])
     q = cut_quality(full, box, faces)
-    out = img.convert("RGBA")
+    out = decontaminate(img, full).convert("RGBA")  # 가장자리 잔디 초록을 안쪽 색으로 (D-490)
     out.putalpha(full)
     buf = io.BytesIO()
     out.save(buf, "PNG")
@@ -1717,6 +1769,25 @@ def save_docs(name, docs, client=None, force=False):
             pass
         _WRITER[str(p)] = (client, docs["rev"])
     return docs["rev"]
+
+
+def exported_files(name, docs):
+    """디자인이 기억한 '유튜브용 그림'(designs[].exp.file · 썸네일 화면이 '이미지로 저장' 때 적음 · D-491) 중 완성본 폴더에 지금 있고
+    이 영상 이름으로 시작하는 것 → 이름 목록. 지웠거나 이름 바꾸기로 옛 이름이 된 그림(I-070)은 빠져 화면이 '아직 없음'으로 보임
+    (7단계 올리기 키트도 그 그림을 못 찾음 · upload._images_of)."""
+    pre = core.adir(name).name + "_"
+    out = []
+    for d in (docs.get("designs") if isinstance(docs, dict) else None) or []:
+        e = d.get("exp") if isinstance(d, dict) else None
+        f = e.get("file") if isinstance(e, dict) else None
+        if not isinstance(f, str) or f in out or f != Path(f).name or not f.startswith(pre):  # 폴더 밖·다른 영상 이름은 보지 않음
+            continue
+        try:
+            if (core.OUT / f).is_file():
+                out.append(f)
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 def export_image(name, data_url, fmt="jpg", label="썸네일"):

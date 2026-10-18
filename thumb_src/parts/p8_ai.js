@@ -2140,9 +2140,10 @@ function renderAICards() {
   el.className = `aicards ${AUTO_FMT}`;
   el.innerHTML = AI.results.map((x, i) => `<div class="aicard" data-ai="${i}"><canvas width="${cw}" height="${ch}"></canvas>
     <div class="meta"><b>${Math.round(x.score)}점</b> ${esc(x.tpl)}<br><span class="hint">${esc(x.why.join(" · ") || "")}</span></div>
-    <div class="row"><button class="btn sm pri" data-aedit="${i}">편집하기</button><label class="hint"><input type="checkbox" data-ab="${i}" ${AI.ab.has(i) ? "checked" : ""}> A/B에 담기</label></div></div>`).join("");
+    <div class="row"><button class="btn sm pri" data-aedit="${i}">편집하기</button><button class="btn sm" data-asave="${i}" title="이 추천을 디자인으로 불러와 유튜브용 그림(JPG)으로 바로 저장해요 — 올리기(7단계)에 이 그림을 써요">이걸로 저장</button><label class="hint"><input type="checkbox" data-ab="${i}" ${AI.ab.has(i) ? "checked" : ""}> A/B에 담기</label></div></div>`).join("");
   paintThumbs("ai", [...el.querySelectorAll("[data-ai]")].map(c => [c.querySelector("canvas"), AI.results[+c.dataset.ai] && AI.results[+c.dataset.ai].doc]).filter(x => x[0] && x[1]));
   el.querySelectorAll("[data-aedit]").forEach(b => (b.onclick = () => openAI(+b.dataset.aedit)));
+  el.querySelectorAll("[data-asave]").forEach(b => (b.onclick = () => saveAI(+b.dataset.asave)));
   el.querySelectorAll("[data-ab]").forEach(b => (b.onchange = () => { const i = +b.dataset.ab; b.checked ? AI.ab.add(i) : AI.ab.delete(i); const s = $("abSave"); if (s) { s.disabled = !AI.ab.size; s.textContent = `A/B 묶음 저장 (${AI.ab.size})`; } }));
   const re = $("aiRe"); if (re) re.disabled = !AI.results.length;
 }
@@ -2150,6 +2151,11 @@ function openAI(i) {
   const x = AI.results[i]; if (!x) return;
   DOCS.designs.push({ id: nid(), name: `AI ${x.tpl} ${DOCS.designs.length + 1}`, doc: clone(x.doc) });
   openDesign(DOCS.designs.length - 1); scheduleSave(); toast("추천 썸네일을 불러왔어요 · 글자·그래픽 모두 따로 고칠 수 있어요");
+}
+// AI 추천 카드 '이걸로 저장' (D-491): 편집하기와 같이 디자인으로 불러온 뒤 바로 유튜브용 그림(JPG)으로 — 고치지 않고 쓸 때 한 번에
+async function saveAI(i) {
+  if (!AI.results[i]) return;
+  openAI(i); await exportImg({ fmt: "jpg", quiet: true });
 }
 async function copyAi() {
   const j = await post("/api/thumb/copy", { name: NAME, ai: true });

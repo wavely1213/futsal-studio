@@ -259,32 +259,65 @@ function openDesign(i) {
   if (editing) endEdit(); xform = null; liveBefore = null;
   cur = i; D = DOCS.designs[i]; D.doc.w = D.doc.w || 1280; D.doc.h = D.doc.h || 720; D.doc.layers.forEach(normLayer);
   W = D.doc.w; H = D.doc.h; selIds = []; undoStack = []; redoStack = []; histNames = []; textSel = null;
-  fitView(); refreshUI(); renderDesigns();
+  fitView(); refreshUI(); renderDesigns(); renderExp();
 }
 function showTab(t) { document.querySelectorAll(".ph .tab").forEach(x => x.classList.toggle("on", x.dataset.tab === t)); $("tab-auto").style.display = t === "auto" ? "" : "none"; $("tab-props").style.display = t === "props" ? "" : "none"; }
 document.querySelectorAll(".ph .tab").forEach(b => (b.onclick = () => showTab(b.dataset.tab)));
 
+/* ---------- 유튜브용 그림 상태 (D-491) ----------
+   제목 옆 '저장됨'은 디자인(고칠 수 있는 원본) 자동 저장 · 올리기(7단계)·유튜브 바로 올리기는 '이미지로 저장'한 그림(완성본 폴더)만 씀
+   → 디자인마다 마지막으로 내보낸 그림의 지문·파일 이름(designs[].exp)을 기억해 '아직 없음 / 고친 뒤 다시 안 만듦 / 저장됨'을 따로 보이고,
+   이 창에서 고친 디자인이 아직 없음·고친 뒤면 나갈 때 물어봄 */
+let OUTS = new Set();  // 디자인이 기억한 그림 중 완성본 폴더에 지금 있는 것 (열 때 서버가 확인 · 이 창에서 내보내면 더함)
+const TOUCHED = new WeakSet();  // 이 창에서 고친 디자인 (열고 그냥 나가면 묻지 않게)
+function docKey(doc) {  // 그림이 달라지는 내용(안내선 빼고)의 짧은 지문
+  const s = JSON.stringify(Object.assign({}, doc, { guides: undefined }), dropPriv); let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36) + "." + s.length.toString(36);
+}
+function expState(d) {  // → "empty"(보이는 레이어 없음) · "none"(아직 없음·그림이 지워짐) · "stale"(고친 뒤 다시 안 만듦) · "ok"
+  if (!d || !d.doc.layers.some(l => !l.hidden)) return "empty";
+  const e = d.exp; if (!e || !e.file || !OUTS.has(e.file)) return "none";
+  return e.sig === docKey(d.doc) ? "ok" : "stale";
+}
+const EXP_TXT = { none: "유튜브용 그림 아직 없음", stale: "고친 뒤 유튜브용 그림 다시 안 만듦", ok: "유튜브용 그림 저장됨" };
+function renderExp() {
+  clearTimeout(expT); expT = null;
+  const el = $("expState"); if (!el) return; const st = expState(D);
+  el.className = "hint exps " + st; el.textContent = EXP_TXT[st] ? "· " + EXP_TXT[st] : "";
+  el.title = st === "ok" ? `올리기(7단계)에 쓰는 그림: ${D.exp.file}` : st === "empty" ? "" : "올리기(7단계)·유튜브 바로 올리기는 '이미지로 저장'한 그림을 써요 (디자인 '저장됨'과 따로예요)";
+}
+let expT = null;
+function expSoon() { if (!expT) expT = setTimeout(renderExp, 300); }  // 끌기·속성 바꾸기마다 지문을 다시 세지 않게
+
 /* ---------- 내보내기 ---------- */
 const PNG_LIMIT = 2 * 1024 * 1024;  // 썸네일 용량 한도 (바이트) — 7단계 썸네일 확인(upload.THUMB_MAX)·스튜디오 직접 올리기와 같은 값
-async function exportImg() {
-  if (!D) return; if (editing) endEdit();
-  if (gone) return markGone();  // 옛 이름으로 열린 창: 완성본 폴더에 옛 이름 그림을 만들지 않음 (서버도 404 gone)
-  const pend = D.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
+// o.fmt: "jpg" 면 고른 형식과 상관없이 JPG(유튜브용) · o.quiet: 완성본 폴더를 열지 않음 (나가기·AI 추천 '이걸로 저장') → 저장했으면 true
+async function exportImg(o = {}) {
+  if (!D) return false; if (editing) endEdit();
+  if (gone) { markGone(); return false; }  // 옛 이름으로 열린 창: 완성본 폴더에 옛 이름 그림을 만들지 않음 (서버도 404 gone)
+  const d = D;  // 기다리는 사이 다른 디자인을 열어도 그린 디자인에 기억
+  const pend = d.doc.layers.filter(l => l.type === "image" && !l.hidden && !l._edit && l.src);
   const ok = await Promise.all(pend.map(l => imgReady(l.src)));
-  if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return;
-  const c = newCanvas(W, H); renderDoc(c.getContext("2d"), D.doc, 1);
-  let fmt = $("exFmt").value, data;
-  const jpg = () => { let q = 0.93, d; do { d = c.toDataURL("image/jpeg", q); q -= 0.07; } while (d.length * 0.75 > 1.95e6 && q > 0.5); return d; };
+  if (ok.some(x => !x) && !confirm("불러오지 못한 그림이 있어요. 그래도 저장할까요? (회색 상자로 나와요)")) return false;
+  const sig = docKey(d.doc), c = newCanvas(d.doc.w, d.doc.h); renderDoc(c.getContext("2d"), d.doc, 1);
+  let fmt = o.fmt || $("exFmt").value, data;
+  const jpg = () => { let q = 0.93, dd; do { dd = c.toDataURL("image/jpeg", q); q -= 0.07; } while (dd.length * 0.75 > 1.95e6 && q > 0.5); return dd; };
   if (fmt === "png") {
     data = c.toDataURL("image/png");
     // 7단계 썸네일 확인·스튜디오 직접 올리기는 2MB 까지 (판정 A2: 쇼츠 PNG 는 2MB 를 넘는데 알려 주지 않았음 · 바로 올리기는 50MB · I-062)
     if (data.length * 0.75 > PNG_LIMIT && confirm(`PNG 그림이 ${(data.length * 0.75 / 1048576).toFixed(1)}MB 라 7단계 썸네일 확인·유튜브 스튜디오에 직접 올릴 때 한도(2MB)를 넘어요.\nJPG(화질 거의 같음)로 바꿔 저장할까요? [취소]를 누르면 PNG 그대로 저장해요.`)) { fmt = "jpg"; data = jpg(); }
   } else data = jpg();
-  const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: SAVE_LABEL || `${D.name}${H > W ? "_쇼츠" : ""}` });
-  if (j.gone) return markGone(j.error);
-  if (j.ok) { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); } else toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요");
+  const j = await post("/api/thumb/export", { name: NAME, data, fmt, label: SAVE_LABEL || `${d.name}${d.doc.h > d.doc.w ? "_쇼츠" : ""}` });
+  if (j.gone) { markGone(j.error); return false; }
+  if (!j.ok) { toast(j.error || "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return false; }
+  d.exp = { sig, file: j.file, at: Date.now() }; OUTS.add(j.file);  // 디자인 파일에 기억 (다음에 열어도 '저장됨' · 고치면 '다시 안 만듦')
+  if (d === D) scheduleSave(true); else saveNow(); renderExp();
+  if (o.quiet) toast(`유튜브용 그림으로 저장했어요 · ${j.file} · 올리기(7단계)에 이 그림을 써요`);
+  else { toast(data.length * 0.75 > PNG_LIMIT ? `저장했어요 · ${j.file} · 2MB 가 넘어 7단계 썸네일 확인에 걸려요 (JPG 로 저장하면 돼요)` : `저장했어요 · ${j.file}`); post("/api/open", { which: "out" }); }
+  return true;
 }
-$("exportBtn").onclick = exportImg;
+$("exportBtn").onclick = () => exportImg();
 
 /* ---------- 썸네일 검수 ---------- */
 const lum = hex => { const v = [1, 3, 5].map(i => parseInt(toHex(hex).slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
@@ -408,8 +441,29 @@ $("back").onclick = async () => {  // 저장이 끝난 뒤에만 나감 (실패�
   clearTimeout(saveTimer); saveTimer = null;
   const ok = await saveNow();
   if (ok === "reload") return;  // 다른 곳 최근 내용을 다시 불러오는 중 (방금 고른 것과 다른 것을 또 묻지 않음)
-  if (ok || confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) location.href = "/";
+  if (!ok && !confirm("디자인을 저장하지 못했어요. 그래도 나갈까요? (마지막으로 바꾼 내용이 사라질 수 있어요)")) return;
+  if (ok && !(await leaveAsk())) return;
+  location.href = "/";
 };
+// 이 창에서 고친 디자인의 유튜브용 그림이 아직 없거나 고친 뒤면 물어봄 (D-491 · '저장됨'만 보고 나가면 올리기에 썸네일이 없거나 고치기 전 그림)
+// → 나가도 되면 true ([저장하고 나가기]는 JPG 로 저장한 뒤 · [그냥 나가기]) · [계속 고치기]·저장 실패면 false
+function leaveAsk() {
+  const st = expState(D);
+  if (!D || gone || !TOUCHED.has(D) || (st !== "none" && st !== "stale")) return Promise.resolve(true);
+  $("leaveMsg").textContent = st === "stale"
+    ? `유튜브용 그림(${D.exp.file})을 만든 뒤에 디자인을 고쳤어요. 이대로 나가면 올리기(7단계)에는 고치기 전 그림이 쓰여요.`
+    : "디자인은 저장됐지만(저장됨), 올리기(7단계)와 유튜브 바로 올리기에 쓰는 유튜브용 그림(JPG)은 아직 만들지 않았어요.";
+  $("leaveModal").classList.add("show");
+  return new Promise(resolve => {
+    const done = v => { $("leaveModal").classList.remove("show"); ["leaveSave", "leaveGo", "leaveStay"].forEach(id => ($(id).onclick = null)); resolve(v); };
+    $("leaveStay").onclick = () => done(false);
+    $("leaveGo").onclick = () => done(true);
+    $("leaveSave").onclick = async () => {
+      $("leaveSave").disabled = true;
+      try { const r = await exportImg({ fmt: "jpg", quiet: true }); done(r ? (await saveNow()) !== "reload" : false); } finally { $("leaveSave").disabled = false; }
+    };
+  });
+}
 new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); }).observe(stage);
 
 /* ---------- 시작 ---------- */
@@ -433,6 +487,7 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   if (INFO.width && INFO.height && INFO.height > INFO.width) AUTO_FMT = "short";
   const qf = new URLSearchParams(location.search).get("fmt"); if (qf === "short" || qf === "long") AUTO_FMT = qf;  // 결과 카드 [썸네일]: 그 결과물 형식
   if (!DOCS.designs.length) DOCS.designs.push({ id: nid(), name: "디자인 1", doc: { w: 1280, h: 720, bg: "#111111", layers: [] } });
+  OUTS = new Set(j.outs || []);  // 디자인이 기억한 유튜브용 그림 중 완성본 폴더에 있는 것 (D-491)
   openDesign(0); renderAuto(); setTool("move");
   $("saved").textContent = "저장됨";
   for (let tries = 0; tries < 200; tries++) {
@@ -447,8 +502,9 @@ new ResizeObserver(() => { if (!D) return; fitMode ? fitView() : applyView(); })
   Promise.all([loadBrand(), loadThumbStyle()]).then(() => { renderTS(); if (TS.view && TS.view.active && FRAMES.length) makeCands(); }); post("/api/thumb/copy", { name: NAME }).then(c => { if (c.ok && !AI.copy.length) { AI.copy = c.items; AI.topics = c.topics; AI.ai = c.ai; renderAI(); } }).catch(() => {});
   const d0 = DOCS.designs[0];
   if (d0 && !d0.doc.layers.length && FRAMES.length) {
-    if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; refreshUI(); }
-    else { d0.doc.layers.unshift(L("image", { src: frameSrc(FRAMES[0].t), name: "배경", x: 0, y: 0, w: d0.doc.w, h: d0.doc.h, fit: "cover" })); renderDesigns(); scheduleSave(); }
+    // 처음 연 빈 디자인에 깐 배경 장면은 사람이 고친 것이 아님 → 그대로 나가도 '유튜브용 그림' 물음 없음 (D-491)
+    if (cur === 0) { addImage(frameSrc(FRAMES[0].t), true); undoStack = []; redoStack = []; histNames = []; selIds = []; TOUCHED.delete(d0); refreshUI(); }
+    else { d0.doc.layers.unshift(L("image", { src: frameSrc(FRAMES[0].t), name: "배경", x: 0, y: 0, w: d0.doc.w, h: d0.doc.h, fit: "cover" })); renderDesigns(); scheduleSave(true); }
   }
   showTab("auto");
 })();
