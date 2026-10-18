@@ -129,6 +129,10 @@
   .frame { position: relative; background: #000; overflow: hidden; box-shadow: 0 0 0 1px #2a2a2a; isolation: isolate; }
   .lay { position: absolute; inset: 0; display: none; overflow: hidden; }
   .lay .lbg { position: absolute; inset: 0; }
+  .lay .lbp, .lay .lbp i { position: absolute; left: 0; width: 100%; }  /* 은평 스타일 띠 그림·로고 (epPics) */
+  .lay .lbp { inset: 0; height: 100%; }
+  .lay .lbp i { top: 0; background-size: cover; background-position: center; background-repeat: no-repeat; }
+  .lay .lbp img { position: absolute; max-width: none; }
   .lay canvas.lbc { position: absolute; left: -8%; top: -8%; width: 116%; height: 116%; filter: blur(14px) brightness(.85); display: none; }
   .lay .lfg { position: absolute; overflow: hidden; }
   .lay .lfg video, .lay .lfg img { position: absolute; max-width: none; }
@@ -2564,7 +2568,7 @@ function fitRect(it, md) {
       return { bx: 0, by: 0, bw: W, bh: H, mw: sw * s, mh: sh * s, mx: -(scw - W) * rf, my: -(sch - H) / 2 - ct * sh * s, bg: null }; }
     const zw = W * Math.max(1, lay.zoom), s = zw / sw, zh = vh * s, ch = Math.min(zh, H);
     return { bx: 0, by: (H - ch) * lay.vpos, bw: W, bh: ch, mw: zw, mh: sh * s, mx: -(zw - W) * rf, my: -(zh - ch) / 2 - ct * sh * s, bg: lay.mode, bar: lay.bar,
-      win: lay.mode === "box" && !!lay.win };
+      win: lay.mode === "box" && !!lay.win, ...(lay.mode === "box" && (lay.band || lay.logo) ? { band: lay.band, logo: lay.logo } : {}) };
   }
   if (fit === "auto") fit = md.kind === "image" && !md.freeze && sw <= W && sh <= H ? "native" : "contain"; // 정지 화면은 원래 영상처럼
   const s = fit === "native" ? 1 : fit === "cover" ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh), scw = sw * s, sch = sh * s;
@@ -2612,6 +2616,7 @@ function showItem(it, t, z, mod, used) {
   css(e.lay, "transform", mod && mod.tx != null ? `translateX(${mod.tx * 100}%)` : "none");
   css(e.lay, "clipPath", mod && mod.wipe != null ? `inset(0 0 0 ${(1 - mod.wipe) * 100}%)` : mod && mod.wipeA != null ? `inset(0 ${mod.wipeA * 100}% 0 0)` : "none");
   css(e.bgd, "background", f.bg === "box" ? f.bar : f.bg === "blur" ? "#000" : "transparent");
+  epPics(e.bgd, f, k, W, H);
   css(e.bgc, "display", f.bg === "blur" ? "block" : "none");
   const el = e.el, vw = el.videoWidth || el.naturalWidth || 0, vh = el.videoHeight || el.naturalHeight || 0;
   if (f.bg === "blur" && vw && vh && (el.tagName !== "IMG" || e.bgSrc !== el.currentSrc)) { // 사진·정지 화면도 흐린 배경 (사진은 한 번만 그림)
@@ -2626,6 +2631,31 @@ function showItem(it, t, z, mod, used) {
   css(e.fg, "clipPath", f.win ? winClip(f, mo, k, W, H) : "none");
   css(e.fg, "opacity", String(op));
   css(e.el, "filter", colorFilter(it));
+}
+// 은평 스타일 띠 그림·로고 (layout.band·logo · BR-280 · BR-281 · editor.py ep_bg_image 와 같은 셈): 위·아래 띠(영상 창 밖)마다 띠 그림을 꽉 차게
+// (CSS cover = 가운데 기준 자름) · 로고는 아래 띠 가운데 (높이 EP.LOGO.h · 세로 가운데 EP.LOGO.cy · 폭은 그림 비율) — 클립 바탕(lbg) 안이라 영상·글자 아래이고
+// 전환도 내보내기처럼 클립과 함께 · 그림을 못 읽으면 띠 색만 보임 (내보내기도 띠 색)
+const epPicUrl = ref => "/api/style/card_pic?f=" + encodeURIComponent(ref);
+function epPics(bg, f, k, W, H) {
+  let p = bg._ep;
+  if (!(f.bg === "box" && (f.band || f.logo))) { if (p) css(p.root, "display", "none"); return; }
+  if (!p) {
+    const root = document.createElement("div"); root.className = "lbp"; root.innerHTML = `<i></i><i></i><img alt="" draggable="false">`; bg.appendChild(root);
+    p = bg._ep = { root, top: root.children[0], bot: root.children[1], logo: root.children[2] };
+    p.logo.onload = p.logo.onerror = () => { frameDirty = true; };
+  }
+  css(p.root, "display", "block");
+  const bu = f.band ? `url("${epPicUrl(f.band)}")` : "none", gap = Math.max(0, H - f.by - f.bh);
+  css(p.top, "backgroundImage", bu); css(p.bot, "backgroundImage", bu);
+  css(p.top, "height", f.by * k + "px"); css(p.bot, "top", (f.by + f.bh) * k + "px"); css(p.bot, "height", gap * k + "px");
+  const lg = p.logo, want = f.logo ? epPicUrl(f.logo) : "";
+  if (lg.getAttribute("src") !== want) { if (want) lg.setAttribute("src", want); else lg.removeAttribute("src"); }
+  const ok = want && lg.complete && lg.naturalWidth > 0 && lg.naturalHeight > 0;
+  css(lg, "display", ok ? "block" : "none");
+  if (ok) {
+    const h = EP.LOGO.h * H, w = h * lg.naturalWidth / lg.naturalHeight;
+    css(lg, "left", (W - w) / 2 * k + "px"); css(lg, "top", (EP.LOGO.cy * H - h / 2) * k + "px"); css(lg, "width", w * k + "px"); css(lg, "height", h * k + "px");
+  }
 }
 // 은평 스타일(layout.win · D-424): 확대·이동·회전한 클립도 영상 창(화면의 f.by ~ f.by+f.bh) 안만 보이게 — 창 네 모서리를 클립 상자 안 자리로 거꾸로 옮긴
 // 다각형 (transform = 기준점 둘레 translate·rotate·scale · editor.py layer 의 창 겹치기와 같은 그림) · 움직임이 없으면 창 = 클립 상자라 자르지 않음
@@ -4661,6 +4691,8 @@ const TEMPLATES = {
 // + 그 아래 작은 흰 사실 줄(주제 줄 · 끝까지 · 바꿔 끼우기 없음) · 말 자막은 아래 띠
 const EP = {
   BAR: "#1F4FD1", ZOOM: 1.32, VPOS: 0.48, BOX: { x: 0.05, y: 0.095, w: 0.9, h: 0.06 }, PAD: 28, SIZES: [72, 68, 64, 60, 56, 52, 48], CAP_Y: 0.8,
+  // 띠 그림·로고 (BR-280 · BR-281 · editor.py EP_LOGO · EP_LINK_LOGO_Y): 로고 높이·세로 가운데(화면 높이 비율) · 로고가 있으면 전체 강좌 줄은 로고 바로 위
+  LOGO: { h: 0.151, cy: 0.892 }, LINK_LOGO_Y: 0.804,
   TITLE: { weight: "Black", fill: "#111111", stroke: "#111111", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
   FACT: { weight: "Bold", size: 42, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", y: 0.195 },
   // 덧붙임 (BR-245 · BR-246 · editor.py EP_TAG·EP_TAG_BOX·EP_TAG_PAD·EP_LINK·LONG_LINE): 시리즈 이름표(검은 상자 · 흰 글씨) · 전체 강좌 줄
@@ -4668,7 +4700,7 @@ const EP = {
   TAG_BOX: { y: 0.052, h: 0.036 }, TAG_PAD: 22, LONG: "전체 강좌는 채널에서 ▶",
   LINK: { weight: "Bold", size: 36, fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", y: 0.865 },
 };
-let EPX = null;  // 스타일 화면 덧붙임 {series, seriesName, longLine, next(다음 시리즈 번호 · 보기)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx)
+let EPX = null;  // 스타일 화면 덧붙임 {series, seriesName, longLine, next(다음 시리즈 번호 · 보기), pics({band, logo} 켠 띠 그림·로고 이름)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx)
 function epSeriesFit(t, g) {  // 이름표 상자 폭을 글에 맞춤 (editor.py ep_series_fit 과 같음)
   const w = Math.min(0.9, (textW(t.text, t.style) + 2 * EP.TAG_PAD) / 1080);
   g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
@@ -4689,13 +4721,21 @@ function epExtras(q, L) {
     else Object.assign(g, { start: 0, dur: r3(L), full: true });
     epSeriesFit(t, g);
   }
-  if (!line && x.longLine) q.titles.push({ id: nid(), text: EP.LONG, start: 0, dur: r3(L), style: { ...EP.LINK }, plan: "longline" });
-  else if (line) { line.start = 0; line.dur = r3(L); }
+  const logo = !!(q.layout && q.layout.logo);  // 로고가 있으면 전체 강좌 줄은 로고 바로 위 (editor.py ep_longline · D-472)
+  if (!line && x.longLine) q.titles.push({ id: nid(), text: EP.LONG, start: 0, dur: r3(L), style: { ...EP.LINK, ...(logo ? { y: EP.LINK_LOGO_Y } : {}) }, plan: "longline" });
+  else if (line) {
+    line.start = 0; line.dur = r3(L);
+    if (logo) line.style.y = EP.LINK_LOGO_Y; else if (+line.style.y === EP.LINK_LOGO_Y) line.style.y = EP.LINK.y;
+  }
 }
-// 전체 강좌 줄이 있으면 말 자막 아래 끝을 그 줄 위 끝에서 틈(GAP) 위로 (배운 스타일 '아래' 자막 0.85 는 줄과 겹침 · 이미 위면 그대로 · editor.py ep_cap_clear 와 같은 셈)
+// 전체 강좌 줄·로고가 있으면 말 자막 아래 끝을 그 위 끝에서 틈(GAP) 위로 (배운 스타일 '아래' 자막 0.85 는 줄·로고와 겹침 · 이미 위면 그대로 ·
+// editor.py ep_cap_lim · ep_cap_clear 와 같은 셈)
 function epCapClear(q) {
-  const ln = q.titles.find(t => t.plan === "longline"); if (!ln) return;
-  const lim = Math.floor((+ln.style.y - (TOPIC.LINE * +ln.style.size + 2 * +(ln.style.strokeW || 0)) / 1920 - TOPIC.GAP) * 1000 + 1e-6) / 1000;
+  const ln = q.titles.find(t => t.plan === "longline"), lims = [];
+  if (ln) lims.push(Math.floor((+ln.style.y - (TOPIC.LINE * +ln.style.size + 2 * +(ln.style.strokeW || 0)) / 1920 - TOPIC.GAP) * 1000 + 1e-6) / 1000);
+  if (q.layout && q.layout.logo) lims.push(Math.floor((EP.LOGO.cy - EP.LOGO.h / 2 - TOPIC.GAP) * 1000 + 1e-6) / 1000);
+  if (!lims.length) return;
+  const lim = Math.min(...lims);
   if (+(q.captionStyle.y ?? EP.CAP_Y) > lim) q.captionStyle.y = lim;
 }
 // 이름표 글·검은 상자는 한 묶음: 하나를 지우면 다른 하나도 (빈 검은 상자·상자 없는 글이 남지 않게 · gone: 지운 것들)
@@ -4711,6 +4751,8 @@ const epOn = q => (q.shapes || []).some(g => g.plan === "card");
 // 편집본 q 를 은평 스타일로 (L = 길이): 화면 구성 · 말 자막은 아래 띠로 · 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · 없으면 편집본 이름) · 그 주제 줄 · 흰 상자
 function epCard(q, L) {
   q.layout = Object.assign(q.layout || {}, { mode: "box", bar: EP.BAR, zoom: EP.ZOOM, vpos: EP.VPOS, win: true });
+  const pics = (EPX && EPX.pics) || {};  // 스타일 화면에서 켠 띠 그림·로고 (끈 것은 지움 · BR-280 · BR-281)
+  for (const k of ["band", "logo"]) { if (pics[k]) q.layout[k] = pics[k]; else delete q.layout[k]; }
   if (+(q.captionStyle.y ?? EP.CAP_Y) < EP.CAP_Y) q.captionStyle.y = EP.CAP_Y;
   for (const k of q.titles) if (k.plan === "topic" && k.swap) {  // 바꿔 끼운 주제 줄 뒤로 옮겨 둔 큰 제목은 다시 처음부터
     const t = q.titles.find(x => x.id === k.under); if (t && Math.abs(t.start - (k.start + k.dur)) < 0.05) { t.dur = r3(t.dur + t.start - k.start); t.start = k.start; }
@@ -4729,7 +4771,7 @@ function epCard(q, L) {
 // 다른 템플릿을 고르면 은평 스타일 흰 상자를 지우고 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · MSG 강조 글씨 등은 그대로) 크기·나타나기를 보통으로,
 // 그 사실 줄은 첫머리 주제 줄(처음 SEC 초 · 모양은 tplTitle 의 placeTopic 이 다시 놓음)로 (예전 편집본에는 흰 상자가 없어 그대로)
 function epOff(q) {
-  if (q.layout) delete q.layout.win;  // 영상 창 밖 자르기(D-424)도 은평 스타일에서만
+  if (q.layout) { delete q.layout.win; delete q.layout.band; delete q.layout.logo; }  // 영상 창 밖 자르기(D-424)·띠 그림·로고(BR-280 · BR-281)도 은평 스타일에서만
   // 이름표·전체 강좌 줄도 은평 스타일에서만 (BR-245 · BR-246) — 흰 상자를 먼저 지웠어도 (안 지우면 아래 tplTitle 이 큰 제목 모양으로 바꿈)
   if ((q.shapes || []).some(g => g.plan === "series")) q.shapes = q.shapes.filter(g => g.plan !== "series");
   if (q.titles.some(epFrame)) q.titles = q.titles.filter(t => !epFrame(t));

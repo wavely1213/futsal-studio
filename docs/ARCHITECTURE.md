@@ -30,7 +30,7 @@
    ▼
 [작업 폴더 WORK]   videos/ analysis/ projects/ thumbnails/ styles/ refs/(학습용 영상) strategy/(채널 전략) edit_media/ out/ studio.log …
 [~/.futsal-studio] bin/deno.exe · bin/cloudflared.exe · models/*.onnx · 엔진 기록(json) · remote.json(휴대폰 열쇠) · remote/(터널 설정·pid)
-[앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태) · fonts/ · sfx/(Kenney CC0 효과음, D-141)
+[앱 폴더]          config.json · .rollback/ · .update_* · .req_hash  (업데이트 상태) · fonts/ · sfx/(Kenney CC0 효과음, D-141) · eunpyeong/(은평 스타일 띠 그림·로고, D-470)
 ```
 
 **휴대폰으로 보기 (원격 접속, D-027 · 켜 둔 동안만)**

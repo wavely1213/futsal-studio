@@ -1518,6 +1518,126 @@ EP_TITLE = dict(DEFAULT_STYLE, weight="Black", size=72, fill="#111111", stroke="
 EP_FACT = dict(DEFAULT_STYLE, weight="Bold", size=42, fill="#FFFFFF", stroke="#000000", strokeW=0, bgOn=False, x=0.5, align="center",
                effect="none", y=0.195)   # 사실 줄 (글 아래 끝 0.195 · 상자 아래 끝 + 틈 1.2% + 한 줄)
 EP_CAP_Y = 0.8         # 말 자막은 아래 띠 (이보다 위면 여기로)
+# 띠 그림·로고 (BR-280~BR-282 · D-470~D-474 · editor.html EP.LOGO·EP.LINK_LOGO_Y·epPics 와 같은 값·셈): layout.band·logo = 그림 이름 (켠 것만 ·
+# 스타일 화면에서 끄거나 바꿈) · 띠 그림은 위·아래 띠마다 꽉 차게(가운데 기준 자름) 영상·글자 아래 · 로고는 아래 띠 가운데 (말 자막·글자 아래)
+EP_PICS = core.APP_DIR / "eunpyeong"   # 앱과 함께 싣는 기본 그림 (band.png · logo.png · 출처 eunpyeong/NOTICE.md)
+EP_LOGO = {"h": 0.151, "cy": 0.892}    # 로고 높이·세로 가운데 (화면 높이 비율 · 위 끝 0.8165 · 아래 끝 0.9675 · 유튜브 쇼츠 아래 글자보다 더 내리지 않음)
+EP_LOGO_TOP = EP_LOGO["cy"] - EP_LOGO["h"] / 2
+EP_LINK_LOGO_Y = 0.804  # 로고가 있으면 전체 강좌 줄(글 아래 끝)은 로고 바로 위 (로고 위 끝 - 틈 TXT_GAP · 내림) · 말 자막은 그 줄 위 (D-472)
+
+
+def ep_layout():
+    """은평 스타일 화면 구성 (EP_LAYOUT) + 스타일 화면에서 켠 띠 그림·로고 이름 (layout.band · layout.logo · 못 읽으면 기본 = 둘 다 켬)."""
+    lay = dict(EP_LAYOUT)
+    try:
+        import style as _style
+        lay.update(_style.card_pic_refs())
+    except Exception:  # noqa: BLE001 — 설정을 못 읽으면 띠 색만
+        pass
+    return lay
+
+
+def ep_pic_path(ref):
+    """layout.band·logo 의 그림 이름 → 파일 (앱과 함께 실은 band.png·logo.png · 작업 폴더의 바꾼 그림) · 이상한 이름·없는 파일은 None."""
+    if not isinstance(ref, str) or not ref or Path(ref).name != ref or not ref.lower().endswith(".png") or ref.startswith("."):
+        return None
+    try:
+        import style as _style
+        p = (EP_PICS if ref in _style.CARD_PIC_SHIP.values() else _style.card_pic_dir()) / ref
+    except Exception:  # noqa: BLE001
+        return None
+    return p if p.is_file() else None
+
+
+_EP_IMG = {}   # 읽은 띠 그림·로고 (경로, 고친 시각, 크기) → PIL 그림 (구간마다 다시 읽지 않게)
+
+
+def _ep_img(p, mode):
+    from PIL import Image
+    st = p.stat()
+    k = (str(p), st.st_mtime_ns, st.st_size, mode)
+    if k not in _EP_IMG:
+        with Image.open(p) as im:
+            im.load()
+            if len(_EP_IMG) > 8:
+                _EP_IMG.clear()
+            _EP_IMG[k] = im.convert(mode)
+    return _EP_IMG[k]
+
+
+def ep_band_rects(by, bh, H):
+    """띠 그림을 까는 두 띠 (위 끝, 아래 끝 · 화소 · 소수 그대로) — 위 띠 0 ~ 영상 창 위 끝 · 아래 띠 영상 창 아래 끝 ~ 화면 끝 (빈 띠는 뺌)."""
+    return [(a, b) for a, b in ((0.0, float(by)), (float(by) + float(bh), float(H))) if b - a > 0.5]
+
+
+def ep_cover(iw, ih, W, hb):
+    """띠 그림을 W×hb 띠에 꽉 차게 (CSS background-size: cover · position: center 와 같음) → (그린 폭, 높이, 왼쪽, 위 · 띠 기준)."""
+    s = max(W / iw, hb / ih)
+    return iw * s, ih * s, (W - iw * s) / 2, (hb - ih * s) / 2
+
+
+def ep_logo_box(lw, lh, W, H):
+    """로고 자리 (왼쪽, 위, 폭, 높이 · 화소) — 높이 EP_LOGO h · 세로 가운데 EP_LOGO cy · 가로 가운데 · 폭은 그림 비율대로."""
+    h = EP_LOGO["h"] * H
+    w = h * lw / lh
+    return (W - w) / 2, EP_LOGO["cy"] * H - h / 2, w, h
+
+
+def ep_bg_image(W, H, by, bh, bar, band=None, logo=None, log=None):
+    """은평 스타일 바탕 그림 (W×H RGB · PIL): 영상 창 = 띠 색 · 위아래 띠 = 띠 그림(띠마다 꽉 차게 · 가운데 기준) · 아래 띠 가운데 로고.
+    띠 그림·로고를 못 읽으면 그것만 빼고(띠 색) 기록 한 줄 → 둘 다 못 쓰면 None (예전 색 바탕 그대로) — editor.html epPics 와 같은 셈."""
+    from PIL import Image
+    im = Image.new("RGB", (W, H), "#" + str(bar or "#000000").lstrip("#"))
+    used = False
+    if band:
+        try:
+            src = _ep_img(band, "RGB")
+            for a, b in ep_band_rects(by, bh, H):
+                dw, dh, dx, dy = ep_cover(src.size[0], src.size[1], W, b - a)
+                r0, r1 = int(math.floor(a)), min(H, int(math.ceil(b)))   # 띠 둘레 반 칸은 영상 창 쪽으로 넉넉히 (영상이 덮음 · 띠 색 줄이 안 남게)
+                lay = Image.new("RGB", (W, r1 - r0))
+                lay.paste(src.resize((max(1, round(dw)), max(1, round(dh))), Image.LANCZOS), (round(dx), round(a + dy) - r0))
+                im.paste(lay, (0, r0))
+            used = True
+        except Exception as e:  # noqa: BLE001 — 깨진 그림이면 띠 색 (내보내기는 멈추지 않음)
+            (log or studiolog.write)(f"은평 스타일 띠 그림을 읽지 못해 띠 색으로 만들어요 · {Path(band).name} · {type(e).__name__}")
+    if logo:
+        try:
+            src = _ep_img(logo, "RGBA")
+            x, y, w, h = ep_logo_box(src.size[0], src.size[1], W, H)
+            im = im.convert("RGBA")
+            im.alpha_composite(src.resize((max(1, round(w)), max(1, round(h))), Image.LANCZOS), (round(x), round(y)))
+            im = im.convert("RGB")
+            used = True
+        except Exception as e:  # noqa: BLE001
+            (log or studiolog.write)(f"은평 스타일 로고를 읽지 못해 로고 없이 만들어요 · {Path(logo).name} · {type(e).__name__}")
+    return im if used else None
+
+
+def _ep_bg_file(fit, W, H, tmp):
+    """내보내기 구간의 은평 스타일 바탕 그림 PNG (임시 폴더 · 같은 배치면 한 번만 만듦) → 경로 · 띠 그림·로고가 없거나 못 쓰면 None."""
+    band, logo = ep_pic_path(fit.get("band")), ep_pic_path(fit.get("logo"))
+    if not band and not logo:
+        return None
+    sig = [W, H, round(float(fit["by"]), 3), round(float(fit["bh"]), 3), str(fit.get("bar"))]
+    for p in (band, logo):
+        st = p.stat() if p else None
+        sig += [str(p), st.st_mtime_ns if st else 0, st.st_size if st else 0]
+    out = Path(tmp) / f"epbg_{hashlib.sha1(json.dumps(sig).encode('utf-8')).hexdigest()[:16]}.png"
+    if out.is_file():
+        return out
+    try:
+        im = ep_bg_image(W, H, fit["by"], fit["bh"], fit.get("bar"), band, logo)
+        if im is None:
+            return None
+        import io
+        b = io.BytesIO()
+        im.save(b, "PNG", compress_level=1)
+        updater.write_atomic(out, b.getvalue())
+    except Exception as e:  # noqa: BLE001 — PIL 이 없거나 못 쓰면 예전 색 바탕
+        studiolog.write(f"은평 스타일 바탕 그림을 만들지 못해 띠 색으로 만들어요 · {type(e).__name__}: {e}")
+        return None
+    return out
 
 
 def shorts_card_on():
@@ -1600,12 +1720,15 @@ def ep_series(name, n, length):
     return t, g
 
 
-def ep_longline(length):
-    return {"id": _nid(), "text": LONG_LINE, "start": 0.0, "dur": round(float(length), 2), "style": dict(EP_LINK), "plan": "longline"}
+def ep_longline(length, logo=False):
+    """전체 강좌 줄 · logo: 아래 띠에 로고가 있으면 로고 바로 위 (EP_LINK_LOGO_Y · D-472)."""
+    st = dict(EP_LINK, y=EP_LINK_LOGO_Y) if logo else dict(EP_LINK)
+    return {"id": _nid(), "text": LONG_LINE, "start": 0.0, "dur": round(float(length), 2), "style": st, "plan": "longline"}
 
 
-def ep_extras(length, ahead=0):
-    """스타일 화면에서 고른 덧붙임 → (더할 타이틀, 더할 도형) · 이름표 번호는 아직 정하지 않은 보기 번호(다음 번호 + ahead · 내보낼 때 정함)."""
+def ep_extras(length, ahead=0, logo=False):
+    """스타일 화면에서 고른 덧붙임 → (더할 타이틀, 더할 도형) · 이름표 번호는 아직 정하지 않은 보기 번호(다음 번호 + ahead · 내보낼 때 정함) ·
+    logo: 로고가 있는 화면 구성 (전체 강좌 줄을 로고 위로)."""
     try:
         import style as _style
         ex = _style.card_extras()
@@ -1618,19 +1741,37 @@ def ep_extras(length, ahead=0):
         titles.append(t)
         shapes.append(g)
     if ex["longLine"]:
-        titles.append(ep_longline(length))
+        titles.append(ep_longline(length, logo))
     return titles, shapes
 
 
-def ep_cap_clear(cs, titles):
-    """전체 강좌 줄(plan longline)이 있으면 말 자막 아래 끝을 그 줄 위 끝에서 TXT_GAP 위로 (배운 스타일 '아래' 자막 0.85 는 줄과 겹침 ·
+def ep_line_on():
+    """스타일 화면에서 '전체 강좌는 채널에서 ▶' 줄을 골랐는지 (못 읽으면 False)."""
+    try:
+        import style as _style
+        return bool(_style.card_extras()["longLine"])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ep_cap_lim(line=None, logo=False):
+    """은평 스타일 말 자막 아래 끝의 한계 — 전체 강좌 줄(line · 타이틀) 위 끝 - 틈 · 로고 위 끝 - 틈 중 위쪽 (내림: 반올림으로 틈이 줄지 않게) ·
+    둘 다 없으면 None — editor.html epCapClear 와 같은 셈."""
+    _, H = frame_size("shorts")
+    lims = []
+    if line:
+        lims.append(math.floor((_cap_band(line["style"], H)[0] - TXT_GAP) * 1000 + 1e-6) / 1000)
+    if logo:
+        lims.append(math.floor((EP_LOGO_TOP - TXT_GAP) * 1000 + 1e-6) / 1000)
+    return min(lims) if lims else None
+
+
+def ep_cap_clear(cs, titles, logo=False):
+    """전체 강좌 줄(plan longline)·로고(logo)가 있으면 말 자막 아래 끝을 그 위 끝에서 TXT_GAP 위로 (배운 스타일 '아래' 자막 0.85 는 줄·로고와 겹침 ·
     0.8 처럼 이미 위면 그대로) — editor.html epCapClear 와 같은 셈."""
     ln = next((t for t in titles or [] if t.get("plan") == "longline"), None)
-    if not ln:
-        return cs
-    _, H = frame_size("shorts")
-    lim = math.floor((_cap_band(ln["style"], H)[0] - TXT_GAP) * 1000 + 1e-6) / 1000   # 내림: 반올림으로 틈이 줄지 않게
-    if float(cs.get("y", EP_CAP_Y)) > lim:
+    lim = ep_cap_lim(ln, logo)
+    if lim is not None and float(cs.get("y", EP_CAP_Y)) > lim:
         cs["y"] = lim
     return cs
 
@@ -2205,6 +2346,7 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                              master=dict(master), captionsOn=caps_on, **extra))
     if "shorts" in kinds:
         card = shorts_card_on()  # 스타일 화면 '쇼츠 화면 배치' (기본 지금처럼)
+        ep_lay = ep_layout() if card else None   # 띠 그림·로고 (스타일 화면에서 켠 것 · BR-280 · BR-281)
         for i, r in enumerate(rec["shorts"], 1):
             items = _items_from_cuts(_rhythm(_quiet_edges(r["cuts"], wf, units, info.get("duration")), segs, st, every, caps), 0.3, zoom=zoom)
             length = max([i_end(it) for it in items] or [0.0])  # 말 빠르기를 맞추면 조금 짧아짐
@@ -2214,9 +2356,9 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                 cs = ep_caption(cs)
                 kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
                 shapes = ep_card(hook, kt, length)
-                xt, xg = ep_extras(length, ahead=i - 1)   # 시리즈 이름표·전체 강좌 줄 (고른 것만 · BR-245 · BR-246)
-                ep_cap_clear(cs, xt)   # 말 자막은 전체 강좌 줄 위로 (D-428)
-                seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(EP_LAYOUT), master=dict(master),
+                xt, xg = ep_extras(length, ahead=i - 1, logo=bool(ep_lay.get("logo")))   # 시리즈 이름표·전체 강좌 줄 (고른 것만 · BR-245 · BR-246)
+                ep_cap_clear(cs, xt, bool(ep_lay.get("logo")))   # 말 자막은 전체 강좌 줄·로고 위로 (D-428 · D-472)
+                seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(ep_lay), master=dict(master),
                                      captionsOn=caps_on, titles=[hook] + ([kt] if kt else []) + xt, shapes=shapes + xg))
                 continue
             W, H = frame_size("shorts")
@@ -4743,7 +4885,8 @@ def fit_rect(it, md, seq, W, H):
         zh = vh * s
         ch = min(zh, H)
         return {"bx": 0.0, "by": (H - ch) * float(lay["vpos"]), "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf,
-                "my": -(zh - ch) / 2 - ct * sh * s, "bg": lay["mode"], "bar": lay["bar"]}
+                "my": -(zh - ch) / 2 - ct * sh * s, "bg": lay["mode"], "bar": lay["bar"],
+                "pics": lay["mode"] == "box" and bool(lay.get("band") or lay.get("logo"))}
     if fit == "auto":
         fit = "native" if md.get("kind") == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
     s = ref if fit == "native" else (max if fit == "cover" else min)(W / sw, H / sh)
@@ -4776,7 +4919,7 @@ def premiere_motion(it, md, seq, W, H):
     crop = [max(0.0, x) for x in (l / sw * 100, (sw - rr) / sw * 100, t / sh * 100, (sh - b) / sh * 100)]
     anim = any(len({json.dumps(k["v"]) for k in param(it, key)["k"]}) > 1 for key in ("pos", "scale", "rot", "opacity"))
     return {"scale": s * sc * 100, "rot": rot, "center": ((cx - W / 2) / W, (cy - H / 2) / H), "crop": [0.0 if x < 1e-3 else x for x in crop],
-            "opacity": float(kf_at(param(it, "opacity"), m)), "animated": anim, "bg": f["bg"], "bar": f.get("bar")}
+            "opacity": float(kf_at(param(it, "opacity"), m)), "animated": anim, "bg": f["bg"], "bar": f.get("bar"), "pics": f.get("pics")}
 
 
 def _xnum(v, nd=6):
@@ -5093,6 +5236,8 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
                     seen_anim.append(x["start"])
                 if mo["bg"] == "blur" or (mo["bg"] == "box" and str(mo.get("bar") or "#000000").lower() not in ("#000000", "#000")):
                     seen_bg.add((mo["bg"], mo.get("bar")))
+                if mo.get("pics"):   # 은평 스타일 띠 그림·로고 (BR-280 · BR-281)
+                    seen_bg.add(("pics", ""))
                 if not _color_default(x.get("color")):
                     seen_color.append(x["start"])
                 if x.get("link"):
@@ -5252,6 +5397,7 @@ def _xml_report(proj, rep, stem, fps, t_lo, t_hi, overlay=None, overlay_note=Non
     if rep.get("bg"):
         for bg, bar in rep["bg"]:
             rows.append("■ 흐린 배경이 빠져요\n  쇼츠 위아래의 흐린 배경 대신 검은 바탕이 보여요." if bg == "blur"
+                        else "■ 위아래 띠 그림·로고가 빠져요\n  은평 스타일 띠 그림과 아래 띠 로고 대신 검은 바탕이 보여요." if bg == "pics"
                         else f"■ 위아래 띠 색({bar})이 빠져요\n  검은 바탕이 보여요.")
     if rep.get("color"):
         rows.append(f"■ 색 보정 {len(rep['color'])}개 클립이 빠져요\n  " + ", ".join(_tc(t, fps) for t in rep["color"][:12])
@@ -5367,8 +5513,11 @@ def _fit(it, md, seq, W, H):
         zw = _even(W * max(1.0, float(lay["zoom"])))
         zh = _even(vh * zw / sw)
         ch = min(zh, H)
-        return {"chain": pre + f"scale={zw}:{zh},crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}", "bw": W, "bh": ch, "bx": 0,
-                "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
+        out = {"chain": pre + f"scale={zw}:{zh},crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}", "bw": W, "bh": ch, "bx": 0,
+               "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
+        if lay["mode"] == "box" and (lay.get("band") or lay.get("logo")):   # 은평 스타일 띠 그림·로고 (BR-280 · BR-281 · 없으면 예전과 같은 값)
+            out.update(band=lay.get("band"), logo=lay.get("logo"))
+        return out
     if fit == "auto":  # 위 트랙: 영상은 화면에 맞춤, 이미지는 작으면 원래 크기 (정지 화면은 원래 영상처럼 화면에 맞춤)
         fit = "native" if md["kind"] == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
     cover = fit == "cover"
@@ -5641,7 +5790,13 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
             src = s2
         elif bg == "box":
             bgl = lab("g")
-            fc.append(f"color=c=0x{fit['bar'].lstrip('#')}:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n}[{bgl}]")
+            pic = _ep_bg_file(fit, W, H, tmp) if fit.get("band") or fit.get("logo") else None
+            if pic:  # 은평 스타일 띠 그림·로고: 한 장 그림을 한 번만 읽어 n 프레임으로 (사진 클립과 같은 방법 · 못 만들면 아래 색 바탕)
+                idx = len(inputs)
+                inputs.append(["-loop", "1", "-framerate", "1", "-t", f"{dur + 1.5:.3f}", "-f", "image2", "-pattern_type", "none", "-i", str(pic)])
+                fc.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps={fps},tpad=stop_mode=clone:stop_duration={dur + 1:.3f},trim=end_frame={n},format=yuv420p,setsar=1[{bgl}]")
+            else:
+                fc.append(f"color=c=0x{fit['bar'].lstrip('#')}:s={W}x{H}:r={fps}:d={dur + 0.1:.3f},trim=end_frame={n}[{bgl}]")
         chain = [] if img_pre else [fit["chain"], "setsar=1"]
         full_plain = not motion and (bg is not None or (bw == W and bh == H and it["track"] == "V1" and md["kind"] != "image"))
         if not motion and bg is None and it["track"] == "V1" and md["kind"] != "image" and not (bw == W and bh == H):

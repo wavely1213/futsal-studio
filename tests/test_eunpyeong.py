@@ -148,10 +148,10 @@ class RoughCardTest(WorkMixin, unittest.TestCase):
                 L = editor.seq_total(q)
                 # 파란 띠 위 말 자막: 어두운 색(배운 스타일)은 흰 글씨 · 밝은 색은 그대로
                 self.assertEqual(q["captionStyle"]["fill"], "#FFD400" if st and st.get("captionColor") == "#FFD400" else "#FFFFFF")
-                self.assertEqual(q["layout"], editor.EP_LAYOUT)
+                self.assertEqual(q["layout"], editor.ep_layout())   # 띠 그림·로고 기본 켬 (BR-280 · BR-281)
                 self.assertGreaterEqual(q["captionStyle"]["y"], editor.EP_CAP_Y)
-                if st and st.get("captionPos") == "bottom":
-                    self.assertEqual(q["captionStyle"]["y"], editor.CAP_Y["bottom"])
+                if st and st.get("captionPos") == "bottom":   # 배운 '아래'(0.85)는 로고 위 끝 - 틈으로 (D-472)
+                    self.assertEqual(q["captionStyle"]["y"], min(editor.CAP_Y["bottom"], editor.ep_cap_lim(None, True)))
                 top = q["titles"][0]
                 self.assertNotIn("\n", top["text"])
                 self.assertEqual((top["start"], top["dur"]), (0.0, round(L, 2)))
@@ -208,7 +208,7 @@ class MsgCardTest(unittest.TestCase):
         kinds = set()
         for q in self.qs:
             L = round(editor.seq_total(q), 3)
-            self.assertEqual(q["layout"], editor.EP_LAYOUT, q["name"])
+            self.assertEqual(q["layout"], editor.ep_layout(), q["name"])   # 띠 그림·로고 기본 켬 (BR-280 · BR-281)
             self.assertGreaterEqual(q["captionStyle"]["y"], editor.EP_CAP_Y)
             ev = next(e for e in q["msg"]["events"] if e["kind"] == "hook")
             [box] = [g for g in q["shapes"] if g.get("plan") == "card"]
@@ -244,7 +244,7 @@ class MsgCardTest(unittest.TestCase):
             for g in q.get("tactics") or []:
                 self.assertTrue(g.get("pts") or g.get("follow"), q["name"])
         seq = {"format": "shorts", "layout": msg.seq_layout("shorts", True)}
-        self.assertEqual(seq["layout"], editor.EP_LAYOUT)
+        self.assertEqual(seq["layout"], editor.ep_layout())
         self.assertEqual(msg.seq_layout("shorts")["mode"], "blur")   # 끄면 예전 그대로
 
     def test_replay_label_row(self):
@@ -649,6 +649,7 @@ class ExtrasRoughTest(WorkMixin, unittest.TestCase):
         줄이 없으면 그대로 0.85 (R1 그대로)."""
         name = self.fix("MSGRAW01")
         style.set_shorts_layout("eunpyeong")
+        style.set_card_pics(band=False, logo=False)   # 로고가 없을 때의 자리 (로고가 있으면 tests.test_ep_pics)
         st = {"captionPos": "bottom"}
         for q in editor.auto_sequences(name, self.INFO, st, ("shorts",)):
             self.assertEqual(q["captionStyle"]["y"], editor.CAP_Y["bottom"])

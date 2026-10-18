@@ -754,13 +754,18 @@ class Handler(BaseHTTPRequestHandler):
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
                                     "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(),
-                                    "cardExtras": style.card_extras()})
+                                    "cardExtras": style.card_extras(), "cardPics": style.card_pics()})
         if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
             return self._send(200, {"on": style.shorts_topic_on()})
         if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · BR-240)
             return self._send(200, {"layout": style.shorts_layout()})
         if u.path == "/api/style/card_extras":  # 은평 스타일 덧붙임 (시리즈 이름표·전체 강좌 줄 · BR-245 · BR-246) 지금 값
             return self._send(200, style.card_extras())
+        if u.path == "/api/style/card_pic":  # 은평 스타일 띠 그림·로고 그림 (편집실 미리보기·스타일 화면 · 실은 그림 또는 작업 폴더의 바꾼 그림 · BR-280 · BR-281)
+            p = editor.ep_pic_path((q.get("f") or [""])[0])
+            if not p:
+                return self._send(404, {"error": "not found"})
+            return self._file(p, "image/png")
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
             return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
@@ -888,7 +893,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "capMerged": editor.merged_captions(proj.get("captions")),
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
                                         "recommend": editor.recommend(n),
-                                        "epx": dict(style.card_extras(), next=style.series_peek())})   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
+                                        "epx": dict(style.card_extras(), next=style.series_peek(),   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
+                                                    pics=style.card_pic_refs())})   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
             except Exception as e:
                 studiolog.trace(e)
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
@@ -1121,6 +1127,24 @@ class Handler(BaseHTTPRequestHandler):
                                           b.get("longLine") if isinstance(b.get("longLine"), bool) else None)
             except OSError:
                 return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, dict(v, ok=True))
+        if path == "/api/style/card_pics":  # 스타일 화면 띠 그림·로고 켜기/끄기 · 처음 그림으로 (준 값만 · 다음에 만드는 은평 스타일 쇼츠부터 · BR-282)
+            try:
+                v = style.set_card_pics(b.get("band") if isinstance(b.get("band"), bool) else None,
+                                        b.get("logo") if isinstance(b.get("logo"), bool) else None,
+                                        b.get("reset") if b.get("reset") in style.CARD_PIC_KINDS else None)
+            except OSError:
+                return self._send(500, {"ok": False, "error": "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            return self._send(200, dict(v, ok=True))
+        if path == "/api/style/card_pic":  # 스타일 화면 '그림 바꾸기': 고른 그림(data URL)을 확인해 작업 폴더에 복사 (BR-282)
+            try:
+                v = style.save_card_pic(b.get("kind"), b.get("data"))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"은평 스타일 그림을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "그림을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            log(f"은평 스타일 {'띠 그림을' if b.get('kind') == 'band' else '로고를'} 바꿨어요 · {v[b.get('kind') + 'File']}")
             return self._send(200, dict(v, ok=True))
         # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
         if path == "/api/style/tempo":

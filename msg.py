@@ -3309,6 +3309,8 @@ class _Build:
         self.main = []     # 본편 V1 클립 (원본 → 타임라인 바꾸기용)
         self.lost = 0      # 양 범위 때문에 뺀 사건 중 그것만 보여 주던 재미 순간이 있던 것 (govern)
         self.card = False  # 은평 스타일 쇼츠 (BR-240 · 위 띠 제목 상자·사실 줄은 글자 자리 정리에서 그대로 두고 피함)
+        self.lay = None    # 은평 스타일 화면 구성 (띠 그림·로고 포함 · editor.ep_layout · 한 편집본 안에서 같은 값)
+        self.cap_lim = None  # 은평 스타일 말 자막 아래 끝 한계 (전체 강좌 줄·로고 위 · editor.ep_cap_lim)
         self.fixed = set()  # 자리를 옮기지 않는 글자 id (은평 스타일 큰 제목·사실 줄)
 
     def clip(self, a, b, speed=1.0, fx=None, nocaps=False, mute=False, vol_db=0.0, main=False, color=None):
@@ -3766,6 +3768,11 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     cap_y = caption_y(st, fmt)
     if B.card:
         cap_y = max(cap_y, editor.EP_CAP_Y)   # 말 자막은 아래 띠 (BR-242)
+        B.lay = seq_layout(fmt, True)
+        logo = bool(B.lay.get("logo"))
+        B.cap_lim = editor.ep_cap_lim(editor.ep_longline(0, logo) if editor.ep_line_on() else None, logo)
+        if B.cap_lim is not None:
+            cap_y = min(cap_y, B.cap_lim)   # 말 자막은 전체 강좌 줄·로고 위로 (D-472 · 편집실·가편집 ep_cap_clear 와 같은 한계)
     looks = text_looks(st, fmt, cap_y, card=B.card)
     snd = dict(st["sound"], moods=_moods_for(st["sound"].get("moods") or {}, moms))
     pal = SFX_PALETTE.get(snd.get("palette"), SFX_PALETTE["variety"])
@@ -4056,7 +4063,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             B.shapes.append(box)
             refs["shapes"] = [box["id"]]
             B.fixed |= set(refs["titles"])
-            xt, xg = editor.ep_extras(B.pos)   # 시리즈 이름표(큰 제목과 한 묶음 · 빼면 같이 빠짐)·전체 강좌 줄(따로) · 고른 것만 (BR-245 · BR-246)
+            xt, xg = editor.ep_extras(B.pos, logo=bool(B.lay.get("logo")))   # 시리즈 이름표(큰 제목과 한 묶음 · 빼면 같이 빠짐)·전체 강좌 줄(따로) · 고른 것만 (BR-245 · BR-246)
             B.titles += xt
             B.shapes += xg
             B.fixed |= {t["id"] for t in xt}
@@ -4123,7 +4130,9 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         tracks.append({"id": "A5", "k": "a", "lock": False, "mute": False, "solo": False, "target": False, "h": 1, "vol": 0.0, "role": "dialog", "name": "효과음",
                        "voiceFx": False})
     capst = editor.ep_caption(_caption_style(st, fmt, cap_y)) if B.card else _caption_style(st, fmt, cap_y)   # (은평 스타일: 어두운 글씨는 흰 글씨)
-    layout = seq_layout(fmt, B.card)
+    if B.card and B.cap_lim is not None:   # ep_caption 이 아래 띠(0.8)로 내린 것을 다시 강좌 줄·로고 위로 (D-472)
+        capst["y"] = min(float(capst["y"]), B.cap_lim)
+    layout = dict(B.lay) if B.card else seq_layout(fmt)
     seq = editor._new_seq(label, fmt, B.items, trans=B.trans, titles=B.titles, shapes=B.shapes, tactics=B.tactics, markers=B.markers, captionStyle=capst,
                           captionsOn=bool(st["captions"].get("on", True)), layout=layout,
                           master={"volume": 1.0, "normalize": True, "lufs": float(snd.get("lufs") or -14.0)},
@@ -4295,9 +4304,9 @@ def _track_play(name, a, b, t, detect_fn=None):
 
 
 def seq_layout(fmt, card=False):
-    """MSG 편집본 화면 배치 (쇼츠는 흐린 배경 위 1.35배 · card: 은평 스타일 파란 띠 · editor.EP_LAYOUT)."""
+    """MSG 편집본 화면 배치 (쇼츠는 흐린 배경 위 1.35배 · card: 은평 스타일 파란 띠 + 켠 띠 그림·로고 · editor.ep_layout)."""
     if fmt == "shorts" and card:
-        return dict(editor.EP_LAYOUT)
+        return editor.ep_layout()
     if fmt == "shorts":
         return {"mode": "blur", "bar": "#000000", "zoom": 1.35, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0}
     return {"mode": "fill", "bar": "#000000", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0}
@@ -4314,7 +4323,7 @@ def place_tactics(B, name, sig, moms, intensity, fmt, detect_fn=None):
     main = [it for it in B.items if it["track"] == "V1" and it.get("media", "main") == "main"]
     mins = sum(editor.i_len(it) for it in main) / 60.0
     n_max = min(most, max(1, int(mins * per_min + 0.5)))
-    seq = {"format": fmt, "layout": seq_layout(fmt, getattr(B, "card", False))}
+    seq = {"format": fmt, "layout": getattr(B, "lay", None) or seq_layout(fmt, getattr(B, "card", False))}
     md = {"kind": "video", "w": B.info.get("width"), "h": B.info.get("height")}
     used, made = [], []
     cuts = sorted(float(c) for c in sig.get("cuts") or ())

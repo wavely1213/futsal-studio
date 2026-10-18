@@ -11,7 +11,10 @@ AI 비용 없는 규칙 기반 분석:
 쇼츠와 긴 영상을 섞어 배우면 형식마다 따로도 합쳐 formats {long, shorts} 에 두고, 가편집은 형식에 맞는 값을 쓴다 (E12 · D-102).
 스타일 일치 점수: 배운 스타일 ↔ 자동 가편집(편집본 JSON)을 내보내지 않고 바로 비교 (profile_from_sequence · distance).
 """
+import base64
 import bisect
+import hashlib
+import io
 import json
 import math
 import os
@@ -1214,6 +1217,113 @@ def set_card_extras(series=None, name=None, long_line=None):
     f.parent.mkdir(parents=True, exist_ok=True)
     updater.write_atomic(f, json.dumps(dict(cur, set=time.strftime("%Y-%m-%d %H:%M")), ensure_ascii=False))
     return cur
+
+
+# 은평 스타일 띠 그림·로고 (BR-280~BR-282 · D-470~D-474): 위아래 띠를 띠 그림으로 · 아래 띠 가운데 로고 — 둘 다 기본 켬 (소유자가 고른 모양)
+# 그림은 앱과 함께 실은 것(eunpyeong/band.png·logo.png) · '그림 바꾸기'로 고른 그림은 작업 폴더 styles/설정/은평 그림/ 에 내용 지문 이름으로 복사
+CARD_PIC_KINDS = ("band", "logo")
+CARD_PIC_SHIP = {"band": "band.png", "logo": "logo.png"}   # 앱 폴더 eunpyeong/ 의 기본 그림 (editor.EP_PICS)
+CARD_PIC_MAX = 20 << 20        # 고른 그림 파일 크기 한도 (바이트)
+CARD_PIC_SIDE = 4096           # 이보다 긴 변은 줄여서 저장 (쇼츠 1080 폭 · 4K 내보내기에도 넉넉)
+CARD_PIC_MIN = 16              # 이보다 작은 그림은 받지 않음 (화소)
+_CARD_PIC_NAME = re.compile(r"(band|logo)_[0-9a-f]{12}\.png")   # 바꾼 그림 이름 (내용 지문 · 같은 그림은 같은 이름)
+
+
+def _card_pic_file():
+    return STYLES / ROUGH_DIR_NAME / "은평 스타일 그림.json"
+
+
+def card_pic_dir():
+    """'그림 바꾸기'로 고른 그림을 두는 곳 (작업 폴더)."""
+    return STYLES / ROUGH_DIR_NAME / "은평 그림"
+
+
+def card_pics():
+    """{"band": 띠 그림을 쓰는지, "logo": 로고를 쓰는지, "bandFile": 바꾼 띠 그림 이름('' = 앱과 함께 실은 그림), "logoFile": …}
+    — 파일이 없거나 못 읽으면 둘 다 켬·실은 그림 · 바꾼 그림 파일이 없어졌으면 실은 그림."""
+    try:
+        d = json.loads(_card_pic_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    out = {}
+    for k in CARD_PIC_KINDS:
+        out[k] = d.get(k) is not False
+        f = d.get(k + "File")
+        out[k + "File"] = f if isinstance(f, str) and _CARD_PIC_NAME.fullmatch(f) and f.startswith(k + "_") and (card_pic_dir() / f).is_file() else ""
+    return out
+
+
+def card_pic_refs():
+    """은평 스타일 편집본 화면 구성(layout)에 넣을 그림 이름 {"band": …, "logo": …} — 켠 것만 (editor.ep_pic_path 로 찾음)."""
+    c = card_pics()
+    return {k: c[k + "File"] or CARD_PIC_SHIP[k] for k in CARD_PIC_KINDS if c[k]}
+
+
+def _save_card_pics(cur):
+    f = _card_pic_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps(dict(cur, set=time.strftime("%Y-%m-%d %H:%M")), ensure_ascii=False))
+    return cur
+
+
+def set_card_pics(band=None, logo=None, reset=None):
+    """켜기/끄기 (준 값만) · reset: "band"/"logo" 면 그 그림을 앱과 함께 실은 그림으로 → 바뀐 card_pics()."""
+    cur = card_pics()
+    for k, v in (("band", band), ("logo", logo)):
+        if v is not None:
+            cur[k] = bool(v)
+    if reset in CARD_PIC_KINDS:
+        cur[reset + "File"] = ""
+    return _save_card_pics(cur)
+
+
+def card_pic_png(raw, kind):
+    """고른 그림(바이트) 확인 → 저장할 PNG 바이트 (휴대폰 사진 회전 정보 적용 · 긴 변 CARD_PIC_SIDE 까지 · 띠는 RGB · 로고는 투명 그대로).
+    그림이 아니거나 깨졌거나 너무 작으면 ValueError (화면에 그대로 보이는 문장)."""
+    if len(raw) > CARD_PIC_MAX:
+        raise ValueError(f"그림 파일이 너무 커요 ({len(raw) >> 20}MB) · {CARD_PIC_MAX >> 20}MB 보다 작은 그림을 골라 주세요")
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as im0:
+            im0.verify()   # 잘린 파일·그림이 아닌 파일
+        im = Image.open(io.BytesIO(raw))
+        im = ImageOps.exif_transpose(im)
+        im.load()
+    except Exception as e:  # noqa: BLE001 — PIL 은 꼴마다 다른 예외를 냄
+        raise ValueError("그림 파일을 읽지 못했어요 · PNG·JPG 그림을 골라 주세요") from e
+    if min(im.size) < CARD_PIC_MIN:
+        raise ValueError(f"그림이 너무 작아요 ({im.size[0]}×{im.size[1]}) · 더 큰 그림을 골라 주세요")
+    alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+    im = im.convert("RGBA" if kind == "logo" and alpha else "RGB")
+    if max(im.size) > CARD_PIC_SIDE:
+        im.thumbnail((CARD_PIC_SIDE, CARD_PIC_SIDE), Image.LANCZOS)
+    b = io.BytesIO()
+    im.save(b, "PNG", optimize=True)
+    return b.getvalue()
+
+
+def save_card_pic(kind, data):
+    """'그림 바꾸기': 고른 그림(data URL 또는 바이트)을 확인해 작업 폴더에 PNG 로 복사하고 그 그림을 씀(켬) → 바뀐 card_pics().
+    이미 만든 편집본은 예전 그림 이름을 가리키므로 예전 그림 파일은 지우지 않는다."""
+    if kind not in CARD_PIC_KINDS:
+        raise ValueError("띠 그림·로고 중 하나를 골라 주세요")
+    if isinstance(data, str):
+        if not data.startswith("data:") or "," not in data:
+            raise ValueError("그림 파일을 읽지 못했어요 · PNG·JPG 그림을 골라 주세요")
+        try:
+            data = base64.b64decode(data.split(",", 1)[1], validate=False)
+        except ValueError as e:
+            raise ValueError("그림 파일을 읽지 못했어요 · PNG·JPG 그림을 골라 주세요") from e
+    png = card_pic_png(bytes(data), kind)
+    name = f"{kind}_{hashlib.sha256(png).hexdigest()[:12]}.png"
+    p = card_pic_dir() / name
+    if not p.is_file():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        updater.write_atomic(p, png)
+    cur = card_pics()
+    cur[kind], cur[kind + "File"] = True, name
+    return _save_card_pics(cur)
 
 
 # 시리즈 번호 (BR-245 · D-429): 채널마다 하나의 셈 · 쇼츠 편집본마다 처음 내보낼 때(또는 올리기 키트를 만들 때) 한 번 정하고 다시 내보내도 그대로
