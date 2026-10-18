@@ -121,10 +121,12 @@ def _duration_by_reading(path):
     return int(ts[-1][0]) * 3600 + int(ts[-1][1]) * 60 + float(ts[-1][2]) if ts else 0.0
 
 
-def probe(path):
-    """영상 한 개의 정보: 길이·코덱·크기·fps·회전·소리·촬영 시각."""
+def probe(path, timeout=None, read_len=True):
+    """영상 한 개의 정보: 길이·코덱·크기·fps·회전·소리·촬영 시각.
+    timeout: ffmpeg 를 기다릴 초 (넘으면 끄고 subprocess.TimeoutExpired) · read_len=False: 길이 정보가 없어도 끝까지 읽어 재지 않고
+    길이 0 으로 (보관함 줄의 해상도 안내처럼 보여 주기만 할 때 — 파일을 오래 잡고 있지 않게 · D-466)."""
     path = Path(path)
-    err = core.run([core.ffmpeg(), "-hide_banner", "-nostdin", "-i", str(path)]).stderr or ""
+    err = core.run([core.ffmpeg(), "-hide_banner", "-nostdin", "-i", str(path)], timeout=timeout).stderr or ""
     lines = err.splitlines()
     streams, head, cur = [], [], None
     for ln in lines:
@@ -148,9 +150,9 @@ def probe(path):
     m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
     dur = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
     st0 = re.search(r"Duration: [^\n]*?start: (-?[\d.]+)", err)  # 파일 시작 시각 (캠코더 .mts 는 1.4초 등)
-    if dur <= 0:
+    if dur <= 0 and read_len:
         dur = _duration_by_reading(path)
-    if dur <= 0:
+    if dur <= 0 and read_len:
         raise RuntimeError(f"'{path.name}'의 길이를 알 수 없어요 (파일이 깨졌을 수 있어요). 이 파일은 빼고 다시 묶어 주세요")
     vf = _split_top(v["desc"])
     sz = re.search(r", (\d{2,5})x(\d{2,5})", v["desc"])

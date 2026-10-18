@@ -4,6 +4,8 @@
   (겹치는 이름에 폴더 이름 · 복사 중·잠긴 파일은 그대로 · 빈 폴더만 지움) · /api/state 의 nested · /api/unnest
 - 화질: intake.quality_flag(카카오톡 이름 · 720p 이하 낮은 비트레이트) · intake.media(뒤에서 읽어 둠) · 실제 ffmpeg 로 읽기
 - 화면(ui.html, node): 한 촬영의 조각 판단(shootPieces) · [편집점 찾기]가 먼저 묶기를 권함 · 해상도·비트레이트 글 · 폴더 줄
+- 고친 점(D-465~D-467 · I-464): 폴더째 복사가 이어지는 중(filling) · 정션 · 파일을 오래 잡지 않는 화질 읽기(시간 제한 · 작업 중 쉼 ·
+  모아서 보임) · 묻는 카드는 실패 카드 자리 밖 · 폰 화면의 [휴대폰에서 옮기는 법] · 꺼내기 결과 글 · [이대로 두기]
 실행: 저장소 폴더에서 python3 -m unittest tests.test_footage_intake
 """
 import json
@@ -42,14 +44,14 @@ class Base(unittest.TestCase):
         self.patches += [mock.patch.object(intake, "_writer_open", return_value=False)]
         for p in self.patches:
             p.start()
-        intake._NEST.clear()
-        intake._SEEN.clear()
+        for d in (intake._NEST, intake._SEEN, intake._NEST_SEEN, intake._NEST_SIG):
+            d.clear()
 
     def tearDown(self):
         for p in self.patches:
             p.stop()
-        intake._NEST.clear()
-        intake._SEEN.clear()
+        for d in (intake._NEST, intake._SEEN, intake._NEST_SEEN, intake._NEST_SIG):
+            d.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def put(self, rel, size=100, age=3600):
@@ -59,7 +61,16 @@ class Base(unittest.TestCase):
             f.truncate(size)
         t = time.time() - age
         os.utime(p, (t, t))
+        self.age_dirs(p.parent)
         return p
+
+    def age_dirs(self, d, age=3600):
+        """폴더 수정 시각도 오래전으로 (방금 만든 폴더는 '아직 파일이 들어오는 중'으로 보임)."""
+        t = time.time() - age
+        d = Path(d)
+        while d != self.videos and self.videos in d.parents:
+            os.utime(d, (t, t))
+            d = d.parent
 
 
 class NestedTests(Base):
@@ -106,6 +117,96 @@ class NestedTests(Base):
         (real / "x.mp4").write_bytes(b"0")
         os.symlink(real, self.videos / "링크")
         self.assertEqual(intake.nested(self.videos), [])
+
+
+class FillingTests(Base):
+    """폴더째 복사가 아직 이어지는 중 (D-465): 탐색기는 영상의 수정 시각을 원본대로 두고, 영상과 영상 사이·사진을 복사하는
+    동안에는 쓰는 프로그램도 없음 → 폴더의 변화(영상 수·크기 합 · 안의 폴더 수정 시각)로 봄."""
+    def test_new_entry_in_folder_means_filling(self):
+        self.put("폰/IMG_1.MOV")
+        self.assertFalse(intake.nested(self.videos)[0]["filling"])
+        (self.videos / "폰" / "사진.JPG").write_bytes(b"0")  # 탐색기가 사진을 복사하는 중 (영상은 그대로 · 폴더 시각만 바뀜)
+        row = intake.nested(self.videos, fresh=True)[0]
+        self.assertEqual((row["copying"], row["filling"]), (0, True))
+
+    def test_folder_that_gains_a_video_between_polls_is_filling(self):
+        self.put("폰/IMG_1.MOV")
+        now = [1000.0]
+        with mock.patch.object(intake, "_mono", side_effect=lambda: now[0]):
+            self.assertFalse(intake.nested(self.videos, fresh=True)[0]["filling"], "처음 본 폴더는 기다리지 않음")
+            self.put("폰/IMG_2.MOV")  # 원본 시각 그대로 복사됨 (파일·폴더 시각은 오래전으로 맞춤)
+            now[0] += 3
+            row = intake.nested(self.videos, fresh=True)[0]
+            self.assertEqual((row["count"], row["copying"], row["filling"]), (2, 0, True), "영상 수가 바뀜 → 아직 들어오는 중")
+            now[0] += intake.STABLE + 0.1
+            self.assertFalse(intake.nested(self.videos, fresh=True)[0]["filling"], "STABLE 초 동안 그대로면 다 들어옴")
+
+    def test_unnest_waits_while_folder_is_filling(self):
+        self.put("폰/IMG_1.MOV")
+        (self.videos / "폰" / "IMG_2.MOV").write_bytes(b"0")  # 방금 생김 (폴더 시각도 지금)
+        os.utime(self.videos / "폰" / "IMG_2.MOV", (time.time() - 3600,) * 2)
+        logs = []
+        r = intake.unnest(self.videos, "폰", logs.append)
+        self.assertEqual(r, {"moved": [], "kept": [], "filling": True})
+        self.assertTrue((self.videos / "폰" / "IMG_1.MOV").exists(), "아무것도 옮기지 않고 폴더도 그대로")
+        self.assertTrue(any("들어오는 중" in x for x in logs))
+
+    def test_writer_check_runs_once_per_unchanged_file(self):
+        self.put("보관/a.mp4")
+        self.put("보관/b.mp4")
+        with mock.patch.object(intake, "_writer_open", return_value=False) as w:
+            for _ in range(3):
+                intake.nested(self.videos, fresh=True)
+            self.assertEqual(w.call_count, 2, "한 번 확인한 파일은 바뀌기 전까지 다시 열어 보지 않음 (보관 폴더 수백 개를 3초마다 열지 않게)")
+            self.put("보관/a.mp4", size=200)
+            intake.nested(self.videos, fresh=True)
+            intake._NEST_SEEN[str(self.videos / "보관" / "a.mp4")]["t"] -= intake.STABLE
+            intake.nested(self.videos, fresh=True)
+            self.assertEqual(w.call_count, 3, "바뀐 파일만 다시 확인")
+        intake.forget([])
+        self.assertTrue(intake._NEST_SEEN, "보관함 바로 안 목록의 forget 이 폴더 안 기억을 지우지 않음")
+
+    def test_writer_open_counts_as_copying(self):
+        self.put("폰/IMG_1.MOV")
+        with mock.patch.object(intake, "_writer_open", return_value=True):
+            row = intake.nested(self.videos, fresh=True)[0]
+        self.assertEqual(row["copying"], 1)
+
+
+class JunctionTests(Base):
+    """정션은 파이썬 3.12 전 Windows 에서 링크로 보이지 않음 → 재분석 태그로 봄 (D-465)."""
+    class Entry:
+        def __init__(self, attrs, tag, link=False):
+            self.path, self.attrs, self.tag, self.link = "C:/x", attrs, tag, link
+
+        def is_symlink(self):
+            return self.link
+
+        def stat(self, follow_symlinks=True):
+            return type("St", (), {"st_file_attributes": self.attrs, "st_reparse_tag": self.tag})()
+
+    def test_reparse_tags(self):
+        E = self.Entry
+        with mock.patch.object(intake.sys, "platform", "win32"), mock.patch.object(intake.os, "DirEntry", E):
+            self.assertTrue(intake._is_link(E(0x410, 0xA0000003)), "정션")
+            self.assertTrue(intake._is_link(E(0x410, 0xA000000C)), "심볼릭 링크")
+            self.assertFalse(intake._is_link(E(0x410, 0x9000001A)), "OneDrive 자리표시 폴더는 그대로 살펴봄")
+            self.assertFalse(intake._is_link(E(0x10, 0)), "보통 폴더")
+            self.assertTrue(intake._is_link(E(0x10, 0, link=True)))
+        self.assertFalse(intake._is_link(E(0x410, 0xA0000003)), "Windows 밖은 is_symlink 만")
+
+    def test_link_folders_are_skipped_and_refused(self):
+        self.put("정션/a.mp4")
+        self.put("폰/깊은 정션/b.mp4")
+        self.put("폰/c.mp4")
+        is_link = lambda e: Path(getattr(e, "path", e)).name in ("정션", "깊은 정션")  # noqa: E731
+        with mock.patch.object(intake, "_is_link", side_effect=is_link):
+            self.assertEqual([(r["folder"], r["count"]) for r in intake.nested(self.videos)], [("폰", 1)])
+            with self.assertRaises(FileNotFoundError):
+                intake.unnest(self.videos, "정션", QUIET)
+            r = intake.unnest(self.videos, "폰", QUIET)
+        self.assertEqual([m["name"] for m in r["moved"]], ["c.mp4"])
+        self.assertTrue((self.videos / "정션" / "a.mp4").exists() and (self.videos / "폰" / "깊은 정션" / "b.mp4").exists())
 
 
 class UnnestTests(Base):
@@ -221,6 +322,65 @@ class QualityTests(Base):
         self.assertEqual(sorted(calls), ["IMG_1.MOV", "KakaoTalk_1.mp4"], "복사 중인 파일은 안 읽음 · 한 번씩만")
         intake._INFO.clear()
 
+    def test_read_has_time_limit_and_never_reads_whole_file(self):
+        import bundle
+        seen = {}
+        with mock.patch.object(bundle, "probe", side_effect=lambda p, **kw: seen.update(kw) or {"duration": 0, "bytes": 1, "dw": 1280, "dh": 720}):
+            got = intake._probe_info(self.videos / "x.mp4")
+        self.assertEqual(seen, {"timeout": intake.INFO_TIMEOUT, "read_len": False})
+        self.assertEqual((got["w"], got["kbps"], got["dur"]), (1280, 0, 0), "길이를 모르면 비트레이트도 모름")
+        err = ("Input #0, mpegts, from 'x':\n  Duration: N/A, start: 0.000000, bitrate: N/A\n"
+               "  Stream #0:0[0x100]: Video: h264 (High), yuv420p(progressive), 1280x720 [SAR 1:1 DAR 16:9], 30 fps, 30 tbr, 90k tbn\n")
+        p = self.put("x.mp4")
+        runs = []
+        fake = lambda cmd, timeout=None, stdin=None: runs.append(timeout) or subprocess.CompletedProcess(cmd, 1, "", err)  # noqa: E731
+        with mock.patch.object(bundle.core, "run", side_effect=fake), \
+                mock.patch.object(bundle, "_duration_by_reading", return_value=0.0) as whole:
+            c = bundle.probe(p, timeout=7, read_len=False)
+            self.assertEqual((c["duration"], c["dw"], runs), (0.0, 1280, [7]))
+            whole.assert_not_called()
+            with self.assertRaises(RuntimeError, msg="묶기·편집실은 예전처럼 끝까지 읽어 재고, 모르면 알림"):
+                bundle.probe(p)
+            whole.assert_called_once()
+
+    def test_paused_while_job_runs(self):
+        self.put("IMG_1.MOV")
+        rows = lambda: [{"name": "IMG_1.MOV"}]  # noqa: E731
+        with mock.patch.object(intake, "_probe_info", return_value={"w": 1920, "h": 1080, "kbps": 9000}) as pr:
+            intake.media(rows(), self.videos, paused=True)
+            time.sleep(0.1)
+            self.assertFalse(intake._INFO_RUN["on"])
+            pr.assert_not_called()
+            intake.media(rows(), self.videos)
+            for _ in range(100):
+                if not intake._INFO_RUN["on"]:
+                    break
+                time.sleep(0.02)
+            r = intake.media(rows(), self.videos)
+        self.assertEqual(r[0]["media"]["w"], 1920)
+        intake._INFO.clear()
+        intake._INFO_Q.clear()
+
+    def test_results_are_shown_in_batches_while_reading(self):
+        p = self.put("IMG_1.MOV")
+        st = p.stat()
+        key = (str(p), st.st_size, st.st_mtime_ns)
+        with intake._LOCK:
+            intake._INFO[key] = {"w": 1920, "h": 1080, "kbps": 9000}
+            intake._INFO_HOLD.add(key)
+            intake._INFO_RUN.update(on=True, shown=intake._mono())  # 아직 읽는 중 · 방금 보였음
+        try:
+            r = intake.media([{"name": "IMG_1.MOV"}], self.videos)
+            self.assertNotIn("media", r[0], "하나 읽을 때마다 목록을 다시 그리지 않음")
+            self.assertEqual(intake._INFO_Q, [], "읽은 것은 다시 읽지 않음")
+            intake._INFO_RUN["shown"] -= intake.INFO_EVERY
+            r = intake.media([{"name": "IMG_1.MOV"}], self.videos)
+            self.assertEqual(r[0]["media"]["w"], 1920, "INFO_EVERY 초마다 모아서 보임")
+        finally:
+            intake._INFO_RUN.update(on=False, shown=0.0)
+            intake._INFO.clear()
+            intake._INFO_HOLD.clear()
+
     def test_real_file_resolution_bitrate_and_shot_time(self):
         ff = core.ffmpeg()
         p = self.videos / "KakaoTalk_20261008_160233.mp4"
@@ -278,7 +438,7 @@ class RouteTests(Base):
         self.put("KakaoTalk_1.mp4")
         code, s = self.call("/api/state?since=0")
         self.assertEqual(code, 200)
-        self.assertEqual(s["nested"], [{"folder": "10월5일 레슨", "count": 1, "size_mb": 0.0, "copying": 0}])
+        self.assertEqual(s["nested"], [{"folder": "10월5일 레슨", "count": 1, "size_mb": 0.0, "copying": 0, "filling": False}])
         by = {v["name"]: v for v in s["local"]}
         self.assertEqual(by["KakaoTalk_1.mp4"]["lowq"], "kakao")
         self.assertIsInstance(by["KakaoTalk_1.mp4"]["mtime"], int)
@@ -290,6 +450,26 @@ class RouteTests(Base):
         self.assertEqual(s["nested"], [])
         self.assertIn("IMG_5001.MOV", {v["name"] for v in s["local"]})
         self.assertFalse(self.app.JOB["name"], "작업 자리를 놓음")
+
+    def test_unnest_while_folder_fills_moves_nothing(self):
+        self.put("폰/IMG_1.MOV")
+        os.utime(self.videos / "폰", None)  # 방금 파일이 생긴 폴더
+        code, s = self.call("/api/state?since=0")
+        self.assertTrue(s["nested"][0]["filling"])
+        code, r = self.call("/api/unnest", {"folder": "폰"})
+        self.assertEqual((code, r["ok"], r["moved"], r.get("filling")), (200, True, [], True))
+        self.assertTrue((self.videos / "폰" / "IMG_1.MOV").exists())
+        self.assertFalse(self.app.JOB["name"])
+
+    def test_media_reading_pauses_during_job(self):
+        self.put("IMG_1.MOV")
+        self.app.JOB["name"] = "편집점 찾기"
+        try:
+            with mock.patch.object(intake, "media", wraps=intake.media) as m:
+                self.call("/api/state?since=0")
+        finally:
+            self.app.JOB["name"] = None
+        self.assertTrue(m.call_args.kwargs.get("paused"))
 
     def test_unnest_refused_while_job_runs(self):
         self.put("폰/IMG_1.MOV")
@@ -311,7 +491,13 @@ const fs = require("fs");
 const src = fs.readFileSync(process.argv[1], "utf8");
 const cut = (a, b) => { const i = src.indexOf(a), j = src.indexOf(b, i); if (i < 0 || j < 0) throw new Error("못 찾음 " + a); return src.slice(i, j); };
 const els = {};
-const el = id => els[id] || (els[id] = { id, hidden: true, value: "", textContent: "", innerHTML: "", disabled: false, scrollIntoView() {}, onclick: null });
+const el = id => els[id] || (els[id] = { id, hidden: true, value: "", textContent: "", innerHTML: "", disabled: false, scrollIntoView() {}, onclick: null,
+  querySelectorAll(sel) {  // innerHTML 의 data-… 단추를 흉내 (piecesCard)
+    const k = /\[data-(\w+)\]/.exec(sel)[1], re = new RegExp(`data-${k}="([^"]*)"`, "g"), out = [];
+    let m; while ((m = re.exec(this.innerHTML))) out.push({ dataset: { [k]: m[1] }, onclick: null });
+    return (this.btns = out);
+  } });
+const store = {}, localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
 const $ = el, esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 const srcOf = v => (v && v.source) || { kind: "unknown" };
 const state = { job: null, local: [], nested: [] };
@@ -323,7 +509,7 @@ const confirm = () => true, prompt = () => "촬영본", toast = m => calls.push(
 const segVal = () => "small", againMsg = () => "", api = async () => ({}), analyzed = () => {}, bundleDone = () => {};
 let lastLocalKey = "", poll = () => {};
 eval(cut('function analyzeNames(names, changedFile, separate) {', 'function againMsg(') + cut('function bundleNames(names) {', '/* 끝: 2-1d */')
-  + 'globalThis.T = { analyzeNames, shootPieces, qualityOf, nestRows, bundleNames };');
+  + 'globalThis.T = { analyzeNames, shootPieces, qualityOf, nestRows, bundleNames, unnestMsg, nestKeep };');
 const day = Date.UTC(2026, 9, 5, 3, 0, 0) / 1000;  // 그날 낮 (어느 시간대든 같은 날 안)
 const mk = (name, mtime, extra) => ({ name, mtime, source: { kind: "footage" }, ...extra });
 const out = {};
@@ -338,13 +524,18 @@ out.analyzed = T.shootPieces([mk("IMG_1.MOV", day), mk("IMG_2.MOV", day + 60, { 
 out.bundled = T.shootPieces([mk("묶음_20261005_촬영본.mp4", day), mk("IMG_2.MOV", day + 60)]);
 out.noTime = T.shootPieces([mk("IMG_1.MOV", 0), mk("IMG_2.MOV", day)]);
 state.local = [mk("IMG_1.MOV", day), mk("IMG_2.MOV", day + 300), { ...mk("유튜브.mp4", day + 400), source: { kind: "own" } }];
+const pc = $("piecesCard");
+const press = a => pc.btns.find(b => b.dataset.pc === a).onclick();
 calls.length = 0; T.analyzeNames(["IMG_1.MOV", "IMG_2.MOV"]);
-const hint = calls.find(c => c[0] === "fail");
-out.hint = hint && { kind: hint[1].kind, actions: hint[1].actions, labels: hint[1].labels, msg: hint[1].msg, jobs: calls.filter(c => c[0] === "job").length };
-calls.length = 0; hint[2].on.separate();
+out.hint = { shown: !pc.hidden, html: pc.innerHTML, btns: pc.btns.map(b => b.dataset.pc), fails: calls.filter(c => c[0] === "fail" || c[0] === "clear").length,
+  jobs: calls.filter(c => c[0] === "job").length };
+calls.length = 0; press("separate");
 out.separate = calls.filter(c => c[0] === "job").map(c => [c[1], c[2].names]);
-calls.length = 0; hint[2].on.bundle();
+out.hiddenAfter = pc.hidden;
+calls.length = 0; T.analyzeNames(["IMG_1.MOV", "IMG_2.MOV"]); press("bundle");
 out.bundle = calls.filter(c => c[0] === "job").map(c => [c[1], c[2].names]);
+calls.length = 0; T.analyzeNames(["IMG_1.MOV", "IMG_2.MOV"]); press("close");
+out.closeJobs = calls.filter(c => c[0] === "job").length;
 calls.length = 0; T.analyzeNames(["IMG_1.MOV", "유튜브.mp4"]);
 out.mixedJob = calls.filter(c => c[0] === "job").map(c => c[1]);
 calls.length = 0; T.analyzeNames(["IMG_1.MOV", "IMG_2.MOV"], true);
@@ -355,6 +546,18 @@ out.qLowFoot = T.qualityOf({ name: "x.mp4", lowq: "low", source: { kind: "footag
 out.qNone = T.qualityOf({ name: "x.mp4" });
 out.rowReady = T.nestRows([{ folder: "10월5일 레슨", count: 3, size_mb: 1500, copying: 0 }]);
 out.rowWait = T.nestRows([{ folder: "폰<b>", count: 2, size_mb: 10, copying: 1 }]);
+out.rowFilling = T.nestRows([{ folder: "폰", count: 2, size_mb: 10, copying: 0, filling: true }]);
+T.nestKeep({ "보관": 300 });
+out.keptRows = T.nestRows([{ folder: "보관", count: 300, size_mb: 9000, copying: 0, filling: false }, { folder: "폰", count: 2, size_mb: 10, copying: 0 }]);
+out.keptGrown = T.nestRows([{ folder: "보관", count: 301, size_mb: 9100, copying: 0, filling: false }]);
+out.keepAfterGrow = T.nestKeep();
+const mv = (name, from) => ({ name, from });
+out.mFilling = T.unnestMsg({ ok: true, moved: [], kept: [], filling: true });
+out.mNothing = T.unnestMsg({ ok: true, moved: [], kept: [] });
+out.mExists = T.unnestMsg({ ok: true, moved: [], kept: [{ name: "폰/a.MOV", why: "exists" }] });
+out.mCopying = T.unnestMsg({ ok: true, moved: [], kept: [{ name: "폰/a.MOV", why: "copying" }] });
+out.mMixed = T.unnestMsg({ ok: true, moved: [mv("a (폰).MOV", "폰/a.MOV"), mv("b.MOV", "폰/b.MOV")],
+  kept: [{ name: "폰/c.MOV", why: "copying" }, { name: "폰/d.MOV", why: "locked" }, { name: "폰/e.MOV", why: "exists" }] });
 console.log(JSON.stringify(out));
 """
 
@@ -379,11 +582,15 @@ class UiTests(unittest.TestCase):
 
     def test_analyze_suggests_bundle_first(self):
         h = self.o["hint"]
-        self.assertEqual((h["kind"], h["actions"], h["jobs"]), ("pieces", ["bundle", "separate"], 0))
-        self.assertEqual(h["labels"], {"bundle": "묶고 편집점 찾기", "separate": "따로 찾기"})
-        self.assertIn("한 촬영의 조각 같아요", h["msg"])
+        self.assertEqual((h["shown"], h["btns"], h["jobs"]), (True, ["bundle", "separate", "close"], 0))
+        self.assertEqual(h["fails"], 0, "묻는 카드는 실패 카드 자리에 그리지 않음 (꺼짐·실패 카드를 덮지 않게)")
+        self.assertIn("묶고 편집점 찾기", h["html"])
+        self.assertIn("따로 찾기", h["html"])
+        self.assertIn("한 촬영의 조각 같아요", h["html"])
         self.assertEqual(self.o["separate"], [["/api/analyze", ["IMG_1.MOV", "IMG_2.MOV"]]])
+        self.assertTrue(self.o["hiddenAfter"])
         self.assertEqual(self.o["bundle"], [["/api/bundle", ["IMG_1.MOV", "IMG_2.MOV"]]])
+        self.assertEqual(self.o["closeJobs"], 0, "[닫기]는 아무것도 시작하지 않음")
         self.assertEqual(self.o["mixedJob"], ["/api/analyze"], "내 촬영본이 아닌 영상이 섞이면 예전처럼")
         self.assertEqual(self.o["changedJob"], ["/api/analyze"], "파일이 바뀐 영상 다시 찾기는 묻지 않음")
 
@@ -405,6 +612,39 @@ class UiTests(unittest.TestCase):
         self.assertIn("아직 복사 중이에요 (1개)", w)
         self.assertIn('data-wait="1" disabled', w)
         self.assertNotIn("<b>", w, "폴더 이름은 글로만")
+        f = self.o["rowFilling"]
+        self.assertIn("아직 폴더에 파일이 들어오는 중이에요", f)
+        self.assertIn('data-wait="1" disabled', f, "영상과 영상 사이에도 [밖으로 꺼내기]를 막음")
+        self.assertIn('data-nestkeep="10월5일 레슨" data-n="3"', r)
+
+    def test_keep_folder_as_is(self):
+        k = self.o["keptRows"]
+        self.assertNotIn("'보관' 폴더", k)
+        self.assertIn("'폰' 폴더", k)
+        self.assertIn("폴더 1곳은 [이대로 두기]로 폴더 안에 그대로 둬요", k)
+        self.assertIn("data-nestshow", k)
+        self.assertIn("'보관' 폴더", self.o["keptGrown"], "영상을 새로 넣으면 다시 보임")
+        self.assertEqual(self.o["keepAfterGrow"], {})
+
+    def test_unnest_messages(self):
+        o = self.o
+        self.assertIn("아직 폴더에 파일이 들어오는 중", o["mFilling"])
+        self.assertEqual(o["mNothing"], "꺼낼 영상이 없어요 · 목록을 새로 고쳤어요")
+        self.assertIn("같은 이름의 파일이 방금 생김", o["mExists"])
+        self.assertNotIn("다른 프로그램", o["mExists"], "까닭마다 따로")
+        self.assertIn("아직 복사 중", o["mCopying"])
+        self.assertEqual(o["mMixed"], "영상 2개를 보관함으로 꺼냈어요 · 같은 이름이 있어 1개는 이름 뒤에 폴더 이름을 붙였어요 · 3개는 그대로 뒀어요 "
+                         "(아직 복사 중 1개 · 다른 프로그램이 쓰는 중 1개 · 같은 이름의 파일이 방금 생김 1개 · 잠시 뒤 다시 눌러 주세요)")
+
+    def test_phone_screen_hides_pc_only_guide_link(self):
+        src = (REPO / "ui.html").read_text(encoding="utf-8")
+        import re
+        tags = re.findall(r"<button[^>]*data-howto[^>]*>", src)
+        self.assertTrue(tags)
+        for t in tags:
+            self.assertIn("data-pc-only", t, "#phoneHow 카드는 폰 화면에 안 보이니 그 단추도 숨김")
+        self.assertRegex(src, r'id="phoneHow"[^>]*data-pc-only')
+        self.assertRegex(src, r'id="piecesCard"')
 
 
 if __name__ == "__main__":

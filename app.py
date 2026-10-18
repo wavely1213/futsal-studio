@@ -907,7 +907,8 @@ class Handler(BaseHTTPRequestHandler):
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
             rename.annotate(local)  # 탐색기에서 이름을 바꿔 끊긴 옛 이름 작업 (renamedFrom · [이어 붙이기])
-            intake.media(local, core.VIDEOS)  # 해상도·비트레이트(media · 뒤에서 읽어 둠) · 카카오톡 압축 사본 같음(lowq) (D-462)
+            # 해상도·비트레이트(media · 뒤에서 읽어 둠 · 작업 중에는 쉼) · 카카오톡 압축 사본 같음(lowq) (D-462 · D-466)
+            intake.media(local, core.VIDEOS, paused=bool(JOB["name"]))
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
                                     "result": JOB["result"] if not JOB["name"] and (not JOB["big"] or q.get("result") == ["1"]) else None,
                                     "resultBig": bool(JOB["big"]) and not JOB["name"],

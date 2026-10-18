@@ -10,8 +10,8 @@
   · 바뀐 파일로 편집점을 다시 찾으면 반쪽 파일로 만든 파형·썸네일·미리보기 파일을 지움(clear_media_cache)
 - convert: 못 쓰는 형식(.MTS 등)을 ffmpeg 로 MP4 로 바꿔 보관함에 넣음 (원본은 보관함 안 '바꾸기 전 원본' 폴더로 옮겨 그대로)
   · ffmpeg 는 core.run/core.popen 으로 (검은 창 없음 · 앱이 꺼지면 Job Object 로 같이 꺼짐) · 마지막 파일은 updater.replace_retry
-- nested·unnest: 폴더째 넣은 촬영본(휴대폰·SD카드 날짜 폴더) — 하위 폴더별 영상 수를 알리고, 누르면 보관함 바로 안으로 꺼냄 (D-460)
-- media·quality_flag: 보관함 줄의 해상도·비트레이트(뒤에서 ffmpeg 로 한 번씩 읽어 기억) · 카카오톡으로 받아 압축된 사본 알림 (D-462)
+- nested·unnest: 폴더째 넣은 촬영본(휴대폰·SD카드 날짜 폴더) — 하위 폴더별 영상 수를 알리고, 누르면 보관함 바로 안으로 꺼냄 (D-460 · 아직 들어오는 중이면 기다림 D-465)
+- media·quality_flag: 보관함 줄의 해상도·비트레이트(뒤에서 ffmpeg 로 한 번씩 읽어 기억 · 시간 제한 · 작업 중 쉼 · D-466) · 카카오톡으로 받아 압축된 사본 알림 (D-462)
 표준 라이브러리 + 앱 공통 도구(core·updater, 함수 안에서 불러옴)만 쓴다 (경로를 받아 판단 · core 가 함수 안에서, app 이 불러 씀 ·
 ffmpeg 경로는 부르는 쪽이 줌).
 """
@@ -61,20 +61,22 @@ def _writer_open(path):
     return False
 
 
-def copying(path, st=None):
-    """보관함 목록용: 이 파일이 아직 들어오는 중(복사 중)인지. 부를 때마다 본 크기·수정 시각을 기억해 비교한다."""
+def copying(path, st=None, seen=None):
+    """보관함 목록용: 이 파일이 아직 들어오는 중(복사 중)인지. 부를 때마다 본 크기·수정 시각을 기억해 비교한다.
+    seen: 기억해 둘 곳 (기본 _SEEN · 폴더째 넣은 촬영본은 _NEST_SEEN — forget 이 보관함 바로 안 목록만 남기므로 따로)."""
     path = Path(path)
+    memo = _SEEN if seen is None else seen
     try:
         st = st or path.stat()
     except OSError:
         return False
     key, now, k = (st.st_size, st.st_mtime_ns), _mono(), str(path)
     with _LOCK:
-        rec = _SEEN.get(k)
+        rec = memo.get(k)
         if rec is None:  # 처음 봄: 기다리지 않음 (켤 때·막 받은·막 묶은 영상이 '복사 중'이 되지 않게) — 쓰는 중이면 Windows 는
-            rec = _SEEN[k] = {"key": key, "t": now - STABLE, "ok": False}  # 쓰기 손잡이로, 그 밖은 다음 관찰(1초 뒤)에 크기가 바뀌어서 앎
+            rec = memo[k] = {"key": key, "t": now - STABLE, "ok": False}  # 쓰기 손잡이로, 그 밖은 다음 관찰(1초 뒤)에 크기가 바뀌어서 앎
         elif rec["key"] != key:
-            rec = _SEEN[k] = {"key": key, "t": now, "ok": False}
+            rec = memo[k] = {"key": key, "t": now, "ok": False}
         if now - rec["t"] < STABLE:
             return True
         if rec["ok"]:
@@ -82,7 +84,7 @@ def copying(path, st=None):
     if _writer_open(path):  # 크기는 그대로여도(탐색기는 처음에 크기를 다 잡아 둠) 쓰는 중
         return True
     with _LOCK:
-        if _SEEN.get(k) is rec:
+        if memo.get(k) is rec:
             rec["ok"] = True
     return False
 
@@ -342,6 +344,28 @@ NEST_DEPTH = 6     # 하위 폴더를 이만큼 깊이까지 (소니 캠코더 P
 NEST_MAX = 5000    # 한 번에 살펴볼 항목 수 (사진 수천 장이 든 DCIM 폴더째 넣어도 목록이 느려지지 않게)
 NEST_TTL = 3.0     # 살펴본 결과를 이만큼(초) 기억 (보관함 목록은 1초마다 부름)
 _NEST = {}         # 보관함 폴더 → (살펴본 때 monotonic, 결과)
+_NEST_SEEN = {}    # 폴더 안 영상 → copying() 의 기억 (한 번 '쓰는 프로그램 없음'을 확인한 파일은 바뀌기 전까지 다시 열어 보지 않음)
+_NEST_SIG = {}     # 하위 폴더 → {"key": (영상 수, 크기 합, 가장 늦은 폴더 수정 시각 ns), "t": 그 값을 처음 본 때 monotonic}
+_LINK_TAGS = (0xA0000003, 0xA000000C)  # 재분석 태그: 정션(IO_REPARSE_TAG_MOUNT_POINT) · 심볼릭 링크(IO_REPARSE_TAG_SYMLINK)
+
+
+def _is_link(e):
+    """바로 가기(심볼릭 링크·정션)인지 — os.DirEntry 또는 경로. Windows 의 정션은 파이썬 3.12 전에는 링크로 보이지 않고
+    폴더로 보여서(DirEntry.is_junction 은 3.12부터) 파일 속성의 재분석 태그로 본다. OneDrive 자리표시 같은 다른 재분석 지점은
+    바로 가기가 아니라 그대로 살펴봄 · 알 수 없으면(읽기 오류) 따라가지 않음 (D-465)."""
+    try:
+        if e.is_symlink():
+            return True
+        if sys.platform != "win32":
+            return False
+        path = e.path if isinstance(e, os.DirEntry) else os.fspath(e)
+        st = e.stat(follow_symlinks=False) if isinstance(e, os.DirEntry) else os.lstat(path)
+        if not getattr(st, "st_file_attributes", 0) & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+            return False
+        tag = getattr(st, "st_reparse_tag", 0) or getattr(os.lstat(path), "st_reparse_tag", 0)
+        return tag in _LINK_TAGS
+    except OSError:
+        return True
 
 
 def _skip_dir(name):
@@ -355,11 +379,14 @@ def _nest_file(name):
 
 
 def _nest_walk(top, limit):
-    """하위 폴더 top 아래 영상 파일 경로 (이름 순 · 깊이 NEST_DEPTH · 바로 가기(심볼릭 링크·정션)는 따라가지 않음) · 남은 살펴볼 수."""
-    out, stack = [], [(Path(top), 1)]
+    """하위 폴더 top 아래 영상 파일 경로 (이름 순 · 깊이 NEST_DEPTH · 바로 가기(심볼릭 링크·정션)는 따라가지 않음) · 남은 살펴볼 수 ·
+    살펴본 폴더 중 가장 늦은 수정 시각(초 · 폴더는 안에 파일이 새로 생기거나 지워질 때 바뀜 — 탐색기가 영상의 수정 시각을
+    원본대로 두어도 폴더 시각은 바뀌어서, 폴더째 복사가 아직 이어지는지 알 수 있음)."""
+    out, stack, newest = [], [(Path(top), 1)], 0.0
     while stack and limit > 0:
         d, depth = stack.pop()
         try:
+            newest = max(newest, os.stat(d).st_mtime)
             with os.scandir(d) as it:
                 items = sorted(it, key=lambda e: e.name)
         except OSError:
@@ -370,7 +397,7 @@ def _nest_walk(top, limit):
             if limit <= 0:
                 break
             try:
-                if e.is_symlink() or (getattr(e, "is_junction", None) and e.is_junction()):
+                if _is_link(e):
                     continue
                 if e.is_dir(follow_symlinks=False):
                     if depth < NEST_DEPTH and not _skip_dir(e.name):
@@ -380,12 +407,19 @@ def _nest_walk(top, limit):
             except OSError:
                 continue
         stack.extend(reversed(subs))
-    return out, limit
+    return out, limit, newest
+
+
+def _filling(newest):
+    """폴더째 복사가 아직 이어지는 중 같은지: 안의 폴더 하나라도 STABLE 초 안에 파일이 생기거나 지워짐."""
+    return 0 <= _wall() - newest < STABLE
 
 
 def nested(folder, fresh=False):
-    """보관함 폴더 바로 안 하위 폴더별로 그 안(더 깊은 폴더 포함)에 든 영상 [{folder, count, size_mb, copying}] (이름 순).
-    copying: 아직 들어오는 중인 것 수 (방금 바뀌었거나 Windows 에서 쓰는 프로그램이 있음) · 영상이 없는 폴더는 뺌."""
+    """보관함 폴더 바로 안 하위 폴더별로 그 안(더 깊은 폴더 포함)에 든 영상 [{folder, count, size_mb, copying, filling}] (이름 순).
+    copying: 아직 들어오는 중인 영상 수 (copying() 처럼 크기·수정 시각을 지켜보고 Windows 에서는 쓰는 프로그램 확인 · 한 번 확인한
+    파일은 바뀌기 전까지 다시 열어 보지 않음) · filling: 폴더째 복사가 아직 이어지는 중 같음 (영상 수·크기 합이 STABLE 초 안에
+    바뀌었거나, 안의 폴더에 방금 파일이 생김 — 영상과 영상 사이·사진을 복사하는 동안에도 · D-465) · 영상이 없는 폴더는 뺌."""
     folder = Path(folder)
     k = str(folder)
     hit = _NEST.get(k)
@@ -394,13 +428,14 @@ def nested(folder, fresh=False):
     out, limit = [], NEST_MAX
     try:
         with os.scandir(folder) as it:
-            tops = [e for e in it if not _skip_dir(e.name) and not e.is_symlink() and e.is_dir(follow_symlinks=False)]
+            tops = [e for e in it if not _skip_dir(e.name) and not _is_link(e) and e.is_dir(follow_symlinks=False)]
     except OSError:
         tops = []
+    seen_files, seen_tops = set(), set()
     for e in sorted(tops, key=lambda e: e.name):
         if limit <= 0:
             break
-        files, limit = _nest_walk(e.path, limit)
+        files, limit, newest = _nest_walk(e.path, limit)
         size = busy_n = n = 0
         for p in files:
             try:
@@ -409,10 +444,24 @@ def nested(folder, fresh=False):
                 continue
             n += 1
             size += st.st_size
-            if 0 <= _wall() - st.st_mtime < STABLE or _writer_open(p):
+            seen_files.add(str(p))
+            if 0 <= _wall() - st.st_mtime < STABLE or copying(p, st, _NEST_SEEN):
                 busy_n += 1
         if n:
-            out.append({"folder": e.name, "count": n, "size_mb": round(size / 1e6, 1), "copying": busy_n})
+            sig, now = (n, size, int(newest * 1e9)), _mono()
+            with _LOCK:
+                rec = _NEST_SIG.get(e.path)
+                if rec is None:  # 처음 봄: copying() 처럼 기다리지 않음 (켤 때 · 오래전에 넣어 둔 폴더)
+                    rec = _NEST_SIG[e.path] = {"key": sig, "t": now - STABLE}
+                elif rec["key"] != sig:
+                    rec = _NEST_SIG[e.path] = {"key": sig, "t": now}
+                filling = now - rec["t"] < STABLE or _filling(newest)
+            seen_tops.add(e.path)
+            out.append({"folder": e.name, "count": n, "size_mb": round(size / 1e6, 1), "copying": busy_n, "filling": filling})
+    with _LOCK:  # 없어진 폴더·파일의 기억은 지움
+        for d, keep in ((_NEST_SEEN, seen_files), (_NEST_SIG, seen_tops)):
+            for x in [x for x in d if x not in keep]:
+                del d[x]
     _NEST[k] = (_mono(), out)
     return [dict(r) for r in out]
 
@@ -444,11 +493,12 @@ def nest_target(folder, path, used):
 def unnest(folder, sub, log=print):
     """하위 폴더 sub 안(더 깊은 폴더 포함)의 영상을 보관함 바로 안으로 옮김 → {moved: [{name, from}], kept: [{name, why}]}.
     같은 드라이브 안 옮기기라 복사하지 않음 · 겹치는 이름은 폴더 이름을 붙임 · 아직 복사 중이거나 다른 프로그램이 잡고 있는 파일은
-    그대로 둠 · 다 비운 폴더만 지움(사진 등 다른 파일이 남은 폴더는 그대로)."""
+    그대로 둠 · 다 비운 폴더만 지움(사진 등 다른 파일이 남은 폴더는 그대로) · 폴더째 복사가 아직 이어지는 중이면(방금 안에 파일이
+    생김) 아무것도 옮기지 않고 {filling: True} · 바로 가기(심볼릭 링크·정션) 폴더는 거절."""
     import core
     import updater
     folder = Path(folder)
-    if not sub or sub != Path(sub).name or _skip_dir(sub) or not (folder / sub).is_dir():
+    if not sub or sub != Path(sub).name or _skip_dir(sub) or _is_link(folder / sub) or not (folder / sub).is_dir():
         raise FileNotFoundError("그 폴더를 보관함에서 찾지 못했어요. 목록을 새로 고친 뒤 다시 눌러 주세요")
     used = {"names": set(), "stems": set()}
     try:
@@ -460,7 +510,10 @@ def unnest(folder, sub, log=print):
                 used["stems"].add(core._stem_key(n).casefold())
     except OSError:
         pass
-    files, _ = _nest_walk(folder / sub, NEST_MAX)
+    files, _, newest = _nest_walk(folder / sub, NEST_MAX)
+    if _filling(newest):  # 폴더째 복사가 아직 이어지는 중 → 아무것도 옮기지 않음 (다 비운 폴더를 지우는 사이 탐색기가 다음 파일을
+        log(f"  아직 폴더에 파일이 들어오는 중이라 그대로 뒀어요 · {sub}")  # 그 폴더에 쓰려다 '대상 폴더 없음'으로 멈추지 않게)
+        return {"moved": [], "kept": [], "filling": True}
     moved, kept, dirs = [], [], set()
     for p in files:
         rel = p.relative_to(folder).as_posix()
@@ -507,7 +560,11 @@ TINY_SIDE = 480    # 짧은 변이 이보다 작으면 비트레이트와 상관
 _KAKAO = re.compile(r"^kakaotalk_", re.I)
 _INFO = {}         # (경로, 크기, 수정 시각 ns) → {w, h, kbps, dur, created} 또는 {} (못 읽음)
 _INFO_Q = []       # 뒤에서 하나씩 읽을 파일 (경로, 열쇠)
-_INFO_RUN = {"on": False}
+_INFO_HOLD = set() # 읽었지만 아직 목록에 안 보인 열쇠 — 몇 개씩 모아 한 번에 보임 (하나 읽을 때마다 목록을 다시 그리면 열어 둔 메뉴가 닫힘)
+_INFO_RUN = {"on": False, "pause": False, "shown": 0.0}  # 뒤에서 읽는 중 · 작업 중이라 쉼 · 마지막으로 모아 보인 때(monotonic)
+INFO_TIMEOUT = 20  # 영상 하나를 읽는 ffmpeg 를 기다릴 초 (멈춘 ffmpeg 하나가 뒤의 영상을 다 막지 않게)
+INFO_BATCH = 8     # 이만큼 모이거나
+INFO_EVERY = 10.0  # 이만큼(초) 지나면 (또는 다 읽으면) 목록에 보임
 
 
 def quality_flag(name, info):
@@ -527,7 +584,7 @@ def _probe_info(path):
     """영상 하나의 화면 크기(보이는 방향)·전체 비트레이트(kbps)·길이·촬영 시각 (bundle.probe 와 같은 읽기 · 못 읽으면 {})."""
     import bundle
     try:
-        c = bundle.probe(path)
+        c = bundle.probe(path, timeout=INFO_TIMEOUT, read_len=False)  # 길이 정보가 없는 파일도 끝까지 읽지 않음 (비트레이트는 모름)
     except Exception:  # noqa: BLE001 — 안내용 · 깨진 파일은 편집점 찾기가 따로 알림
         return {}
     dur = c.get("duration") or 0
@@ -538,7 +595,7 @@ def _probe_info(path):
 def _info_worker():
     while True:
         with _LOCK:
-            if not _INFO_Q:
+            if not _INFO_Q or _INFO_RUN["pause"]:  # 다 읽음 · 작업이 시작됨 (남은 것은 작업이 끝난 뒤 다음 목록에서 이어 읽음)
                 _INFO_RUN["on"] = False
                 return
             path, key = _INFO_Q.pop(0)
@@ -548,13 +605,24 @@ def _info_worker():
         with _LOCK:
             if len(_INFO) > 3000:
                 _INFO.clear()
+                _INFO_HOLD.clear()
             _INFO[key] = got
+            _INFO_HOLD.add(key)
 
 
-def media(rows, folder):
+def media(rows, folder, paused=False):
     """보관함 목록에 'media' {w, h, kbps, dur, created}(아는 것만) · 'lowq'(quality_flag) 를 붙임.
-    처음 보는 파일은 뒤에서 하나씩 ffmpeg 로 읽고(목록은 기다리지 않음 · 다음 목록부터 보임) · 복사 중인 파일은 다 들어온 뒤 읽음."""
+    처음 보는 파일은 뒤에서 하나씩 ffmpeg 로 읽고(목록은 기다리지 않음 · 다음 목록부터 보임) · 복사 중인 파일은 다 들어온 뒤 읽음.
+    읽은 것은 INFO_BATCH 개씩 · INFO_EVERY 초마다 · 다 읽으면 모아서 보임 (목록을 1초마다 다시 그리지 않게 · D-466).
+    paused: 편집점 찾기·묶기 같은 작업 중 — 새로 읽기 시작하지 않고, 읽던 것도 지금 파일까지만 (작업과 디스크·ffmpeg 를 다투지 않게)."""
     folder, want = Path(folder), []
+    with _LOCK:
+        _INFO_RUN["pause"] = bool(paused)
+        now = _mono()
+        if _INFO_HOLD and (not _INFO_RUN["on"] or len(_INFO_HOLD) >= INFO_BATCH or now - _INFO_RUN["shown"] >= INFO_EVERY):
+            _INFO_HOLD.clear()
+            _INFO_RUN["shown"] = now
+        hold = set(_INFO_HOLD)
     for r in rows:
         p = folder / r["name"]
         flag = quality_flag(r["name"], None)
@@ -566,9 +634,11 @@ def media(rows, folder):
         if st is not None and not r.get("copying"):
             key = (str(p), st.st_size, st.st_mtime_ns)
             with _LOCK:
-                info = _INFO.get(key)
-            if info is None:
+                got = _INFO.get(key)
+            if got is None:
                 want.append((p, key))
+            elif key not in hold:
+                info = got
         if info:
             r["media"] = dict(info)
             flag = quality_flag(r["name"], info)
@@ -578,8 +648,8 @@ def media(rows, folder):
         with _LOCK:
             queued = {k for _, k in _INFO_Q}
             _INFO_Q.extend(x for x in want if x[1] not in queued)
-            start = not _INFO_RUN["on"]
-            _INFO_RUN["on"] = True
+            start = not _INFO_RUN["on"] and not paused
+            _INFO_RUN["on"] = _INFO_RUN["on"] or start
         if start:
             threading.Thread(target=_info_worker, daemon=True, name="media-info").start()
     return rows
