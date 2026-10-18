@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import core
 import editor
+import epfont
 import intake
 import source
 import updater
@@ -52,6 +53,7 @@ EDIT_UPLOAD_MAX = 64 << 20     # 편집실 바로 가져오기(/api/edit/upload)
 CHUNK = 8 << 20                # 조각 올리기 기본 조각 (Cloudflare 빠른 터널 요청 본문 100MB 보다 훨씬 작게)
 CHUNK_MAX = 16 << 20
 HANDOFF_BODY_MAX = 1024
+FONT_BODY_MAX = epfont.FONT_MAX * 4 // 3 + (1 << 20)   # 은평 스타일 '글꼴 파일 고르기'(/api/style/card_font) — 글꼴 한도 40MB 의 base64(4/3) + JSON 여유
 MEDIA_WAIT = 15.0              # 미디어 동시 수가 꽉 찼으면 이만큼 기다려 봄 (편집실이 영상 여러 개를 한꺼번에 열 때)
 MEDIA_SEND_TIMEOUT = 120       # 미디어를 보내는 동안의 소켓 기다림 (PC 화면 app.Handler.timeout 과 같게 · 요청을 읽을 때는 RemoteHandler 20초 그대로 · D-368)
 FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}   # app.FONT_TYPES 와 같음
@@ -732,9 +734,12 @@ def gate(h, method, svc, ip):
         if n is None:
             return send(h, 411, {"ok": False, "error": "요청을 보내는 방식이 맞지 않아요 · 새로 고친 뒤 다시 해 주세요"})
         raw_ok = path in ("/api/edit/upload", "/s/upload/chunk")
-        limit = EDIT_UPLOAD_MAX if path == "/api/edit/upload" else CHUNK_MAX if path == "/s/upload/chunk" else JSON_MAX
+        limit = (EDIT_UPLOAD_MAX if path == "/api/edit/upload" else CHUNK_MAX if path == "/s/upload/chunk"
+                 else FONT_BODY_MAX if path == "/api/style/card_font" else JSON_MAX)
         if n > limit:
             h.close_connection = True
+            if path == "/api/style/card_font":   # 글꼴 고르기에는 조각 올리기가 없음 → 크기 안내만 (ui.html CARD_FONT_MAX 와 같은 문장)
+                return send(h, 413, {"ok": False, "code": "too_big", "error": f"글꼴 파일이 너무 커요 · {epfont.FONT_MAX >> 20}MB 보다 작은 파일을 골라 주세요"})
             return send(h, 413, {"ok": False, "code": "too_big", "error": "한 번에 보내기에 너무 커요 · 조각 올리기로 다시 해 주세요"})
         ct = _ctype(h)
         if raw_ok:

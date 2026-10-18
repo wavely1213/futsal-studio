@@ -767,12 +767,19 @@ class Handler(BaseHTTPRequestHandler):
             if not p:
                 return self._send(404, {"error": "not found"})
             return self._file(p, "image/png")
-        if u.path == "/api/style/card_font":  # 은평 스타일 글꼴 줄 (찾았는지·이름·고른 파일이 있는지·찾는 중 · BR-312)
-            return self._send(200, style.card_font_state())
+        if u.path == "/api/style/card_font":  # 은평 스타일 글꼴 줄 (찾았는지·이름·고른 파일이 있는지·찾는 중 · BR-312) · full=1: 편집실이 늦게 받을 글꼴 정보도 (BR-311)
+            return self._send(200, style.card_font_state(full=(q.get("full") or [""])[0] == "1"))
         if u.path == "/api/style/ep_font":  # 은평 스타일 글꼴 파일 (편집실 미리보기 @font-face · 고른 파일 또는 이 PC 에 깔린 KFA 글꼴 · BR-311)
             info = editor.ep_font(wait=False)
             if not info or not Path(info["path"]).is_file():
                 return self._send(404, {"error": "not found"})
+            if info["ext"] == ".ttc":  # 묶음은 쓰는 글꼴 하나만 떼어 줌 (브라우저는 묶음의 첫 글꼴만 그림 · 내보내기와 같은 글꼴 · I-502)
+                try:
+                    raw, ext = epfont.single_face(info["path"], info["index"])
+                except (ValueError, OSError) as e:
+                    log(f"은평 스타일 글꼴 묶음에서 글꼴을 떼어 내지 못했어요 · {e}")
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, raw, FONT_TYPES[ext])
             return self._file(Path(info["path"]), FONT_TYPES.get(info["ext"], "application/octet-stream"))
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
@@ -903,7 +910,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "recommend": editor.recommend(n),
                                         "epx": dict(style.card_extras(), next=style.series_peek(),   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
                                                     pics=style.card_pic_refs(),   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
-                                                    font=epfont.public(editor.ep_font(wait=False)))})   # 은평 스타일 글꼴 (이름·폭 표·파일 주소 · 못 찾으면 null · BR-311)
+                                                    font=epfont.public(editor.ep_font(wait=False)),   # 은평 스타일 글꼴 (이름·폭 표·파일 주소 · 못 찾으면 null · BR-311)
+                                                    fontChecking=epfont.checking())})   # 아직 찾는 중 → 편집실이 끝나면 다시 받음 (/api/style/card_font?full=1)
             except Exception as e:
                 studiolog.trace(e)
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})

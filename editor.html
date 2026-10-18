@@ -2653,6 +2653,20 @@ function epFontLoad() {
   new FontFace("EpFontE", `url("${EPF.url}")`, { weight: "400" }).load().then(f => { document.fonts.add(f); frameDirty = true; })
     .catch(() => toast("은평 스타일 글꼴을 불러오지 못했어요 · 미리보기만 기본 글꼴로 보여요 (내보낸 영상에는 KFA 글꼴이 들어가요)"));
 }
+// 편집실을 열 때 서버가 아직 KFA 글꼴을 찾는 중이었으면(epx.fontChecking · 앱을 막 켰을 때 등) 끝날 때까지 0.5초마다 다시 물어 받음 (/api/style/card_font?full=1 ·
+// 2분까지) — '은평 스타일' 템플릿·새 쇼츠는 글자 크기를 정하기 전에 이것을 기다림 (안 기다리면 Pretendard 폭으로 정한 크기가 저장되고 내보내기는 KFA 로 그림 · I-503)
+let epFontWaiting = null;
+function epFontReady() {
+  if (EPF || !EPX || !EPX.fontChecking) return Promise.resolve(EPF);
+  return epFontWaiting || (epFontWaiting = (async () => {
+    for (let i = 0; i < 240 && EPX.fontChecking; i++) {
+      const j = await fetch("/api/style/card_font?full=1").then(r => r.json()).catch(() => null);
+      if (j && !j.checking) { EPF = j.font || null; epFontLoad(); frameDirty = true; break; }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    EPX.fontChecking = false; epFontWaiting = null; return EPF;
+  })());
+}
 function epPics(bg, f, k, W, H) {
   let p = bg._ep;
   if (!(f.bg === "box" && (f.band || f.logo))) { if (p) css(p.root, "display", "none"); return; }
@@ -5254,6 +5268,7 @@ async function renderRec() {
   };
   document.querySelectorAll("[data-rec]").forEach(b => b.onclick = async () => {
     const s = r.shorts[+b.dataset.rec], on = await topicSetting();  // 설정은 누를 때 다시 봄 (편집실을 연 뒤 스타일 화면에서 꺼도 따름)
+    if (epOn(recBase().base)) await epFontReady();  // 은평 스타일 바탕이면 KFA 글꼴을 찾은 뒤 큰 제목 크기를 정함 (I-503)
     const { base, top0 } = recBase();
     commit("쇼츠 편집본 추가");
     const q = { id: nid(), name: uniqSeqName(`쇼츠 · ${cutText(s.title, 14)}`), format: "shorts", v: 2, captionsOn: true, tracks: defaultTracks(), trans: [], markers: [], shapes: [],
@@ -6264,7 +6279,10 @@ function renderSeqTab() {
     if ($("pBar")) { const e2 = $("pBar"); let before = null; e2.oninput = () => { if (!before) before = JSON.stringify(P); S.layout.bar = e2.value; frameDirty = true; }; e2.onchange = () => { if (before) { pushHist("박스 색", before); before = null; scheduleSave(); } }; }
     bindRange("pCropB", v => S.layout.cropBottom = v, v => Math.round(v * 100) + "%", "원본 자르기"); bindRange("pCropT", v => S.layout.cropTop = v, v => Math.round(v * 100) + "%", "원본 자르기");
     if ($("pZoom")) { bindRange("pZoom", v => S.layout.zoom = v, v => Math.round(v * 100) + "%", "영상 크기"); bindRange("pVpos", v => S.layout.vpos = v, v => v < 0.45 ? "위쪽" : v > 0.55 ? "아래쪽" : "가운데", "영상 위치"); }
-    document.querySelectorAll("[data-tpl]").forEach(b => b.onclick = () => { commit("템플릿"); TEMPLATES[b.dataset.tpl](); changed(false); toast(`"${b.dataset.tpl}" 템플릿을 적용했어요`); });
+    document.querySelectorAll("[data-tpl]").forEach(b => b.onclick = async () => {
+      if (b.dataset.tpl === "은평 스타일" && !EPF && EPX && EPX.fontChecking) { toast("KFA 글꼴을 찾는 중이에요 · 찾으면 바로 적용해요"); await epFontReady(); }  // 글자 크기를 KFA 폭으로 (I-503)
+      commit("템플릿"); TEMPLATES[b.dataset.tpl](); changed(false); toast(`"${b.dataset.tpl}" 템플릿을 적용했어요`);
+    });
   }
   bindStyle("cs_", () => S.captionStyle, el);
   document.querySelectorAll("#rt-seq [data-preset]").forEach(b => b.onclick = () => { commit("자막 스타일"); Object.assign(S.captionStyle, PRESETS[b.dataset.preset]); changed(false); toast(`"${b.dataset.preset}" 스타일을 적용했어요`); });
@@ -8118,7 +8136,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   P = j.project; P.sequences.forEach(ensureSeq); signFresh();
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
-  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad();
+  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad(); epFontReady();
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;

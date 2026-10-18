@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -42,12 +43,13 @@ DOHYEON = editor.FONTS / "DoHyeon-Regular.ttf"
 FAMILY = "KFA고딕 테스트"
 
 
-def renamed(src, family=FAMILY, weight=None, lang=0x412):
-    """글꼴 바이트의 이름 표를 바꿈 (Windows 플랫폼 · 한국어 이름만 · 새 이름 표를 끝에 붙이고 표 목록이 가리키게) · weight: OS/2 굵기."""
+def renamed(src, family=FAMILY, weight=None, lang=0x412, ps="KFATest-Regular", full=None):
+    """글꼴 바이트의 이름 표를 바꿈 (Windows 플랫폼 · 한국어 이름만 · 새 이름 표를 끝에 붙이고 표 목록이 가리키게) · weight: OS/2 굵기 ·
+    ps: PostScript 이름 · full: 전체 이름 (없으면 글꼴 이름)."""
     b = bytearray(Path(src).read_bytes() if not isinstance(src, (bytes, bytearray)) else src)
     n = struct.unpack_from(">H", b, 4)[0]
     rows, strs = [], b""
-    for txt, nid in ((family, 1), ("Regular", 2), (family, 4), ("KFATest-Regular", 6)):
+    for txt, nid in ((family, 1), ("Regular", 2), (full or family, 4), (ps, 6)):
         s = txt.encode("utf-16-be")
         rows.append(struct.pack(">6H", 3, 1, 0x409 if nid == 6 else lang, nid, len(s), len(strs)))
         strs += s
@@ -159,6 +161,55 @@ class ParseTest(unittest.TestCase):
         self.assertEqual([x["index"] for x in epfont._best(fs)], [1, 0])   # KFA 이름이 먼저
         self.assertEqual(epfont.metrics(raw, 1), epfont.metrics(DOHYEON))   # PIL 이 묶음 속 글꼴을 읽음
 
+    def test_single_face(self):
+        """TTC 묶음에서 글꼴 하나만 떼어 냄 (편집실 미리보기 · 브라우저는 묶음의 첫 글꼴만 그림) — 그 글꼴 하나 · 이름·굵기·폭 표가 묶음 속 그 글꼴과 같음."""
+        raw = ttc([DOHYEON.read_bytes(), renamed(DOHYEON, weight=700)])
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "묶음.ttc"
+            p.write_bytes(raw)
+            one, ext = epfont.single_face(p, 1)
+            self.assertEqual(ext, ".ttf")
+            self.assertEqual(one[:4], b"\x00\x01\x00\x00")
+            [x] = epfont.faces(one)
+            self.assertEqual((x["index"], x["family"], x["weight"]), (0, FAMILY, 700))
+            self.assertEqual(epfont.metrics(one), epfont.metrics(raw, 1))
+            [y] = epfont.faces(epfont.single_face(p, 0)[0])
+            self.assertEqual((y["family"], y["weight"]), ("Do Hyeon", 400))
+            from PIL import ImageFont
+            import io
+            self.assertEqual(ImageFont.truetype(io.BytesIO(one), 40).getname(), ImageFont.truetype(io.BytesIO(raw), 40, index=1).getname())   # FreeType 도 같은 글꼴
+            for bad in ((p, 2), (DOHYEON, 0)):
+                with self.assertRaises(ValueError):
+                    epfont.single_face(*bad)
+
+    def test_ass_name(self):
+        """ASS 'Style:' 줄은 쉼표로 칸을 나눔 — 쉼표·제어 글자가 든 글꼴 이름은 안 씀 (전체 이름 → PostScript 이름 → FreeType 이름 · 다 안 되면 그 글꼴은 안 씀)."""
+        for ok in ("KFA고딕", "Do Hyeon", "KFATest-Regular"):
+            self.assertTrue(epfont.ass_name_ok(ok), ok)
+        for bad in ("", "  ", "Foo Gothic, KR", "a\tb", "a\nb", "a\x7fb", None):
+            self.assertFalse(epfont.ass_name_ok(bad), bad)
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "쉼표.ttf"
+            p.write_bytes(renamed(DOHYEON, "KFA고딕, 굵게", full="KFA고딕 굵게"))
+            [x] = epfont.faces(p)
+            self.assertEqual((x["family"], x["full"], x["ass"]), ("KFA고딕, 굵게", "KFA고딕 굵게", ["KFA고딕, 굵게", "KFA고딕 굵게"]))   # TrueType = PostScript 이름은 안 씀
+            self.assertEqual(epfont._info(p, x, "picked", "쉼표.ttf")["family"], "KFA고딕 굵게")       # 전체 이름 (libass 가 맞춰 봄)
+            p.write_bytes(renamed(DOHYEON, "KFA고딕, 굵게"))
+            [x] = epfont.faces(p)
+            with self.assertRaisesRegex(ValueError, "쓸 수 없는 글자"):
+                epfont._info(p, x, "picked", "쉼표.ttf")
+        [o] = epfont.faces(editor.FONTS / "Pretendard-Bold.otf")   # CFF 글꼴은 PostScript 이름까지 (libass 가 맞춰 봄)
+        self.assertEqual(o["ass"][0], "Pretendard")
+        self.assertIn("Pretendard-Bold", o["ass"])
+        # 이름이 다 쉼표면 그 글꼴은 안 씀 → 깔린 글꼴 · 지금 글꼴 (엉뚱한 글꼴·크기로 그리지 않게)
+        epfont.forget()
+        with mock.patch.object(style, "STYLES", Path(tempfile.mkdtemp()) / "styles"), mock.patch.object(epfont, "FONT_DIRS", []), \
+                mock.patch.object(epfont, "_log"):
+            style.save_card_font(renamed(DOHYEON, "KFA고딕, 굵게"), "쉼표.ttf")
+            self.assertIsNone(epfont.find())
+            shutil.rmtree(style.STYLES.parent, ignore_errors=True)
+        epfont.forget()
+
     def test_not_fonts(self):
         good = DOHYEON.read_bytes()
         bad = [b"", b"hello world, not a font", (ROOT / "eunpyeong" / "logo.png").read_bytes(), good[:200], b"ttcf" + b"\0" * 40,
@@ -217,6 +268,51 @@ class FindTest(FontEnv, unittest.TestCase):
         self.assertEqual(set(pub), {"family", "k", "em", "hangul", "src", "file", "url"})
         self.assertRegex(pub["url"], r"^/api/style/ep_font\?v=[0-9a-f]{10}$")
         self.assertNotIn(str(self.ftmp), json.dumps(pub, ensure_ascii=False))   # 경로는 화면에 안 줌
+
+    def test_installed_by_file_name(self):
+        """파일 이름에 KFA 가 들었으면 속 이름에 KFA 가 없어도 씀 (진짜 KFA 글꼴의 속 이름을 아직 모름 · 한국어 이름일 수도) ·
+        이름 표에만 KFA 가 든 다른 파일보다 먼저 · 한글이 없는 'KFA' 파일은 건너뜀."""
+        (self.fdirs[0] / "KFA고딕.ttf").write_bytes(DOHYEON.read_bytes())          # 속 이름 'Do Hyeon'
+        self.install("font0123.ttf", d=1, weight=900)                              # 이름 표에만 KFA (더 굵어도 파일 이름 쪽이 먼저)
+        nh = no_hangul_font()
+        if nh:
+            (self.fdirs[1] / "KFA Latin.ttf").write_bytes(nh.read_bytes())
+        info = epfont.find()
+        self.assertEqual((info["family"], info["src"], info["file"]), ("Do Hyeon", "installed", "KFA고딕.ttf"))
+        self.assertEqual(info["em"], epfont.metrics(DOHYEON)["em"])
+        (self.fdirs[0] / "KFA고딕.ttf").unlink()
+        epfont.forget()
+        self.assertEqual(epfont.find()["file"], "font0123.ttf")                     # 없으면 이름 표로
+        # 파일 이름 쪽 여럿: 속 이름에 KFA 가 든 것 먼저 · 그다음 가장 굵은 것
+        (self.fdirs[0] / "KFA 굵게.ttf").write_bytes(renamed(DOHYEON, "Other Bold", weight=800, ps="Other-Bold"))
+        (self.fdirs[0] / "KFA 보통.ttf").write_bytes(renamed(DOHYEON, weight=400))
+        epfont.forget()
+        self.assertEqual(epfont.find()["file"], "KFA 보통.ttf")
+
+    def test_rescan_reads_only_new_files(self):
+        """글꼴 폴더가 바뀌어 다시 찾을 때는 새로 깐(바뀐) 파일만 읽음 (파일마다 읽은 이름 표를 기억 · 지운 파일은 잊음)."""
+        import os
+        for i in range(5):
+            (self.fdirs[0] / f"다른 글꼴 {i}.ttf").write_bytes(renamed(DOHYEON, f"Other {i}", ps=f"Other-{i}"))
+        with mock.patch.object(epfont, "faces", wraps=epfont.faces) as fc, mock.patch.object(epfont, "RECHECK", 0):
+            self.assertIsNone(epfont.find())
+            self.assertEqual(fc.call_count, 5)
+            new = self.fdirs[0] / "새 글꼴.ttf"
+            new.write_bytes(renamed(DOHYEON, ps="New-1"))
+            os.utime(self.fdirs[0], ns=(1, 10 ** 18))
+            fc.reset_mock()
+            self.assertEqual(epfont.find()["file"], "새 글꼴.ttf")
+            self.assertEqual([c.args[0].name for c in fc.call_args_list], ["새 글꼴.ttf"])
+            (self.fdirs[0] / "다른 글꼴 0.ttf").unlink()
+            os.utime(self.fdirs[0], ns=(1, 2 * 10 ** 18))
+            fc.reset_mock()
+            self.assertEqual(epfont.find()["file"], "새 글꼴.ttf")
+            self.assertEqual(fc.call_count, 0)
+            self.assertNotIn(str(self.fdirs[0] / "다른 글꼴 0.ttf"), epfont._FACES)
+        epfont.forget(files=False)   # 고르기·처음으로 = 파일마다 읽은 것은 남김
+        self.assertTrue(epfont._FACES)
+        epfont.forget()
+        self.assertFalse(epfont._FACES)
 
     def test_picked_first_then_reset(self):
         self.install()
@@ -282,6 +378,38 @@ class FindTest(FontEnv, unittest.TestCase):
             th.join(10)
         self.assertEqual(epfont.find(wait=False)["family"], FAMILY)
         self.assertFalse(epfont.checking())
+
+    def test_screen_never_searches_itself(self):
+        """화면 요청(wait=False)은 폴더가 바뀌었어도 스스로 찾지 않음 — 뒤 스레드가 찾고 화면은 UI_WAIT 뒤 기억해 둔 값 + '찾는 중' ·
+        끝나면 새 값 (글꼴을 하나 깔고 바로 스타일 화면·편집실을 열어도 요청이 글꼴 폴더를 다 읽기를 기다리지 않게)."""
+        import os
+        self.install()
+        first, k0 = epfont.find(), epfont._CACHE["key"]
+        self.assertEqual(first["file"], "KFA고딕.ttf")
+        go, held, who = threading.Event(), threading.Event(), []
+        real = epfont._lookup
+
+        def slow():
+            who.append(threading.current_thread())
+            held.set()
+            go.wait(10)
+            return real()
+        self.install("KFA 새 글꼴.ttf", weight=800)
+        epfont._CACHE.update(key=k0, info=first, at=0.0)   # 깔기 전 결과를 기억한 채 (install 이 비운 것을 되돌림)
+        os.utime(self.fdirs[0], ns=(1, 10 ** 18))
+        with mock.patch.object(epfont, "_lookup", slow), mock.patch.object(epfont, "UI_WAIT", 0.2):
+            t0 = time.monotonic()
+            self.assertEqual(epfont.find(wait=False)["file"], "KFA고딕.ttf")          # 예전 값을 바로
+            self.assertLess(time.monotonic() - t0, 2)
+            held.wait(5)
+            self.assertIsNot(who[0], threading.current_thread())                       # 찾기는 뒤 스레드
+            self.assertTrue(epfont.checking())
+            st = style.card_font_state()
+            self.assertEqual((st["found"], st["file"], st["checking"]), (True, "KFA고딕.ttf", True))   # 찾은 것 + 다시 찾는 중
+            go.set()
+            epfont._BG["th"].join(10)
+        self.assertFalse(epfont.checking())
+        self.assertEqual(epfont.find(wait=False)["file"], "KFA 새 글꼴.ttf")
 
     def test_failure_is_quiet(self):
         with mock.patch.object(epfont, "_lookup", side_effect=RuntimeError("boom")), mock.patch.object(epfont, "_log") as lg:
@@ -441,6 +569,29 @@ class AssTest(FontEnv, unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:   # 다른 화면은 글꼴 파일을 안 넣음
             editor._write_subs(Path(t), dict(q, layout=dict(editor.BOX_LAYOUT)), W, H, 30)
             self.assertFalse(any(p.name.startswith("ep_font") for p in (Path(t) / "fonts").iterdir()))
+
+    @unittest.skipUnless(FF, "ffmpeg 가 없어요")
+    def test_comma_name_real_render(self):
+        """글꼴 이름(이름 표 1번)에 쉼표가 든 고른 글꼴: ASS 'Style:' 줄 칸이 밀리지 않게 전체 이름을 씀 · libass 가 그 이름으로 그 글꼴 파일을 고름."""
+        style.save_card_font(renamed(DOHYEON, "KFA고딕, 굵게", full="KFA고딕 굵게", ps="KFAComma-Bold"), "쉼표 글꼴.ttf")
+        info = epfont.find()
+        self.assertEqual((info["family"], info["src"]), ("KFA고딕 굵게", "picked"))
+        q = ep_seq()
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            editor._write_subs(t, q, W, H, 30)
+            ass = (t / "subs.ass").read_text(encoding="utf-8")
+            fmt = next(ln for ln in ass.splitlines() if ln.startswith("Format: Name, Fontname"))
+            for ln in ass.splitlines():
+                if ln.startswith("Style:"):
+                    self.assertEqual(len(ln.split(",")), len(fmt.split(",")), ln)   # 칸 수 그대로 (크기·색·굵기가 밀리지 않음)
+            self.assertNotIn("KFA고딕, 굵게", ass)
+            r = subprocess.run([FF, "-hide_banner", "-loglevel", "debug", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:d=4:r=30", "-vf",
+                                "subtitles=subs.ass:fontsdir=fonts", "-f", "null", "-"], cwd=t, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        sel = [x for x in re.findall(r"fontselect: \((.+?), (\d+), \d+\) -> (\S+?),", r.stderr) if x[0] != "Arial"]
+        self.assertTrue(sel, r.stderr[-1500:])
+        self.assertEqual({f for f, _w, _p in sel}, {"KFA고딕 굵게"}, sel)
+        self.assertEqual(sel[0][2], "KFAComma-Bold", sel)                      # 그 글꼴 파일 (내보내기 fonts 폴더의 ep_font.ttf)
 
     def test_msg_measure(self):
         info = (self.install(), epfont.find())[1]
@@ -627,6 +778,39 @@ out.off = {{ on: epFontOn(S), fit: CS.map(st => T.map(t => [capFit(t, st, 1080),
         with mock.patch.object(editor, "ep_font", lambda wait=True: None):
             self.assertEqual(js0, [editor.ep_title_style(t) for t in self.TEXTS])
 
+    def test_late_font(self):
+        """편집실을 열 때 서버가 아직 찾는 중이었으면(epx.fontChecking) 끝날 때까지 다시 물어 글꼴을 받음 — 받은 뒤 큰 제목 크기는 그 글꼴 폭 (I-503) ·
+        찾는 중이 아니면 묻지 않음 · 끝내 못 찾으면 null."""
+        info = (self.install(), epfont.find())[1]
+        pub = epfont.public(info)
+        text = "패스하고 그 자리에 서 있으면 안 돼요"   # 좁은 글꼴이면 더 큰 글자 (AssTest.test_title_refit_with_real_metrics)
+        prog = ("let frameDirty = false, asked = 0; const toast = () => {};\n" + js_defs(["EP", "TOPIC", "emOf", "textW", "EPF", "EPX", "epFontLoad", "epFontWaiting",
+                                                                                      "epFontReady", "epTitleStyle"]) + f"""
+const answers = [{{ checking: true }}, {{ checking: true }}, {{ found: true, checking: false, font: {json.dumps(pub, ensure_ascii=False)} }}];
+globalThis.fetch = async u => {{ asked++; if (u !== "/api/style/card_font?full=1") throw new Error(u); const a = answers.shift(); return {{ json: async () => a }}; }};
+(async () => {{
+  const out = {{}};
+  EPX = {{}}; out.idle = (await epFontReady(), asked);                        // 찾는 중이 아니면 묻지 않음
+  EPX = {{ fontChecking: true }}; out.before = epTitleStyle({json.dumps(text, ensure_ascii=False)});
+  const a = epFontReady(), b = epFontReady(); out.same = a === b;            // 두 번 불러도 한 번만 물음
+  await a; out.asked = asked; out.family = EPF && EPF.family; out.after = epTitleStyle({json.dumps(text, ensure_ascii=False)}); out.dirty = frameDirty;
+  out.checking = EPX.fontChecking;
+  EPF = null; EPX = {{ fontChecking: true }}; answers.push({{ found: false, checking: false, font: null }}); await epFontReady(); out.none = EPF;
+  process.stdout.write(JSON.stringify(out));
+}})();""")
+        r = subprocess.run([NODE, "-e", prog], capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        js = json.loads(r.stdout)
+        self.assertEqual((js["idle"], js["same"], js["asked"], js["family"], js["dirty"], js["checking"], js["none"]), (0, True, 3, FAMILY, True, False, None))
+        with mock.patch.object(editor, "ep_font", lambda wait=True: None):
+            self.assertEqual(js["before"], editor.ep_title_style(text))           # 받기 전 = 예전 어림
+        self.assertEqual(js["after"], editor.ep_title_style(text))               # 받은 뒤 = 서버 (그 글꼴 폭)
+        self.assertNotEqual(js["before"]["size"], js["after"]["size"])
+        src = (ROOT / "editor.html").read_text(encoding="utf-8")
+        self.assertIn('if (b.dataset.tpl === "은평 스타일" && !EPF && EPX && EPX.fontChecking) { toast("KFA 글꼴을 찾는 중이에요 · 찾으면 바로 적용해요"); await epFontReady(); }', src)
+        self.assertIn("if (epOn(recBase().base)) await epFontReady();", src)
+        self.assertIn("epFontLoad(); epFontReady();", src)
+
     def test_editor_source(self):
         src = (ROOT / "editor.html").read_text(encoding="utf-8")
         self.assertIn('el.style.fontFamily = ep ? \'"EpFontE", PretendardE\'', src)                  # 은평 화면 글자 = KFA 글꼴 (타이틀 글꼴보다 먼저)
@@ -686,6 +870,20 @@ class RouteTest(unittest.TestCase):
                                              "file": "KFA고딕 테스트.ttf"}))
             self.assertEqual(get("/api/style/ep_font?v=1"), (200, "font/ttf", DOHYEON.read_bytes()))
             self.assertEqual(t.call("/api/style/list")[1]["cardFont"]["family"], "Do Hyeon")
+            st, j = t.call("/api/style/card_font?full=1")   # 편집실이 늦게 받을 글꼴 정보 (찾는 중이었을 때 · I-503)
+            self.assertEqual((st, j["font"]["family"], set(j["font"])), (200, "Do Hyeon", {"family", "k", "em", "hangul", "src", "file", "url"}))
+            self.assertNotIn("font", t.call("/api/style/card_font")[1])
+            # TTC 묶음: 쓰는 글꼴(KFA 이름 · 굵은 것 = 묶음의 2번째)만 떼어 줌 — 브라우저가 묶음의 첫 글꼴을 그리지 않게 (내보내기와 같은 글꼴)
+            raw = ttc([DOHYEON.read_bytes(), renamed(DOHYEON, weight=700)])
+            st, j = t.call("/api/style/card_font", {"data": data_url(raw), "name": "KFA 묶음.ttc"})
+            self.assertEqual((st, j["family"], j["src"]), (200, FAMILY, "picked"))
+            info = epfont.find()
+            self.assertEqual((info["index"], info["ext"]), (1, ".ttc"))
+            st, ct, body = get("/api/style/ep_font?v=2")
+            self.assertEqual((st, ct), (200, "font/ttf"))
+            [x] = epfont.faces(body)
+            self.assertEqual((x["family"], x["weight"]), (FAMILY, 700))
+            self.assertEqual(epfont.metrics(body), {k: info[k] for k in ("em", "hangul")})   # 미리보기 폭 표 = 떼어 준 글꼴
             st, j = t.call("/api/style/card_font", {"reset": True})
             self.assertEqual((st, j["found"], j["picked"]), (200, False, False))
             self.assertEqual(get("/api/style/ep_font")[0], 404)
@@ -702,7 +900,45 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(app.FONT_TYPES[".ttc"], "font/collection")
         src = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("font=epfont.public(editor.ep_font(wait=False))", src)   # 편집실을 열 때 은평 글꼴 (epx.font)
+        self.assertIn("fontChecking=epfont.checking())", src)                   # 아직 찾는 중이면 편집실이 다시 받음
         self.assertIn("epfont.warm()", src)
+
+
+class RemoteFontTest(unittest.TestCase):
+    """밖에서(휴대폰·웹) '글꼴 파일 고르기': 글꼴 한도(40MB)의 base64 본문이 원격 JSON 한도(32MB)에 막히지 않음 · 넘으면 크기 안내 (조각 올리기 안내 아님)."""
+
+    def test_big_font_from_remote(self):
+        import rstudio
+        from test_remote_studio import StudioBase
+
+        class T(StudioBase):
+            def runTest(self):
+                pass
+        t = T()
+        t.setUp()
+        fd = mock.patch.object(epfont, "FONT_DIRS", [])
+        fd.start()
+        epfont.forget()
+        try:
+            t.login()
+            self.assertGreaterEqual(rstudio.FONT_BODY_MAX, epfont.FONT_MAX * 4 // 3 + 1000)
+            raw = DOHYEON.read_bytes() + b"\0" * (26 << 20)   # 26MB 글꼴 (끝에 붙은 바이트는 글꼴 표 밖 · base64 본문 약 35MB > JSON_MAX)
+            body = {"data": data_url(raw), "name": "KFA 큰 글꼴.ttf"}
+            self.assertGreater(len(json.dumps(body)), rstudio.JSON_MAX)
+            st, _, out = t.req("POST", "/api/style/card_font", body)
+            j = json.loads(out)
+            self.assertEqual((st, j.get("ok"), j.get("family"), j.get("src")), (200, True, "Do Hyeon", "picked"), j)
+            st, _, out = t.req("POST", "/api/style/card_font", {"reset": True}, headers={"Content-Length": str(rstudio.FONT_BODY_MAX + 1)})
+            j = json.loads(out)
+            self.assertEqual((st, j["code"]), (413, "too_big"))
+            self.assertIn("글꼴 파일이 너무 커요 · 40MB 보다 작은 파일을 골라 주세요", j["error"])
+            st, _, out = t.req("POST", "/api/style/card_extras", {}, headers={"Content-Length": str(rstudio.JSON_MAX + 1)})
+            self.assertEqual(st, 413)
+            self.assertIn("조각 올리기", json.loads(out)["error"])   # 다른 길은 그대로
+        finally:
+            epfont.forget()
+            fd.stop()
+            t.doCleanups()
 
 
 if __name__ == "__main__":

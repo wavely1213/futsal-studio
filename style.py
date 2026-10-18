@@ -1399,7 +1399,7 @@ def save_card_font(data, name=""):
     f.parent.mkdir(parents=True, exist_ok=True)
     updater.write_atomic(f, json.dumps({"file": fname, "name": _clean_font_name(name) or fname, "set": time.strftime("%Y-%m-%d %H:%M")},
                                        ensure_ascii=False))
-    epfont.forget()
+    epfont.forget(files=False)   # 깔린 글꼴 파일마다 읽은 이름 표는 그대로 (다시 다 읽지 않게)
     return card_font()
 
 
@@ -1410,18 +1410,21 @@ def reset_card_font():
     f = _card_font_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     updater.write_atomic(f, json.dumps({"file": "", "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
-    epfont.forget()
+    epfont.forget(files=False)   # 깔린 글꼴 파일마다 읽은 이름 표는 그대로 (다시 다 읽지 않게)
     return card_font()
 
 
-def card_font_state(wait=False):
+def card_font_state(wait=False, full=False):
     """스타일 화면 글꼴 줄: {"found": 찾았는지, "family": 글꼴 이름, "src": picked/installed, "file": 파일 이름, "picked": 고른 파일이 있는지,
-    "checking": 아직 찾는 중인지}."""
+    "checking": 뒤에서 아직 찾는 중인지 (찾은 글꼴이 있어도 폴더가 바뀌어 다시 찾는 중이면 참 · 화면은 잠시 뒤 다시 물음)} ·
+    full: 편집실이 늦게 받을 글꼴 정보(epfont.public · "font")도."""
     import epfont
     info = epfont.find(wait=wait)
-    out = {"found": bool(info), "picked": bool(card_font()["file"]), "checking": not info and epfont.checking()}
+    out = {"found": bool(info), "picked": bool(card_font()["file"]), "checking": epfont.checking()}
     if info:
         out.update(family=info["family"], src=info["src"], file=info["file"])
+    if full:
+        out["font"] = epfont.public(info)
     return out
 
 
