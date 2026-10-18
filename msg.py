@@ -3665,8 +3665,8 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
         kinds = dict((seq.get("msg") or {}).get("summary", {}).get("kinds") or {})
         kinds["teaser"] = sum(1 for e in seq["msg"]["events"] if e["kind"] == "teaser" and "명장면" in (e.get("why") or ""))
         if fmt != "long" or not over:
-            if fmt == "shorts" and tot < MIN_SHORTS and knobs.get("pointStop", True) and _shorts_points(moms):
-                # 다음 포인트 앞에서 끊었더니 정리 컷·쉼 컷 뒤 MIN_SHORTS 초가 안 됨 → 끊지 않고 다시 (쇼츠가 아예 빠지지 않게 · D-267)
+            if fmt == "shorts" and tot < min_shorts() and knobs.get("pointStop", True) and _shorts_points(moms):
+                # 다음 포인트 앞에서 끊었더니 정리 컷·쉼 컷 뒤 min_shorts() 초가 안 됨 → 끊지 않고 다시 (쇼츠가 아예 빠지지 않게 · D-267)
                 knobs["pointStop"] = False
                 best = None
                 continue
@@ -4904,7 +4904,7 @@ def _shorts_window(rec, moms, dur, sig_demo=(), win=None, points=None, stop=True
     """쇼츠: 추천 구간 중 재미 순간이 가장 많은 곳(_shorts_best · 없으면 앞쪽 정리 구간 50초)의 컷 목록.
     win: 정해 준 구간 (끝까지 자동으로 · 포인트 하나 = 쇼츠 하나) — 고르지 않고 그 구간을 씀 (시범 살리기·끝 다듬기는 같음).
     points: 쇼츠 = 포인트 하나(BR-092 · 없으면 SHORTS_POINTS) — 포인트를 여는 말로 시작하는 구간에 앞 포인트의 시범을 붙이지 않고,
-    정리 말('오늘 배운 거')·끝인사·다음 포인트 앞에서 끝냄 (D-260) — 그 앞까지 남는 컷이 MIN_SHORTS 초 넘을 때만 (원본 시간이 아니라
+    정리 말('오늘 배운 거')·끝인사·다음 포인트 앞에서 끝냄 (D-260) — 그 앞까지 남는 컷이 min_shorts() 초 넘을 때만 (원본 시간이 아니라
     남는 컷 길이로 · D-267) · stop=False 면 다음 포인트 앞에서 끊지 않음 (끊어서 쇼츠가 너무 짧아졌을 때 compile_seq 가 다시 만듦 ·
     포인트를 넘는 쇼츠가 쇼츠 없음보다 나음 · D-267)."""
     pts = SHORTS_POINTS if points is None else points
@@ -4924,13 +4924,13 @@ def _shorts_window(rec, moms, dur, sig_demo=(), win=None, points=None, stop=True
         # (끝 8초 안의 딴소리('물 좀 마시고 할게요')로 끝나도 그 앞에서 — 마무리 없이 흐지부지 · 판정 round6)
         sec = [float(m["a"]) for m in moms if (m["kind"] == "section" and end - 15.0 < float(m["a"]) < end - 0.5)
                or (m["kind"] == "aside" and end - 8.0 < float(m["a"]) < end - 0.5)]
-        if pts and stop:  # 포인트 하나: 시작 뒤의 다음 포인트·정리 말·끝인사 앞에서 (얼마나 남든 · 앞에 남는 컷이 MIN_SHORTS 초 넘을 때)
+        if pts and stop:  # 포인트 하나: 시작 뒤의 다음 포인트·정리 말·끝인사 앞에서 (얼마나 남든 · 앞에 남는 컷이 min_shorts() 초 넘을 때)
             a0 = float(cuts[0]["in"]) if cuts else float(best["start"])
             sec += [float(m["a"]) for m in moms if (_point_mark(m) or m["kind"] in ("recap", "closing")) and a0 + 3.0 < float(m["a"]) < end - 0.5]
         if sec:
             at = min(sec) - 0.2
             kept = sum(max(0.0, min(float(c["out"]), at) - float(c["in"])) for c in cuts)
-            if (kept >= MIN_SHORTS) if pts and stop else (at - float(cuts[0]["in"]) >= 20.0):
+            if (kept >= min_shorts()) if pts and stop else (at - float(cuts[0]["in"]) >= _stop_min()):
                 cuts = [dict(c, out=min(float(c["out"]), at)) for c in cuts if float(c["in"]) < at - 0.3]
         return cuts
     out, tot = [], 0.0
@@ -5915,7 +5915,19 @@ def summary_of(events, sections, total, audio):
 
 MIN_RAW = 20.0        # 이보다 짧은 원본은 MSG 를 만들지 않음 (편집할 재료가 없음)
 MIN_WORDS = 12        # 받아쓰기 낱말이 이보다 적으면 말 없는 영상으로 봄
-MIN_SHORTS = 15.0     # 쇼츠 후보가 이보다 짧으면 만들지 않음
+MIN_SHORTS = 15.0     # 쇼츠 후보가 이보다 짧으면 만들지 않음 (스타일 화면 '쇼츠 길이'가 짧으면 min_shorts 로 낮춤)
+MIN_SHORTS_PART = 0.75  # 짧은 '쇼츠 길이'(한 동작 10~20초 · 레퍼런스): 가장 짧게의 이만큼까지 (정리 컷·쉼 컷 뒤에 줄어드는 몫)
+
+
+def min_shorts():
+    """이보다 짧은 MSG 쇼츠는 만들지 않음 — 기본 MIN_SHORTS(15초) · '쇼츠 길이'가 한 동작(10~20초)·짧은 레퍼런스면 가장 짧게 × MIN_SHORTS_PART
+    (BR-291 · 리뷰: 15초를 그대로 두면 10~20초 후보가 정리 컷 뒤 9~14초가 되어 고른 길이로는 쇼츠가 거의 안 나옴) · 기본·기술 하나·설명은 15초 그대로."""
+    return min(MIN_SHORTS, editor.shorts_len()[0] * MIN_SHORTS_PART)
+
+
+def _stop_min():
+    """포인트로 끊지 않을 때 끝 다듬기(다음 순서 말 앞에서 끝냄)가 남겨야 할 원본 길이 — 기본 20초 · '쇼츠 길이'가 짧으면 그 가장 짧게."""
+    return min(20.0, editor.shorts_len()[0])
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
@@ -5965,7 +5977,7 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
     captionsOld: MSG 가 다시 듣기 전 받아쓰기로 만든 자막 (프로젝트 자막을 사용자가 고쳤는지 보려고 · 다시 들은 적이 없으면 None).
     windows: 쇼츠 구간 목록 (끝까지 자동으로 · editor.recommend 쇼츠) — 주면 쇼츠 형식은 구간마다 하나씩 (결과 편집본 seq['msgWin'] = 그 번호).
     없으면 쇼츠는 하나 (MSG 가 고른 구간 · v2.16.0 그대로).
-    결과 notes: 만들지 않은 후보와 그 까닭 [{label, why, win}] (쇼츠가 MIN_SHORTS 초 안 될 때 · 편집실 알림에 보임 · D-267)."""
+    결과 notes: 만들지 않은 후보와 그 까닭 [{label, why, win}] (쇼츠가 min_shorts() 초 안 될 때 · 편집실 알림에 보임 · D-267)."""
     if intensity != "모두" and intensity not in INTENSITY:
         raise ValueError("MSG 양은 담백·보통·듬뿍 중에서 골라 주세요")
     specs = [s for s in (specs or []) if isinstance(s, dict) and s.get("name")][:3]
@@ -6010,9 +6022,9 @@ def build_variants(name, specs, intensity="보통", kinds=("long",), log=print, 
             seed = _seed(sig["sig"], st["label"], lv, fmt) + (wi or 0)
             seq, md = compile_seq(name, info, sig, segs, moms, st, lv, fmt, seed, label, log, caps, ai, windows[wi] if wi is not None else None)
             _check()
-            if fmt == "shorts" and editor.seq_total(seq) < MIN_SHORTS:
+            if fmt == "shorts" and editor.seq_total(seq) < min_shorts():
                 # (초는 내림 — 14.6초를 '15초뿐이에요 (15초 넘어야 해요)'로 쓰지 않게) · 결과 notes 로도 돌려줌 (편집실 알림·끝까지 자동으로 · D-267)
-                why = f"쇼츠 후보는 만들지 않았어요 · 재미 순간이 모인 구간이 {int(editor.seq_total(seq))}초뿐이에요 ({MIN_SHORTS:.0f}초 넘어야 해요)"
+                why = f"쇼츠 후보는 만들지 않았어요 · 재미 순간이 모인 구간이 {int(editor.seq_total(seq))}초뿐이에요 ({min_shorts():g}초 넘어야 해요)"
                 log("  " + why)
                 notes.append({"label": label, "why": why, "win": wi})
                 continue

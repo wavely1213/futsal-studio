@@ -133,6 +133,37 @@ class CaptionModeTest(Base):
         self.assertEqual(rstudio.POLICY.get(("POST", "/api/style/long_caps")), rstudio.WRITE)
 
 
+    def score(self, prof, chosen=None):
+        """score_video (영상·화면 살펴보기는 가짜 · 가편집·프로필·거리 셈은 진짜) → (점수 결과, auto_sequences 에 준 params)."""
+        name, info = self.lesson(2)
+        if chosen:
+            prof = dict(prof, longCaps=chosen)
+        st = {"name": "레슨", "profile": prof, "params": style.edit_params(prof)}
+        seen, real = {}, editor.auto_sequences
+
+        def auto(n, i, params, kinds):
+            seen.update(params)
+            return real(n, i, params, kinds)
+        segs = json.loads((core.adir(name) / "transcript.json").read_text(encoding="utf-8"))
+        with mock.patch.object(style, "_score_inputs", return_value=(st, segs)), mock.patch.object(style, "_cached_events", return_value={}), \
+                mock.patch.object(editor, "media_info", return_value=info), mock.patch.object(editor, "auto_sequences", side_effect=auto):
+            return style.score_video("레슨", name), seen
+
+    def test_score_unchanged_when_not_chosen(self):
+        """리뷰: 롱폼 말 자막을 고르지 않은 자막 7% 스타일 — 점수는 예전처럼 자막 끈 가편집으로 매김 ('자막' 100점 그대로 · 'small' 이면 약 9점)."""
+        r, seen = self.score(self.prof(0.07))
+        self.assertEqual(seen["longCaps"], "off")
+        self.assertLess(r["rough"]["captionRatio"], 0.1)
+        self.assertEqual(r["parts"]["자막"], 100)
+        r, seen = self.score(self.prof(0.65))
+        self.assertEqual(seen["longCaps"], "on")
+        r, seen = self.score(self.prof(0.07), chosen="small")   # 고른 값이면 그 값으로 만든 가편집을 매김
+        self.assertEqual(seen["longCaps"], "small")
+        self.assertGreater(r["rough"]["captionRatio"], 0.3)
+        self.assertLess(r["parts"]["자막"], 50)
+        self.assertEqual(style._params(self.prof(0.07))["longCaps"], "small", "가편집 자체는 '작게 켜기' 그대로")
+
+
 # ---------- 쇼츠 길이 (BR-291) ----------
 
 class ShortsLenTest(Base):
@@ -206,6 +237,60 @@ class ShortsLenTest(Base):
         self.assertEqual(rstudio.POLICY.get(("GET", "/api/style/shorts_len")), rstudio.READ)
 
 
+    def test_msg_follows_length(self):
+        """리뷰: '한 동작 (10~20초)'이면 MSG(재미있게 자동 편집·끝까지 자동으로) 쇼츠의 가장 짧게 15초도 낮춤 — 정리 컷 뒤 9~14초 쇼츠가
+        '15초 넘어야 해요'로 다 빠지지 않게 · 기본·기술 하나·설명은 15초 그대로."""
+        import msg
+        from test_msg_round7 import M
+        self.assertEqual((msg.min_shorts(), msg._stop_min()), (15.0, 20.0))
+        for m, want in (("loop", (7.5, 10.0)), ("point", (15.0, 20.0)), ("explain", (15.0, 20.0)), ("", (15.0, 20.0))):
+            style.set_shorts_len(m)
+            self.assertEqual((msg.min_shorts(), msg._stop_min()), want, m)
+        style.set_shorts_len("ref")
+        self.rough([18.0])   # 보통 18초 → 11~27초
+        self.assertAlmostEqual(msg.min_shorts(), 8.25)
+
+        # 쇼츠 하나 = 포인트 하나: 다음 포인트 앞에서 끊고 남는 컷 9.8초 → 한 동작이면 끊음 (기본은 15초가 안 돼 안 끊음 · D-267 그대로)
+        rec = {"shorts": [{"start": 100.0, "end": 160.0, "cuts": [{"in": 100.0, "out": 105.0}, {"in": 110.0, "out": 113.0}, {"in": 118.0, "out": 160.0}]}],
+               "tidy": []}
+        moms = [M("play", 104.0, score=2.0), M("section", 120.0, "자, 네 번째 포인트는 몸 방향이에요.", 120.0, 122.0)]
+        style.set_shorts_len("")
+        self.assertEqual(msg._shorts_window(rec, moms, 200.0, [], points=True)[-1]["out"], 160.0)
+        style.set_shorts_len("loop")
+        self.assertAlmostEqual(msg._shorts_window(rec, moms, 200.0, [], points=True)[-1]["out"], 119.8)
+
+        # 후보 만들기: 정리 컷 뒤 12.4초 쇼츠 — 기본은 빼고 까닭(15초), 한 동작이면 남김
+        def fake(name, info, sig, segs, moms, st, lv, fmt, seed, label, log, caps, ai, win):
+            dur = 60.0 if fmt == "long" else 12.4
+            return {"id": fmt, "items": [{"track": "V1", "start": 0.0, "in": 0.0, "out": dur, "speed": 1.0}], "msg": {"summary": {"text": ""}}}, []
+
+        def run():
+            with mock.patch.multiple(msg, compile_seq=fake, ensure_transcript=lambda *a: None, _check_input=lambda *a: None,
+                                     signals=lambda *a, **k: {"blobs": [], "sig": "s"}, moments=lambda *a, **k: [], _check=lambda: None), \
+                    mock.patch.object(editor, "media_info", lambda n: {"duration": 120.0}), mock.patch.object(editor, "_segments_of", lambda n: []), \
+                    mock.patch.object(editor, "_captions_of", lambda *a: []):
+                return msg.build_variants("v.mp4", [{"kind": "preset", "name": "예능 MSG형"}], "보통", ("long", "shorts"), lambda m: None)
+        style.set_shorts_len("")
+        res = run()
+        self.assertEqual([q["id"] for q in res["sequences"]], ["long"])
+        self.assertIn("12초뿐이에요 (15초 넘어야 해요)", res["notes"][0]["why"])
+        style.set_shorts_len("loop")
+        res = run()
+        self.assertEqual(([q["id"] for q in res["sequences"]], res["notes"]), (["long", "shorts"], []))
+
+        # 끊어서 짧아지면 끊지 않고 다시 만드는 셈(D-267)도 같은 가장 짧게로: 끊은 11초는 한 동작이면 그대로
+        calls = []
+
+        def once(*a):
+            calls.append(a[12].get("pointStop", True))
+            dur = 11.0 if a[12].get("pointStop", True) else 40.0
+            return ({"items": [{"track": "V1", "start": 0.0, "in": 0.0, "out": dur, "speed": 1.0}], "titles": [], "shapes": [],
+                     "msg": {"events": [], "summary": {"kinds": {}}}}, [], 0, 0)
+        st = msg.resolve({"kind": "preset", "name": "예능 MSG형"})
+        with mock.patch.object(msg, "_compile_once", once):
+            q, _ = msg.compile_seq("v.mp4", {"duration": 300.0}, {}, [], [M("play", 10.0)], st, "보통", "shorts", 1, "x", lambda m: None)
+        self.assertEqual((calls, editor.seq_total(q)), ([True], 11.0))
+
 # ---------- 티저 (BR-292) ----------
 
 class TeaserTest(Base):
@@ -276,6 +361,29 @@ class EmphasisTest(Base):
         self.assertIsNone(k("핵심은 공을 받기 전에 미리 주변을 둘러보고 몸을 여는 거예요"), "길면 자르지 않고 안 띄움")
         self.assertIsNone(k("자, 첫번째 포인트."), "순서 말은 콕 집은 말이 아님")
         self.assertIsNone(k("트래핑을 연습해 볼 건데요"), "콕 집은 말이 아님")
+
+    def test_key_label_lead_ins(self):
+        """리뷰: 감독님이 늘 쓰는 이끄는 말('중요한 게 뭐냐면요' · '핵심은 세 가지예요' · '자 오늘 핵심 정리할게요')은 강조 큰 글씨가 아님 —
+        이끄는 말 뒤에 내용이 있으면 그 내용 ('중요한 게 뭐냐면요, 디딤발 위치예요' → '디딤발 위치!')."""
+        k = editor.key_label
+        for t in ("중요한 게 뭐냐면요", "중요한 건 이거예요", "핵심은 여기 있어요", "자, 정리하면 핵심은 세 가지예요.", "자 오늘 핵심 정리할게요",
+                  "여기서 중요한 포인트", "중요한 건 뭐냐", "핵심은 두 가지예요", "중요한 거 하나만 말씀드릴게요", "두 가지가 핵심이에요",
+                  "세 번째가 중요해요", "자 여기서 핵심", "핵심은 포인트예요", "뭐가 핵심이냐면요"):
+            self.assertIsNone(k(t, terms=[]), t)
+        self.assertEqual(k("중요한 게 뭐냐면요, 디딤발 위치예요.", terms=[]), "디딤발 위치!")
+        self.assertEqual(k("여기서 디딤발이 핵심이에요", terms=[]), "디딤발 핵심!")
+        self.assertEqual(k("오늘 핵심은 디딤발이에요", terms=[]), "디딤발!")
+        self.assertEqual(k("중요한 건 타이밍이에요", terms=[]), "타이밍!")
+        # 이끄는 말은 다음 문장(콕 집은 말이 아니면 기술 이름 규칙)으로 — 예전: 100초에 '뭐냐면요!'
+        items = editor._items_from_cuts([{"in": 0.0, "out": 200.0}])
+        segs = [{"start": 100.0, "end": 104.0, "text": "중요한 게 뭐냐면요"}, {"start": 104.5, "end": 108.0, "text": "디딤발을 공 옆에 두는 거예요."}]
+        out = editor._emphasis_titles(items, segs, 4.0, "#FFE14D", captions_on=True)
+        self.assertNotIn("뭐냐면요!", [t["text"] for t in out])
+        out = editor._emphasis_titles(items, segs + [{"start": 130.0, "end": 134.0, "text": "자 오늘 핵심 정리할게요"},
+                                                     {"start": 160.0, "end": 164.0, "text": "디딤발 위치가 진짜 핵심이에요."}], 4.0, "#FFE14D", captions_on=True)
+        got = [t["text"] for t in out]
+        self.assertIn("디딤발 위치 핵심!", got)
+        self.assertNotIn("자 오늘 핵심!", got)   # (짧은 말의 강조 낱말만 '핵심!'은 예전 emphasis_label 규칙 그대로)
 
     def test_sentences(self):
         seg = {"start": 0.0, "end": 9.0, "text": "안녕하세요 여러분. 오늘은 퍼스트 터치예요. 이게 진짜 핵심이에요."}

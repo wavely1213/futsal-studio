@@ -2088,6 +2088,10 @@ def score_video(style_name, name, log=None, analyze=False):
     # 티저 경계(컷 하나)·강조 글자(자막 시간)가 v1.9.2 와 다른 점수를 만들지 않게 (기획 판단은 점수에 넣지 않음)
     fl = (st.get("formats") or {}).get("long")  # 쇼츠·긴 영상을 섞어 배운 스타일: 롱폼 가편집은 긴 영상 값과 비교 (E12)
     params = {k: v for k, v in (fl["params"] if fl else st["params"]).items() if k not in PLAN_PARAM_KEYS}
+    if (st.get("profile") or {}).get("longCaps") not in LONG_CAPS:
+        # 롱폼 말 자막을 고르지 않은 스타일: 점수는 예전처럼 배운 자막 비율로 켜고 끔 (BR-290 · 리뷰) — 가편집 기본 '작게 켜기'는 앱이 정한 것이라
+        # 자막을 적게 쓰는 스타일의 '자막' 점수가 100 → 약 9 점으로 떨어지지 않게 · 사용자가 고른 값이면 그 값으로 만든 가편집을 매김
+        params["longCaps"] = "on" if params.get("captions") else "off"
     seq = ed.auto_sequences(name, info, params, ("long",))[0]
     proj = {"source": name, "info": info, "captions": [x for x in segs if x["text"].strip()],
             "media": [{"id": "main", "kind": "video", "src": "videos", "file": name, "dur": info["duration"], "w": info["width"],

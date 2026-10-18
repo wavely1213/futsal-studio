@@ -2142,6 +2142,23 @@ def _key_phrase_words(x):
 
 
 KEY_DEM = re.compile(r"^(?:(?:자|그래서|그러니까|그리고|네)[,.\s]+)*(?:이게|이거|이건|그게|그거|그건|저게|요게|여기가|여기는|이|그)\s+")
+# 콕 집은 말 앞뒤에 감독님이 늘 붙이는 이끄는 말 (리뷰: '중요한 게 뭐냐면요' → '뭐냐면요!' · '핵심은 세 가지예요' → '세 가지!' ·
+# '자 오늘 핵심 정리할게요' → '자 오늘 핵심!') — 이런 말만 남으면 강조 큰 글씨를 만들지 않고 다음 문장·기술 이름 규칙(emphasis_label)으로
+KEY_LEAD = re.compile(r"^(?:뭐|뭔|뭘|무엇|무슨|어떤|어떻게|왜|이거|이것|이건|요거|저거|그거|그것|여기|저기|거기|이렇게|이런|그런|저런|하나|한\s?가지|"
+                      r"두\s?가지|세\s?가지|네\s?가지|몇|다음|가지|번째)")
+KEY_TALK = re.compile(r"말씀|얘기|이야기|설명|알려|보여|정리|드릴|드려|할게|볼게|볼까|하겠|해\s?볼|시작")
+KEY_FILL = re.compile(r"^(?:(?:자|네|그래서|그러니까|그리고|그럼|그러면|결국|오늘|오늘의|이번|이번에|여기서|거기서|지금|다시|정리하면|정리하자면)[,.\s]+)+")
+
+
+def _key_vague(x, generic=True):
+    """강조 큰 글씨로 띄울 만한 내용이 없는 말 ('뭐냐면요' · '이거' · '여기 있어요' · '세 가지' · '하나만 말씀드릴게요' · '포인트').
+    generic=False: 이끄는 말·말하기 낱말만 봄 (④ 앞 구절 '차이가 정말 중요'는 콕 집은 낱말 앞이라 GENERIC 이어도 씀)."""
+    ws = [w for w in re.split(r"[\s,.!?~…]+", str(x or "")) if w]
+    if not ws:
+        return True
+    if KEY_TALK.search(x) or any(KEY_LEAD.match(w) for w in ws):
+        return True
+    return generic and all(w in KEY_THIS or w in GENERIC or re.sub(r"(?:이에요|예요|이죠|에요|이|가|은|는)$", "", w) in GENERIC for w in ws)
 
 
 def key_label(txt, terms=None):
@@ -2168,14 +2185,22 @@ def key_label(txt, terms=None):
             if not ws or not all(x in POINT_NOUNS for x in ws):
                 continue
             ws = ([found[0][2]] if found else []) + ws
+        else:
+            while ws and KEY_FILL.match(ws[0] + " "):  # '여기서 디딤발이 핵심' → '디딤발 핵심!' (앞 이끄는 말은 뗌)
+                ws = ws[1:]
+            if ws and _key_vague(" ".join(ws)):  # '두 가지가 핵심' · '세 번째가 중요' → 이끄는 말이라 다음 규칙으로
+                continue
         lab = ok(f"{' '.join(ws)} {w}!") if ws else None
         if lab:
             return lab
     m = KEY_HEAD.search(t)
     if m:  # 뒤 말 전체가 짧을 때만 (자르면 '… 멈추지 않는!' 같은 조각)
-        rest = re.sub(r"[\s,.~…]+$", "", re.split(r"[.!?]", m.group(1))[0])
+        parts = [x.strip() for x in re.split(r",", re.split(r"[.!?]", m.group(1))[0]) if x.strip()]
+        while parts and _key_vague(parts[0]):  # '중요한 게 뭐냐면요, 디딤발 위치예요' → '디딤발 위치' (앞 이끄는 말은 뗌)
+            parts.pop(0)
+        rest = re.sub(r"[\s,.~…]+$", "", ", ".join(parts))
         rest = re.sub(r"\s*(?:이에요|예요|입니다|이죠|거든요|에요)$", "", rest).strip()
-        lab = (rest + "!") if 2 <= len(_norm(rest)) <= KEY_MAX else None
+        lab = (rest + "!") if 2 <= len(_norm(rest)) <= KEY_MAX and not _key_vague(rest) else None
         if lab:
             return lab
     if re.search(r"무조건|절대", t):
@@ -2189,7 +2214,9 @@ def key_label(txt, terms=None):
         if found:
             return ok(f"{found[0][2]} {w.group(1)}!")
         head = re.split(r"[.!?,]\s*", t[:w.end()])[-1].strip()
-        head = re.sub(r"^(?:부분이|부분은|부분|거|것이|것은|게)\s+", "", KEY_DEM.sub("", head)).strip()   # '이 부분이 정말 중요' → '정말 중요'
+        head = re.sub(r"^(?:부분이|부분은|부분|거|것이|것은|게)\s+", "", KEY_DEM.sub("", KEY_FILL.sub("", head))).strip()   # '이 부분이 정말 중요' → '정말 중요'
+        if head[:-len(w.group(1))].strip() and _key_vague(head[:-len(w.group(1))], generic=False):
+            head = ""  # '자 정리하면 핵심' · '뭐가 중요' → 이끄는 말만 남음 (KEY_FILL 로 '자·오늘·여기서'를 뗀 뒤)
         if not re.sub(r"(?:진짜|정말|제일|가장|완전|꼭|너무)\s*", "", head[:-len(w.group(1))]).strip() and len(head) == len(w.group(1)):
             head = ""
         if 2 <= len(_norm(head)) <= KEY_MAX - 2:
