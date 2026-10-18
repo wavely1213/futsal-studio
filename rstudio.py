@@ -958,7 +958,8 @@ def _adapt(h, svc, sess, path, b):
     if path == "/api/upload/open":
         what = b.get("what")
         if what == "studio":
-            return send(h, 200, {"ok": True, "openUrl": upload.STUDIO_URL})
+            url = upload.studio_url()  # 우리 채널 업로드 창 (모르면 스튜디오 첫 화면)
+            return send(h, 200, {"ok": True, "openUrl": url, "channel": url != upload.STUDIO_URL})
         if what == "file":
             try:
                 n = editor.safe_name(b.get("file"))

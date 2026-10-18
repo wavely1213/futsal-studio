@@ -1670,6 +1670,9 @@ class Handler(BaseHTTPRequestHandler):
                     kit = upload.set_guests(n, b.get("seq") or None, b["guests"])
                 elif isinstance(b.get("newTitles"), bool):  # '쇼츠 새 말투·이모지 후보' 칸 → 설정 + 지금 키트 제목 후보 (D-438)
                     kit = upload.set_new_titles(n, b.get("seq") or None, b["newTitles"])
+                elif isinstance(b.get("carryFrom"), str):  # 올릴 대상을 바꿀 때 고친 제목·설명 가져오기 (물어본 뒤 · D-452)
+                    kit, swapped = upload.carry_edits(n, b["carryFrom"] or None, b.get("seq") or None)
+                    return self._send(200, {"ok": True, "kit": kit, "chaptersSwapped": swapped})
                 elif isinstance(e, dict):
                     kit = upload.save_edits(n, b.get("seq") or None, e.get("title"), e.get("description"), e.get("tags"))
                 else:
@@ -1684,8 +1687,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": f"올리기 키트를 만들지 못했어요 · {e}"})
         if path == "/api/upload/open":  # 유튜브 스튜디오 · 키트 파일 위치 · 설명 틀
             try:
-                if b.get("what") == "studio":
-                    upload.open_studio()
+                if b.get("what") == "studio":  # 우리 채널 업로드 창 (채널을 모르면 스튜디오 첫 화면)
+                    return self._send(200, {"ok": True, "channel": upload.open_studio() != upload.STUDIO_URL})
                 elif b.get("what") == "template":
                     upload.open_template()
                 elif b.get("what") == "file":

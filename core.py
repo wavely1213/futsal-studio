@@ -529,16 +529,47 @@ def is_video_file(name):
     return Path(name).suffix.lower() in VIDEO_EXTS and not is_partial(Path(name).name)
 
 
+def _mt(p):
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def added_at(st):
+    """보관함에 넣은 시각: 복사(copy2)는 고친 시각을 원본 그대로 두므로 만든 시각(Windows st_birthtime · 없으면 st_ctime)과 견줘 늦은 쪽."""
+    return max(st.st_mtime, getattr(st, "st_birthtime", None) or st.st_ctime)
+
+
+def _exports():
+    """완성본 폴더의 내보낸 영상(.mp4) [(파일 이름, 고친 시각)] — 영상마다 '<영상>_…mp4' 를 찾을 때 한 번만 읽음."""
+    try:
+        return [(p.name, _mt(p)) for p in OUT.iterdir() if p.suffix.lower() == ".mp4"]
+    except OSError:
+        return []
+
+
 def local_videos():
-    out = []
+    """보관함 영상 목록 — 최근에 넣었거나 작업한 영상이 위 (같으면 이름 순 · D-450).
+    recent: 넣은 시각(파일을 만든 시각)·편집점 찾기·편집실 저장·내보내기 중 가장 늦은 것 · exported: 가장 최근에 내보낸 시각(없으면 None)."""
+    out, exps = [], None
     for v in sorted(VIDEOS.iterdir()):
         if is_video_file(v.name):
             try:  # 받기를 마친 yt-dlp 가 중간 파일을 지우는 순간이면 목록과 stat 사이에 사라짐 (Windows: 지우는 중)
-                size = v.stat().st_size
+                st = v.stat()
             except OSError:
                 continue
-            done = (adir(v.name) / "transcript_timeline.md").exists()
-            out.append({"name": v.name, "size_mb": round(size / 1e6, 1), "analyzed": done})
+            d = adir(v.name)
+            tl = d / "transcript_timeline.md"
+            done = tl.exists()
+            if exps is None:
+                exps = _exports()
+            pre = d.name + "_"  # editor.export 의 파일 이름 '<영상>_<편집본 이름>( (2)).mp4'
+            exported = max((t for n, t in exps if n.startswith(pre)), default=None)
+            recent = max(added_at(st), _mt(tl) if done else 0.0, _mt(WORK / "projects" / f"{d.name}.json"), exported or 0.0)
+            out.append({"name": v.name, "size_mb": round(st.st_size / 1e6, 1), "analyzed": done,
+                        "recent": round(recent, 3), "exported": round(exported, 3) if exported else None})
+    out.sort(key=lambda x: -x["recent"])  # sorted 는 안정 정렬 → 같은 시각이면 이름 순 그대로
     return out
 
 

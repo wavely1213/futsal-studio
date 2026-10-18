@@ -1,4 +1,5 @@
 """올리기 키트(upload.py · hooks.py) 테스트 — 저장소 폴더에서 python3 -m unittest tests.test_upload"""
+import copy
 import json
 import shutil
 import sys
@@ -1049,6 +1050,237 @@ class RunOnTranscriptKitTests(KitBase):
                 quote = line1[1:-1]
                 self.assertLessEqual(len(quote), 60, quote)
                 self.assertTrue(captions.ends_sentence(quote.split()[-1]), quote)  # 문장 끝말로 끝남 (예전: '…메시랑 이니에스타가 2대1을')
+
+
+class SpokenPointTests(unittest.TestCase):
+    """백로그 145 (BR-260): 감독님이 말로 나눈 '첫 번째·두 번째·세 번째 포인트'를 이름 붙은 챕터와 설명 '오늘 배울 것'으로."""
+    FIX = RunOnTranscriptKitTests.FIX
+
+    def test_msgraw01_points_become_named_chapters(self):
+        for key, third in (("MSGRAW01", 137), ("MSGRAW01_nocond", 131)):  # 부호 있는·없는 받아쓰기 모두
+            with self.subTest(key):
+                segs = upload.sentences(self.FIX[key]["transcript"])
+                notes = []
+                chs = upload.chapters(segs, dur=201.5, notes=notes)  # 예전: [] ('나눌 곳이 마땅치 않아')
+                self.assertEqual([c["t"] for c in chs], [0, 24, 87, third])
+                self.assertEqual(chs[0]["title"], "인트로")
+                self.assertEqual([c["title"][0] for c in chs[1:]], ["①", "②", "③"])
+                self.assertTrue(chs[1]["title"].startswith("① 공이 오기 전에 고개를"), chs[1]["title"])
+                self.assertTrue(all(len(c["title"]) <= 20 and c["named"] for c in chs[1:]))
+                self.assertEqual(notes, [])
+        self.assertEqual(upload.chapters(upload.sentences(self.FIX["MSGRAW01_nocond"]["transcript"]), dur=201.5)[2]["title"], "② 디딤발이에요")
+
+    def test_counting_attempts_is_not_a_lesson_point(self):
+        self.assertEqual(upload.spoken_points(upload.sentences(self.FIX["MSGRAW03"]["transcript"])), [])  # '첫 번째 갑니다' · '두 번째 슛.'
+        segs = [{"start": 10, "end": 12, "text": "자, 첫 번째 갑니다."}, {"start": 30, "end": 32, "text": "두 번째 슛."},
+                {"start": 50, "end": 52, "text": "세 번째 들어갔어요."}]
+        self.assertEqual(upload.spoken_points(segs), [])
+        segs = [{"start": 10, "end": 12, "text": "첫째, 고개를 드세요."}, {"start": 40, "end": 42, "text": "둘째, 디딤발은 공 옆에."}]
+        self.assertEqual([p["title"] for p in upload.spoken_points(segs)], ["① 고개를 드세요", "② 디딤발은 공 옆에"])  # '첫째·둘째'는 그 말만으로
+
+    def test_retake_and_slip_use_the_later_line(self):
+        pts = upload.spoken_points(upload.sentences(self.FIX["MSGRAW02"]["transcript"]))  # '두 번째 동작은 … 아니다. / 다시 할게요.' 뒤 다시 한 줄
+        self.assertEqual([(round(p["t"], 2), p["n"]) for p in pts], [(19.66, 1), (48.12, 2)])
+        self.assertEqual(pts[0]["title"], "① 패스하고 바로 앞으로 두 걸음")  # 순서 말만 한 줄 → 바로 다음 문장
+        segs = [{"start": 10, "end": 12, "text": "첫 번째 포인트는 고개 들기예요."}, {"start": 15, "end": 17, "text": "첫 번째 포인트는 고개를 먼저 드는 거예요."},
+                {"start": 60, "end": 62, "text": "두 번째 포인트는 디딤발이에요."}]
+        self.assertEqual([(p["t"], p["name"]) for p in upload.spoken_points(segs)], [(15, "고개를 먼저 드는 거예요"), (60, "디딤발이에요")])
+
+    def test_needs_order_from_one_and_two_points(self):
+        one = [{"start": 10, "end": 12, "text": "첫 번째 포인트는 고개 들기예요."}]
+        self.assertEqual(upload.spoken_points(one), [])
+        skip = [{"start": 10, "end": 12, "text": "두 번째 포인트는 디딤발이에요."}, {"start": 50, "end": 52, "text": "세 번째 포인트는 트래핑이에요."}]
+        self.assertEqual(upload.spoken_points(skip), [])
+        bare = [{"start": 10, "end": 12, "text": "자, 첫 번째 포인트."}, {"start": 40, "end": 42, "text": "그리고 두 번째 포인트."}]
+        self.assertEqual([p["title"] for p in upload.spoken_points(bare)], ["첫 번째 포인트", "두 번째 포인트"])  # 이어지는 말이 없으면 말한 그대로
+
+    def test_markers_and_numbered_titles_still_win(self):
+        segs = upload.sentences(self.FIX["MSGRAW01"]["transcript"])
+        chs = upload.chapters(segs, [{"t": 0, "name": "시작"}, {"t": 60, "name": "고개"}, {"t": 120, "name": "디딤발"}], None, 201.5)
+        self.assertEqual([c["title"] for c in chs], ["시작", "고개", "디딤발"])
+        chs = upload.chapters(segs, [], [{"text": "1. 고개", "start": 30}, {"text": "2. 디딤발", "start": 90}, {"text": "3. 트래핑", "start": 140}], 201.5)
+        self.assertEqual([c["title"] for c in chs[1:]], ["1. 고개", "2. 디딤발", "3. 트래핑"])
+
+    def test_description_learn_block(self):
+        d = upload.description(["“한 줄”", "둘째 줄"], [], ["#풋살"], template="{훅}\n\n{해시태그}", learn=["① 고개 들기", "② 디딤발"])
+        self.assertEqual(d, "“한 줄”\n둘째 줄\n\n▶ 오늘 배울 것\n① 고개 들기\n② 디딤발\n\n#풋살")
+        self.assertEqual(upload.description(["a", "b"], [], [], template="{훅}"), "a\nb")  # 없으면 예전 그대로
+
+
+class SpokenKitTests(KitBase):
+    def test_kit_has_point_chapters_and_learn_list(self):
+        name = self.add_video("20261008_MSGRAW01_레슨.mp4", segs=RunOnTranscriptKitTests.FIX["MSGRAW01"]["transcript"])
+        kit = upload.build_kit(name, save=False)
+        self.assertEqual([c["title"][0] for c in kit["chapters"][1:4]], ["①", "②", "③"])
+        self.assertIn("▶ 오늘 배울 것\n① 공이 오기 전에 고개를", kit["description"])
+        self.assertIn("\n00:24 ① 공이 오기 전에 고개를", kit["description"])
+        self.assertLess(kit["description"].index("▶ 오늘 배울 것"), kit["description"].index("▶ 출연"))
+
+    def test_fixture_kit_without_points_unchanged(self):
+        kit = upload.build_kit(self.add_video(self.NAME), save=False)
+        self.assertNotIn("오늘 배울 것", kit["description"])
+        self.assertFalse(any(c["title"][0] in "①②③" for c in kit["chapters"]))
+
+
+class StudioUrlTests(unittest.TestCase):
+    """백로그 229 (D-453): '업로드 페이지 열기'는 우리 채널의 업로드 창 · 모르면 스튜디오 첫 화면."""
+    UC = "UCRYziLOw2T6BF6fXtpUby-g"
+
+    def test_channel_url_in_config(self):
+        with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}"}):
+            self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+        with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}/videos"}):
+            self.assertEqual(upload.own_channel_id(), self.UC)
+
+    def test_handle_falls_back_to_strategy_then_root(self):
+        import strategy
+        with mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/@futsal"}):
+            with mock.patch.object(strategy, "own_entry", return_value={"channelId": self.UC}):
+                self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+            with mock.patch.object(strategy, "own_entry", return_value={"channelId": None}):
+                self.assertEqual(upload.studio_url(), "https://studio.youtube.com")
+            with mock.patch.object(strategy, "own_entry", side_effect=OSError("깨짐")):
+                self.assertEqual(upload.studio_url(), "https://studio.youtube.com")
+            with mock.patch.object(strategy, "own_entry", return_value={"channelId": "UC짧음"}):
+                self.assertEqual(upload.studio_url(), "https://studio.youtube.com")
+        with mock.patch.dict(core.CONFIG, {"channel_url": ""}), mock.patch.object(strategy, "own_entry", return_value={}):
+            self.assertEqual(upload.studio_url(), "https://studio.youtube.com")
+
+    def test_open_studio_opens_that_url(self):
+        with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}"}), \
+                mock.patch.object(upload.webbrowser, "open") as op:
+            self.assertEqual(upload.open_studio(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+            op.assert_called_once_with(f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+
+
+class SourceDefaultTests(SequenceKitTests):
+    """백로그 168 (D-451 · D-452): 내보낸 편집본이 없어도 '원본 영상 그대로'가 아니라 작업한 편집본을 기본으로 · 고친 제목·설명 가져오기."""
+
+    def two_seqs(self, name, active=None):
+        p = self.write_project(name, [{"t": 0, "name": "시작"}, {"t": 250, "name": "패스 연습"}, {"t": 500, "name": "슈팅"}])
+        proj = json.loads(p.read_text(encoding="utf-8"))
+        proj["sequences"][0]["auto"] = "rough"
+        s2 = dict(copy.deepcopy(proj["sequences"][0]), id="s2", name="내 편집본", auto="user", markers=[])
+        proj["sequences"].append(s2)
+        if active:
+            proj["active"] = active
+        p.write_text(json.dumps(proj, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def test_default_without_export(self):
+        name = self.add_video(self.NAME)
+        self.assertEqual(upload.sources(name)["default"], "")  # 편집실 프로젝트가 없으면 원본 그대로
+        self.two_seqs(name)
+        self.assertEqual(upload.sources(name)["default"], "s1")  # 롱폼 가편집 (예전: '')
+        self.two_seqs(name, active="s2")
+        self.assertEqual(upload.sources(name)["default"], "s2")  # 편집실에서 마지막으로 연 편집본
+        upload.build_kit(name, "s1")
+        self.assertEqual(upload.sources(name)["default"], "s1")  # 올리기 키트를 가장 최근에 저장한 편집본
+        upload.build_kit(name)  # 원본 키트는 기본을 바꾸지 않음
+        self.assertEqual(upload.sources(name)["default"], "s1")
+        shutil.copy(self.media / "export.mp4", self.out / f"{core.adir(name).name}_내 편집본.mp4")
+        self.assertEqual(upload.sources(name)["default"], "s2")  # 내보낸 편집본이 가장 먼저
+
+    def test_routes_default_seq_and_carry(self):
+        from urllib.parse import quote
+        name = self.add_video(self.NAME)
+        self.two_seqs(name, active="s2")
+        import app
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+        def call(path, body=None):
+            req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="GET" if body is None else "POST")
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        try:
+            with mock.patch.object(app, "PORT", srv.server_address[1]), mock.patch.object(app, "LOGFILE", self.work / "studio.log"):
+                code, j = call(f"/api/upload/kit?name={quote(name)}")
+                self.assertEqual((code, j["default"], j["seq"]), (200, "s2", "s2"))
+                self.assertEqual(call("/api/upload/kit", {"name": name, "seq": "s1", "carryFrom": ""})[0], 400)  # 고친 게 없음
+                call("/api/upload/kit", {"name": name, "seq": ""})
+                call("/api/upload/kit", {"name": name, "seq": "", "edits": {"title": "고친 제목"}})
+                code, j = call("/api/upload/kit", {"name": name, "seq": "s1", "carryFrom": ""})
+                self.assertEqual((code, j["kit"]["title"], j["chaptersSwapped"]), (200, "고친 제목", True))
+                with mock.patch.object(upload.webbrowser, "open"), \
+                        mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g"}):
+                    self.assertEqual(call("/api/upload/open", {"what": "studio"})[1], {"ok": True, "channel": True})
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_carry_edits_swaps_chapters(self):
+        name = self.add_video(self.NAME)
+        self.two_seqs(name)
+        raw = upload.build_kit(name)
+        old = upload.chapters_text(raw["chapters"])
+        self.assertIn(old, raw["description"])
+        upload.save_edits(name, None, "고친 제목", "고친 첫 줄\n\n" + raw["description"])
+        kit, swapped = upload.carry_edits(name, "", "s1")  # s1 키트가 없으면 만든 뒤 가져옴
+        self.assertTrue(swapped)
+        self.assertEqual(kit["title"], "고친 제목")
+        self.assertTrue(kit["description"].startswith("고친 첫 줄\n"))
+        self.assertIn("▶ 목차\n00:00 시작\n04:10 패스 연습\n08:20 슈팅", kit["description"])  # 편집본 마커 시간
+        self.assertNotIn(old, kit["description"])
+        self.assertTrue(kit.get("edited"))
+        self.assertEqual(upload.load_kit(name)["title"], "고친 제목")  # 원본 키트는 그대로
+        # 고친 설명에서 예전 목차를 못 찾으면 설명 그대로 (False)
+        upload.save_edits(name, None, "또 고친 제목", "목차를 지운 설명")
+        kit, swapped = upload.carry_edits(name, "", "s2")
+        self.assertFalse(swapped)
+        self.assertEqual(kit["description"], "목차를 지운 설명")
+        # 고친 적 없는 키트 · 같은 대상
+        upload.build_kit(name, "s1")
+        with self.assertRaises(LookupError):
+            upload.carry_edits(name, "s1", "s2")
+        with self.assertRaises(ValueError):
+            upload.carry_edits(name, "", "")
+
+
+class LocalOrderTests(KitBase):
+    """백로그 230 (D-450): 보관함·편집실·썸네일·올리기 목록은 최근에 넣었거나 작업한 영상이 위 · exported 는 가장 최근에 내보낸 시각."""
+
+    def test_recent_first(self):
+        import os
+        for n in ("가.mp4", "나.mp4", "다.mp4"):
+            shutil.copy(self.media / "short.mp4", core.VIDEOS / n)
+        added = {"가.mp4": 100.0, "나.mp4": 300.0, "다.mp4": 200.0}
+        with mock.patch.object(core, "added_at", side_effect=lambda st: 0.0):
+            self.assertEqual([v["name"] for v in core.local_videos()], ["가.mp4", "나.mp4", "다.mp4"])  # 같으면 이름 순
+        order = iter([])
+
+        def names():
+            return [v["name"] for v in core.local_videos()]
+        with mock.patch.object(core, "added_at", side_effect=lambda st: next(order)):
+            order = iter(added[n] for n in sorted(added))  # local_videos 는 이름 순으로 stat 함
+            self.assertEqual(names(), ["나.mp4", "다.mp4", "가.mp4"])  # 최근에 넣은 것이 위
+            p = core.WORK / "projects" / f"{core.adir('가.mp4').name}.json"
+            p.write_text("{}", encoding="utf-8")
+            os.utime(p, (400, 400))  # 편집실에서 저장
+            order = iter(added[n] for n in sorted(added))
+            self.assertEqual(names(), ["가.mp4", "나.mp4", "다.mp4"])
+            e = self.out / f"{core.adir('다.mp4').name}_롱폼 가편집.mp4"
+            e.write_bytes(b"x")
+            os.utime(e, (500, 500))  # 내보냄
+            order = iter(added[n] for n in sorted(added))
+            vids = core.local_videos()
+            self.assertEqual([v["name"] for v in vids], ["다.mp4", "가.mp4", "나.mp4"])
+            self.assertEqual([v["exported"] for v in vids], [500.0, None, None])
+            self.assertEqual(vids[0]["recent"], 500.0)
+
+    def test_added_at_uses_creation_time(self):
+        class St:
+            st_mtime, st_ctime = 10.0, 50.0
+        self.assertEqual(core.added_at(St()), 50.0)  # copy2 로 고친 시각이 예전이어도 넣은 시각
+        St.st_birthtime = 30.0
+        self.assertEqual(core.added_at(St()), 30.0)
+        St.st_mtime = 90.0
+        self.assertEqual(core.added_at(St()), 90.0)
 
 
 if __name__ == "__main__":

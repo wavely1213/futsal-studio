@@ -284,9 +284,73 @@ def _clean_name(v, limit=60):
     return _oneline(v, limit)
 
 
+# 감독님이 말로 나눈 장 ('자, 첫 번째 포인트.' · '두번째 포인트는 디딤발이에요' · '셋째, …') — 군말(_LEAD_RE)을 뗀 문장 맨 앞의 순서 말 (BR-260)
+_ORDINAL = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "첫째": 1, "둘째": 2, "셋째": 3, "넷째": 4, "다섯째": 5}
+# '첫 번째·두 번째'는 뒤에 '포인트·동작…'이 있을 때만 ('두 번째 슛.'·'첫 번째 갑니다'는 챌린지 시도 세기) · '첫째·둘째'는 그 말만으로도
+_SPOKEN = re.compile(r"^(?:(?:(첫|두|세|네|다섯|여섯|일곱)\s?번째|([1-7])\s?번째)\s*(?:포인트|팁|방법|단계|동작|핵심|기술|연습|자세|원칙|규칙)|"
+                     r"(첫째|둘째|셋째|넷째|다섯째)(?:\s*(?:포인트|팁|방법|단계|동작|핵심|기술|연습|자세|원칙|규칙))?)"
+                     r"(?:는|은|이|가|로|으로|입니다|이에요|예요|에요|요)?(?=[\s,.!?~…:]|$)[\s,.!?~…:]*")
+_CIRCLED = "①②③④⑤⑥⑦"
+SPOKEN_NEXT = 10.0  # 순서 말만 한 문장('첫 번째 포인트.')이면 이 초 안에 이어지는 다음 문장을 이름으로
+SPOKEN_RETAKE = 20.0  # 같은 순서 말을 이 초 안에 다시 하면 다시 찍은 것 (뒤엣것을 씀)
+_RETAKE = re.compile(r"^(?:다시\s?(?:할게요|하겠습니다|갈게요|갑니다|해 볼게요)|다시요)")
+
+
+def _drop_lead(t):
+    t = re.sub(r"\s+", " ", t or "").strip()
+    while True:
+        m = _LEAD_RE.match(t)
+        if not m or m.end() >= len(t):
+            return t
+        t = t[m.end():]
+
+
+def _first_said(t, limit):
+    """마침표 없이 이어 말한 글에서도 첫 문장만 ('고개를 들어요 그래야 보여요' → '고개를 들어요' · captions.ends_sentence) → limit 자 안."""
+    ws, out = (t or "").split(), []
+    for w in ws:
+        out.append(w)
+        if captions.ends_sentence(w):
+            break
+    return first_sentence(" ".join(out), limit)
+
+
+def spoken_points(segs):
+    """받아쓰기에서 감독님이 말로 나눈 포인트 [{"t", "n", "name", "title"}] — 순서 말이 1부터 차례로(첫 번째 → 두 번째 → …) 2개 넘게 나올 때만,
+    번호마다 가장 먼저 말한 곳 (말을 고친 문장·'다시 할게요' 앞 문장은 빼고, 같은 번호를 20초 안에 다시 하면 뒤엣것). 이름은 순서 말 뒤의 말('디딤발이에요'), 순서 말만 했으면 바로 다음 문장, 그것도 없으면 순서 말 그대로.
+    title: 챕터 제목 '② 디딤발이에요' (20자 안). 없거나 하나뿐이면 []."""
+    segs = _segments(segs)
+    out, want = [], 1
+    for i, s in enumerate(segs):
+        t = _drop_lead(s["text"])
+        m = _SPOKEN.match(t)
+        if not m:
+            continue
+        n = _ORDINAL.get(m[1] or m[3]) or int(m[2])
+        nxt = segs[i + 1] if i + 1 < len(segs) and segs[i + 1]["start"] - s["start"] <= SPOKEN_NEXT else None
+        if _SLIP.search(t) or (nxt and _RETAKE.match(_drop_lead(nxt["text"]))):  # 말을 고치고 다시 한 것 → 다음 것을 씀
+            continue
+        retake = bool(out) and n == out[-1]["n"] and s["start"] - out[-1]["t"] <= SPOKEN_RETAKE
+        if n != want and not retake:
+            continue
+        name = _first_said(t[m.end():], CH_TITLE_MAX - 2)
+        if len(name) < 2:
+            name = _first_said(_drop_lead(nxt["text"]), CH_TITLE_MAX - 2) if nxt and not _SPOKEN.match(_drop_lead(nxt["text"])) else ""
+        said = m[0].strip(" ,.!?~…:")
+        title = f"{_CIRCLED[n - 1]} {name}" if len(name) >= 2 else first_sentence(said)
+        p = {"t": s["start"], "n": n, "name": name if len(name) >= 2 else said, "title": title}
+        if retake:
+            out[-1] = p
+        else:
+            out.append(p)
+            want += 1
+    return out if len(out) >= 2 else []
+
+
 def chapters(segments_or_srt, markers=None, titles=None, dur=None, notes=None):
     """유튜브 챕터 [{"t", "time", "title", "named"}].
-    이름 붙인 편집실 마커가 있으면 그 자리로 (없으면 '1. …'처럼 번호 붙은 그래픽 제목), 없으면 90~150초마다
+    이름 붙인 편집실 마커가 있으면 그 자리로 (없으면 '1. …'처럼 번호 붙은 그래픽 제목 · 그것도 없으면 감독님이 말로 나눈
+    '첫 번째·두 번째 포인트' spoken_points), 없으면 90~150초마다
     가장 오래 쉰 곳에서 나누고 그 자리 첫 문장(20자 이내)을 제목으로. 3분 미만이거나 규칙을 못 맞추면 []."""
     notes = [] if notes is None else notes
     segs = _segments(segments_or_srt)
@@ -303,12 +367,15 @@ def chapters(segments_or_srt, markers=None, titles=None, dur=None, notes=None):
             (memo if _MEMO.search(nm) else named).append((t, nm))
     if memo:
         notes.append("편집 메모처럼 보이는 마커 이름은 챕터에서 뺐어요 · " + ", ".join(f"'{nm}'" for _, nm in memo[:5]))
-    from_markers = bool(named)
+    from_markers, from_spoken = bool(named), False
     if not named:  # 번호 붙은 그래픽 제목('1. 퍼스트 터치')은 장 제목으로 봄
         for x in titles or []:
             nm, t = _clean_name((x or {}).get("text")), _num((x or {}).get("start"))
             if nm and t is not None and 0 <= t < dur and _SECTION.match(nm):
                 named.append((t, nm))
+    if not named:  # 마커·번호 제목이 없으면 감독님이 말로 나눈 '첫 번째·두 번째 포인트' (BR-260)
+        named = [(p["t"], p["title"]) for p in spoken_points(segs) if 0 <= p["t"] < dur]
+        from_spoken = bool(named)
     pts = [(t, nm, True) for t, nm in named]
     by_marker = "편집실 마커 이름으로 챕터를 만들었어요 · 메모로 붙인 이름이 있으면 설명에서 고쳐 주세요"
     if pts:
@@ -323,7 +390,8 @@ def chapters(segments_or_srt, markers=None, titles=None, dur=None, notes=None):
         if len(out) >= CH_MIN_COUNT:
             if from_markers:
                 notes.append(by_marker)
-            notes.append("이름 붙인 마커가 적어서 사이사이 쉬는 곳에서 챕터를 더 나눴어요")
+            notes.append("감독님이 말로 나눈 곳이 적어서 사이사이 쉬는 곳에서 챕터를 더 나눴어요" if from_spoken
+                         else "이름 붙인 마커가 적어서 사이사이 쉬는 곳에서 챕터를 더 나눴어요")
             return out
     elif segs:
         out = _finalize([(0.0, None, False)] + [(s, None, False) for s in _auto_cuts(segs, 0.0, dur)], dur, segs)
@@ -539,8 +607,9 @@ def add_promo(text, lines, notes=None):
     return fit_description(text, notes)
 
 
-def description(hook, chs, tags_h, title="", topics=(), template=None, notes=None):
-    """설명 틀(upload_template.txt)의 {훅} {챕터} {해시태그} {제목} {주제} 를 채움."""
+def description(hook, chs, tags_h, title="", topics=(), template=None, notes=None, learn=()):
+    """설명 틀(upload_template.txt)의 {훅} {챕터} {해시태그} {제목} {주제} 를 채움.
+    learn: 감독님이 말로 나눈 포인트 이름들 → {훅} 아래에 '▶ 오늘 배울 것' 목록 (BR-260)."""
     notes = [] if notes is None else notes
     tpl = load_template() if template is None else template
     tpl = "\n".join(ln for ln in tpl.replace("\r\n", "\n").split("\n") if not ln.lstrip().startswith("##"))
@@ -549,7 +618,10 @@ def description(hook, chs, tags_h, title="", topics=(), template=None, notes=Non
         notes.append("설명 틀에 {챕터} 자리가 없어 맨 아래에 목차를 붙였어요")
     if tags_h and "{해시태그}" not in tpl:
         tpl = tpl.rstrip() + "\n\n{해시태그}"
-    vals = {"{훅}": "\n".join(hook), "{챕터}": ("▶ 목차\n" + chapters_text(chs)) if chs else "", "{해시태그}": " ".join(tags_h),
+    head = "\n".join(hook)
+    if learn:
+        head += "\n\n▶ 오늘 배울 것\n" + "\n".join(learn)
+    vals = {"{훅}": head, "{챕터}": ("▶ 목차\n" + chapters_text(chs)) if chs else "", "{해시태그}": " ".join(tags_h),
             "{제목}": title, "{주제}": ", ".join(topics[:3])}
     text = re.sub("|".join(map(re.escape, vals)), lambda m: vals[m[0]], tpl)  # 한 번에 바꿈 (넣은 글 속 {…}는 그대로)
     return fit_description(text, notes)
@@ -781,17 +853,40 @@ def _kit_stem(name, seq, sq):
     return base
 
 
+def _kit_times(name):
+    """이 영상의 편집본마다 키트를 마지막으로 저장한 시각 {편집본 id: 시각} (원본 키트는 뺌)."""
+    pre, out = core.adir(name).name + "_", {}
+    try:
+        files = [p for p in core.OUT.iterdir() if p.name.startswith(pre) and p.suffix == ".json" and _KIT_FILE.search(p.name)]
+    except OSError:
+        return out
+    for p in files:
+        kit = _read_kit(p)
+        if kit is not None and _owner(kit)[0] == name and _owner(kit)[1]:
+            sid = _owner(kit)[1]
+            out[sid] = max(out.get(sid, 0.0), _mtime(p))
+    return out
+
+
 def sources(name):
-    """키트를 만들 수 있는 것: 원본 영상 그대로 + 편집실 편집본 (내보낸 영상이 있으면 표시 · 가장 최근에 내보낸 것을 기본으로)."""
+    """키트를 만들 수 있는 것: 원본 영상 그대로 + 편집실 편집본 (내보낸 영상이 있으면 표시).
+    기본(D-451): 가장 최근에 내보낸 편집본 → (내보낸 게 없으면) 올리기 키트를 가장 최근에 저장한 편집본 → 편집실에서 마지막으로 연 편집본(active)
+    → 롱폼 가편집 → 첫 편집본. 편집본이 하나도 없을 때만 '원본 영상 그대로' ('')."""
     editor.video_path(name)
     proj = read_project(name)
+    seqs = [s for s in (proj or {}).get("sequences") or [] if s.get("id")]
     out, best, newest = [{"id": "", "label": "원본 영상 그대로", "format": None, "export": None}], "", 0.0
-    for s in (proj or {}).get("sequences") or []:
+    for s in seqs:
         exp = latest_export(name, s)
         out.append({"id": s.get("id"), "label": s.get("name") or "편집본", "format": "shorts" if s.get("format") == "shorts" else "long",
                     "export": exp.name if exp else None})
         if exp and _mtime(exp) > newest:
             best, newest = s.get("id"), _mtime(exp)
+    if not best and seqs:
+        ids = {s["id"] for s in seqs}
+        kt = {k: v for k, v in _kit_times(name).items() if k in ids}
+        rough = next((s["id"] for s in seqs if s.get("auto") == "rough" and s.get("format") != "shorts"), None)
+        best = (max(kt, key=kt.get) if kt else None) or (proj.get("active") if proj.get("active") in ids else None) or rough or seqs[0]["id"]
     return {"sources": out, "default": best}
 
 
@@ -1098,7 +1193,9 @@ def build_kit(name, seq=None, save=True):
         _tag_titles(kit)
     kit["hashtags"] = todo_hashtags(kit["hashtags"], hints, fmt)
     quote_avoid = [_kit_quote(k) for k in others if k.get("name") == name]  # 같은 촬영본의 다른 키트가 쓴 첫 줄 인용
-    kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur, quote_avoid), chs, kit["hashtags"], kit["title"], topics, notes=notes)
+    learn = [f"{_CIRCLED[p['n'] - 1]} {p['name']}" for p in spoken_points(segs)] if fmt == "long" else []  # 말로 나눈 포인트 → '오늘 배울 것' (BR-260)
+    kit["description"] = description(hook_lines(segs, topics, fmt, flow, dur, quote_avoid), chs, kit["hashtags"], kit["title"], topics, notes=notes,
+                                     learn=learn)
     if foreign:  # 게스트를 넣기 전에 (원본이 다른 채널 영상이면 '▶ 출연'은 게스트만 · D-271)
         kit["foreign"] = foreign
         if _main_other(kit):  # 설명 틀의 감독님 '▶ 출연' 묶음은 통째로 뺌 (그 아래 소개 줄이 게스트 이력처럼 남지 않게 · D-272)
@@ -1315,6 +1412,33 @@ def save_edits(name, seq, title=None, desc=None, tags=None):
         if not _reuse_live(kit):  # 서버를 다시 켠 뒤 처음 고친 것처럼 지난 값이 없을 때만 새로 (.txt 의 올릴 날 줄도 그대로)
             annotate(kit)
         return _store(kit, name, seq, sq)
+
+
+def _swap_chapters(desc, old, new):
+    """설명 속 목차(▶ 목차 + 챕터 줄)를 새 챕터로 바꿈 → (설명, 바꿨는지). 고친 설명에서 예전 목차를 못 찾으면 그대로."""
+    ot, nt = chapters_text(old or []), chapters_text(new or [])
+    if not ot:
+        return desc, False
+    for o, n in (("▶ 목차\n" + ot, "▶ 목차\n" + nt if nt else ""), (ot, nt)):
+        if o in desc:
+            return re.sub(r"\n{3,}", "\n\n", desc.replace(o, n, 1)).strip(), True
+    return desc, False
+
+
+def carry_edits(name, from_seq, to_seq):
+    """올릴 대상을 바꿀 때 앞 대상에서 고친 제목·설명을 새 대상 키트로 가져옴 (화면이 물어본 뒤에만 · D-452).
+    새 대상 키트가 없으면 먼저 만듦 · 설명 속 목차는 새 대상의 챕터(그 영상 시간)로 바꿈 · 태그는 그대로.
+    → (키트, 목차를 바꿨는지 — 앞 키트에 목차가 없었거나 고친 설명에서 못 찾았으면 False)."""
+    src = load_kit(name, from_seq or None)
+    if src is None or not src.get("edited"):
+        raise LookupError("가져올 고친 제목·설명이 없어요")
+    if (from_seq or "") == (to_seq or ""):
+        raise ValueError("같은 대상이에요")
+    dst = load_kit(name, to_seq or None) or build_kit(name, to_seq or None)
+    desc, swapped = _swap_chapters(src.get("description") or "", src.get("chapters"), dst.get("chapters"))
+    if not swapped and not src.get("chapters") and dst.get("chapters"):  # 앞 대상에 목차가 없었으면(쇼츠 등) 새 목차를 붙임
+        desc, swapped = desc.rstrip() + "\n\n▶ 목차\n" + chapters_text(dst["chapters"]), True
+    return save_edits(name, to_seq or None, src.get("title") or "", desc), swapped
 
 
 # ---------- 제목 겹침 · 전략 맞춤 · 게스트 · 올릴 날 (D-080 ~ D-086) ----------
@@ -2173,8 +2297,33 @@ def open_template():
     return p
 
 
+_UC = re.compile(r"/channel/(UC[0-9A-Za-z_-]{22})(?:[/?#]|$)")
+
+
+def own_channel_id():
+    """우리 채널 ID (UC…): 설정 channel_url 의 /channel/UC… → 없으면 채널 전략이 알아 둔 우리 채널 ID → 모르면 None."""
+    m = _UC.search(str(core.CONFIG.get("channel_url") or "").strip())
+    if m:
+        return m.group(1)
+    try:
+        import strategy
+        cid = strategy.own_entry().get("channelId")
+    except Exception:  # noqa: BLE001 — 전략 기록을 못 읽어도 스튜디오 첫 화면은 열림
+        return None
+    return cid if isinstance(cid, str) and re.fullmatch(r"UC[0-9A-Za-z_-]{22}", cid) else None
+
+
+def studio_url():
+    """'업로드 페이지 열기': 우리 채널의 동영상 업로드 창 (다른 구글 계정이면 YouTube 가 계정 전환을 안내) · 채널을 모르면 스튜디오 첫 화면."""
+    cid = own_channel_id()
+    return f"{STUDIO_URL}/channel/{cid}/videos/upload" if cid else STUDIO_URL
+
+
 def open_studio():
-    webbrowser.open(STUDIO_URL)
+    """→ 연 주소 (우리 채널 업로드 창이면 화면이 안내 문구를 바꿈)."""
+    url = studio_url()
+    webbrowser.open(url)
+    return url
 
 
 # ---------- 유튜브에 바로 올리기 (youtube_upload) 가 쓰는 파일 찾기 ----------

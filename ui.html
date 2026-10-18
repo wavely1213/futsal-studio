@@ -251,7 +251,7 @@
   .dot.c0 { background: var(--c0); } .dot.c1 { background: var(--c1); } .dot.c2 { background: var(--c2); } .dot.c3 { background: var(--c3); }
   .dot.c4 { background: var(--c4); } .dot.c5 { background: var(--c5); } .dot.c6 { background: var(--c6); } .dot.c7 { background: var(--c7); }
   .filters .lbl { align-self: center; font-size: 12px; color: var(--ink-3); margin-right: 2px; }
-  #libHidden { font-size: 12px; color: var(--ink-3); }
+  #libHidden, #libOrder { font-size: 12px; color: var(--ink-3); }
   #libHidden:empty { display: none; }
   .filters button.part { border-color: var(--ink); color: var(--ink); }
   .srcmenu .new { display: flex; gap: 6px; padding: 4px 6px; }
@@ -933,7 +933,7 @@
       </div>
       <div class="failslot"></div>
       <div class="card autocard" id="autoCard" hidden></div>
-      <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div></div>
+      <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div><div class="hint" id="libOrder" hidden>최근에 넣었거나 작업한 영상이 위에 있어요 · 편집실·썸네일·올리기 목록도 같은 순서예요</div></div>
       <div class="card banner" id="refBanner" hidden><span class="tx" id="refBannerTx"></span><button class="btn primary" id="refBannerGo">모두 학습용으로 옮기기</button><button class="btn" id="refBannerNo">다음에</button></div>
       <div class="card rows" id="local"></div>
       <!-- 2-2. 용어 사전: 받아쓰기가 풋살 용어·이름을 잘 알아듣게 -->
@@ -1025,12 +1025,13 @@
     <section class="panel" id="p-upload">
       <div class="phead"><div><h1>올리기</h1><p>유튜브에 올릴 제목 후보·설명·챕터·태그를 영상 내용으로 만들어 드려요. 고쳐 쓴 뒤 칸마다 복사해서 유튜브 스튜디오에 붙여 넣으세요 · 또는 [유튜브에 올리기]로 이 화면에서 바로 올려요.</p></div></div>
       <div class="bar">
-        <select class="sel" id="upVid" title="올릴 영상"></select>
+        <select class="sel" id="upVid" title="올릴 영상 · 최근에 넣었거나 작업한 영상이 위에 있어요"></select>
         <select class="sel" id="upSrc" title="원본 영상을 그대로 올릴지, 편집실에서 만든 편집본을 올릴지 골라요"></select>
         <div class="sp"></div>
         <button class="btn" id="upTpl" data-pc-only title="설명에 매번 들어가는 틀(출연 소개·링크 등)을 메모장으로 열어 고쳐요">설명 틀 고치기</button>
         <button class="btn primary" id="upMake">올리기 키트 만들기</button>
       </div>
+      <p class="up-hint" id="upSrcHint" style="margin:0 0 10px" hidden></p>
       <div class="up-meta" id="upMeta"></div>
       <div class="up-sched" id="upSched" hidden></div>
       <div class="up-notes" id="upNotes"></div>
@@ -1492,6 +1493,7 @@ function renderLocal() {
   [...libSel].forEach(n => { if (!have.has(n) || busyCopy.has(n)) libSel.delete(n); });  // 지웠거나 이름을 바꾼 영상 · 아직 복사 중인 영상은 빼기
   const checked = libSel;
   $("libCount").textContent = state.local.length || "";
+  $("libOrder").hidden = state.local.length < 2;  // 목록 순서 알림 (core.local_videos · D-450)
   renderSrcFilters();
   const list = state.local.filter(v => srcMatch(v, srcFilter));
   const bad = srcFilter === "all" || srcFilter === "footage" ? state.unusable || [] : [];  // 아직 못 쓰는 형식 (.MTS 등) — 말없이 빠지지 않게 줄로
@@ -2909,7 +2911,10 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
     $("upVid").innerHTML = list.length ? list.map(v => `<option value="${esc(v.name)}">${esc(niceName(v.name))}${srcNote(v)}${v.analyzed ? "" : " (편집점 찾기 전)"}</option>`).join("")
       : `<option value="">(보관함이 비어 있어요)</option>`;
     if (list.some(v => v.name === cur)) $("upVid").value = cur;
-    else if (list.length) $("upVid").value = (list.find(v => v.analyzed) || list[0]).name;
+    else if (list.length) {  // 처음: 가장 최근에 내보낸 영상 → 편집점을 찾은 영상 중 가장 최근 것 (목록은 최근 순 · D-450)
+      const ex = list.filter(v => v.exported).sort((a, b) => b.exported - a.exported)[0];
+      $("upVid").value = (ex || list.find(v => v.analyzed) || list[0]).name;
+    }
     return $("upVid").value !== up.name;
   }
   async function flush() {  // 고치던 내용을 바로 저장
@@ -2939,10 +2944,19 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
     $("upSrc").innerHTML = srcs.map(s => `<option value="${esc(s.id)}">${s.id ? `편집본 · ${esc(s.label)}${s.format === "shorts" ? " (쇼츠)" : ""}${s.export ? " · 내보냄" : " · 아직 안 내보냄"}` : esc(s.label)}</option>`).join("");
     $("upSrc").value = up.seq;
     $("upSrc").style.display = srcs.length > 1 ? "" : "none";
+    up.srcs = srcs;
+    srcHint();
     up.kit = j.kit || null;
     $("upSaved").textContent = "";
     render();
     if (make && !up.kit && up.name && !$("upMake").disabled) $("upMake").click();
+  }
+  function srcHint() {  // '원본 영상 그대로'가 무엇인지 · 아직 안 내보낸 편집본 (D-451)
+    const srcs = up.srcs || [], cur = srcs.find(s => s.id === up.seq), el = $("upSrcHint");
+    el.textContent = srcs.length < 2 ? ""
+      : !up.seq ? "'원본 영상 그대로'는 편집하지 않고 받은 영상을 그대로 올릴 때만 골라요 · 챕터·설명이 원본 영상 시간으로 만들어져요. 편집본을 올릴 거면 위 칸에서 그 편집본을 골라 주세요"
+      : cur && !cur.export ? "이 편집본은 아직 내보내지 않았어요 · 챕터·설명은 편집본 시간으로 만들고, 올리기 전에 편집실에서 내보내 주세요" : "";
+    el.hidden = !el.textContent;
   }
   function meta() {
     const k = up.kit;
@@ -3063,7 +3077,20 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
   ["upGName", "upGBio"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) addGuest(); }));
   $("upGName").addEventListener("change", () => { const g = ((up.kit && up.kit.guestBook) || []).find(x => x.name === $("upGName").value.trim()); if (g && !$("upGBio").value) $("upGBio").value = g.bio || ""; });
   $("upVid").onchange = () => load();
-  $("upSrc").onchange = () => load($("upSrc").value);
+  $("upSrc").onchange = async () => {  // 올릴 대상을 바꿈 → 앞에서 고친 제목·설명을 가져갈지 물어봄 (덮어쓰지 않고 · D-452)
+    await flush();
+    const from = { seq: up.seq, kit: up.kit, name: up.name }, to = $("upSrc").value;
+    await load(to);
+    const k = from.kit, nk = up.kit, label = (up.srcs || []).find(s => s.id === up.seq);
+    if (!k || !k.edited || up.name !== from.name || up.seq !== to || from.seq === to) return;
+    if (nk && (nk.title || "") === (k.title || "") && (nk.description || "") === (k.description || "")) return;
+    const where = label ? (label.id ? `'${label.label}'` : "'원본 영상 그대로'") : "이 대상";
+    if (!confirm(`앞에서 고친 제목·설명을 ${where}에도 가져갈까요?\n목차(챕터)는 ${where}의 시간으로 바꿔 넣어요.` + (nk && nk.edited ? `\n${where}에서 고친 제목·설명은 바뀌어요.` : ""))) return;
+    const j = await api("/api/upload/kit", { name: up.name, seq: up.seq, carryFrom: from.seq || "" }).catch(() => null);
+    if (!j || !j.ok || up.name !== from.name || up.seq !== to) return;
+    up.kit = j.kit; render();
+    toast(j.chaptersSwapped ? "고친 제목·설명을 가져왔어요 · 목차는 이 대상의 시간으로 바꿨어요" : "고친 제목·설명을 가져왔어요 · 목차 시간이 맞는지 확인해 주세요");
+  };
   document.querySelector('.step[data-p="upload"]').addEventListener("click", async () => { await flush(); fillVids(); load(up.name === $("upVid").value ? up.seq : undefined); });
   setInterval(() => { if ($("p-upload").classList.contains("on") && fillVids()) load(); }, 1500);  // 보관함이 바뀌면 목록도
   $("upMake").onclick = async () => {
@@ -3094,7 +3121,12 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
     await copyText(k.prompt.replace(/\[지금 만든 초안\][\s\S]*?\n\n(?=\[부탁해요\])/, draft + "\n\n"));
     toast("복사했어요 · claude.ai 대화창에 붙여 넣으세요 (무료)");
   };
-  $("upStudio").onclick = async () => { await flush(); api("/api/upload/open", { what: "studio" }); toast("유튜브 스튜디오를 열었어요 · 오른쪽 위 '만들기 → 동영상 업로드'를 누르세요"); };
+  $("upStudio").onclick = async () => {  // 우리 채널(설정 channel_url)의 업로드 창 · 채널을 모르면 스튜디오 첫 화면
+    await flush();
+    const j = await api("/api/upload/open", { what: "studio" }).catch(() => ({}));
+    toast(j && j.channel ? "우리 채널의 동영상 업로드 창을 열었어요 · 다른 계정이라고 나오면 그 화면 안내대로 우리 채널 계정으로 바꿔 주세요"
+      : "유튜브 스튜디오를 열었어요 · 오른쪽 위 '만들기 → 동영상 업로드'를 누르세요");
+  };
   $("upFile").onclick = async () => { await flush(); if (up.kit && up.kit.files) api("/api/upload/open", { what: "file", file: up.kit.files.txt }); };
   $("upTpl").onclick = () => { api("/api/upload/open", { what: "template" }); toast("설명 틀을 메모장으로 열었어요 · 고치고 저장한 뒤 '다시 만들기'를 누르세요"); };
   // 썸네일 편집기에서 '돌아가기'로 오면 올리기 화면 · 보던 영상과 편집본 그대로 (보관함 목록이 오면 fillVids 가 고름)
