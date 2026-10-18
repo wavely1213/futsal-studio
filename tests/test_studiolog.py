@@ -382,15 +382,18 @@ class AppTests(Base):
         self.assertFalse((self.tmp / studiolog.RUNNING).exists(), "창을 닫으면 정상 종료")
 
     def test_export_error_location_from_editor(self):
-        """편집실 내보내기 안의 예상 못 한 오류(RuntimeError 가 아님)도 파일:줄을 남김 (editor.py 의 traceback.print_exc 자리)."""
+        """편집실 내보내기 안의 예상 못 한 오류(RuntimeError 가 아님)도 파일:줄을 남김 (editor.py 의 traceback.print_exc 자리).
+        오류는 _build_ass 에 넣음 — 내보내기는 build_ass 가 아니라 _write_subs → _build_ass 로 자막을 만듦 (글꼴 범위를 _write_subs 가 정함 ·
+        D-503 · D-513). build_ass 에 넣으면 내보내기가 그 자리를 지나지 않아 오류가 안 남 (I-513)."""
         import editor
         proj = {"format": "long", "info": {"duration": 5, "width": 320, "height": 240}, "source": "a.mp4",
                 "clips": [{"in": 0, "out": 2}], "captions": []}
         with mock.patch.object(editor, "_missing_media", return_value=[]), \
-                mock.patch.object(editor, "build_ass", side_effect=ZeroDivisionError("division by zero")), \
+                mock.patch.object(editor, "_build_ass", side_effect=ZeroDivisionError("division by zero")) as ba, \
                 mock.patch.object(sys, "stderr", None):
             with self.assertRaises(RuntimeError):
                 editor.export("a.mp4", proj, {"srt": False, "xml": False}, lambda m: None)
+        self.assertTrue(ba.called, "내보내기가 자막(ASS)을 _build_ass 로 만들지 않음 — 오류를 넣는 자리를 다시 정해야 함")
         line = next(x for x in self.lines() if "오류 위치" in x)
         self.assertRegex(line, r"ZeroDivisionError: division by zero · .*editor\.py:\d+ export")
 

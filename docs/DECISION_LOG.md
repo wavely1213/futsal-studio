@@ -29,6 +29,14 @@
 
 <!-- 여기서부터 최신 항목을 위에 추가 -->
 
+## D-513 | 2026-10-18 | 내보내기 자막은 `_write_subs` → `_build_ass` 그대로 · 시험은 `_build_ass` 에 오류를 넣음
+- **상태**: 채택
+- **맥락**: KFA 글꼴 고정(42b5336 · D-503)부터 내보내기·투명 영상·지금 화면 저장은 `build_ass` 가 아니라 `editor._write_subs` 가 글꼴 범위(`ep_font_scope(fx or False)`)를 정하고 `_build_ass` 를 바로 부른다. `tests.test_studiolog` `test_export_error_location_from_editor` 는 `build_ass` 에 ZeroDivisionError 를 넣었으므로 그 자리를 지나지 않게 됐고, 시험 편집본에 `captionStyle` 이 없어 진짜 `_build_ass` 가 KeyError 로 멈춰 기대한 오류 줄이 안 남았다(I-513).
+- **결정**: 제품 코드는 그대로 두고 시험이 `_build_ass`(모든 ASS 가 지나는 자리)에 오류를 넣고, 그 자리가 실제로 불렸는지 먼저 확인한다.
+- **이유**: `_write_subs` 가 `build_ass` 를 부르면 `build_ass` 의 `ep_font_scope(ep_font_on(proj))` 가 바깥 범위를 덮어, 글꼴 파일을 못 넣었을 때도 ASS 에 KFA 글꼴 이름이 들어간다(libass 가 엉뚱한 글꼴로 그림 · 바꿔 보면 `tests.test_ep_font` `AssTest.test_write_subs_copies_font` 실패). `captionStyle` 이 없는 편집본은 v2.24.0 에서도 같은 KeyError 였고 실제 편집본은 늘 `captionStyle` 이 있다(`_new_seq` 호출·editor.html 새 편집본) — 제품 동작 변화가 아니다.
+- **버린 대안**: `_write_subs` 를 `build_ass` 로 되돌림 — 위 글꼴 되돌리기가 깨짐 / 시험 편집본에 `captionStyle` 만 더함 — 넣은 오류는 여전히 안 나고 그 뒤 진짜 영상 만들기 실패를 봄 / `_build_ass` 에서 `captionStyle` 없음을 기본값으로 — 실제로 없는 경우를 위한 새 동작.
+- **영향/제약**: ASS 를 만드는 자리를 또 옮기면 이 시험이 '_build_ass 로 만들지 않음'으로 바로 알린다.
+
 ## D-511 | 2026-10-18 | 원격 서비스에 close() — 시험이 만든 서비스의 뒤 스레드를 시험 끝에 멈추고 기다림
 - **상태**: 채택
 - **맥락**: 전체 단위 시험이 부하가 있을 때 가끔 `Segmentation fault`(139)로 죽었다(I-081 · I-510). 원격 시험마다 만든 `remote.Service` 의 `remote-watch`(5초마다 tick)·`remote-publisher` 가 끝나지 않고 뒤 시험 내내 남아(한 번 전체 실행에 수십 개), 닫힌 가짜 ntfy 로 비콘을 보내며 `updater._ssl_context` → OpenSSL 이 **GIL 없이** C `getenv("SSL_CERT_FILE"/"SSL_CERT_DIR")` 를 불렀다. 같은 때 주 스레드의 다른 시험이 `mock.patch.dict(os.environ)`(나올 때 `clear()`+`update()` = setenv/unsetenv 약 320번)로 glibc 의 environ 배열을 다시 잡아(realloc·free) getenv 가 풀린 배열을 읽었다.

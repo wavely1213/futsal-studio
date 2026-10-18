@@ -27,6 +27,12 @@
 
 <!-- 최신 항목을 위에 추가. 심각도 '높음'은 발견 즉시 소유자에게 별도 보고 -->
 
+## I-513 | 2026-10-18 | studio.log 내보내기 오류 위치 시험이 KeyError 'captionStyle' 로 실패 (main 733622c)
+- **상태**: 해결(2026-10-18) — 시험이 오류를 `editor._build_ass` 에 넣고 그 자리가 불렸는지 확인한다(D-513 · 제품 코드 그대로 · 고치기 전 main 에서 실패 · 고친 뒤 통과)
+- **심각도**: 낮음(시험만)
+- **증상/내용**: `tests.test_studiolog.AppTests.test_export_error_location_from_editor` 가 늘 실패 — 기대 'ZeroDivisionError: division by zero · …editor.py:N export' 대신 "KeyError: 'captionStyle' · editor.py _build_ass ← _write_subs ← export". 42b5336(KFA 글꼴 고정)의 부모에서는 통과, 42b5336 부터 실패. 그 커밋이 내보내기 자막을 `build_ass` 대신 `_write_subs` → `_build_ass` 로 만들게 해(D-503) 시험이 `build_ass` 에 넣은 오류가 안 나고, `captionStyle` 이 없는 시험 편집본에서 진짜 `_build_ass` 가 멈췄다. 오류 위치 기록 자체는 제대로 남았다.
+- **위치**: tests/test_studiolog.py · editor.py `_write_subs`·`build_ass`·`_build_ass`
+
 ## I-511 | 2026-10-18 | 시험 뒤에 남는 다른 스레드 (getenv 와 무관) · remote-awake 의 절전 막기 Windows 미검증
 - **상태**: 열림
 - **심각도**: 낮음(개발 환경)
