@@ -1,6 +1,8 @@
 {
   "version": "2.23.0",
   "notes": "쇼츠: 은평 스타일 화면(파란 띠 · 흰 상자 제목 · 사실 줄 · 고르는 것) · 시리즈 이름표 '1분 레슨 (n)' · '전체 강좌는 채널에서 ▶' · 새 제목 말투·이모지 후보(켜면) · 추천 채널 '서울은평 덴포스' + 스타일 배우기가 고정 틀을 알아봄",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/064db4831dfd9fa575a0bae66ef9a006a5700375.zip",
+  "commit": "064db4831dfd9fa575a0bae66ef9a006a5700375",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "f35e1d5edbd07249da3addd1b963c1ed2bae022ac6effd7e1f8517fc8909c3c8",
