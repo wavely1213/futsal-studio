@@ -1326,6 +1326,105 @@ def save_card_pic(kind, data):
     return _save_card_pics(cur)
 
 
+# 은평 스타일 글꼴 (BR-310~BR-313 · D-500~D-505): KFA 글꼴은 앱에 싣지 않음 — '글꼴 파일 고르기'로 고른 파일은 확인해 작업 폴더
+# styles/설정/은평 그림/ 에 내용 지문 이름으로 복사 · 고른 것이 없으면 epfont 가 이 PC 에 깔린 KFA 글꼴을 찾음
+_CARD_FONT_NAME = re.compile(r"font_[0-9a-f]{12}\.(ttf|otf|ttc)")
+CARD_FONT_SHOWN = 80   # 화면에 보일 고른 파일 이름 글자 수
+
+
+def _card_font_file():
+    return STYLES / ROUGH_DIR_NAME / "은평 스타일 글꼴.json"
+
+
+def card_font():
+    """{"file": 고른 글꼴 파일 이름(작업 폴더 · '' = 고르지 않음), "name": 고를 때의 파일 이름(화면에 보임)} — 파일이 없거나 못 읽거나
+    고른 파일이 없어졌으면 고르지 않음."""
+    try:
+        d = json.loads(_card_font_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    f = d.get("file")
+    ok = isinstance(f, str) and _CARD_FONT_NAME.fullmatch(f) and (card_pic_dir() / f).is_file()
+    name = d.get("name") if ok and isinstance(d.get("name"), str) else ""
+    return {"file": f if ok else "", "name": name}
+
+
+def card_font_path():
+    """고른 글꼴 파일 경로 · 없으면 None."""
+    f = card_font()["file"]
+    return card_pic_dir() / f if f else None
+
+
+def _clean_font_name(v):
+    s = " ".join(str(v or "").replace("\\", "/").split("/")[-1].split())
+    return "".join(list(s)[:CARD_FONT_SHOWN])
+
+
+def save_card_font(data, name=""):
+    """'글꼴 파일 고르기': 고른 글꼴(data URL 또는 바이트)을 확인(TTF·OTF·TTC · 한글이 있는 글꼴)해 작업 폴더에 복사하고 그 글꼴을 씀 →
+    card_font(). 글꼴이 아니거나 깨졌거나 너무 크면 ValueError (화면에 그대로 보이는 문장)."""
+    import epfont
+    if isinstance(data, str):
+        if not data.startswith("data:") or "," not in data:
+            raise ValueError("글꼴 파일을 읽지 못했어요 · TTF·OTF 글꼴 파일을 골라 주세요")
+        try:
+            data = base64.b64decode(data.split(",", 1)[1], validate=False)
+        except ValueError as e:
+            raise ValueError("글꼴 파일을 읽지 못했어요 · TTF·OTF 글꼴 파일을 골라 주세요") from e
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("글꼴 파일을 읽지 못했어요 · TTF·OTF 글꼴 파일을 골라 주세요")
+    raw = bytes(data)
+    if len(raw) > epfont.FONT_MAX:
+        raise ValueError(f"글꼴 파일이 너무 커요 ({len(raw) >> 20}MB) · {epfont.FONT_MAX >> 20}MB 보다 작은 파일을 골라 주세요")
+    try:
+        fs = epfont.faces(raw)
+    except ValueError as e:
+        raise ValueError("글꼴 파일이 아니에요 · TTF·OTF 글꼴 파일을 골라 주세요") from e
+    errs = []
+    for x in fs:   # 한 글꼴이라도 한글을 그릴 수 있어야 (PIL 로 실제로 열어 봄 · 복사하기 전에)
+        try:
+            epfont.metrics(raw, x["index"])
+            break
+        except ValueError as e:
+            errs.append(str(e))
+    else:
+        raise ValueError(errs[0] if errs else "글꼴 파일을 읽지 못했어요")
+    fname = f"font_{hashlib.sha256(raw).hexdigest()[:12]}{epfont.ext_of(raw)}"
+    p = card_pic_dir() / fname
+    if not p.is_file():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        updater.write_atomic(p, raw)
+    f = _card_font_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"file": fname, "name": _clean_font_name(name) or fname, "set": time.strftime("%Y-%m-%d %H:%M")},
+                                       ensure_ascii=False))
+    epfont.forget()
+    return card_font()
+
+
+def reset_card_font():
+    """'처음으로': 고른 글꼴을 쓰지 않음 (깔린 KFA 글꼴을 찾거나 지금 글꼴) → card_font(). 이미 만든 편집본이 가리키지 않으므로
+    복사해 둔 파일은 남겨 둠 (다시 고르면 같은 이름)."""
+    import epfont
+    f = _card_font_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"file": "", "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    epfont.forget()
+    return card_font()
+
+
+def card_font_state(wait=False):
+    """스타일 화면 글꼴 줄: {"found": 찾았는지, "family": 글꼴 이름, "src": picked/installed, "file": 파일 이름, "picked": 고른 파일이 있는지,
+    "checking": 아직 찾는 중인지}."""
+    import epfont
+    info = epfont.find(wait=wait)
+    out = {"found": bool(info), "picked": bool(card_font()["file"]), "checking": not info and epfont.checking()}
+    if info:
+        out.update(family=info["family"], src=info["src"], file=info["file"])
+    return out
+
+
 # 시리즈 번호 (BR-245 · D-429): 채널마다 하나의 셈 · 쇼츠 편집본마다 처음 내보낼 때(또는 올리기 키트를 만들 때) 한 번 정하고 다시 내보내도 그대로
 _SERIES_LOCK = threading.Lock()
 

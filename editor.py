@@ -18,11 +18,13 @@ import uuid
 import wave
 import xml.etree.ElementTree as ET
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
 import captions
 import core
+import epfont
 import exportplan
 import hwdec
 import idle
@@ -1414,9 +1416,9 @@ def shorts_topic_on():
 
 
 def _text_w(text, st):
-    """글 한 줄 폭 어림 (화소 · text_box 와 같은 글자 폭 · 테두리 포함)."""
-    black = st.get("weight") == "Black"
-    return max([sum(_em(ch, black) for ch in ln) for ln in str(text or "").replace("\r", "").split("\n")] or [0.0]) * float(st.get("size") or 0) \
+    """글 한 줄 폭 어림 (화소 · text_box 와 같은 글자 폭 · 테두리 포함 · 은평 글꼴을 쓰는 중이면 그 글꼴 폭 표)."""
+    black, fm = st.get("weight") == "Black", ep_font_now()
+    return max([sum(_em(ch, black, fm) for ch in ln) for ln in str(text or "").replace("\r", "").split("\n")] or [0.0]) * float(st.get("size") or 0) \
         + 2 * float(st.get("strokeW") or 0)
 
 
@@ -1659,6 +1661,42 @@ def _ep_bg_file(fit, W, H, tmp):
     return out
 
 
+# 은평 스타일 글꼴 (BR-310~BR-313 · D-500~D-505 · editor.html EPF·epFontOn·fmNow·emOf 와 같은 셈): 은평 스타일 화면(layout box + win)의 모든 글자
+# (흰 상자 제목·사실 줄·이름표·강좌 줄·말 자막·MSG 글자)는 이 PC 의 KFA 글꼴로 고정 — 배운 스타일·타이틀 글꼴(style.font)보다 먼저 ·
+# 글꼴은 앱에 싣지 않음(epfont) · 못 찾으면 지금 글꼴 그대로. 글자 폭 셈(text_box·cap_fit 등)은 ep_font_scope 안에서 그 글꼴 폭 표를 씀 (스레드마다 따로).
+_FONT_CTX = threading.local()
+
+
+def ep_font(wait=True):
+    """지금 쓸 은평 스타일 글꼴 (epfont.find · 못 찾거나 실패하면 None = 지금 글꼴)."""
+    try:
+        return epfont.find(wait=wait)
+    except Exception:  # noqa: BLE001 — 부가 기능: 실패해도 지금 글꼴로
+        return None
+
+
+def ep_font_on(seq):
+    """은평 스타일 화면인지 — 쇼츠 · 위아래 박스 · 영상 창(layout.win · 은평 스타일만 켬 · editor.html epFontOn)."""
+    lay = (seq or {}).get("layout") or {}
+    return (seq or {}).get("format") == "shorts" and lay.get("mode") == "box" and bool(lay.get("win"))
+
+
+@contextmanager
+def ep_font_scope(on=True):
+    """이 안에서 셈하는 글자 폭·ASS 글꼴은 은평 글꼴 (on 이고 이 PC 에서 찾았을 때 · on 이 글꼴 정보(dict)면 그것 · 아니면 지금처럼 — 바깥 범위도 끔)."""
+    prev = getattr(_FONT_CTX, "f", None)
+    _FONT_CTX.f = on if isinstance(on, dict) else ep_font() if on else None
+    try:
+        yield _FONT_CTX.f
+    finally:
+        _FONT_CTX.f = prev
+
+
+def ep_font_now():
+    """지금 범위(ep_font_scope)의 은평 글꼴 · 없으면 None."""
+    return getattr(_FONT_CTX, "f", None)
+
+
 def shorts_card_on():
     """스타일 화면 '쇼츠 화면 배치'가 은평 스타일인지 (못 읽으면 지금처럼 = False)."""
     try:
@@ -1669,10 +1707,12 @@ def shorts_card_on():
 
 
 def ep_title_style(text):
-    """은평 스타일 큰 제목 모양 — 흰 상자 안(양옆 EP_PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝)."""
+    """은평 스타일 큰 제목 모양 — 흰 상자 안(양옆 EP_PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝) ·
+    글자 폭은 이 PC 의 은평 글꼴(KFA · 없으면 Pretendard 어림)로 셈 (BR-311)."""
     W, H = frame_size("shorts")
     room = EP_BOX["w"] * W - 2 * EP_PAD
-    size = next((z for z in EP_SIZES if _text_w(text, dict(EP_TITLE, size=z)) <= room), EP_SIZES[-1])
+    with ep_font_scope():
+        size = next((z for z in EP_SIZES if _text_w(text, dict(EP_TITLE, size=z)) <= room), EP_SIZES[-1])
     return dict(EP_TITLE, size=size, y=round(EP_BOX["y"] + EP_BOX["h"] / 2 + TXT_LINE * size / 2 / H, 4))
 
 
@@ -1722,9 +1762,10 @@ def ep_series_text(name, n):
 
 
 def ep_series_fit(t, g):
-    """이름표 상자 폭을 글에 맞춤 (가운데 · 양옆 EP_TAG_PAD)."""
+    """이름표 상자 폭을 글에 맞춤 (가운데 · 양옆 EP_TAG_PAD · 은평 글꼴 폭 · BR-311)."""
     W, _ = frame_size("shorts")
-    w = min(0.9, (_text_w(t["text"], t["style"]) + 2 * EP_TAG_PAD) / W)
+    with ep_font_scope():
+        w = min(0.9, (_text_w(t["text"], t["style"]) + 2 * EP_TAG_PAD) / W)
     g["w"], g["x"] = round(w, 4), round(0.5 - w / 2, 4)
 
 
@@ -1880,13 +1921,13 @@ def text_box(text, st, W, H):
     """글 상자 (왼, 위, 오른, 아래) — 화면 비율 0~1. y 는 글 아래 끝 (editor.html styleText · ASS \\an2·\\pos 와 같음).
     화면 폭 92% 안에서 띄어쓰기마다 줄을 바꿔 셈 (editor.html .txt max-width 92%) · 글자 폭은 cap_fit 과 같은 어림."""
     size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
-    black = st.get("weight") == "Black"
-    avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
+    black, fm = st.get("weight") == "Black", ep_font_now()
+    avail, sp = 0.92 * W - 2 * stroke, _em(" ", fm=fm) * size
     widths = []
     for para in str(text or "").replace("\r", "").split("\n"):
         cur = 0.0
         for w in para.split(" "):
-            ww = sum(_em(ch, black) for ch in w) * size
+            ww = sum(_em(ch, black, fm) for ch in w) * size
             if cur and cur + sp + ww > avail:
                 widths.append(cur)
                 cur = ww
@@ -4316,7 +4357,15 @@ def _shorts_parts(cap):
 FIT_MIN = 0.7
 
 
-def _em(ch, black=False):
+def _em(ch, black=False, fm=None):
+    """글자 하나의 폭 (글자 크기 1 기준) — fm: 은평 글꼴 폭 표(epfont.metrics · 그 글꼴에 있는 글자·한글만 · editor.html emOf 와 같은 셈) ·
+    없거나 표에 없는 글자는 Pretendard 어림."""
+    if fm:
+        w = fm["em"].get(ch)
+        if w is not None:
+            return w
+        if epfont.is_hangul(ch):
+            return fm["hangul"]
     o = ord(ch)
     if ch == " ":
         return 0.24
@@ -4334,8 +4383,8 @@ def cap_fit(text, st, W):
     x, al = float(st.get("x", 0.5)), st.get("align", "center")
     room = (1 - x) if al == "left" else x if al == "right" else 2 * min(x, 1 - x)
     avail = W * min(0.9, room - 0.05)  # 화면 90%까지 (미리보기 글 상자 92%·내보내기 양옆 여백 안쪽)
-    black = st.get("weight") == "Black"
-    em = max([sum(_em(ch, black) for ch in ln) for ln in str(text).replace("\r", "").split("\n")] or [0])
+    black, fm = st.get("weight") == "Black", ep_font_now()
+    em = max([sum(_em(ch, black, fm) for ch in ln) for ln in str(text).replace("\r", "").split("\n")] or [0])
     need = em * float(st["size"]) + 2 * float(st.get("strokeW") or 0)
     if need <= avail or avail <= 0:
         return 1.0
@@ -4543,14 +4592,14 @@ def cap_wrap_lines(text, st, W):
     """글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.html capWrapLines)."""
     paras = str(text if text is not None else "").replace("\r", "").split("\n")
     size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
-    black = st.get("weight") == "Black"
-    avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
+    black, fm = st.get("weight") == "Black", ep_font_now()
+    avail, sp = 0.92 * W - 2 * stroke, _em(" ", fm=fm) * size
     n = 0
     for para in paras:
         cur = 0.0
         n += 1
         for w in para.split(" "):
-            ww = sum(_em(ch, black) for ch in w) * size
+            ww = sum(_em(ch, black, fm) for ch in w) * size
             if cur and cur + sp + ww > avail:
                 n += 1
                 cur = ww
@@ -4582,17 +4631,48 @@ def track_visible(seq, o):
 
 
 def build_ass(proj, W, H, fps=30, frame_grid=True):
-    """frame_grid: 시작·끝을 프레임 격자로 (D-328 · 미리보기와 같은 프레임) — False 는 예전 반올림 (시험 golden 비교용)."""
+    """frame_grid: 시작·끝을 프레임 격자로 (D-328 · 미리보기와 같은 프레임) — False 는 예전 반올림 (시험 golden 비교용).
+    은평 스타일 화면이면 모든 글자를 이 PC 의 KFA 글꼴로 (ep_font_scope · 못 찾으면·다른 화면은 예전과 같은 바이트 · BR-311)."""
+    with ep_font_scope(ep_font_on(proj)):
+        return _build_ass(proj, W, H, fps, frame_grid)
+
+
+EP_FONT_FILE = "ep_font"   # 내보내기 임시 글꼴 폴더(fonts/)에 넣는 은평 글꼴 파일 이름 (영문 · libass 가 폴더째 읽어 깔리지 않은 고른 글꼴도 씀)
+
+
+def _write_subs(tmp, proj, W, H, fps):
+    """내보내기 임시 폴더에 fonts/(앱 글꼴 + 은평 스타일이면 KFA 글꼴 파일) + subs.ass — 글꼴 파일을 못 넣으면 ASS 도 지금 글꼴로
+    (libass 가 없는 글꼴 이름을 받으면 엉뚱한 글꼴로 그림)."""
+    shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+    fx = ep_font() if ep_font_on(proj) else None
+    if fx:
+        try:
+            shutil.copyfile(fx["path"], tmp / "fonts" / (EP_FONT_FILE + fx["ext"]))
+        except OSError as e:
+            studiolog.write(f"은평 스타일 글꼴을 내보내기에 넣지 못해 지금 글꼴로 만들어요 · {Path(fx['path']).name} · {e}")
+            fx = None
+    with ep_font_scope(fx or False):
+        (tmp / "subs.ass").write_text(_build_ass(proj, W, H, fps, True), encoding="utf-8")
+
+
+def ass_font(s):
+    """글자 모양 → (ASS 글꼴 이름, 크기 비율, 굵게) — 은평 글꼴 범위면 그 글꼴 (배운 스타일·타이틀 글꼴보다 먼저 · 굵기는 그 글꼴 파일의 굵기
+    그대로 = libass 가 그 글꼴을 고르고 굵게 흉내 내지 않음 · 미리보기 font-weight 400)."""
+    fx = ep_font_now()
+    if fx:
+        return fx["family"], fx["k"], fx["weight"] if fx["weight"] > 400 else 0
+    if s.get("font") in TITLE_FONTS:  # 굵기가 하나뿐인 글꼴 → 굵게 흉내 없이 (미리보기도 font-weight 400)
+        font, k = TITLE_FONTS[s["font"]]
+        return font, k, 0
+    return ("Pretendard Black", FONT_K, 0) if s["weight"] == "Black" else ("Pretendard", FONT_K, -1)
+
+
+def _build_ass(proj, W, H, fps, frame_grid):
     st = proj["captionStyle"]
     at = (lambda t: _ass_ftime(t, fps)) if frame_grid else _ass_time
 
     def style_line(name, s):
-        font = "Pretendard Black" if s["weight"] == "Black" else "Pretendard"
-        bold = 0 if s["weight"] == "Black" else -1
-        k = FONT_K
-        if s.get("font") in TITLE_FONTS:  # 굵기가 하나뿐인 글꼴 → 굵게 흉내 없이 (미리보기도 font-weight 400)
-            font, k = TITLE_FONTS[s["font"]]
-            bold = 0
+        font, k, bold = ass_font(s)
         if s.get("bgOn"):
             border, outline, ocol = 3, max(6, s["strokeW"]), _ass_color(s["bg"], 1 - s["bgOpacity"])
         else:
@@ -4644,7 +4724,7 @@ def build_ass(proj, W, H, fps=30, frame_grid=True):
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
         k = min(cap_fit(text, s, W), ep_room_fit(text, s, W, H, wb)) if fit else 1.0  # 로고 화면 말 자막은 아래 띠 안 (wb · BR-283)
-        fs = rf"\fs{round(s['size'] * k * FONT_K)}" if k < 1 else ""  # 화면보다 긴 한 줄 자막은 글자만 조금 작게
+        fs = rf"\fs{round(s['size'] * k * (ep_font_now() or {}).get('k', FONT_K))}" if k < 1 else ""  # 화면보다 긴 한 줄 자막은 글자만 조금 작게 (은평 글꼴은 그 비율)
         rz = -_rot(s)  # 화면은 시계 방향 + · ASS \frz 는 반시계 방향 + (기준점은 \pos 자리 = 미리보기 transform-origin)
         fr = rf"\frz{_num(round(rz, 2))}" if rz else ""
         tags = rf"{{\an{an}\pos({x},{y}){fs}{fr}}}" if s["effect"] != "slide" else rf"{{\an{an}{fs}{fr}}}"
@@ -7034,8 +7114,7 @@ def export(name, proj, opts, log):
 
         try:
             trans = valid_trans(proj)
-            (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
-            shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+            _write_subs(tmp, proj, BW, BH, fps)
             segs = _segments(proj, t_lo, t_hi, fps, trans, media)
             tot_f = sum(b - a for a, b in segs) or 1
             done = {}
@@ -7290,8 +7369,7 @@ def _overlay_export(name, proj, BW, BH, fps, t_lo, t_hi, stem, log):
                           eta=int(el / pct * (100 - pct)) if pct > 2 else None)
 
     try:
-        (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
-        shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+        _write_subs(tmp, proj, BW, BH, fps)
         g = _overlay_graph(BW, BH, fps, f0, n)
         (tmp / "ov.txt").write_text(g + ",scale=out_color_matrix=bt709:out_range=tv,format=yuva444p10le[v]", encoding="utf-8")
         src, out, why = None, None, ""
@@ -7386,8 +7464,7 @@ def export_frame(name, proj, t, log=print):
         core.OUT.mkdir(parents=True, exist_ok=True)
         tmp = Path(tempfile.mkdtemp(prefix=".render_", dir=core.OUT))
         try:
-            (tmp / "subs.ass").write_text(build_ass(proj, BW, BH, fps), encoding="utf-8")
-            shutil.copytree(FONTS, tmp / "fonts", dirs_exist_ok=True)
+            _write_subs(tmp, proj, BW, BH, fps)
             args, final, _n = _build_segment(proj, media, BW, BH, fps, f, f + 1, valid_trans(proj), tmp, 0)
             run = lambda a: _ff_once(["-y", "-v", "error"] + a + [_fc_opt(), "fc0.txt", "-map", f"[{final}]", "-frames:v", "1", "-update", "1", "frame.png"], tmp)  # noqa: E731
             if hwdec.is_bad():

@@ -294,7 +294,8 @@ def _js_funcs():
     """editor.html 에서 미리보기 함수(capWords·capParts·emOf·capFit)만 꺼냄."""
     src = (ROOT / "editor.html").read_text(encoding="utf-8")
     out = []
-    for name in ("function capWeight(", "function capWords(", "function capParts(", "const emOf =", "function capFit("):
+    for name in ("function capWeight(", "function capWords(", "function capParts(", "const emOf =", "let EPF =", "const epFontOn =", "const fmNow =",
+                 "function capFit("):
         i = src.index(name)
         j = src.index("\n}", i) + 2 if name.startswith("function") else src.index("\n", i)
         out.append(src[i:j])

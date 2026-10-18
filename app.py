@@ -25,6 +25,7 @@ import claude_cli
 import core
 import cutout_worker
 import editor
+import epfont
 import hooks
 import idle
 import intake
@@ -68,7 +69,7 @@ PORT_FALLBACK = range(PORT + 1, PORT + 35)  # 8765 를 다른 프로그램이 �
 APP_ID = "futsal-studio"  # /api/ping: 이 포트에서 듣는 게 이 앱인지 (다른 프로그램이면 창을 띄우라고 보내지 않음)
 LOG, JOB = [], {"name": None, "result": None, "error": None, "by": None, "t0": None, "id": 0, "big": False}
 DONE = collections.OrderedDict()  # 끝난 작업 번호 → {이름·시킨 곳·결과·오류} (최근 20개) — PC 화면이 자기가 시킨 작업의 결과만 받게 (휴대폰 작업과 안 섞임)
-FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2"}  # /fonts/ 응답 종류 (확장자로)
+FONT_TYPES = {".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2", ".ttc": "font/collection"}  # /fonts/·은평 글꼴 응답 종류 (확장자로)
 BIG_RESULT = 64 << 10   # 이보다 큰 작업 결과(MSG 후보 묶음)는 /api/state?result=1 로 물을 때만 (1초마다 몇 MB 를 다시 보내지 않게)
 LOCK = threading.Lock()
 BUSY_MSG = "다른 작업이 끝난 뒤에 다시 눌러 주세요"
@@ -754,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
                                     "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(),
-                                    "cardExtras": style.card_extras(), "cardPics": style.card_pics()})
+                                    "cardExtras": style.card_extras(), "cardPics": style.card_pics(), "cardFont": style.card_font_state()})
         if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
             return self._send(200, {"on": style.shorts_topic_on()})
         if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · BR-240)
@@ -766,6 +767,13 @@ class Handler(BaseHTTPRequestHandler):
             if not p:
                 return self._send(404, {"error": "not found"})
             return self._file(p, "image/png")
+        if u.path == "/api/style/card_font":  # 은평 스타일 글꼴 줄 (찾았는지·이름·고른 파일이 있는지·찾는 중 · BR-312)
+            return self._send(200, style.card_font_state())
+        if u.path == "/api/style/ep_font":  # 은평 스타일 글꼴 파일 (편집실 미리보기 @font-face · 고른 파일 또는 이 PC 에 깔린 KFA 글꼴 · BR-311)
+            info = editor.ep_font(wait=False)
+            if not info or not Path(info["path"]).is_file():
+                return self._send(404, {"error": "not found"})
+            return self._file(Path(info["path"]), FONT_TYPES.get(info["ext"], "application/octet-stream"))
         if u.path == "/api/style/thumb_img":  # 썸네일 버릇을 배운 썸네일 (스타일 폴더의 _thumbs/<영상 id>.jpg 만)
             p = thumbstyle.thumb_path((q.get("id") or [""])[0])
             return self._file(p, "image/jpeg") if p and p.is_file() else self._send(404, {"error": "not found"})
@@ -894,7 +902,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "thumbs": editor.thumbs(n), "events": core.timeline_events(n),
                                         "recommend": editor.recommend(n),
                                         "epx": dict(style.card_extras(), next=style.series_peek(),   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
-                                                    pics=style.card_pic_refs())})   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
+                                                    pics=style.card_pic_refs(),   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
+                                                    font=epfont.public(editor.ep_font(wait=False)))})   # 은평 스타일 글꼴 (이름·폭 표·파일 주소 · 못 찾으면 null · BR-311)
             except Exception as e:
                 studiolog.trace(e)
                 return self._send(500, {"error": f"편집실을 열지 못했어요 · {e}"})
@@ -1145,6 +1154,20 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"은평 스타일 그림을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "그림을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             log(f"은평 스타일 {'띠 그림을' if b.get('kind') == 'band' else '로고를'} 바꿨어요 · {v[b.get('kind') + 'File']}")
+            return self._send(200, dict(v, ok=True))
+        if path == "/api/style/card_font":  # 스타일 화면 '글꼴 파일 고르기'(data URL · 확인해 작업 폴더에 복사) · '처음으로'(reset · BR-312)
+            try:
+                if b.get("reset") is True:
+                    style.reset_card_font()
+                else:
+                    style.save_card_font(b.get("data"), b.get("name") if isinstance(b.get("name"), str) else "")
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"은평 스타일 글꼴을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "글꼴을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            v = style.card_font_state(wait=True)
+            log("은평 스타일 글꼴을 처음으로 돌렸어요" if b.get("reset") is True else f"은평 스타일 글꼴을 골랐어요 · {v.get('family') or '?'}")
             return self._send(200, dict(v, ok=True))
         # ---- 컷 리듬 맞추기 (#7): 스타일 카드의 '말 빠르기 맞추기' 켜기/끄기 (스타일 파일에 저장) ----
         if path == "/api/style/tempo":
@@ -2485,6 +2508,7 @@ def main():
     if "--browser" in sys.argv:
         _BROWSER.append(True)  # 서버가 답하기 전에 정해 둠 (그사이 또 켠 실행이 /api/focus 를 물어도 화면을 다시 열게)
     threading.Thread(target=editor.sweep_temp, daemon=True).start()  # 멈췄거나 갑자기 꺼져 남은 임시 폴더 정리
+    epfont.warm()  # 은평 스타일 KFA 글꼴을 뒤에서 미리 찾아 둠 (스타일 화면·편집실이 글꼴 폴더를 다 읽기를 기다리지 않게 · BR-310)
     JOB_HOOKS.append(idle.touch)  # 작업이 끝나고 5분 동안 다른 작업이 없으면 불러 둔 모델을 내려놓음 (메모리 반환)
     idle.start(LOCK, lambda: bool(JOB["name"]))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

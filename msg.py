@@ -3656,7 +3656,8 @@ def compile_seq(name, info, sig, segs, moms, st, intensity, fmt, seed, label, lo
     prev = None
     for _ in range(10):
         _check()
-        seq, media, n_ev, lost = _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai, win)
+        with editor.ep_font_scope(fmt == "shorts" and editor.shorts_card_on()):   # 은평 스타일 쇼츠: 글자 자리는 KFA 글꼴 폭으로 (BR-311)
+            seq, media, n_ev, lost = _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, log, caps, knobs, ai, win)
         tot = editor.seq_total(seq)
         over = round(max(0.0, n_ev - DENSITY[intensity][1] * max(0.25, tot / 60.0)), 2)
         if best is None or (over, lost) < best[0]:
@@ -4399,8 +4400,18 @@ LAYOUT_PRI = {"title": 0, "teaser": 0, "end": 0, "hook": 0, "montage": 1, "score
 
 
 def _font(style):
-    """(PIL 글꼴 또는 None, 줄 높이 비율) — editor.build_ass 와 같은 글꼴·비율."""
+    """(PIL 글꼴 또는 None, 줄 높이 비율) — editor.build_ass 와 같은 글꼴·비율 (은평 스타일 쇼츠는 그 KFA 글꼴 · editor.ep_font_scope · BR-311)."""
+    fx = editor.ep_font_now()
     f = style.get("font")
+    if fx:
+        key = (fx["path"], fx["index"], int(round(float(style.get("size") or 50))))
+        if key not in _FONTS:
+            try:
+                from PIL import ImageFont
+                _FONTS[key] = ImageFont.truetype(fx["path"], key[2], index=fx["index"])
+            except Exception:  # noqa: BLE001 — 글꼴을 못 읽으면 글자 수로 어림
+                _FONTS[key] = None
+        return _FONTS[key], fx["k"]
     if f == "Black Han Sans":
         fn, k = "BlackHanSans-Regular.ttf", 1.02
     elif f == "Do Hyeon":

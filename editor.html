@@ -1453,12 +1453,18 @@ function capPosOf(id) {
   return Object.keys(o).length ? o : null;
 }
 // 한 줄 자막이 화면 밖으로 넘치지 않게 글자 크기 배율 — editor.py cap_fit 과 같은 규칙 (한글 0.9em 어림 · 0.7배보다 더 줄여야 하면 그대로 두고 줄바꿈)
-const emOf = (ch, black) => ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? (black ? 0.95 : 0.9) : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
+// fm: 은평 글꼴 폭 표(서버 epfont.metrics · 그 글꼴에 있는 글자·한글만 · editor.py _em 과 같은 셈) — 없거나 표에 없는 글자는 Pretendard 어림
+const emOf = (ch, black, fm) => fm && fm.em[ch] != null ? fm.em[ch] : fm && /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF]/.test(ch) ? fm.hangul : ch === " " ? 0.24 : ch.codePointAt(0) >= 0x1100 ? (black ? 0.95 : 0.9) : /[0-9a-z]/.test(ch) ? 0.6 : /[A-Z]/.test(ch) ? 0.78 : 0.42;
+// 은평 스타일 글꼴 (BR-310~BR-313 · editor.py ep_font·ep_font_on·ep_font_scope 와 같은 셈): 편집실을 열 때 서버가 준 KFA 글꼴 {family, k, em, hangul, url}
+// (이 PC 에서 못 찾으면 null) — 은평 스타일 화면(쇼츠 · 위아래 박스 · 영상 창)의 모든 글자를 이 글꼴로 그리고 글자 폭도 이 표로 셈 (타이틀 글꼴·배운 스타일보다 먼저)
+let EPF = null;
+const epFontOn = q => !!(q && q.format === "shorts" && q.layout && q.layout.mode === "box" && q.layout.win);
+const fmNow = () => EPF && epFontOn(S) ? EPF : null;
 function capFit(text, st, W) {
-  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black";
+  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black", fm = fmNow();
   const room = al === "left" ? 1 - x : al === "right" ? x : 2 * Math.min(x, 1 - x);
   const avail = W * Math.min(0.9, room - 0.05);
-  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, black), 0)));
+  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, black, fm), 0)));
   const need = em * st.size + 2 * (st.strokeW || 0);
   if (need <= avail || avail <= 0) return 1;
   const k = Math.floor(avail / need * 100) / 100;
@@ -1473,12 +1479,12 @@ function capLines(text, st, W) {
 // 글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.py cap_wrap_lines)
 function capWrapLines(text, st, W) {
   const paras = String(text ?? "").replace(/\r/g, "").split("\n");
-  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", avail = 0.92 * W - 2 * stroke, sp = emOf(" ") * size;
+  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", fm = fmNow(), avail = 0.92 * W - 2 * stroke, sp = emOf(" ", false, fm) * size;
   let n = 0;
   for (const para of paras) {
     let cur = 0; n++;
     for (const w of para.split(" ")) {
-      const ww = Array.from(w).reduce((a, ch) => a + emOf(ch, black), 0) * size;
+      const ww = Array.from(w).reduce((a, ch) => a + emOf(ch, black, fm), 0) * size;
       if (cur && cur + sp + ww > avail) { n++; cur = ww; } else cur = cur + (cur ? sp : 0) + ww;
     }
   }
@@ -1500,11 +1506,11 @@ function capRowY(q, o, st, e, c1s, W) {
 const TOPIC = { SEC: 2.5, TOP: 0.07, ONE: 0.9, SIZES: [72, 64], SWAP: [100, 90, 80, 72], LINE: 1.25, GAP: 0.012 };
 const TOPIC_STYLE = { weight: "Black", size: 72, fill: "#FFFFFF", stroke: "#111111", strokeW: 8, bgOn: false, bg: "#000000", bgOpacity: 0.55, y: 0.22, effect: "pop", highlight: "#FFD400" };
 function txtBox(text, st, W, H) {  // 글 상자 [왼, 위, 오른, 아래] 화면 비율 · y 는 글 아래 끝 (editor.py text_box)
-  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", avail = 0.92 * W - 2 * stroke, sp = emOf(" ") * size, widths = [];
+  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", fm = fmNow(), avail = 0.92 * W - 2 * stroke, sp = emOf(" ", false, fm) * size, widths = [];
   for (const para of String(text ?? "").replace(/\r/g, "").split("\n")) {
     let cur = 0;
     for (const w of para.split(" ")) {
-      const ww = Array.from(w).reduce((a, ch) => a + emOf(ch, black), 0) * size;
+      const ww = Array.from(w).reduce((a, ch) => a + emOf(ch, black, fm), 0) * size;
       if (cur && cur + sp + ww > avail) { widths.push(cur); cur = ww; } else cur = cur + (cur ? sp : 0) + ww;
     }
     widths.push(cur);
@@ -1513,7 +1519,7 @@ function txtBox(text, st, W, H) {  // 글 상자 [왼, 위, 오른, 아래] 화�
   const x = (st.x ?? 0.5) * W, al = st.align || "center", left = al === "left" ? x : al === "right" ? x - wd : x - wd / 2, y = (+st.y) * H;
   return [left / W, (y - h) / H, (left + wd) / W, y / H];
 }
-const textW = (text, st) => Math.max(0, ...String(text ?? "").replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, st.weight === "Black"), 0))) * (+st.size || 0) + 2 * (+st.strokeW || 0);
+const textW = (text, st, fm = fmNow()) => Math.max(0, ...String(text ?? "").replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, st.weight === "Black", fm), 0))) * (+st.size || 0) + 2 * (+st.strokeW || 0);
 const oneLine = (text, st, W) => !String(text ?? "").includes("\n") && textW(text, st) <= TOPIC.ONE * 0.92 * W;
 function topicFill(cap) {
   let f = String((cap || {}).fill || "#FFFFFF").toUpperCase(); if (!/^#[0-9A-F]{6}$/.test(f)) f = "#FFFFFF";
@@ -2641,6 +2647,12 @@ function showItem(it, t, z, mod, used) {
 // (CSS cover = 가운데 기준 자름) · 로고는 아래 띠 가운데 (높이 EP.LOGO.h · 세로 가운데 EP.LOGO.cy · 폭은 그림 비율) — 클립 바탕(lbg) 안이라 영상·글자 아래이고
 // 전환도 내보내기처럼 클립과 함께 · 그림을 못 읽으면 띠 색만 보임 (내보내기도 띠 색)
 const epPicUrl = ref => "/api/style/card_pic?f=" + encodeURIComponent(ref);
+// 은평 스타일 글꼴 파일 (BR-311 · 서버 /api/style/ep_font = 고른 파일 또는 이 PC 에 깔린 KFA 글꼴) → 'EpFontE' · 다 받으면 다시 그림 (못 받으면 Pretendard 로 보임)
+function epFontLoad() {
+  if (!EPF || !EPF.url || typeof FontFace === "undefined") return;
+  new FontFace("EpFontE", `url("${EPF.url}")`, { weight: "400" }).load().then(f => { document.fonts.add(f); frameDirty = true; })
+    .catch(() => toast("은평 스타일 글꼴을 불러오지 못했어요 · 미리보기만 기본 글꼴로 보여요 (내보낸 영상에는 KFA 글꼴이 들어가요)"));
+}
 function epPics(bg, f, k, W, H) {
   let p = bg._ep;
   if (!(f.bg === "box" && (f.band || f.logo))) { if (p) css(p.root, "display", "none"); return; }
@@ -2955,9 +2967,9 @@ function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >
 // 타이틀 글꼴 (editor.py TITLE_FONTS 와 같은 목록) — 굵기가 하나뿐인 글꼴은 굵게 흉내 없이
 const TFONTS = { "Black Han Sans": ["BlackHanSansE", "검은고딕"], "Do Hyeon": ["DoHyeonE", "도현"] };
 function styleText(el, st, scale, fk = 1) {
-  const tf = TFONTS[st.font];
-  el.style.fontFamily = tf ? tf[0] : "";
-  el.style.fontWeight = tf ? 400 : st.weight === "Black" ? 900 : 700;
+  const tf = TFONTS[st.font], ep = fmNow();  // 은평 스타일 화면은 KFA 글꼴 고정 (그 글꼴 파일의 굵기 그대로 · editor.py ass_font)
+  el.style.fontFamily = ep ? '"EpFontE", PretendardE' : tf ? tf[0] : "";
+  el.style.fontWeight = ep || tf ? 400 : st.weight === "Black" ? 900 : 700;
   el.style.fontSize = st.size * scale * fk + "px";
   el.style.top = st.y * 100 + "%";
   el.style.left = (st.x ?? 0.5) * 100 + "%";
@@ -4708,7 +4720,7 @@ const EP = {
 };
 let EPX = null;  // 스타일 화면 덧붙임 {series, seriesName, longLine, next(다음 시리즈 번호 · 보기), pics({band, logo} 켠 띠 그림·로고 이름)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx)
 function epSeriesFit(t, g) {  // 이름표 상자 폭을 글에 맞춤 (editor.py ep_series_fit 과 같음)
-  const w = Math.min(0.9, (textW(t.text, t.style) + 2 * EP.TAG_PAD) / 1080);
+  const w = Math.min(0.9, (textW(t.text, t.style, EPF) + 2 * EP.TAG_PAD) / 1080);  // 은평 글꼴 폭 (editor.py ep_series_fit · BR-311)
   g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
 }
 // 은평 스타일 덧붙임 (editor.py ep_extras · ep_series · ep_longline 과 같은 값): 고른 것만 · 이미 있으면 때만 다시 맞춤 (두 번 눌러도 하나) · 번호는 보기 번호(내보낼 때 정함)
@@ -4769,8 +4781,8 @@ function seriesGone(q, gone) {
   if (!gone.some(g => g && g.plan === "series")) return;
   q.titles = q.titles.filter(t => t.plan !== "series"); q.shapes = (q.shapes || []).filter(g => g.plan !== "series");
 }
-function epTitleStyle(text) {  // 흰 상자 안(양옆 PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝)
-  const room = EP.BOX.w * 1080 - 2 * EP.PAD, size = EP.SIZES.find(z => textW(text, { ...EP.TITLE, size: z }) <= room) ?? EP.SIZES[EP.SIZES.length - 1];
+function epTitleStyle(text) {  // 흰 상자 안(양옆 PAD) 한 줄로 들어가는 가장 큰 글자 · 상자 세로 가운데 (y = 글 아래 끝) · 은평 글꼴(KFA) 폭으로 (editor.py ep_title_style)
+  const room = EP.BOX.w * 1080 - 2 * EP.PAD, size = EP.SIZES.find(z => textW(text, { ...EP.TITLE, size: z }, EPF) <= room) ?? EP.SIZES[EP.SIZES.length - 1];
   return { ...EP.TITLE, size, y: Math.round((EP.BOX.y + EP.BOX.h / 2 + TOPIC.LINE * size / 2 / 1920) * 1e4) / 1e4 };
 }
 const epOn = q => (q.shapes || []).some(g => g.plan === "card");
@@ -5632,7 +5644,7 @@ function styleEditor(prefix, st, title, head) {  // head: 제목 글 (줄 설정
     ${slider(prefix + "y", "세로 위치", st.y, 0.08, 0.95, 0.01, v => Math.round(v * 100) + "%")}
     ${!title ? slider(prefix + "x", "가로 위치", st.x ?? 0.5, 0.02, 0.98, 0.01, v => Math.round(v * 100) + "%") : ""}
     ${title ? slider(prefix + "x", "가로 위치", st.x ?? 0.5, 0.02, 0.98, 0.01, v => Math.round(v * 100) + "%") + `<div class="f"><label>정렬</label><div class="seg" id="${prefix}align">${[["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]].map(([v, l]) => `<button data-v="${v}" class="${(st.align || "center") === v ? "on" : ""}">${l}</button>`).join("")}</div><span></span></div>` : ""}
-    ${title ? `<div class="f"><label>글꼴</label><select class="s" id="${prefix}font">${[["", "프리텐다드 (기본)"], ...Object.entries(TFONTS).map(([k, v]) => [k, v[1]])].map(([v, l]) => `<option value="${v}" ${(st.font || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
+    ${title ? `<div class="f"><label>글꼴</label><select class="s" id="${prefix}font"${fmNow() ? ` disabled title="은평 스타일 화면은 KFA 글꼴(${esc(EPF.family)})로 고정돼요"` : ""}>${[["", "프리텐다드 (기본)"], ...Object.entries(TFONTS).map(([k, v]) => [k, v[1]])].map(([v, l]) => `<option value="${v}" ${(st.font || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
     ${slider(prefix + "rot", "기울기", st.rot || 0, -20, 20, 1, v => v + "°")}` : ""}
     <div class="f"><label>효과</label><select class="s" id="${prefix}effect">${[["none", "없음"], ["fade", "페이드"], ["pop", "팝 (튀어나오기)"], ["slide", "슬라이드 업"], ["karaoke", "노래방 하이라이트"], ["stamp", "쾅 찍기"], ["shake", "흔들기"]].map(([v, l]) => `<option value="${v}" ${st.effect === v ? "selected" : ""}>${l}</option>`).join("")}</select><span></span></div>
     <div class="f"><label>강조색</label><input type="color" id="${prefix}highlight" value="${st.highlight || "#FFD400"}"><span class="hint">노래방 효과용</span></div>
@@ -8106,7 +8118,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   P = j.project; P.sequences.forEach(ensureSeq); signFresh();
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
-  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null;
+  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad();
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;

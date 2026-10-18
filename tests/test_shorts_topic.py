@@ -360,7 +360,7 @@ class LayoutTest(WorkMixin, unittest.TestCase):
         self.assertIsNone(editor.topic_title("가나다라마바사아자차카타파하가나다", top))
 
 
-JS_DEFS = ("FPS,EPS,fr,sp,iEnd,iLen,tlOf,mt,DEF,prm,emOf,cutText,isMainAV,r6,mergeIv,tlRemap,cutPieces,moveItem,remapSeq,tidySeq,"
+JS_DEFS = ("FPS,EPS,fr,sp,iEnd,iLen,tlOf,mt,DEF,prm,emOf,EPF,epFontOn,fmNow,cutText,isMainAV,r6,mergeIv,tlRemap,cutPieces,moveItem,remapSeq,tidySeq,"
            "TOPIC,TOPIC_STYLE,txtBox,textW,oneLine,topicFill,capBand,videoTop,topicTitle,r3,swapIn,topicUnder,headTopic,epFrame,epFacts,topicAfter,topicGone,"
            "placeTopic,gfxCut,EP,EPX,epSeriesFit,epExtras,epCapClear,epTitleStyle,epOn,epCard,epOff,tplTitle,TEMPLATES").split(",")
 
