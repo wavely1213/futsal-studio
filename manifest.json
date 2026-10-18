@@ -1,6 +1,8 @@
 {
   "version": "2.24.0",
   "notes": "올리기: 작업한 편집본이 기본 · 우리 채널 업로드 창 · 최근 순 목록 · 말로 나눈 포인트가 챕터 · 촬영본 넣기: 폴더째 넣은 영상 꺼내기 · 카톡 저화질 알림 · 휴대폰에서 옮기는 법 · 한 촬영 조각은 묶기 권함 · 은평 스타일: 팀 배너 띠 + 로고",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/61b52a2d81f219291e1685a3befe6b13a9a34cd0.zip",
+  "commit": "61b52a2d81f219291e1685a3befe6b13a9a34cd0",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "58d9241c3e6885e8fa80d4a4e27b8cc69e832c2904476719b5871d6c1461b83e",
