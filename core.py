@@ -621,8 +621,9 @@ def local_videos():
         done = tl.exists()
         exp = exported.get(d.name)
         recent = max(added[n], seen.get(n, 0.0), _mt(tl) if done else 0.0, _mt(WORK / "projects" / f"{d.name}.json"), exp or 0.0)
+        # mtime: 파일 수정 시각(초) — 한 촬영의 조각인지 어림할 때 촬영 시각을 모르면 씀 (보관함 화면 · D-464)
         out.append({"name": n, "size_mb": round(st.st_size / 1e6, 1), "analyzed": done,
-                    "recent": round(recent, 3), "exported": round(exp, 3) if exp else None})
+                    "recent": round(recent, 3), "exported": round(exp, 3) if exp else None, "mtime": int(st.st_mtime)})
     out.sort(key=lambda x: -x["recent"])  # sorted 는 안정 정렬 → 같은 시각이면 이름 순 그대로
     return out
 

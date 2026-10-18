@@ -907,12 +907,14 @@ class Handler(BaseHTTPRequestHandler):
             local = source.annotate(core.local_videos())  # 영상마다 출처(풋살사관학교·다른 채널·내 촬영본) + 고르기 칩 개수
             intake.annotate(local, core.VIDEOS, core.adir)  # 복사 중(copying) · 편집점을 찾은 뒤 파일이 바뀜(changed)
             rename.annotate(local)  # 탐색기에서 이름을 바꿔 끊긴 옛 이름 작업 (renamedFrom · [이어 붙이기])
+            intake.media(local, core.VIDEOS)  # 해상도·비트레이트(media · 뒤에서 읽어 둠) · 카카오톡 압축 사본 같음(lowq) (D-462)
             return self._send(200, {"version": core.VERSION, "workspace": str(core.WORK), "job": JOB["name"], **jinfo,
                                     "result": JOB["result"] if not JOB["name"] and (not JOB["big"] or q.get("result") == ["1"]) else None,
                                     "resultBig": bool(JOB["big"]) and not JOB["name"],
                                     "error": JOB["error"] if not JOB["name"] else None,
                                     "fail": JOB.get("fail") if not JOB["name"] else None,  # 쉬운 한 줄 + 할 일 (화면의 실패 카드 · 내가 시킨 작업은 done.fail)
                                     "unusable": intake.unusable(core.VIDEOS),  # 아직 못 쓰는 형식 (.MTS 등)
+                                    "nested": intake.nested(core.VIDEOS),  # 폴더째 넣은 촬영본: 하위 폴더별 영상 수 → [밖으로 꺼내기] (D-460)
                                     "log": lines, "log_total": total, "progress": dict(core.PROGRESS), "local": local, "sources": source.summary(local),
                                     "remote": remote.SVC.brief(), "crash": dict(CRASH) or None,
                                     "auto": dict(autorun.LIVE) or None,  # 끝까지 자동으로: 지금 단계 (i/n · 이름)
@@ -1567,6 +1569,29 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 source.start_backfill(log)
             return self._send(200, {"ok": True, "running": source.backfill_running()})
+        if path == "/api/unnest":  # 폴더째 넣은 촬영본을 보관함 바로 안으로 꺼내기 (D-460) — 이름 바꾸기처럼 작업 자리를 잡고 바로 답함
+            sub = b.get("folder")
+            if not isinstance(sub, str) or sub not in {r["folder"] for r in intake.nested(core.VIDEOS, fresh=True)}:
+                return self._send(404, {"ok": False, "error": "그 폴더를 보관함에서 찾지 못했어요. 목록을 새로 고친 뒤 다시 눌러 주세요"})
+            with LOCK:
+                busy = bool(JOB["name"]) or RESTARTING.is_set()
+                if not busy:
+                    JOB["name"] = "폴더 안 영상 꺼내기"
+            if busy:  # 편집점 찾기·묶기가 보관함 파일을 쓰는 중일 수 있음
+                return self._send(409, {"ok": False, "error": BUSY_MSG})
+            try:
+                log(f"폴더 안 영상 꺼내기 · {sub}")
+                r = intake.unnest(core.VIDEOS, sub, log)
+                code, res = 200, dict(r, ok=True)
+            except FileNotFoundError as e:
+                code, res = 404, {"ok": False, "error": str(e)}
+            except OSError as e:
+                log(f"폴더 안 영상을 꺼내지 못했어요 · {e}")
+                code, res = 500, {"ok": False, "error": "폴더 안 영상을 꺼내지 못했어요. 잠시 뒤 다시 눌러 주세요"}
+            finally:
+                with LOCK:
+                    JOB["name"] = None
+            return self._send(code, res)
         if path in ("/api/rename", "/api/rename/attach"):  # 보관함 영상 이름 바꾸기 · 탐색기에서 바꾼 영상에 옛 작업 이어 붙이기 (D-073)
             with LOCK:  # 작업 자리를 잡아 둠 → 바꾸는 동안 휴대폰·다른 창이 옛 이름으로 작업을 시작하지 못하게 (확인만 하고 놓으면 그 틈에 시작됨)
                 busy = bool(JOB["name"]) or RESTARTING.is_set()

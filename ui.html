@@ -922,6 +922,7 @@
       <div class="phead"><div><h1>보관함</h1><p>받은 영상과 직접 찍은 원본이 모이는 곳이에요. 편집점 찾기를 돌리면 대사와 컷 후보를 정리해 드려요.</p></div></div>
       <div class="bar">
         <button class="btn" id="btnOpenVideos" data-pc-only>촬영 원본 넣기</button>
+        <button class="linkbtn" id="btnPhoneHow" data-pc-only title="휴대폰 촬영본을 화질 그대로 PC로 옮기는 법">휴대폰에서 옮기는 법</button>
         <span id="remoteLibSlot"></span>
         <div class="sp"></div>
         <button class="btn" id="btnToRefs" disabled title="스타일 배우기에만 쓸 다른 채널 영상을 '학습용 영상'으로 옮겨요. 보관함·편집실·썸네일·올리기 목록에서 빠져요">학습용으로 옮기기</button>
@@ -931,6 +932,12 @@
         <button class="btn primary" id="btnAnalyze" disabled>편집점 찾기</button>
         <div class="mhint" id="modelHint"></div>
       </div>
+      <div class="card guide" id="phoneHow" hidden data-pc-only><b class="h">휴대폰 촬영본은 원본 파일 그대로 옮겨 주세요</b>
+        <ol><li><b>갤럭시</b> · USB 선으로 PC에 꽂고 휴대폰 알림에서 'USB 사용 용도 → 파일 전송'을 고른 뒤, 탐색기의 휴대폰 → DCIM → Camera 폴더에서 영상을 복사해요</li>
+          <li><b>아이폰</b> · USB 선으로 꽂고 아이폰에서 '신뢰'를 누른 뒤, Windows '사진' 앱의 [가져오기]로 영상을 PC에 옮겨요 (아이폰 설정 → 사진 → 'Mac 또는 PC로 전송'을 '원본 유지'로 두면 화질 그대로예요)</li>
+          <li><b>선이 없으면</b> · 구글 드라이브·네이버 MYBOX·iCloud 같은 클라우드에 올린 뒤 PC에서 내려받아요. 카카오톡·문자로 보내면 화질을 줄인 사본이 와요</li></ol>
+        <p class="hint">옮긴 영상은 [촬영 원본 넣기]로 연 폴더에 넣어 주세요. 날짜 폴더째 넣어도 돼요 (보관함에서 [밖으로 꺼내기]를 눌러 주세요).</p>
+        <div class="acts"><button class="btn primary" id="phoneHowOpen">촬영 원본 넣기</button><button class="btn" id="phoneHowClose">닫기</button></div></div>
       <div class="failslot"></div>
       <div class="card autocard" id="autoCard" hidden></div>
       <div class="bar srcbar"><div class="filters" id="srcFilters" title="영상 출처로 골라 보기"></div><div class="filters" id="srcChans" title="다른 채널 영상을 채널별로 골라 보기" style="display:none"></div><div class="hint" id="libHidden"></div><div class="hint" id="libOrder" hidden>최근에 넣었거나 작업한 영상이 위에 있어요 · 편집실·썸네일·올리기 목록도 같은 순서예요</div></div>
@@ -1485,7 +1492,7 @@ function downloaded(res) {
 
 /* 2. 보관함 */
 function renderLocal() {
-  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + srcFilter + JSON.stringify(state.crash || null);
+  const key = JSON.stringify(state.local) + JSON.stringify(state.sources || null) + JSON.stringify(state.unusable || []) + JSON.stringify(state.nested || []) + srcFilter + JSON.stringify(state.crash || null);
   if (key === lastLocalKey) return;
   lastLocalKey = key;
   const have = new Set(state.local.map(v => v.name));
@@ -1500,8 +1507,10 @@ function renderLocal() {
   const badRows = bad.map(u => `<div class="row bad" title="MP4·MOV·M4V·MKV·WEBM 영상만 바로 쓸 수 있어요">
       <span></span><div class="mini"><span class="ph">${esc(u.ext)}</span></div>
       <div style="min-width:0"><div class="name">${esc(u.name)}</div><div class="sub">이 형식(.${esc(u.ext)})은 바로 못 써요 · <span class="next">[MP4로 바꾸기]를 누르면 편집할 수 있는 MP4로 바꿔 넣어요</span> · <span class="size">${u.size_mb >= 1000 ? (u.size_mb / 1000).toFixed(1) + "GB" : u.size_mb + "MB"}</span></div></div>
-      <span class="chip bad">못 써요</span><button class="btn" data-conv="${esc(u.name)}" title="원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요">MP4로 바꾸기</button></div>`).join("");
+      <span class="chip bad">못 써요</span><button class="btn" data-conv="${esc(u.name)}" title="원본은 보관함 폴더 안 '바꾸기 전 원본' 폴더로 옮겨 그대로 둬요">MP4로 바꾸기</button></div>`).join("")
+    + (srcFilter === "all" || srcFilter === "footage" ? nestRows(state.nested || []) : "");  // 폴더째 넣은 촬영본 (D-460)
   $("local").innerHTML = list.length || badRows ? list.map(v => {
+    const q = qualityOf(v);  // 해상도·비트레이트 · 압축된 사본 같으면 알림 (D-462)
     const id = ytId(v.name);
     const title = niceName(v.name);
     const chip = v.copying ? `<span class="chip copy" title="파일이 아직 복사되고 있어요. 크기가 몇 초 동안 그대로면 쓸 수 있어요">복사 중…</span>`
@@ -1510,7 +1519,7 @@ function renderLocal() {
     return `<div class="row${v.copying ? " copying" : ""}">
       <input type="checkbox" class="lchk" value="${esc(v.name)}" ${checked.has(v.name) ? "checked" : ""}${v.copying ? ` disabled title="복사가 끝나면 고를 수 있어요"` : ""}>
       <div class="mini"><span class="ph">${id ? "⚽" : "원본"}</span>${id ? `<img src="${thumb(id)}" loading="lazy" alt="" data-gone="1">` : ""}</div>
-      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}</span>${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button> · <button class="linkbtn" data-auto="${esc(v.name)}" title="이 영상 하나로 가편집·MSG·내보내기·쇼츠·썸네일·올리기 키트까지 한 번에 (유튜브에는 올리지 않아요)">끝까지 자동으로</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
+      <div style="min-width:0"><div class="name">${esc(title)}</div><div class="sub">${srcBadge(srcOf(v), v.name)} · <span class="size">${v.size_mb >= 1000 ? (v.size_mb / 1000).toFixed(1) + "GB" : v.size_mb + "MB"}${q.txt ? ` · ${q.txt}` : ""}</span>${q.warn ? ` · <span class="next">${q.warn}</span> <button class="linkbtn" data-howto title="휴대폰 촬영본을 화질 그대로 PC로 옮기는 법">휴대폰에서 옮기는 법</button>` : ""}${v.changed && !v.copying ? ` · <span class="next">복사가 덜 된 채로 찾았을 수 있어요 · [편집점 다시 찾기]를 눌러 주세요</span>` : ""}${crashOf(v.name) ? ` · <span class="next">${crashOf(v.name)}</span>` : ""}${v.renamedFrom ? ` · <span class="next">예전 이름 '${esc(v.renamedFrom.old)}'의 받아쓰기${v.renamedFrom.seqs ? `·편집본 ${v.renamedFrom.seqs}개` : ""}가 있어요 (탐색기에서 이름을 바꿨나요?)</span>` : ""}${v.copying ? "" : ` · <button class="linkbtn" data-ren="${esc(v.name)}" title="영상 파일 이름을 바꿔요 · 받아쓰기·편집본·썸네일 디자인도 함께 옮겨요">이름 바꾸기</button> · <button class="linkbtn" data-auto="${esc(v.name)}" title="이 영상 하나로 가편집·MSG·내보내기·쇼츠·썸네일·올리기 키트까지 한 번에 (유튜브에는 올리지 않아요)">끝까지 자동으로</button>`}${srcOf(v).kind === "other" ? ` · <button class="linkbtn" data-toref="${esc(v.name)}" title="스타일 배우기에만 쓸 영상이면 '학습용 영상'으로 옮겨요 (편집 목록에서 빠져요)">학습용으로 옮기기</button>` : ""}</div></div>
       ${chip}
       ${v.changed && !v.copying ? `<button class="btn primary" data-reana="${esc(v.name)}" title="다 들어온 파일로 받아쓰기·가편집을 다시 만들어요 (내 편집본은 그대로)">편집점 다시 찾기</button>`
         : v.analyzed && !v.copying ? `<button class="btn primary" data-edit="${esc(v.name)}">편집실 열기</button>`
@@ -1527,6 +1536,8 @@ function renderLocal() {
   document.querySelectorAll("#local [data-ren]").forEach(b => b.onclick = () => renameVideo(b.dataset.ren));
   document.querySelectorAll("#local [data-auto]").forEach(b => b.onclick = () => window.autoOpen && window.autoOpen(b.dataset.auto));
   document.querySelectorAll("#local [data-attach]").forEach(b => b.onclick = () => attachOld(b.dataset.attach, b.dataset.old));
+  document.querySelectorAll("#local [data-unnest]").forEach(b => b.onclick = () => unnestFolder(b.dataset.unnest));
+  document.querySelectorAll("#local [data-howto]").forEach(b => b.onclick = () => phoneHow(true));
   renderBanner();
   fillSelect("tlSel", state.local.filter(v => v.analyzed));
   renderEdList(); renderThList(); renderStyleSrc();
@@ -1624,8 +1635,10 @@ function fillSelect(id, list) {
 }
 $("btnOpenVideos").onclick = () => { openFolder("videos"); if (!window.FS_REMOTE) toast("열린 폴더에 영상 파일을 넣으면 여기에 나타나요 · 복사가 끝날 때까지 '복사 중'으로 보여요"); };
 $("btnAnalyze").onclick = () => analyzeNames(libChecked());
-function analyzeNames(names, changedFile) {
+function analyzeNames(names, changedFile, separate) {
   if (state.job || !names.length) return;
+  // 한 촬영의 조각 여러 개면 먼저 묶을지 물음 (D-464) — [따로 찾기]를 누르면 예전처럼 하나씩
+  if (!changedFile && !separate && shootPieces(state.local.filter(v => names.includes(v.name)))) return piecesHint(names);
   const again = state.local.filter(v => v.analyzed && names.includes(v.name)).length;
   if (again && !confirm(againMsg(again, changedFile))) return;
   job("/api/analyze", { names, model: segVal("modelSeg") }, analyzed);
@@ -1758,15 +1771,71 @@ if (bundleMarked()) api("/api/state?since=999999999").then(s => {
   if (s.job) return;
   if (s.result && s.result.mode && s.result.added) bundleDone(s.result); else bundleMark(false);
 }).catch(() => {});
-$("btnBundle").onclick = () => {
-  const names = libChecked();
-  if (names.length < 2) return;
+$("btnBundle").onclick = () => bundleNames(libChecked());
+function bundleNames(names) {
+  if (state.job || names.length < 2) return;
   const mb = state.local.filter(v => names.includes(v.name)).reduce((s, v) => s + v.size_mb, 0);
   const size = mb >= 1000 ? (mb / 1000).toFixed(1) + "GB" : Math.max(1, Math.round(mb)) + "MB";
   const t = prompt(`고른 영상 ${names.length}개를 찍은 순서대로 이어서 한 영상으로 만들고, 이어서 편집점까지 찾아요.\n원본은 그대로 두고 새 파일이 하나 생겨서, 저장 공간을 원본만큼(약 ${size}) 더 써요.\n\n묶은 영상 이름을 정해 주세요`, "촬영본");
   if (t === null) return;
   job("/api/bundle", { names, title: t.trim() || "촬영본", model: segVal("modelSeg") }, bundleDone);
-};
+}
+
+/* 2-1d. 보관함 들어오는 촬영본 살피기 (D-460~D-464): 폴더째 넣은 촬영본 줄 · 해상도·비트레이트 · 휴대폰에서 옮기는 법 ·
+   한 촬영의 조각 묶기 권하기. 한 촬영 조각 판단(shootPieces)은 고른 것이 2개 이상 · 모두 내 촬영본 · 아직 편집점을 안 찾음 ·
+   묶은 영상(묶음_…)이 아님 · 같은 날 · 잇단 두 파일의 시각 차이가 (둘 중 긴 길이 + 15분) 이하. 시각은 모두 촬영 시각(media.created)을
+   알면 그것, 아니면 파일 수정 시각(mtime) — 섞어 쓰지 않음 (BR-272) */
+const PIECE_GAP = 15 * 60;
+function shootPieces(rows) {
+  if (rows.length < 2 || rows.some(v => srcOf(v).kind !== "footage" || v.analyzed || v.copying || /^묶음_/.test(v.name))) return false;
+  const useC = rows.every(v => v.media && v.media.created);
+  const pts = rows.map(v => ({ t: useC ? v.media.created : v.mtime, d: (v.media && v.media.dur) || 0 }));
+  if (pts.some(p => !p.t)) return false;
+  pts.sort((a, b) => a.t - b.t);
+  const day = t => new Date(t * 1000).toDateString();
+  if (pts.some(p => day(p.t) !== day(pts[0].t))) return false;
+  for (let i = 1; i < pts.length; i++) if (pts[i].t - pts[i - 1].t > Math.max(pts[i - 1].d, pts[i].d) + PIECE_GAP) return false;
+  return true;
+}
+function piecesHint(names) {
+  showFail({ kind: "pieces", msg: `고른 ${names.length}개는 한 촬영의 조각 같아요 (같은 날 잇달아 찍음) · 먼저 한 영상으로 묶을까요? 따로 찾으면 조각마다 가편집·쇼츠가 따로 생겨요`,
+    actions: ["bundle", "separate"], labels: { bundle: "묶고 편집점 찾기", separate: "따로 찾기" }, job: "편집점 찾기" },
+    { panel: "p-library", on: { bundle: () => { clearFail("p-library"); bundleNames(names); }, separate: () => { clearFail("p-library"); analyzeNames(names, false, true); } } });
+}
+function mbps(kbps) { return kbps >= 10000 ? `${Math.round(kbps / 1000)}Mbps` : `${(kbps / 1000).toFixed(1)}Mbps`; }
+function qualityOf(v) {  // → {txt: '1280×720 · 2.1Mbps', warn: 쉬운 알림 또는 ""} · 카카오톡 이름은 출처와 상관없이, 낮은 화질은 내 촬영본만
+  const m = v.media || {}, txt = m.w && m.h ? `${m.w}×${m.h}${m.kbps ? " · " + mbps(m.kbps) : ""}` : "";
+  const warn = v.lowq === "kakao" ? "카카오톡으로 받은 영상 같아요 · 카톡은 화질을 줄여 보내서 유튜브 화질이 떨어져요. 휴대폰의 원본 파일로 다시 옮겨 주세요"
+    : v.lowq === "low" && srcOf(v).kind === "footage" ? "화질이 낮아요 (메신저로 받아 압축된 사본 같아요) · 휴대폰의 원본 파일로 다시 옮겨 주세요" : "";
+  return { txt, warn };
+}
+function nestRows(list) {  // 폴더째 넣은 촬영본: 폴더마다 한 줄 · [밖으로 꺼내기] (보관함 바로 안으로 옮김 · 복사 없음)
+  return list.map(f => {
+    const wait = f.copying > 0, size = f.size_mb >= 1000 ? (f.size_mb / 1000).toFixed(1) + "GB" : f.size_mb + "MB";
+    return `<div class="row bad" title="보관함 폴더 바로 안의 영상만 목록에 보여요">
+      <span></span><div class="mini"><span class="ph">폴더</span></div>
+      <div style="min-width:0"><div class="name">'${esc(f.folder)}' 폴더</div><div class="sub">영상 ${f.count}개가 폴더 안에 있어요 · <span class="next">${wait ? `아직 복사 중이에요 (${f.copying}개) · 복사가 끝나면 [밖으로 꺼내기]를 눌러 주세요` : "폴더 안 영상은 목록에 안 보여요 · [밖으로 꺼내기]를 누르면 보관함으로 옮겨요"}</span> · <span class="size">${size}</span>${wait ? "" : ` · <button class="linkbtn" data-unnest="${esc(f.folder)}" title="폴더 안 영상을 보관함으로 옮겨요 (복사하지 않아요)">밖으로 꺼내기</button>`}</div></div>
+      <span class="chip${wait ? " copy" : " bad"}">${wait ? "복사 중…" : "폴더 안"}</span><button class="btn" data-unnest="${esc(f.folder)}"${wait ? ` data-wait="1" disabled title="복사가 끝나면 누를 수 있어요"` : ` title="폴더 안 영상을 보관함으로 옮겨요 (복사하지 않아요 · 같은 이름이 있으면 폴더 이름을 붙여요)"`}>밖으로 꺼내기</button></div>`;
+  }).join("");
+}
+async function unnestFolder(folder) {
+  if (state.job) return toast("다른 작업이 끝난 뒤에 눌러 주세요");
+  const f = (state.nested || []).find(x => x.folder === folder);
+  if (!confirm(`'${folder}' 폴더 안 영상 ${f ? f.count + "개" : ""}를 보관함으로 꺼낼까요?\n복사하지 않고 옮기기만 해요. 같은 이름의 영상이 이미 있으면 이름 뒤에 폴더 이름을 붙여요.\n영상을 다 꺼낸 빈 폴더는 지우고, 사진 같은 다른 파일이 남은 폴더는 그대로 둬요.`)) return;
+  const j = await api("/api/unnest", { folder }).catch(() => ({}));
+  if (!j.ok) return;  // 안내는 api() 가 토스트로
+  const moved = j.moved || [], kept = j.kept || [], ren = moved.filter(m => m.name !== m.from.split("/").pop()).length;
+  const busy = kept.filter(k => k.why === "copying").length;
+  lastLocalKey = ""; poll();
+  toast(moved.length ? `영상 ${moved.length}개를 보관함으로 꺼냈어요` + (ren ? ` · 같은 이름이 있어 ${ren}개는 이름 뒤에 폴더 이름을 붙였어요` : "")
+      + (kept.length ? ` · ${kept.length}개는 그대로 뒀어요 (${busy ? "아직 복사 중" : "다른 프로그램이 쓰는 중"} · 잠시 뒤 다시 눌러 주세요)` : "")
+    : `꺼내지 못했어요 · ${busy ? "아직 복사 중이에요. 복사가 끝나면" : "다른 프로그램이 영상을 쓰고 있어요. 잠시 뒤"} 다시 눌러 주세요`);
+}
+function phoneHow(on) { $("phoneHow").hidden = !on; if (on) $("phoneHow").scrollIntoView({ block: "nearest" }); }
+$("btnPhoneHow").onclick = () => phoneHow($("phoneHow").hidden);
+$("phoneHowClose").onclick = () => phoneHow(false);
+$("phoneHowOpen").onclick = () => $("btnOpenVideos").onclick();
+/* 끝: 2-1d */
 
 /* 2-2. 용어 사전: 받아쓰기에 알려 줄 용어 + 자주 틀리게 받아쓰는 말 고치기 (다음 편집점 찾기부터)
    넣거나 빼면 1초 뒤 저절로 저장 (올리기 키트처럼 · D-410) · 편집점 찾기·끝까지 자동으로 직전(job)과 창을 닫거나 다른 화면으로 갈 때도
@@ -2559,7 +2628,7 @@ function sync() {
   $("btnAnalyze").disabled = busy || !nl;
   $("btnToRefs").disabled = busy || !nl;
   $("btnToRefs").textContent = nl ? `학습용으로 옮기기 (${nl})` : "학습용으로 옮기기";
-  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren], #local [data-auto]").forEach(b => (b.disabled = busy));
+  document.querySelectorAll("#refGo, [data-rdir], #refActs .btn, [data-rdel], [data-toref], #refBannerGo, #local [data-conv], #local [data-reana], #local [data-attach], #local [data-ren], #local [data-auto], #local [data-unnest]").forEach(b => (b.disabled = busy || b.dataset.wait === "1"));
   $("btnAuto").disabled = busy || nl !== 1;
   if ($("btnLearn")) syncStyle();
   if ($("btnBundle")) syncBundle(busy);
@@ -2629,6 +2698,7 @@ async function poll() {
   state.sources = s.sources;
   if (typeof remoteDot === "function") remoteDot(s.remote);
   state.unusable = s.unusable || [];  // 아직 못 쓰는 형식 (.MTS 등)
+  state.nested = s.nested || [];  // 폴더째 넣은 촬영본: 하위 폴더별 영상 수 (D-460)
   state.auto = s.auto || null;  // 끝까지 자동으로: 지금 단계 (busy 줄 · 보관함 카드)
   if (s.autoThumb && window.autoThumb) window.autoThumb(s.autoThumb);  // 작업이 이 화면에 썸네일을 그려 달라고 함
   if (window.autoTick) window.autoTick(s);

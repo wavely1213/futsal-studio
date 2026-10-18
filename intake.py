@@ -10,10 +10,13 @@
   · 바뀐 파일로 편집점을 다시 찾으면 반쪽 파일로 만든 파형·썸네일·미리보기 파일을 지움(clear_media_cache)
 - convert: 못 쓰는 형식(.MTS 등)을 ffmpeg 로 MP4 로 바꿔 보관함에 넣음 (원본은 보관함 안 '바꾸기 전 원본' 폴더로 옮겨 그대로)
   · ffmpeg 는 core.run/core.popen 으로 (검은 창 없음 · 앱이 꺼지면 Job Object 로 같이 꺼짐) · 마지막 파일은 updater.replace_retry
+- nested·unnest: 폴더째 넣은 촬영본(휴대폰·SD카드 날짜 폴더) — 하위 폴더별 영상 수를 알리고, 누르면 보관함 바로 안으로 꺼냄 (D-460)
+- media·quality_flag: 보관함 줄의 해상도·비트레이트(뒤에서 ffmpeg 로 한 번씩 읽어 기억) · 카카오톡으로 받아 압축된 사본 알림 (D-462)
 표준 라이브러리 + 앱 공통 도구(core·updater, 함수 안에서 불러옴)만 쓴다 (경로를 받아 판단 · core 가 함수 안에서, app 이 불러 씀 ·
 ffmpeg 경로는 부르는 쪽이 줌).
 """
 import json
+import os
 import re
 import shutil
 import sys
@@ -329,3 +332,254 @@ def convert_target_keep(folder, name):
         out = folder / f"{p.stem} ({k}){p.suffix}"
         k += 1
     return out
+
+
+# ---------- 폴더째 넣은 촬영본 (휴대폰·SD카드 날짜 폴더) ----------
+# 보관함 목록(core.local_videos)·분석 폴더·이름 바꾸기·편집 프로젝트는 모두 '보관함 바로 안의 파일 이름'으로 영상을 찾는다.
+# 그래서 하위 폴더 영상을 목록에 바로 섞지 않고(같은 이름 IMG_0001.MOV 가 폴더마다 있을 수 있음), 폴더별로 'N개 영상이 폴더 안에
+# 있어요 · [밖으로 꺼내기]' 줄만 보여 주고, 누르면 보관함 바로 안으로 옮긴다(같은 드라이브 안 이름 바꾸기 · 복사 없음 · D-460).
+NEST_DEPTH = 6     # 하위 폴더를 이만큼 깊이까지 (소니 캠코더 PRIVATE/AVCHD/BDMV/STREAM/00001.MTS 까지)
+NEST_MAX = 5000    # 한 번에 살펴볼 항목 수 (사진 수천 장이 든 DCIM 폴더째 넣어도 목록이 느려지지 않게)
+NEST_TTL = 3.0     # 살펴본 결과를 이만큼(초) 기억 (보관함 목록은 1초마다 부름)
+_NEST = {}         # 보관함 폴더 → (살펴본 때 monotonic, 결과)
+
+
+def _skip_dir(name):
+    """하위 폴더 중 살펴보지 않을 것: 앱이 쓰는 '바꾸기 전 원본' · 숨김(.으로 시작) · Windows 시스템 폴더($RECYCLE.BIN 등)."""
+    return name.casefold() == CONVERTED.casefold() or name.startswith((".", "$")) or name == "System Volume Information"
+
+
+def _nest_file(name):
+    import core
+    return core.is_video_file(name) or Path(name).suffix.lower() in UNUSABLE_EXTS
+
+
+def _nest_walk(top, limit):
+    """하위 폴더 top 아래 영상 파일 경로 (이름 순 · 깊이 NEST_DEPTH · 바로 가기(심볼릭 링크·정션)는 따라가지 않음) · 남은 살펴볼 수."""
+    out, stack = [], [(Path(top), 1)]
+    while stack and limit > 0:
+        d, depth = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                items = sorted(it, key=lambda e: e.name)
+        except OSError:
+            continue
+        subs = []
+        for e in items:
+            limit -= 1
+            if limit <= 0:
+                break
+            try:
+                if e.is_symlink() or (getattr(e, "is_junction", None) and e.is_junction()):
+                    continue
+                if e.is_dir(follow_symlinks=False):
+                    if depth < NEST_DEPTH and not _skip_dir(e.name):
+                        subs.append((Path(e.path), depth + 1))
+                elif _nest_file(e.name) and e.is_file(follow_symlinks=False):
+                    out.append(Path(e.path))
+            except OSError:
+                continue
+        stack.extend(reversed(subs))
+    return out, limit
+
+
+def nested(folder, fresh=False):
+    """보관함 폴더 바로 안 하위 폴더별로 그 안(더 깊은 폴더 포함)에 든 영상 [{folder, count, size_mb, copying}] (이름 순).
+    copying: 아직 들어오는 중인 것 수 (방금 바뀌었거나 Windows 에서 쓰는 프로그램이 있음) · 영상이 없는 폴더는 뺌."""
+    folder = Path(folder)
+    k = str(folder)
+    hit = _NEST.get(k)
+    if hit and not fresh and _mono() - hit[0] < NEST_TTL:
+        return [dict(r) for r in hit[1]]
+    out, limit = [], NEST_MAX
+    try:
+        with os.scandir(folder) as it:
+            tops = [e for e in it if not _skip_dir(e.name) and not e.is_symlink() and e.is_dir(follow_symlinks=False)]
+    except OSError:
+        tops = []
+    for e in sorted(tops, key=lambda e: e.name):
+        if limit <= 0:
+            break
+        files, limit = _nest_walk(e.path, limit)
+        size = busy_n = n = 0
+        for p in files:
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            n += 1
+            size += st.st_size
+            if 0 <= _wall() - st.st_mtime < STABLE or _writer_open(p):
+                busy_n += 1
+        if n:
+            out.append({"folder": e.name, "count": n, "size_mb": round(size / 1e6, 1), "copying": busy_n})
+    _NEST[k] = (_mono(), out)
+    return [dict(r) for r in out]
+
+
+def _taken(folder, name, used):
+    """보관함 바로 안에 이 이름을 쓸 수 없는지: 같은 이름(대소문자 무시 · Windows) · 같은 분석 폴더 이름의 영상
+    (IMG_0001.MOV ↔ IMG_0001.mp4) · 지운 영상의 분석 폴더·편집 프로젝트가 남은 이름 (남의 받아쓰기·편집본을 이어 받지 않게)."""
+    import core
+    key, stem = name.casefold(), core._stem_key(name).casefold()
+    if key in used["names"] or stem in used["stems"]:
+        return True
+    return (core.ANALYSIS / core._stem_key(name)).exists() or (core.WORK / "projects" / f"{core._stem_key(name)}.json").exists()
+
+
+def nest_target(folder, path, used):
+    """밖으로 꺼낼 때의 새 이름: 원래 이름 → 겹치면 '이름 (폴더 이름).MOV' → '이름 (폴더 이름 2).MOV'…"""
+    p = Path(path)
+    if not _taken(folder, p.name, used):
+        return p.name
+    tag = (p.parent.name or "폴더").strip(" .")[:40].rstrip(" .") or "폴더"
+    k = 1
+    while True:
+        cand = f"{p.stem} ({tag}){p.suffix}" if k == 1 else f"{p.stem} ({tag} {k}){p.suffix}"
+        if not _taken(folder, cand, used):
+            return cand
+        k += 1
+
+
+def unnest(folder, sub, log=print):
+    """하위 폴더 sub 안(더 깊은 폴더 포함)의 영상을 보관함 바로 안으로 옮김 → {moved: [{name, from}], kept: [{name, why}]}.
+    같은 드라이브 안 옮기기라 복사하지 않음 · 겹치는 이름은 폴더 이름을 붙임 · 아직 복사 중이거나 다른 프로그램이 잡고 있는 파일은
+    그대로 둠 · 다 비운 폴더만 지움(사진 등 다른 파일이 남은 폴더는 그대로)."""
+    import core
+    import updater
+    folder = Path(folder)
+    if not sub or sub != Path(sub).name or _skip_dir(sub) or not (folder / sub).is_dir():
+        raise FileNotFoundError("그 폴더를 보관함에서 찾지 못했어요. 목록을 새로 고친 뒤 다시 눌러 주세요")
+    used = {"names": set(), "stems": set()}
+    try:
+        with os.scandir(folder) as it:
+            names = [e.name for e in it]
+        for n in names:
+            used["names"].add(n.casefold())
+            if core.is_video_file(n):
+                used["stems"].add(core._stem_key(n).casefold())
+    except OSError:
+        pass
+    files, _ = _nest_walk(folder / sub, NEST_MAX)
+    moved, kept, dirs = [], [], set()
+    for p in files:
+        rel = p.relative_to(folder).as_posix()
+        if busy(p):
+            kept.append({"name": rel, "why": "copying"})
+            continue
+        new = nest_target(folder, p, used)
+        dst = folder / new
+        if dst.exists():  # 그사이 같은 이름이 생김 → 덮어쓰지 않음
+            kept.append({"name": rel, "why": "exists"})
+            continue
+        try:
+            updater.replace_retry(p, dst, 3.0)  # Windows: 백신·미리보기가 잠깐 잡고 있으면 조금 기다렸다 다시
+        except OSError as e:
+            kept.append({"name": rel, "why": "locked"})
+            log(f"  옮기지 못했어요 · {rel} · {e}")
+            continue
+        used["names"].add(new.casefold())
+        used["stems"].add(core._stem_key(new).casefold())
+        moved.append({"name": new, "from": rel})
+        dirs.add(p.parent)
+        log(f"  보관함으로 꺼냄 · {rel}" + (f" → {new}" if new != p.name else ""))
+    top = (folder / sub).resolve()
+    for d in sorted(dirs | {folder / sub}, key=lambda x: len(x.parts), reverse=True):  # 비었으면 위로 올라가며 지움
+        cur = Path(d)
+        while True:
+            try:
+                cur.rmdir()  # 빈 폴더만 지워짐 (파일이 남았으면 OSError)
+            except OSError:
+                break
+            if cur.resolve() == top:
+                break
+            cur = cur.parent
+    _NEST.pop(str(folder), None)
+    return {"moved": moved, "kept": kept}
+
+
+# ---------- 화질 (해상도·비트레이트) — 카카오톡으로 받아 압축된 촬영본 알리기 ----------
+# 메신저로 보낸 영상은 720p·낮은 비트레이트 사본이 온다. 그대로 쓰면 1080p 로 키워 내보내 업로드 화질이 되돌릴 수 없게 상함 →
+# 보관함 줄에 해상도·비트레이트를 보이고, 'KakaoTalk_' 이름이거나 720p 이하·낮은 비트레이트면 원본으로 다시 옮기라고 알린다 (D-462).
+LOW_SIDE = 720     # 짧은 변이 이 이하이고
+LOW_KBPS = 4000    # 전체 비트레이트가 이보다 낮으면 '압축된 사본 같음' (폰 원본 720p 도 6Mbps 쯤 · 카톡 사본은 1~3Mbps)
+TINY_SIDE = 480    # 짧은 변이 이보다 작으면 비트레이트와 상관없이 낮은 화질
+_KAKAO = re.compile(r"^kakaotalk_", re.I)
+_INFO = {}         # (경로, 크기, 수정 시각 ns) → {w, h, kbps, dur, created} 또는 {} (못 읽음)
+_INFO_Q = []       # 뒤에서 하나씩 읽을 파일 (경로, 열쇠)
+_INFO_RUN = {"on": False}
+
+
+def quality_flag(name, info):
+    """'kakao'(카카오톡 이름) · 'low'(720p 이하 + 낮은 비트레이트 · 480p 미만) · None. info 를 아직 모르면 이름만 봄."""
+    if _KAKAO.match(Path(name).name):
+        return "kakao"
+    w, h, kbps = (info or {}).get("w") or 0, (info or {}).get("h") or 0, (info or {}).get("kbps") or 0
+    if not (w and h):
+        return None
+    side = min(w, h)
+    if side < TINY_SIDE or (side <= LOW_SIDE and 0 < kbps < LOW_KBPS):
+        return "low"
+    return None
+
+
+def _probe_info(path):
+    """영상 하나의 화면 크기(보이는 방향)·전체 비트레이트(kbps)·길이·촬영 시각 (bundle.probe 와 같은 읽기 · 못 읽으면 {})."""
+    import bundle
+    try:
+        c = bundle.probe(path)
+    except Exception:  # noqa: BLE001 — 안내용 · 깨진 파일은 편집점 찾기가 따로 알림
+        return {}
+    dur = c.get("duration") or 0
+    kbps = int(round(c["bytes"] * 8 / dur / 1000)) if dur > 0 else 0
+    return {"w": c.get("dw") or 0, "h": c.get("dh") or 0, "kbps": kbps, "dur": round(dur, 1), "created": c.get("created")}
+
+
+def _info_worker():
+    while True:
+        with _LOCK:
+            if not _INFO_Q:
+                _INFO_RUN["on"] = False
+                return
+            path, key = _INFO_Q.pop(0)
+        if key in _INFO:
+            continue
+        got = _probe_info(path)
+        with _LOCK:
+            if len(_INFO) > 3000:
+                _INFO.clear()
+            _INFO[key] = got
+
+
+def media(rows, folder):
+    """보관함 목록에 'media' {w, h, kbps, dur, created}(아는 것만) · 'lowq'(quality_flag) 를 붙임.
+    처음 보는 파일은 뒤에서 하나씩 ffmpeg 로 읽고(목록은 기다리지 않음 · 다음 목록부터 보임) · 복사 중인 파일은 다 들어온 뒤 읽음."""
+    folder, want = Path(folder), []
+    for r in rows:
+        p = folder / r["name"]
+        flag = quality_flag(r["name"], None)
+        try:
+            st = p.stat()
+        except OSError:
+            st = None
+        info = None
+        if st is not None and not r.get("copying"):
+            key = (str(p), st.st_size, st.st_mtime_ns)
+            with _LOCK:
+                info = _INFO.get(key)
+            if info is None:
+                want.append((p, key))
+        if info:
+            r["media"] = dict(info)
+            flag = quality_flag(r["name"], info)
+        if flag:
+            r["lowq"] = flag
+    if want:
+        with _LOCK:
+            queued = {k for _, k in _INFO_Q}
+            _INFO_Q.extend(x for x in want if x[1] not in queued)
+            start = not _INFO_RUN["on"]
+            _INFO_RUN["on"] = True
+        if start:
+            threading.Thread(target=_info_worker, daemon=True, name="media-info").start()
+    return rows

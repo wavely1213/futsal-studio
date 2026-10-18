@@ -369,6 +369,7 @@ POLICY = {
     **{(_P, p): WRITE for p in (
         "/api/analyze", "/api/bundle", "/api/convert", "/api/download", "/api/list", "/api/render", "/api/whisper/estimate",
         "/api/source", "/api/source/check", "/api/rename", "/api/rename/attach", "/api/crash/dismiss", "/api/dict",
+        "/api/unnest",  # 폴더째 넣은 촬영본을 보관함 바로 안으로 꺼내기 (D-460)
         "/api/style/learn", "/api/style/thumbs", "/api/style/delete", "/api/style/rough", "/api/style/tempo", "/api/style/score",
         "/api/style/mix", "/api/style/mix_pick", "/api/style/plan_ai", "/api/style/plan_paste",
         "/api/refs/add", "/api/refs/direction", "/api/refs/learn", "/api/refs/delete", "/api/refs/prune", "/api/refs/restore",
@@ -408,7 +409,7 @@ LABELS = {"/api/analyze": "편집점 찾기", "/api/bundle": "한 영상으로 �
           "/api/list": "채널 불러오기", "/api/edit/export": "내보내기", "/api/edit/proxy": "미리보기 파일 만들기", "/api/edit/qa": "영상 검수",
           "/api/edit/msg": "MSG 후보 만들기", "/api/thumb/export": "썸네일 내보내기", "/api/thumb/ab": "A/B 썸네일",
           "/api/upload/kit": "올리기 키트", "/api/youtube/upload": "유튜브에 올리기", "/api/youtube/resume": "유튜브 이어 올리기",
-          "/api/youtube/finish": "유튜브 마무리", "/api/rename": "이름 바꾸기", "/api/style/learn": "스타일 배우기",
+          "/api/youtube/finish": "유튜브 마무리", "/api/rename": "이름 바꾸기", "/api/unnest": "폴더 안 영상 꺼내기", "/api/style/learn": "스타일 배우기",
           "/api/refs/add": "학습용 영상 받기", "/api/strategy/refresh": "채널 전략 새로 고침", "/api/strategy/save": "채널 전략 저장",
           "/s/upload/finish": "보관함에 올림", "/s/outputs/preview": "작은 미리보기 만들기", "/s/logout": "연결 끝내기",
           "/api/auto": "끝까지 자동으로", "/api/edit/sfx": "효과음 꺼내기",
