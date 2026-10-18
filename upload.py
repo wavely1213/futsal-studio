@@ -287,9 +287,14 @@ def _clean_name(v, limit=60):
 # 감독님이 말로 나눈 장 ('자, 첫 번째 포인트.' · '두번째 포인트는 디딤발이에요' · '셋째, …') — 군말(_LEAD_RE)을 뗀 문장 맨 앞의 순서 말 (BR-260)
 _ORDINAL = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "첫째": 1, "둘째": 2, "셋째": 3, "넷째": 4, "다섯째": 5}
 # '첫 번째·두 번째'는 뒤에 '포인트·동작…'이 있을 때만 ('두 번째 슛.'·'첫 번째 갑니다'는 챌린지 시도 세기) · '첫째·둘째'는 그 말만으로도
+# 뒤 토씨는 '는·은'(장 머리)과 '…가 뭐냐면'만 — '첫 번째 동작이 끝나면'·'두 번째 방법으로 해 볼게요'처럼 이·가·로가 붙으면 문장 가운데 말
 _SPOKEN = re.compile(r"^(?:(?:(첫|두|세|네|다섯|여섯|일곱)\s?번째|([1-7])\s?번째)\s*(?:포인트|팁|방법|단계|동작|핵심|기술|연습|자세|원칙|규칙)|"
                      r"(첫째|둘째|셋째|넷째|다섯째)(?:\s*(?:포인트|팁|방법|단계|동작|핵심|기술|연습|자세|원칙|규칙))?)"
-                     r"(?:는|은|이|가|로|으로|입니다|이에요|예요|에요|요)?(?=[\s,.!?~…:]|$)[\s,.!?~…:]*")
+                     r"(?:는|은|(?:이|가)\s?뭐(?:냐면|냐 하면|냐하면|예요|에요|죠)|입니다|이에요|예요|에요|요)?(?=[\s,.!?~…:]|$)[\s,.!?~…:]*")
+# 순서 말 뒤가 '갑니다·할게요'뿐이면 장 이름이 아님: '첫 번째 연습 갑니다'는 시도 세기라 뺌 · '첫 번째 포인트 갈게요'는 장 머리만 말한 것(다음 문장이 이름)
+_SPOKEN_GO = re.compile(r"(?:자\s)?(?:갑니다|가요|갈게요|가겠습니다|가 ?볼게요|가 ?봅시다|할게요|합니다|하겠습니다|해요|해 ?볼게요|해 ?보겠습니다|"
+                        r"해 ?봅시다|볼게요|봅시다|넘어가요|넘어갈게요|넘어갑니다|넘어가겠습니다|시작할게요|시작합니다|시작|들어갑니다|들어갈게요|준비)")
+_SPOKEN_HEAD = re.compile(r"포인트|팁|핵심|원칙|규칙")  # 이 말이면 '갈게요'가 붙어도 장 머리
 _CIRCLED = "①②③④⑤⑥⑦"
 SPOKEN_NEXT = 10.0  # 순서 말만 한 문장('첫 번째 포인트.')이면 이 초 안에 이어지는 다음 문장을 이름으로
 SPOKEN_RETAKE = 20.0  # 같은 순서 말을 이 초 안에 다시 하면 다시 찍은 것 (뒤엣것을 씀)
@@ -334,6 +339,10 @@ def spoken_points(segs):
         if n != want and not retake:
             continue
         name = _first_said(t[m.end():], CH_TITLE_MAX - 2)
+        if _SPOKEN_GO.fullmatch(name.strip(" ,.!?~…")):  # '첫 번째 연습 갑니다' (시도 세기) · '첫 번째 포인트 갈게요' (이름은 다음 문장)
+            if not _SPOKEN_HEAD.search(m[0]):
+                continue
+            name = ""
         if len(name) < 2:
             name = _first_said(_drop_lead(nxt["text"]), CH_TITLE_MAX - 2) if nxt and not _SPOKEN.match(_drop_lead(nxt["text"])) else ""
         said = m[0].strip(" ,.!?~…:")
@@ -854,7 +863,7 @@ def _kit_stem(name, seq, sq):
 
 
 def _kit_times(name):
-    """이 영상의 편집본마다 키트를 마지막으로 저장한 시각 {편집본 id: 시각} (원본 키트는 뺌)."""
+    """이 영상의 키트마다 마지막으로 저장한 시각·고쳤는지 {편집본 id: (시각, 고쳤는지)} — 원본 키트는 '' (D-451)."""
     pre, out = core.adir(name).name + "_", {}
     try:
         files = [p for p in core.OUT.iterdir() if p.name.startswith(pre) and p.suffix == ".json" and _KIT_FILE.search(p.name)]
@@ -862,16 +871,18 @@ def _kit_times(name):
         return out
     for p in files:
         kit = _read_kit(p)
-        if kit is not None and _owner(kit)[0] == name and _owner(kit)[1]:
-            sid = _owner(kit)[1]
-            out[sid] = max(out.get(sid, 0.0), _mtime(p))
+        if kit is not None and _owner(kit)[0] == name:
+            sid, t = _owner(kit)[1], _mtime(p)
+            if t >= out.get(sid, (0.0, False))[0]:
+                out[sid] = (t, bool(kit.get("edited")))
     return out
 
 
 def sources(name):
     """키트를 만들 수 있는 것: 원본 영상 그대로 + 편집실 편집본 (내보낸 영상이 있으면 표시).
     기본(D-451): 가장 최근에 내보낸 편집본 → (내보낸 게 없으면) 올리기 키트를 가장 최근에 저장한 편집본 → 편집실에서 마지막으로 연 편집본(active)
-    → 롱폼 가편집 → 첫 편집본. 편집본이 하나도 없을 때만 '원본 영상 그대로' ('')."""
+    → 롱폼 가편집 → 첫 편집본. '원본 영상 그대로'('')는 편집본이 하나도 없을 때, 또는 원본 키트를 고쳤고 그게 가장 최근에 저장한 키트일 때
+    (예전 기본이던 원본 키트에서 고친 제목·설명이 사라져 보이지 않게 · 편집본으로 바꾸면 화면이 가져갈지 물어봄)."""
     editor.video_path(name)
     proj = read_project(name)
     seqs = [s for s in (proj or {}).get("sequences") or [] if s.get("id")]
@@ -883,8 +894,11 @@ def sources(name):
         if exp and _mtime(exp) > newest:
             best, newest = s.get("id"), _mtime(exp)
     if not best and seqs:
-        ids = {s["id"] for s in seqs}
-        kt = {k: v for k, v in _kit_times(name).items() if k in ids}
+        ids, times = {s["id"] for s in seqs}, _kit_times(name)
+        kt = {k: v[0] for k, v in times.items() if k in ids}
+        orig = times.get("")
+        if orig and orig[1] and orig[0] >= max(kt.values(), default=0.0):  # 원본 키트를 고친 게 가장 최근 → 원본 그대로
+            return {"sources": out, "default": ""}
         rough = next((s["id"] for s in seqs if s.get("auto") == "rough" and s.get("format") != "shorts"), None)
         best = (max(kt, key=kt.get) if kt else None) or (proj.get("active") if proj.get("active") in ids else None) or rough or seqs[0]["id"]
     return {"sources": out, "default": best}
@@ -1436,9 +1450,25 @@ def carry_edits(name, from_seq, to_seq):
         raise ValueError("같은 대상이에요")
     dst = load_kit(name, to_seq or None) or build_kit(name, to_seq or None)
     desc, swapped = _swap_chapters(src.get("description") or "", src.get("chapters"), dst.get("chapters"))
-    if not swapped and not src.get("chapters") and dst.get("chapters"):  # 앞 대상에 목차가 없었으면(쇼츠 등) 새 목차를 붙임
-        desc, swapped = desc.rstrip() + "\n\n▶ 목차\n" + chapters_text(dst["chapters"]), True
+    # 자동으로 넣은 해시태그 줄(손대지 않아 그대로 있으면)은 새 대상 것으로 — 쇼츠 → 롱폼에 '#shorts'가 남지 않고, 키트의 hashtags 와 설명 줄이
+    # 같아야 나중에 게스트를 넣을 때 그 줄을 찾아 바꿈(_apply_guests)
+    old_h, new_h = " ".join(src.get("hashtags") or []), " ".join(dst.get("hashtags") or [])
+    if old_h and new_h and old_h != new_h and old_h in desc:
+        i = desc.rfind(old_h)
+        desc = desc[:i] + new_h + desc[i + len(old_h):]
+    if not swapped and not src.get("chapters") and dst.get("chapters"):  # 앞 대상에 목차가 없었으면(쇼츠 등) 새 목차를 해시태그 줄 앞에 (설명 틀 {챕터} 자리처럼)
+        desc, swapped = _insert_before_hashtags(desc, "▶ 목차\n" + chapters_text(dst["chapters"])), True
     return save_edits(name, to_seq or None, src.get("title") or "", desc), swapped
+
+
+def _insert_before_hashtags(text, block):
+    """글 맨 끝 쪽 해시태그 줄 앞에 묶음을 넣음 (add_promo 와 같은 자리 찾기) · 해시태그 줄이 없으면 맨 끝."""
+    ls = text.rstrip().split("\n")
+    at = next((i for i in range(len(ls) - 1, -1, -1) if _HASHTAG.match(ls[i].strip())), None)
+    if at is None:
+        return "\n".join(ls) + "\n\n" + block
+    ls[at:at] = [block, ""]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(ls))
 
 
 # ---------- 제목 겹침 · 전략 맞춤 · 게스트 · 올릴 날 (D-080 ~ D-086) ----------
@@ -2314,9 +2344,10 @@ def own_channel_id():
 
 
 def studio_url():
-    """'업로드 페이지 열기': 우리 채널의 동영상 업로드 창 (다른 구글 계정이면 YouTube 가 계정 전환을 안내) · 채널을 모르면 스튜디오 첫 화면."""
+    """'업로드 페이지 열기': 우리 채널의 동영상 업로드 창 (다른 구글 계정이면 YouTube 가 계정 전환을 안내) · 채널을 모르면 스튜디오 첫 화면.
+    '/videos/upload' 만으로는 콘텐츠(동영상 목록) 탭이라 '?d=ud'(업로드 창 띄우기)를 붙임 — youtube.com/upload 가 보내는 주소와 같음."""
     cid = own_channel_id()
-    return f"{STUDIO_URL}/channel/{cid}/videos/upload" if cid else STUDIO_URL
+    return f"{STUDIO_URL}/channel/{cid}/videos/upload?d=ud" if cid else STUDIO_URL
 
 
 def open_studio():

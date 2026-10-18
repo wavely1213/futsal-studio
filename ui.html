@@ -3124,7 +3124,7 @@ if (!window.FS_REMOTE) checkUpdate();  // 업데이트는 PC 에서만 (밖에�
   $("upStudio").onclick = async () => {  // 우리 채널(설정 channel_url)의 업로드 창 · 채널을 모르면 스튜디오 첫 화면
     await flush();
     const j = await api("/api/upload/open", { what: "studio" }).catch(() => ({}));
-    toast(j && j.channel ? "우리 채널의 동영상 업로드 창을 열었어요 · 다른 계정이라고 나오면 그 화면 안내대로 우리 채널 계정으로 바꿔 주세요"
+    toast(j && j.channel ? "우리 채널의 동영상 업로드 창을 열었어요 · 다른 계정이라고 나오면 그 화면 안내대로 우리 채널 계정으로 바꿔 주세요 · 업로드 창이 안 뜨면 오른쪽 위 '만들기 → 동영상 업로드'를 누르세요"
       : "유튜브 스튜디오를 열었어요 · 오른쪽 위 '만들기 → 동영상 업로드'를 누르세요");
   };
   $("upFile").onclick = async () => { await flush(); if (up.kit && up.kit.files) api("/api/upload/open", { what: "file", file: up.kit.files.txt }); };

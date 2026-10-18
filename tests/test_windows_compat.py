@@ -741,7 +741,8 @@ class LibraryNames(Work):
         base = "20240101_abcdefghijk_정형ᄃ 풋살 기본기"
         for n in (f"{base}.mp4", f"{base}.f137.mp4", f"{base}.f399-1.mp4", f"{base}.temp.mp4", f"{base}.f140.m4a.part", "레이싱.f1.mp4"):
             self.video(n)
-        self.assertEqual([v["name"] for v in core.local_videos()], ["20240101_abcdefghijk_정형ᄃ 풋살 기본기.mp4", "레이싱.f1.mp4"])
+        with mock.patch.object(core, "added_at", return_value=0.0):  # 목록은 최근 순(D-450) — 넣은 시각이 같으면 이름 순 (만든 시각 차이로 흔들리지 않게)
+            self.assertEqual([v["name"] for v in core.local_videos()], ["20240101_abcdefghijk_정형ᄃ 풋살 기본기.mp4", "레이싱.f1.mp4"])
         self.assertEqual(source._find_file("abcdefghijk"), f"{base}.mp4", ".f137.mp4 가 앞에 정렬되어도 진짜 영상")
         self.assertNotIn(f"{base}.f137.mp4", source._library())
 

@@ -541,34 +541,88 @@ def added_at(st):
     return max(st.st_mtime, getattr(st, "st_birthtime", None) or st.st_ctime)
 
 
+_RANGE_EXPORT = re.compile(r"_구간_[^_]+-[^_]+(?: \(\d+\))*\.mp4$", re.I)  # editor.export 의 구간 내보내기 '<영상>_<편집본>_구간_0m10s-1m20s.mp4'
+
+
 def _exports():
-    """완성본 폴더의 내보낸 영상(.mp4) [(파일 이름, 고친 시각)] — 영상마다 '<영상>_…mp4' 를 찾을 때 한 번만 읽음."""
+    """완성본 폴더의 내보낸 영상(.mp4 · 구간 내보내기는 뺌 — upload.latest_export 와 같음) [(파일 이름, 고친 시각)] — 한 번만 읽음."""
     try:
-        return [(p.name, _mt(p)) for p in OUT.iterdir() if p.suffix.lower() == ".mp4"]
+        return [(p.name, _mt(p)) for p in OUT.iterdir() if p.suffix.lower() == ".mp4" and not _RANGE_EXPORT.search(p.name)]
     except OSError:
         return []
 
 
+def _export_owner(fname, folders):
+    """내보낸 파일 '<분석 폴더>_<편집본 이름>.mp4' 가 어느 영상 것인지 → 분석 폴더 이름 (가장 길게 맞는 것 · 없으면 None).
+    '훈련' 과 '훈련_ab12cd34'(_alt_key) · 'KakaoTalk_1' 과 'KakaoTalk_1_01' 처럼 한쪽 폴더 이름이 다른 쪽 앞부분이어도 긴 쪽 영상 것으로."""
+    return max((f for f in folders if fname.startswith(f + "_")), key=len, default=None)
+
+
+SEEN_FILE = "library_seen.json"  # 보관함 영상을 앱이 처음 본 시각 {파일 이름: 시각} (D-457)
+_SEEN = {"key": None, "map": {}}
+_SEEN_LOCK = threading.Lock()
+
+
+def _first_seen(names, added):
+    """영상마다 앱이 보관함에서 처음 본 시각. 탐색기로 같은 드라이브 안에서 옮기면 만든 시각·고친 시각이 예전 그대로라
+    (바탕 화면에 며칠 둔 휴대폰 영상) 넣은 때를 알 수 없음 → 처음 본 때를 작업 폴더 library_seen.json 에 남김.
+    기록이 처음 생길 때는 이미 있던 영상에 지금 시각 대신 넣은 시각(added)을 적어 순서가 그대로 · 기록을 못 쓰면 이번 실행 동안만 기억."""
+    path = WORK / SEEN_FILE
+    now = time.time()
+    with _SEEN_LOCK:
+        if _SEEN["key"] != str(path):
+            try:
+                m = json.loads(path.read_text(encoding="utf-8"))
+                m = {k: float(v) for k, v in m.items() if isinstance(k, str) and isinstance(v, (int, float))} if isinstance(m, dict) else None
+            except (OSError, ValueError):
+                m = None
+            _SEEN.update(key=str(path), map=m, fresh=m is None)
+        m, fresh = _SEEN["map"], _SEEN.get("fresh")
+        if m is None:
+            m = _SEEN["map"] = {}
+        new = [n for n in names if n not in m]
+        for n in new:
+            m[n] = added[n] if fresh else now
+        gone = [n for n in m if n not in names] if names else []  # 폴더가 잠깐 비어 보여도(외장 드라이브) 기록은 그대로
+        for n in gone:
+            del m[n]
+        _SEEN["fresh"] = False
+        if new or gone or fresh:
+            try:
+                updater.write_atomic(path, json.dumps(m, ensure_ascii=False))
+            except OSError:
+                pass
+        return dict(m)
+
+
 def local_videos():
     """보관함 영상 목록 — 최근에 넣었거나 작업한 영상이 위 (같으면 이름 순 · D-450).
-    recent: 넣은 시각(파일을 만든 시각)·편집점 찾기·편집실 저장·내보내기 중 가장 늦은 것 · exported: 가장 최근에 내보낸 시각(없으면 None)."""
-    out, exps = [], None
+    recent: 넣은 시각(파일을 만든 시각·앱이 처음 본 시각 중 늦은 것 · D-457)·편집점 찾기·편집실 저장·내보내기 중 가장 늦은 것 ·
+    exported: 가장 최근에 내보낸 시각(없으면 None · 구간 내보내기는 뺌)."""
+    rows = []
     for v in sorted(VIDEOS.iterdir()):
         if is_video_file(v.name):
             try:  # 받기를 마친 yt-dlp 가 중간 파일을 지우는 순간이면 목록과 stat 사이에 사라짐 (Windows: 지우는 중)
                 st = v.stat()
             except OSError:
                 continue
-            d = adir(v.name)
-            tl = d / "transcript_timeline.md"
-            done = tl.exists()
-            if exps is None:
-                exps = _exports()
-            pre = d.name + "_"  # editor.export 의 파일 이름 '<영상>_<편집본 이름>( (2)).mp4'
-            exported = max((t for n, t in exps if n.startswith(pre)), default=None)
-            recent = max(added_at(st), _mt(tl) if done else 0.0, _mt(WORK / "projects" / f"{d.name}.json"), exported or 0.0)
-            out.append({"name": v.name, "size_mb": round(st.st_size / 1e6, 1), "analyzed": done,
-                        "recent": round(recent, 3), "exported": round(exported, 3) if exported else None})
+            rows.append((v.name, st, adir(v.name)))
+    folders = {d.name for _, _, d in rows}
+    exported = {}
+    for n, t in _exports():  # editor.export 의 파일 이름 '<영상>_<편집본 이름>( (2)).mp4'
+        f = _export_owner(n, folders)
+        if f is not None:
+            exported[f] = max(exported.get(f, 0.0), t)
+    added = {n: added_at(st) for n, st, _ in rows}
+    seen = _first_seen({n for n, _, _ in rows}, added)
+    out = []
+    for n, st, d in rows:
+        tl = d / "transcript_timeline.md"
+        done = tl.exists()
+        exp = exported.get(d.name)
+        recent = max(added[n], seen.get(n, 0.0), _mt(tl) if done else 0.0, _mt(WORK / "projects" / f"{d.name}.json"), exp or 0.0)
+        out.append({"name": n, "size_mb": round(st.st_size / 1e6, 1), "analyzed": done,
+                    "recent": round(recent, 3), "exported": round(exp, 3) if exp else None})
     out.sort(key=lambda x: -x["recent"])  # sorted 는 안정 정렬 → 같은 시각이면 이름 순 그대로
     return out
 

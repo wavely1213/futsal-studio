@@ -830,7 +830,7 @@ class GateHttpTest(StudioBase):
             self.assertEqual(self.jreq("POST", "/api/upload/open", {"what": "studio"})[1]["openUrl"], "https://studio.youtube.com")
         with mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g"}):  # 우리 채널 업로드 창 (D-453)
             self.assertEqual(self.jreq("POST", "/api/upload/open", {"what": "studio"})[1],
-                             {"ok": True, "openUrl": "https://studio.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g/videos/upload", "channel": True})
+                             {"ok": True, "openUrl": "https://studio.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g/videos/upload?d=ud", "channel": True})
         (self.out / "키트_올리기.txt").write_text("x", encoding="utf-8")
         self.assertEqual(self.jreq("POST", "/api/upload/open", {"what": "file", "file": "키트_올리기.txt"})[1]["download"],
                          "/s/dl?f=%ED%82%A4%ED%8A%B8_%EC%98%AC%EB%A6%AC%EA%B8%B0.txt")

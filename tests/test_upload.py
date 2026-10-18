@@ -1078,6 +1078,21 @@ class SpokenPointTests(unittest.TestCase):
         segs = [{"start": 10, "end": 12, "text": "첫째, 고개를 드세요."}, {"start": 40, "end": 42, "text": "둘째, 디딤발은 공 옆에."}]
         self.assertEqual([p["title"] for p in upload.spoken_points(segs)], ["① 고개를 드세요", "② 디딤발은 공 옆에"])  # '첫째·둘째'는 그 말만으로
 
+    def test_drill_counting_and_mid_sentence_ordinals_are_not_points(self):
+        def seg(*ts):
+            return [{"start": 10 + 40 * i, "end": 12 + 40 * i, "text": t} for i, t in enumerate(ts)]
+        drill = seg("첫 번째 연습 갑니다.", "두 번째 연습 갑니다.", "세 번째 연습 갑니다.")  # 드릴 시도 세기 (예전: '① 갑니다 / ② 갑니다 / ③ 갑니다')
+        self.assertEqual(upload.spoken_points(drill), [])
+        self.assertEqual(upload.spoken_points(seg("첫 번째 동작 할게요.", "두 번째 동작 해 볼게요!", "세 번째 동작 시작")), [])
+        mid = seg("첫 번째 동작이 끝나면 두 번째 동작으로 넘어가요.", "두 번째 방법으로 해 볼게요.", "세 번째 방법으로 해 볼게요.")
+        self.assertEqual(upload.spoken_points(mid), [])  # 예전: '① 끝나면 두 번째 동작' · '② 해 볼게요'
+        segs = [dict(s, start=s["start"] + 60, end=s["end"] + 60) for s in drill]
+        chs = upload.chapters([{"start": 0, "end": 5, "text": "안녕하세요."}] + segs + [{"start": 390, "end": 395, "text": "끝."}], dur=400)
+        self.assertFalse(any(c["title"][:1] in upload._CIRCLED for c in chs), chs)
+        heads = [{"start": 10, "end": 12, "text": "자, 첫 번째 포인트 갈게요."}, {"start": 13, "end": 15, "text": "공이 오기 전에 고개를 드세요."},
+                 {"start": 60, "end": 62, "text": "두 번째 포인트가 뭐냐면, 디딤발이에요."}]
+        self.assertEqual([p["title"] for p in upload.spoken_points(heads)], ["① 공이 오기 전에 고개를 드세요", "② 디딤발이에요"])  # 장 머리 말은 그대로
+
     def test_retake_and_slip_use_the_later_line(self):
         pts = upload.spoken_points(upload.sentences(self.FIX["MSGRAW02"]["transcript"]))  # '두 번째 동작은 … 아니다. / 다시 할게요.' 뒤 다시 한 줄
         self.assertEqual([(round(p["t"], 2), p["n"]) for p in pts], [(19.66, 1), (48.12, 2)])
@@ -1128,7 +1143,7 @@ class StudioUrlTests(unittest.TestCase):
 
     def test_channel_url_in_config(self):
         with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}"}):
-            self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+            self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload?d=ud")
         with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}/videos"}):
             self.assertEqual(upload.own_channel_id(), self.UC)
 
@@ -1136,7 +1151,7 @@ class StudioUrlTests(unittest.TestCase):
         import strategy
         with mock.patch.dict(core.CONFIG, {"channel_url": "https://www.youtube.com/@futsal"}):
             with mock.patch.object(strategy, "own_entry", return_value={"channelId": self.UC}):
-                self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+                self.assertEqual(upload.studio_url(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload?d=ud")
             with mock.patch.object(strategy, "own_entry", return_value={"channelId": None}):
                 self.assertEqual(upload.studio_url(), "https://studio.youtube.com")
             with mock.patch.object(strategy, "own_entry", side_effect=OSError("깨짐")):
@@ -1149,8 +1164,8 @@ class StudioUrlTests(unittest.TestCase):
     def test_open_studio_opens_that_url(self):
         with mock.patch.dict(core.CONFIG, {"channel_url": f"https://www.youtube.com/channel/{self.UC}"}), \
                 mock.patch.object(upload.webbrowser, "open") as op:
-            self.assertEqual(upload.open_studio(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
-            op.assert_called_once_with(f"https://studio.youtube.com/channel/{self.UC}/videos/upload")
+            self.assertEqual(upload.open_studio(), f"https://studio.youtube.com/channel/{self.UC}/videos/upload?d=ud")
+            op.assert_called_once_with(f"https://studio.youtube.com/channel/{self.UC}/videos/upload?d=ud")
 
 
 class SourceDefaultTests(SequenceKitTests):
@@ -1180,6 +1195,19 @@ class SourceDefaultTests(SequenceKitTests):
         self.assertEqual(upload.sources(name)["default"], "s1")
         shutil.copy(self.media / "export.mp4", self.out / f"{core.adir(name).name}_내 편집본.mp4")
         self.assertEqual(upload.sources(name)["default"], "s2")  # 내보낸 편집본이 가장 먼저
+
+    def test_edited_original_kit_keeps_original_default(self):
+        name = self.add_video(self.NAME)
+        self.two_seqs(name, active="s2")
+        upload.build_kit(name)  # 예전 기본('원본 영상 그대로')에서 만들고 고친 키트
+        self.assertEqual(upload.sources(name)["default"], "s2")  # 고치지 않은 원본 키트는 기본을 바꾸지 않음
+        upload.save_edits(name, None, "고친 제목")
+        self.assertEqual(upload.sources(name)["default"], "")  # 고친 원본 키트가 가장 최근 → 원본 그대로 (고친 글이 사라져 보이지 않게)
+        import os
+        js = self.out / f"{core.adir(name).name}_올리기.json"
+        os.utime(js, (1000, 1000))
+        upload.build_kit(name, "s1")  # 그 뒤에 편집본 키트를 만들면 그 편집본
+        self.assertEqual(upload.sources(name)["default"], "s1")
 
     def test_routes_default_seq_and_carry(self):
         from urllib.parse import quote
@@ -1213,6 +1241,24 @@ class SourceDefaultTests(SequenceKitTests):
         finally:
             srv.shutdown()
             srv.server_close()
+
+    def test_carry_from_kit_without_chapters_puts_toc_before_hashtags(self):
+        name = self.add_video(self.NAME)
+        self.two_seqs(name)
+        upload.build_kit(name)
+        js = self.out / f"{core.adir(name).name}_올리기.json"
+        raw = json.loads(js.read_text(encoding="utf-8"))  # 쇼츠 키트처럼: 목차 없음 · '#shorts' 해시태그 줄
+        raw.update(chapters=[], hashtags=["#shorts", "#풋살"], description="고친 첫 줄\n\n#shorts #풋살", edited="2026-10-18 10:00")
+        js.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        kit, swapped = upload.carry_edits(name, "", "s1")
+        self.assertTrue(swapped)
+        d = kit["description"]
+        self.assertTrue(d.startswith("고친 첫 줄\n\n▶ 목차\n00:00 시작\n"), d)  # 목차는 해시태그 줄 앞 (예전: 맨 끝)
+        self.assertTrue(d.endswith(" ".join(kit["hashtags"])), d)  # 해시태그 줄은 새 대상(롱폼) 것 · '#shorts' 없음
+        self.assertNotIn("#shorts", d)
+        kit = upload.set_guests(name, "s1", [{"name": "김철수", "bio": ""}])
+        self.assertIn("#김철수", kit["description"])  # 게스트 해시태그가 설명 줄에도 들어감 (예전: hashtags 와 설명 줄이 달라 못 찾음)
+        self.assertEqual(upload._insert_before_hashtags("첫 줄", "▶ 목차\n00:00 a"), "첫 줄\n\n▶ 목차\n00:00 a")  # 해시태그 줄이 없으면 맨 끝
 
     def test_carry_edits_swaps_chapters(self):
         name = self.add_video(self.NAME)
@@ -1272,6 +1318,40 @@ class LocalOrderTests(KitBase):
             self.assertEqual([v["name"] for v in vids], ["다.mp4", "가.mp4", "나.mp4"])
             self.assertEqual([v["exported"] for v in vids], [500.0, None, None])
             self.assertEqual(vids[0]["recent"], 500.0)
+
+    def test_exports_belong_to_the_longest_matching_folder(self):
+        for n in ("훈련.mov", "훈련.mp4", "KakaoTalk_1.mp4", "KakaoTalk_1_01.mp4"):
+            shutil.copy(self.media / "short.mp4", core.VIDEOS / n)
+        folders = {n: core.adir(n).name for n in ("훈련.mov", "훈련.mp4")}
+        self.assertNotEqual(folders["훈련.mov"], folders["훈련.mp4"])  # 확장자만 다른 쌍 → 한쪽은 '<이름>_<지문>' (_alt_key)
+        alt = max(folders.values(), key=len)
+        import os
+        for f, t in ((f"{alt}_롱폼.mp4", 500), ("KakaoTalk_1_01_롱폼 가편집.mp4", 600), ("KakaoTalk_1_롱폼_구간_0m10s-1m20s.mp4", 700)):
+            (self.out / f).write_bytes(b"x")
+            os.utime(self.out / f, (t, t))
+        ex = {v["name"]: v["exported"] for v in core.local_videos()}
+        owner = next(n for n, f in folders.items() if f == alt)
+        self.assertEqual(ex[owner], 500.0)
+        self.assertIsNone(ex[next(n for n in folders if n != owner)])  # 예전: 짧은 이름 영상도 500 (앞부분이 같아서)
+        self.assertEqual(ex["KakaoTalk_1_01.mp4"], 600.0)
+        self.assertIsNone(ex["KakaoTalk_1.mp4"])  # 구간 내보내기는 안 셈 · '_01' 영상 것도 아님
+
+    def test_moved_in_file_counts_from_first_seen(self):
+        import os
+        shutil.copy(self.media / "short.mp4", core.VIDEOS / "가.mp4")
+        os.utime(core.VIDEOS / "가.mp4", (100, 100))
+        with mock.patch.object(core, "added_at", side_effect=lambda st: st.st_mtime):  # 탐색기로 옮김: 만든·고친 시각이 예전 그대로
+            first = core.local_videos()
+            self.assertEqual(first[0]["recent"], 100.0)  # 기록이 처음 생길 때 이미 있던 영상은 넣은 시각 그대로 (순서가 안 바뀜)
+            self.assertEqual(json.loads((core.WORK / core.SEEN_FILE).read_text(encoding="utf-8")), {"가.mp4": 100.0})
+            shutil.copy(self.media / "short.mp4", core.VIDEOS / "나.mp4")
+            os.utime(core.VIDEOS / "나.mp4", (50, 50))  # 며칠 전 바탕 화면에 둔 휴대폰 영상을 지금 옮겨 넣음
+            vids = core.local_videos()
+            self.assertEqual([v["name"] for v in vids], ["나.mp4", "가.mp4"])  # 예전: '가' 아래 (50 < 100)
+            self.assertGreater(vids[0]["recent"], 1e9)
+            (core.VIDEOS / "가.mp4").unlink()
+            core.local_videos()
+            self.assertEqual(set(json.loads((core.WORK / core.SEEN_FILE).read_text(encoding="utf-8"))), {"나.mp4"})  # 지운 영상은 기록에서 뺌
 
     def test_added_at_uses_creation_time(self):
         class St:
