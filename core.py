@@ -1460,12 +1460,11 @@ def _deno_ok(path):
 
 
 def _use_deno(path):
-    """찾은 Deno 를 yt-dlp 가 쓰게: 경로를 기억하고 이 프로그램의 PATH 맨 앞에 넣음."""
+    """찾은 Deno 를 yt-dlp 가 쓰게: 경로만 기억함 (yt-dlp 에는 _js_opts 로 경로를 바로 넘김).
+    os.environ(PATH)은 바꾸지 않음 — 뒤 스레드(엔진 확인·다운로드)에서 환경을 바꾸면 다른 스레드가 GIL 없이 부르는
+    C getenv(OpenSSL 인증서 경로 등)와 겹쳐 프로세스가 죽을 수 있음 (D-510 · I-510)."""
     global _DENO
     _DENO = str(path)
-    d = os.path.dirname(_DENO)
-    if d not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
     return _DENO
 
 

@@ -68,6 +68,7 @@ class LifecycleBase(unittest.TestCase):
         self.fb = FakeBridge()
         self.svc = remote.Service(home=self.home / ".futsal-studio", ntfy=self.ntfy.url)
         self.svc.init(self.fb.bridge())
+        self.addCleanup(self.svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         self.addCleanup(self.kill_all)
 
     def kill_all(self):

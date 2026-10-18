@@ -29,6 +29,22 @@
 
 <!-- 여기서부터 최신 항목을 위에 추가 -->
 
+## D-511 | 2026-10-18 | 원격 서비스에 close() — 시험이 만든 서비스의 뒤 스레드를 시험 끝에 멈추고 기다림
+- **상태**: 채택
+- **맥락**: 전체 단위 시험이 부하가 있을 때 가끔 `Segmentation fault`(139)로 죽었다(I-081 · I-510). 원격 시험마다 만든 `remote.Service` 의 `remote-watch`(5초마다 tick)·`remote-publisher` 가 끝나지 않고 뒤 시험 내내 남아(한 번 전체 실행에 수십 개), 닫힌 가짜 ntfy 로 비콘을 보내며 `updater._ssl_context` → OpenSSL 이 **GIL 없이** C `getenv("SSL_CERT_FILE"/"SSL_CERT_DIR")` 를 불렀다. 같은 때 주 스레드의 다른 시험이 `mock.patch.dict(os.environ)`(나올 때 `clear()`+`update()` = setenv/unsetenv 약 320번)로 glibc 의 environ 배열을 다시 잡아(realloc·free) getenv 가 풀린 배열을 읽었다.
+- **결정**: `Service.close()` 가 init 이 띄운 스레드(remote-watch·remote-publisher·remote-login-control·미리 정한 로그인 · Windows remote-awake)를 끝내고 기다린다. `_watch` 는 `time.sleep(5)` 대신 `_closed.wait(5)`, `Publisher.stop()` 은 줄에 남은 것·다시 하기를 버리고 바로 끝낸다. 시험은 `remote_fixture.make_home` 정리가 그 폴더로 `service()` 가 만든 서비스를 닫고, 서비스를 직접 만드는 시험은 `addCleanup(svc.close)`.
+- **이유**: 남는 스레드를 없애면 시험의 환경 바꾸기와 겹칠 C getenv 가 없다. 앱은 서비스 하나(`remote.SVC`)를 프로세스가 끝날 때까지 쓰므로 `close` 를 부르지 않는다 — 동작은 그대로(`shutdown` 도 그대로).
+- **버린 대안**: 시험의 `patch.dict(os.environ)` 를 없앰 — 수백 곳이고 남은 스레드(네트워크·tick)가 다음 시험을 흔드는 문제는 그대로 / `shutdown` 이 스레드도 멈춤 — 다시 시작이 실패해 앱이 계속 도는 경우(app.restart) 알림·자동 다시 켜기가 사라짐 / 시험 전체에서 남은 스레드를 몰래 정리(load_tests 훅) — 보이지 않는 규칙.
+- **영향/제약**: 서비스를 만드는 새 시험은 `make_home`+`service()` 를 쓰거나 `addCleanup(svc.close)` 를 단다(`TESTING_GUIDELINES.md` 4번). `tests.test_remote_notify.ThreadTests` 가 지킨다.
+
+## D-510 | 2026-10-18 | 앱은 돌아가는 동안 os.environ 을 바꾸지 않음 — Deno 는 yt-dlp 에 경로로만 넘김
+- **상태**: 채택 (D-008 구현의 'PATH 맨 앞에 넣기'를 뺌)
+- **맥락**: `core._use_deno` 가 찾은 Deno 폴더를 `os.environ["PATH"]` 앞에 넣었다. 이 함수는 뒤 스레드(앱을 켤 때 `engine_autoupdate` · 다운로드 작업의 `_engine`)에서 불리고, 그때 다른 스레드는 GIL 없이 C getenv 를 부를 수 있다(OpenSSL 인증서 경로 등 · I-510). glibc 의 setenv/unsetenv 와 getenv 는 서로 잠그지 않는다.
+- **결정**: `_use_deno` 는 경로만 기억한다. yt-dlp 는 지금도 모든 옵션에서 `_js_opts()`(`js_runtimes.deno.path`)로 그 경로를 받는다(core·source 의 YoutubeDL 5곳). 앱의 환경 바꾸기는 스레드를 띄우기 전 시작 때(`app.main` 의 FUTSAL_RESTART·FUTSAL_AUTO pop · `updater.run_app`)만 남긴다.
+- **이유**: PATH 넣기는 `_js_opts` 와 같은 커밋(a713520)에서 함께 들어간 겹친 장치다. Deno 를 쓰는 yt-dlp 판은 `js_runtimes` 옵션으로 경로를 받는다(개발 PC 2026.08.19 확인). 실행 중 환경 바꾸기를 없애면 리눅스 개발 서버(`app.py --browser` · e2e)에서도 같은 충돌이 날 길이 없다.
+- **버린 대안**: 환경을 바꾸는 곳을 잠금으로 감쌈 — C 쪽 getenv(OpenSSL·glibc)는 그 잠금을 모름 / 자식 프로세스에 `env=` 로 PATH 를 넘김 — yt-dlp 는 같은 프로세스 안에서 돌아 넘길 자식이 없음.
+- **영향/제약**: Windows 에서는 CRT 가 환경 잠금을 쓰므로 원래 이 충돌은 개발(리눅스)에서만 보였다. Deno 를 PATH 로 찾던 다른 도구는 없다(`grep` 확인).
+
 ## D-487 | 2026-10-18 | 콕 집은 말의 이끄는 말('뭐냐면요'·'세 가지'·'정리할게요')은 강조 큰 글씨가 아님
 - **상태**: 채택
 - **맥락**: D-483 의 `key_label` 이 '중요한 건/게 · 핵심은 Y' 의 Y 를 길이만 보고 써서 '중요한 게 뭐냐면요' → '뭐냐면요!', '핵심은 세 가지예요' → '세 가지!', '자 오늘 핵심 정리할게요' → '자 오늘 핵심!'이 됐다. 점수 10(KEY_SCORE)이라 진짜 기술 강조보다 먼저 뽑히고, 8자 안이라 자막 중복 규칙에도 안 걸렸다(검토).

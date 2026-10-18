@@ -78,6 +78,7 @@ class StoreTests(unittest.TestCase):
         with mock.patch.object(core, "ENGINE_HOME", self.home / ".futsal-studio"):
             svc = remote.Service(clock=self.clock, ntfy="http://127.0.0.1:1")
             svc.init(None)
+            self.addCleanup(svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
             svc.store.add_device("폰")
             self.assertTrue((self.home / ".futsal-studio" / "remote.json").is_file())
         self.assertFalse(list(core.APP_DIR.glob("remote.json")))

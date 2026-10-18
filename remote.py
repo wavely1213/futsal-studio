@@ -1008,6 +1008,7 @@ class Publisher:
         self.last_beacon = 0.0
         self.pending = None
         self.warned = 0.0
+        self.stopped = False  # stop(): 남은 것을 보내지 않고 바로 끝냄 (Service.close)
         self.thread = threading.Thread(target=self._loop, daemon=True, name="remote-publisher")
         self.thread.start()
 
@@ -1035,7 +1036,7 @@ class Publisher:
         return True
 
     def _loop(self):
-        while True:
+        while not self.stopped:
             try:
                 wait = None
                 if self.pending is not None:
@@ -1087,6 +1088,8 @@ class Publisher:
     def _post(self, url, data, headers):
         cert = False
         for k in range(len(RETRY_DELAYS) + 1):
+            if self.stopped:  # 멈춘 뒤에는 다시 해 보지 않음 (기록도 남기지 않음)
+                return False
             try:
                 req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
                 with updater.urlopen(req, 10) as r:  # 업데이트와 같은 인증서 설정 (Python 3.13+ · 백신 'HTTPS 검사' · D-029)
@@ -1116,6 +1119,8 @@ class Publisher:
             return False
 
     def stop(self):
+        """보내는 스레드를 끝냄 — 줄에 남은 것은 버림 (지금 보내는 하나는 끝까지 · 다시 해 보기는 안 함)."""
+        self.stopped = True
         self.q.put(("stop",))
 
 
@@ -1185,6 +1190,8 @@ class Service:
         self._ctl_seen = collections.deque()
         self._ctl_timeout = LOGIN_CONTROL_TIMEOUT
         self._ctl_stop = threading.Event()   # 앱을 끌 때 (데몬 스레드라 남아도 앱 끄기를 막지 않음)
+        self._closed = threading.Event()     # close(): 뒤 스레드(remote-watch 등)를 끝냄
+        self._watch_th = None
         self._preset_thread = None           # 미리 정한 로그인 넣기 (D-258 · 같은 아이디를 쓰는 PC 살피기)
 
     # ----- 준비 -----
@@ -1207,7 +1214,8 @@ class Service:
         if not self._started:
             self._started = True
             self.pub = Publisher(self)
-            threading.Thread(target=self._watch, daemon=True, name="remote-watch").start()
+            self._watch_th = threading.Thread(target=self._watch, daemon=True, name="remote-watch")
+            self._watch_th.start()
             if sys.platform == "win32":
                 threading.Thread(target=self._keep_awake, daemon=True, name="remote-awake").start()
         return self
@@ -1632,6 +1640,22 @@ class Service:
         except Exception:  # noqa: BLE001 — 끄는 길은 막히면 안 됨
             _trace()
 
+    def close(self, timeout=5.0):
+        """init 이 띄운 뒤 스레드(remote-watch·remote-publisher·remote-login-control·미리 정한 로그인)를 끝내고 기다림.
+        앱은 서비스 하나(SVC)를 프로세스가 끝날 때까지 쓰므로 부르지 않음 — 서비스를 여럿 만드는 시험이 스레드를 다음 시험으로
+        남기지 않게 (남은 스레드의 HTTPS 보내기가 다른 시험의 os.environ 바꾸기와 겹치면 C getenv 에서 죽음 · I-510).
+        터널·리스너는 끄지 않음 (turn_off·shutdown 이 함)."""
+        self._closed.set()
+        self._ctl_stop.set()
+        ths = [self._watch_th, self._ctl, self._preset_thread]
+        if self.pub:
+            self.pub.stop()
+            ths.append(self.pub.thread)
+        end = time.monotonic() + timeout
+        for t in ths:
+            if t is not None and t is not threading.current_thread():
+                t.join(max(0.0, end - time.monotonic()))
+
     # ----- 비콘 -----
     def beacon_body(self, state=None, reason=None, moved=None):
         d = self.store.data
@@ -1753,8 +1777,7 @@ class Service:
 
     def _watch(self):
         last_hb = self.clock()
-        while True:
-            time.sleep(5)
+        while not self._closed.wait(5):
             try:
                 self.tick(last_hb)
                 if self.clock() - last_hb >= HEARTBEAT:
@@ -1811,8 +1834,8 @@ class Service:
                 or bool(self.studio and self.studio.sessions.all()))  # 밖에서 작업 세션 (2분 넘게 조용해도 30분 동안은 살아 있음)
 
     def _keep_awake(self):
-        """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기 (remote-awake 스레드)."""
-        self._awake_loop()
+        """Windows: 원격이 켜져 있고 (작업 중이거나 '항상'이면) 절전 막기 (remote-awake 스레드 · close 하면 끝남)."""
+        self._awake_loop(self._closed)
 
     def _awake_loop(self, stop=None, every=5):
         """이 스레드에서 core.keep_awake() 를 쥐고 있다가 원하지 않게 되면 놓음 (SetThreadExecutionState 는 core·updater 에서만).

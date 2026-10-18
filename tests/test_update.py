@@ -1084,14 +1084,17 @@ class DenoTests(Base):
         return dest
 
     @unittest.skipIf(sys.platform == "win32", "시험용 deno 는 셸 스크립트")
-    def test_installs_into_user_bin_and_prepends_path(self):
+    def test_installs_into_user_bin_without_touching_environ(self):
+        """설치한 Deno 는 yt-dlp 에 경로로만 넘김 — os.environ(PATH)은 그대로 (뒤 스레드에서 환경을 바꾸면 다른 스레드의
+        C getenv 와 겹쳐 죽을 수 있음 · D-510)."""
+        env = dict(os.environ)
         with mock.patch.object(self.core.shutil, "which", return_value=None), \
                 mock.patch.object(self.core.updater, "download", side_effect=self.fake_download), \
                 mock.patch.object(self.core, "_fetch_text", return_value=self.sum):
             path = self.core.ensure_deno(self.logs.append)
         self.assertEqual(Path(path), self.core.ENGINE_HOME / "bin" / "deno")
         self.assertTrue(Path(path).is_file())
-        self.assertEqual(os.environ["PATH"].split(os.pathsep)[0], str(self.core.ENGINE_HOME / "bin"))
+        self.assertEqual(dict(os.environ), env)
         self.assertEqual(self.core._js_opts(), {"js_runtimes": {"deno": {"path": path}}})
         self.assertEqual(self.fetched, [self.core.DENO_ZIP])
         with mock.patch.object(self.core.updater, "download", side_effect=AssertionError("다시 받으면 안 됨")):

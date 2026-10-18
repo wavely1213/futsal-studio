@@ -242,13 +242,26 @@ class FakeBridge:
                              refs_job=self.refs_job, version=self.version)
 
 
+_LIVE = {}  # 시험 폴더 → 그 폴더로 만든 서비스들 (make_home 의 정리가 뒤 스레드를 끝냄)
+
+
 def make_home():
+    """시험용 집 폴더와 정리 함수 — 정리는 이 폴더로 service() 가 만든 서비스의 뒤 스레드(remote-watch·remote-publisher)를
+    먼저 끝내고(Service.close) 폴더를 지움. 남은 스레드가 다음 시험까지 HTTPS 를 보내면 그 시험의 os.environ 바꾸기와 겹쳐
+    C getenv 에서 죽을 수 있음 (I-510)."""
     d = Path(tempfile.mkdtemp(prefix="원격 시험 "))
-    return d, lambda: shutil.rmtree(d, ignore_errors=True)
+
+    def cleanup():
+        for svc in _LIVE.pop(d, []):
+            svc.close()
+        shutil.rmtree(d, ignore_errors=True)
+    return d, cleanup
 
 
 def service(home, clock=None, ntfy="http://127.0.0.1:1", bridge=None):
+    """서비스를 만들어 init (뒤 스레드가 뜸) — home 은 make_home() 폴더 (그 정리가 close 함)."""
     svc = remote.Service(home=home, clock=clock or time.time, ntfy=ntfy)
+    _LIVE.setdefault(Path(home), []).append(svc)
     fb = bridge or FakeBridge()
     svc.init(fb.bridge())
     fb.hooks.append(svc.job_hook)

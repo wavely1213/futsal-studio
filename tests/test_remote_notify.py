@@ -479,6 +479,37 @@ class ThreadTests(unittest.TestCase):
         self.assertEqual(count("remote-publisher"), pub + 1)
         self.assertEqual(count("remote-awake") - awake, 1 if sys.platform == "win32" else 0)
 
+    def test_close_ends_background_threads_even_while_retrying(self):
+        """Service.close: remote-watch·remote-publisher 가 끝남 — 닿지 않는 ntfy 로 다시 해 보는 중(2초·5초 쉼)이어도
+        남은 다시 하기·줄에 남은 것은 버리고 곧 끝남 (I-510 · 남은 스레드의 HTTPS 가 다른 시험의 환경 바꾸기와 겹치지 않게)."""
+        home, cleanup = make_home()
+        self.addCleanup(cleanup)
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            dead = f"http://127.0.0.1:{s.getsockname()[1]}"   # 아무도 듣지 않는 포트 (연결 거절)
+        svc, _ = service(home, ntfy=dead)
+        pair_device(svc, "폰 A")   # 짝짓기 알림·비콘 → 보내기 실패 → RETRY_DELAYS 만큼 쉬며 다시 해 봄
+        for _ in range(5):
+            svc.pub.notify("test", remote.NOTE_TEXT["test"], 3, "bell")
+        time.sleep(0.3)   # 짝짓기 알림을 보내다 실패해 쉬는 중 (줄에는 알림 5개)
+        ths = [svc.pub.thread, svc._watch_th]
+        self.assertTrue(all(t.is_alive() for t in ths))
+        t0 = time.monotonic()
+        svc.close()
+        self.assertLess(time.monotonic() - t0, 4.0, "다시 해 보기(2초+5초)를 끝까지 기다리지 않음")
+        self.assertEqual([t.name for t in ths if t.is_alive()], [])
+
+    def test_fixture_services_leave_no_threads_for_next_tests(self):
+        """시험이 끝나면(make_home 정리) 그 시험이 만든 서비스의 뒤 스레드가 남지 않음 — 예전에는 서비스마다 remote-watch·
+        remote-publisher 가 끝까지 남아 뒤 시험 내내 비콘을 보냈음 (전체 시험이 C getenv 에서 죽던 까닭 · I-510)."""
+        def names():
+            return sorted(t.name for t in threading.enumerate() if t.name.startswith("remote-"))
+        before = names()
+        r = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromName("tests.test_remote_notify.NotifyTests.test_new_device_push").run(r)
+        self.assertTrue(r.wasSuccessful(), r.errors + r.failures)
+        self.assertEqual(names(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

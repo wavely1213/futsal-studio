@@ -88,7 +88,7 @@ class LoginBase(unittest.TestCase):
         self.svc = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)
         self.svc.init(self.fb.bridge())
         self.svc._ctl_timeout = 3
-        self.addCleanup(self.svc._ctl_stop.set)
+        self.addCleanup(self.svc.close)  # 뒤 스레드(remote-watch·remote-publisher)를 다음 시험으로 남기지 않음 (I-510)
         self.lines = self.fb.lines
         if self.http_listener:
             self.assertTrue(self.svc.turn_on())
@@ -179,6 +179,7 @@ class SetupTests(LoginBase):
         svc2 = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)
         fb = FakeBridge()
         svc2.init(fb.bridge())
+        self.addCleanup(svc2.close)
         self.assertTrue(svc2.store.login_bad)
         self.assertIsNone(svc2.store.login())
         self.assertEqual(len(svc2.store.data["devices"]), 1)
@@ -1027,7 +1028,7 @@ class ReviewFixTests(LoginBase):
             self.assertEqual(recs[-1]["reason"], why)
             svc2 = remote.Service(home=self.tmp / ".futsal-studio", clock=self.clock, ntfy=self.ntfy.url)   # 앱을 다시 켬
             svc2.init(FakeBridge().bridge())
-            self.addCleanup(svc2._ctl_stop.set)
+            self.addCleanup(svc2.close)
             svc2._collision_at = self.clock() + 1e9
             svc2.tick()
             self.assertTrue(self.wait(lambda: len(self.lookup_records()) == n + 1))
@@ -1309,7 +1310,7 @@ class PresetTests(LoginBase):
             fb = FakeBridge()
             svc.init(fb.bridge())
             self.addCleanup(svc.turn_off)
-            self.addCleanup(svc._ctl_stop.set)
+            self.addCleanup(svc.close)
             if svc._preset_thread:
                 svc._preset_thread.join(15)
         return svc, fb
