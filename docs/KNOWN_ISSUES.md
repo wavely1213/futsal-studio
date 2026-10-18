@@ -30,7 +30,7 @@
 ## I-511 | 2026-10-18 | 시험 뒤에 남는 다른 스레드 (getenv 와 무관) · close·remote-awake Windows 미검증
 - **상태**: 열림
 - **심각도**: 낮음(개발 환경)
-- **증상/내용**: I-510 을 고친 뒤에도 전체 시험에서 끝까지 남는 데몬 스레드가 있다 — `test_autoupdate` 의 `app-autoupdate`(10⁶초 잠) · `test_idle` 의 `idle-release`(`CHECK_SEC` 마다 확인). 둘 다 C getenv·HTTPS 를 부르지 않아 I-510 의 충돌은 만들지 않는다(남는 스레드 검사: `$SCRATCH/fxa_runs/tools/leakrun.py` · 저장소 밖). `intake` 의 `media-info`·`epfont` 의 '은평 글꼴 찾기'는 시험 안에서 끝났고(남지 않음) ffprobe(자식 프로세스)·글꼴 읽기는 부모에서 getenv 를 부르지 않았다(gdb 확인). `Service.close` 의 remote-awake 끝내기는 Windows 에서만 도는 길이라 미검증.
+- **증상/내용**: I-510 을 고친 뒤에도 전체 시험에서 끝까지 남는 데몬 스레드가 있다 — `test_autoupdate` 의 `app-autoupdate`(10⁶초 잠) · `test_idle` 의 `idle-release`(`CHECK_SEC` 마다 확인) · `test_youtube_trouble` 의 로그인 기다림 `threading.Timer`(youtube_api · 끝나면 로컬 서버를 닫음) · 가짜 ntfy 의 흘려 보내기 처리 스레드. 둘 다 C getenv·HTTPS 를 부르지 않아 I-510 의 충돌은 만들지 않는다(남는 스레드 검사: `$SCRATCH/fxa_runs/tools/leakrun.py` · 저장소 밖). `intake` 의 `media-info`·`epfont` 의 '은평 글꼴 찾기'는 시험 안에서 끝났고(남지 않음) ffprobe(자식 프로세스)·글꼴 읽기는 부모에서 getenv 를 부르지 않았다(gdb 확인). `Service.close` 의 remote-awake 끝내기는 Windows 에서만 도는 길이라 미검증.
 - **위치**: `tests/test_autoupdate.py` `LoopTests` · `tests/test_idle.py` · `remote.Service.close`
 - **해결 방향**: 그 스레드들도 시험 끝에 멈출 길(멈춤 Event)이 생기면 정리한다.
 

@@ -1008,7 +1008,7 @@ class Publisher:
         self.last_beacon = 0.0
         self.pending = None
         self.warned = 0.0
-        self.stopped = False  # stop(): 남은 것을 보내지 않고 바로 끝냄 (Service.close)
+        self.halt = threading.Event()  # stop(): 남은 것을 보내지 않고 바로 끝냄 (Service.close)
         self.thread = threading.Thread(target=self._loop, daemon=True, name="remote-publisher")
         self.thread.start()
 
@@ -1036,7 +1036,7 @@ class Publisher:
         return True
 
     def _loop(self):
-        while not self.stopped:
+        while not self.halt.is_set():
             try:
                 wait = None
                 if self.pending is not None:
@@ -1088,7 +1088,7 @@ class Publisher:
     def _post(self, url, data, headers):
         cert = False
         for k in range(len(RETRY_DELAYS) + 1):
-            if self.stopped:  # 멈춘 뒤에는 다시 해 보지 않음 (기록도 남기지 않음)
+            if self.halt.is_set():  # 멈춘 뒤에는 다시 해 보지 않음 (기록도 남기지 않음)
                 return False
             try:
                 req = urllib.request.Request(url, data=data, method="POST", headers={**updater.UA, **headers})
@@ -1101,7 +1101,7 @@ class Publisher:
             except updater.NET_ERRORS as e:
                 cert = cert or "CERTIFICATE_VERIFY_FAILED" in updater._why(e)
             if k < len(RETRY_DELAYS):
-                time.sleep(RETRY_DELAYS[k])
+                self.halt.wait(RETRY_DELAYS[k])  # 쉬는 동안 stop() 하면 바로 깸
         if self.svc.clock() - self.warned > 3600:
             self.warned = self.svc.clock()  # 정해진 문장만 (주소·주제가 든 오류 글은 기록하지 않음)
             self.svc.log("  휴대폰 알림을 보내지 못했어요 · " + ("백신 프로그램의 'HTTPS 검사'·'웹 보호'를 잠시 끄고 다시 해 보세요" if cert
@@ -1120,7 +1120,7 @@ class Publisher:
 
     def stop(self):
         """보내는 스레드를 끝냄 — 줄에 남은 것은 버림 (지금 보내는 하나는 끝까지 · 다시 해 보기는 안 함)."""
-        self.stopped = True
+        self.halt.set()
         self.q.put(("stop",))
 
 
