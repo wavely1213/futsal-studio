@@ -3,10 +3,14 @@
 - 앱과 함께 싣는 그림(eunpyeong/band.png·logo.png · git 추적 = 배포 목록 · 업데이트 경로 규칙) · 출처 글
 - 설정(styles/설정/은평 스타일 그림.json): 기본 둘 다 켬 · 켜기/끄기 · 깨진 파일 · '그림 바꾸기'(그림 확인 · 한글 폴더 · 내용 지문 이름 · 회전 정보 ·
   큰 그림 줄임 · 로고 투명 그대로) · 처음 그림으로 · 바꾼 그림 파일이 없어지면 실은 그림
-- 그림 찾기(ep_pic_path · 이상한 이름 거절) · 바탕 그림(ep_bg_image: 띠 질감 · 영상 창 = 띠 색 · 로고 자리 · 깨진 그림 = 띠 색)
-- 가편집·MSG 쇼츠: 화면 구성에 그림 이름 · 말 자막·전체 강좌 줄이 로고와 안 겹침 · 설정을 끄면 예전 EP_LAYOUT 그대로
-- 그림이 없는 편집본은 내보내기 필터가 예전과 같음 · 실제 내보내기(720×1280): 띠 질감·로고·말 자막·강좌 줄·이름표 · 확대(창 자르기)·전환 · 깨진 그림
-- 편집실(editor.html 함수를 node 로): 템플릿 '은평 스타일' = 서버와 같은 그림 이름·자막 한계·강좌 줄 자리 · 다른 템플릿은 지움 · fitRect
+- 그림 찾기(ep_pic_path · 이상한 이름 거절) · 바탕 그림(ep_bg_image: 띠 질감 · 영상 창 = 띠 색 · 창 옆 빈 줄 없음 · 로고 자리 · 깨진 그림 = 띠 색)
+- 가편집·MSG 쇼츠: 화면 구성에 그림 이름 · 말 자막·전체 강좌 줄이 로고와 안 겹침 · MSG 가 밀어낸 글자도 로고 자리를 피함 ·
+  아래 띠에 안 들어가는 두 줄 말 자막만 줄여 영상 창 아래(I-472 · ASS \\fs) ·
+  설정을 끄면 예전 EP_LAYOUT 그대로 · 스타일 화면·편집실 '박스 색' 안내
+- 그림이 없는 편집본은 내보내기 필터가 예전과 같음 · 실제 내보내기(720×1280): 띠 질감·로고·말 자막·강좌 줄·이름표 · 확대(창 자르기)·전환 ·
+  창 바로 아래 줄 · 두 줄 말 자막이 창을 안 덮음 · 깨진 그림
+- 편집실(editor.html 함수를 node 로): 템플릿 '은평 스타일' = 서버와 같은 그림 이름·자막 한계·강좌 줄 자리 · 다른 템플릿은 지움 · fitRect ·
+  말 자막 줄이는 배율(epWinB·epRoomFit) = 서버
 - 길: /api/style/card_pic(그림) · /api/style/card_pics · /api/style/card_pic(바꾸기) · /api/style/list · /api/edit/open epx.pics · 원격 길 표 · 프리미어 XML 안내"""
 import base64
 import io
@@ -202,11 +206,26 @@ class BgImageTest(unittest.TestCase):
         r = editor.ep_cover(1600, 320, W, f["by"])
         self.assertAlmostEqual(r[1], f["by"], places=6)              # 위 띠는 높이에 맞춤 (가로가 넘쳐 양옆을 자름)
         self.assertAlmostEqual(r[2], (W - r[0]) / 2, places=6)
-        self.assertEqual(editor.ep_band_rects(f["by"], f["bh"], H), [(0.0, f["by"]), (f["by"] + f["bh"], float(H))])
+        wy = int(f["by"]) & ~1                                         # 내보내기 영상 창 위 끝 (짝수 칸 · ffmpeg yuv420 겹치기)
+        self.assertEqual(editor.ep_band_rects(f["by"], f["bh"], H), [(0, wy), (wy + f["bh"], H)])
         self.assertEqual(editor.ep_band_rects(0, H, H), [])          # 세로 영상이 화면을 다 채우면 띠 없음
         thin = editor.ep_cover(1600, 320, W, 100)                     # 띠가 그림보다 납작하면 가로에 맞추고 위아래를 자름
         self.assertAlmostEqual(thin[0], W, places=6)
         self.assertLess(thin[3], 0)
+
+    def test_no_empty_row_next_to_window(self):
+        """검토: by 소수 부분이 0.5 이상이면(16:9 원본 1080×1920 = 536.64) 영상 창 아래 끝(실제 내보내기 칸 = 짝수로 내린 by + bh)과
+        띠 그림 사이에 검은 한 줄이 남았음 → 창 밖 모든 줄이 띠 그림 (검정도, 한 색 띠 색도 아님) · 소수 부분 두 경우 · 홀수 칸 · 작은 화면."""
+        import numpy as np
+        for Ww, Hh, by, bh in ((W, H, 536.64, 802), (W, H, 536.3, 802), (W, H, 537.5, 802), (W, H, 537.2, 803), (720, 1280, 358.08, 534),
+                               (720, 1280, 358.6, 534), (W, H, 0.7, 1500), (W, H, 419.5, 1500)):
+            a = np.asarray(editor.ep_bg_image(Ww, Hh, by, bh, "#1F4FD1", editor.ep_pic_path("band.png"), None)).astype(int)
+            wy = int(by) & ~1
+            for r in list(range(0, wy)) + list(range(wy + bh, Hh)):
+                row = a[r]
+                self.assertFalse((row == 0).all(), (Ww, by, r, "검은 줄"))
+                self.assertFalse((row == BLUE).all(), (Ww, by, r, "띠 색 줄"))
+            self.assertTrue((a[wy:wy + bh] == BLUE).all(), (Ww, by))   # 영상 창(영상이 덮는 칸)만 띠 색
 
     def test_broken_or_missing(self):
         import numpy as np
@@ -255,6 +274,60 @@ class LayoutPlaceTest(unittest.TestCase):
                 self.assertLessEqual(cb[1] + editor.TXT_GAP, editor.text_box(line["text"], line["style"], W, H)[1] + 1e-9)
         cs = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), [ln], True)
         self.assertGreaterEqual(editor._cap_band(cs, H)[0], video_band(editor.EP_LAYOUT)[1])   # 한 줄 자막은 아직 영상 창 아래 (아래 띠)
+
+    LONG = "트래핑할 때는 공을 멈추는 게 아니라 다음 동작을 준비하는 거예요"   # 화면에서 두 줄로 감기는 긴 말 자막
+
+    def caps(self):
+        lay = dict(editor.EP_LAYOUT, band="band.png", logo="logo.png")
+        both = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), [editor.ep_longline(10, logo=True)], True)
+        return lay, editor.ep_win_bottom({"format": "shorts", "layout": lay}, W, H), both
+
+    def test_two_line_captions_stay_below_window(self):
+        """검토(I-472): 로고 + 강좌 줄이면 말 자막 아래 끝 0.768 → 두 줄 자막(72)은 위쪽이 영상 창 아래 끝을 약 60화소 덮었음 (BR-242 위반) →
+        아래 띠(창 아래 끝 ~ 0.768)에 안 들어가는 여러 줄 자막만 글자를 줄여 창 아래에 둠 · 한 줄 자막·로고만·로고 없음은 그대로."""
+        lay, wb, both = self.caps()
+        self.assertAlmostEqual(wb / H, video_band(lay)[1], places=6)            # 은평 스타일 영상 창 아래 끝 (16:9 · 0.697)
+        self.assertEqual(both["y"], 0.768)
+        self.assertGreater(wb - editor._cap_band(both, H, 2)[0] * H, 50)        # 줄이지 않으면 두 줄 72 가 창을 50화소 넘게 덮음 (예전)
+        for text in (self.LONG, "첫 줄\n둘째 줄"):
+            k = min(editor.cap_fit(text, both, W), editor.ep_room_fit(text, both, W, H, wb))
+            self.assertTrue(0.6 <= k < 1, (text, k))                             # 조금만 작게 (72 → 47~)
+            st = dict(both, size=both["size"] * k)
+            n = editor.cap_wrap_lines(text, st, W)
+            self.assertEqual(n, 2, text)
+            self.assertGreaterEqual(editor._cap_band(st, H, n)[0] * H, wb - 1e-6, text)   # 줄인 두 줄도 영상 창 아래 (아래 띠)
+            self.assertEqual(editor.ep_room_fit(text, both, W, H, None), 1.0)    # 로고 화면이 아니면 그대로
+        self.assertEqual(editor.ep_room_fit("트래핑할 때는", both, W, H, wb), 1.0)                     # 한 줄 자막은 그대로 72
+        self.assertEqual(editor.ep_room_fit("공을 멈추는 게 아니라 다음 동작을 준비해요", both, W, H, wb), 1.0)   # 폭만 줄여 한 줄(cap_fit)이면 그대로
+        logo_only = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), [], True)
+        self.assertEqual(editor.ep_room_fit("첫 줄\n둘째 줄", logo_only, W, H, wb), 1.0)              # 로고만(0.8): 두 줄도 이미 창 아래
+        self.assertGreaterEqual(editor._cap_band(logo_only, H, 2)[0] * H, wb - 1e-6)
+        k3 = editor.ep_room_fit(self.LONG, logo_only, W, H, wb)                                   # 세 줄로 감길 자막은 로고만이어도 두 줄로
+        self.assertTrue(0.8 < k3 < 1 and editor.cap_wrap_lines(self.LONG, dict(logo_only, size=72 * k3), W) == 2, k3)
+        self.assertEqual(editor.ep_room_fit(self.LONG, dict(both, y=0.6), W, H, wb), 1.0)          # 창 안으로 옮긴 자막은 그대로
+        self.assertEqual(editor.ep_room_fit("하나\n둘\n셋\n넷", both, W, H, wb), editor.EP_ROOM_MIN)  # 아주 긴 자막도 0.5배까지만
+        for seq in ({"format": "shorts", "layout": dict(editor.EP_LAYOUT, band="band.png")}, {"format": "shorts", "layout": dict(editor.EP_LAYOUT)},
+                    {"format": "shorts", "layout": dict(lay, mode="blur")}, {"format": "long", "layout": lay}, {"format": "shorts"}):
+            self.assertIsNone(editor.ep_win_bottom(seq, W, H), seq)              # 로고가 없으면 예전 그대로
+
+    def test_ass_shrinks_only_long_main_captions(self):
+        """내보내기(ASS): 로고 화면의 말 자막(자막 1)만 · 두 줄로 감기는 자막만 \\fs 로 줄임 — 한 줄 자막·로고 없는 편집본은 예전과 같은 줄."""
+        lay, wb, both = self.caps()
+        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": 20.0, "speed": 1.0}
+        caps = [{"id": "a", "start": 1.0, "end": 3.0, "text": "트래핑할 때는"}, {"id": "b", "start": 4.0, "end": 6.0, "text": self.LONG}]
+
+        def cap_lines(layout):
+            proj = {"format": "shorts", "captionStyle": dict(both), "titles": [editor.ep_longline(20, logo=True)], "shapes": [], "items": [v],
+                    "captions": caps, "captionsOn": True, "layout": layout}
+            return [ln for ln in editor.build_ass(proj, W, H).splitlines() if ln.startswith("Dialogue:") and ",Cap," in ln]
+        on, off = cap_lines(lay), cap_lines(dict(editor.EP_LAYOUT, band="band.png"))
+        k = editor.ep_room_fit(self.LONG, both, W, H, wb)
+        fs = __import__("re").compile(r"\\fs\d")
+        self.assertIsNone(fs.search(on[0]))                                      # 한 줄 자막은 그대로
+        self.assertIn(rf"\fs{round(both['size'] * k * editor.FONT_K)}" + "}", on[1])   # 두 줄 자막은 아래 띠에 들게
+        self.assertEqual(len(off), 2)
+        self.assertFalse(any(fs.search(ln) for ln in off))                       # 로고가 없으면 예전과 같음
+        self.assertEqual(on[0], off[0])
 
 
 class RoughPicsTest(WorkMixin, unittest.TestCase):
@@ -319,6 +392,52 @@ class MsgPicsTest(unittest.TestCase):
                 self.assertFalse(b[0] < x + w and x < b[2] and b[1] < y + h and y < b[3], (q["name"], t["text"], b))
 
 
+class MsgLogoAvoidTest(unittest.TestCase):
+    """검토: MSG 글자 자리 정리(layout_titles)가 흰 상자·큰 제목은 피하지만 로고 자리는 몰라서, 밀어낸 강조·상황·속마음 글자가 0.86~0.95 로 내려가
+    로고를 덮을 수 있었음 → 로고가 있는 은평 스타일 쇼츠는 로고 자리(그림 비율대로)도 피함 (BR-283) · 로고가 없으면 예전 그대로."""
+
+    def build(self, lay, card=True):
+        b = msg._Build("x.mp4", {"duration": 60.0, "width": 1080, "height": 1920}, "shorts")
+        b.card, b.lay = card, lay
+        ts = []
+        for k, (kind, y) in enumerate((("emphasis", 0.92), ("inner", 0.86), ("situ", 0.9))):
+            t = b.title(f"강조 글자 {k + 1}", 5.0 + k * 10, 2.0, dict(editor.TITLE_STYLE, size=80, y=y))
+            b.event(kind, t["start"], t["text"], "", refs={"titles": [t["id"]]})
+            ts.append(t)
+        return b, ts
+
+    def test_texts_leave_logo_alone(self):
+        lay = dict(editor.EP_LAYOUT, band="band.png", logo="logo.png")
+        lr = editor.ep_logo_rect(lay, W, H)
+        x, y, w, h = editor.ep_logo_box(180, 254, W, H)
+        self.assertEqual([round(v, 3) for v in lr], [round(v, 3) for v in (x, y, x + w, y + h)])
+        b, ts = self.build(lay)
+        gone = msg.layout_titles(b, [], dict(editor.ep_caption(dict(editor.SHORTS_STYLE)), y=0.768), 60.0)
+        kept = [t for t in ts if t["id"] not in gone]
+        self.assertTrue(kept)
+        for t in kept:
+            bx = msg.text_box(t["text"], t["style"], W, H)
+            self.assertFalse(bx[0] < lr[2] and lr[0] < bx[2] and bx[1] < lr[3] and lr[1] < bx[3], (t["text"], t["style"]["y"], bx))
+        # 로고가 없거나(꺼짐·그림을 못 읽음) 은평 스타일이 아니면 예전과 같음 (그 자리 그대로)
+        for lay2, card in ((dict(editor.EP_LAYOUT), True), (dict(editor.EP_LAYOUT, logo="logo_000000000000.png"), True), (lay, False)):
+            self.assertIsNone(editor.ep_logo_rect(lay2, W, H) if card else None)
+            b, ts = self.build(lay2, card)
+            msg.layout_titles(b, [], dict(editor.SHORTS_STYLE), 60.0)
+            self.assertEqual([t["style"]["y"] for t in ts], [0.92, 0.86, 0.9], (lay2, card))
+
+
+class BandColorWordingTest(unittest.TestCase):
+    """검토: 띠 그림이 기본으로 켜져 '박스 색'을 바꿔도 띠가 안 바뀜 → 스타일 화면·편집실 안내가 그 사정을 쉬운 말로 알려 줌."""
+
+    def test_wording(self):
+        ui = (ROOT / "ui.html").read_text(encoding="utf-8")
+        self.assertNotIn("띠 색은 편집실 '박스 색'에서 바꿀 수 있어요. 고르면", ui)
+        self.assertIn("'띠에 그림 깔기'를 켜 두면 그림에 가려 안 보이고, 끄거나 그림을 못 읽을 때 이 색이 나와요", ui)
+        self.assertIn("끄면 띠 색(편집실 '박스 색')만 써요", ui)
+        ed = (ROOT / "editor.html").read_text(encoding="utf-8")
+        self.assertIn('${lay.mode === "box" && lay.band ? `<div class="hint" id="pBarPic"', ed)
+
+
 class SameWhenUnusedTest(unittest.TestCase):
     """그림 이름이 없는 화면 구성(예전 편집본·다른 템플릿·설정을 끈 은평 스타일)은 _fit 값·내보내기 필터가 예전과 같음 (색 바탕 · 입력 하나)."""
 
@@ -358,7 +477,7 @@ class ExportPicsTest(WorkMixin, unittest.TestCase):
                              capture_output=True).stdout
         return np.frombuffer(raw, np.uint8).reshape(1280, 720, 3).astype(int)
 
-    def make(self, name, layout, label):
+    def make(self, name, layout, label, text="공을 멈추는 게 아니라"):
         d = self.D
         A, B = editor._pair(0.0, 2.0, start=0.0), editor._pair(2.0, 4.0, start=2.0)
         B[0]["fx"] = {"scale": {"v": 160, "k": []}}
@@ -370,7 +489,7 @@ class ExportPicsTest(WorkMixin, unittest.TestCase):
         cs = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), xt, logo)
         q = editor._new_seq(label, "shorts", A + B, captionStyle=cs, layout=layout, titles=[top, kt] + xt, shapes=shapes + xg,
                             trans=[{"id": "x", "track": "V1", "a": A[0]["id"], "b": B[0]["id"], "type": "dissolve", "dur": 0.6, "align": "center"}])
-        caps = [{"id": "c1", "start": 0.0, "end": d, "text": "공을 멈추는 게 아니라"}]
+        caps = [{"id": "c1", "start": 0.0, "end": d, "text": text}]
         proj = dict(q, captions=caps, info=self.info, source=name, media=[], master={"volume": 1, "normalize": False, "lufs": -14})
         return editor.export(name, proj, {"preset": "small", "hw": False, "xml": True, "srt": False}, lambda m: None), q
 
@@ -423,6 +542,27 @@ class ExportPicsTest(WorkMixin, unittest.TestCase):
             # 이름표 검은 상자는 그대로 (띠 그림 위)
             tag = a[int(0.056 * Hh):int(0.084 * Hh), int(0.45 * Ww):int(0.55 * Ww)]
             self.assertTrue((tag.max(axis=2) < 40).mean() > 0.3 or (tag.min(axis=2) > 215).mean() > 0.1, t)
+        # 검토: 영상 창 위 끝 소수 부분이 0.5 이상(1080×1920 16:9 = 536.64 와 같은 경우)이어도 창 바로 아래 줄이 검게 남지 않음
+        style.set_card_pics(band=True, logo=True)
+        lay = dict(editor.ep_layout(), vpos=0.4807)
+        self.assertEqual((lay.get("band"), lay.get("logo")), ("band.png", "logo.png"))
+        f2 = editor._fit({"track": "V1", "fit": "auto"}, {"kind": "video", "w": 640, "h": 360}, {"format": "shorts", "layout": lay}, Ww, Hh)
+        self.assertGreaterEqual(f2["by"] % 1, 0.5)
+        seam, _ = self.make(name, lay, "쇼츠 줄", text=LayoutPlaceTest.LONG)   # 두 줄로 감기는 말 자막 (강좌 줄 + 로고 · I-472)
+        a = self.frame(seam[0], 1.0)
+        e0 = (int(f2["by"]) & ~1) + f2["bh"]
+        # 검토(I-472): 강좌 줄 + 로고에서 두 줄 말 자막이 영상 창(회색)을 덮지 않음 — 흰 글씨는 모두 창 아래 · 로고 위 · 두 줄 + 강좌 줄
+        white = (a.min(axis=2) > 225).sum(axis=1) > 3
+        self.assertFalse(white[(int(f2["by"]) & ~1):e0].any(), np.where(white[(int(f2["by"]) & ~1):e0])[0][:5])
+        wr = np.where(white[e0:int(ly)])[0] + e0
+        groups = np.split(wr, np.where(np.diff(wr) > 2)[0] + 1)
+        self.assertGreaterEqual(len(groups), 3, [(g.min(), g.max()) for g in groups])   # 말 자막 두 줄 · 강좌 줄
+        self.assertGreater(wr.min(), e0 + 2)
+        ref2 = np.asarray(editor.ep_bg_image(Ww, Hh, f2["by"], f2["bh"], f2["bar"], editor.ep_pic_path("band.png"), None)).astype(int)
+        for r in (e0, e0 + 1):
+            self.assertGreater(a[r, 4:60, 2].mean(), 100, (r, a[r, 4:60].mean(axis=0)))   # 검은 줄이 아님 (띠 그림 파랑)
+            self.assertLess(np.abs(a[r, 4:60] - ref2[r, 4:60]).mean(), 12, r)
+        self.assertLess(np.abs(a[e0 - 1, 4:60] - 128).max(), 20)                           # 바로 위 줄은 영상(회색)
         xml = sorted(core.OUT.rglob("*.txt"))
         notes = "\n".join(p.read_text(encoding="utf-8") for p in xml)
         self.assertIn("띠 그림·로고가 빠져요", notes)
@@ -471,6 +611,41 @@ EPX = null; S = rough(false); TEMPLATES["은평 스타일"](); out.push(cp(S));"
         self.assertNotIn("band", none["layout"])
         for k, v in editor.EP_LAYOUT.items():
             self.assertEqual(none["layout"][k], v, k)
+
+    def test_room_fit_same_as_server(self):
+        """미리보기(epWinB·epRoomFit·capWrapLines · drawOverlays 의 자막 1 글자 배율) = 내보내기(ep_win_bottom·ep_room_fit·cap_wrap_lines) — 같은 배율·줄 수."""
+        from test_eunpyeong import run_js2
+        lay = dict(editor.EP_LAYOUT, band="band.png", logo="logo.png")
+        ln = editor.ep_longline(10, logo=True)
+        both = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), [ln], True)
+        logo_only = editor.ep_cap_clear(editor.ep_caption(dict(editor.SHORTS_STYLE)), [], True)
+        texts = [LayoutPlaceTest.LONG, "첫 줄\n둘째 줄", "트래핑할 때는", "공을 멈추는 게 아니라 다음 동작을 준비해요", "하나\n둘\n셋\n넷",
+                 "Shooting 꿀팁 ABC xyz 패스하고 그 자리에 서 있으면 왜 안될까요?"]
+        styles = [both, logo_only, dict(both, weight="Bold", strokeW=4), dict(both, y=0.6), dict(both, size=90), dict(both, y="0.768")]
+        lays = [lay, dict(lay, zoom=1.0, vpos=0.5), dict(lay, cropTop=0.1), dict(editor.EP_LAYOUT, band="band.png"), dict(lay, mode="blur")]
+        got = run_js2(f"""
+const texts = {json.dumps(texts, ensure_ascii=False)}, styles = {json.dumps(styles, ensure_ascii=False)}, lays = {json.dumps(lays)};
+out = lays.map(l => {{ S = {{ format: "shorts", layout: l }}; const wb = epWinB();
+  return {{ wb, k: styles.map(st => texts.map(t => Math.min(capFit(t, st, 1080), epRoomFit(t, st, 1080, 1920, wb)))),
+           n: styles.map(st => texts.map(t => capWrapLines(t, st, 1080))) }}; }});""",
+                      extra=("fitRect", "capFit", "capLines", "capWrapLines", "epWinB", "epRoomFit"))
+        shrunk = 0
+        for l, g in zip(lays, got):
+            wb = editor.ep_win_bottom({"format": "shorts", "layout": l}, W, H)
+            if wb is None:
+                self.assertIsNone(g["wb"], l)
+            else:
+                self.assertAlmostEqual(g["wb"], wb, places=6)
+            for st, ks, ns in zip(styles, g["k"], g["n"]):
+                for t, k, n in zip(texts, ks, ns):
+                    want = min(editor.cap_fit(t, st, W), editor.ep_room_fit(t, st, W, H, wb))
+                    self.assertEqual(k, want, (l, st.get("y"), st.get("size"), t))
+                    self.assertEqual(n, editor.cap_wrap_lines(t, st, W), t)
+                    shrunk += want < editor.cap_fit(t, st, W)
+        self.assertGreater(shrunk, 5)   # 시험이 줄이는 경우를 실제로 지남
+        src = (ROOT / "editor.html").read_text(encoding="utf-8")
+        self.assertIn("Math.min(capFit(w.text, w.st, BW()), epRoomFit(w.text, w.st, BW(), BH(), w.wb))", src)
+        self.assertIn('wb: o.id === "C1" ? wb : null', src)   # 말 자막(자막 1)만 (내보내기 build_ass 의 wb 와 같음)
 
     def test_fit_rect_carries_pics(self):
         from test_eunpyeong import run_js2

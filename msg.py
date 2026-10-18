@@ -4478,6 +4478,9 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
     fixed = getattr(B, "fixed", None) or set()
     fboxes = [text_box(t["text"], t["style"], W, H) for t in B.titles if t["id"] in fixed]
     fboxes += [[s["x"] * W, s["y"] * H, (s["x"] + s["w"]) * W, (s["y"] + s["h"]) * H] for s in B.shapes if s.get("plan") in ("card", "series")]
+    lr = editor.ep_logo_rect(getattr(B, "lay", None), W, H) if getattr(B, "card", False) else None
+    if lr:   # 아래 띠 로고 자리에는 어떤 글자도 (BR-283 · 밀어낸 강조·상황·속마음 글자도 0.86~0.95 로 내려가 로고를 덮지 않게)
+        fboxes.append(lr)
     for t in sorted(B.titles, key=lambda t: (LAYOUT_PRI.get(kind_of.get(t["id"]), 9), t["start"])):
         if t["id"] in fixed:
             continue

@@ -1468,6 +1468,11 @@ function capFit(text, st, W) {
 function capLines(text, st, W) {
   const paras = String(text ?? "").replace(/\r/g, "").split("\n");
   if (capFit(text, st, W) < 1) return paras.length;
+  return capWrapLines(text, st, W);
+}
+// 글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.py cap_wrap_lines)
+function capWrapLines(text, st, W) {
+  const paras = String(text ?? "").replace(/\r/g, "").split("\n");
   const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", avail = 0.92 * W - 2 * stroke, sp = emOf(" ") * size;
   let n = 0;
   for (const para of paras) {
@@ -3002,6 +3007,7 @@ function olayEl(o) {
 function drawOverlays(t) {
   const F = $("frame"), fw = F.clientWidth, fh = F.clientHeight, scale = fh / BH(), tot = total(), ots = S.otracks || [], live = new Set(), want = {};
   let caps = null;
+  const wb = epWinB();  // 로고 화면이면 말 자막(자막 1)은 영상 창 아래 끝 밑 (epRoomFit · 아니면 null = 예전 그대로)
   ots.forEach((o, i) => {
     const L = olayEl(o), vis = otVisible(o); live.add(o.id);
     css(L.el, "zIndex", String(i + 1)); css(L.el, "display", vis ? "block" : "none");
@@ -3013,7 +3019,7 @@ function drawOverlays(t) {
         let s2 = st;
         if (o.id !== "C1") { c1s = c1s || (otVisible(OTK("C1") || { id: "C1" }) ? caps.filter(x => x.trk === "C1") : []); const y = capRowY(S, o, st, c, c1s, BW()); if (y !== st.y) s2 = { ...st, y }; } // 두 줄 자막 1 과 안 겹치게 (D-308)
         const own = c.mid === "main" ? capPosOf(c.cap.id) : null; if (own) s2 = { ...s2, ...own }; // '이 자막만' 옮긴 자리 (트랙 높이보다 먼저 · D-321)
-        want[c.mid === "main" ? "c" + c.cap.id : "c" + c.mid + ":" + c.cap.id] = { L, z: z++, st: s2, s: c.s, e: c.e, text: c.text, kw: c.kw, fit: true, pick: { k: "caption", id: c.cap.id, mid: c.mid, trk: o.id } };
+        want[c.mid === "main" ? "c" + c.cap.id : "c" + c.mid + ":" + c.cap.id] = { L, z: z++, st: s2, s: c.s, e: c.e, text: c.text, kw: c.kw, fit: true, wb: o.id === "C1" ? wb : null, pick: { k: "caption", id: c.cap.id, mid: c.mid, trk: o.id } };
       }
     }
     else { let z = 0; for (const g of S.titles) if (trkOf(g, "t") === o.id && t >= g.start - TEPS && t < g.start + g.dur - TEPS && t < tot + 0.01) want["t" + g.id] = { L, z: z++, st: g.style, s: g.start, e: g.start + g.dur, text: g.text, pick: { k: "title", id: g.id, trk: o.id } }; }
@@ -3026,7 +3032,7 @@ function drawOverlays(t) {
     if (el.parentNode !== w.L.el) w.L.el.appendChild(el); // 줄을 옮긴 글자는 그 줄 겹으로 (같은 div · #ov .txt 로 찾을 수 있음)
     el._pick = w.pick; // 화면을 눌러 고르기 (pvPick · D-320)
     css(el, "zIndex", String(w.z));
-    styleText(el, w.st, scale, w.fit ? capFit(w.text, w.st, BW()) : 1);
+    styleText(el, w.st, scale, w.fit ? Math.min(capFit(w.text, w.st, BW()), epRoomFit(w.text, w.st, BW(), BH(), w.wb)) : 1);
     effect(el, w.st, t - w.s, w.e - t, scale, w.text, w.kw);
   }
 }
@@ -4738,6 +4744,26 @@ function epCapClear(q) {
   const lim = Math.min(...lims);
   if (+(q.captionStyle.y ?? EP.CAP_Y) > lim) q.captionStyle.y = lim;
 }
+// 로고가 있는 은평 스타일 화면(layout.logo · box)의 영상 창 아래 끝 (화소 · 16:9 원본 기준) · 아니면 null — 말 자막(자막 1)을 그 아래 띠에 맞춤 (editor.py ep_win_bottom)
+function epWinB() {
+  const lay = S.layout || {};
+  if (S.format !== "shorts" || lay.mode !== "box" || !lay.logo) return null;
+  const f = fitRect({ track: "V1", fit: "auto" }, { kind: "video", w: 1920, h: 1080 });
+  return f.by + f.bh;
+}
+// 로고 화면 말 자막이 아래 띠(창 아래 끝 wb ~ 글 아래 끝 y)에 들게 하는 글자 배율 — 아래 띠에 안 들어가는 여러 줄 자막만 줄임 · 한 줄도 안 들어가는 자리는 그대로
+// (강좌 줄 + 로고면 두 줄 72 가 창을 덮음 · BR-283 · editor.py ep_room_fit 과 같은 셈 · 가장 작게 EP_ROOM_MIN 0.5)
+function epRoomFit(text, st, W, H, wb) {
+  const size = +st.size || 0, stroke = +st.strokeW || 0;
+  if (wb == null || size <= 0) return 1;
+  const room = +(st.y ?? 0.85) * H - wb;
+  if (room < TOPIC.LINE * size + 2 * stroke || capFit(text, st, W) < 1) return 1;  // 한 줄(글자만 조금 줄여 한 줄)이면 이미 들어감
+  for (let i = 100; i > 50; i--) {  // 가장 큰 배율부터 (줄이면 한 줄에 더 들어가 줄 수도 다시 셈)
+    const f = size * i / 100;
+    if (capWrapLines(text, { ...st, size: f }, W) * TOPIC.LINE * f + 2 * stroke <= room) return i / 100;
+  }
+  return 0.5;
+}
 // 이름표 글·검은 상자는 한 묶음: 하나를 지우면 다른 하나도 (빈 검은 상자·상자 없는 글이 남지 않게 · gone: 지운 것들)
 function seriesGone(q, gone) {
   if (!gone.some(g => g && g.plan === "series")) return;
@@ -6204,6 +6230,7 @@ function renderSeqTab() {
       </div>
       <div class="hint" style="margin:-4px 0 10px">${lay.mode === "fill" ? "가로 영상을 세로 화면에 꽉 차게 잘라요. 클립을 골라 효과 컨트롤의 '화면 좌우'로 위치를 맞춰요." : lay.mode === "box" ? "가로 영상을 폭에 맞춰 가운데 두고, 위아래 빈 곳은 박스로 채워요. 위에는 제목, 아래는 자막을 두기 좋아요." : "가로 영상을 가운데 두고, 위아래는 같은 영상을 흐리게 깔아요."}</div>
       ${lay.mode === "box" ? `<div class="f"><label>박스 색</label><input type="color" id="pBar" value="${lay.bar}"><span></span></div>` : ""}
+      ${lay.mode === "box" && lay.band ? `<div class="hint" id="pBarPic" style="margin:-4px 0 10px">위아래 띠에 그림이 깔려 있어 박스 색은 그림에 가려 안 보여요. 스타일 화면에서 '띠에 그림 깔기'를 끄거나 그림을 못 읽으면 이 색이 보여요.</div>` : ""}
       ${lay.mode !== "fill" ? slider("pZoom", "영상 크기", lay.zoom, 1, 2, 0.01, v => Math.round(v * 100) + "%") + slider("pVpos", "영상 위치", lay.vpos, 0, 1, 0.01, v => v < 0.45 ? "위쪽" : v > 0.55 ? "아래쪽" : "가운데") : ""}
       ${slider("pCropB", "원본 아래 자르기", lay.cropBottom, 0, 0.4, 0.005, v => Math.round(v * 100) + "%")}
       ${slider("pCropT", "원본 위 자르기", lay.cropTop, 0, 0.4, 0.005, v => Math.round(v * 100) + "%")}

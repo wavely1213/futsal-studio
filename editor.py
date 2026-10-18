@@ -1566,8 +1566,12 @@ def _ep_img(p, mode):
 
 
 def ep_band_rects(by, bh, H):
-    """띠 그림을 까는 두 띠 (위 끝, 아래 끝 · 화소 · 소수 그대로) — 위 띠 0 ~ 영상 창 위 끝 · 아래 띠 영상 창 아래 끝 ~ 화면 끝 (빈 띠는 뺌)."""
-    return [(a, b) for a, b in ((0.0, float(by)), (float(by) + float(bh), float(H))) if b - a > 0.5]
+    """띠 그림을 까는 두 띠 (위 끝, 아래 끝 · 정수 화소) — 위 띠 0 ~ 영상 창 위 끝 · 아래 띠 영상 창 아래 끝 ~ 화면 끝 (빈 띠는 뺌).
+    영상 창은 내보내기가 실제로 그리는 칸: 위 끝 = int(by) 를 짝수로 내림 (ffmpeg yuv420 겹치기 · 창 자르기 판도 같은 칸) · 높이 bh
+    → 소수 by 로 띠를 나누면 창 아래 끝과 띠 사이에 영상도 그림도 없는 한 줄(검정·띠 색)이 남음 (D-471)."""
+    wy = int(float(by)) & ~1
+    we = wy + int(round(float(bh)))
+    return [(a, b) for a, b in ((0, wy), (we, int(H))) if b > a]
 
 
 def ep_cover(iw, ih, W, hb):
@@ -1583,6 +1587,20 @@ def ep_logo_box(lw, lh, W, H):
     return (W - w) / 2, EP_LOGO["cy"] * H - h / 2, w, h
 
 
+def ep_logo_rect(lay, W, H):
+    """화면 구성(layout.logo)의 로고 자리 [왼쪽, 위, 오른쪽, 아래] (화소 · 그림 비율대로 = 내보내기 ep_bg_image 와 같은 자리) — 로고가 없거나
+    그림을 못 읽으면(내보내기도 로고 없음) None · MSG 글자 자리 정리가 이 자리를 피함 (BR-283)."""
+    p = ep_pic_path((lay or {}).get("logo"))
+    if not p:
+        return None
+    try:
+        lw, lh = _ep_img(p, "RGBA").size
+    except Exception:  # noqa: BLE001 — 못 읽으면 내보내기에도 로고가 없음
+        return None
+    x, y, w, h = ep_logo_box(lw, lh, W, H)
+    return [x, y, x + w, y + h]
+
+
 def ep_bg_image(W, H, by, bh, bar, band=None, logo=None, log=None):
     """은평 스타일 바탕 그림 (W×H RGB · PIL): 영상 창 = 띠 색 · 위아래 띠 = 띠 그림(띠마다 꽉 차게 · 가운데 기준) · 아래 띠 가운데 로고.
     띠 그림·로고를 못 읽으면 그것만 빼고(띠 색) 기록 한 줄 → 둘 다 못 쓰면 None (예전 색 바탕 그대로) — editor.html epPics 와 같은 셈."""
@@ -1593,11 +1611,12 @@ def ep_bg_image(W, H, by, bh, bar, band=None, logo=None, log=None):
         try:
             src = _ep_img(band, "RGB")
             for a, b in ep_band_rects(by, bh, H):
-                dw, dh, dx, dy = ep_cover(src.size[0], src.size[1], W, b - a)
-                r0, r1 = int(math.floor(a)), min(H, int(math.ceil(b)))   # 띠 둘레 반 칸은 영상 창 쪽으로 넉넉히 (영상이 덮음 · 띠 색 줄이 안 남게)
-                lay = Image.new("RGB", (W, r1 - r0))
-                lay.paste(src.resize((max(1, round(dw)), max(1, round(dh))), Image.LANCZOS), (round(dx), round(a + dy) - r0))
-                im.paste(lay, (0, r0))
+                hb = b - a
+                dw, dh, dx, dy = ep_cover(src.size[0], src.size[1], W, hb)
+                # 띠보다 작아지지 않게 올림으로 줄여 가운데를 W×hb 로 잘라냄 → 띠의 모든 칸이 그림 (반올림으로 한 줄이 비지 않음)
+                rw, rh = max(W, math.ceil(dw - 1e-6)), max(hb, math.ceil(dh - 1e-6))
+                ox, oy = min(rw - W, max(0, round(-dx))), min(rh - hb, max(0, round(-dy)))
+                im.paste(src.resize((rw, rh), Image.LANCZOS).crop((ox, oy, ox + W, oy + hb)), (0, a))
             used = True
         except Exception as e:  # noqa: BLE001 — 깨진 그림이면 띠 색 (내보내기는 멈추지 않음)
             (log or studiolog.write)(f"은평 스타일 띠 그림을 읽지 못해 띠 색으로 만들어요 · {Path(band).name} · {type(e).__name__}")
@@ -1774,6 +1793,36 @@ def ep_cap_clear(cs, titles, logo=False):
     if lim is not None and float(cs.get("y", EP_CAP_Y)) > lim:
         cs["y"] = lim
     return cs
+
+
+EP_ROOM_MIN = 0.5   # 로고 화면 말 자막을 아래 띠에 맞춰 줄일 때 가장 작은 글자 배율 (세 줄 넘는 긴 자막도 읽히게 · 그보다 줄여야 하면 이만큼만)
+
+
+def ep_win_bottom(seq, W, H):
+    """로고가 있는 은평 스타일 화면(layout.logo · box)의 영상 창 아래 끝 (화소 · 16:9 원본 = 은평 스타일 영상 창 기준) · 아니면 None —
+    말 자막(자막 1)을 이 아래 띠에 맞추는 기준 (ep_room_fit · editor.html epWinB 와 같은 셈)."""
+    lay = seq.get("layout") or {}
+    if seq.get("format") != "shorts" or lay.get("mode") != "box" or not lay.get("logo"):
+        return None
+    f = fit_rect({"track": "V1", "fit": "auto"}, {"kind": "video", "w": 1920, "h": 1080}, seq, W, H)
+    return f["by"] + f["bh"]
+
+
+def ep_room_fit(text, st, W, H, wb):
+    """로고 화면 말 자막이 아래 띠(영상 창 아래 끝 wb ~ 글 아래 끝 y)에 들게 하는 글자 크기 배율 (1 = 그대로 · wb None 이면 1) —
+    강좌 줄 + 로고면 글 아래 끝 0.768 이라 두 줄 자막(72)이 창을 덮음 → 아래 띠에 안 들어가는 여러 줄 자막만 줄임 (한 줄은 그대로 · BR-283 · I-472) ·
+    한 줄도 안 들어가는 자리(창 안으로 옮긴 자막)는 그대로 — editor.html epRoomFit 과 같은 셈."""
+    size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
+    if wb is None or size <= 0:
+        return 1.0
+    room = float(st.get("y", 0.85)) * H - wb
+    if room < TXT_LINE * size + 2 * stroke or cap_fit(text, st, W) < 1:   # 한 줄(글자만 조금 줄여 한 줄)이면 이미 들어감
+        return 1.0
+    for i in range(100, round(EP_ROOM_MIN * 100), -1):   # 가장 큰 배율부터 (줄이면 한 줄에 더 들어가 줄 수도 다시 셈)
+        f = size * i / 100
+        if cap_wrap_lines(text, dict(st, size=f), W) * TXT_LINE * f + 2 * stroke <= room:
+            return i / 100
+    return EP_ROOM_MIN
 
 
 def series_apply(name, seq):
@@ -4487,6 +4536,12 @@ def cap_lines(text, st, W):
     paras = str(text if text is not None else "").replace("\r", "").split("\n")
     if cap_fit(text, st, W) < 1:
         return len(paras)
+    return cap_wrap_lines(text, st, W)
+
+
+def cap_wrap_lines(text, st, W):
+    """글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.html capWrapLines)."""
+    paras = str(text if text is not None else "").replace("\r", "").split("\n")
     size, stroke = float(st.get("size") or 0), float(st.get("strokeW") or 0)
     black = st.get("weight") == "Black"
     avail, sp = 0.92 * W - 2 * stroke, _em(" ") * size
@@ -4584,11 +4639,11 @@ def build_ass(proj, W, H, fps=30, frame_grid=True):
         return (f"Dialogue: {layer},{at(start)},{at(end)},Shape,,0,0,0,,"
                 rf"{{\an7\pos({x},{y})\p1\bord0\shad0\1c{col[:2]}{col[4:]}&\1a&H{a:02X}&}}{path}{{\p0}}")
 
-    def event(style, s, start, end, text, words=None, fit=False, layer=1):
+    def event(style, s, start, end, text, words=None, fit=False, layer=1, wb=None):
         al = s.get("align", "center")
         an = {"left": 1, "right": 3}.get(al, 2)
         x, y = int(W * s.get("x", 0.5)), int(H * s["y"])
-        k = cap_fit(text, s, W) if fit else 1.0
+        k = min(cap_fit(text, s, W), ep_room_fit(text, s, W, H, wb)) if fit else 1.0  # 로고 화면 말 자막은 아래 띠 안 (wb · BR-283)
         fs = rf"\fs{round(s['size'] * k * FONT_K)}" if k < 1 else ""  # 화면보다 긴 한 줄 자막은 글자만 조금 작게
         rz = -_rot(s)  # 화면은 시계 방향 + · ASS \frz 는 반시계 방향 + (기준점은 \pos 자리 = 미리보기 transform-origin)
         fr = rf"\frz{_num(round(rz, 2))}" if rz else ""
@@ -4605,6 +4660,7 @@ def build_ass(proj, W, H, fps=30, frame_grid=True):
     # 예전 프로젝트(G1 < C1 < T1): 도형·전술 그림 0 · 자막 1 · 타이틀 2 → 화면은 예전과 같음 (예전에도 타이틀은 자막 뒤에 써서 위)
     caps = timeline_captions(proj) if any(o["k"] == "c" and track_visible(proj, o) for o in ots) else []
     c1s = [c for c in caps if c.get("trk", "C1") == "C1"] if track_visible(proj, {"id": "C1"}) else []  # 두 줄 자막 1 과 안 겹치게 (cap_row_y · D-308)
+    wb = ep_win_bottom(proj, W, H)   # 로고 화면이면 말 자막(자막 1)은 영상 창 아래 끝 밑 (ep_room_fit · 아니면 None = 예전 그대로)
     for layer, o in enumerate(ots):
         tid, k = o["id"], o["k"]
         if not track_visible(proj, o):
@@ -4625,7 +4681,7 @@ def build_ass(proj, W, H, fps=30, frame_grid=True):
                             s1 = dict(s1, y=yy)
                     if c.get("pos"):  # '이 자막만' 옮긴 자리 (트랙 높이보다 먼저 · D-321)
                         s1 = dict(s1, **c["pos"])
-                    event(cname[tid], s1, c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer)
+                    event(cname[tid], s1, c["start"], c["end"], c["text"], c.get("words"), fit=True, layer=layer, wb=wb if tid == "C1" else None)
         else:
             for t in proj["titles"]:
                 if track_of(t, "T", ids) == tid and t["start"] < tl_total:

@@ -5,7 +5,8 @@
   리드 개발 환경은 `$SCRATCH/topic_ev2/work` · 영상은 저장소에 넣지 않음)
 - 저장소를 EP_OUT/app 으로 복사(config.json 은 시험용)해 띄우고, 작업 폴더 EP_OUT/work 는 매번 새로 · 스크린샷·비교 그림 EP_OUT/shots
 확인: 스타일 화면(띠 그림·로고 기본 켬 · 그림 보임 · 끄기/켜기 · 한글 이름 그림 파일로 '그림 바꾸기' · 처음 그림으로) · 가편집 쇼츠 화면 구성 ·
-편집실 미리보기(띠 그림·로고) = 내보낸 장면(1080×1920 · 바탕 화소 차이·로고 자리) · 말 자막·강좌 줄이 로고 위 · 다른 템플릿은 그림을 지움 ·
+편집실 미리보기(띠 그림·로고) = 내보낸 장면(1080×1920 · 바탕 화소 차이·로고 자리) · 말 자막·강좌 줄이 로고 위 ·
+두 줄로 감기는 말 자막(강좌 줄 + 로고)은 글자를 줄여 미리보기·내보내기 모두 영상 창 아래(같은 크기·자리) · 다른 템플릿은 그림을 지움 · '박스 색' 옆 안내(띠 그림이 있을 때만) ·
 템플릿 '은평 스타일'은 스타일 화면 설정대로 (로고를 끄면 로고 없음) · JS 오류 0."""
 import json
 import os
@@ -162,6 +163,11 @@ try:
         q0 = sq[0]
         ev(f"switchSeq('{q0['id']}')")
         W(1000)
+        # 검토(I-472): 1초에 보이는 말 자막을 두 줄로 감기는 긴 글로 (강좌 줄 + 로고 → 말 자막 아래 끝 0.768)
+        LONG = "트래핑할 때는 공을 멈추는 게 아니라 다음 동작을 준비하는 거예요"
+        cap_id = ev("""(t => { const c = capsTL().find(x => (x.trk || "C1") === "C1" && x.mid === "main" && x.s <= 1.0 && 1.0 < x.e);
+              if (!c) return null; c.cap.text = t; ver++; frameDirty = true; return c.cap.id; })""" + f"({json.dumps(LONG, ensure_ascii=False)})")
+        cst = ev("JSON.parse(JSON.stringify(capStyleOf(OTK('C1') || { id: 'C1' })))")
         ev("seek(1.0)")
         W(2500)
         ev("selX = null; if (window.selI) selI.clear(); renderTimeline(); frameDirty = true")
@@ -173,6 +179,8 @@ try:
               and dom["shown"] == "block", json.dumps(dom))
         pv = SHOTS / "e1_preview_1s.png"
         pg.locator("#frame").screenshot(path=str(pv))
+        cdom = ev("""(id => { const el = ovEls["c" + id]; if (!el) return null; const F = $("frame").getBoundingClientRect(), r = el.getBoundingClientRect(), k = F.height / BH();
+              return { top: (r.top - F.top) / k, bottom: (r.bottom - F.top) / k, fs: parseFloat(el.style.fontSize) / k, text: el.textContent }; })""" + f"({json.dumps(cap_id)})")
 
         # ---- 3. 미리보기 = 내보낸 장면 (처음 3초 구간 · 1080×1920) ----
         proj = ev("({...JSON.parse(JSON.stringify(S)), captions: P.captions, info: P.info, source: NAME, media: P.media})")
@@ -207,8 +215,8 @@ try:
             m[:int(0.81 * Hh)] = False
             m[:, :int(0.33 * Ww)] = False
             m[:, int(0.67 * Ww):] = False
-            ys, xs = np.nonzero(m)
-            return (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())) if len(ys) else None
+            ys, xs = np.nonzero(m.sum(axis=1) >= 3)[0], np.nonzero(m.sum(axis=0) >= 3)[0]   # 띠 무늬 가장자리 한두 화소(미리보기 축소)는 셈하지 않음
+            return (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())) if len(ys) and len(xs) else None
         le, lp = logo_bbox(a), logo_bbox(pvi)
         lx, ly, lw, lh = editor.ep_logo_box(180, 254, Ww, Hh)
         check("로고 자리: 내보내기·미리보기·약속한 자리(높이 0.151 · 가운데 0.892)가 같음 (4화소 안)",
@@ -219,6 +227,21 @@ try:
         check("말 자막·전체 강좌 줄 흰 글씨는 로고 위 (안 겹침)", len(wrows) > 10 and wrows.max() < le[1],
               f"흰 글씨 줄 {wrows.min() if len(wrows) else None}~{wrows.max() if len(wrows) else None} · 로고 위 끝 {le[1]}")
         Image.fromarray(np.concatenate([pvi, a], axis=1).astype(np.uint8)).resize((Ww, Hh // 2)).save(SHOTS / "e1_preview_vs_export.png")
+        # 두 줄 말 자막: 서버 셈(ep_room_fit)대로 줄어든 크기 · 미리보기 글 상자 위 끝이 영상 창 아래 · 흰 글씨 자리가 미리보기 = 내보내기 · 창 안(미리보기는 빈 창)에 흰 글씨 없음
+        wb = editor.ep_win_bottom({"format": "shorts", "layout": q0["lay"]}, 1080, 1920)
+        kf = min(editor.cap_fit(LONG, cst, 1080), editor.ep_room_fit(LONG, cst, 1080, 1920, wb))
+        line_top = int((editor.EP_LINK_LOGO_Y - editor.TXT_LINE * editor.EP_LINK["size"] / 1920) * Hh) - 4
+
+        def ink(img, r0):
+            m = img[r0:line_top].min(axis=2) > 225
+            return np.where(m.sum(axis=1) > 3)[0] + r0
+        ip, ie = ink(pvi, wy0), ink(a, wy1)
+        cap_ok = (cap_id and cdom and cdom["text"] == LONG and kf < 1 and abs(cdom["fs"] - cst["size"] * kf) < 0.6 and cdom["top"] >= wb - 1
+                  and len(ip) > 20 and ip.min() >= wy1 and len(ie) > 20 and ie.min() > wy1 + 2 and abs(int(ip.min()) - int(ie.min())) <= 6
+                  and abs(int(ip.max()) - int(ie.max())) <= 6 and len(np.split(ie, np.where(np.diff(ie) > 2)[0] + 1)) >= 2)
+        check("두 줄 말 자막(강좌 줄 + 로고): 글자를 줄여 미리보기·내보내기 모두 영상 창 아래 · 같은 크기·자리", cap_ok,
+              f"배율 {kf} · 미리보기 글자 {cdom and round(cdom['fs'], 1)} · 글 상자 위 {cdom and round(cdom['top'], 1)} / 창 아래 {wb:.1f} · "
+              f"흰 글씨 줄 미리보기 {ip.min() if len(ip) else None}~{ip.max() if len(ip) else None} · 내보내기 {ie.min() if len(ie) else None}~{ie.max() if len(ie) else None} · 창 {wy0}~{wy1}")
 
         # ---- 4. 다른 템플릿은 그림을 지움 · 다시 은평 스타일 ----
         ev("commit('템플릿'); TEMPLATES['위아래 검정 박스'](); changed(false)")
@@ -231,6 +254,14 @@ try:
         check("다른 템플릿 → 띠 그림·로고 없음 · 다시 '은평 스타일' → 스타일 화면 설정대로 다시",
               "band" not in g1["lay"] and "logo" not in g1["lay"] and not g1["shown"] and g2["lay"].get("band") == "band.png" and g2["lay"].get("logo") == "logo.png"
               and g2["shown"], f"{g1} {g2}")
+        # 검토: 띠 그림이 있으면 '박스 색'을 바꿔도 띠가 안 바뀌므로 그 옆에 안내 (그림이 없으면 안내 없음)
+        hint_on = ev("(() => { renderSeqTab(); const e = document.getElementById('pBarPic'); return !!(e && document.getElementById('pBar') && e.textContent.includes('띠에 그림 깔기')); })()")
+        ev("commit('템플릿'); TEMPLATES['위아래 검정 박스'](); changed(false)")
+        W(600)
+        hint_off = ev("(() => { renderSeqTab(); return !document.getElementById('pBarPic') && !!document.getElementById('pBar'); })()")
+        ev("commit('템플릿'); TEMPLATES['은평 스타일'](); changed(false)")
+        W(600)
+        check("편집실 '박스 색' 옆 안내: 띠 그림이 있을 때만 ('띠에 그림 깔기'를 끄면 보임)", hint_on and hint_off, f"{hint_on} {hint_off}")
         ev("doSave && doSave()")
         W(1500)
 
