@@ -4858,7 +4858,9 @@ function epOff(q) {
 // 은평 스타일 것(KFA 글꼴 고정 win · 띠 그림·로고 · 이름표·강좌 줄)은 쓰지 않음 · 글자 폭은 Pretendard (은평 글꼴 표를 쓰지 않음)
 const SKIN = {
   PAD: 28, SIZES: [96, 88, 80, 72, 64, 56, 48], TOPIC_SIZES: [88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.9, RADIUS: 17,
-  TOPIC_CY: 0.179, CAP_UP: 0.04, CAP_STROKE: 8,
+  TOPIC_CY: 0.179, CAP_UP: 0.04,
+  // 말 자막 모양 (소유자 쇼츠에서 잰 값 · 흰 Black 92 · 검은 테두리 10 · 상자 없음 · 나타나기는 배운 그대로 · editor.py SKIN_CAP 과 같은 값 · D-529)
+  CAP: { weight: "Black", size: 92, fill: "#FFFFFF", stroke: "#000000", strokeW: 10, bgOn: false },
   TITLE: { weight: "Black", fill: "#CE4F2F", stroke: "#CE4F2F", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
   TOPIC: { weight: "Black", fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
 };
@@ -4879,7 +4881,7 @@ function skinTopicStyle(text, top) {  // 한 줄로 화면 폭 90% 안 가장 �
   return { ...SKIN.TOPIC, size, y: Math.round(Math.min(y, lim) * 1e4) / 1e4 };
 }
 const skinCapY = bottom => Math.round((+bottom - SKIN.CAP_UP) * 1e4) / 1e4;  // 말 자막 아래 끝 = 영상 창 아래 끝 - CAP_UP (editor.py skin_cap_y)
-// 편집본 q 를 풋살사관학교 스킨으로 (L = 길이 · 스킨을 못 읽었으면(SKX 없음) 아무것도 안 하고 false): 화면 구성(서버 값 그대로) · 말 자막(흰 글씨·검은 테두리·창 아래 끝 바로 위) ·
+// 편집본 q 를 풋살사관학교 스킨으로 (L = 길이 · 스킨을 못 읽었으면(SKX 없음) 아무것도 안 하고 false): 화면 구성(서버 값 그대로) · 말 자막(SKIN.CAP · 창 아래 끝 바로 위) ·
 // 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · 없으면 편집본 이름 · epCard 와 같은 고르기) · 그 주제 줄 · 흰 둥근 상자 (두 번 눌러도 하나)
 function skinCard(q, L) {
   const k = SKX; if (!k || !k.layout) return false;
@@ -4887,7 +4889,7 @@ function skinCard(q, L) {
   delete q.layout.win; delete q.layout.band; delete q.layout.logo;  // 은평 스타일 영상 창 자르기·띠 그림·로고는 스킨에서 안 씀 (BR-325)
   if ((q.shapes || []).some(g => g.plan === "series")) q.shapes = q.shapes.filter(g => g.plan !== "series");  // 은평 이름표·강좌 줄도
   if (q.titles.some(epFrame)) q.titles = q.titles.filter(t => !epFrame(t));
-  Object.assign(q.captionStyle, { fill: "#FFFFFF", stroke: "#000000", strokeW: Math.max(SKIN.CAP_STROKE, Math.trunc(+q.captionStyle.strokeW || 0)), y: skinCapY(k.bottom) });
+  Object.assign(q.captionStyle, SKIN.CAP, { y: skinCapY(k.bottom) });  // (editor.py skin_caption)
   for (const t0 of q.titles) if (t0.plan === "topic" && t0.swap) {  // 바꿔 끼운 주제 줄 뒤로 옮겨 둔 큰 제목은 다시 처음부터 (epCard 와 같음)
     const t = q.titles.find(x => x.id === t0.under); if (t && Math.abs(t.start - (t0.start + t0.dur)) < 0.05) { t.dur = r3(t.dur + t.start - t0.start); t.start = t0.start; }
   }

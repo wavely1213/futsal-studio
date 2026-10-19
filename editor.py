@@ -1960,7 +1960,10 @@ SKIN_TOPIC = dict(DEFAULT_STYLE, weight="Black", size=88, fill="#FFFFFF", stroke
                   effect="none")
 SKIN_TOPIC_CY = 0.179  # 주제 줄 가운데 (화면 비율 · 소유자 쇼츠 글자 303~386화소) — 글 상자 아래 끝은 영상 창 위 끝 - TXT_GAP 위까지
 SKIN_CAP_UP = 0.04     # 말 자막 아래 끝 = 영상 창 아래 끝 - 이만큼 (배운 자막 자리와 상관없이 · 여러 줄은 창 안에서 위로 늘어남)
-SKIN_CAP_STROKE = 8    # 말 자막 검은 테두리 가장 얇게
+# 말 자막 모양 — 소유자 쇼츠 '애들 목소리가 다 똑같아...'에서 잰 값 (흰 Pretendard Black · 글자 크기 92 · 검은 테두리 10 · 상자 없음 · D-529) ·
+# 나타나기(effect)는 배운 스타일 그대로 (가편집 쇼츠 pop · MSG none·karaoke) · 화면보다 긴 한 줄은 cap_fit 이 글자만 줄여 한 줄로 ·
+# editor.html SKIN.CAP 과 같은 값 — 한쪽을 고치면 다른 쪽도
+SKIN_CAP = {"weight": "Black", "size": 92, "fill": "#FFFFFF", "stroke": "#000000", "strokeW": 10, "bgOn": False}
 # 흰 상자 폭을 셀 때만 쓰는 Pretendard Black 실제 글자 폭 (글자 크기 1 기준 · fonts/Pretendard-Black.otf 의 글자 나아감 · 천분의 일 · D-526) —
 # 글자 크기 고르기는 넉넉한 어림(_text_w · 한글 0.95)을 그대로 씀 · 표에 없는 글자(이모지 등)는 그 어림 · editor.html SKIN_HUG 와 같은 표
 _SKIN_HUG_ASCII = "218 340 375 642 646 1024 674 195 423 423 584 671 307 460 301 396 703 488 626 654 679 647 663 592 668 663 301 301 671 671 671 577 871 767 647 744 711 603 567 749 728 281 568 690 554 903 704 771 636 772 646 646 664 702 767 1055 734 737 671 423 396 423 483 477 482 572 625 586 625 589 388 628 625 283 283 586 283 910 624 605 627 627 417 567 391 627 585 847 576 585 572 423 389 423 671"   # ' '(0x20) ~ '~'(0x7E)
@@ -2113,9 +2116,10 @@ def skin_cap_y(bottom):
 
 
 def skin_caption(cs, bottom):
-    """스킨 말 자막: 흰 글씨 + 검은 테두리(SKIN_CAP_STROKE 이상) · 배운 자막 크기 · 아래 끝은 영상 창 아래 끝 바로 위 (배운 자막 자리와 상관없이)."""
+    """스킨 말 자막: 소유자 쇼츠 모양(SKIN_CAP · 흰 Black 92 · 검은 테두리 10 · 상자 없음) · 나타나기는 배운 스타일 그대로 ·
+    아래 끝은 영상 창 아래 끝 바로 위 (배운 자막 자리와 상관없이 · editor.html skinCard 와 같은 값)."""
     c = dict(cs)
-    c.update(fill="#FFFFFF", stroke="#000000", strokeW=max(SKIN_CAP_STROKE, int(c.get("strokeW") or 0)), y=skin_cap_y(bottom))
+    c.update(SKIN_CAP, y=skin_cap_y(bottom))
     return c
 
 

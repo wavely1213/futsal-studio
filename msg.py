@@ -4118,7 +4118,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         for y in (0.0, 1.0 - LETTERBOX):
             B.shape(0.0, y, 1.0, LETTERBOX, "#000000", 0.0, total, 1.0, 0, "검은 띠 (영화 화면)")["full"] = True
     caps_tl = editor.timeline_captions({"items": B.items, "captions": caps, "format": fmt}) if st["captions"].get("on", True) else []
-    layout_titles(B, caps_tl, _caption_style(st, fmt, cap_y), total, face_box(sig), moms if intensity != "담백" else (), words, intensity in VITAL_LEVELS)
+    lay_cap = editor.skin_caption(_caption_style(st, fmt, cap_y), B.skin["bottom"]) if B.skin else _caption_style(st, fmt, cap_y)   # 스킨: 실제 말 자막(92 · D-529)을 피함
+    layout_titles(B, caps_tl, lay_cap, total, face_box(sig), moms if intensity != "담백" else (), words, intensity in VITAL_LEVELS)
     if fmt == "long":
         govern(B, intensity, fc, total, moms, words, sig.get("cuts") or (), st, knobs.get("protect", False))
         _smooth_zoom_joins(B)

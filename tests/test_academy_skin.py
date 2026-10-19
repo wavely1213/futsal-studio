@@ -5,7 +5,8 @@
   내용 지문 이름 · 한글 폴더) · 거절(창 없음 · 비율 · 너무 작음 · 투명 없음 · 그림 아님) · 처음 스킨으로 · 이상한 이름
 - 화면 구성 셈(zoom·vpos · 16:9 원본이 1080·720·4K 내보내기(위아래 4화소 더)와 미리보기 모두에서 덮을 곳을 덮음) · 은평 것(win·띠 그림·로고·글꼴 고정)은 없음
 - 흰 상자 폭 = 실제 글자 폭(Pretendard Black 표 · PIL 로 잰 폭과 같음) + 양옆 28 · 크기 고르기는 넉넉한 어림 그대로
-- 가편집 쇼츠(큰 제목·흰 상자·주제 줄·말 자막 값) · MSG 쇼츠(고정 글자 말고는 위·아래 띠에 글자 없음 · 말 자막 자리)
+- 가편집 쇼츠(큰 제목·흰 상자·주제 줄·말 자막 값) · MSG 쇼츠(고정 글자 말고는 위·아래 띠에 글자 없음 · 말 자막 자리) ·
+  말 자막은 소유자 쇼츠 모양(흰 Black 92 · 테두리 10 · 상자 없음 · 나타나기는 배운 그대로 · 긴 한 줄은 글자만 줄여 한 줄 · MSG 글자 자리 정리도 이 자막을 피함 · D-529)
 - 실제 내보내기(1080×1920): 위·아래 띠 = 스킨 화소 · 창 가운데 = 영상 · 찢어진 종이 홈(비치는 화소)에도 영상(검은 바탕 아님) · V2(화면 전체)·빈 곳에도 스킨 · 흰 상자·주황 큰 제목이 스킨 위 ·
   글자·도형만 투명 영상에는 스킨 없음 · 프리미어 '빠진 것' · 4K 필터
 - 기본·은평 스타일은 스킨 전 코드와 같은 결과 (tests/skin_same.py 지문 = tests/fixtures/academy_same.json)
@@ -297,8 +298,8 @@ class RoughTest(WorkMixin, unittest.TestCase):
                 self.assertFalse(any(g.get("plan") == "series" for g in q["shapes"]))
                 cs = q["captionStyle"]
                 self.assertEqual((cs["y"], cs["fill"], cs["stroke"]), (0.723, "#FFFFFF", "#000000"))
-                self.assertGreaterEqual(cs["strokeW"], 8)
-                self.assertEqual(cs["size"], editor.SHORTS_STYLE["size"])                  # 배운 자막 크기 그대로
+                # 소유자 쇼츠 말 자막 모양 (흰 Black 92 · 검은 테두리 10 · 상자 없음 · D-529) · 나타나기는 가편집 쇼츠 그대로(pop)
+                self.assertEqual((cs["weight"], cs["size"], cs["strokeW"], cs["bgOn"], cs["effect"]), ("Black", 92, 10, False, editor.SHORTS_STYLE["effect"]))
                 top = q["titles"][0]
                 self.assertNotIn("\n", top["text"])
                 self.assertEqual((top["start"], top["dur"]), (0.0, round(L, 2)))
@@ -355,14 +356,42 @@ class RoughTest(WorkMixin, unittest.TestCase):
         self.assertEqual(editor.skin_cap_y(1465 / 1920), 0.723)
         for y0 in (0.15, 0.55, 0.85, 0.9):
             c = editor.skin_caption(dict(editor.SHORTS_STYLE, y=y0, fill="#1A1A1A", stroke="#FFFFFF", strokeW=3), 1465 / 1920)
-            self.assertEqual((c["y"], c["fill"], c["stroke"], c["strokeW"]), (0.723, "#FFFFFF", "#000000", 8))
-        self.assertEqual(editor.skin_caption(dict(editor.SHORTS_STYLE, strokeW=12), 0.8)["strokeW"], 12)
+            self.assertEqual((c["y"], c["fill"], c["stroke"], c["strokeW"]), (0.723, "#FFFFFF", "#000000", 10))
+        # 말 자막 모양은 소유자 쇼츠 값 그대로 (배운 굵기·크기·테두리·상자와 상관없이 · D-529) · 나타나기·노래방 강조 색은 배운 스타일 그대로
+        for base in (dict(editor.SHORTS_STYLE, strokeW=12), dict(editor.SHORTS_STYLE, weight="Bold", size=60, strokeW=4, bgOn=True, effect="fade"),
+                     dict(editor.SHORTS_STYLE, size=80, effect="karaoke", highlight="#00FF00"), dict(editor.LONG_STYLE, effect="none")):
+            c = editor.skin_caption(base, 0.8)
+            self.assertEqual({k: c[k] for k in editor.SKIN_CAP}, {"weight": "Black", "size": 92, "fill": "#FFFFFF", "stroke": "#000000", "strokeW": 10, "bgOn": False})
+            self.assertEqual((c["effect"], c.get("highlight"), c["y"]), (base["effect"], base.get("highlight"), 0.76))
         self.assertEqual(editor.skin_title_style("선수 이름 맞추기")["size"], 96)
         self.assertEqual(editor.skin_title_style("퍼스트 터치 첫 번째 포인트")["size"], 80)
         st = editor.skin_title_style("가" * 40)
         self.assertEqual(st["size"], 48)
         g = editor.skin_box({"text": "가" * 40, "style": st}, 10)
         self.assertEqual((g["w"], g["x"]), (0.9, 0.05))                                       # 가장 넓게 90%
+
+    def test_caption_one_line(self):
+        """소유자 쇼츠 말 자막(92 · 한 줄): 화면보다 긴 한 줄은 cap_fit 이 글자만 줄여 한 줄로 (FIT_MIN 까지) — 소유자 줄 '애들 목소리가 다 똑같아...'·
+        쇼츠 자막 한도(13글자)는 한 줄 · ASS 도 한 줄(줄바꿈 없음 · 줄인 크기 \\fs) · 그보다 훨씬 긴 글은 예전처럼 띄어쓰기에서 줄을 바꿈 (D-529)."""
+        import captions
+        st = editor.skin_caption(dict(editor.SHORTS_STYLE), 1465 / 1920)
+        for text in ("애들 목소리가 다 똑같아...", "가" * captions.LIMITS["shorts"][0], "패스하고 그 자리에 서 있으면", "선수 이름 맞추기"):
+            k = editor.cap_fit(text, st, W)
+            self.assertTrue(editor.FIT_MIN <= k <= 1.0, (text, k))
+            self.assertEqual(editor.cap_lines(text, st, W), 1, text)
+        self.assertLess(editor.cap_fit("애들 목소리가 다 똑같아...", st, W), 1.0)          # 어림 폭으로는 화면 90% 를 조금 넘어 글자만 줄임
+        self.assertEqual(editor.cap_lines("가나다 라마바 사아자 차카타 파하거 너더러", st, W), 2)   # 너무 길면 두 줄 (창 안에서 위로)
+        v = {"id": "v", "track": "V1", "media": "main", "start": 0.0, "in": 0.0, "out": 10.0, "speed": 1.0}
+        proj = {"format": "shorts", "captionStyle": st, "titles": [], "shapes": [], "items": [v], "captionsOn": True,
+                "captions": [{"id": "a", "start": 0.0, "end": 2.0, "text": "애들 목소리가 다 똑같아..."}]}
+        [d] = [ln.split(",", 9) for ln in editor.build_ass(proj, W, H).splitlines() if ln.startswith("Dialogue: 1,") and ",Cap," in ln]
+        k = editor.cap_fit("애들 목소리가 다 똑같아...", st, W)
+        self.assertIn(rf"\pos(540,{int(H * 0.723)})", d[9])
+        self.assertIn(rf"\fs{round(92 * k * editor.FONT_K)}", d[9])
+        self.assertNotIn(r"\N", d[9])
+        sty = next(ln for ln in editor.build_ass(proj, W, H).splitlines() if ln.startswith("Style: Cap,"))
+        self.assertIn(",&H00FFFFFF,", sty)                                                     # 흰 글씨
+        self.assertIn(",10,", sty)                                                             # 테두리 10
 
     def test_box_hugs_real_width(self):
         """검토: 흰 상자 폭이 넉넉한 어림(_text_w · 한글 0.95em)으로 셈해 글보다 양옆 60화소쯤 넓었음 → Pretendard Black 실제 글자 폭 표(SKIN_HUG)로 셈 —
@@ -394,9 +423,15 @@ class MsgSkinTest(unittest.TestCase):
         style.set_shorts_layout("academy")
         style.set_card_extras(series=True, long_line=True)
         specs = [{"kind": "preset", "name": n} for n in msg.PRESETS]
-        cls.qs = []
-        for inten in ("듬뿍", "보통"):
-            cls.qs += msg.build_variants(cls.w.name, specs[:3], inten, ("shorts",), lambda m: None)["sequences"]
+        cls.qs, cls.lay_caps = [], []
+        orig = msg.layout_titles
+
+        def rec(B, caps_tl, cap_style, *a, **k):   # 글자 자리 정리가 피하는 말 자막 모양 (실제 말 자막과 같아야 함 · D-529)
+            cls.lay_caps.append(dict(cap_style))
+            return orig(B, caps_tl, cap_style, *a, **k)
+        with mock.patch.object(msg, "layout_titles", rec):
+            for inten in ("듬뿍", "보통"):
+                cls.qs += msg.build_variants(cls.w.name, specs[:3], inten, ("shorts",), lambda m: None)["sequences"]
 
     @classmethod
     def tearDownClass(cls):
@@ -410,8 +445,10 @@ class MsgSkinTest(unittest.TestCase):
         others = 0
         for q in self.qs:
             self.assertEqual(q["layout"], lay, q["name"])
-            self.assertEqual((q["captionStyle"]["y"], q["captionStyle"]["fill"], q["captionStyle"]["stroke"]), (0.723, "#FFFFFF", "#000000"))
-            self.assertGreaterEqual(q["captionStyle"]["strokeW"], 8)
+            cs = q["captionStyle"]
+            self.assertEqual((cs["y"], cs["fill"], cs["stroke"]), (0.723, "#FFFFFF", "#000000"))
+            self.assertEqual((cs["weight"], cs["size"], cs["strokeW"], cs["bgOn"]), ("Black", 92, 10, False))   # 소유자 쇼츠 말 자막 (D-529)
+            self.assertIn(cs["effect"], ("none", "karaoke"))                                 # 나타나기는 MSG 말 자막 그대로 (_caption_style)
             self.assertFalse(any(t.get("plan") in ("series", "longline") for t in q["titles"]))
             end = round(editor.seq_total(q), 3)
             [box] = [g for g in q["shapes"] if g.get("plan") == "card"]
@@ -429,6 +466,13 @@ class MsgSkinTest(unittest.TestCase):
                 self.assertGreaterEqual(b[1], top - 1e-6, (q["name"], t["text"], t["style"].get("y"), b))   # 위 띠에 안 걸침
                 self.assertLessEqual(b[3], bot + 1e-6, (q["name"], t["text"], t["style"].get("y"), b))       # 아래 띠에 안 걸침
         self.assertGreater(others, 3)
+
+    def test_layout_avoids_real_caption(self):
+        """글자 자리 정리(layout_titles)는 스킨의 실제 말 자막(흰 Black 92 · 테두리 10 · 창 아래 끝 - 0.04)을 피함 — 예전에는 MSG 기본 말 자막(72)으로 셈해
+        강조 글자가 커진 말 자막 윗부분에 닿을 수 있었음 (D-529)."""
+        self.assertTrue(self.lay_caps)
+        for c in self.lay_caps:
+            self.assertEqual((c["weight"], c["size"], c["strokeW"], c["bgOn"], c["y"]), ("Black", 92, 10, False, 0.723))
 
     def test_layout_titles_avoid_bands(self):
         """글자 자리 정리: 띠 안에 놓인 강조·상황·속마음 글자는 창 안으로 옮김 · 스킨이 아니면 예전 그대로."""
@@ -626,7 +670,7 @@ SKX = {json.dumps(info)};
 out = {{ titles: {json.dumps(texts, ensure_ascii=False)}.map(t => skinTitleStyle(t)), topics: {json.dumps(topics, ensure_ascii=False)}.map(t => skinTopicStyle(t, SKX.top)),
          cap: skinCapY(SKX.bottom), runs: [] }};
 for (const swap of [false, true]) {{
-  S = rough(swap); S.captionStyle.y = 0.85; S.captionStyle.fill = "#1A1A1A"; S.captionStyle.strokeW = 3;
+  S = rough(swap); S.captionStyle.y = 0.85; S.captionStyle.fill = "#1A1A1A"; S.captionStyle.strokeW = 3; S.captionStyle.effect = "pop"; S.captionStyle.bgOn = true;
   TEMPLATES["풋살사관학교 스킨"](); out.runs.push(cp(S));
   TEMPLATES["풋살사관학교 스킨"](); out.runs.push({{ n: S.shapes.length }});   // 두 번 눌러도 상자 하나
   TEMPLATES["위아래 검정 박스"](); out.runs.push(cp(S));
@@ -643,10 +687,10 @@ SKX = null; S = rough(false); out.noSkin = {{ ok: skinCard(S, total()), S: cp(S)
         for k in (0, 3):
             r = got["runs"][k]
             self.assertEqual(r["layout"], info["layout"])
-            cs, want_cs = r["captionStyle"], editor.skin_caption({"y": 0.85, "fill": "#1A1A1A", "strokeW": 3}, info["bottom"])
-            for k2 in ("y", "fill", "stroke", "strokeW"):
+            cs, want_cs = r["captionStyle"], editor.skin_caption({"y": 0.85, "fill": "#1A1A1A", "strokeW": 3, "effect": "pop"}, info["bottom"])
+            for k2 in ("y", "fill", "stroke", "strokeW", "weight", "size", "bgOn", "effect"):
                 self.assertEqual(cs[k2], want_cs[k2], k2)
-            self.assertEqual(cs["size"], 72)
+            self.assertEqual((cs["size"], cs["strokeW"], cs["bgOn"], cs["effect"]), (92, 10, False, "pop"))   # 소유자 말 자막 (D-529) · 나타나기 그대로
             big = next(t for t in r["titles"] if t["id"] == "big")
             kt = next(t for t in r["titles"] if t["id"] == "k")
             self.assertNotIn("\n", big["text"])

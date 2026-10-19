@@ -165,12 +165,13 @@ try:
         for q in sq:
             top = q["titles"][0]
             box = [g_ for g_ in q["shapes"] if g_.get("plan") == "card"]
-            good = good and q["lay"] == info["layout"] and q["cap"]["y"] == 0.723 and q["cap"]["fill"] == "#FFFFFF" and top["style"] == editor.skin_title_style(top["text"]) \
+            good = good and q["lay"] == info["layout"] and q["cap"]["y"] == 0.723 and {k_: q["cap"].get(k_) for k_ in editor.SKIN_CAP} == editor.SKIN_CAP \
+                and top["style"] == editor.skin_title_style(top["text"]) \
                 and len(box) == 1 and box[0]["radius"] == 17 and not any(t.get("plan") in ("series", "longline") for t in q["titles"])
             for kt in [t for t in q["titles"] if t.get("plan") == "topic"]:
                 good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"])
-        check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.723) = 서버 값 · 은평 덧붙임 없음", good,
-              json.dumps([{"lay": q["lay"], "cap": q["cap"]["y"]} for q in sq], ensure_ascii=False)[:300])
+        check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.723 · 흰 Black 92 · 테두리 10 · 상자 없음) = 서버 값 · 은평 덧붙임 없음", good,
+              json.dumps([{"lay": q["lay"], "cap": {k_: q["cap"].get(k_) for k_ in ("y", "weight", "size", "strokeW", "bgOn", "effect")}} for q in sq], ensure_ascii=False)[:400])
         q0 = sq[0]
         ev(f"switchSeq('{q0['id']}')")
         W(1000)
@@ -238,8 +239,9 @@ try:
         W(1500)
         g2 = ev("({lay: S.layout, cap: S.captionStyle, shown: $('skinL').style.display, card: S.shapes.filter(g => g.plan === 'card'), hint: !!$('pSkinHint'), toast: $('toast').textContent})")
         pg.locator("#frame").screenshot(path=str(SHOTS / "e3_template_skin.png"))
-        check("다른 템플릿 → 스킨·흰 상자 없음 · '풋살사관학교 스킨' 단추 → 서버 값 그대로 다시 (상자 하나 · 안내 줄)",
+        check("다른 템플릿 → 스킨·흰 상자 없음 · '풋살사관학교 스킨' 단추 → 서버 값 그대로 다시 (상자 하나 · 말 자막 흰 Black 92 · 테두리 10 · 안내 줄)",
               "skin" not in g1["lay"] and g1["shown"] == "none" and g1["card"] == 0 and g2["lay"] == info["layout"] and g2["cap"]["y"] == 0.723
+              and {k_: g2["cap"].get(k_) for k_ in editor.SKIN_CAP} == editor.SKIN_CAP
               and g2["shown"] == "block" and len(g2["card"]) == 1 and g2["card"][0]["radius"] == 17 and g2["hint"] and "풋살사관학교 스킨" in g2["toast"],
               json.dumps({"g1": g1, "g2": {k: v for k, v in g2.items() if k != "cap"}}, ensure_ascii=False)[:400])
         ev("commit('템플릿'); TEMPLATES['은평 스타일'](); changed(false)")
