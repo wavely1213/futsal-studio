@@ -1462,26 +1462,36 @@ const emOf = (ch, black, fm) => fm && fm.em[ch] != null ? fm.em[ch] : fm && /[\u
 let EPF = null;
 const epFontOn = q => !!(q && q.format === "shorts" && q.layout && q.layout.mode === "box" && q.layout.win);
 const fmNow = () => EPF && epFontOn(S) ? EPF : null;
-function capFit(text, st, W) {
-  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black", fm = fmNow();
+// 스킨 말 자막(hug "skin")은 Pretendard Black 실제 글자 폭 표(SKIN_HUG)로 화면 폭 95%까지 (editor.py _fit_need · SKIN_CAP_ROOM · D-533)
+function fitNeed(text, st, W) {
+  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black", hug = st.hug === "skin" && !fmNow(), fm = hug ? SKIN_HUG : fmNow();
   const room = al === "left" ? 1 - x : al === "right" ? x : 2 * Math.min(x, 1 - x);
-  const avail = W * Math.min(0.9, room - 0.05);
+  const avail = W * Math.min(hug ? SKIN.CAP_ROOM : 0.9, room - 0.05);
+  const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, black, fm), 0)));
+  return [avail, em * st.size + 2 * (st.strokeW || 0)];
+}
+function capFit(text, st, W) {  // (fitNeed 와 같은 셈을 그대로 — 이 함수만 꺼내 쓰는 시험·페이지가 있어 혼자 돌게)
+  const x = st.x ?? 0.5, al = st.align || "center", black = st.weight === "Black", hug = st.hug === "skin" && !fmNow(), fm = hug ? SKIN_HUG : fmNow();
+  const room = al === "left" ? 1 - x : al === "right" ? x : 2 * Math.min(x, 1 - x);
+  const avail = W * Math.min(hug ? SKIN.CAP_ROOM : 0.9, room - 0.05);
   const em = Math.max(0, ...String(text).replace(/\r/g, "").split("\n").map(ln => Array.from(ln).reduce((a, ch) => a + emOf(ch, black, fm), 0)));
   const need = em * st.size + 2 * (st.strokeW || 0);
   if (need <= avail || avail <= 0) return 1;
   const k = Math.floor(avail / need * 100) / 100;
   return k >= 0.7 ? k : 1;
 }
+// 스킨 글이 글자를 capFit 만큼 줄여 글 속 줄 그대로 들어가는지 → 줄을 바꾸지 않음 (editor.py hug_one · 내보내기 \q2 · D-533)
+function hugOne(text, st, W) { if (st.hug !== "skin") return false; const [avail, need] = fitNeed(text, st, W); return avail > 0 && need * capFit(text, st, W) <= avail + 1e-6; }
 // 자막 하나가 화면에서 몇 줄인지 어림 (editor.py cap_lines) — capFit 으로 글자를 줄여 들어가면 글 속 줄 수 그대로 · 아니면 화면 폭 92% 에서 띄어쓰기마다 바꿈 (txtBox 와 같은 셈)
 function capLines(text, st, W) {
   const paras = String(text ?? "").replace(/\r/g, "").split("\n");
-  if (capFit(text, st, W) < 1) return paras.length;
+  if (capFit(text, st, W) < 1 || (st.hug === "skin" && hugOne(text, st, W))) return paras.length;  // (스킨 말 자막: 실제 글자 폭으로 한 줄이면 줄을 바꾸지 않음 · D-533)
   return capWrapLines(text, st, W);
 }
 // 글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.py cap_wrap_lines)
 function capWrapLines(text, st, W) {
   const paras = String(text ?? "").replace(/\r/g, "").split("\n");
-  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", fm = fmNow(), avail = 0.92 * W - 2 * stroke, sp = emOf(" ", false, fm) * size;
+  const size = +st.size || 0, stroke = +st.strokeW || 0, black = st.weight === "Black", fm = fmNow() || (st.hug === "skin" ? SKIN_HUG : null), avail = 0.92 * W - 2 * stroke, sp = emOf(" ", false, fm) * size;
   let n = 0;
   for (const para of paras) {
     let cur = 0; n++;
@@ -2571,9 +2581,11 @@ function syncEl(e, it, t, need = true) {
     if (Math.abs(el.currentTime - m) > 1e-3) seekEl(e, m);
   }
 }
-// 기본 화면 배치 (editor.py _fit 과 같은 계산, 기준 해상도 픽셀)
-function fitRect(it, md) {
-  const W = BW(), H = BH(), sw = md.w || W, sh = md.h || H, lay = S.layout, rf = it.reframe ?? 0.5;
+// 화면 좌우 (editor.py rf_at): 얼굴 따라가기 키프레임(rfk · 원본 시각 · BR-326)이 있으면 그때 자리 · 없으면 reframe
+const rfAt = (it, t) => it.rfk && it.rfk.length ? kfAt({ v: it.reframe ?? 0.5, k: [...it.rfk].sort((a, b) => a.t - b.t) }, mt(it, t)) : (it.reframe ?? 0.5);
+// 기본 화면 배치 (editor.py _fit 과 같은 계산, 기준 해상도 픽셀) · t: 타임라인 시각 (없으면 재생 위치 · 화면 좌우 따라가기)
+function fitRect(it, md, t) {
+  const W = BW(), H = BH(), sw = md.w || W, sh = md.h || H, lay = S.layout, rf = it.rfk && it.rfk.length ? rfAt(it, t ?? T) : it.reframe ?? 0.5;
   let fit = it.fit || "auto";
   if (S.format === "shorts" && it.track === "V1" && fit === "auto") {
     const ct = lay.cropTop || 0, cb = lay.cropBottom || 0, keep = Math.max(0.2, 1 - ct - cb), vh = sh * keep;
@@ -2622,7 +2634,7 @@ function showItem(it, t, z, mod, used) {
   const grp = TGRP[it.track]; if (grp && e.lay.parentNode !== grp) grp.appendChild(e.lay); // 트랙별 묶음 (디졸브를 내보내기와 같게 섞으려고)
   const md = e.md, k = frameK(), W = BW(), H = BH();
   if (md.kind !== "image") syncEl(e, it, t);
-  const f = fitRect(it, md), mo = motionAt(it, t), op = val(it, "opacity", t) / 100;
+  const f = fitRect(it, md, t), mo = motionAt(it, t), op = val(it, "opacity", t) / 100;
   css(e.lay, "display", "block"); css(e.lay, "zIndex", String(z));
   css(e.lay, "opacity", String(mod && mod.op != null ? mod.op : 1));
   css(e.lay, "mixBlendMode", mod && mod.blend ? "plus-lighter" : "normal"); // A·(1-p) + B·p (내보내기와 같은 섞기)
@@ -3075,6 +3087,8 @@ function drawOverlays(t) {
     el._pick = w.pick; // 화면을 눌러 고르기 (pvPick · D-320)
     css(el, "zIndex", String(w.z));
     styleText(el, w.st, scale, w.fit ? Math.min(capFit(w.text, w.st, BW()), epRoomFit(w.text, w.st, BW(), BH(), w.wb)) : 1);
+    const one = w.st.hug === "skin" && (!w.fit || hugOne(w.text, w.st, BW()));  // 스킨 큰 제목·한 줄 말 자막은 줄을 바꾸지 않음 (내보내기 \q2 와 같음 · D-531 · D-533)
+    css(el, "whiteSpace", one ? "pre" : ""); css(el, "maxWidth", one ? "none" : "");
     effect(el, w.st, t - w.s, w.e - t, scale, w.text, w.kw);
   }
 }
@@ -3529,7 +3543,7 @@ async function tacFollow(tc) {
   const btn = $("tcFollow"); if (btn) { btn.disabled = true; btn.textContent = "따라가는 중…"; }
   toast("선수를 따라가는 중이에요… (몇 초 걸려요)");
   // 기다리는 동안 되돌리기·그림 옮기기·클립 편집이 있었으면 결과를 버림 (옛 사본에 쓰거나 옛 자리 기준으로 따라가지 않게)
-  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.fit]]);
+  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.rfk, x.fit]]);
   const sig0 = sig(n, it), id = tc.id, seqId = S.id;
   let r = null; tacFollowing = id;
   try { r = await post("/api/edit/track", { name: NAME, file: md.file, src: md.src || "videos", t0: mt(it, t0), t1: mt(it, t1 - 1e-3), x: u, y: Math.min(1, v), kind: n.kind }).then(x => x.json()); } catch (e) { r = null; }
@@ -3613,7 +3627,7 @@ function monItem() { if (selI.size === 0) return null; const it = byId(primary) 
 function drawMonBox(t) {
   const it = monItem(), box = $("mbox");
   if (!it || playing) { css(box, "display", "none"); return; }
-  const f = fitRect(it, mdOf(it)), mo = motionAt(it, t), k = frameK(), W = BW(), H = BH();
+  const f = fitRect(it, mdOf(it), t), mo = motionAt(it, t), k = frameK(), W = BW(), H = BH();
   css(box, "display", "block");
   css(box, "left", f.bx * k + "px"); css(box, "top", f.by * k + "px"); css(box, "width", f.bw * k + "px"); css(box, "height", f.bh * k + "px");
   css(box, "transformOrigin", `${mo.anc[0] * 100}% ${mo.anc[1] * 100}%`);
@@ -4842,6 +4856,7 @@ function epCard(q, L) {
 // 그 사실 줄은 첫머리 주제 줄(처음 SEC 초 · 모양은 tplTitle 의 placeTopic 이 다시 놓음)로 (예전 편집본에는 흰 상자가 없어 그대로)
 function epOff(q) {
   if (q.layout) { delete q.layout.win; delete q.layout.band; delete q.layout.logo; delete q.layout.skin; }  // 영상 창 밖 자르기(D-424)·띠 그림·로고(BR-280 · BR-281)도 은평 스타일에서만 · 스킨(BR-325)도 스킨 템플릿에서만
+  if (q.captionStyle) delete q.captionStyle.hug; for (const t of q.titles || []) if (t.style) delete t.style.hug;  // 스킨 글자 한 줄 셈(실제 글자 폭 · 줄 안 바꿈 · D-533)도 스킨에서만
   // 이름표·전체 강좌 줄도 은평 스타일에서만 (BR-245 · BR-246) — 흰 상자를 먼저 지웠어도 (안 지우면 아래 tplTitle 이 큰 제목 모양으로 바꿈)
   if ((q.shapes || []).some(g => g.plan === "series")) q.shapes = q.shapes.filter(g => g.plan !== "series");
   if (q.titles.some(epFrame)) q.titles = q.titles.filter(t => !epFrame(t));
@@ -4857,27 +4872,29 @@ function epOff(q) {
 // 흰 둥근 상자(도형 plan "card" · 폭은 큰 제목에 맞춤) 안 주황 큰 제목 한 줄 + 그 아래 흰 주제 줄(처음부터 끝까지) · 말 자막은 영상 창 아래 끝 바로 위 ·
 // 은평 스타일 것(KFA 글꼴 고정 win · 띠 그림·로고 · 이름표·강좌 줄)은 쓰지 않음 · 글자 폭은 Pretendard (은평 글꼴 표를 쓰지 않음)
 const SKIN = {
-  PAD: 28, SIZES: [96, 88, 80, 72, 64, 56, 48], TOPIC_SIZES: [88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.9, RADIUS: 17,
-  TOPIC_CY: 0.179, CAP_UP: 0.04,
-  // 말 자막 모양 (소유자 쇼츠에서 잰 값 · 흰 Black 92 · 검은 테두리 10 · 상자 없음 · 나타나기는 배운 그대로 · editor.py SKIN_CAP 과 같은 값 · D-529)
-  CAP: { weight: "Black", size: 92, fill: "#FFFFFF", stroke: "#000000", strokeW: 10, bgOn: false },
-  TITLE: { weight: "Black", fill: "#CE4F2F", stroke: "#CE4F2F", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
+  PAD: 14, SIZES: [96, 88, 80, 72, 64, 56, 48], FLOOR: 24, TOPIC_SIZES: [96, 88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.9, RADIUS: 17,
+  TOPIC_CY: 0.179, TOPIC_GAP: 0.008, CAP_UP: 0.046, CAP_ROOM: 0.95,
+  // 말 자막 모양 (소유자 쇼츠에서 잰 값 · 흰 Black 96 · 검은 테두리 10 · 상자 없음 · 실제 글자 폭으로 한 줄 셈 hug · 나타나기는 배운 그대로 · editor.py SKIN_CAP 과 같은 값 · D-529 · D-532 · D-533)
+  CAP: { weight: "Black", size: 96, fill: "#FFFFFF", stroke: "#000000", strokeW: 10, bgOn: false, hug: "skin" },
+  TITLE: { weight: "Black", fill: "#CE4F2F", stroke: "#CE4F2F", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", hug: "skin" },
   TOPIC: { weight: "Black", fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
 };
 // 흰 상자 폭을 셀 때만 쓰는 Pretendard Black 실제 글자 폭 표 (' '~'~' 천분의 일 + 몇 글자 · editor.py SKIN_HUG·_SKIN_HUG_ASCII 와 같은 표 · D-526) — 글자 크기 고르기는 넉넉한 어림(textW … null) 그대로
 const SKIN_HUG = { hangul: 0.864, em: Object.assign(Object.fromEntries("218 340 375 642 646 1024 674 195 423 423 584 671 307 460 301 396 703 488 626 654 679 647 663 592 668 663 301 301 671 671 671 577 871 767 647 744 711 603 567 749 728 281 568 690 554 903 704 771 636 772 646 646 664 702 767 1055 734 737 671 423 396 423 483 477 482 572 625 586 625 589 388 628 625 283 283 586 283 910 624 605 627 627 417 567 391 627 585 847 576 585 572 423 389 423 671".split(" ").map((v, i) => [String.fromCharCode(32 + i), v / 1000])), { "·": 0.301, "…": 0.902, "‘": 0.291, "’": 0.291, "“": 0.516, "”": 0.516 }) };
 let SKX = null;  // 스타일 화면에서 고른 스킨 {ref, top, bottom(영상 창 · 화면 높이 비율), layout(editor.py skin_layout)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx.skin · 못 읽으면 null)
-function skinTitleStyle(text) {  // 한 줄로 (화면 폭 90% - 양옆 PAD) 안에 들어가는 가장 큰 글자 · 흰 상자 세로 가운데 (y = 글 아래 끝 · editor.py skin_title_style)
-  const room = SKIN.BOX_MAX * 1080 - 2 * SKIN.PAD, size = SKIN.SIZES.find(z => textW(text, { ...SKIN.TITLE, size: z }, null) <= room) ?? SKIN.SIZES[SKIN.SIZES.length - 1];
+function skinTitleStyle(text) {  // 한 줄로 (화면 폭 90% - 양옆 PAD) 안에 들어가는 가장 큰 글자 (48 에도 안 들어가면 들어가는 크기까지 · FLOOR 까지 · D-531) · 흰 상자 세로 가운데 (y = 글 아래 끝 · editor.py skin_title_style)
+  const room = SKIN.BOX_MAX * 1080 - 2 * SKIN.PAD, per = textW(text, { ...SKIN.TITLE, size: 1, strokeW: 0 }, null), last = SKIN.SIZES[SKIN.SIZES.length - 1];
+  const size = SKIN.SIZES.find(z => textW(text, { ...SKIN.TITLE, size: z }, null) <= room) ?? (per > 0 ? Math.max(SKIN.FLOOR, Math.min(last, Math.floor(room / per))) : last);
   return { ...SKIN.TITLE, size, y: Math.round((SKIN.BOX.y + SKIN.BOX.h / 2 + TOPIC.LINE * size / 2 / 1920) * 1e4) / 1e4 };
 }
 function skinBoxFit(t, g) {  // 흰 상자 폭을 큰 제목에 맞춤 (가운데 · 양옆 PAD · 가장 넓게 BOX_MAX · 글 폭은 실제 글자 폭 표 SKIN_HUG · editor.py skin_box_fit·skin_hug_w)
   const w = Math.min(SKIN.BOX_MAX, (textW(t.text, t.style, SKIN_HUG) + 2 * SKIN.PAD) / 1080);
   g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
 }
-function skinTopicStyle(text, top) {  // 한 줄로 화면 폭 90% 안 가장 큰 글자 · 가운데 TOPIC_CY · 글 상자 아래 끝은 영상 창 위 끝 - GAP 위까지 (editor.py skin_topic_style)
-  const size = SKIN.TOPIC_SIZES.find(z => textW(text, { ...SKIN.TOPIC, size: z }, null) <= SKIN.BOX_MAX * 1080) ?? SKIN.TOPIC_SIZES[SKIN.TOPIC_SIZES.length - 1];
-  const y = SKIN.TOPIC_CY + TOPIC.LINE * size / 2 / 1920, lim = Math.floor((+top - TOPIC.GAP) * 1e4 + 1e-6) / 1e4;
+function skinTopicStyle(text, top, most) {  // 한 줄로 화면 폭 90% 안 가장 큰 글자 (큰 제목 크기 most 보다 크지 않게 · D-531) · 가운데 TOPIC_CY · 글 상자 아래 끝은 영상 창 위 끝 - GAP 위까지 (editor.py skin_topic_style)
+  const zs = SKIN.TOPIC_SIZES.filter(z => most == null || z <= +most), sizes = zs.length ? zs : [SKIN.TOPIC_SIZES[SKIN.TOPIC_SIZES.length - 1]];
+  const size = sizes.find(z => textW(text, { ...SKIN.TOPIC, size: z }, null) <= SKIN.BOX_MAX * 1080) ?? sizes[sizes.length - 1];
+  const y = SKIN.TOPIC_CY + TOPIC.LINE * size / 2 / 1920, lim = Math.floor((+top - SKIN.TOPIC_GAP) * 1e4 + 1e-6) / 1e4;
   return { ...SKIN.TOPIC, size, y: Math.round(Math.min(y, lim) * 1e4) / 1e4 };
 }
 const skinCapY = bottom => Math.round((+bottom - SKIN.CAP_UP) * 1e4) / 1e4;  // 말 자막 아래 끝 = 영상 창 아래 끝 - CAP_UP (editor.py skin_cap_y)
@@ -4897,7 +4914,7 @@ function skinCard(q, L) {
   if (!top) { top = { id: nid(), text: cutText(q.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: L, style: { ...q.captionStyle } }; q.titles.unshift(top); }
   const topics = q.titles.filter(t => t.plan === "topic" && topicUnder(t, q.titles) === top), one = x => String(x || "").split(/\s+/).filter(Boolean).join(" ");
   top.text = one(top.text); top.start = 0; top.dur = r3(L); top.style = skinTitleStyle(top.text);
-  for (const t of topics) { delete t.swap; t.text = one(t.text); t.under = top.id; t.start = 0; t.dur = r3(L); t.style = skinTopicStyle(t.text, k.top); }
+  for (const t of topics) { delete t.swap; t.text = one(t.text); t.under = top.id; t.start = 0; t.dur = r3(L); t.style = skinTopicStyle(t.text, k.top, top.style.size); }  // (주제 줄은 큰 제목보다 크지 않게 · editor.py skin_card)
   const box = (q.shapes || []).find(g => g.plan === "card"), bx = { x: 0.05, y: SKIN.BOX.y, w: SKIN.BOX_MAX, h: SKIN.BOX.h, color: "#FFFFFF", opacity: 1, radius: SKIN.RADIUS, start: 0, dur: r3(L), full: true };
   let g = box;
   if (g) Object.assign(g, bx); else (q.shapes = q.shapes || []).push(g = { id: nid(), name: "제목 상자", ...bx, plan: "card" });
@@ -5904,7 +5921,7 @@ function renderFx() {
        <div class="hint" style="padding:2px 12px 8px">미리보기 화면에서 흰 상자를 끌면 위치, 모서리를 끌면 크기가 바뀌어요.</div>`, "motion");
     h += fxGroup("opacity", "불투명도", "#888", kfRow(v, "opacity"), "opacity");
     h += fxGroup("fit", "화면 맞춤", "#666", `<div class="ecr" style="padding:6px 12px"><div class="seg" id="pFit">${[["auto", "자동"], ["contain", "전체 보이기"], ["cover", "꽉 채우기"], ["native", "원래 크기"]].map(([k, l]) => `<button data-v="${k}" class="${(v.fit || "auto") === k ? "on" : ""}">${l}</button>`).join("")}</div>
-      ${S.format === "shorts" && v.track === "V1" ? `<div style="margin-top:8px">${slider("pReframe", "화면 좌우", v.reframe ?? 0.5, 0, 1, 0.01, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데")}</div>` : ""}</div>`);
+      ${S.format === "shorts" && v.track === "V1" ? `<div style="margin-top:8px">${slider("pReframe", "화면 좌우", v.reframe ?? 0.5, 0, 1, 0.01, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데")}${v.rfk && v.rfk.length ? `<div class="hint" id="pReframeHint" style="margin-top:4px">얼굴을 따라 화면이 좌우로 움직여요 · 위 칸을 옮기면 그 자리에 멈춰요</div>` : ""}</div>` : ""}</div>`);
   }
   h += fxGroup("speed", "속도 · 시간", "#8b4fc6", `<div class="ecr" style="padding:6px 12px"><div class="f"><label>속도</label><div class="nud"><button class="btn sm" data-spd="0.5">0.5×</button><button class="btn sm" data-spd="1">1×</button><button class="btn sm" data-spd="2">2×</button></div><span class="v">${Math.round(sp(main) * 100)}%${main.rev ? " · 거꾸로" : ""}</span></div>
     <button class="btn sm" id="pSpeedDlg">속도 · 길이… (Ctrl+R)</button>${v && mdOf(v).kind === "video" ? ` <button class="btn sm" id="pFreeze" title="재생 위치의 장면을 2초 멈춰 보여줘요 (프레임 고정)">정지 화면 넣기</button>` : ""}${smoothRow(v)}</div>`);
@@ -5989,7 +6006,7 @@ function bindFx(v, a, main, its) {
   el.querySelectorAll("[data-kn]").forEach(b => b.onclick = () => jump(b.dataset.kn, 1));
   el.querySelectorAll(".kl").forEach(ln => bindLane(ln, itOf(ln.dataset.kl), ln.dataset.kl));
   if ($("pFit")) $("pFit").querySelectorAll("button").forEach(b => b.onclick = () => { commit("화면 맞춤"); v.fit = b.dataset.v; changed(false); });
-  if ($("pReframe")) bindRange("pReframe", x => v.reframe = x, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데", "화면 좌우 위치");
+  if ($("pReframe")) bindRange("pReframe", x => { v.reframe = x; if (v.rfk) { delete v.rfk; const h = $("pReframeHint"); if (h) h.remove(); } }, x => x < 0.45 ? "왼쪽" : x > 0.55 ? "오른쪽" : "가운데", "화면 좌우 위치");  // 손으로 옮기면 얼굴 따라가기는 끔 (BR-326)
   el.querySelectorAll("[data-spd]").forEach(b => b.onclick = () => setSpeed(its.filter(x => unlocked(x.track)), +b.dataset.spd, true));
   $("pSpeedDlg").onclick = openSpeed; if ($("pFreeze")) $("pFreeze").onclick = freezeFrame;
   if ($("pSmooth")) $("pSmooth").onchange = e => { commit("느린 장면 부드럽게"); if (e.target.checked) v.smooth = "motion"; else delete v.smooth; changed(false); };

@@ -3771,7 +3771,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     fc = zoom_anchor(face_center(sig) or [0.5, 0.38], face_box(sig))
     B = _Build(name, info, fmt)
     B.card = fmt == "shorts" and editor.shorts_card_on()   # 은평 스타일 쇼츠 (BR-240 · 스타일 화면 '쇼츠 화면 배치')
-    sk_lay = editor.skin_layout() if fmt == "shorts" and not B.card and editor.shorts_skin_on() else None   # 풋살사관학교 스킨 (BR-320 · 못 읽으면 지금처럼)
+    sk_lay = editor.skin_layout(info=info) if fmt == "shorts" and not B.card and editor.shorts_skin_on() else None   # 풋살사관학교 스킨 (BR-320 · 원본 비율로 창을 덮음 · 못 읽으면 지금처럼)
     cap_y = caption_y(st, fmt)
     if B.card:
         cap_y = max(cap_y, editor.EP_CAP_Y)   # 말 자막은 아래 띠 (BR-242)
@@ -4117,8 +4117,10 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         # 다큐: 처음부터 끝까지 위아래 검은 띠 (영화 화면 느낌 · 화면 사건이 아님) — 제목 화면에만 띠가 있다가 없어지면 화면이 튐 (판정)
         for y in (0.0, 1.0 - LETTERBOX):
             B.shape(0.0, y, 1.0, LETTERBOX, "#000000", 0.0, total, 1.0, 0, "검은 띠 (영화 화면)")["full"] = True
+    if B.skin:   # 스킨: 화면 좌우는 얼굴을 따라 · 확대 기준점은 창 좌표로 (BR-326 · 전술 그림·글자 자리를 셈하기 전에)
+        editor.skin_reframe(name, B.items, B.lay)
     caps_tl = editor.timeline_captions({"items": B.items, "captions": caps, "format": fmt}) if st["captions"].get("on", True) else []
-    lay_cap = editor.skin_caption(_caption_style(st, fmt, cap_y), B.skin["bottom"]) if B.skin else _caption_style(st, fmt, cap_y)   # 스킨: 실제 말 자막(92 · D-529)을 피함
+    lay_cap = editor.skin_caption(_caption_style(st, fmt, cap_y), B.skin["bottom"]) if B.skin else _caption_style(st, fmt, cap_y)   # 스킨: 실제 말 자막(96 · D-529)을 피함
     layout_titles(B, caps_tl, lay_cap, total, face_box(sig), moms if intensity != "담백" else (), words, intensity in VITAL_LEVELS)
     if fmt == "long":
         govern(B, intensity, fc, total, moms, words, sig.get("cuts") or (), st, knobs.get("protect", False))
@@ -4793,8 +4795,9 @@ def _shorts_intro(B, hook, short_r, vt, topic_on, looks, st, cap_y, fmt, caps):
                 htxt = _short_text(hook, lim)
         if B.card:  # 은평 스타일: 흰 상자 안 한 줄 큰 제목 · 처음부터 끝까지 (BR-241)
             hk = B.title(" ".join(htxt.split()), 0.0, B.pos, editor.ep_title_style(" ".join(htxt.split())))
-        elif B.skin:  # 풋살사관학교 스킨: 흰 둥근 상자 안 한 줄 주황 큰 제목 · 처음부터 끝까지 (BR-321)
-            hk = B.title(" ".join(htxt.split()), 0.0, B.pos, editor.skin_title_style(" ".join(htxt.split())))
+        elif B.skin:  # 풋살사관학교 스킨: 흰 둥근 상자 안 한 줄 주황 큰 제목 · 처음부터 끝까지 · 80 밑으로 줄어야 하면 앞 구절·포인트 말·영상 주제로 (BR-321 · D-531)
+            htxt = editor.skin_headline(htxt, [point.get("phrase") if isinstance(point, dict) else None, vt])
+            hk = B.title(htxt, 0.0, B.pos, editor.skin_title_style(htxt))
         else:
             hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
         kick = editor.topic_line(vt, point, htxt) if topic_on else ""
@@ -4833,7 +4836,7 @@ def _card_fact(B, text, hk):
         return None
     if getattr(B, "skin", None):
         text = " ".join(text.split())
-    look = editor.skin_topic_style(text, B.skin["top"]) if getattr(B, "skin", None) else dict(editor.EP_FACT)
+    look = editor.skin_topic_style(text, B.skin["top"], hk["style"].get("size")) if getattr(B, "skin", None) else dict(editor.EP_FACT)   # (스킨: 큰 제목보다 크지 않게 · D-531)
     kt = B.title(text, 0.0, float(hk["dur"]), look)
     kt["plan"], kt["under"] = "topic", hk["id"]
     return kt

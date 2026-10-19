@@ -920,7 +920,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "epx": dict(style.card_extras(), next=style.series_peek(),   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
                                                     pics=style.card_pic_refs(),   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
                                                     font=epfont.public(editor.ep_font(wait=False)),   # 은평 스타일 글꼴 (이름·폭 표·파일 주소 · 못 찾으면 null · BR-311)
-                                                    skin=editor.skin_info(),   # 템플릿 '풋살사관학교 스킨'이 넣을 스킨 이름·영상 창·화면 구성 (못 읽으면 null · BR-325)
+                                                    skin=editor.skin_info(proj.get("info")),   # 템플릿 '풋살사관학교 스킨'이 넣을 스킨 이름·영상 창·화면 구성 (이 영상 비율 · 못 읽으면 null · BR-325 · D-530)
                                                     fontChecking=epfont.checking())})   # 아직 찾는 중 → 편집실이 끝나면 다시 받음 (/api/style/card_font?full=1)
             except Exception as e:
                 studiolog.trace(e)

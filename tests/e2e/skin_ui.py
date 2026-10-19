@@ -6,7 +6,8 @@
 - 저장소를 SKIN_OUT/app 으로 복사(config.json 은 시험용)해 띄우고, 작업 폴더 SKIN_OUT/work 는 매번 새로 · 스크린샷·비교 그림 SKIN_OUT/shots
 확인: 스타일 화면(쇼츠 화면 배치 '풋살사관학교 스킨' · 스킨 그림 보임 · 한글 이름 PNG 로 '스킨 바꾸기' · 잘못된 그림은 쉬운 말 · 처음 스킨으로) ·
 가편집 쇼츠 화면 구성·글자 값 = 서버 · 편집실 미리보기 차례(스킨 그림은 영상 묶음 위 · 글자·도형 아래 · 화면 크기) · 미리보기 = 내보낸 장면(스킨 띠·흰 상자) ·
-미리보기 영상 칸이 찢어진 종이 홈까지 덮음 · 흰 상자 = 미리보기 글 폭 + 양옆 28 · 다른 템플릿은 스킨을 지움 · 템플릿 '풋살사관학교 스킨'은 서버 값 ·
+미리보기 영상 칸이 찢어진 종이 홈까지 덮음 · 흰 상자 = 미리보기 글 폭 + 양옆 14 · 화면 좌우 얼굴 따라가기(rfk) 미리보기 = 서버 셈 · 다른 템플릿은 스킨을 지움 ·
+템플릿 '풋살사관학교 스킨'은 서버 값 ·
 시퀀스 탭 스킨 안내는 화면 구성(풀샷 자르기·박스·블러)에 맞는 칸만 말함 · 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 ·
 '새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
 import json
@@ -165,14 +166,26 @@ try:
         for q in sq:
             top = q["titles"][0]
             box = [g_ for g_ in q["shapes"] if g_.get("plan") == "card"]
-            good = good and q["lay"] == info["layout"] and q["cap"]["y"] == 0.723 and {k_: q["cap"].get(k_) for k_ in editor.SKIN_CAP} == editor.SKIN_CAP \
+            good = good and q["lay"] == info["layout"] and q["cap"]["y"] == editor.skin_cap_y(info["bottom"]) and {k_: q["cap"].get(k_) for k_ in editor.SKIN_CAP} == editor.SKIN_CAP \
                 and top["style"] == editor.skin_title_style(top["text"]) \
                 and len(box) == 1 and box[0]["radius"] == 17 and not any(t.get("plan") in ("series", "longline") for t in q["titles"])
             for kt in [t for t in q["titles"] if t.get("plan") == "topic"]:
-                good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"])
-        check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.723 · 흰 Black 92 · 테두리 10 · 상자 없음) = 서버 값 · 은평 덧붙임 없음", good,
+                good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"], top["style"]["size"])
+        check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.717 · 흰 Black 96 · 테두리 10 · 상자 없음) = 서버 값 · 은평 덧붙임 없음", good,
               json.dumps([{"lay": q["lay"], "cap": {k_: q["cap"].get(k_) for k_ in ("y", "weight", "size", "strokeW", "bgOn", "effect")}} for q in sq], ensure_ascii=False)[:400])
         q0 = sq[0]
+        # 화면 좌우 얼굴 따라가기 (BR-326): 가편집이 얼굴을 보고 정한 자리 · 따라 움직이는 클립은 미리보기(fitRect t) = 서버 fit_rect(원본 시각)
+        rq = ev("""(() => { const out = []; for (const q of P.sequences.filter(q => q.format === 'shorts')) { S = q;
+            for (const it of q.items.filter(i => i.track === 'V1' && i.media === 'main')) { const t = it.start + 0.37 * (iEnd(it) - it.start);
+              out.push({ rf: it.reframe, rfk: it.rfk || null, it: { id: it.id, track: it.track, media: it.media, start: it.start, in: it.in, out: it.out, speed: it.speed || 1, rev: !!it.rev, reframe: it.reframe, rfk: it.rfk || null, fit: it.fit },
+                         t, mx: fitRect(it, { kind: 'video', w: 1920, h: 1080 }, t).mx }); } }
+            switchSeq(P.sequences.find(q => q.format === 'shorts').id); return out; })()""")
+        moved = [x for x in rq if x["rf"] != 0.5 or x["rfk"]]
+        same = all(abs(x["mx"] - editor.fit_rect({k: v for k, v in x["it"].items() if v is not None}, {"kind": "video", "w": 1920, "h": 1080},
+                                                 {"format": "shorts", "layout": info["layout"]}, 1080, 1920,
+                                                 editor.i_mt(x["it"], x["t"]))["mx"]) < 1e-6 for x in rq)
+        check("화면 좌우 얼굴 따라가기: 가편집 쇼츠 V1 클립 자리를 얼굴로 정함(가운데 0.5 아닌 클립 · 따라 움직이는 키프레임) · 미리보기 자리 = 서버 셈",
+              moved and same, f"{len(moved)}/{len(rq)} 클립 · 따라감 {sum(1 for x in rq if x['rfk'])}")
         ev(f"switchSeq('{q0['id']}')")
         W(1000)
         ev("seek(1.0)")
@@ -216,9 +229,13 @@ try:
         check("내보낸 장면: 위·아래 띠 = 스킨 그림 (화소 평균 차이 < 6)", max(dex) < 6, f"{dex[0]:.2f}/{dex[1]:.2f}")
         check("미리보기 = 내보낸 장면 (스킨 띠 화소 평균 차이 < 10 / 255)", max(dpv) < 10, f"{dpv[0]:.2f}/{dpv[1]:.2f}")
         box = [g_ for g_ in q0["shapes"] if g_.get("plan") == "card"][0]
-        bx = (slice(int((box["y"] + 0.006) * Hh), int((box["y"] + box["h"] - 0.006) * Hh)), slice(int(box["x"] * Ww) + 8, int(box["x"] * Ww) + 22))
-        check("흰 상자는 스킨 위 (미리보기·내보내기 모두 흰색 · 그 자리 스킨은 칠판)", a[bx].min() > 225 and pvi[bx].min() > 215 and sk[bx][..., :3].max() < 200,
-              f"내보내기 {a[bx].min()} · 미리보기 {pvi[bx].min()} · 스킨 {sk[bx][..., :3].max()}")
+        bx = (slice(int((box["y"] + 0.006) * Hh), int((box["y"] + box["h"] - 0.006) * Hh)), slice(int(box["x"] * Ww) + 3, int(box["x"] * Ww) + 9))
+        # (미리보기 그림은 화면 폭 250화소쯤이라 양옆 여백 14 칸은 흐려짐 → 미리보기는 상자 안 전체에서 흰 화소 몫으로)
+        inner = (slice(int((box["y"] + 0.006) * Hh), int((box["y"] + box["h"] - 0.006) * Hh)), slice(int((box["x"] + 0.01) * Ww), int((box["x"] + box["w"] - 0.01) * Ww)))
+        pv_white = float((pvi[inner].min(axis=2) > 200).mean())
+        check("흰 상자는 스킨 위 (내보내기 상자 여백 흰색 · 미리보기 상자 안 절반 넘게 흰색(나머지는 주황 글자) · 그 자리 스킨은 칠판)",
+              a[bx].min() > 225 and pv_white > 0.5 and sk[bx][..., :3].max() < 200 and sk[inner][..., :3].mean() < 150,
+              f"내보내기 {a[bx].min()} · 미리보기 흰 몫 {pv_white:.2f} · 스킨 {sk[bx][..., :3].max()}")
         win = editor.skin_window("academy.png")
         mid = (slice(int((win["top"] + 0.05) * Hh), int((win["bottom"] - 0.12) * Hh)), slice(int(0.1 * Ww), int(0.9 * Ww)))
         sk_mid = sk[mid][..., 3].max()
@@ -239,8 +256,8 @@ try:
         W(1500)
         g2 = ev("({lay: S.layout, cap: S.captionStyle, shown: $('skinL').style.display, card: S.shapes.filter(g => g.plan === 'card'), hint: !!$('pSkinHint'), toast: $('toast').textContent})")
         pg.locator("#frame").screenshot(path=str(SHOTS / "e3_template_skin.png"))
-        check("다른 템플릿 → 스킨·흰 상자 없음 · '풋살사관학교 스킨' 단추 → 서버 값 그대로 다시 (상자 하나 · 말 자막 흰 Black 92 · 테두리 10 · 안내 줄)",
-              "skin" not in g1["lay"] and g1["shown"] == "none" and g1["card"] == 0 and g2["lay"] == info["layout"] and g2["cap"]["y"] == 0.723
+        check("다른 템플릿 → 스킨·흰 상자 없음 · '풋살사관학교 스킨' 단추 → 서버 값 그대로 다시 (상자 하나 · 말 자막 흰 Black 96 · 테두리 10 · 안내 줄)",
+              "skin" not in g1["lay"] and g1["shown"] == "none" and g1["card"] == 0 and g2["lay"] == info["layout"] and g2["cap"]["y"] == editor.skin_cap_y(info["bottom"])
               and {k_: g2["cap"].get(k_) for k_ in editor.SKIN_CAP} == editor.SKIN_CAP
               and g2["shown"] == "block" and len(g2["card"]) == 1 and g2["card"][0]["radius"] == 17 and g2["hint"] and "풋살사관학교 스킨" in g2["toast"],
               json.dumps({"g1": g1, "g2": {k: v for k, v in g2.items() if k != "cap"}}, ensure_ascii=False)[:400])
@@ -286,9 +303,9 @@ try:
         editor.skin_box_fit({"text": LONG, "style": want_st}, want_g)
         bl, br = e4["box"]["x"] * 1080, (e4["box"]["x"] + e4["box"]["w"]) * 1080
         tw = e4["txt"] and e4["txt"]["right"] - e4["txt"]["left"]
-        check("큰 제목 글 고치기 → 글자 크기·자리 = 서버 skin_title_style · 흰 상자 = skin_box_fit · 미리보기 글이 상자 안 (양옆 여백 약 28 · 실제 글꼴 폭과 상자 표가 맞음)",
+        check("큰 제목 글 고치기 → 글자 크기·자리 = 서버 skin_title_style · 흰 상자 = skin_box_fit · 미리보기 글이 상자 안 (양옆 여백 약 14 · 실제 글꼴 폭과 상자 표가 맞음)",
               e4["text"] == LONG and e4["st"]["size"] == want_st["size"] and e4["st"]["y"] == want_st["y"] and (e4["box"]["x"], e4["box"]["w"]) == (want_g["x"], want_g["w"])
-              and e4["txt"] and e4["txt"]["left"] >= bl + 14 and e4["txt"]["right"] <= br - 14 and abs((br - bl) - tw - 56) < 20,
+              and e4["txt"] and e4["txt"]["left"] >= bl + 3 and e4["txt"]["right"] <= br - 3 and abs((br - bl) - tw - 2 * editor.SKIN_PAD) < 20,
               json.dumps({"st": {k: e4["st"][k] for k in ("size", "y")}, "box": [round(bl), round(br)], "txt": e4["txt"], "want": want_g}, ensure_ascii=False))
         pg.locator("#frame").screenshot(path=str(SHOTS / "e3b_title_edit.png"))
         ev("undo()")
@@ -313,8 +330,8 @@ try:
         nq = ev("""(() => { const q = P.sequences[P.sequences.length - 1]; return { n: P.sequences.length, lay: q.layout, cap: q.captionStyle.y,
             card: q.shapes.filter(g => g.plan === 'card').length, top: q.titles[0] && q.titles[0].style }; })()""")
         ev("window.fetch = window._f0; EPX.fontChecking = false")
-        check("'새 쇼츠 편집본으로 추가'(스킨 바탕 · KFA 글꼴을 찾는 중): 기다리지 않고 바로 스킨 편집본 (화면 구성 = 서버 · 흰 상자 하나 · 말 자막 0.723)",
-              base_skin and nq["n"] == n0 + 1 and dt < 5 and nq["lay"] == info["layout"] and nq["card"] == 1 and nq["cap"] == 0.723
+        check("'새 쇼츠 편집본으로 추가'(스킨 바탕 · KFA 글꼴을 찾는 중): 기다리지 않고 바로 스킨 편집본 (화면 구성 = 서버 · 흰 상자 하나 · 말 자막 0.717)",
+              base_skin and nq["n"] == n0 + 1 and dt < 5 and nq["lay"] == info["layout"] and nq["card"] == 1 and nq["cap"] == editor.skin_cap_y(info["bottom"])
               and nq["top"] and nq["top"]["fill"] == "#CE4F2F", f"{dt:.1f}초 · " + json.dumps({k: v for k, v in nq.items() if k != "top"}, ensure_ascii=False)[:300])
 
         # ---- 5. 바꾼 스킨으로 템플릿 (편집실을 다시 열 때 설정을 읽음) ----

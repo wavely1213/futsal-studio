@@ -488,11 +488,16 @@ def end_of(seq):
 
 # ---------- 원본 자리 ↔ 화면 자리 (editor.html fitRect·motionAt 과 같은 계산) ----------
 
-def media_rect(it, md, seq, W, H):
-    """클립 미디어를 화면에 놓는 상자 {bx, by, bw, bh, mx, my, mw, mh} (효과 컨트롤 100% 기준) — editor.html fitRect 와 같은 계산."""
+def media_rect(it, md, seq, W, H, m=None):
+    """클립 미디어를 화면에 놓는 상자 {bx, by, bw, bh, mx, my, mw, mh} (효과 컨트롤 100% 기준) — editor.html fitRect 와 같은 계산 ·
+    m: 원본 시각 (화면 좌우 얼굴 따라가기 키프레임 rfk 가 있으면 그때 자리 · editor.rf_at · BR-326)."""
     sw, sh = float(md.get("w") or W), float(md.get("h") or H)
     lay = {"mode": "fill", "zoom": 1.0, "vpos": 0.5, "cropTop": 0.0, "cropBottom": 0.0, **(seq.get("layout") or {})}
-    rf = float(it.get("reframe", 0.5) if it.get("reframe") is not None else 0.5)
+    if m is not None and it.get("rfk"):
+        import editor
+        rf = editor.rf_at(it, m)
+    else:
+        rf = float(it.get("reframe", 0.5) if it.get("reframe") is not None else 0.5)
     fit = it.get("fit") or "auto"
     if seq.get("format") == "shorts" and it.get("track") == "V1" and fit == "auto":
         ct, cb = float(lay.get("cropTop") or 0), float(lay.get("cropBottom") or 0)
@@ -516,6 +521,11 @@ def media_rect(it, md, seq, W, H):
     return {"bx": (W - scw) / 2, "by": (H - sch) / 2, "bw": scw, "bh": sch, "mw": scw, "mh": sch, "mx": 0.0, "my": 0.0}
 
 
+def _mt(it, tl):
+    import editor
+    return editor.i_mt(it, tl) if it.get("rfk") else None
+
+
 def _motion(it, tl):
     import editor
     m = editor.i_mt(it, tl)
@@ -525,7 +535,7 @@ def _motion(it, tl):
 
 def src_to_frame(it, md, seq, W, H, u, v, tl):
     """원본 (u, v)(0~1) → 타임라인 tl 초의 화면 px (확대·위치·회전 효과까지)."""
-    f = media_rect(it, md, seq, W, H)
+    f = media_rect(it, md, seq, W, H, _mt(it, tl))
     pos, sc, rot, anc = _motion(it, tl)
     px, py = f["bx"] + f["mx"] + u * f["mw"], f["by"] + f["my"] + v * f["mh"]
     ox, oy = f["bx"] + anc[0] * f["bw"], f["by"] + anc[1] * f["bh"]
@@ -536,7 +546,7 @@ def src_to_frame(it, md, seq, W, H, u, v, tl):
 
 def frame_to_src(it, md, seq, W, H, x, y, tl):
     """화면 px → 원본 (u, v)(0~1) — src_to_frame 의 거꾸로."""
-    f = media_rect(it, md, seq, W, H)
+    f = media_rect(it, md, seq, W, H, _mt(it, tl))
     pos, sc, rot, anc = _motion(it, tl)
     ox, oy = f["bx"] + anc[0] * f["bw"], f["by"] + anc[1] * f["bh"]
     a = math.radians(rot)
