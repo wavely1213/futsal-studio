@@ -2048,7 +2048,7 @@ def skin_info():
     if not lay:
         return None
     win = skin_window(lay["skin"])
-    return {"ref": lay["skin"], "top": round(win["top"], 6), "bottom": round(win["bottom"], 6), "layout": lay}
+    return {"ref": lay["skin"], "top": win["top"], "bottom": win["bottom"], "layout": lay}   # (창은 반올림하지 않음 · 가편집 셈과 같은 값)
 
 
 def skin_on(seq):
