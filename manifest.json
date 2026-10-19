@@ -1,6 +1,8 @@
 {
   "version": "2.25.0",
   "notes": "은평 스타일 글꼴 KFA 고정(이 PC 의 KFA 글꼴) · 썸네일: 감독님 얼굴 칸 맞춤 · '유튜브용 그림' 저장 상태와 나갈 때 물음 · 누끼 초록 테두리 정리 · 자동 편집: 쇼츠 말 자막 늘 · 쇼츠 길이 고르기 · 티저 맞춤 · '핵심' 강조 · 얼굴 기준 확대",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/bccce1359db3251538f131be5275fa5af257a3c9.zip",
+  "commit": "bccce1359db3251538f131be5275fa5af257a3c9",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "23bca16ba817541141de733c5587b9d93652c9153e85c9e45c63cb3ee530a642",
