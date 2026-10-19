@@ -2216,7 +2216,9 @@ SKIN_FOLLOW_JUMP = 0.15   # 이웃 칸 얼굴 가운데가 이만큼(원본 폭 
 SKIN_FOLLOW_SMOOTH = 2    # 따라갈 때 앞뒤 이만큼 칸(±1초)의 평균 (얼굴 찾기 흔들림을 걸러 천천히)
 SKIN_FOLLOW_TOL = 0.015   # 키프레임 줄이기 허용 (reframe 값 · 원본 폭 0.7% 쯤)
 SKIN_FOLLOW_SPAN = 240.0  # 한 번에 볼 원본 길이 한도 (초 · 넘는 묶음은 가운데 그대로)
+SKIN_CUT_SCENE = 0.2      # 장면이 바뀐 두 칸 사이에서 이만큼 넘게 그림이 바뀐 장면(ffmpeg scene 값)이 있으면 그 장면에서 바로 옮김 (D-537)
 _SKIN_FACES = {}          # (영상 경로, 크기, 고친 시각) → {원본 시각(0.5초 칸): [[x, y, w, h], …] 큰 것부터 | None}
+_SKIN_CUTS = {}           # (영상 경로, 크기, 고친 시각, a, b) → 바뀐 장면 원본 시각 | None
 _SKIN_FACES_LOCK = threading.Lock()
 
 
@@ -2268,8 +2270,9 @@ def skin_faces(name, spans):
             import face
             for g in groups:
                 with tempfile.TemporaryDirectory(prefix="skin_faces_") as d:
+                    # round=up: 칸 t 의 그림 = t 또는 바로 앞 장면 (기본 near 는 t+0.23초까지의 장면이라 바뀐 장면을 0.25초 먼저 봤음 · D-537)
                     r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{g[0]:.3f}", "-t", f"{g[-1] - g[0] + step / 2:.3f}", "-i", str(p),
-                                  "-vf", f"fps={SKIN_FOLLOW_FPS},scale='min({FACE_W},iw)':-2", "-q:v", "3", str(Path(d) / "f_%05d.jpg")])
+                                  "-vf", f"fps={SKIN_FOLLOW_FPS}:round=up,scale='min({FACE_W},iw)':-2", "-q:v", "3", str(Path(d) / "f_%05d.jpg")])
                     files = sorted(Path(d).glob("f_*.jpg")) if r.returncode == 0 else []
 
                     def one(f):
@@ -2285,6 +2288,41 @@ def skin_faces(name, spans):
                         cache[t] = res[i] if i < len(res) else None
     with _SKIN_FACES_LOCK:
         return {t: cache.get(t) for t in want}
+
+
+def skin_cut(name, a, b):
+    """원본 (a, b] 안에서 그림이 확 바뀐 장면(컷)의 원본 시각 — 얼굴이 뛴 두 칸 사이를 작게 풀어 ffmpeg scene 값이 가장 큰 장면 (SKIN_CUT_SCENE 넘을 때) ·
+    없거나(같은 장면에서 다른 사람이 커짐) 못 풀면 None · 영상마다 기억."""
+    p = core.VIDEOS / str(name)
+    try:
+        stt = p.stat()
+    except OSError:
+        return None
+    key = (str(p), stt.st_size, stt.st_mtime_ns, round(float(a), 3), round(float(b), 3))
+    with _SKIN_FACES_LOCK:
+        if key in _SKIN_CUTS:
+            return _SKIN_CUTS[key]
+    r = core.run([core.ffmpeg(), "-v", "error", "-ss", f"{float(a):.3f}", "-t", f"{float(b) - float(a) + 0.02:.3f}", "-i", str(p), "-an", "-sn",
+                  "-vf", "scale=160:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score:file=-", "-f", "null", "-"])
+    best, cur = None, None
+    for ln in (r.stdout or "").splitlines() if r.returncode == 0 else ():
+        if ln.startswith("frame:") and "pts_time:" in ln:
+            try:
+                cur = float(ln.split("pts_time:")[1].split()[0])
+            except ValueError:
+                cur = None
+        elif "lavfi.scene_score=" in ln and cur is not None:
+            try:
+                s = float(ln.split("=", 1)[1])
+            except ValueError:
+                continue
+            t = float(a) + cur
+            if cur > 1e-6 and s >= SKIN_CUT_SCENE and float(a) < t <= float(b) + 0.01 and (best is None or s > best[1]):
+                best = (round(t, 3), s)
+    out = best[0] if best else None
+    with _SKIN_FACES_LOCK:
+        _SKIN_CUTS[key] = out
+    return out
 
 
 def _rdp(pts, tol):
@@ -2303,22 +2341,26 @@ def _rdp(pts, tol):
     return _rdp(pts[:fi + 1], tol)[:-1] + _rdp(pts[fi:], tol)
 
 
-def skin_follow(samples, v):
+def skin_follow(samples, v, cut=None):
     """얼굴 따라가기 계획 (BR-326) — samples [(원본 시각, 얼굴 상자들 | None)] (시각 차례) · v: 창에 보이는 원본 가로 몫 →
     (rf, keys): 한 자리로 모든 칸의 얼굴이 창 안에 들면 (그 자리, None) · 아니면 (가운데 값, [(시각, rf)] 직선 키프레임 — 장면 안은 앞뒤 1초 평균으로 천천히 ·
-    장면이 바뀌는 곳(얼굴이 SKIN_FOLLOW_JUMP 넘게 뜀)은 두 칸 사이에서 바로) · 얼굴을 한 번도 못 보거나 다 보이는 화면(v ≥ 1)이면 (None, None).
-    얼굴은 가장 큰 것 — 앞 칸 얼굴 가까이(0.1)에 절반 넘는 크기의 얼굴이 있으면 그것 (두 사람이 번갈아 커져도 화면이 튀지 않게)."""
+    얼굴이 SKIN_FOLLOW_JUMP 넘게 뛴 곳은 cut(a, b) 가 두 칸 사이 컷 시각을 주면 그 컷에서 바로, 아니면 두 칸 사이를 미끄러지듯) ·
+    얼굴을 한 번도 못 보거나 다 보이는 화면(v ≥ 1)이면 (None, None).
+    얼굴은 가장 큰 것 — 앞 칸 얼굴 가까이(0.1)에 절반 넘는 크기의 얼굴이 있으면 그것 (두 사람이 번갈아 커져도 화면이 튀지 않게) ·
+    한 칸만 딴 데로 뛰고 앞뒤 칸이 같은 자리면 그 칸은 잘못 본 것(지나가는 사람·얼굴 아닌 것) → 앞 칸 자리 (0.5초 동안 창이 갔다 오지 않게 · D-537) ·
+    맨 앞·끝 칸은 안쪽 칸과 사이에 컷이 없을 때만 (컷 너머 다음 장면이면 진짜)."""
     if v >= 1 - 1e-6 or not samples:
         return None, None
     span = 1 - v
-    pick, prev = [], None
+    area = lambda f: float(f[2]) * float(f[3])  # noqa: E731
+    cx = lambda f: float(f[0]) + float(f[2]) / 2  # noqa: E731
+    pick, cands, prev = [], [], None
     for t, fs in samples:
         fs = [f for f in fs or () if float(f[3]) >= SKIN_FOLLOW_MIN_H]
+        cands.append(fs)
         if not fs:
             pick.append(None)
             continue
-        area = lambda f: float(f[2]) * float(f[3])  # noqa: E731
-        cx = lambda f: float(f[0]) + float(f[2]) / 2  # noqa: E731
         f = max(fs, key=area)
         if prev is not None:
             near = [g for g in fs if area(g) >= 0.5 * area(f) and abs(cx(g) - prev) <= 0.1]
@@ -2328,6 +2370,20 @@ def skin_follow(samples, v):
         pick.append((cx(f), float(f[0]), float(f[0]) + float(f[2])))
     if not any(pick):
         return None, None
+    seen = [i for i, p in enumerate(pick) if p]   # 한 칸만 뛴 것 걸러내기 (얼굴을 본 칸끼리 · 차례로 · 양 끝은 안쪽 두 칸이 같은 자리일 때)
+    for j, i in enumerate(seen):
+        nb = [seen[j - 1], seen[j + 1]] if 0 < j < len(seen) - 1 else [seen[1], seen[2]] if j == 0 and len(seen) > 2 \
+            else [seen[-2], seen[-3]] if j == len(seen) - 1 and len(seen) > 2 else None
+        if not nb:
+            continue
+        a, b = pick[nb[0]], pick[nb[1]]
+        if abs(pick[i][0] - a[0]) > SKIN_FOLLOW_JUMP and abs(b[0] - a[0]) <= SKIN_FOLLOW_JUMP:
+            edge = (float(samples[i][0]), float(samples[nb[0]][0])) if j == 0 else (float(samples[nb[0]][0]), float(samples[i][0])) if 0 < j == len(seen) - 1 else None
+            if edge and cut and cut(*edge) is not None:   # 묶음 맨 앞·끝 칸이 컷 너머 다음 장면이면 진짜 (클립이 새 장면으로 이어짐)
+                continue
+            near = [g for g in cands[i] if abs(cx(g) - a[0]) <= 0.1]
+            g = min(near, key=lambda g: abs(cx(g) - a[0])) if near else None
+            pick[i] = (cx(g), float(g[0]), float(g[0]) + float(g[2])) if g else a
     last = next(p for p in pick if p)   # 못 본 칸은 앞 칸 얼굴 그대로 (맨 앞은 처음 본 얼굴)
     for i, p in enumerate(pick):
         if p:
@@ -2367,9 +2423,11 @@ def skin_follow(samples, v):
         return round(plans[0][0][1], 4), None
     keys = []
     for k, pl in enumerate(plans):
-        if k:   # 장면이 바뀌는 곳: 앞 장면 값 그대로 두 칸 가운데까지 → 바로 다음 장면 값
-            mid = (keys[-1][0] + pl[0][0]) / 2
-            keys += [(round(mid - 0.02, 3), keys[-1][1]), (round(mid, 3), pl[0][1])]
+        if k:   # 얼굴이 뛴 곳: 두 칸 사이에 컷이 있으면 앞 장면 값 그대로 컷까지 → 컷에서 바로 다음 값 (컷 앞 장면 한 장도 옮긴 창으로 안 보이게 컷 0.001초 앞) ·
+            t0, t1 = keys[-1][0], pl[0][0]   # 컷이 없으면(같은 장면에서 빨리 움직임·다른 사람) 두 칸 사이 0.5초 동안 미끄러지듯 (한 장 만에 휙 튀지 않게 · D-537)
+            c = cut(t0, t1) if cut else None
+            if c is not None and t0 + 0.012 < float(c) <= t1 + 1e-6:
+                keys += [(round(float(c) - 0.011, 3), keys[-1][1]), (round(float(c) - 0.001, 3), pl[0][1])]
         keys += pl if not k or pl[0][0] > keys[-1][0] + 1e-6 else pl[1:]
     keys = [(round(t, 3), round(x, 4)) for t, x in keys]
     out = [keys[0]]
@@ -2417,7 +2475,7 @@ def skin_reframe(name, items, lay):
     for run, sp in zip(runs, spans):
         if not sp:
             continue
-        rf, keys = skin_follow([(t, faces.get(t)) for t in _skin_grid(*sp)], v)
+        rf, keys = skin_follow([(t, faces.get(t)) for t in _skin_grid(*sp)], v, cut=lambda a, b: skin_cut(name, a, b))
         if rf is None:
             continue
         for it in run:

@@ -1,11 +1,11 @@
-"""풋살사관학교 스킨 쇼츠 (BR-320~BR-327 · D-520~D-536) — 저장소 폴더에서 python3 -m unittest tests.test_academy_skin
+"""풋살사관학교 스킨 쇼츠 (BR-320~BR-327 · D-520~D-537) — 저장소 폴더에서 python3 -m unittest tests.test_academy_skin
 
 - 앱과 함께 싣는 스킨(skins/academy.png · git 추적 = 배포 목록 · 업데이트 경로 규칙 · 출처 글)
 - 영상 창 찾기(academy.png → 417~1465 줄 · 영상이 덮을 곳은 찢어진 종이 홈까지 385~1495 · 기억 · 파일이 바뀌면 다시) · '스킨 바꾸기' 확인(9:16 · 투명한 창 30% 이상 · 크기 · 투명 그대로 ·
   내용 지문 이름 · 한글 폴더) · 거절(창 없음 · 비율 · 너무 작음 · 투명 없음 · 그림 아님) · 처음 스킨으로 · 이상한 이름
 - 화면 구성 셈(zoom·vpos · 원본 비율마다(16:9 그대로 · 세로 1 · 4:3 · 21:9) 1080·720·4K 내보내기(위아래 4화소 더)와 미리보기 모두에서 덮을 곳을 덮음 · D-530) ·
   은평 것(win·띠 그림·로고·글꼴 고정)은 없음
-- 화면 좌우 얼굴 따라가기(skin_follow · skin_reframe · rfk · 확대 기준점 창 좌표 · crop x 시간 식 · 미리보기 = 서버 · BR-326)
+- 화면 좌우 얼굴 따라가기(skin_follow · skin_reframe · rfk · 얼굴이 뛰면 실제 컷에서 · 한 칸만 뛴 얼굴 무시 · 얼굴 칸 = 그 시각 장면 · 확대 기준점 창 좌표 · crop x 시간 식 · 미리보기 = 서버 · BR-326 · D-537)
 - 흰 상자 폭 = 실제 글자 폭(Pretendard Black 표 · PIL 로 잰 폭과 같음) + 양옆 14 · 크기 고르기는 넉넉한 어림 그대로 · 큰 제목 한 줄(skin_headline 80 이상 ·
   손으로 친 긴 글은 48 밑 · \\q2 · 실제 그림에서 흰 상자 안 · D-531) · 주제 줄 96·큰 제목보다 크지 않게 · 배운 강조 큰 글씨는 창 안 (D-534)
 - 가편집 쇼츠(큰 제목·흰 상자·주제 줄·말 자막 값) · MSG 쇼츠(고정 글자 말고는 위·아래 띠에 글자 없음 · 말 자막 자리) ·
@@ -358,15 +358,56 @@ class FollowTest(unittest.TestCase):
         self.assertLess(max(steps), 0.25)                                                      # 천천히 (1초에 reframe 0.25 밑)
 
     def test_scene_change_jumps(self):
+        """얼굴이 뛴 두 칸 사이에 컷이 있으면 그 컷에서 바로 (컷 앞 장면은 옛 자리 그대로 · round 1 실제 렌더: 두 칸 가운데서 옮겨 컷 0.35초 앞부터 감독님이 창 밖이었음) ·
+        컷이 없으면(같은 장면에서 빨리 움직임) 두 칸 사이 0.5초 동안 미끄러지듯 (D-537)."""
         smp = [(k / 2, [[0.15, 0.1, 0.1, 0.3]]) for k in range(10)] + [(5 + k / 2, [[0.80, 0.1, 0.1, 0.3]]) for k in range(10)]
-        rf, keys = editor.skin_follow(smp, self.V)
+        asked = []
+        rf, keys = editor.skin_follow(smp, self.V, cut=lambda a, b: asked.append((a, b)) or 4.9)
+        self.assertEqual(asked, [(4.5, 5.0)])
         for t, fs in smp:
             self.assertTrue(self.inside(fs[0][0] + 0.05, editor._rf_keys_at(keys, t)), t)
         jumps = [(a, b) for a, b in zip(keys, keys[1:]) if abs(b[1] - a[1]) > 0.3]
         self.assertEqual(len(jumps), 1)
         a, b = jumps[0]
-        self.assertLessEqual(b[0] - a[0], 0.03)                                                # 장면이 바뀌는 곳에서 바로 (미끄러지지 않음)
-        self.assertTrue(4.5 < b[0] < 5.0)
+        self.assertLessEqual(b[0] - a[0], 0.011)                                               # 컷에서 바로 (미끄러지지 않음)
+        self.assertTrue(4.88 < a[0] < b[0] < 4.9, jumps)                                        # 컷 앞 장면(4.867)은 옛 자리 · 컷 장면(4.9)은 새 자리
+        self.assertAlmostEqual(editor._rf_keys_at(keys, 4.8667), keys[0][1], places=6)
+        self.assertAlmostEqual(editor._rf_keys_at(keys, 4.9), keys[-1][1], places=6)
+        rf, glide = editor.skin_follow(smp, self.V, cut=lambda a, b: None)                     # 컷 없음: 4.5 → 5.0 미끄러지듯
+        moves = [(a, b) for a, b in zip(glide, glide[1:]) if abs(b[1] - a[1]) > 0.3]
+        self.assertEqual([(a[0], b[0]) for a, b in moves], [(4.5, 5.0)])
+        for t, fs in smp:
+            self.assertTrue(self.inside(fs[0][0] + 0.05, editor._rf_keys_at(glide, t)), t)
+        self.assertEqual(editor.skin_follow(smp, self.V, cut=lambda a, b: 7.0)[1], glide)       # 두 칸 밖 컷 값은 안 씀
+
+    def test_one_sample_flash_ignored(self):
+        """round 1 실제 렌더 msg_MSGRAW01: 한 칸(0.5초)에만 왼쪽에 더 큰 얼굴(지나가는 사람)이 잡혀 창이 0.5초 동안 왼쪽으로 갔다 옴 → 앞뒤 칸이 같은 자리면 그 칸은
+        그 자리 가까운 얼굴(없으면 앞 칸 자리) · 두 칸 넘게 이어지면 그대로 따라감 (D-537)."""
+        coach = [0.555, 0.19, 0.058, 0.133]
+        smp = [(150 + k / 2, [coach]) for k in range(12)]
+        for extra in ([[0.227, 0.195, 0.109, 0.189], coach], [[0.227, 0.195, 0.109, 0.189]]):
+            s = list(smp)
+            s[5] = (s[5][0], extra)
+            rf, keys = editor.skin_follow(s, self.V, cut=lambda a, b: self.fail("뛴 곳이 없어야 함"))
+            self.assertIsNone(keys, extra)
+            self.assertTrue(self.inside(0.584, rf))
+        for i in (0, -1):                                                                        # 맨 앞·끝 한 칸도 (사이에 컷이 없으면)
+            s = list(smp)
+            s[i] = (s[i][0], [[0.227, 0.195, 0.109, 0.189]])
+            self.assertIsNone(editor.skin_follow(s, self.V)[1])
+            self.assertIsNone(editor.skin_follow(s, self.V, cut=lambda a, b: None)[1])
+            rf, keys = editor.skin_follow(s, self.V, cut=lambda a, b: (a + b) / 2)              # 컷 너머 다음 장면이면 진짜 (round 1 rough_MSGRAW03_s2 끝 장면)
+            self.assertTrue(keys, i)
+            self.assertTrue(self.inside(0.28, editor._rf_keys_at(keys, s[i][0])), i)
+        s = list(smp)
+        for i in (5, 6, 7):
+            s[i] = (s[i][0], [[0.227, 0.195, 0.109, 0.189]])                                    # 1초 넘게 이어지면 진짜로 다른 자리
+        rf, keys = editor.skin_follow(s, self.V, cut=lambda a, b: None)
+        self.assertTrue(keys)
+        self.assertTrue(self.inside(0.28, editor._rf_keys_at(keys, 153.0)))
+        alt = [(150 + k / 2, [[0.10, 0.1, 0.1, 0.3]] if k % 2 else [coach]) for k in range(12)]   # 번갈아 잡혀도 한쪽으로 (뒤집히지 않음)
+        rf, keys = editor.skin_follow(alt, self.V, cut=lambda a, b: None)
+        self.assertIsNone(keys)
 
     def test_reframe_items(self):
         """얼굴이 원본 0.15·0.85 인 컷 → 창 안 · 확대 컷 기준점은 창 좌표 · 정지 화면은 앞 컷 끝 자리 · 얼굴을 못 보면 가운데 그대로."""
@@ -957,6 +998,26 @@ class ExportSkinTest(WorkMixin, unittest.TestCase):
         fr = editor.export_frame(name, proj, 0.15)
         png = np.asarray(Image.open(core.OUT / fr["file"]).convert("RGB")).astype(int)
         self.assertLess(np.abs(png[mid].reshape(-1, 3).mean(axis=0) - (255, 0, 0)).max(), 40)
+
+    def test_follow_sample_times_and_cut(self):
+        """얼굴 칸 t 의 그림 = t 의 장면 (ffmpeg fps 기본(near)은 t+0.23초까지의 장면을 줘 바뀐 장면을 먼저 봤음 → 창이 컷보다 0.35초 먼저 옮겨감 · round 1) ·
+        두 칸 사이 컷 시각 = 실제로 그림이 바뀐 장면 · 컷이 없으면 None (D-537). 원본: 2.1초에 빨강 → 파랑."""
+        from PIL import Image
+        import face
+        name = self.fix("MSGRAW01")
+        r = subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x180:r=30:d=4", "-vf", "drawbox=c=blue:t=fill:enable='gte(t,2.1)'",
+                            "-c:v", "libx264", "-g", "60", "-pix_fmt", "yuv420p", str(core.VIDEOS / name)], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+
+        def fake_faces(f):
+            px = Image.open(f).convert("RGB").getpixel((5, 5))
+            return [{"box": [0.1 if px[0] > px[2] else 0.8, 0.1, 0.1, 0.3]}]
+        with mock.patch.object(editor, "_face_ready", lambda n: True), mock.patch.object(face, "faces", fake_faces):
+            got = editor.skin_faces(name, [(1.0, 3.0)])
+        self.assertEqual({t: got[t][0][0] for t in (1.0, 1.5, 2.0, 2.5, 3.0)}, {1.0: 0.1, 1.5: 0.1, 2.0: 0.1, 2.5: 0.8, 3.0: 0.8})
+        self.assertAlmostEqual(editor.skin_cut(name, 2.0, 2.5), 2.1, delta=0.034)
+        self.assertIsNone(editor.skin_cut(name, 0.5, 1.0))
+        self.assertIsNone(editor.skin_cut("없는 영상.mp4", 0.5, 1.0))
 
     def test_long_title_stays_in_box(self):
         """검토: 26글자 큰 제목이 두 줄로 바뀌어 흰 상자(177~296) 위로 넘침 → 손으로 고친 긴 글도 한 줄 · 주황 글자 줄은 흰 상자 안 (실제 그림)."""
