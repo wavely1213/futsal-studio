@@ -425,7 +425,7 @@ class FollowTest(unittest.TestCase):
             import tactic
             self.assertAlmostEqual(tactic.media_rect(v, md, seq, W, H, m)["mx"], f["mx"], places=6)
         fit = editor._fit(v, md, seq, W, H, "if(lt(t,1),0,1)")
-        self.assertIn("crop=1080:1120:x='912*(if(lt(t,1),0,1))':0.0", fit["chain"])
+        self.assertIn("crop=w=1080:h=1120:x='912*(if(lt(t,1),0,1))':y=0.0", fit["chain"])   # 이름 붙인 값만 (x= 뒤 순서 값은 ffmpeg 가 잘못 읽음)
         self.assertIn("crop=1080:1120:", editor._fit(v, md, seq, W, H)["chain"])
         self.assertTrue(editor.premiere_motion(v, md, seq, W, H)["animated"])
         q = editor._new_seq("쇼츠", "shorts", [v, au], layout=lay, captionStyle=dict(editor.SHORTS_STYLE))
@@ -434,7 +434,7 @@ class FollowTest(unittest.TestCase):
             (Path(t) / "x.mp4").write_bytes(b"0")
             editor._build_segment(q, mdd, W, H, 30, 0, 150, [], Path(t), 0)
             fc = (Path(t) / "fc0.txt").read_text(encoding="utf-8")
-            self.assertIn("crop=1080:1120:x='912*(if(lt(t,", fc)                              # 움직이는 구간: 시간 식
+            self.assertIn("crop=w=1080:h=1120:x='912*(if(lt(t,", fc)                          # 움직이는 구간: 시간 식
             editor._build_segment(q, mdd, W, H, 30, 240, 270, [], Path(t), 1)
             fc1 = (Path(t) / "fc1.txt").read_text(encoding="utf-8")
             self.assertNotIn("x='", fc1.split("subtitles")[0].split("crop=1080:1120:")[1][:20])   # 안 움직이는 구간: 숫자
@@ -925,6 +925,38 @@ class ExportSkinTest(WorkMixin, unittest.TestCase):
         d = np.abs(png[0:170] - sk_rgb[0:170])[alpha[0:170] == 255].mean()
         self.assertLess(d, 6)
         self.assertEqual(int(((png.max(axis=2) < 60) & (alpha < 128) & see).sum()), 0)        # 찢어진 종이 홈에도 영상 (검토)
+
+    def test_follow_render(self):
+        """얼굴 따라가기 키프레임(rfk)이 있는 클립을 실제로 내보냄 (검토 고침 뒤 실제 렌더에서 ffmpeg 가 crop 옵션을 잘못 읽어 실패했음 — 그래프 글만 보던 시험이
+        못 잡음) — 원본 왼쪽 절반 빨강 · 오른쪽 절반 파랑 · 화면 좌우 0 → 1 (2초) → 처음엔 창 가운데가 빨강, 끝엔 파랑 · 지금 화면 그림도 같은 자리."""
+        import numpy as np
+        from PIL import Image
+        name = self.fix("MSGRAW01")
+        r = subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x360:r=30:d=3", "-f", "lavfi", "-i", "color=c=blue:s=320x360:r=30:d=3",
+                            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-filter_complex", "[0:v][1:v]hstack[v]", "-map", "[v]", "-map", "2:a", "-t", "3",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(core.VIDEOS / name)], capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        info = {"duration": 3.0, "width": 640, "height": 360, "fps": 30.0}
+        lay = editor.skin_layout(info=info)
+        win = editor.skin_window(lay["skin"])
+        v, au = editor._pair(0.0, 2.5, start=0.0)
+        v["rfk"] = [{"t": 0.3, "v": 0.0, "e": "lin"}, {"t": 2.0, "v": 1.0, "e": "lin"}]
+        v["reframe"] = 0.5
+        q = editor._new_seq("쇼츠 따라가기", "shorts", [v, au], captionStyle=editor.skin_caption(dict(editor.SHORTS_STYLE), win["bottom"]), layout=lay,
+                            titles=[], shapes=[])
+        proj = dict(q, captions=[], info=info, source=name, media=[], master={"volume": 1, "normalize": False, "lufs": -14})
+        outs = editor.export(name, proj, {"preset": "youtube", "hw": False, "xml": False, "srt": False}, lambda m: None)
+        mp4 = core.OUT / next(o for o in outs if o.endswith(".mp4"))
+        mid = (slice(int(0.45 * H), int(0.5 * H)), slice(500, 580))
+        for t, want in ((0.15, (255, 0, 0)), (2.3, (0, 0, 255))):
+            a = self.frame(mp4, t)[mid].reshape(-1, 3).mean(axis=0)
+            self.assertLess(np.abs(a - want).max(), 40, (t, a))
+        a = self.frame(mp4, 1.15)                                                                    # 가운데쯤: 창 안에 빨강·파랑 경계가 보임
+        row = a[int(0.48 * H), 60:1020]
+        self.assertTrue((row[:, 0] > 200).any() and (row[:, 2] > 200).any(), row[::120].tolist())
+        fr = editor.export_frame(name, proj, 0.15)
+        png = np.asarray(Image.open(core.OUT / fr["file"]).convert("RGB")).astype(int)
+        self.assertLess(np.abs(png[mid].reshape(-1, 3).mean(axis=0) - (255, 0, 0)).max(), 40)
 
     def test_long_title_stays_in_box(self):
         """검토: 26글자 큰 제목이 두 줄로 바뀌어 흰 상자(177~296) 위로 넘침 → 손으로 고친 긴 글도 한 줄 · 주황 글자 줄은 흰 상자 안 (실제 그림)."""

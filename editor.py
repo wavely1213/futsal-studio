@@ -6609,13 +6609,15 @@ def _fit(it, md, seq, W, H, rfx=None):
         if lay["mode"] == "fill":
             s = max(W / sw, H / vh)
             scw, sch = max(W, _even(sw * s)), max(H, _even(vh * s))
-            cx = f"x='{scw - W}*({rfx})'" if rfx is not None and scw > W else f"{(scw - W) * rf:.1f}"
-            return {"chain": pre + f"scale={scw}:{sch},crop={W}:{H}:{cx}:{(sch - H) / 2:.1f}", "bw": W, "bh": H, "bx": 0, "by": 0, "bg": None}
+            crop = (f"crop=w={W}:h={H}:x='{scw - W}*({rfx})':y={(sch - H) / 2:.1f}" if rfx is not None and scw > W   # (이름 붙인 값 뒤에는 순서 값을 못 씀)
+                    else f"crop={W}:{H}:{(scw - W) * rf:.1f}:{(sch - H) / 2:.1f}")
+            return {"chain": pre + f"scale={scw}:{sch},{crop}", "bw": W, "bh": H, "bx": 0, "by": 0, "bg": None}
         zw = _even(W * max(1.0, float(lay["zoom"])))
         zh = _even(vh * zw / sw)
         ch = min(zh, H)
-        cx = f"x='{zw - W}*({rfx})'" if rfx is not None and zw > W else f"{(zw - W) * rf:.1f}"
-        out = {"chain": pre + f"scale={zw}:{zh},crop={W}:{ch}:{cx}:{(zh - ch) / 2:.1f}", "bw": W, "bh": ch, "bx": 0,
+        crop = (f"crop=w={W}:h={ch}:x='{zw - W}*({rfx})':y={(zh - ch) / 2:.1f}" if rfx is not None and zw > W   # (이름 붙인 값 뒤에는 순서 값을 못 씀)
+                else f"crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}")
+        out = {"chain": pre + f"scale={zw}:{zh},{crop}", "bw": W, "bh": ch, "bx": 0,
                "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
         if lay["mode"] == "box" and (lay.get("band") or lay.get("logo")):   # 은평 스타일 띠 그림·로고 (BR-280 · BR-281 · 없으면 예전과 같은 값)
             out.update(band=lay.get("band"), logo=lay.get("logo"))
@@ -6627,8 +6629,9 @@ def _fit(it, md, seq, W, H, rfx=None):
     scw, sch = _even(sw * s), _even(sh * s)
     if cover:
         scw, sch = max(scw, W), max(sch, H)
-        cx = f"x='{scw - W}*({rfx})'" if rfx is not None and scw > W else f"{(scw - W) * rf:.1f}"
-        return {"chain": f"scale={scw}:{sch},crop={W}:{H}:{cx}:{(sch - H) / 2:.1f}", "bw": W, "bh": H, "bx": 0, "by": 0, "bg": None}
+        crop = (f"crop=w={W}:h={H}:x='{scw - W}*({rfx})':y={(sch - H) / 2:.1f}" if rfx is not None and scw > W
+                else f"crop={W}:{H}:{(scw - W) * rf:.1f}:{(sch - H) / 2:.1f}")
+        return {"chain": f"scale={scw}:{sch},{crop}", "bw": W, "bh": H, "bx": 0, "by": 0, "bg": None}
     return {"chain": f"scale={scw}:{sch}", "bw": scw, "bh": sch, "bx": (W - scw) / 2, "by": (H - sch) / 2, "bg": None}
 
 
