@@ -3317,6 +3317,8 @@ class _Build:
         self.cap_lim = None  # 은평 스타일 말 자막 아래 끝 한계 (전체 강좌 줄·로고 위 · editor.ep_cap_lim)
         self.fixed = set()  # 자리를 옮기지 않는 글자 id (은평 스타일 큰 제목·사실 줄 · 스킨 큰 제목·주제 줄)
         self.skin = None   # 풋살사관학교 스킨 영상 창 {top, bottom} (BR-323 · 화면 구성은 B.lay · 위·아래 띠는 글자 자리 정리에서 피함)
+        self.skin_faces = None   # 스킨: 얼굴 따라가기가 본 얼굴 {원본 시각: 상자들} (MSG 글자가 얼굴을 피함 · editor.skin_screen_faces · D-538)
+        self.skin_rep = {}   # 스킨: 얼굴 모델을 못 썼는지 (noFace → 편집본 skinNoFace · '확인할 것')
 
     def clip(self, a, b, speed=1.0, fx=None, nocaps=False, mute=False, vol_db=0.0, main=False, color=None):
         v, au = editor._pair(a, b, start=round(self.pos, 4))
@@ -4117,8 +4119,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         # 다큐: 처음부터 끝까지 위아래 검은 띠 (영화 화면 느낌 · 화면 사건이 아님) — 제목 화면에만 띠가 있다가 없어지면 화면이 튐 (판정)
         for y in (0.0, 1.0 - LETTERBOX):
             B.shape(0.0, y, 1.0, LETTERBOX, "#000000", 0.0, total, 1.0, 0, "검은 띠 (영화 화면)")["full"] = True
-    if B.skin:   # 스킨: 화면 좌우는 얼굴을 따라 · 확대 기준점은 창 좌표로 (BR-326 · 전술 그림·글자 자리를 셈하기 전에)
-        editor.skin_reframe(name, B.items, B.lay)
+    if B.skin:   # 스킨: 화면 좌우는 얼굴·공을 따라 · 세로 원본은 위아래도 · 확대 기준점은 창 좌표로 (BR-326 · BR-328 · 전술 그림·글자 자리를 셈하기 전에)
+        B.skin_faces = editor.skin_reframe(name, B.items, B.lay, info=info, speech=[(w[0], w[1]) for w in words], report=B.skin_rep)
     caps_tl = editor.timeline_captions({"items": B.items, "captions": caps, "format": fmt}) if st["captions"].get("on", True) else []
     lay_cap = editor.skin_caption(_caption_style(st, fmt, cap_y), B.skin["bottom"]) if B.skin else _caption_style(st, fmt, cap_y)   # 스킨: 실제 말 자막(96 · D-529)을 피함
     layout_titles(B, caps_tl, lay_cap, total, face_box(sig), moms if intensity != "담백" else (), words, intensity in VITAL_LEVELS)
@@ -4162,6 +4164,8 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
                           voice=dict(VOICE))
     seq["tracks"] = tracks
     seq["auto"] = "msg"
+    if B.skin and B.skin_rep.get("noFace"):   # 얼굴 모델을 못 써 창을 얼굴에 맞추지 못함 → 내보낸 뒤 검수 '확인할 것' (D-538)
+        seq["skinNoFace"] = True
     if B.card or B.skin:  # 은평 스타일·스킨 큰 제목·사실(주제) 줄·흰 상자는 편집본 끝까지 (끝에 남는 효과음·배경음악 꼬리까지 · BR-241 · BR-321)
         end = round(editor.seq_total(seq), 3)
         for x in [t for t in B.titles if t["id"] in B.fixed] + [g for g in B.shapes if g.get("plan") in ("card", "series")]:
@@ -4512,6 +4516,8 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
     lr = editor.ep_logo_rect(getattr(B, "lay", None), W, H) if getattr(B, "card", False) else None
     if lr:   # 아래 띠 로고 자리에는 어떤 글자도 (BR-283 · 밀어낸 강조·상황·속마음 글자도 0.86~0.95 로 내려가 로고를 덮지 않게)
         fboxes.append(lr)
+    sk_faces = getattr(B, "skin_faces", None) if getattr(B, "skin", None) else None
+    sk_seq = {"format": "shorts", "layout": getattr(B, "lay", None) or {}, "info": getattr(B, "info", None) or {}}
     if getattr(B, "skin", None):   # 풋살사관학교 스킨(BR-323): 위 띠(0 ~ 영상 창 위 끝)·아래 띠(창 아래 끝 ~ 화면 끝)에는 고정 글자(큰 제목·주제 줄) 말고 어떤 글자도
         fboxes += editor.skin_bands(B.lay, W, H)
     for t in sorted(B.titles, key=lambda t: (LAYOUT_PRI.get(kind_of.get(t["id"]), 9), t["start"])):
@@ -4532,13 +4538,20 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
         y0 = float(st["y"])
         on_caps = band is not None and any(min(b, t["start"] + t["dur"]) - max(a, t["start"]) > 0.02 for a, b, _ in cboxes)
 
-        avoid_face = fpx is not None and kind_of.get(t["id"]) not in FACE_FREE
+        a, b = t["start"], t["start"] + t["dur"]
+        # 스킨 쇼츠(D-538): 창 안 얼굴이 기본 배치보다 1.84배 커 가운데 높이(0.48)의 반응·숫자 글자가 눈·코를 덮었음 (검토 edit r1) →
+        # 얼굴 따라가기가 본 그 장면 얼굴(화면 좌표 · 글자 처음·가운데·끝)을 피함 (기본·은평 배치는 그대로)
+        fsk = []
+        if sk_faces and kind_of.get(t["id"]) not in FACE_FREE:
+            for tt in (a + 0.2, (a + b) / 2, b - 0.2):
+                fsk += [[x * W, y * H, (x + w) * W, (y + h) * H] for x, y, w, h in editor.skin_screen_faces(B.items, tt, sk_seq, sk_faces, W, H) or ()]
+        avoid_face = (fpx is not None or bool(fsk)) and kind_of.get(t["id"]) not in FACE_FREE
 
-        def free(y, a, b, face_ok=False):
-            bx = text_box(t["text"], dict(st, y=y), W, H)
+        def free(y, a, b, face_ok=False, x=None):
+            bx = text_box(t["text"], dict(st, y=y) if x is None else dict(st, y=y, x=x), W, H)
             if bx[1] < sy0 - 0.5 or bx[3] > sy1 + 0.5:
                 return False
-            if avoid_face and not face_ok and _overlap(bx, fpx) > 0.12:
+            if avoid_face and not face_ok and ((fpx is not None and _overlap(bx, fpx) > 0.12) or any(_overlap(bx, f) > 0.12 for f in fsk)):
                 return False
             if any(_overlap(bx, fb) > 0 for fb in fboxes):
                 return False
@@ -4548,9 +4561,25 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
             if len(same) >= 2 and any(sum(1 for q_a, q_b, _ in same if q_a <= m < q_b) >= 2 for m in [a] + [x for q in same for x in (q[0], q[1]) if a <= x < b]):
                 return False  # 화면 글자는 한꺼번에 2개까지
             return not any(_overlap(bx, pb) > 0.05 for p_a, p_b, pb in same)
-        a, b = t["start"], t["start"] + t["dur"]
         ys = [y0] + [round(y0 + d * sg, 3) for d in (0.07, 0.14, 0.21, 0.28, 0.35, 0.42, 0.5) for sg in ((-1, 1) if y0 >= 0.5 else (1, -1))]
         y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b)), None)
+        if y is None and fsk:   # 스킨: 위아래로 피할 곳이 없으면(창 높이를 거의 채운 얼굴) 얼굴 옆으로 · 그래도 안 되면 글자를 조금 줄여 옆으로
+            size0 = float(st.get("size") or 50)   # (skin_emph_placer 의 '머리 옆'과 같은 뜻 · 0.85·0.7 배까지 · D-538)
+            for k in (1.0, 0.85, 0.7):
+                st["size"] = size0 if k == 1.0 else max(24, int(size0 * k))
+                bk = text_box(t["text"], st, W, H)
+                bw0, c0 = bk[2] - bk[0], (bk[0] + bk[2]) / 2
+                xs = sorted({round(c / W, 4) for f in fsk for c in (f[0] - editor.TXT_GAP * W - bw0 / 2, f[2] + editor.TXT_GAP * W + bw0 / 2)
+                             if sx0 <= c - bw0 / 2 and c + bw0 / 2 <= sx1}, key=lambda c: abs(c * W - c0))
+                for xx in xs:
+                    y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b, x=xx)), None)
+                    if y is not None:
+                        st["x"] = xx
+                        break
+                if y is not None:
+                    break
+            if y is None:
+                st["size"] = size0
         if y is None and avoid_face:  # 얼굴을 피할 자리가 없으면 가리더라도
             y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b, True)), None)
         if y is None:  # 자리가 없으면 앞 글자가 사라진 뒤로 늦춤 (남는 시간이 MIN_TEXT 넘을 때만)

@@ -2933,7 +2933,8 @@ def _a_export(svc, dev, a, tok):
 def _a_qa(svc, dev, a, tok):
     f = _out_file(a.get("file"))
     meta = editor.EXPORT_META.get(f.name) or {}
-    return svc._go(dev, "영상 검수", lambda: qa.check_video(f, meta.get("format"), meta.get("master"), editor.run_killable), f.name)
+    return svc._go(dev, "영상 검수", lambda: qa.check_video(f, meta.get("format"), meta.get("master"), editor.run_killable,
+                                                                  **({"notes": meta["notes"]} if meta.get("notes") else {})), f.name)
 
 
 def _a_preview(svc, dev, a, tok):

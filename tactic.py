@@ -511,7 +511,15 @@ def media_rect(it, md, seq, W, H, m=None):
         s = zw / sw
         zh = vh * s
         ch = min(zh, H)
-        return {"bx": 0.0, "by": (H - ch) * float(lay.get("vpos", 0.5)), "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf, "my": -(zh - ch) / 2 - ct * sh * s}
+        by, my = (H - ch) * float(lay.get("vpos", 0.5)), -(zh - ch) / 2 - ct * sh * s
+        if it.get("vshift"):   # 스킨 위아래 맞춤 (editor.skin_vshift · fit_rect 와 같은 셈 · BR-328)
+            import editor
+            dv = editor.skin_vshift(it, lay, H)
+            if dv:
+                top = by - (zh - ch) / 2 + dv
+                by2 = max(0.0, top)
+                ch, my, by = min(float(H), top + zh) - by2, top - by2 - ct * sh * s, by2
+        return {"bx": 0.0, "by": by, "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf, "my": my}
     if fit == "auto":
         fit = "native" if md.get("kind") == "image" and not md.get("freeze") and sw <= W and sh <= H else "contain"
     s = 1.0 if fit == "native" else max(W / sw, H / sh) if fit == "cover" else min(W / sw, H / sh)

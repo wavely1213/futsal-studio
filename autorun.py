@@ -664,8 +664,9 @@ def _export_one(c, o):
     meta = editor.EXPORT_META.get(mp4) or {}
     try:  # 검수 (소리 크기·검은 화면·멈춘 화면 · 편집실 '영상 검수'와 같은 것)
         r = qa.check_video(core.OUT / mp4, meta.get("format") or ("shorts" if o.get("kind") == "shorts" else "long"), meta.get("master"),
-                           editor.run_killable)
-        o["qa"] = [{"lv": x["lv"], "title": x["title"], "msg": x["msg"], "t": x.get("t")} for x in r.get("items") or [] if x["lv"] != "ok"]
+                           editor.run_killable, **({"notes": meta["notes"]} if meta.get("notes") else {}))   # (편집본 알림 · D-538)
+        o["qa"] = [{"lv": x["lv"], "title": x["title"], "msg": x["msg"], "t": x.get("t"), **({"note": True} if x.get("note") else {})}
+                   for x in r.get("items") or [] if x["lv"] != "ok"]
         o["qaScore"] = r.get("score")
     except Exception as e:  # noqa: BLE001 — 검수를 못 해도 완성본은 그대로
         if _cancelled():
@@ -919,7 +920,7 @@ def checklist(st):
             add("export", "bad", f"{nm} · 아직 내보내지 못했어요" + (f" · {o['exportFail']}" if o.get("exportFail") else ""), key)
         for q in o.get("qa") or []:
             loud = q["title"] in LOUD_TITLES
-            if loud or q["lv"] == "bad":
+            if loud or q["lv"] == "bad" or q.get("note"):   # (note: 편집본이 남긴 알림 — 스킨 영상 창을 얼굴에 못 맞춤 등 · D-538)
                 add("loud" if loud else "qa", q["lv"], f"{nm} · {q['title']} · {q['msg']}", key, q.get("t"))
         ti = o.get("thumbInfo") or {}
         if o.get("seq") and not o.get("thumb") and tried("thumbs") and o.get("thumbFail") == NO_PAGE:

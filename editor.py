@@ -1954,7 +1954,8 @@ SKIN_TITLE_FLOOR = 24  # 손으로 고친 아주 긴 큰 제목도 한 줄로 �
 SKIN_AUTO_MIN = 80     # 가편집·MSG 가 만드는 큰 제목은 한 줄로 이 크기 이상 (안 들어가면 앞 구절·포인트 말·영상 주제로 · skin_headline · D-531)
 SKIN_TOPIC_SIZES = (96, 88, 80, 72, 64, 56, 48)  # 주제 줄 글자 크기 (한 줄로 화면 폭 90% 안 가장 큰 것 · 큰 제목보다 크지 않게 · 소유자 쇼츠 약 97 · D-532)
 SKIN_BOX = {"y": 0.0922, "h": 0.0625}            # 흰 상자 위 끝·높이 (화면 비율 · 소유자 쇼츠에서 잰 177~297화소)
-SKIN_BOX_MAX = 0.9     # 흰 상자 가장 넓게 (화면 폭 비율)
+SKIN_BOX_MAX = 0.74    # 흰 상자 가장 넓게 (화면 폭 비율 · 위 칠판 띠 양옆 점선 원호(x 107~129 · 967~990화소)를 덮지 않게 x 140~940 · 예전 0.9 · D-538)
+SKIN_TOPIC_MAX = 0.9   # 주제 줄 한 줄 폭 한도 (화면 폭 비율 · 원호 아래 줄이라 상자보다 넓어도 됨)
 SKIN_RADIUS = 17       # 흰 상자 모서리 둥글기 (% · 짧은 변 절반 기준 → 높이 120화소 상자에서 10화소)
 # hug "skin": 이 글은 Pretendard Black 실제 글자 폭 표(SKIN_HUG)로 한 줄인지 셈하고 한 줄이면 줄을 바꾸지 않음 (ASS \q2 · 미리보기 nowrap · D-531 · D-533)
 SKIN_TITLE = dict(DEFAULT_STYLE, weight="Black", size=96, fill="#CE4F2F", stroke="#CE4F2F", strokeW=0, bgOn=False, x=0.5, align="center",
@@ -1969,6 +1970,8 @@ SKIN_CAP_UP = 0.046    # 말 자막 아래 끝 = 영상 창 아래 끝 - 이만�
 # cap_fit 이 글자만 줄여 한 줄로 · editor.html SKIN.CAP 과 같은 값 — 한쪽을 고치면 다른 쪽도
 SKIN_CAP = {"weight": "Black", "size": 96, "fill": "#FFFFFF", "stroke": "#000000", "strokeW": 10, "bgOn": False, "hug": "skin"}
 SKIN_CAP_ROOM = 0.95   # 스킨 말 자막 한 줄 폭 한도 (화면 폭 비율 · 테두리 포함 · 소유자 줄 1000화소 = 93% · 다른 자막은 90% · D-533)
+SKIN_CAP_MIN = 0.5     # 스킨 말 자막: 0.7 배로도 한 줄이 안 되는 긴 글은 두 줄까지 들게 이만큼까지 줄임 (_skin_two · D-538)
+SKIN_CAP_TWO = 0.92    # 두 줄 셈 여유 (libass 는 줄 길이를 고르게 나눠 우리 셈보다 조금 일찍 줄을 바꿈)
 # 흰 상자 폭·스킨 말 자막 한 줄 셈에 쓰는 Pretendard Black 실제 글자 폭 (글자 크기 1 기준 · fonts/Pretendard-Black.otf 의 글자 나아감 · 천분의 일 · D-526 · D-533) —
 # 큰 제목 글자 크기 고르기는 넉넉한 어림(_text_w · 한글 0.95)을 그대로 씀 · 표에 없는 글자(이모지 등)는 그 어림 · editor.html SKIN_HUG 와 같은 표
 _SKIN_HUG_ASCII = "218 340 375 642 646 1024 674 195 423 423 584 671 307 460 301 396 703 488 626 654 679 647 663 592 668 663 301 301 671 671 671 577 871 767 647 744 711 603 567 749 728 281 568 690 554 903 704 771 636 772 646 646 664 702 767 1055 734 737 671 423 396 423 483 477 482 572 625 586 625 589 388 628 625 283 283 586 283 910 624 605 627 627 417 567 391 627 585 847 576 585 572 423 389 423 671"   # ' '(0x20) ~ '~'(0x7E)
@@ -2149,19 +2152,20 @@ def skin_box_fit(t, g):
 
 def skin_box(top, length):
     """스킨 흰 제목 상자 (도형 · 둥근 모서리 · 처음부터 끝까지 · plan "card" — 편집실이 다른 템플릿으로 바꾸면 지움 · 폭은 큰 제목(top)에 맞춤)."""
-    g = {"id": _nid(), "name": "제목 상자", "x": 0.05, "y": SKIN_BOX["y"], "w": SKIN_BOX_MAX, "h": SKIN_BOX["h"], "color": "#FFFFFF",
+    g = {"id": _nid(), "name": "제목 상자", "x": round(0.5 - SKIN_BOX_MAX / 2, 4), "y": SKIN_BOX["y"], "w": SKIN_BOX_MAX, "h": SKIN_BOX["h"], "color": "#FFFFFF",
          "opacity": 1.0, "radius": SKIN_RADIUS, "start": 0.0, "dur": round(float(length), 3), "full": True, "plan": "card"}
     skin_box_fit(top, g)
     return g
 
 
 def skin_topic_style(text, top, most=None):
-    """스킨 주제 줄 모양 — 한 줄로 화면 폭 90% 안에 들어가는 가장 큰 글자 (most: 큰 제목 글자 크기 — 그보다 크지 않게 · D-531) · 가운데 SKIN_TOPIC_CY ·
+    """스킨 주제 줄 모양 — 한 줄로 화면 폭 90% 안에 들어가는 가장 큰 글자 (most: 큰 제목 글자 크기 — 그보다 크지 않게 · 48 밑이면 그 크기 · D-531 · D-538) · 가운데 SKIN_TOPIC_CY ·
     글 상자 아래 끝은 영상 창 위 끝(top) - SKIN_TOPIC_GAP 위까지 (넘으면 그만큼 위로 · 내림) — editor.html skinTopicStyle 과 같은 셈."""
     W, H = frame_size("shorts")
-    sizes = [z for z in SKIN_TOPIC_SIZES if most is None or z <= float(most)] or [SKIN_TOPIC_SIZES[-1]]
+    # 큰 제목이 48 보다 작으면(손으로 고친 아주 긴 글) 주제 줄도 그 크기까지 (예전: 48 아래로는 안 내려가 큰 제목보다 컸음 · 검토 robust r1 · D-538)
+    sizes = [z for z in SKIN_TOPIC_SIZES if most is None or z <= float(most)] or [max(SKIN_TITLE_FLOOR, math.floor(float(most)))]
     with ep_font_scope(False):
-        size = next((z for z in sizes if _text_w(text, dict(SKIN_TOPIC, size=z)) <= SKIN_BOX_MAX * W), sizes[-1])
+        size = next((z for z in sizes if _text_w(text, dict(SKIN_TOPIC, size=z)) <= SKIN_TOPIC_MAX * W), sizes[-1])
     y = SKIN_TOPIC_CY + TXT_LINE * size / 2 / H
     lim = math.floor((float(top) - SKIN_TOPIC_GAP) * 10000 + 1e-6) / 10000
     return dict(SKIN_TOPIC, size=size, y=round(min(y, lim), 4))
@@ -2217,7 +2221,19 @@ SKIN_FOLLOW_SMOOTH = 2    # 따라갈 때 앞뒤 이만큼 칸(±1초)의 평균
 SKIN_FOLLOW_TOL = 0.015   # 키프레임 줄이기 허용 (reframe 값 · 원본 폭 0.7% 쯤)
 SKIN_FOLLOW_SPAN = 240.0  # 한 번에 볼 원본 길이 한도 (초 · 넘는 묶음은 가운데 그대로)
 SKIN_CUT_SCENE = 0.2      # 장면이 바뀐 두 칸 사이에서 이만큼 넘게 그림이 바뀐 장면(ffmpeg scene 값)이 있으면 그 장면에서 바로 옮김 (D-537)
+# 공도 창 안에 (D-538 · 검토 edit r1: 시범·다시 보기 장면에서 공이 창 밖 — 공 칸 240개 중 약 70개) — 얼굴과 같은 칸 그림을 선수·공 찾기 모델(detect)로 봄
+SKIN_BALL_MIN = 0.3       # 공일 확률이 이만큼 넘는 공만 (detect.B_THR 0.2 보다 높게 · 등·무릎을 공으로 잘못 본 것 줄임)
+SKIN_BALL_PAD = 0.05      # 공 상자 양옆이 창 가장자리에서 이만큼(원본 폭 비율) 안쪽 (공은 빨리 움직여 얼굴보다 넉넉히)
+SKIN_BALL_HOLD = 2        # 공을 못 본 칸은 앞 칸 공 자리를 이만큼 칸(1초)까지 이어서 지킴 (공 찾기가 칸마다 깜빡여도 창이 흔들리지 않게)
+SKIN_SPEAKER_H = 0.15     # 이만큼(화면 높이 비율) 안 되는 얼굴은 말하는 사람 크기가 아님 (넓은 시범 장면의 선수) → 공과 함께 안 들면 공 먼저
+SKIN_CLOSEUP_H = 0.25     # 이만큼 넘는 얼굴은 가까이 찍은 말하는 사람 — 말이 잠깐 끊겨도 얼굴 먼저 (공이 곁에 굴러가도 창이 공으로 가지 않게)
+SKIN_SPEAK_PAD = 0.3      # 받아쓴 낱말 앞뒤 이만큼(초)도 말하는 중 (문장 사이 짧은 쉼에 창이 공으로 갔다 오지 않게)
+SKIN_QUIET_MIN = 3        # 말 없는 칸이 이만큼(1초) 넘게 이어지면 시범 장면 — 얼굴과 공이 함께 안 들면 공 먼저 (말하는 중이면 얼굴)
+# 위아래 맞춤 (세로 9:16·4:5 처럼 덮을 곳보다 높은 원본 · D-538 · 검토 r1: 머리 위·이마가 위 띠에 가림)
+SKIN_VHEAD = 0.06         # 얼굴 상자 위 끝을 영상 창 위 끝에서 이만큼(화면 높이 비율) 아래로 (머리카락·이마까지 창 안)
+SKIN_VMARGIN = 2          # 위아래로 옮겨도 덮을 곳 + SKIN_BLEED 를 이만큼(화소 · 1920 기준) 더 덮게 (720·4K 반올림)
 _SKIN_FACES = {}          # (영상 경로, 크기, 고친 시각) → {원본 시각(0.5초 칸): [[x, y, w, h], …] 큰 것부터 | None}
+_SKIN_OBJS = {}           # (영상 경로, 크기, 고친 시각) → {원본 시각(0.5초 칸): [공 [x, y, w, h, 확률] | None, 사람 상자들] | None}
 _SKIN_CUTS = {}           # (영상 경로, 크기, 고친 시각, a, b) → 바뀐 장면 원본 시각 | None
 _SKIN_FACES_LOCK = threading.Lock()
 
@@ -2243,51 +2259,103 @@ def _skin_grid(a, b):
     return [round(k * step, 2) for k in range(max(0, math.floor(a / step + 1e-6)), math.ceil(b / step - 1e-6) + 1)]
 
 
-def skin_faces(name, spans):
-    """원본 구간들 [(a, b)] 의 0.5초 칸마다 얼굴 상자 {시각: [[x, y, w, h], …] (큰 것부터) | None} — 아직 못 본 칸만 이어진 칸끼리 ffmpeg 하나로 차례로 풀어
-    (FACE_W 크기 · 칸마다 다시 찾아가는 것보다 3배쯤 빠름) 4장씩 얼굴 찾기 · 영상마다 기억 · 얼굴 모델이 없거나(내려받지 않음) 못 보면 None."""
+def _skin_models(name):
+    """스킨 따라가기에 쓸 모델 (얼굴 · 선수·공) — 없으면 내려받음 (처음 한 번 · 얼굴·표정 약 36MB · 선수·공 약 4MB · 못 받으면 10분 동안은 다시 안 기다림) ·
+    띄운 진행 표시는 원래대로 돌려놓음 (가편집은 바로 답하는 요청) → (얼굴 됨, 공 됨). 예전: 얼굴 모델을 아직 안 받은 PC 는 받지 않고 조용히 가운데 그대로였음
+    (검토 robust r1 · 그 뒤 모델이 와도 만든 쇼츠는 그대로 · D-538)."""
+    before = dict(core.PROGRESS)
+    try:
+        try:
+            import face
+            f_ok = bool(face.ensure(item=name, label=FACE_LABEL))
+        except Exception:  # noqa: BLE001
+            f_ok = False
+        try:
+            import detect
+            d_ok = bool(detect.ensure(item=name, label=FACE_LABEL))
+        except Exception:  # noqa: BLE001
+            d_ok = False
+    finally:
+        if core.PROGRESS.get("label") == FACE_LABEL:
+            core.set_progress(**before)
+    return f_ok, d_ok
+
+
+def _skin_scan(name, want):
+    """원본 시각들(0.5초 칸)의 얼굴(_SKIN_FACES)·공과 사람(_SKIN_OBJS)을 채움 — 아직 못 본 칸만 이어진 칸끼리 ffmpeg 하나로 차례로 풀어 (FACE_W 크기 ·
+    칸마다 다시 찾아가는 것보다 3배쯤 빠름) 4장씩 얼굴 찾기·선수·공 찾기 · 영상마다 기억 · 모델을 못 쓰면 그 기억은 비워 둠(다음에 다시) → (얼굴 기억, 공 기억) | None."""
     p = core.VIDEOS / str(name)
-    want = sorted({t for a, b in spans for t in _skin_grid(float(a), float(b))})
     try:
         stt = p.stat()
     except OSError:
-        return {t: None for t in want}
+        return None
     key = (str(p), stt.st_size, stt.st_mtime_ns)
     with _SKIN_FACES_LOCK:
-        cache = _SKIN_FACES.setdefault(key, {})
-        todo = [t for t in want if t not in cache]
-    if todo:
-        step = 1.0 / SKIN_FOLLOW_FPS
+        fc, oc = _SKIN_FACES.setdefault(key, {}), _SKIN_OBJS.setdefault(key, {})
+        miss = [t for t in want if t not in fc or t not in oc]
+    if not miss:
+        return fc, oc
+    step = 1.0 / SKIN_FOLLOW_FPS
+    with idle.using():  # 가편집은 바로 답하는 요청 — 쉬는 동안 내려놓기가 얼굴 모델을 지우지 않게 (face_anchors 와 같음)
+        f_ok, d_ok = _skin_models(name)
+        with _SKIN_FACES_LOCK:
+            todo = [t for t in miss if (f_ok and t not in fc) or (d_ok and t not in oc)]
         groups = []
         for t in todo:
             if groups and t - groups[-1][-1] <= step + 1e-6:
                 groups[-1].append(t)
             else:
                 groups.append([t])
-        with idle.using():  # 가편집은 바로 답하는 요청 — 쉬는 동안 내려놓기가 얼굴 모델을 지우지 않게 (face_anchors 와 같음)
-            if not _face_ready(name):
-                return {t: cache.get(t) for t in want}
-            import face
-            for g in groups:
-                with tempfile.TemporaryDirectory(prefix="skin_faces_") as d:
-                    # round=up: 칸 t 의 그림 = t 또는 바로 앞 장면 (기본 near 는 t+0.23초까지의 장면이라 바뀐 장면을 0.25초 먼저 봤음 · D-537)
-                    r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{g[0]:.3f}", "-t", f"{g[-1] - g[0] + step / 2:.3f}", "-i", str(p),
-                                  "-vf", f"fps={SKIN_FOLLOW_FPS}:round=up,scale='min({FACE_W},iw)':-2", "-q:v", "3", str(Path(d) / "f_%05d.jpg")])
-                    files = sorted(Path(d).glob("f_*.jpg")) if r.returncode == 0 else []
+        import face
+        import detect
+        for g in groups:
+            with tempfile.TemporaryDirectory(prefix="skin_faces_") as d:
+                # round=up: 칸 t 의 그림 = t 또는 바로 앞 장면 (기본 near 는 t+0.23초까지의 장면이라 바뀐 장면을 0.25초 먼저 봤음 · D-537)
+                r = core.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{g[0]:.3f}", "-t", f"{g[-1] - g[0] + step / 2:.3f}", "-i", str(p),
+                              "-vf", f"fps={SKIN_FOLLOW_FPS}:round=up,scale='min({FACE_W},iw)':-2", "-q:v", "3", str(Path(d) / "f_%05d.jpg")])
+                files = sorted(Path(d).glob("f_*.jpg")) if r.returncode == 0 else []
 
-                    def one(f):
+                def one(f):
+                    fs = ob = None
+                    if f_ok:
                         try:
                             fs = face.faces(f)
                         except Exception:  # noqa: BLE001 — 장면 하나를 못 봐도 계속
                             fs = None
-                        return None if fs is None else [list(x["box"]) for x in fs]
-                    with ThreadPoolExecutor(4, thread_name_prefix="model-face") as ex:
-                        res = list(ex.map(one, files[:len(g)]))
-                with _SKIN_FACES_LOCK:
-                    for i, t in enumerate(g):
-                        cache[t] = res[i] if i < len(res) else None
+                    if d_ok:
+                        try:
+                            pp = detect.people(f)
+                        except Exception:  # noqa: BLE001
+                            pp = None
+                        ob = None if pp is None else [pp.get("ball"), pp.get("persons") or []]
+                    return (None if fs is None else [list(x["box"]) for x in fs]), ob
+                with ThreadPoolExecutor(4, thread_name_prefix="model-face") as ex:
+                    res = list(ex.map(one, files[:len(g)]))
+            with _SKIN_FACES_LOCK:
+                for i, t in enumerate(g):
+                    fs, ob = res[i] if i < len(res) else (None, None)
+                    if f_ok and t not in fc:
+                        fc[t] = fs
+                    if d_ok and t not in oc:
+                        oc[t] = ob
+    return fc, oc
+
+
+def skin_faces(name, spans):
+    """원본 구간들 [(a, b)] 의 0.5초 칸마다 얼굴 상자 {시각: [[x, y, w, h], …] (큰 것부터) | None} — _skin_scan (얼굴 모델이 없으면 내려받음 · 못 쓰거나 못 보면 None)."""
+    want = sorted({t for a, b in spans for t in _skin_grid(float(a), float(b))})
+    got = _skin_scan(name, want)
     with _SKIN_FACES_LOCK:
-        return {t: cache.get(t) for t in want}
+        return {t: (got[0].get(t) if got else None) for t in want}
+
+
+def skin_objs(name, spans):
+    """원본 구간들의 0.5초 칸마다 [공 [x, y, w, h, 확률] | None, 사람 상자들 [[x, y, w, h, 확률], …]] | None (선수·공 찾기 모델 detect · 얼굴과 같은 칸 그림 ·
+    못 쓰면 None · D-538)."""
+    want = sorted({t for a, b in spans for t in _skin_grid(float(a), float(b))})
+    got = _skin_scan(name, want)
+    with _SKIN_FACES_LOCK:
+        return {t: (got[1].get(t) if got else None) for t in want}
 
 
 def skin_cut(name, a, b):
@@ -2341,16 +2409,41 @@ def _rdp(pts, tol):
     return _rdp(pts[:fi + 1], tol)[:-1] + _rdp(pts[fi:], tol)
 
 
-def skin_follow(samples, v, cut=None):
+def _skin_ball_track(balls, n):
+    """칸마다 공 [x, y, w, h, 확률] | None → ([(가운데, 왼, 오른) | None], [그 칸에서 본 공인지]) — 확률 SKIN_BALL_MIN 넘는 공이 앞뒤 칸(0.35 안)에 공이
+    있을 때(한 칸만 잡힌 것은 등·무릎을 잘못 본 것) · 그보다 낮은 공(0.2~)은 앞뒤 칸 확실한 공 곁일 때만 · 못 본 칸은 앞 칸 공 자리를 SKIN_BALL_HOLD 칸까지 이어서
+    (공 찾기가 칸마다 깜빡임)."""
+    raw = (list(balls or []) + [None] * n)[:n]
+    bl = [(float(b[0]) + float(b[2]) / 2, float(b[0]), float(b[0]) + float(b[2]), float(b[4]) if len(b) > 4 else 1.0) if b else None for b in raw]
+
+    def near(i, p, strong):
+        return any(q and abs(q[0] - p[0]) <= 0.35 and (not strong or q[3] >= SKIN_BALL_MIN) for q in (bl[i - 1] if i else None, bl[i + 1] if i + 1 < n else None))
+    keep = [p[:3] if p and ((p[3] >= SKIN_BALL_MIN and near(i, p, False)) or near(i, p, True)) else None for i, p in enumerate(bl)]
+    out, last, gap = [], None, 0
+    for p in keep:
+        if p:
+            last, gap = p, 0
+        else:
+            gap += 1
+        out.append(p or (last if last and gap <= SKIN_BALL_HOLD else None))
+    return out, [bool(p) for p in keep]
+
+
+def skin_follow(samples, v, cut=None, balls=None, quiet=None, people=None):
     """얼굴 따라가기 계획 (BR-326) — samples [(원본 시각, 얼굴 상자들 | None)] (시각 차례) · v: 창에 보이는 원본 가로 몫 →
     (rf, keys): 한 자리로 모든 칸의 얼굴이 창 안에 들면 (그 자리, None) · 아니면 (가운데 값, [(시각, rf)] 직선 키프레임 — 장면 안은 앞뒤 1초 평균으로 천천히 ·
     얼굴이 SKIN_FOLLOW_JUMP 넘게 뛴 곳은 cut(a, b) 가 두 칸 사이 컷 시각을 주면 그 컷에서 바로, 아니면 두 칸 사이를 미끄러지듯) ·
-    얼굴을 한 번도 못 보거나 다 보이는 화면(v ≥ 1)이면 (None, None).
+    얼굴도 공도 한 번도 못 보거나 다 보이는 화면(v ≥ 1)이면 (None, None).
     얼굴은 가장 큰 것 — 앞 칸 얼굴 가까이(0.1)에 절반 넘는 크기의 얼굴이 있으면 그것 (두 사람이 번갈아 커져도 화면이 튀지 않게) ·
     한 칸만 딴 데로 뛰고 앞뒤 칸이 같은 자리면 그 칸은 잘못 본 것(지나가는 사람·얼굴 아닌 것) → 앞 칸 자리 (0.5초 동안 창이 갔다 오지 않게 · D-537) ·
-    맨 앞·끝 칸은 안쪽 칸과 사이에 컷이 없을 때만 (컷 너머 다음 장면이면 진짜)."""
+    맨 앞·끝 칸은 안쪽 칸과 사이에 컷이 없을 때만 (컷 너머 다음 장면이면 진짜).
+    공 (D-538 · 검토 edit r1: 시범·다시 보기 장면에서 공이 창 밖): balls 칸마다 공 [x, y, w, h, 확률] | None (samples 와 같은 차례 · _skin_ball_track) ·
+    quiet 칸마다 시범 장면인지(말 없는 칸이 이어짐 · 다시 보기·느린 화면) · people 칸마다 사람 상자들 — 공도 창 안(양옆 SKIN_BALL_PAD)에:
+    얼굴과 함께 들면 둘 다 · 안 들면 시범 장면·작은 얼굴(SKIN_SPEAKER_H 밑)이거나 이 칸에서 얼굴을 못 봤으면 공 먼저(얼굴 쪽으로 가장 가깝게 ·
+    가까이 찍은 얼굴 SKIN_CLOSEUP_H 넘으면 얼굴) · 말하는 중이면 얼굴 · 얼굴이 없으면 공(공 곁 사람과 함께 들면 둘 다)."""
     if v >= 1 - 1e-6 or not samples:
         return None, None
+    n = len(samples)
     span = 1 - v
     area = lambda f: float(f[2]) * float(f[3])  # noqa: E731
     cx = lambda f: float(f[0]) + float(f[2]) / 2  # noqa: E731
@@ -2367,9 +2460,11 @@ def skin_follow(samples, v, cut=None):
             if near:
                 f = min(near, key=lambda g: abs(cx(g) - prev))
         prev = cx(f)
-        pick.append((cx(f), float(f[0]), float(f[0]) + float(f[2])))
-    if not any(pick):
+        pick.append((cx(f), float(f[0]), float(f[0]) + float(f[2]), float(f[3])))
+    bt, _ = _skin_ball_track(balls, n)
+    if not any(pick) and not any(bt):
         return None, None
+    had = [bool(p) for p in pick]   # 이 칸에서 정말 본 얼굴 (한 칸만 뛴 얼굴을 앞 칸 자리로 바꾼 칸·못 본 칸은 아님 · 공과 견줄 때)
     seen = [i for i, p in enumerate(pick) if p]   # 한 칸만 뛴 것 걸러내기 (얼굴을 본 칸끼리 · 차례로 · 양 끝은 안쪽 두 칸이 같은 자리일 때)
     for j, i in enumerate(seen):
         nb = [seen[j - 1], seen[j + 1]] if 0 < j < len(seen) - 1 else [seen[1], seen[2]] if j == 0 and len(seen) > 2 \
@@ -2383,41 +2478,76 @@ def skin_follow(samples, v, cut=None):
                 continue
             near = [g for g in cands[i] if abs(cx(g) - a[0]) <= 0.1]
             g = min(near, key=lambda g: abs(cx(g) - a[0])) if near else None
-            pick[i] = (cx(g), float(g[0]), float(g[0]) + float(g[2])) if g else a
-    last = next(p for p in pick if p)   # 못 본 칸은 앞 칸 얼굴 그대로 (맨 앞은 처음 본 얼굴)
-    for i, p in enumerate(pick):
-        if p:
-            last = p
-        else:
-            pick[i] = last
+            pick[i] = (cx(g), float(g[0]), float(g[0]) + float(g[2]), float(g[3])) if g else a
+            had[i] = bool(g)
+    if any(pick):
+        last = next(p for p in pick if p)   # 못 본 칸은 앞 칸 얼굴 그대로 (맨 앞은 처음 본 얼굴)
+        for i, p in enumerate(pick):
+            if p:
+                last = p
+            else:
+                pick[i] = last
     times = [float(t) for t, _ in samples]
+    quiet = (list(quiet or []) + [False] * n)[:n]
+    people = (list(people or []) + [None] * n)[:n]
 
-    def want(p):
-        return min(1.0, max(0.0, (p[0] - v / 2) / span))
+    def at(c):   # 이 자리(원본 x)를 창 가운데에 두는 reframe
+        return min(1.0, max(0.0, (c - v / 2) / span))
 
-    def allowed(p):   # 얼굴 상자(+여유)가 창 안에 드는 reframe 범위 · 얼굴이 창보다 넓으면 가운데
-        lo, hi = max(0.0, (p[2] + SKIN_FOLLOW_PAD - v) / span), min(1.0, (p[1] - SKIN_FOLLOW_PAD) / span)
-        return (lo, hi) if lo <= hi else (want(p), want(p))
+    def rng(x0, x1, pad, c):   # 상자(+여유)가 창 안에 드는 reframe 범위 · 상자가 창보다 넓으면 가운데 한 점
+        lo, hi = max(0.0, (x1 + pad - v) / span), min(1.0, (x0 - pad) / span)
+        return (lo, hi) if lo <= hi else (at(c), at(c))
+    plan = []   # 칸마다 (지킬 범위 lo, hi · 바라는 reframe · 장면 가르기 자리)
+    for i in range(n):
+        p, b = pick[i], bt[i]
+        fr = rng(p[1], p[2], SKIN_FOLLOW_PAD, p[0]) if p else None
+        br = rng(b[1], b[2], SKIN_BALL_PAD, b[0]) if b else None
+        if p and b:
+            lo, hi = max(fr[0], br[0]), min(fr[1], br[1])
+            if lo <= hi + 1e-9:   # 얼굴과 공이 함께 듦
+                plan.append((lo, max(lo, hi), min(max(lo, hi), max(lo, at(p[0]))), p[0]))
+            elif not had[i] or ((quiet[i] or p[3] < SKIN_SPEAKER_H) and p[3] < SKIN_CLOSEUP_H):
+                # 이 칸에서 못 본 얼굴 · 시범 장면·작은 얼굴: 공 먼저 (얼굴 쪽으로 가장 가깝게 · 가까이 찍은 말하는 사람은 얼굴)
+                w = min(br[1], max(br[0], at(p[0])))
+                plan.append((br[0], br[1], w, w * span + v / 2))
+            else:   # 말하는 중: 얼굴
+                plan.append((fr[0], fr[1], at(p[0]), p[0]))
+        elif b:
+            w = min(br[1], max(br[0], at(b[0])))
+            ps = [q for q in people[i] or () if float(q[3]) >= SKIN_SPEAKER_H]
+            if ps:   # 공 곁 사람과 함께 들면 둘 다 (공만 덩그러니 말고)
+                q = min(ps, key=lambda q: abs(float(q[0]) + float(q[2]) / 2 - b[0]))
+                x0, x1 = min(b[1], float(q[0])), max(b[2], float(q[0]) + float(q[2]))
+                ur = rng(x0, x1, SKIN_BALL_PAD, (x0 + x1) / 2)
+                if x1 - x0 + 2 * SKIN_BALL_PAD <= v and ur[0] <= ur[1]:
+                    w = min(ur[1], max(ur[0], at((x0 + x1) / 2)))
+            plan.append((br[0], br[1], w, b[0]))
+        elif p:
+            plan.append((fr[0], fr[1], at(p[0]), p[0]))
+        else:
+            plan.append(None)
+    first = next(x for x in plan if x)   # 얼굴도 공도 없는 칸은 앞 칸 그대로 (맨 앞은 처음 것)
+    for i in range(n):
+        plan[i] = plan[i] or (plan[i - 1] if i else first)
     scenes = [[0]]
-    for i in range(1, len(pick)):
-        if abs(pick[i][0] - pick[i - 1][0]) > SKIN_FOLLOW_JUMP:
+    for i in range(1, n):
+        if abs(plan[i][3] - plan[i - 1][3]) > SKIN_FOLLOW_JUMP:
             scenes.append([i])
         else:
             scenes[-1].append(i)
     plans = []
     for sc in scenes:
-        lo = max(allowed(pick[i])[0] for i in sc)
-        hi = min(allowed(pick[i])[1] for i in sc)
-        if lo <= hi + 1e-9:   # 한 자리로 이 장면 얼굴이 다 보임 → 그 자리 (얼굴 가운데값에 가장 가깝게)
-            ws = sorted(want(pick[i]) for i in sc)
+        lo = max(plan[i][0] for i in sc)
+        hi = min(plan[i][1] for i in sc)
+        if lo <= hi + 1e-9:   # 한 자리로 이 장면 얼굴(·공)이 다 보임 → 그 자리 (바라는 값의 가운데값에 가장 가깝게)
+            ws = sorted(plan[i][2] for i in sc)
             rf = min(hi, max(lo, ws[len(ws) // 2]))
             plans.append([(times[sc[0]], rf), (times[sc[-1]], rf)])
             continue
         pts = []
         for j, i in enumerate(sc):
-            win = [want(pick[k]) for k in sc[max(0, j - SKIN_FOLLOW_SMOOTH):j + SKIN_FOLLOW_SMOOTH + 1]]
-            a, b = allowed(pick[i])
-            pts.append((times[i], min(b, max(a, sum(win) / len(win)))))
+            win = [plan[k][2] for k in sc[max(0, j - SKIN_FOLLOW_SMOOTH):j + SKIN_FOLLOW_SMOOTH + 1]]
+            pts.append((times[i], min(plan[i][1], max(plan[i][0], sum(win) / len(win)))))
         plans.append(_rdp(pts, SKIN_FOLLOW_TOL))
     if len(plans) == 1 and abs(plans[0][0][1] - plans[0][-1][1]) < 1e-9 and len(plans[0]) == 2:
         return round(plans[0][0][1], 4), None
@@ -2459,23 +2589,119 @@ def _skin_runs(items):
     return runs
 
 
-def skin_reframe(name, items, lay):
-    """스킨 편집본의 V1 원본 클립마다 화면 좌우를 얼굴에 맞춤 (BR-326 · items 를 고침): 한 자리면 reframe · 움직이면 rfk(원본 시각 키프레임 ·
-    reframe 은 클립 가운데 값) · 확대 컷 기준점(fx.anchor)은 원본 좌표 → 창 좌표 (그 클립 가운데 얼굴이 있으면 그 얼굴) · 정지 화면(사진)은 바로 앞 원본 클립 끝 자리.
-    얼굴 모델이 없거나 못 보면 그대로. → 얼굴 상자 {원본 시각: …} (강조 글씨 자리 찾기에 씀)."""
+def _skin_vroom(lay, info=None):
+    """스킨 화면에서 V1 원본(그 영상 비율 info)을 위아래로 옮길 수 있는 범위 — 덮을 곳(창 + 찢어진 종이 홈) 위아래 SKIN_BLEED + SKIN_VMARGIN 을 늘 덮게 →
+    (아래 한계, 위 한계 (화소 · 1080×1920 · + 아래로), 옮기기 전 원본 위 끝, 원본 높이, 영상 창) · 옮길 수 없으면(16:9·4:3 처럼 덮을 곳에 꼭 맞음) None (D-538)."""
+    lay = lay or {}
+    win = skin_window(lay.get("skin")) if lay.get("mode") == "box" else None
+    if not win:
+        return None
+    W, H = frame_size("shorts")
+    sw, sh = _skin_src(info)
+    keep = max(0.2, 1 - float(lay.get("cropTop") or 0) - float(lay.get("cropBottom") or 0))
+    zh = sh * keep * W * max(1.0, float(lay.get("zoom") or 1)) / sw
+    ch = min(zh, H)
+    top0 = (H - ch) * float(lay.get("vpos", 0.5)) - (zh - ch) / 2
+    m = SKIN_BLEED + SKIN_VMARGIN
+    lo, hi = win["coverBottom"] * H + m - (top0 + zh), win["coverTop"] * H - m - top0
+    return (lo, hi, top0, zh, win) if hi - lo >= 4 else None
+
+
+def skin_vfit(samples, vr):
+    """위아래 맞춤 (D-538 · 세로 원본은 확대 1 로 화면 가득이라 위아래 자리(vpos)가 소용없어 머리 위·이마가 위 띠에 가렸음 · 검토 r1) —
+    samples [(원본 시각, 얼굴들)] · vr: _skin_vroom → 옮길 화소 (+ 아래로 · 1920 기준) | None: 얼굴 상자 위 끝이 영상 창 위 끝 + SKIN_VHEAD 아래 ·
+    아래 끝이 말 자막 위에 모든 칸(얼굴을 잘못 본 칸을 빼려고 위아래 20% 칸은 빼고)이 들면 가장 덜 옮기는 값 · 안 되면 얼굴 위 끝(이마·눈) 먼저 (가운데 값) ·
+    옮길 수 있는 범위 안."""
+    lo, hi, top0, zh, win = vr
+    H = frame_size("shorts")[1]
+    head = (float(win["top"]) + SKIN_VHEAD) * H
+    cap = skin_cap_y(win["bottom"]) * H - SKIN_CAP["size"] * TXT_LINE   # 말 자막 글 상자 위 끝
+    need, roof = [], []
+    for _, fs in samples:
+        fs = [f for f in fs or () if float(f[3]) >= SKIN_FOLLOW_MIN_H]
+        if not fs:
+            continue
+        f = max(fs, key=lambda f: float(f[2]) * float(f[3]))
+        y0 = top0 + float(f[1]) * zh
+        need.append(head - y0)
+        roof.append(cap - (y0 + float(f[3]) * zh))
+    if not need:
+        return None
+    need.sort()
+    roof.sort()
+    a, b = need[min(len(need) - 1, int(0.8 * len(need)))], roof[int(0.2 * len(roof))]
+    d = min(b, max(a, 0.0)) if a <= b else need[len(need) // 2]
+    d = min(hi, max(lo, d))
+    return round(d) if abs(d) >= 2 else None
+
+
+def _skin_quiet(times, speech, still=False):
+    """칸마다 시범 장면인지 — 말 없는 칸(받아쓴 낱말 앞뒤 SKIN_SPEAK_PAD 밖)이 SKIN_QUIET_MIN 칸 넘게 이어짐 · still: 다시 보기·느린 화면·자막 없는 클립(늘 시범) ·
+    speech 를 모르면(None) 시범 장면 없음 (얼굴 먼저 · D-538)."""
+    if still:
+        return [True] * len(times)
+    if speech is None:
+        return [False] * len(times)
+    sp = sorted((float(a) - SKIN_SPEAK_PAD, float(b) + SKIN_SPEAK_PAD) for a, b in speech)
+    starts = [a for a, _ in sp]
+    talk = []
+    for t in times:
+        k = bisect.bisect_right(starts, t)
+        talk.append(any(sp[j][1] >= t for j in range(max(0, k - 8), k)))
+    out, i = [False] * len(times), 0
+    while i < len(times):
+        if talk[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(times) and not talk[j]:
+            j += 1
+        if j - i >= SKIN_QUIET_MIN:
+            out[i:j] = [True] * (j - i)
+        i = j
+    return out
+
+
+def skin_reframe(name, items, lay, info=None, speech=None, report=None):
+    """스킨 편집본의 V1 원본 클립마다 화면 좌우를 얼굴·공에 맞춤 (BR-326 · items 를 고침): 한 자리면 reframe · 움직이면 rfk(원본 시각 키프레임 ·
+    reframe 은 클립 가운데 값) · 시범·다시 보기 장면은 공도 창 안 (speech: 받아쓴 낱말 [(시작, 끝)] 원본 시각 — 말이 없는 곳이 시범 장면 · D-538) ·
+    덮을 곳보다 높은 원본(세로 9:16·4:5 · info)은 위아래도 얼굴에 맞춤(vshift · 화면 높이 비율 · + 아래로 · D-538) ·
+    확대 컷 기준점(fx.anchor)은 원본 좌표 → 창 좌표 (그 클립 가운데 얼굴이 있으면 그 얼굴) · 정지 화면(사진)은 바로 앞 원본 클립 끝 자리.
+    얼굴·공 모델이 없으면 내려받고, 그래도 얼굴 모델을 못 쓰면 report["noFace"] = True (부른 쪽이 '확인할 것'에 · D-538). → 얼굴 상자 {원본 시각: …}
+    (강조 글씨·MSG 글자 자리 찾기에 씀)."""
     v = skin_view(lay)
-    if v >= 1 - 1e-6:
+    vr = _skin_vroom(lay, info)
+    if v >= 1 - 1e-6 and not vr:
         return {}
     runs = [r for r in _skin_runs(items) if min(float(x["in"]) for x in r) < max(float(x["out"]) for x in r)]
     spans = [(min(float(x["in"]) for x in r), max(float(x["out"]) for x in r)) for r in runs]
     spans = [sp if sp[1] - sp[0] <= SKIN_FOLLOW_SPAN else None for sp in spans]
-    faces = skin_faces(name, [sp for sp in spans if sp]) if any(spans) else {}
-    if not any(faces.values()):
+    look = [sp for sp in spans if sp]
+    faces = skin_faces(name, look) if look else {}
+    objs = skin_objs(name, look) if look and v < 1 - 1e-6 else {}
+    if report is not None and faces and all(x is None for x in faces.values()):
+        report["noFace"] = True
+    if not any(faces.values()) and not any(objs.values()):
         return faces
     for run, sp in zip(runs, spans):
         if not sp:
             continue
-        rf, keys = skin_follow([(t, faces.get(t)) for t in _skin_grid(*sp)], v, cut=lambda a, b: skin_cut(name, a, b))
+        grid = _skin_grid(*sp)
+        smp = [(t, faces.get(t)) for t in grid]
+        if vr:
+            d = skin_vfit(smp, vr)
+            for it in run:
+                if d:
+                    it["vshift"] = round(d / frame_size("shorts")[1], 4)
+                else:
+                    it.pop("vshift", None)
+        if v >= 1 - 1e-6:
+            continue
+        ob = [objs.get(t) for t in grid]
+        balls = [o[0] if o and o[0] else None for o in ob]
+        still = all(it.get("noCaps") or float(it.get("speed") or 1) < 0.9 for it in run)   # 다시 보기·느린 화면 (말 자막 없음)
+        rf, keys = skin_follow(smp, v, cut=lambda a, b: skin_cut(name, a, b), balls=balls, quiet=_skin_quiet(grid, speech, still),
+                               people=[o[1] if o else None for o in ob])
         if rf is None:
             continue
         for it in run:
@@ -2491,30 +2717,40 @@ def skin_reframe(name, items, lay):
             else:
                 it.pop("rfk", None)
                 it["reframe"] = rf
-    zw = _even(1080 * max(1.0, float(lay.get("zoom") or 1)))
+    W, H = frame_size("shorts")
+    zw = _even(W * max(1.0, float(lay.get("zoom") or 1)))
     for it in [x for x in items if x.get("track") == "V1" and x.get("media", "main") == "main" and (x.get("fit") or "auto") == "auto"]:
         anc = (it.get("fx") or {}).get("anchor")
         if not anc:
             continue
         a, b = float(it["in"]), float(it["out"])
         m = (a + b) / 2
-        x0 = rf_at(it, m) * (zw - 1080) / zw   # 창 왼쪽 끝 (원본 폭 비율)
+        x0 = rf_at(it, m) * (zw - W) / zw   # 창 왼쪽 끝 (원본 폭 비율)
         fs = [f for f in faces.get(min(faces, key=lambda t: abs(t - m))) or () if float(f[3]) >= SKIN_FOLLOW_MIN_H] if faces else []
         near = min(abs(t - m) for t in faces) if faces else 99
         to_box = lambda x: round(min(1.0, max(0.0, (float(x) - x0) / v)), 3)  # noqa: E731
+        d = float(it.get("vshift") or 0) * H
+        if vr and d:   # 위아래로 옮긴 클립: 원본 y → 보이는 상자 y (상자 = 화면 안에 든 원본 부분)
+            top = vr[2] + d
+            by, bot = max(0.0, top), min(float(H), top + vr[3])
+            to_y = lambda y: round(min(1.0, max(0.0, (top + float(y) * vr[3] - by) / max(1.0, bot - by))), 3)  # noqa: E731
+        else:
+            to_y = lambda y: y  # noqa: E731
         if fs and near <= 1.0:   # 그 클립 가운데 얼굴 (가장 큰 것)
             f = max(fs, key=lambda f: float(f[2]) * float(f[3]))
-            anc["v"] = [to_box(float(f[0]) + float(f[2]) / 2), anc["v"][1]]
+            anc["v"] = [to_box(float(f[0]) + float(f[2]) / 2), to_y(anc["v"][1])]
         else:
-            anc["v"] = [to_box(anc["v"][0]), anc["v"][1]]
+            anc["v"] = [to_box(anc["v"][0]), to_y(anc["v"][1])]
         for k in anc.get("k") or []:
-            k["v"] = [to_box(k["v"][0]), k["v"][1]]
+            k["v"] = [to_box(k["v"][0]), to_y(k["v"][1])]
     prev = None   # 정지 화면(그 순간 그림): 바로 앞 원본 클립 끝 자리 (MSG 정지 화면·끝 화면은 바로 앞 장면을 멈춘 것)
     for it in sorted([x for x in items if x.get("track") == "V1"], key=lambda x: float(x["start"])):
         if it.get("media", "main") == "main":
             prev = it
         elif prev is not None and (it.get("fit") or "auto") == "auto" and it.get("reframe", 0.5) == 0.5:
             it["reframe"] = round(rf_at(prev, float(prev["out"])), 4)
+            if prev.get("vshift"):
+                it["vshift"] = prev["vshift"]
     return faces
 
 
@@ -2539,7 +2775,12 @@ def skin_screen_faces(items, t, seq, faces, W=1080, H=1920):
     return out
 
 
-SKIN_EMPH_SIZES = (80, 72, 64)   # 스킨 가편집 쇼츠 강조 큰 글씨 크기 (한 줄로 들어가는 가장 큰 것 · 쇼츠와 같음)
+# 얼굴 모델을 못 써 스킨 영상 창을 얼굴에 맞추지 못한 쇼츠 (skin_reframe report · 편집본 skinNoFace) → 내보낸 뒤 검수 '확인할 것' (qa notes · D-538)
+SKIN_NOFACE_NOTE = {"lv": "warn", "title": "영상 창 맞춤",
+                    "msg": "얼굴 찾기 모델을 받지 못해 영상 창을 감독님 얼굴에 맞추지 못했어요(가운데 그대로예요). 인터넷이 될 때 편집실에서 "
+                           "'가편집 다시 만들기'나 '재미있게 자동 편집'으로 이 쇼츠를 다시 만들면 맞춰져요."}
+SKIN_EMPH_SIZES = (110, 104, 96)   # 스킨 가편집 쇼츠 강조 큰 글씨 크기 (한 줄로 들어가는 가장 큰 것 · 말 자막 96 보다 작지 않게 · MSG 스킨 강조 110 과 같게 ·
+#                                    예전 80 이라 바로 아래 말 자막(96)보다 작아 덜 중요해 보였음 · 검토 robust r1 · D-538)
 
 
 def skin_emph_placer(items, seq, cap_style, win, faces):
@@ -3360,6 +3601,8 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
         sk_lay = skin_layout(info=info) if not card and shorts_skin_on() else None   # 풋살사관학교 스킨 (BR-320 · 원본 비율로 창을 덮음 · 못 읽으면 지금처럼)
         sk_win = skin_window(sk_lay["skin"]) if sk_lay else None
         sk_vt = video_topic(name, segs) if sk_lay else ""   # 스킨 큰 제목이 길면 대신 쓸 영상 주제 (skin_headline · D-531)
+        sk_talk = ([(float(w["s"]), float(w["e"])) for g in segs for w in g.get("words") or () if w.get("s") is not None and w.get("e") is not None]
+                   or [(float(g["start"]), float(g["end"])) for g in segs]) if sk_lay else None   # 말하는 곳 (시범 장면은 공도 창 안 · D-538)
         for i, r in enumerate(rec["shorts"], 1):
             # 확대 컷 기준점·시범 장면 (BR-294) — 은평 스타일 쇼츠는 영상 창 배치가 달라 그대로
             cuts = _rhythm(_quiet_edges(r["cuts"], wf, units, info.get("duration")), segs, st, every, caps, calm=not card)
@@ -3382,7 +3625,8 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                 cs = skin_caption(cs, sk_win["bottom"])
                 kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
                 shapes, kt = skin_card(hook, kt, length, sk_win, alts=[(r.get("point") or {}).get("phrase"), sk_vt])
-                faces = skin_reframe(name, items, sk_lay)   # 화면 좌우는 얼굴을 따라 · 확대 기준점은 창 좌표로 (BR-326)
+                rep = {}   # 화면 좌우는 얼굴·공을 따라 · 세로 원본은 위아래도 · 확대 기준점은 창 좌표로 (BR-326 · BR-328)
+                faces = skin_reframe(name, items, sk_lay, info=info, speech=sk_talk, report=rep)
                 titles = [hook] + ([kt] if kt else [])
                 em = st.get("emphasisTitles") or {}
                 if float(em.get("perMin") or 0) > 0:  # 배운 강조 큰 글씨도 (창 안 · 위 띠·말 자막·얼굴을 피함 · BR-327 · D-534)
@@ -3392,6 +3636,8 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                                                gap=min(EMPH_GAP, max(6.0, length / 3)), avoid=[t["text"] for t in titles])
                 seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(sk_lay), master=dict(master),
                                      captionsOn=True, titles=titles, shapes=shapes))
+                if rep.get("noFace"):   # 얼굴 모델을 못 써 창을 얼굴에 맞추지 못함 → 내보낸 뒤 검수 '확인할 것' (D-538)
+                    seqs[-1]["skinNoFace"] = True
                 continue
             W, H = frame_size("shorts")
             tb = text_box(hook["text"], hook["style"], W, H)
@@ -5388,12 +5634,28 @@ def _fit_need(text, st, W):
 
 
 def cap_fit(text, st, W):
-    """자막 글자 크기 배율 (1 = 그대로) — 가장 긴 줄이 화면 폭의 90%(왼쪽/오른쪽 정렬이면 남은 쪽, 그래도 90%까지 · 스킨 말 자막은 실제 글자 폭으로 95%) 안에 들게."""
+    """자막 글자 크기 배율 (1 = 그대로) — 가장 긴 줄이 화면 폭의 90%(왼쪽/오른쪽 정렬이면 남은 쪽, 그래도 90%까지 · 스킨 말 자막은 실제 글자 폭으로 95%) 안에 들게 ·
+    0.7 배로도 한 줄이 안 되면 그대로(줄을 바꿈) — 스킨 말 자막은 두 줄까지 들게 더 줄임 (_skin_two · D-538)."""
     avail, need = _fit_need(text, st, W)
     if need <= avail or avail <= 0:
         return 1.0
     k = math.floor(avail / need * 100) / 100
-    return k if k >= FIT_MIN else 1.0
+    if k >= FIT_MIN:
+        return k
+    return _skin_two(text, st, W, need) if st.get("hug") == "skin" and not ep_font_now() else 1.0
+
+
+def _skin_two(text, st, W, need):
+    """스킨 말 자막이 0.7 배로도 한 줄이 안 될 때(낱말 시각이 없는 손 자막·SRT 긴 글) 두 줄까지 드는 글자 배율 — 0.7 에서 SKIN_CAP_MIN 까지 0.05씩 ·
+    줄 수는 cap_wrap_lines · libass 는 줄 길이를 고르게 나눠 조금 일찍 바꾸므로 두 줄 폭의 SKIN_CAP_TWO 까지 (예전: 96 그대로 세 줄 · 창의 1/3 · 검토 robust r1 ·
+    editor.html skinTwo)."""
+    stroke = float(st.get("strokeW") or 0)
+    wrap = 0.92 * W - 2 * stroke
+    for i in range(int(round(FIT_MIN * 100)), int(round(SKIN_CAP_MIN * 100)) - 1, -5):
+        k = i / 100
+        if cap_wrap_lines(text, dict(st, size=float(st["size"]) * k), W) <= 2 and (need - 2 * stroke) * k <= 2 * wrap * SKIN_CAP_TWO:
+            return k
+    return SKIN_CAP_MIN
 
 
 def hug_one(text, st, W):
@@ -5595,7 +5857,12 @@ def cap_lines(text, st, W):
     """자막 하나가 화면에서 몇 줄인지 어림 (editor.html capLines) — cap_fit 으로 글자를 줄여 들어가면 글 속 줄 수 그대로 ·
     아니면 화면 폭 92% 에서 띄어쓰기마다 바꿈 (text_box 와 같은 셈)."""
     paras = str(text if text is not None else "").replace("\r", "").split("\n")
-    if cap_fit(text, st, W) < 1 or hug_one(text, st, W):   # (스킨 말 자막: 실제 글자 폭으로 한 줄이면 줄을 바꾸지 않음 · D-533)
+    k = cap_fit(text, st, W)
+    if hug_one(text, st, W):   # (스킨 말 자막: 실제 글자 폭으로 한 줄이면 줄을 바꾸지 않음 · D-533)
+        return len(paras)
+    if k < 1 and st.get("hug") == "skin":   # 스킨 말 자막: 두 줄까지 줄인 크기로 바꾼 줄 수 (D-538)
+        return cap_wrap_lines(text, dict(st, size=float(st["size"]) * k), W)
+    if k < 1:
         return len(paras)
     return cap_wrap_lines(text, st, W)
 
@@ -6015,6 +6282,18 @@ def _audio_channels(p):
     return _ACH[k]
 
 
+def skin_vshift(it, lay, H):
+    """스킨 화면 V1 클립의 위아래 옮김 (화소 · 화면 높이 H 기준 · + 아래로) — 클립 vshift(화면 높이 비율 · skin_reframe 이 세로·4:5 원본에서 얼굴에 맞춤 ·
+    BR-328 · D-538) · 스킨 박스 배치가 아니면 0 (기본·은평 배치는 그대로 · 같은 바이트)."""
+    if not (lay or {}).get("skin") or (lay or {}).get("mode") != "box" or not it.get("vshift"):
+        return 0.0
+    try:
+        v = float(it["vshift"])
+    except (TypeError, ValueError):
+        return 0.0
+    return v * H if math.isfinite(v) and abs(v) < 1 else 0.0
+
+
 def fit_rect(it, md, seq, W, H, m=None):
     """미디어를 화면에 놓는 자리 (효과 컨트롤 100% 기준 · 반올림 없음) — editor.html fitRect 와 같은 셈 (미리보기 화면 그대로).
     bx·by·bw·bh: 보이는 상자 · mx·my·mw·mh: 상자 안 원본 전체 그림(잘린 곳 포함) · bg: 쇼츠 위아래 박스(box)·흐린 배경(blur) ·
@@ -6035,8 +6314,14 @@ def fit_rect(it, md, seq, W, H, m=None):
         s = zw / sw
         zh = vh * s
         ch = min(zh, H)
-        return {"bx": 0.0, "by": (H - ch) * float(lay["vpos"]), "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf,
-                "my": -(zh - ch) / 2 - ct * sh * s, "bg": lay["mode"], "bar": lay["bar"],
+        by, my = (H - ch) * float(lay["vpos"]), -(zh - ch) / 2 - ct * sh * s
+        dv = skin_vshift(it, lay, H)
+        if dv:   # 스킨 위아래 맞춤 (BR-328): 원본을 dv 만큼 옮기고 보이는 상자는 화면 안에 든 부분
+            top = by - (zh - ch) / 2 + dv
+            by2 = max(0.0, top)
+            ch, my, by = min(float(H), top + zh) - by2, top - by2 - ct * sh * s, by2
+        return {"bx": 0.0, "by": by, "bw": W, "bh": ch, "mw": zw, "mh": sh * s, "mx": -(zw - W) * rf,
+                "my": my, "bg": lay["mode"], "bar": lay["bar"],
                 "pics": lay["mode"] == "box" and bool(lay.get("band") or lay.get("logo"))}
     if fit == "auto":
         fit = "native" if md.get("kind") == "image" and not md.get("freeze") and sw * ref <= W and sh * ref <= H else "contain"
@@ -6673,10 +6958,18 @@ def _fit(it, md, seq, W, H, rfx=None):
         zw = _even(W * max(1.0, float(lay["zoom"])))
         zh = _even(vh * zw / sw)
         ch = min(zh, H)
-        crop = (f"crop=w={W}:h={ch}:x='{zw - W}*({rfx})':y={(zh - ch) / 2:.1f}" if rfx is not None and zw > W   # (이름 붙인 값 뒤에는 순서 값을 못 씀)
-                else f"crop={W}:{ch}:{(zw - W) * rf:.1f}:{(zh - ch) / 2:.1f}")
+        by, cy = (H - ch) * float(lay["vpos"]), (zh - ch) / 2
+        dv = skin_vshift(it, lay, H)
+        if dv:   # 스킨 위아래 맞춤 (BR-328 · fit_rect 와 같은 자리): 원본 위 끝을 짝수 칸에 · 화면 밖은 잘라 냄 (yuv420 겹치기는 짝수 칸)
+            top = 2 * round((by - cy + dv) / 2)
+            cy = max(0, -top)
+            by = float(top + cy)
+            ch = min(zh - cy, H - int(by))
+            ch -= ch % 2
+        crop = (f"crop=w={W}:h={ch}:x='{zw - W}*({rfx})':y={cy:.1f}" if rfx is not None and zw > W   # (이름 붙인 값 뒤에는 순서 값을 못 씀)
+                else f"crop={W}:{ch}:{(zw - W) * rf:.1f}:{cy:.1f}")
         out = {"chain": pre + f"scale={zw}:{zh},{crop}", "bw": W, "bh": ch, "bx": 0,
-               "by": (H - ch) * float(lay["vpos"]), "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
+               "by": by, "bg": lay["mode"], "bar": lay["bar"], "win": lay["mode"] == "box" and bool(lay.get("win"))}
         if lay["mode"] == "box" and (lay.get("band") or lay.get("logo")):   # 은평 스타일 띠 그림·로고 (BR-280 · BR-281 · 없으면 예전과 같은 값)
             out.update(band=lay.get("band"), logo=lay.get("logo"))
         return out
@@ -8349,6 +8642,8 @@ def export(name, proj, opts, log):
                                                                "lufs": min(-9.0, max(-24.0, float(m.get("lufs") or -14.0)))}}
             if isinstance(proj.get("msg"), dict):  # MSG 편집본: 무엇을 넣었는지 (검수·평가가 씀)
                 EXPORT_META[out.name]["msg"] = (proj["msg"].get("summary") or {}).get("text")
+            if proj.get("skinNoFace") and skin_on(proj):   # 스킨 영상 창을 얼굴에 맞추지 못한 쇼츠 → 검수 '확인할 것' (D-538)
+                EXPORT_META[out.name]["notes"] = [dict(SKIN_NOFACE_NOTE)]
             log(f"  영상 길이 {span:.1f}초 · {W}×{H} · {fps}fps · {time.time() - t_start:.0f}초 걸림" + (f" · 그래픽카드({hw})" if hw and (hw, W, H) not in _HW.get("bad", set()) else ""))
         except Cancelled as e:
             traceback.clear_frames(e.__traceback__)

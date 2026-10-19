@@ -1168,7 +1168,7 @@ function fullSeq(q, lo, hi) {
   const cs = mergeIv(cut, 0);
   if (!ins.length && !cs.length) return null;
   return remapSeq(q, cs, ins, f => ins.flatMap(x => newPair(r6(x.a), r6(x.b), f(x.p, true), "main",
-    { reframe: x.like.reframe === undefined ? 0.5 : x.like.reframe, fit: x.like.fit || "auto" })));
+    { reframe: x.like.reframe === undefined ? 0.5 : x.like.reframe, fit: x.like.fit || "auto", ...(x.like.vshift ? { vshift: x.like.vshift } : {}) })));
 }
 /* ---------- /군더더기 정리 ---------- */
 const TEPS = 1e-6;  // 화면에 보이는지 시각 비교 여유 — 시작이 부동소수 오차로 프레임 시각보다 아주 조금 커도 그 프레임부터 (내보내기 editor._ass_ftime 과 같은 프레임 · D-328)
@@ -1478,14 +1478,22 @@ function capFit(text, st, W) {  // (fitNeed 와 같은 셈을 그대로 — 이 
   const need = em * st.size + 2 * (st.strokeW || 0);
   if (need <= avail || avail <= 0) return 1;
   const k = Math.floor(avail / need * 100) / 100;
-  return k >= 0.7 ? k : 1;
+  return k >= 0.7 ? k : hug ? skinTwo(text, st, W, need) : 1;
+}
+// 스킨 말 자막이 0.7 배로도 한 줄이 안 되면(낱말 시각이 없는 손 자막·SRT 긴 글) 두 줄까지 드는 배율 — 0.7 에서 CAP_MIN 까지 0.05씩 (editor.py _skin_two · D-538)
+function skinTwo(text, st, W, need) {
+  const stroke = +st.strokeW || 0, wrap = 0.92 * W - 2 * stroke;
+  for (let i = 70; i >= Math.round(SKIN.CAP_MIN * 100); i -= 5) { const k = i / 100; if (capWrapLines(text, { ...st, size: st.size * k }, W) <= 2 && (need - 2 * stroke) * k <= 2 * wrap * SKIN.CAP_TWO) return k; }
+  return SKIN.CAP_MIN;
 }
 // 스킨 글이 글자를 capFit 만큼 줄여 글 속 줄 그대로 들어가는지 → 줄을 바꾸지 않음 (editor.py hug_one · 내보내기 \q2 · D-533)
 function hugOne(text, st, W) { if (st.hug !== "skin") return false; const [avail, need] = fitNeed(text, st, W); return avail > 0 && need * capFit(text, st, W) <= avail + 1e-6; }
 // 자막 하나가 화면에서 몇 줄인지 어림 (editor.py cap_lines) — capFit 으로 글자를 줄여 들어가면 글 속 줄 수 그대로 · 아니면 화면 폭 92% 에서 띄어쓰기마다 바꿈 (txtBox 와 같은 셈)
 function capLines(text, st, W) {
-  const paras = String(text ?? "").replace(/\r/g, "").split("\n");
-  if (capFit(text, st, W) < 1 || (st.hug === "skin" && hugOne(text, st, W))) return paras.length;  // (스킨 말 자막: 실제 글자 폭으로 한 줄이면 줄을 바꾸지 않음 · D-533)
+  const paras = String(text ?? "").replace(/\r/g, "").split("\n"), k = capFit(text, st, W);
+  if (st.hug === "skin" && hugOne(text, st, W)) return paras.length;  // (스킨 말 자막: 실제 글자 폭으로 한 줄이면 줄을 바꾸지 않음 · D-533)
+  if (k < 1 && st.hug === "skin") return capWrapLines(text, { ...st, size: st.size * k }, W);  // (스킨 말 자막: 두 줄까지 줄인 크기로 바꾼 줄 수 · D-538)
+  if (k < 1) return paras.length;
   return capWrapLines(text, st, W);
 }
 // 글 속 줄마다 화면 폭 92% 에서 띄어쓰기마다 바꾼 줄 수 (글자 크기 그대로 · editor.py cap_wrap_lines)
@@ -2591,8 +2599,11 @@ function fitRect(it, md, t) {
     const ct = lay.cropTop || 0, cb = lay.cropBottom || 0, keep = Math.max(0.2, 1 - ct - cb), vh = sh * keep;
     if (lay.mode !== "box" && lay.mode !== "blur") { const s = Math.max(W / sw, H / vh), scw = Math.max(W, sw * s), sch = Math.max(H, vh * s);
       return { bx: 0, by: 0, bw: W, bh: H, mw: sw * s, mh: sh * s, mx: -(scw - W) * rf, my: -(sch - H) / 2 - ct * sh * s, bg: null }; }
-    const zw = W * Math.max(1, lay.zoom), s = zw / sw, zh = vh * s, ch = Math.min(zh, H);
-    return { bx: 0, by: (H - ch) * lay.vpos, bw: W, bh: ch, mw: zw, mh: sh * s, mx: -(zw - W) * rf, my: -(zh - ch) / 2 - ct * sh * s, bg: lay.mode, bar: lay.bar,
+    const zw = W * Math.max(1, lay.zoom), s = zw / sw, zh = vh * s;
+    let ch = Math.min(zh, H), by = (H - ch) * lay.vpos, my = -(zh - ch) / 2 - ct * sh * s;
+    const dv = lay.skin && lay.mode === "box" && Math.abs(+it.vshift || 0) < 1 ? (+it.vshift || 0) * H : 0;
+    if (dv) { const top = by - (zh - ch) / 2 + dv, by2 = Math.max(0, top); ch = Math.min(H, top + zh) - by2; my = top - by2 - ct * sh * s; by = by2; }  // 스킨 위아래 맞춤 (editor.py skin_vshift · fit_rect · BR-328)
+    return { bx: 0, by, bw: W, bh: ch, mw: zw, mh: sh * s, mx: -(zw - W) * rf, my, bg: lay.mode, bar: lay.bar,
       win: lay.mode === "box" && !!lay.win, ...(lay.mode === "box" && (lay.band || lay.logo) ? { band: lay.band, logo: lay.logo } : {}) };
   }
   if (fit === "auto") fit = md.kind === "image" && !md.freeze && sw <= W && sh <= H ? "native" : "contain"; // 정지 화면은 원래 영상처럼
@@ -3543,7 +3554,7 @@ async function tacFollow(tc) {
   const btn = $("tcFollow"); if (btn) { btn.disabled = true; btn.textContent = "따라가는 중…"; }
   toast("선수를 따라가는 중이에요… (몇 초 걸려요)");
   // 기다리는 동안 되돌리기·그림 옮기기·클립 편집이 있었으면 결과를 버림 (옛 사본에 쓰거나 옛 자리 기준으로 따라가지 않게)
-  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.rfk, x.fit]]);
+  const sig = (g, x) => JSON.stringify([g && g.kind, g && g.pts, g && g.start, g && g.dur, x && [x.id, x.media, x.start, x.in, x.out, x.speed, x.rev, x.fx, x.reframe, x.rfk, x.vshift, x.fit]]);
   const sig0 = sig(n, it), id = tc.id, seqId = S.id;
   let r = null; tacFollowing = id;
   try { r = await post("/api/edit/track", { name: NAME, file: md.file, src: md.src || "videos", t0: mt(it, t0), t1: mt(it, t1 - 1e-3), x: u, y: Math.min(1, v), kind: n.kind }).then(x => x.json()); } catch (e) { r = null; }
@@ -4549,7 +4560,7 @@ async function freezeFrame() {
   insertGap(t0, len, mediaTracks().filter(id => !music(id)));
   // 밀린 자리에 음악이 있으면 겹치지 않게 빈 소리 트랙으로 (음악은 그대로)
   const mv = followTo(follow.map(a => a.start < t0 - EPS ? splitItem(a, t0) : a).filter(Boolean), len);
-  const nw = { id: nid(), track: it.track, media: fm.id, start: t0, in: 0, out: len, speed: 1, rev: false, link: null, reframe: it.reframe ?? 0.5, fit: it.fit || "auto", fx, color: { ...(it.color || {}) } };
+  const nw = { id: nid(), track: it.track, media: fm.id, start: t0, in: 0, out: len, speed: 1, rev: false, link: null, reframe: it.reframe ?? 0.5, fit: it.fit || "auto", fx, color: { ...(it.color || {}) }, ...(it.vshift ? { vshift: it.vshift } : {}) };
   S.items.push(nw); selI = new Set([nw.id]); primary = nw.id; selX = null; changed(false); renderMediaBin();
   toast("2초 정지 화면을 넣었어요 · 끝을 끌어 길이를 바꾸고, 도형·타이틀로 설명을 붙여 보세요" + followNote(mv));
 }
@@ -4872,8 +4883,8 @@ function epOff(q) {
 // 흰 둥근 상자(도형 plan "card" · 폭은 큰 제목에 맞춤) 안 주황 큰 제목 한 줄 + 그 아래 흰 주제 줄(처음부터 끝까지) · 말 자막은 영상 창 아래 끝 바로 위 ·
 // 은평 스타일 것(KFA 글꼴 고정 win · 띠 그림·로고 · 이름표·강좌 줄)은 쓰지 않음 · 글자 폭은 Pretendard (은평 글꼴 표를 쓰지 않음)
 const SKIN = {
-  PAD: 14, SIZES: [96, 88, 80, 72, 64, 56, 48], FLOOR: 24, TOPIC_SIZES: [96, 88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.9, RADIUS: 17,
-  TOPIC_CY: 0.179, TOPIC_GAP: 0.008, CAP_UP: 0.046, CAP_ROOM: 0.95,
+  PAD: 14, SIZES: [96, 88, 80, 72, 64, 56, 48], FLOOR: 24, TOPIC_SIZES: [96, 88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.74, TOPIC_MAX: 0.9, RADIUS: 17,
+  TOPIC_CY: 0.179, TOPIC_GAP: 0.008, CAP_UP: 0.046, CAP_ROOM: 0.95, CAP_MIN: 0.5, CAP_TWO: 0.92,  // (BOX_MAX: 위 띠 점선 원호를 덮지 않게 · CAP_MIN·CAP_TWO: 긴 말 자막 두 줄까지 · D-538)
   // 말 자막 모양 (소유자 쇼츠에서 잰 값 · 흰 Black 96 · 검은 테두리 10 · 상자 없음 · 실제 글자 폭으로 한 줄 셈 hug · 나타나기는 배운 그대로 · editor.py SKIN_CAP 과 같은 값 · D-529 · D-532 · D-533)
   CAP: { weight: "Black", size: 96, fill: "#FFFFFF", stroke: "#000000", strokeW: 10, bgOn: false, hug: "skin" },
   TITLE: { weight: "Black", fill: "#CE4F2F", stroke: "#CE4F2F", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400", hug: "skin" },
@@ -4892,8 +4903,8 @@ function skinBoxFit(t, g) {  // 흰 상자 폭을 큰 제목에 맞춤 (가운�
   g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
 }
 function skinTopicStyle(text, top, most) {  // 한 줄로 화면 폭 90% 안 가장 큰 글자 (큰 제목 크기 most 보다 크지 않게 · D-531) · 가운데 TOPIC_CY · 글 상자 아래 끝은 영상 창 위 끝 - GAP 위까지 (editor.py skin_topic_style)
-  const zs = SKIN.TOPIC_SIZES.filter(z => most == null || z <= +most), sizes = zs.length ? zs : [SKIN.TOPIC_SIZES[SKIN.TOPIC_SIZES.length - 1]];
-  const size = sizes.find(z => textW(text, { ...SKIN.TOPIC, size: z }, null) <= SKIN.BOX_MAX * 1080) ?? sizes[sizes.length - 1];
+  const zs = SKIN.TOPIC_SIZES.filter(z => most == null || z <= +most), sizes = zs.length ? zs : [Math.max(SKIN.FLOOR, Math.floor(+most))];  // (큰 제목이 48 밑이면 그 크기까지 · D-538)
+  const size = sizes.find(z => textW(text, { ...SKIN.TOPIC, size: z }, null) <= SKIN.TOPIC_MAX * 1080) ?? sizes[sizes.length - 1];
   const y = SKIN.TOPIC_CY + TOPIC.LINE * size / 2 / 1920, lim = Math.floor((+top - SKIN.TOPIC_GAP) * 1e4 + 1e-6) / 1e4;
   return { ...SKIN.TOPIC, size, y: Math.round(Math.min(y, lim) * 1e4) / 1e4 };
 }
@@ -4915,7 +4926,7 @@ function skinCard(q, L) {
   const topics = q.titles.filter(t => t.plan === "topic" && topicUnder(t, q.titles) === top), one = x => String(x || "").split(/\s+/).filter(Boolean).join(" ");
   top.text = one(top.text); top.start = 0; top.dur = r3(L); top.style = skinTitleStyle(top.text);
   for (const t of topics) { delete t.swap; t.text = one(t.text); t.under = top.id; t.start = 0; t.dur = r3(L); t.style = skinTopicStyle(t.text, k.top, top.style.size); }  // (주제 줄은 큰 제목보다 크지 않게 · editor.py skin_card)
-  const box = (q.shapes || []).find(g => g.plan === "card"), bx = { x: 0.05, y: SKIN.BOX.y, w: SKIN.BOX_MAX, h: SKIN.BOX.h, color: "#FFFFFF", opacity: 1, radius: SKIN.RADIUS, start: 0, dur: r3(L), full: true };
+  const box = (q.shapes || []).find(g => g.plan === "card"), bx = { x: Math.round((0.5 - SKIN.BOX_MAX / 2) * 1e4) / 1e4, y: SKIN.BOX.y, w: SKIN.BOX_MAX, h: SKIN.BOX.h, color: "#FFFFFF", opacity: 1, radius: SKIN.RADIUS, start: 0, dur: r3(L), full: true };
   let g = box;
   if (g) Object.assign(g, bx); else (q.shapes = q.shapes || []).push(g = { id: nid(), name: "제목 상자", ...bx, plan: "card" });
   skinBoxFit(top, g);
@@ -4929,6 +4940,13 @@ function skinRefit(q, t, old) {
   if (!t || t !== skinTop(q)) return false;
   if (old != null) { const a = skinTitleStyle(old); if (+t.style.size === a.size && +t.style.y === a.y) { const b = skinTitleStyle(t.text); t.style.size = b.size; t.style.y = b.y; } }
   skinBoxFit(t, q.shapes.find(g => g.plan === "card"));
+  // 그 아래 주제 줄도 새 큰 제목 크기에 맞춤 — 손대지 않은 것(어떤 큰 제목 크기의 skinTopicStyle 그대로)만 · 주제 줄이 큰 제목보다 커지지 않게
+  // (예전: 큰 제목만 48 로 줄고 주제 줄은 96 그대로 · 검토 robust r1 · D-531 · D-538)
+  const top = SKX && SKX.top;
+  if (top != null) for (const k of q.titles.filter(x => x.plan === "topic" && topicUnder(x, q.titles) === t)) {
+    const auto = Array.from({ length: 97 - SKIN.FLOOR }, (_, i) => SKIN.FLOOR + i).some(m => { const s = skinTopicStyle(k.text, top, m); return s.size === +k.style.size && s.y === +k.style.y; });
+    if (auto) { const s = skinTopicStyle(k.text, top, +t.style.size); k.style.size = s.size; k.style.y = s.y; }
+  }
   return true;
 }
 function tplTitle(st) {

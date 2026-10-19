@@ -29,14 +29,19 @@ def _lr_levels(err):
     return [float(x) if "inf" not in x else float("-inf") for _, x in v]
 
 
-def check_video(path, fmt=None, master=None, run=None):
+def check_video(path, fmt=None, master=None, run=None, notes=None):
     """fmt: 내보낸 편집본 형식 (내보내기를 누를 때의 값) · master: 그때의 소리 크기 설정 {normalize, lufs}
-    run: 멈추기(✕)로 끌 수 있는 실행 함수 (편집실은 editor.run_killable)."""
+    run: 멈추기(✕)로 끌 수 있는 실행 함수 (편집실은 editor.run_killable) ·
+    notes: 내보낼 때 편집본이 남긴 알림 [{lv, title, msg}] (예: 스킨 영상 창을 얼굴에 맞추지 못함 · editor.EXPORT_META · D-538) — 그대로 항목에 (note 표시)."""
     path = str(path)
     items = []
 
     def add(lv, title, msg, t=None):
         items.append({"lv": lv, "title": title, "msg": msg, "t": t})
+
+    for n in notes or ():
+        if isinstance(n, dict) and n.get("title") and n.get("lv") in ("bad", "warn"):
+            items.append({"lv": n["lv"], "title": str(n["title"]), "msg": str(n.get("msg") or ""), "t": None, "note": True})
 
     core.set_progress(label="영상 검수 중", pct=None, detail="화면·소리 살펴보는 중")
     r = (run or core.run)([core.ffmpeg(), "-hide_banner", "-i", path,

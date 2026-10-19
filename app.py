@@ -1506,7 +1506,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"ok": False, "error": "검수할 파일을 찾지 못했어요"})
             meta = editor.EXPORT_META.get(f.name) or {}  # 내보낼 때 기록한 설정이 먼저 (편집실을 새로 열면 화면 쪽 기록이 없음)
             ok = start_job("영상 검수", lambda: qa.check_video(f, meta.get("format") or b.get("format"), meta.get("master") or b.get("master"),
-                                                             editor.run_killable))
+                                                             editor.run_killable, **({"notes": meta["notes"]} if meta.get("notes") else {})))
             return self._send(200 if ok else 409, _started(ok))
         if path == "/api/edit/proxy":
             ok = start_job("미리보기 파일 만들기", lambda: editor.make_proxy(b["file"], b.get("src", "videos"), log))
