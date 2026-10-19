@@ -808,7 +808,7 @@ globalThis.fetch = async u => {{ asked++; if (u !== "/api/style/card_font?full=1
         self.assertNotEqual(js["before"]["size"], js["after"]["size"])
         src = (ROOT / "editor.html").read_text(encoding="utf-8")
         self.assertIn('if (b.dataset.tpl === "은평 스타일" && !EPF && EPX && EPX.fontChecking) { toast("KFA 글꼴을 찾는 중이에요 · 찾으면 바로 적용해요"); await epFontReady(); }', src)
-        self.assertIn("if (epOn(recBase().base)) await epFontReady();", src)
+        self.assertIn("if (epOn(recBase().base) && !skinOn(recBase().base)) await epFontReady();", src)   # 은평 바탕만 (스킨 흰 상자도 card · D-528)
         self.assertIn("epFontLoad(); epFontReady();", src)
 
     def test_editor_source(self):

@@ -6,7 +6,9 @@
 - 저장소를 SKIN_OUT/app 으로 복사(config.json 은 시험용)해 띄우고, 작업 폴더 SKIN_OUT/work 는 매번 새로 · 스크린샷·비교 그림 SKIN_OUT/shots
 확인: 스타일 화면(쇼츠 화면 배치 '풋살사관학교 스킨' · 스킨 그림 보임 · 한글 이름 PNG 로 '스킨 바꾸기' · 잘못된 그림은 쉬운 말 · 처음 스킨으로) ·
 가편집 쇼츠 화면 구성·글자 값 = 서버 · 편집실 미리보기 차례(스킨 그림은 영상 묶음 위 · 글자·도형 아래 · 화면 크기) · 미리보기 = 내보낸 장면(스킨 띠·흰 상자) ·
-다른 템플릿은 스킨을 지움 · 템플릿 '풋살사관학교 스킨'은 서버 값 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
+미리보기 영상 칸이 찢어진 종이 홈까지 덮음 · 흰 상자 = 미리보기 글 폭 + 양옆 28 · 다른 템플릿은 스킨을 지움 · 템플릿 '풋살사관학교 스킨'은 서버 값 ·
+시퀀스 탭 스킨 안내는 화면 구성(풀샷 자르기·박스·블러)에 맞는 칸만 말함 · 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 ·
+'새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
 import json
 import os
 import shutil
@@ -219,10 +221,10 @@ try:
         win = editor.skin_window("academy.png")
         mid = (slice(int((win["top"] + 0.05) * Hh), int((win["bottom"] - 0.12) * Hh)), slice(int(0.1 * Ww), int(0.9 * Ww)))
         sk_mid = sk[mid][..., 3].max()
-        check("영상 창 안은 영상: 내보내기 창 화소는 영상(스킨 투명 · 한 색 아님) · 미리보기 영상 칸이 창(위아래 4화소 더)을 덮음",
-              a[mid].std() > 10 and sk_mid == 0 and fgr and fgr["top"] <= win["top"] * 1920 + 0.5 and fgr["bottom"] >= win["bottom"] * 1920 - 0.5,
+        check("영상 창 안은 영상: 내보내기 창 화소는 영상(스킨 투명 · 한 색 아님) · 미리보기 영상 칸이 찢어진 종이 홈까지(385~1495 · 위아래 4화소 더) 덮음",
+              a[mid].std() > 10 and sk_mid == 0 and fgr and fgr["top"] <= win["coverTop"] * 1920 - 3.5 and fgr["bottom"] >= win["coverBottom"] * 1920 + 3.5,
               f"표준편차 {a[mid].std():.1f} · 스킨 알파 {sk_mid} · 미리보기 영상 칸 {fgr and round(fgr['top'], 1)}~{fgr and round(fgr['bottom'], 1)} · "
-              f"창 {win['top'] * 1920:.0f}~{win['bottom'] * 1920:.0f}")
+              f"창 {win['top'] * 1920:.0f}~{win['bottom'] * 1920:.0f} · 덮을 곳 {win['coverTop'] * 1920:.0f}~{win['coverBottom'] * 1920:.0f}")
         Image.fromarray(np.concatenate([pvi, a], axis=1).astype(np.uint8)).resize((Ww, Hh // 2)).save(SHOTS / "e1_preview_vs_export.png")
 
         # ---- 4. 다른 템플릿은 스킨을 지움 · 다시 '풋살사관학교 스킨' ----
@@ -246,6 +248,72 @@ try:
         check("'은평 스타일' → 스킨 지움 (은평 영상 창 win)", "skin" not in g3["lay"] and g3["lay"].get("win") and g3["shown"] == "none", json.dumps(g3))
         ev("commit('템플릿'); TEMPLATES['풋살사관학교 스킨'](); changed(false); doSave && doSave()")
         W(1500)
+
+        # ---- 4b. 시퀀스 탭 스킨 안내는 보이는 칸만 말함 (검토: 풀샷 자르기에는 '영상 크기'·'박스 색' 칸이 없음) ----
+        pg.click("#rtabs [data-rt='seq']")
+        W(600)
+        hints = {}
+        for mode in ("fill", "blur", "box"):
+            pg.click(f"#pLay [data-v='{mode}']")
+            W(700)
+            hints[mode] = ev("({hint: $('pSkinHint') ? $('pSkinHint').textContent : null, zoom: !!$('pZoom'), bar: !!$('pBar'), skin: !!S.layout.skin})")
+        hf, hb, hx = hints["fill"], hints["blur"], hints["box"]
+        check("스킨 안내: 풀샷 자르기는 '영상 크기'·'박스 색' 말 없이 '가로 맞춤+박스'·템플릿 안내 · 블러는 '영상 크기'만 · 박스는 둘 다 (말한 칸이 화면에 있음)",
+              hf["hint"] and hf["skin"] and "영상 크기" not in hf["hint"] and "박스 색" not in hf["hint"] and "가로 맞춤+박스" in hf["hint"] and not hf["zoom"] and not hf["bar"]
+              and hb["hint"] and "영상 크기" in hb["hint"] and "박스 색" not in hb["hint"] and hb["zoom"] and not hb["bar"]
+              and hx["hint"] and "영상 크기" in hx["hint"] and "박스 색" in hx["hint"] and hx["zoom"] and hx["bar"], json.dumps(hints, ensure_ascii=False))
+        ev("commit('템플릿'); TEMPLATES['풋살사관학교 스킨'](); changed(false)")
+        W(800)
+
+        # ---- 4c. 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 (검토: 상자가 그대로라 긴 글이 칠판 위로 넘침) ----
+        ev("seek(1.0)")
+        W(1200)
+        tid = ev("skinTop(S).id")
+        ev(f"selectOverlay('title', '{tid}')")
+        W(600)
+        LONG = "트래핑 꿀팁 세 가지 알려줄게요"
+        pg.locator("#pTitleText").fill(LONG)
+        pg.locator("#pTitleText").dispatch_event("input")
+        pg.locator("#pTitleText").blur()
+        W(1200)
+        e4 = ev(f"""(() => {{ const t = S.titles.find(x => x.id === '{tid}'), g = S.shapes.find(x => x.plan === 'card'), F = $('frame').getBoundingClientRect(), k = 1080 / F.width;
+            const el = ovEls['t' + t.id], r = el && el.getBoundingClientRect();
+            return {{ text: t.text, st: t.style, box: {{ x: g.x, w: g.w }}, txt: r && {{ left: (r.left - F.left) * k, right: (r.right - F.left) * k }} }}; }})()""")
+        want_st = editor.skin_title_style(LONG)
+        want_g = {}
+        editor.skin_box_fit({"text": LONG, "style": want_st}, want_g)
+        bl, br = e4["box"]["x"] * 1080, (e4["box"]["x"] + e4["box"]["w"]) * 1080
+        tw = e4["txt"] and e4["txt"]["right"] - e4["txt"]["left"]
+        check("큰 제목 글 고치기 → 글자 크기·자리 = 서버 skin_title_style · 흰 상자 = skin_box_fit · 미리보기 글이 상자 안 (양옆 여백 약 28 · 실제 글꼴 폭과 상자 표가 맞음)",
+              e4["text"] == LONG and e4["st"]["size"] == want_st["size"] and e4["st"]["y"] == want_st["y"] and (e4["box"]["x"], e4["box"]["w"]) == (want_g["x"], want_g["w"])
+              and e4["txt"] and e4["txt"]["left"] >= bl + 14 and e4["txt"]["right"] <= br - 14 and abs((br - bl) - tw - 56) < 20,
+              json.dumps({"st": {k: e4["st"][k] for k in ("size", "y")}, "box": [round(bl), round(br)], "txt": e4["txt"], "want": want_g}, ensure_ascii=False))
+        pg.locator("#frame").screenshot(path=str(SHOTS / "e3b_title_edit.png"))
+        ev("undo()")
+        W(800)
+
+        # ---- 4d. '새 쇼츠 편집본으로 추가' (스킨 바탕) — KFA 글꼴을 찾는 중이어도 기다리지 않음 (검토: 은평 스타일 바탕만 기다림) ----
+        pg.click('[data-lt="rec"]')
+        W(800)
+        ev("(() => { const d = document.getElementById('recMore'); if (d && !d.open) d.open = true; })()")
+        W(300)
+        n0 = ev("P.sequences.length")
+        base_skin = ev("skinOn(recBase().base) && epOn(recBase().base)")
+        ev("""(() => { window._f0 = window.fetch; EPF = null; EPX.fontChecking = true;   // 글꼴 찾기가 끝나지 않는 PC 흉내 (늘 '찾는 중')
+            window.fetch = (u, o) => String(u).includes('/api/style/card_font') ? Promise.resolve(new Response('{"checking": true}', { headers: { 'Content-Type': 'application/json' } })) : window._f0(u, o); })()""")
+        t0 = time.time()
+        pg.locator('[data-rec="0"]').click()
+        try:
+            pg.wait_for_function(f"P.sequences.length > {n0}", timeout=10000)
+        except Exception:
+            pass
+        dt = time.time() - t0
+        nq = ev("""(() => { const q = P.sequences[P.sequences.length - 1]; return { n: P.sequences.length, lay: q.layout, cap: q.captionStyle.y,
+            card: q.shapes.filter(g => g.plan === 'card').length, top: q.titles[0] && q.titles[0].style }; })()""")
+        ev("window.fetch = window._f0; EPX.fontChecking = false")
+        check("'새 쇼츠 편집본으로 추가'(스킨 바탕 · KFA 글꼴을 찾는 중): 기다리지 않고 바로 스킨 편집본 (화면 구성 = 서버 · 흰 상자 하나 · 말 자막 0.723)",
+              base_skin and nq["n"] == n0 + 1 and dt < 5 and nq["lay"] == info["layout"] and nq["card"] == 1 and nq["cap"] == 0.723
+              and nq["top"] and nq["top"]["fill"] == "#CE4F2F", f"{dt:.1f}초 · " + json.dumps({k: v for k, v in nq.items() if k != "top"}, ensure_ascii=False)[:300])
 
         # ---- 5. 바꾼 스킨으로 템플릿 (편집실을 다시 열 때 설정을 읽음) ----
         import base64  # noqa: E402

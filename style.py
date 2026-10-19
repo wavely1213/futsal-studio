@@ -1416,13 +1416,14 @@ def save_card_pic(kind, data):
     return _save_card_pics(cur)
 
 
-# 풋살사관학교 스킨 (BR-320~BR-325 · D-520~D-524): 쇼츠 화면 전체에 얹는 9:16 그림 (위 칠판 띠 · 아래 캐릭터·채널 이름 띠 · 가운데는 투명 = 영상 창)
+# 풋살사관학교 스킨 (BR-320~BR-325 · D-520~D-525): 쇼츠 화면 전체에 얹는 9:16 그림 (위 칠판 띠 · 아래 캐릭터·채널 이름 띠 · 가운데는 투명 = 영상 창)
 # 그림은 앱과 함께 실은 것(skins/academy.png · 출처 skins/NOTICE.md) · '스킨 바꾸기'로 고른 그림은 작업 폴더 styles/설정/스킨/ 에 내용 지문 이름으로 복사
 SKIN_SHIP = "academy.png"      # 앱 폴더 skins/ 의 기본 스킨 (editor.SKIN_DIR)
 SKIN_ASPECT_TOL = 0.03         # 9:16 에서 이만큼(비율)까지 벗어난 그림은 받음
 SKIN_WIN_MIN = 0.30            # 투명한 영상 창(가장 긴 이어진 줄)이 그림 높이의 이만큼은 돼야 함
 SKIN_MIN_W = 360               # 이보다 좁은 그림은 받지 않음 (화소 · 1080 폭 쇼츠에 세 배 넘게 키우면 흐림)
 SKIN_ROW_HOLE = 0.5            # 한 줄에서 가로 10%~90% 칸의 이 비율 넘게 투명(알파 255 아님)하면 영상 창 줄
+SKIN_COVER_MAX = 0.05          # 영상이 덮을 곳: 창 위아래로 비치는(알파 < 255) 화소가 있는 줄을 이만큼(그림 높이 비율)까지 더 (찢어진 종이 홈 · D-525)
 _SKIN_NAME = re.compile(r"skin_[0-9a-f]{12}\.png")   # 바꾼 스킨 이름 (내용 지문 · 같은 그림은 같은 이름)
 _SKIN_BAD = "가운데가 투명하게 비어 있는 9:16 그림(PNG)을 골라 주세요"
 
@@ -1491,11 +1492,30 @@ def skin_window_of(im):
     return best
 
 
-_SKIN_WIN = {}   # (경로, 고친 시각, 크기) → 창 {top, bottom, w, h} (내보내기·편집실을 열 때마다 다시 재지 않게)
+def skin_cover_of(im, win):
+    """영상이 덮어야 할 줄 (위, 아래 다음) 화소 — 창 [위, 아래) 에서 위·아래로, 가로 10%~90% 칸에 비치는(알파 < 255) 화소가 하나라도 있는 줄이
+    이어지는 동안 넓힘 (창 위아래 SKIN_COVER_MAX 까지 · 찢어진 종이 가장자리의 홈·그림자로 영상이 비쳐야 함 · 안 덮으면 박스 바탕(검정)이 비침 · D-525).
+    글자 자리·말 자막·MSG 띠는 창(win) 그대로 쓴다."""
+    import numpy as np
+    a = np.asarray(im.getchannel("A"))
+    h, w = a.shape
+    x0, x1 = int(w * 0.1), max(int(w * 0.1) + 1, int(w * 0.9))
+    see = (a[:, x0:x1] < 255).any(axis=1)
+    lim = int(SKIN_COVER_MAX * h)
+    t, b = win
+    while t > 0 and t > win[0] - lim and see[t - 1]:
+        t -= 1
+    while b < h and b < win[1] + lim and see[b]:
+        b += 1
+    return t, b
+
+
+_SKIN_WIN = {}   # (경로, 고친 시각, 크기) → 창 {top, bottom, coverTop, coverBottom, w, h} (내보내기·편집실을 열 때마다 다시 재지 않게)
 
 
 def skin_window(p):
-    """스킨 파일 → {"top": 위 끝, "bottom": 아래 끝 (화면 높이 비율 · [위, 아래)), "w", "h"(그림 크기)} · 못 읽거나 창이 없으면 None."""
+    """스킨 파일 → {"top": 위 끝, "bottom": 아래 끝 (화면 높이 비율 · [위, 아래) · 글자 자리), "coverTop", "coverBottom"(영상이 덮을 곳 · skin_cover_of),
+    "w", "h"(그림 크기)} · 못 읽거나 창이 없으면 None."""
     try:
         st = Path(p).stat()
     except (OSError, TypeError):
@@ -1507,12 +1527,14 @@ def skin_window(p):
             with Image.open(p) as im:
                 im.load()
                 win = skin_window_of(im)
+                cov = skin_cover_of(im, win) if win else None
                 size = im.size
         except Exception:  # noqa: BLE001 — 깨진 그림은 창이 없는 것으로
             win, size = None, (0, 0)
         if len(_SKIN_WIN) > 16:
             _SKIN_WIN.clear()
-        _SKIN_WIN[k] = {"top": win[0] / size[1], "bottom": win[1] / size[1], "w": size[0], "h": size[1]} if win else None
+        _SKIN_WIN[k] = {"top": win[0] / size[1], "bottom": win[1] / size[1], "coverTop": cov[0] / size[1], "coverBottom": cov[1] / size[1],
+                        "w": size[0], "h": size[1]} if win else None
     v = _SKIN_WIN[k]
     return dict(v) if v else None
 

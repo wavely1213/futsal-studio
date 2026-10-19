@@ -1940,13 +1940,14 @@ def ep_room_fit(text, st, W, H, wb):
     return EP_ROOM_MIN
 
 
-# ---------- 풋살사관학교 스킨 쇼츠 (BR-320~BR-325 · D-520~D-524) ----------
+# ---------- 풋살사관학교 스킨 쇼츠 (BR-320~BR-325 · D-520~D-528) ----------
 # 소유자 채널 스킨(9:16 투명 창 그림 · skins/academy.png · 바꾼 스킨은 작업 폴더 styles/설정/스킨/)을 화면 전체에 얹음 — 영상 트랙(V1~V3 · 박스 바탕) 위,
-# 글자·도형·전술 그림(ASS) 아래 · 16:9 원본은 스킨의 투명한 영상 창을 꽉 채우게 (창 위아래로 SKIN_BLEED 화소 더) · 위 칠판 띠에 흰 둥근 상자 안 주황 큰 제목 +
+# 글자·도형·전술 그림(ASS) 아래 · 16:9 원본은 스킨의 투명한 영상 창과 그 위아래 찢어진 종이 홈(비치는 줄 · style.skin_cover_of)까지 꽉 채우게
+# (그 위아래로 SKIN_BLEED 화소 더 · D-525) · 위 칠판 띠에 흰 둥근 상자 안 주황 큰 제목 +
 # 그 아래 흰 주제 줄 · 말 자막은 창 아래 끝 바로 위. 스타일 화면 '쇼츠 화면 배치'에서 고름(기본은 지금처럼) · 은평 스타일 것(KFA 글꼴 고정·띠 그림·로고·
 # 이름표·강좌 줄·영상 창 자르기 win)은 쓰지 않음. 편집실 템플릿 '풋살사관학교 스킨'(editor.html SKIN · skinCard)과 같은 값·셈 — 한쪽을 고치면 다른 쪽도.
 SKIN_KEY = "academy"
-SKIN_BLEED = 4         # 16:9 원본이 영상 창 위아래로 더 덮는 화소 (1920 높이 기준 · 찢어진 종이 가장자리 아래로 빈 바탕이 안 보이게)
+SKIN_BLEED = 4         # 16:9 원본이 덮을 곳(창 + 비치는 종이 홈 · style.skin_cover_of) 위아래로 더 덮는 화소 (1920 높이 기준 · 반올림 뒤에도 · D-525)
 SKIN_PAD = 28          # 흰 상자 안 글 양옆 여백 (화소 · 1080 기준)
 SKIN_SIZES = (96, 88, 80, 72, 64, 56, 48)        # 큰 제목 글자 크기 (한 줄로 화면 폭 90% - 양옆 여백 안에 들어가는 가장 큰 것)
 SKIN_TOPIC_SIZES = (88, 80, 72, 64, 56, 48)      # 주제 줄 글자 크기 (한 줄로 화면 폭 90% 안에 들어가는 가장 큰 것)
@@ -1960,6 +1961,11 @@ SKIN_TOPIC = dict(DEFAULT_STYLE, weight="Black", size=88, fill="#FFFFFF", stroke
 SKIN_TOPIC_CY = 0.179  # 주제 줄 가운데 (화면 비율 · 소유자 쇼츠 글자 303~386화소) — 글 상자 아래 끝은 영상 창 위 끝 - TXT_GAP 위까지
 SKIN_CAP_UP = 0.04     # 말 자막 아래 끝 = 영상 창 아래 끝 - 이만큼 (배운 자막 자리와 상관없이 · 여러 줄은 창 안에서 위로 늘어남)
 SKIN_CAP_STROKE = 8    # 말 자막 검은 테두리 가장 얇게
+# 흰 상자 폭을 셀 때만 쓰는 Pretendard Black 실제 글자 폭 (글자 크기 1 기준 · fonts/Pretendard-Black.otf 의 글자 나아감 · 천분의 일 · D-526) —
+# 글자 크기 고르기는 넉넉한 어림(_text_w · 한글 0.95)을 그대로 씀 · 표에 없는 글자(이모지 등)는 그 어림 · editor.html SKIN_HUG 와 같은 표
+_SKIN_HUG_ASCII = "218 340 375 642 646 1024 674 195 423 423 584 671 307 460 301 396 703 488 626 654 679 647 663 592 668 663 301 301 671 671 671 577 871 767 647 744 711 603 567 749 728 281 568 690 554 903 704 771 636 772 646 646 664 702 767 1055 734 737 671 423 396 423 483 477 482 572 625 586 625 589 388 628 625 283 283 586 283 910 624 605 627 627 417 567 391 627 585 847 576 585 572 423 389 423 671"   # ' '(0x20) ~ '~'(0x7E)
+SKIN_HUG = {"hangul": 0.864, "em": dict({chr(32 + i): int(v) / 1000 for i, v in enumerate(_SKIN_HUG_ASCII.split())},
+                                        **{"·": 0.301, "…": 0.902, "‘": 0.291, "’": 0.291, "“": 0.516, "”": 0.516})}
 SKIN_SIZES_EXPORT = ((1080, 1920), (720, 1280), (2160, 3840))   # 영상 창을 덮는지 확인할 내보내기 크기 (PRESETS 쇼츠 · 1080 이 기준)
 
 
@@ -1994,14 +2000,15 @@ def skin_window(ref):
 
 
 def _skin_covers(zoom, vpos, top, bottom):
-    """화면 구성(zoom·vpos)의 16:9 원본 칸이 영상 창 [top, bottom) 을 덮는지 — 내보내기(_fit 짝수 크기 · yuv420 겹치기는 위 끝을 짝수로 내림)와
-    미리보기(fit_rect · 반올림 없음) 모두 · 내보내기 크기마다."""
+    """화면 구성(zoom·vpos)의 16:9 원본 칸이 덮을 곳 [top, bottom) 을 덮는지 — 내보내기(_fit 짝수 크기 · yuv420 겹치기는 위 끝을 짝수로 내림)는
+    위아래 SKIN_BLEED(화면 높이에 맞춰 · 1920 에서 4화소 · 720 에서 2 · 4K 에서 8)까지 내보내기 크기마다, 미리보기(fit_rect · 반올림 없음)는 그 곳까지 (D-525)."""
     lay = {"mode": "box", "bar": "#000000", "zoom": zoom, "vpos": vpos, "cropTop": 0.0, "cropBottom": 0.0}
     seq, it, md = {"format": "shorts", "layout": lay}, {"track": "V1", "fit": "auto"}, {"kind": "video", "w": 1920, "h": 1080}
     for W, H in SKIN_SIZES_EXPORT:
+        bl = math.floor(SKIN_BLEED * H / 1920 + 1e-9)
         f = _fit(it, md, seq, W, H)
         y0 = int(f["by"]) & ~1
-        if y0 > top * H + 1e-6 or y0 + f["bh"] < bottom * H - 1e-6:
+        if y0 > max(0.0, top * H - bl) + 1e-6 or y0 + f["bh"] < min(float(H), bottom * H + bl) - 1e-6:
             return False
         r = fit_rect(it, md, seq, W, H)
         if r["by"] > top * H + 1e-6 or r["by"] + r["bh"] < bottom * H - 1e-6:
@@ -2010,8 +2017,8 @@ def _skin_covers(zoom, vpos, top, bottom):
 
 
 def skin_fit(top, bottom):
-    """영상 창 [top, bottom) (화면 높이 비율) → (zoom, vpos) — 16:9 원본이 [창 위 - SKIN_BLEED, 창 아래 + SKIN_BLEED] 를 꼭 덮게
-    (높이 ch = 창 높이 + 2·BLEED 화소 · zoom = ch / (1080·1080/1920) · vpos = (창 위 - BLEED) / (1920 - ch) · 넷째 자리) ·
+    """덮을 곳 [top, bottom) (화면 높이 비율 · 스킨의 coverTop·coverBottom) → (zoom, vpos) — 16:9 원본이 [위 - SKIN_BLEED, 아래 + SKIN_BLEED] 를 꼭 덮게
+    (높이 ch = 덮을 곳 높이 + 2·BLEED 화소 · zoom = ch / (1080·1080/1920) · vpos = (위 - BLEED) / (1920 - ch) · 넷째 자리) ·
     반올림 뒤에도 덮는지 확인해 모자라면 1화소씩 더 덮음 (_skin_covers)."""
     W, H = frame_size("shorts")
     t, b = float(top) * H, float(bottom) * H
@@ -2038,7 +2045,7 @@ def skin_layout(ref=None):
     win = skin_window(ref)
     if not win:
         return None
-    zoom, vpos = skin_fit(win["top"], win["bottom"])
+    zoom, vpos = skin_fit(win["coverTop"], win["coverBottom"])   # 영상은 창보다 넓게 — 찢어진 종이 홈으로 비치는 곳까지 (D-525)
     return {"mode": "box", "bar": "#000000", "zoom": zoom, "vpos": vpos, "cropTop": 0.0, "cropBottom": 0.0, "skin": ref}
 
 
@@ -2066,11 +2073,18 @@ def skin_title_style(text):
     return dict(SKIN_TITLE, size=size, y=round(SKIN_BOX["y"] + SKIN_BOX["h"] / 2 + TXT_LINE * size / 2 / H, 4))
 
 
+def skin_hug_w(text, st):
+    """흰 상자가 감쌀 큰 제목 한 줄 폭 (화소 · Pretendard Black 실제 글자 폭 표 SKIN_HUG · 테두리 포함 · editor.html textW(…, SKIN_HUG)) —
+    넉넉한 어림(_text_w)은 실제보다 10%쯤 넓어 상자가 글보다 훨씬 넓었음 (D-526)."""
+    black = st.get("weight") == "Black"
+    return max([sum(_em(ch, black, SKIN_HUG) for ch in ln) for ln in str(text or "").replace("\r", "").split("\n")] or [0.0]) * float(st.get("size") or 0) \
+        + 2 * float(st.get("strokeW") or 0)
+
+
 def skin_box_fit(t, g):
-    """흰 상자 폭을 큰 제목(t)에 맞춤 (가운데 · 양옆 SKIN_PAD · 가장 넓게 SKIN_BOX_MAX · editor.html skinBoxFit)."""
+    """흰 상자 폭을 큰 제목(t)에 맞춤 (가운데 · 양옆 SKIN_PAD · 가장 넓게 SKIN_BOX_MAX · 글 폭은 skin_hug_w · editor.html skinBoxFit)."""
     W, _ = frame_size("shorts")
-    with ep_font_scope(False):
-        w = min(SKIN_BOX_MAX, (_text_w(t["text"], t["style"]) + 2 * SKIN_PAD) / W)
+    w = min(SKIN_BOX_MAX, (skin_hug_w(t["text"], t["style"]) + 2 * SKIN_PAD) / W)
     g["w"], g["x"] = round(w, 4), round(0.5 - w / 2, 4)
 
 
