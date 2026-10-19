@@ -141,6 +141,8 @@
   .ov { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
   /* 영상 트랙 묶음(.tgrp z = 1 + 10·k)은 #layers 안에만 → 글자·그림(#ov)은 늘 영상 위 (예전: V6 이 자막을, V5 디졸브가 도형을 덮음 · I-292) */
   #layers { position: absolute; inset: 0; z-index: 1; }
+  /* 풋살사관학교 스킨 (BR-320 · skinShow): 영상 트랙 묶음(#layers) 위 · 글자·그림(#ov) 아래에 화면 전체로 = 내보내기 차례 */
+  #skinL { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 30; pointer-events: none; display: none; max-width: none; }
   /* 글자·그림 줄마다 한 겹 (D-296) — z-index = 줄 차례 (아래 줄 = 뒤) · 내보내기 ASS 층과 같은 차례 */
   .olay { position: absolute; inset: 0; pointer-events: none; }
   .olay > .shp, .olay > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -544,7 +546,7 @@
         <button class="btn sm pri" id="sOver" title="프로그램 재생 위치에 덮어쓰기 ( . )">덮어쓰기</button>
         <div class="sp"></div><span class="tcdim" id="sDur"></span></div>
     </div>
-    <div class="mon" id="mon"><div class="fbar" id="pvBar" style="display:none"></div><div class="holdb" id="holdBadge" role="status" hidden>불러오는 중…</div><div class="frame" id="frame"><div id="layers"></div><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i><b class="gchip" id="gchip"></b></div><div id="gbox2"></div><div id="tacH"></div><div id="pvGuides"></div></div></div>
+    <div class="mon" id="mon"><div class="fbar" id="pvBar" style="display:none"></div><div class="holdb" id="holdBadge" role="status" hidden>불러오는 중…</div><div class="frame" id="frame"><div id="layers"></div><img id="skinL" alt="" draggable="false"><div class="ov" id="ov"></div><div class="mbox" id="mbox"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><span class="an" id="mban"></span></div><div class="mbox gbox" id="gbox"><i class="d"></i><b class="gchip" id="gchip"></b></div><div id="gbox2"></div><div id="tacH"></div><div id="pvGuides"></div></div></div>
     <div class="scrub" id="scrub"><div class="io" id="scrubIO"></div><div class="fill" id="scrubFill"></div><div class="knob" id="scrubKnob"></div></div>
     <div class="ctl" id="pctl">
       <span class="tcbig" id="tcNow">00:00:00:00</span>
@@ -2688,6 +2690,19 @@ function epPics(bg, f, k, W, H) {
     css(lg, "left", (W - w) / 2 * k + "px"); css(lg, "top", (EP.LOGO.cy * H - h / 2) * k + "px"); css(lg, "width", w * k + "px"); css(lg, "height", h * k + "px");
   }
 }
+// 풋살사관학교 스킨 (layout.skin · BR-320 · editor.py _build_segment 의 스킨 겹치기와 같은 차례): 쇼츠면 스킨 그림 한 장을 화면 전체(#frame 크기)로 —
+// 영상 트랙 묶음(#layers · z 1) 위, 글자·도형·전술 그림(#ov · z 60) 아래 · 그림을 못 읽으면 안 보임 (내보내기도 스킨 없이)
+const skinUrl = ref => "/api/style/skin?f=" + encodeURIComponent(ref);
+const skinOn = q => !!(q && q.format === "shorts" && q.layout && q.layout.skin);
+function skinShow() {
+  const el = $("skinL"); if (!el) return;
+  const want = skinOn(S) ? skinUrl(S.layout.skin) : "";
+  if (el.getAttribute("src") !== want) {
+    if (!el._sk) { el._sk = 1; el.onload = el.onerror = () => { frameDirty = true; }; }
+    if (want) el.setAttribute("src", want); else el.removeAttribute("src");
+  }
+  css(el, "display", want && el.complete && el.naturalWidth > 0 ? "block" : "none");
+}
 // 은평 스타일(layout.win · D-424): 확대·이동·회전한 클립도 영상 창(화면의 f.by ~ f.by+f.bh) 안만 보이게 — 창 네 모서리를 클립 상자 안 자리로 거꾸로 옮긴
 // 다각형 (transform = 기준점 둘레 translate·rotate·scale · editor.py layer 의 창 겹치기와 같은 그림) · 움직임이 없으면 창 = 클립 상자라 자르지 않음
 function winClip(f, mo, k, W, H) {
@@ -2816,6 +2831,7 @@ function renderFrame() {
       if (st.b) showItem(st.b, t, z + 1, st.a ? { op: p, blend: true } : { op: p }, used);
     }
   }
+  skinShow();  // 풋살사관학교 스킨: 모든 영상 트랙 위 · 글자 아래 (전환·빈 곳에도 그대로)
   // 소리
   const solo = aTracks().some(x => x.solo), speaking = S.duck.on && speechAt(t);
   if (speaking) speechHold = t;
@@ -4717,6 +4733,7 @@ const TEMPLATES = {
   "블러 배경": () => { Object.assign(S.layout, { mode: "blur", zoom: 1, vpos: 0.5 }); Object.assign(S.captionStyle, { y: 0.8, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false }); tplTitle({ y: 0.2, fill: "#FFFFFF", stroke: "#000000", strokeW: 9 }); },
   "꽉 채우기": () => { Object.assign(S.layout, { mode: "fill" }); Object.assign(S.captionStyle, { y: 0.72, fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false }); tplTitle({ y: 0.15, fill: "#FFE14D", stroke: "#111111", strokeW: 9 }); },
   "은평 스타일": () => { Object.assign(S.captionStyle, { fill: "#FFFFFF", stroke: "#000000", strokeW: 8, bgOn: false }); epCard(S, total()); },
+  "풋살사관학교 스킨": () => { skinCard(S, total()); },
 };
 // 은평 스타일 쇼츠 (BR-240~BR-243 · D-420~D-423 · editor.py EP_* · ep_title_style · ep_card · ep_caption 과 같은 값·셈 — 한쪽을 고치면 다른 쪽도):
 // 위아래 파란 띠 + 가운데 영상 창(1.32배 · 화면 높이 0.28~0.70) + 위 띠 흰 상자(폭 고정 · 도형 plan "card") 안 검은 큰 제목 한 줄(처음부터 끝까지)
@@ -4803,6 +4820,7 @@ const epOn = q => (q.shapes || []).some(g => g.plan === "card");
 // 편집본 q 를 은평 스타일로 (L = 길이): 화면 구성 · 말 자막은 아래 띠로 · 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · 없으면 편집본 이름) · 그 주제 줄 · 흰 상자
 function epCard(q, L) {
   q.layout = Object.assign(q.layout || {}, { mode: "box", bar: EP.BAR, zoom: EP.ZOOM, vpos: EP.VPOS, win: true });
+  delete q.layout.skin;  // 풋살사관학교 스킨은 스킨 템플릿에서만 (BR-325)
   const pics = (EPX && EPX.pics) || {};  // 스타일 화면에서 켠 띠 그림·로고 (끈 것은 지움 · BR-280 · BR-281)
   for (const k of ["band", "logo"]) { if (pics[k]) q.layout[k] = pics[k]; else delete q.layout[k]; }
   if (+(q.captionStyle.y ?? EP.CAP_Y) < EP.CAP_Y) q.captionStyle.y = EP.CAP_Y;
@@ -4823,7 +4841,7 @@ function epCard(q, L) {
 // 다른 템플릿을 고르면 은평 스타일 흰 상자를 지우고 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · MSG 강조 글씨 등은 그대로) 크기·나타나기를 보통으로,
 // 그 사실 줄은 첫머리 주제 줄(처음 SEC 초 · 모양은 tplTitle 의 placeTopic 이 다시 놓음)로 (예전 편집본에는 흰 상자가 없어 그대로)
 function epOff(q) {
-  if (q.layout) { delete q.layout.win; delete q.layout.band; delete q.layout.logo; }  // 영상 창 밖 자르기(D-424)·띠 그림·로고(BR-280 · BR-281)도 은평 스타일에서만
+  if (q.layout) { delete q.layout.win; delete q.layout.band; delete q.layout.logo; delete q.layout.skin; }  // 영상 창 밖 자르기(D-424)·띠 그림·로고(BR-280 · BR-281)도 은평 스타일에서만 · 스킨(BR-325)도 스킨 템플릿에서만
   // 이름표·전체 강좌 줄도 은평 스타일에서만 (BR-245 · BR-246) — 흰 상자를 먼저 지웠어도 (안 지우면 아래 tplTitle 이 큰 제목 모양으로 바꿈)
   if ((q.shapes || []).some(g => g.plan === "series")) q.shapes = q.shapes.filter(g => g.plan !== "series");
   if (q.titles.some(epFrame)) q.titles = q.titles.filter(t => !epFrame(t));
@@ -4833,6 +4851,54 @@ function epOff(q) {
   if (!top) return;
   Object.assign(top.style, { size: 100, effect: "pop" });
   for (const t of q.titles) if (t.plan === "topic" && topicUnder(t, q.titles) === top) { Object.assign(t.style, TOPIC_STYLE); t.dur = r3(Math.min(t.dur, TOPIC.SEC)); }
+}
+// 풋살사관학교 스킨 쇼츠 (BR-320~BR-325 · D-520~D-524 · editor.py SKIN_* · skin_title_style · skin_box_fit · skin_topic_style · skin_cap_y · skin_caption ·
+// skin_card 와 같은 값·셈 — 한쪽을 고치면 다른 쪽도): 스킨 그림을 화면 전체에 얹고(영상은 서버가 정한 확대·위치로 투명한 영상 창을 꽉 채움) · 위 칠판 띠의
+// 흰 둥근 상자(도형 plan "card" · 폭은 큰 제목에 맞춤) 안 주황 큰 제목 한 줄 + 그 아래 흰 주제 줄(처음부터 끝까지) · 말 자막은 영상 창 아래 끝 바로 위 ·
+// 은평 스타일 것(KFA 글꼴 고정 win · 띠 그림·로고 · 이름표·강좌 줄)은 쓰지 않음 · 글자 폭은 Pretendard (은평 글꼴 표를 쓰지 않음)
+const SKIN = {
+  PAD: 28, SIZES: [96, 88, 80, 72, 64, 56, 48], TOPIC_SIZES: [88, 80, 72, 64, 56, 48], BOX: { y: 0.0922, h: 0.0625 }, BOX_MAX: 0.9, RADIUS: 17,
+  TOPIC_CY: 0.179, CAP_UP: 0.04, CAP_STROKE: 8,
+  TITLE: { weight: "Black", fill: "#CE4F2F", stroke: "#CE4F2F", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
+  TOPIC: { weight: "Black", fill: "#FFFFFF", stroke: "#000000", strokeW: 0, bgOn: false, bg: "#000000", bgOpacity: 0.55, x: 0.5, align: "center", effect: "none", highlight: "#FFD400" },
+};
+let SKX = null;  // 스타일 화면에서 고른 스킨 {ref, top, bottom(영상 창 · 화면 높이 비율), layout(editor.py skin_layout)} — 편집실을 열 때 서버가 줌 (/api/edit/open epx.skin · 못 읽으면 null)
+function skinTitleStyle(text) {  // 한 줄로 (화면 폭 90% - 양옆 PAD) 안에 들어가는 가장 큰 글자 · 흰 상자 세로 가운데 (y = 글 아래 끝 · editor.py skin_title_style)
+  const room = SKIN.BOX_MAX * 1080 - 2 * SKIN.PAD, size = SKIN.SIZES.find(z => textW(text, { ...SKIN.TITLE, size: z }, null) <= room) ?? SKIN.SIZES[SKIN.SIZES.length - 1];
+  return { ...SKIN.TITLE, size, y: Math.round((SKIN.BOX.y + SKIN.BOX.h / 2 + TOPIC.LINE * size / 2 / 1920) * 1e4) / 1e4 };
+}
+function skinBoxFit(t, g) {  // 흰 상자 폭을 큰 제목에 맞춤 (가운데 · 양옆 PAD · 가장 넓게 BOX_MAX · editor.py skin_box_fit)
+  const w = Math.min(SKIN.BOX_MAX, (textW(t.text, t.style, null) + 2 * SKIN.PAD) / 1080);
+  g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
+}
+function skinTopicStyle(text, top) {  // 한 줄로 화면 폭 90% 안 가장 큰 글자 · 가운데 TOPIC_CY · 글 상자 아래 끝은 영상 창 위 끝 - GAP 위까지 (editor.py skin_topic_style)
+  const size = SKIN.TOPIC_SIZES.find(z => textW(text, { ...SKIN.TOPIC, size: z }, null) <= SKIN.BOX_MAX * 1080) ?? SKIN.TOPIC_SIZES[SKIN.TOPIC_SIZES.length - 1];
+  const y = SKIN.TOPIC_CY + TOPIC.LINE * size / 2 / 1920, lim = Math.floor((+top - TOPIC.GAP) * 1e4 + 1e-6) / 1e4;
+  return { ...SKIN.TOPIC, size, y: Math.round(Math.min(y, lim) * 1e4) / 1e4 };
+}
+const skinCapY = bottom => Math.round((+bottom - SKIN.CAP_UP) * 1e4) / 1e4;  // 말 자막 아래 끝 = 영상 창 아래 끝 - CAP_UP (editor.py skin_cap_y)
+// 편집본 q 를 풋살사관학교 스킨으로 (L = 길이 · 스킨을 못 읽었으면(SKX 없음) 아무것도 안 하고 false): 화면 구성(서버 값 그대로) · 말 자막(흰 글씨·검은 테두리·창 아래 끝 바로 위) ·
+// 큰 제목(맨 앞에서 시작하는 가장 긴 타이틀 · 없으면 편집본 이름 · epCard 와 같은 고르기) · 그 주제 줄 · 흰 둥근 상자 (두 번 눌러도 하나)
+function skinCard(q, L) {
+  const k = SKX; if (!k || !k.layout) return false;
+  q.layout = Object.assign(q.layout || {}, JSON.parse(JSON.stringify(k.layout)));
+  delete q.layout.win; delete q.layout.band; delete q.layout.logo;  // 은평 스타일 영상 창 자르기·띠 그림·로고는 스킨에서 안 씀 (BR-325)
+  if ((q.shapes || []).some(g => g.plan === "series")) q.shapes = q.shapes.filter(g => g.plan !== "series");  // 은평 이름표·강좌 줄도
+  if (q.titles.some(epFrame)) q.titles = q.titles.filter(t => !epFrame(t));
+  Object.assign(q.captionStyle, { fill: "#FFFFFF", stroke: "#000000", strokeW: Math.max(SKIN.CAP_STROKE, Math.trunc(+q.captionStyle.strokeW || 0)), y: skinCapY(k.bottom) });
+  for (const t0 of q.titles) if (t0.plan === "topic" && t0.swap) {  // 바꿔 끼운 주제 줄 뒤로 옮겨 둔 큰 제목은 다시 처음부터 (epCard 와 같음)
+    const t = q.titles.find(x => x.id === t0.under); if (t && Math.abs(t.start - (t0.start + t0.dur)) < 0.05) { t.dur = r3(t.dur + t.start - t0.start); t.start = t0.start; }
+  }
+  let top = q.titles.filter(t => t.plan !== "topic" && !epFrame(t) && t.start < 0.05).sort((a, b) => b.dur - a.dur)[0];
+  if (!top) { top = { id: nid(), text: cutText(q.name.replace(/^쇼츠\s*\d*\s*·?\s*/, ""), 16) || "제목", start: 0, dur: L, style: { ...q.captionStyle } }; q.titles.unshift(top); }
+  const topics = q.titles.filter(t => t.plan === "topic" && topicUnder(t, q.titles) === top), one = x => String(x || "").split(/\s+/).filter(Boolean).join(" ");
+  top.text = one(top.text); top.start = 0; top.dur = r3(L); top.style = skinTitleStyle(top.text);
+  for (const t of topics) { delete t.swap; t.text = one(t.text); t.under = top.id; t.start = 0; t.dur = r3(L); t.style = skinTopicStyle(t.text, k.top); }
+  const box = (q.shapes || []).find(g => g.plan === "card"), bx = { x: 0.05, y: SKIN.BOX.y, w: SKIN.BOX_MAX, h: SKIN.BOX.h, color: "#FFFFFF", opacity: 1, radius: SKIN.RADIUS, start: 0, dur: r3(L), full: true };
+  let g = box;
+  if (g) Object.assign(g, bx); else (q.shapes = q.shapes || []).push(g = { id: nid(), name: "제목 상자", ...bx, plan: "card" });
+  skinBoxFit(top, g);
+  return true;
 }
 function tplTitle(st) {
   epOff(S);
@@ -5281,11 +5347,12 @@ async function renderRec() {
     // 위쪽 자막 스타일이면 쇼츠 내내 떠 있는 큰 제목(y 0.22) 아래로 (editor.py auto_sequences 의 _stack_below 와 같은 뜻 · E4③)
     if (q.titles.length && q.captionStyle && (q.captionStyle.y ?? 0.8) < 0.3) q.captionStyle.y = 0.3;
     // 첫머리 주제 줄 (BR-120 · editor.py auto_sequences 와 같게) — 서버가 고른 글 (설정 '쇼츠 첫머리에 주제 한 줄 넣기'를 끄면 없음) · 바꿔 끼우면 큰 제목은 그 뒤부터
-    const ep = epOn(base), txt = on ? (s.topicText ?? s.topic ?? "") : "";  // 바탕이 은평 스타일이면 흰 상자·사실 줄도 (BR-240)
-    const tk = q.titles.length ? (ep ? (txt ? { id: nid(), text: txt, start: 0, dur: s.length, style: { ...EP.FACT }, plan: "topic", under: q.titles[0].id } : null)
+    // 바탕이 은평 스타일이면 흰 상자·사실 줄도 (BR-240) · 풋살사관학교 스킨이면 스킨 템플릿과 같게 (BR-325 · 지금 고른 스킨)
+    const sk = skinOn(base) && !!SKX, ep = !skinOn(base) && epOn(base), txt = on ? (s.topicText ?? s.topic ?? "") : "";
+    const tk = q.titles.length ? (ep || sk ? (txt ? { id: nid(), text: txt, start: 0, dur: s.length, style: { ...EP.FACT }, plan: "topic", under: q.titles[0].id } : null)
       : recTopic(s, on, q.titles[0], q.captionStyle, q.layout, q.items)) : null;
     if (tk) { swapIn(q.titles[0], tk); q.titles.push(tk); }
-    if (ep) epCard(q, s.length);
+    if (sk) skinCard(q, s.length); else if (ep) epCard(q, s.length);
     ensureSeq(q); otCopyRows(q, base); P.sequences.push(q); switchSeq(q.id); toast(`새 쇼츠 편집본을 만들었어요 (${s.length}초)`);
   });
   $("recRebuild").onclick = async () => {
@@ -6258,6 +6325,7 @@ function renderSeqTab() {
       <div class="hint" style="margin:-4px 0 10px">${lay.mode === "fill" ? "가로 영상을 세로 화면에 꽉 차게 잘라요. 클립을 골라 효과 컨트롤의 '화면 좌우'로 위치를 맞춰요." : lay.mode === "box" ? "가로 영상을 폭에 맞춰 가운데 두고, 위아래 빈 곳은 박스로 채워요. 위에는 제목, 아래는 자막을 두기 좋아요." : "가로 영상을 가운데 두고, 위아래는 같은 영상을 흐리게 깔아요."}</div>
       ${lay.mode === "box" ? `<div class="f"><label>박스 색</label><input type="color" id="pBar" value="${lay.bar}"><span></span></div>` : ""}
       ${lay.mode === "box" && lay.band ? `<div class="hint" id="pBarPic" style="margin:-4px 0 10px">위아래 띠에 그림이 깔려 있어 박스 색은 그림에 가려 안 보여요. 스타일 화면에서 '띠에 그림 깔기'를 끄거나 그림을 못 읽으면 이 색이 보여요.</div>` : ""}
+      ${lay.skin ? `<div class="hint" id="pSkinHint" style="margin:-4px 0 10px">풋살사관학교 스킨이 화면 전체를 덮고 있어요. 영상은 가운데 투명한 칸으로만 보여요 (박스 색은 스킨에 가려 안 보여요). 세로로 찍은 영상이 너무 크게 보이면 아래 '영상 크기'를 줄여 주세요.</div>` : ""}
       ${lay.mode !== "fill" ? slider("pZoom", "영상 크기", lay.zoom, 1, 2, 0.01, v => Math.round(v * 100) + "%") + slider("pVpos", "영상 위치", lay.vpos, 0, 1, 0.01, v => v < 0.45 ? "위쪽" : v > 0.55 ? "아래쪽" : "가운데") : ""}
       ${slider("pCropB", "원본 아래 자르기", lay.cropBottom, 0, 0.4, 0.005, v => Math.round(v * 100) + "%")}
       ${slider("pCropT", "원본 위 자르기", lay.cropTop, 0, 0.4, 0.005, v => Math.round(v * 100) + "%")}
@@ -6281,6 +6349,7 @@ function renderSeqTab() {
     if ($("pZoom")) { bindRange("pZoom", v => S.layout.zoom = v, v => Math.round(v * 100) + "%", "영상 크기"); bindRange("pVpos", v => S.layout.vpos = v, v => v < 0.45 ? "위쪽" : v > 0.55 ? "아래쪽" : "가운데", "영상 위치"); }
     document.querySelectorAll("[data-tpl]").forEach(b => b.onclick = async () => {
       if (b.dataset.tpl === "은평 스타일" && !EPF && EPX && EPX.fontChecking) { toast("KFA 글꼴을 찾는 중이에요 · 찾으면 바로 적용해요"); await epFontReady(); }  // 글자 크기를 KFA 폭으로 (I-503)
+      if (b.dataset.tpl === "풋살사관학교 스킨" && !SKX) return toast("스킨 그림을 읽지 못했어요 · 스타일 화면에서 스킨을 다시 골라 주세요");  // (BR-324 · 편집본은 그대로)
       commit("템플릿"); TEMPLATES[b.dataset.tpl](); changed(false); toast(`"${b.dataset.tpl}" 템플릿을 적용했어요`);
     });
   }
@@ -8136,7 +8205,7 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   P = j.project; P.sequences.forEach(ensureSeq); signFresh();
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
-  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad(); epFontReady();
+  bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad(); epFontReady(); SKX = (EPX && EPX.skin) || null;
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;

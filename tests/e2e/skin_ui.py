@@ -1,0 +1,282 @@
+"""풋살사관학교 스킨 화면 e2e (BR-320~BR-325 · D-520~D-524 · 개발용 · 배포 안 됨 · unittest 가 줍지 않음) — 마지막 줄 'N/N 통과' 면 통과.
+
+실행: SKIN_SRC=<시험 작업 폴더> [SKIN_REPO=<저장소>] [SKIN_PORT=9491] [SKIN_OUT=<출력 폴더>] python3 tests/e2e/skin_ui.py
+- SKIN_SRC: videos/ 와 analysis/<영상 이름>/ 이 있는 작업 폴더 — MSG 시험 원본 MSGRAW01(퍼스트 터치 레슨) (tests/e2e/ep_pics_ui.py 와 같은 폴더 ·
+  리드 개발 환경은 `$SCRATCH/topic_ev2/work` · 영상은 저장소에 넣지 않음)
+- 저장소를 SKIN_OUT/app 으로 복사(config.json 은 시험용)해 띄우고, 작업 폴더 SKIN_OUT/work 는 매번 새로 · 스크린샷·비교 그림 SKIN_OUT/shots
+확인: 스타일 화면(쇼츠 화면 배치 '풋살사관학교 스킨' · 스킨 그림 보임 · 한글 이름 PNG 로 '스킨 바꾸기' · 잘못된 그림은 쉬운 말 · 처음 스킨으로) ·
+가편집 쇼츠 화면 구성·글자 값 = 서버 · 편집실 미리보기 차례(스킨 그림은 영상 묶음 위 · 글자·도형 아래 · 화면 크기) · 미리보기 = 내보낸 장면(스킨 띠·흰 상자) ·
+다른 템플릿은 스킨을 지움 · 템플릿 '풋살사관학교 스킨'은 서버 값 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+REPO = Path(os.environ.get("SKIN_REPO") or Path(__file__).resolve().parents[2])
+SRC = Path(os.environ.get("SKIN_SRC", "/tmp/claude-0/-home-user-wavely/0fb55fd4-356e-5366-99c4-2fddb0b4f464/scratchpad/topic_ev2/work"))
+OUT = Path(os.environ.get("SKIN_OUT", "/tmp/claude-0/-home-user-wavely/0fb55fd4-356e-5366-99c4-2fddb0b4f464/scratchpad/skin_e2e"))
+PORT = int(os.environ.get("SKIN_PORT", "9491"))
+CHROME = os.environ.get("SKIN_CHROME", "/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+APP, WORK, SHOTS = OUT / "app", OUT / "work", OUT / "shots"
+N1 = "20261008_MSGRAW01_퍼스트 터치 레슨.mp4"
+res = []
+sys.path.insert(0, str(REPO))
+
+
+def check(name, ok, info=""):
+    res.append((name, bool(ok)))
+    print(("PASS " if ok else "FAIL ") + name + (f"  · {info}" if info else ""), flush=True)
+
+
+def api(path, body=None, timeout=300):
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{PORT}"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def wait_job(limit=900):
+    for _ in range(limit * 2):
+        st = api("/api/state?since=999999")
+        if not st.get("job"):
+            return st
+        time.sleep(0.5)
+    return api("/api/state?since=999999")
+
+
+# ---- 시험 앱 · 작업 폴더 (이 시험이 띄운 앱만 끔) ----
+for pid in os.popen("pgrep -f 'app.py --browser'").read().split():
+    try:
+        if os.readlink(f"/proc/{pid}/cwd").startswith(str(APP)):
+            os.kill(int(pid), 15)
+    except OSError:
+        pass
+time.sleep(1)
+shutil.rmtree(WORK, ignore_errors=True)
+shutil.rmtree(APP, ignore_errors=True)
+(WORK / "videos").mkdir(parents=True)
+src = (SRC / "videos" / N1).resolve()
+try:
+    os.link(src, WORK / "videos" / N1)
+except OSError:
+    os.symlink(src, WORK / "videos" / N1)
+shutil.copytree(SRC / "analysis" / N1[:-4], WORK / "analysis" / N1[:-4], ignore=shutil.ignore_patterns("frames"))
+SHOTS.mkdir(parents=True, exist_ok=True)
+subprocess.run(f"cd '{REPO}' && tar --exclude=./tests --exclude=./.git --exclude=__pycache__ --exclude=./config.json -cf - . | (mkdir -p '{APP}' && cd '{APP}' && tar -xf -)",
+               shell=True, check=True)
+(APP / "config.json").write_text(json.dumps({"channel_url": "https://www.youtube.com/channel/UCRYziLOw2T6BF6fXtpUby-g", "workspace": str(WORK),
+                                             "update_manifest_url": "http://127.0.0.1:1/none"}), encoding="utf-8")
+srv = subprocess.Popen(["python3", "app.py", "--browser"], cwd=APP, env=dict(os.environ, FUTSAL_PORT=str(PORT), BROWSER="/bin/true"),
+                       stdout=open(OUT / "app.log", "w"), stderr=subprocess.STDOUT)
+for _ in range(120):
+    try:
+        api("/api/state")
+        break
+    except Exception:
+        time.sleep(0.5)
+
+# 한글·띄어쓰기 이름의 바꿀 스킨 (Windows 의 '내 그림\\내 채널 스킨 새 그림.png' 같은 파일) · 잘못된 그림 (가운데가 안 비었음)
+from PIL import Image  # noqa: E402
+import numpy as np  # noqa: E402
+PICK = OUT / "내 그림" / "내 채널 스킨 새 그림.png"
+PICK.parent.mkdir(parents=True, exist_ok=True)
+g = np.zeros((1920, 1080, 4), np.uint8)
+g[:, :, 3] = 255
+g[:576] = (200, 30, 160, 255)     # 위 띠 (자홍 · 창 위 끝 0.3)
+g[1344:] = (20, 190, 200, 255)    # 아래 띠 (청록 · 창 아래 끝 0.7)
+g[576:1344] = (0, 0, 0, 0)
+Image.fromarray(g, "RGBA").save(PICK)
+BAD = OUT / "내 그림" / "가운데가 안 빈 그림.png"
+Image.new("RGBA", (1080, 1920), (90, 90, 90, 255)).save(BAD)
+
+try:
+    with sync_playwright() as p:
+        b = p.chromium.launch(executable_path=CHROME)
+        pg = b.new_page(viewport={"width": 1500, "height": 1000})
+        errs = []
+        pg.on("pageerror", lambda e: errs.append("pageerror: " + str(e)))
+        pg.on("dialog", lambda d: d.accept())
+        ev, W = pg.evaluate, pg.wait_for_timeout
+
+        # ---- 1. 스타일 화면: 쇼츠 화면 배치 · 스킨 줄 ----
+        pg.goto(f"http://127.0.0.1:{PORT}/")
+        W(1500)
+        pg.locator('[data-p="style"]').first.click()
+        W(1000)
+        ev("document.getElementById('autoSet').scrollIntoView()")
+        opts = ev("[...document.querySelectorAll('#shortsLayout option')].map(o => [o.value, o.textContent])")
+        st0 = ev("""(() => ({w: $('skinImg').naturalWidth, h: $('skinImg').naturalHeight, src: $('skinImg').getAttribute('src'), reset: $('skinReset').hidden,
+            text: $('autoSet').innerText}))()""")
+        check("스타일 화면: '풋살사관학교 스킨 (초록 칠판 · 내 채널 스킨)' 고르기 · 기본은 지금처럼 · 설명 줄",
+              ["academy", "풋살사관학교 스킨 (초록 칠판 · 내 채널 스킨)"] in opts and ev("$('shortsLayout').value") == "" and "풋살사관학교 스킨: 내 채널 스킨 그림" in st0["text"],
+              json.dumps(opts, ensure_ascii=False))
+        check("스킨 줄: 실은 스킨이 보임(1080×1920) · '스킨 바꾸기' · '처음 스킨으로'는 숨김",
+              st0["w"] == 1080 and st0["h"] == 1920 and "academy.png" in st0["src"] and st0["reset"] and "스킨 바꾸기" in st0["text"],
+              json.dumps({k: v for k, v in st0.items() if k != "text"}))
+        pg.select_option("#shortsLayout", "academy")
+        W(800)
+        toast = ev("$('toast').textContent")
+        check("쇼츠 화면 배치 '풋살사관학교 스킨' 저장 · 안내", api("/api/style/shorts_layout")["layout"] == "academy" and "풋살사관학교 스킨" in toast, toast)
+        pg.locator("#autoSet").screenshot(path=str(SHOTS / "s1_style_skin.png"))
+
+        with pg.expect_file_chooser() as fc:
+            pg.click("#skinPick")
+        fc.value.set_files(str(BAD))
+        W(2000)
+        toast = ev("$('toast').textContent")
+        check("가운데가 안 빈 그림 → 쉬운 말 안내 · 설정 그대로", "가운데가 투명하게 비어 있는 9:16 그림(PNG)을 골라 주세요" in toast and api("/api/style/list")["skin"]["file"] == "", toast)
+
+        with pg.expect_file_chooser() as fc:
+            pg.click("#skinPick")
+        fc.value.set_files(str(PICK))
+        pg.wait_for_function("!document.getElementById('skinReset').hidden", timeout=30000)
+        W(800)
+        picked = api("/api/style/list")["skin"]
+        copied = WORK / "styles" / "설정" / "스킨" / picked["file"]
+        shown = ev("$('skinImg').getAttribute('src')")
+        pg.locator("#autoSet").screenshot(path=str(SHOTS / "s2_style_picked.png"))
+        ok_copy = copied.is_file() and np.asarray(Image.open(copied))[700, 500, 3] == 0 and np.asarray(Image.open(copied))[100, 500, 3] == 255
+        check("'스킨 바꾸기'(한글 이름 PNG) → 작업 폴더에 복사(투명 그대로) · 그 스킨이 보임 · '처음 스킨으로' 보임",
+              picked["file"].startswith("skin_") and ok_copy and picked["file"] in shown, f"{picked} {shown}")
+        pg.click("#skinReset")
+        W(800)
+        back = api("/api/style/list")["skin"]
+        check("'처음 스킨으로' → 실은 스킨 · 복사한 파일은 남음", back["file"] == "" and ev("$('skinReset').hidden") and copied.is_file()
+              and "academy.png" in ev("$('skinImg').getAttribute('src')"), str(back))
+
+        # ---- 2. 편집실: 가편집 쇼츠 = 스킨 (처음 열 때 만든 가편집) ----
+        import editor  # noqa: E402 — 저장소의 셈 (서버와 같은 값인지)
+        import style  # noqa: E402
+        style.STYLES = WORK / "styles"   # 이 시험 작업 폴더의 설정·바꾼 스킨
+        info = editor.skin_info()
+        pg.goto(f"http://127.0.0.1:{PORT}/editor?name={urllib.request.quote(N1)}")
+        pg.wait_for_function("document.getElementById('saved') && document.getElementById('saved').textContent.includes('자동 저장')", timeout=300000)
+        W(1500)
+        sq = ev("""P.sequences.filter(q => q.format === 'shorts').map(q => ({id: q.id, lay: q.layout, cap: q.captionStyle, titles: q.titles, shapes: q.shapes}))""")
+        good = bool(sq)
+        for q in sq:
+            top = q["titles"][0]
+            box = [g_ for g_ in q["shapes"] if g_.get("plan") == "card"]
+            good = good and q["lay"] == info["layout"] and q["cap"]["y"] == 0.723 and q["cap"]["fill"] == "#FFFFFF" and top["style"] == editor.skin_title_style(top["text"]) \
+                and len(box) == 1 and box[0]["radius"] == 17 and not any(t.get("plan") in ("series", "longline") for t in q["titles"])
+            for kt in [t for t in q["titles"] if t.get("plan") == "topic"]:
+                good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"])
+        check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.723) = 서버 값 · 은평 덧붙임 없음", good,
+              json.dumps([{"lay": q["lay"], "cap": q["cap"]["y"]} for q in sq], ensure_ascii=False)[:300])
+        q0 = sq[0]
+        ev(f"switchSeq('{q0['id']}')")
+        W(1000)
+        ev("seek(1.0)")
+        W(2500)
+        ev("selX = null; if (window.selI) selI.clear(); renderTimeline(); frameDirty = true")
+        W(1000)
+        z = ev("""(() => { const s = $('skinL'), L = $('layers'), O = $('ov'), F = $('frame'), cs = e => +getComputedStyle(e).zIndex;
+            const kids = [...F.children], r = s.getBoundingClientRect(), f = F.getBoundingClientRect();
+            const vids = [...document.querySelectorAll('#layers .lay')].filter(l => l.style.display !== 'none').length;
+            const txt = [...document.querySelectorAll('#ov .olay')].filter(l => l.style.display !== 'none' && l.querySelector('.txt, .shp')).length;
+            return {shown: s.style.display, src: s.getAttribute('src'), nw: s.naturalWidth, zs: cs(s), zl: cs(L), zo: cs(O), iL: kids.indexOf(L), iS: kids.indexOf(s), iO: kids.indexOf(O),
+                    w: Math.round(r.width), h: Math.round(r.height), fw: Math.round(f.width), fh: Math.round(f.height), pe: getComputedStyle(s).pointerEvents, vids, txt}; })()""")
+        check("미리보기 차례: 스킨 그림은 영상 묶음(#layers) 위 · 글자·도형(#ov) 아래 · 화면 크기 그대로 · 누름은 통과",
+              z["shown"] == "block" and "academy.png" in (z["src"] or "") and z["nw"] == 1080 and z["zl"] < z["zs"] < z["zo"] and z["iL"] < z["iS"] < z["iO"]
+              and abs(z["w"] - z["fw"]) <= 1 and abs(z["h"] - z["fh"]) <= 1 and z["pe"] == "none" and z["vids"] >= 1 and z["txt"] >= 1, json.dumps(z))
+        # 미리보기 영상 칸(V1 클립 .lfg)이 스킨의 투명한 영상 창을 덮음 (시험 크로뮴은 H.264 를 못 풀어 영상 화소 대신 칸 자리로 · 1920 높이로 환산)
+        fgr = ev("""(() => { const F = $('frame').getBoundingClientRect(), k = 1920 / F.height;
+            const l = [...document.querySelectorAll('#layers .lay')].find(x => x.style.display !== 'none'); if (!l) return null;
+            const r = l.querySelector('.lfg').getBoundingClientRect(); return {top: (r.top - F.top) * k, bottom: (r.bottom - F.top) * k}; })()""")
+        pv = SHOTS / "e1_preview_1s.png"
+        pg.locator("#frame").screenshot(path=str(pv))
+        pg.screenshot(path=str(SHOTS / "e1_editor.png"))
+
+        # ---- 3. 미리보기 = 내보낸 장면 (처음 3초 · 1080×1920) ----
+        proj = ev("({...JSON.parse(JSON.stringify(S)), captions: P.captions, info: P.info, source: NAME, media: P.media})")
+        before = set(os.listdir(WORK / "out")) if (WORK / "out").exists() else set()
+        api("/api/edit/export", {"name": N1, "project": proj, "opts": {"preset": "youtube", "range": [0, 3], "video": True, "srt": False, "xml": False, "hw": False}})
+        wait_job(600)
+        mp4 = sorted([f for f in os.listdir(WORK / "out") if f.endswith(".mp4") and f not in before])
+        ff = os.popen("python3 -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())'").read().strip() or "ffmpeg"
+        fr = SHOTS / "e1_export_1s.png"
+        subprocess.run([ff, "-v", "error", "-y", "-ss", "1.0", "-i", str(WORK / "out" / mp4[-1]), "-frames:v", "1", str(fr)], check=True)
+        a = np.asarray(Image.open(fr).convert("RGB")).astype(int)
+        Hh, Ww = a.shape[:2]
+        pvi = np.asarray(Image.open(pv).convert("RGB").resize((Ww, Hh), Image.LANCZOS)).astype(int)
+        sk = np.asarray(Image.open(REPO / "skins" / "academy.png").convert("RGBA").resize((Ww, Hh), Image.LANCZOS)).astype(int)
+        top_rows = (slice(0, int(0.088 * Hh)), slice(None))          # 흰 상자 위 (글자 없음)
+        bot_rows = (slice(int(0.77 * Hh), Hh), slice(None))           # 아래 띠 (캐릭터·채널 이름)
+        dex = [np.abs(a[r] - sk[r][..., :3])[sk[r][..., 3] == 255].mean() for r in (top_rows, bot_rows)]
+        dpv = [np.abs(pvi[r] - a[r])[sk[r][..., 3] == 255].mean() for r in (top_rows, bot_rows)]
+        check("내보낸 장면: 위·아래 띠 = 스킨 그림 (화소 평균 차이 < 6)", max(dex) < 6, f"{dex[0]:.2f}/{dex[1]:.2f}")
+        check("미리보기 = 내보낸 장면 (스킨 띠 화소 평균 차이 < 10 / 255)", max(dpv) < 10, f"{dpv[0]:.2f}/{dpv[1]:.2f}")
+        box = [g_ for g_ in q0["shapes"] if g_.get("plan") == "card"][0]
+        bx = (slice(int((box["y"] + 0.006) * Hh), int((box["y"] + box["h"] - 0.006) * Hh)), slice(int(box["x"] * Ww) + 8, int(box["x"] * Ww) + 22))
+        check("흰 상자는 스킨 위 (미리보기·내보내기 모두 흰색 · 그 자리 스킨은 칠판)", a[bx].min() > 225 and pvi[bx].min() > 215 and sk[bx][..., :3].max() < 200,
+              f"내보내기 {a[bx].min()} · 미리보기 {pvi[bx].min()} · 스킨 {sk[bx][..., :3].max()}")
+        win = editor.skin_window("academy.png")
+        mid = (slice(int((win["top"] + 0.05) * Hh), int((win["bottom"] - 0.12) * Hh)), slice(int(0.1 * Ww), int(0.9 * Ww)))
+        sk_mid = sk[mid][..., 3].max()
+        check("영상 창 안은 영상: 내보내기 창 화소는 영상(스킨 투명 · 한 색 아님) · 미리보기 영상 칸이 창(위아래 4화소 더)을 덮음",
+              a[mid].std() > 10 and sk_mid == 0 and fgr and fgr["top"] <= win["top"] * 1920 + 0.5 and fgr["bottom"] >= win["bottom"] * 1920 - 0.5,
+              f"표준편차 {a[mid].std():.1f} · 스킨 알파 {sk_mid} · 미리보기 영상 칸 {fgr and round(fgr['top'], 1)}~{fgr and round(fgr['bottom'], 1)} · "
+              f"창 {win['top'] * 1920:.0f}~{win['bottom'] * 1920:.0f}")
+        Image.fromarray(np.concatenate([pvi, a], axis=1).astype(np.uint8)).resize((Ww, Hh // 2)).save(SHOTS / "e1_preview_vs_export.png")
+
+        # ---- 4. 다른 템플릿은 스킨을 지움 · 다시 '풋살사관학교 스킨' ----
+        ev("commit('템플릿'); TEMPLATES['위아래 검정 박스'](); changed(false)")
+        W(1200)
+        g1 = ev("({lay: S.layout, shown: $('skinL').style.display, card: S.shapes.filter(g => g.plan === 'card').length})")
+        pg.locator("#frame").screenshot(path=str(SHOTS / "e2_other_template.png"))
+        pg.click("#rtabs [data-rt='seq']")
+        W(800)
+        pg.locator("[data-tpl='풋살사관학교 스킨']").first.click()
+        W(1500)
+        g2 = ev("({lay: S.layout, cap: S.captionStyle, shown: $('skinL').style.display, card: S.shapes.filter(g => g.plan === 'card'), hint: !!$('pSkinHint'), toast: $('toast').textContent})")
+        pg.locator("#frame").screenshot(path=str(SHOTS / "e3_template_skin.png"))
+        check("다른 템플릿 → 스킨·흰 상자 없음 · '풋살사관학교 스킨' 단추 → 서버 값 그대로 다시 (상자 하나 · 안내 줄)",
+              "skin" not in g1["lay"] and g1["shown"] == "none" and g1["card"] == 0 and g2["lay"] == info["layout"] and g2["cap"]["y"] == 0.723
+              and g2["shown"] == "block" and len(g2["card"]) == 1 and g2["card"][0]["radius"] == 17 and g2["hint"] and "풋살사관학교 스킨" in g2["toast"],
+              json.dumps({"g1": g1, "g2": {k: v for k, v in g2.items() if k != "cap"}}, ensure_ascii=False)[:400])
+        ev("commit('템플릿'); TEMPLATES['은평 스타일'](); changed(false)")
+        W(800)
+        g3 = ev("({lay: S.layout, shown: $('skinL').style.display})")
+        check("'은평 스타일' → 스킨 지움 (은평 영상 창 win)", "skin" not in g3["lay"] and g3["lay"].get("win") and g3["shown"] == "none", json.dumps(g3))
+        ev("commit('템플릿'); TEMPLATES['풋살사관학교 스킨'](); changed(false); doSave && doSave()")
+        W(1500)
+
+        # ---- 5. 바꾼 스킨으로 템플릿 (편집실을 다시 열 때 설정을 읽음) ----
+        import base64  # noqa: E402
+        r = api("/api/style/skin", {"data": "data:image/png;base64," + base64.b64encode(PICK.read_bytes()).decode()})
+        info2 = editor.skin_layout(r["file"]) if r.get("ok") else None
+        pg.goto(f"http://127.0.0.1:{PORT}/editor?name={urllib.request.quote(N1)}")
+        pg.wait_for_function("document.getElementById('saved') && document.getElementById('saved').textContent.includes('자동 저장')", timeout=300000)
+        W(1500)
+        ev(f"switchSeq('{q0['id']}')")
+        W(800)
+        ev("commit('템플릿'); TEMPLATES['풋살사관학교 스킨'](); changed(false)")
+        ev("seek(1.0)")
+        W(2500)
+        g4 = ev("({lay: S.layout, cap: S.captionStyle.y, src: $('skinL').getAttribute('src'), nw: $('skinL').naturalWidth, skx: SKX})")
+        pg.locator("#frame").screenshot(path=str(SHOTS / "e4_new_skin.png"))
+        shot = np.asarray(Image.open(SHOTS / "e4_new_skin.png").convert("RGB")).astype(int)
+        sh_h = shot.shape[0]
+        topc = shot[int(0.05 * sh_h):int(0.08 * sh_h), :20].reshape(-1, 3).mean(axis=0)
+        check("바꾼 스킨: 템플릿이 그 스킨·영상 창(0.3~0.7)으로 · 미리보기 위 띠가 그 색(자홍)",
+              r.get("ok") and g4["lay"] == info2 and g4["cap"] == editor.skin_cap_y(0.7) and r["file"] in (g4["src"] or "") and g4["nw"] == 1080
+              and abs(g4["skx"]["top"] - 0.3) < 0.002 and np.abs(topc - (200, 30, 160)).max() < 30,
+              json.dumps({"lay": g4["lay"], "want": info2, "top": topc.round().tolist()}, ensure_ascii=False)[:400])
+        check("JS 오류 없음", not errs, "; ".join(errs[:3]))
+        b.close()
+finally:
+    srv.terminate()
+    try:
+        srv.wait(10)
+    except Exception:
+        srv.kill()
+
+n_ok = sum(1 for _, ok in res if ok)
+print(f"{n_ok}/{len(res)} 통과")
+sys.exit(0 if n_ok == len(res) else 1)

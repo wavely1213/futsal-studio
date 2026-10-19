@@ -1940,6 +1940,192 @@ def ep_room_fit(text, st, W, H, wb):
     return EP_ROOM_MIN
 
 
+# ---------- 풋살사관학교 스킨 쇼츠 (BR-320~BR-325 · D-520~D-524) ----------
+# 소유자 채널 스킨(9:16 투명 창 그림 · skins/academy.png · 바꾼 스킨은 작업 폴더 styles/설정/스킨/)을 화면 전체에 얹음 — 영상 트랙(V1~V3 · 박스 바탕) 위,
+# 글자·도형·전술 그림(ASS) 아래 · 16:9 원본은 스킨의 투명한 영상 창을 꽉 채우게 (창 위아래로 SKIN_BLEED 화소 더) · 위 칠판 띠에 흰 둥근 상자 안 주황 큰 제목 +
+# 그 아래 흰 주제 줄 · 말 자막은 창 아래 끝 바로 위. 스타일 화면 '쇼츠 화면 배치'에서 고름(기본은 지금처럼) · 은평 스타일 것(KFA 글꼴 고정·띠 그림·로고·
+# 이름표·강좌 줄·영상 창 자르기 win)은 쓰지 않음. 편집실 템플릿 '풋살사관학교 스킨'(editor.html SKIN · skinCard)과 같은 값·셈 — 한쪽을 고치면 다른 쪽도.
+SKIN_KEY = "academy"
+SKIN_BLEED = 4         # 16:9 원본이 영상 창 위아래로 더 덮는 화소 (1920 높이 기준 · 찢어진 종이 가장자리 아래로 빈 바탕이 안 보이게)
+SKIN_PAD = 28          # 흰 상자 안 글 양옆 여백 (화소 · 1080 기준)
+SKIN_SIZES = (96, 88, 80, 72, 64, 56, 48)        # 큰 제목 글자 크기 (한 줄로 화면 폭 90% - 양옆 여백 안에 들어가는 가장 큰 것)
+SKIN_TOPIC_SIZES = (88, 80, 72, 64, 56, 48)      # 주제 줄 글자 크기 (한 줄로 화면 폭 90% 안에 들어가는 가장 큰 것)
+SKIN_BOX = {"y": 0.0922, "h": 0.0625}            # 흰 상자 위 끝·높이 (화면 비율 · 소유자 쇼츠에서 잰 177~297화소)
+SKIN_BOX_MAX = 0.9     # 흰 상자 가장 넓게 (화면 폭 비율)
+SKIN_RADIUS = 17       # 흰 상자 모서리 둥글기 (% · 짧은 변 절반 기준 → 높이 120화소 상자에서 10화소)
+SKIN_TITLE = dict(DEFAULT_STYLE, weight="Black", size=96, fill="#CE4F2F", stroke="#CE4F2F", strokeW=0, bgOn=False, x=0.5, align="center",
+                  effect="none")
+SKIN_TOPIC = dict(DEFAULT_STYLE, weight="Black", size=88, fill="#FFFFFF", stroke="#000000", strokeW=0, bgOn=False, x=0.5, align="center",
+                  effect="none")
+SKIN_TOPIC_CY = 0.179  # 주제 줄 가운데 (화면 비율 · 소유자 쇼츠 글자 303~386화소) — 글 상자 아래 끝은 영상 창 위 끝 - TXT_GAP 위까지
+SKIN_CAP_UP = 0.04     # 말 자막 아래 끝 = 영상 창 아래 끝 - 이만큼 (배운 자막 자리와 상관없이 · 여러 줄은 창 안에서 위로 늘어남)
+SKIN_CAP_STROKE = 8    # 말 자막 검은 테두리 가장 얇게
+SKIN_SIZES_EXPORT = ((1080, 1920), (720, 1280), (2160, 3840))   # 영상 창을 덮는지 확인할 내보내기 크기 (PRESETS 쇼츠 · 1080 이 기준)
+
+
+def shorts_skin_on():
+    """스타일 화면 '쇼츠 화면 배치'가 풋살사관학교 스킨인지 (못 읽으면 지금처럼 = False)."""
+    try:
+        import style as _style
+        return _style.shorts_layout() == SKIN_KEY
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def skin_path(ref):
+    """layout.skin 의 스킨 이름 → 파일 (style.skin_path · 이상한 이름·없는 파일은 None)."""
+    try:
+        import style as _style
+        return _style.skin_path(ref)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def skin_window(ref):
+    """스킨 이름 → 영상 창 {"top", "bottom"} (화면 높이 비율 · style.skin_window · 파일을 읽은 시각·크기로 기억) · 못 읽으면 None."""
+    p = skin_path(ref)
+    if not p:
+        return None
+    try:
+        import style as _style
+        return _style.skin_window(p)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _skin_covers(zoom, vpos, top, bottom):
+    """화면 구성(zoom·vpos)의 16:9 원본 칸이 영상 창 [top, bottom) 을 덮는지 — 내보내기(_fit 짝수 크기 · yuv420 겹치기는 위 끝을 짝수로 내림)와
+    미리보기(fit_rect · 반올림 없음) 모두 · 내보내기 크기마다."""
+    lay = {"mode": "box", "bar": "#000000", "zoom": zoom, "vpos": vpos, "cropTop": 0.0, "cropBottom": 0.0}
+    seq, it, md = {"format": "shorts", "layout": lay}, {"track": "V1", "fit": "auto"}, {"kind": "video", "w": 1920, "h": 1080}
+    for W, H in SKIN_SIZES_EXPORT:
+        f = _fit(it, md, seq, W, H)
+        y0 = int(f["by"]) & ~1
+        if y0 > top * H + 1e-6 or y0 + f["bh"] < bottom * H - 1e-6:
+            return False
+        r = fit_rect(it, md, seq, W, H)
+        if r["by"] > top * H + 1e-6 or r["by"] + r["bh"] < bottom * H - 1e-6:
+            return False
+    return True
+
+
+def skin_fit(top, bottom):
+    """영상 창 [top, bottom) (화면 높이 비율) → (zoom, vpos) — 16:9 원본이 [창 위 - SKIN_BLEED, 창 아래 + SKIN_BLEED] 를 꼭 덮게
+    (높이 ch = 창 높이 + 2·BLEED 화소 · zoom = ch / (1080·1080/1920) · vpos = (창 위 - BLEED) / (1920 - ch) · 넷째 자리) ·
+    반올림 뒤에도 덮는지 확인해 모자라면 1화소씩 더 덮음 (_skin_covers)."""
+    W, H = frame_size("shorts")
+    t, b = float(top) * H, float(bottom) * H
+    base = W * W / H   # 확대 1 일 때 16:9 원본 높이 (1080 × 1080/1920 = 607.5)
+    zoom = vpos = None
+    for extra in range(0, 33):
+        bl = SKIN_BLEED + extra
+        ch = (b - t) + 2 * bl
+        zoom = round(max(1.0, ch / base), 4)
+        vpos = round(min(1.0, max(0.0, (t - bl) / (H - ch))), 4) if H - ch > 1e-6 else 0.5
+        if _skin_covers(zoom, vpos, top, bottom):
+            break
+    return zoom, vpos
+
+
+def skin_layout(ref=None):
+    """풋살사관학교 스킨 화면 구성 {"mode": "box", "bar", "zoom", "vpos", "cropTop", "cropBottom", "skin"} — ref 없으면 스타일 화면에서 고른 스킨 ·
+    스킨을 못 읽으면 None (부른 쪽은 지금처럼 만듦)."""
+    try:
+        import style as _style
+        ref = ref or _style.skin_ref()
+    except Exception:  # noqa: BLE001
+        return None
+    win = skin_window(ref)
+    if not win:
+        return None
+    zoom, vpos = skin_fit(win["top"], win["bottom"])
+    return {"mode": "box", "bar": "#000000", "zoom": zoom, "vpos": vpos, "cropTop": 0.0, "cropBottom": 0.0, "skin": ref}
+
+
+def skin_info():
+    """편집실 템플릿 '풋살사관학교 스킨'이 쓸 값 (/api/edit/open epx.skin) {"ref", "top", "bottom", "layout"} · 스킨을 못 읽으면 None."""
+    lay = skin_layout()
+    if not lay:
+        return None
+    win = skin_window(lay["skin"])
+    return {"ref": lay["skin"], "top": round(win["top"], 6), "bottom": round(win["bottom"], 6), "layout": lay}
+
+
+def skin_on(seq):
+    """편집본에 스킨을 얹는지 — 쇼츠 · 화면 구성에 스킨 이름 (그림 파일이 있는지는 skin_path 로 따로)."""
+    return (seq or {}).get("format") == "shorts" and bool(((seq or {}).get("layout") or {}).get("skin"))
+
+
+def skin_title_style(text):
+    """스킨 큰 제목 모양 — 한 줄로 (화면 폭 90% - 양옆 SKIN_PAD) 안에 들어가는 가장 큰 글자 · 흰 상자 세로 가운데 (y = 글 아래 끝) ·
+    Pretendard Black 폭 (은평 글꼴 고정은 쓰지 않음 · editor.html skinTitleStyle)."""
+    W, H = frame_size("shorts")
+    room = SKIN_BOX_MAX * W - 2 * SKIN_PAD
+    with ep_font_scope(False):
+        size = next((z for z in SKIN_SIZES if _text_w(text, dict(SKIN_TITLE, size=z)) <= room), SKIN_SIZES[-1])
+    return dict(SKIN_TITLE, size=size, y=round(SKIN_BOX["y"] + SKIN_BOX["h"] / 2 + TXT_LINE * size / 2 / H, 4))
+
+
+def skin_box_fit(t, g):
+    """흰 상자 폭을 큰 제목(t)에 맞춤 (가운데 · 양옆 SKIN_PAD · 가장 넓게 SKIN_BOX_MAX · editor.html skinBoxFit)."""
+    W, _ = frame_size("shorts")
+    with ep_font_scope(False):
+        w = min(SKIN_BOX_MAX, (_text_w(t["text"], t["style"]) + 2 * SKIN_PAD) / W)
+    g["w"], g["x"] = round(w, 4), round(0.5 - w / 2, 4)
+
+
+def skin_box(top, length):
+    """스킨 흰 제목 상자 (도형 · 둥근 모서리 · 처음부터 끝까지 · plan "card" — 편집실이 다른 템플릿으로 바꾸면 지움 · 폭은 큰 제목(top)에 맞춤)."""
+    g = {"id": _nid(), "name": "제목 상자", "x": 0.05, "y": SKIN_BOX["y"], "w": SKIN_BOX_MAX, "h": SKIN_BOX["h"], "color": "#FFFFFF",
+         "opacity": 1.0, "radius": SKIN_RADIUS, "start": 0.0, "dur": round(float(length), 3), "full": True, "plan": "card"}
+    skin_box_fit(top, g)
+    return g
+
+
+def skin_topic_style(text, top):
+    """스킨 주제 줄 모양 — 한 줄로 화면 폭 90% 안에 들어가는 가장 큰 글자 · 가운데 SKIN_TOPIC_CY · 글 상자 아래 끝은 영상 창 위 끝(top) - TXT_GAP 위까지
+    (넘으면 그만큼 위로 · 내림) — editor.html skinTopicStyle 과 같은 셈."""
+    W, H = frame_size("shorts")
+    with ep_font_scope(False):
+        size = next((z for z in SKIN_TOPIC_SIZES if _text_w(text, dict(SKIN_TOPIC, size=z)) <= SKIN_BOX_MAX * W), SKIN_TOPIC_SIZES[-1])
+    y = SKIN_TOPIC_CY + TXT_LINE * size / 2 / H
+    lim = math.floor((float(top) - TXT_GAP) * 10000 + 1e-6) / 10000
+    return dict(SKIN_TOPIC, size=size, y=round(min(y, lim), 4))
+
+
+def skin_cap_y(bottom):
+    """말 자막 아래 끝 = 영상 창 아래 끝(bottom) - SKIN_CAP_UP (넷째 자리 · editor.html skinCapY)."""
+    return round(float(bottom) - SKIN_CAP_UP, 4)
+
+
+def skin_caption(cs, bottom):
+    """스킨 말 자막: 흰 글씨 + 검은 테두리(SKIN_CAP_STROKE 이상) · 배운 자막 크기 · 아래 끝은 영상 창 아래 끝 바로 위 (배운 자막 자리와 상관없이)."""
+    c = dict(cs)
+    c.update(fill="#FFFFFF", stroke="#000000", strokeW=max(SKIN_CAP_STROKE, int(c.get("strokeW") or 0)), y=skin_cap_y(bottom))
+    return c
+
+
+def skin_card(top, kt, length, win):
+    """가편집 쇼츠를 풋살사관학교 스킨으로: 위 큰 제목(top)은 한 줄·흰 상자 안·처음부터 끝까지, 주제 줄(kt · 없어도 됨)은 그 아래 흰 줄
+    (바꿔 끼우기 없음 · 끝까지) · win: 영상 창 {top, bottom} → 더할 도형 [흰 상자]."""
+    top["text"] = " ".join(str(top.get("text") or "").split())
+    top["start"], top["dur"] = 0.0, round(float(length), 2)
+    top["style"] = skin_title_style(top["text"])
+    if kt:
+        kt.pop("swap", None)
+        kt["text"] = " ".join(str(kt.get("text") or "").split())
+        kt.update(start=0.0, dur=round(float(length), 2), style=skin_topic_style(kt["text"], win["top"]), under=top.get("id"))
+    return [skin_box(top, length)]
+
+
+def skin_bands(lay, W, H):
+    """스킨 화면의 위·아래 띠 [[왼, 위, 오른, 아래], …] (화소 · 영상 창 밖) — MSG 글자 자리 정리가 피함 (BR-323) · 스킨을 못 읽으면 []."""
+    win = skin_window((lay or {}).get("skin"))
+    if not win:
+        return []
+    return [[0.0, 0.0, float(W), win["top"] * H], [0.0, win["bottom"] * H, float(W), float(H)]]
+
+
 def series_apply(name, seq):
     """쇼츠 편집본의 시리즈 이름표 번호를 정해 글에 넣음 (처음 내보낼 때·올리기 키트를 만들 때 · seq 를 고침) → {seq, id, n, text, x, w} · 이름표가 없으면 None.
     글의 번호가 넣어 둔 번호(seriesN)와 다르면 사용자가 고친 번호로 그대로 씀 · 같으면 정해 둔 번호(없으면 새 번호)."""
@@ -2731,6 +2917,8 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
     if "shorts" in kinds:
         card = shorts_card_on()  # 스타일 화면 '쇼츠 화면 배치' (기본 지금처럼)
         ep_lay = ep_layout() if card else None   # 띠 그림·로고 (스타일 화면에서 켠 것 · BR-280 · BR-281)
+        sk_lay = skin_layout() if not card and shorts_skin_on() else None   # 풋살사관학교 스킨 (BR-320 · 스킨을 못 읽으면 지금처럼)
+        sk_win = skin_window(sk_lay["skin"]) if sk_lay else None
         for i, r in enumerate(rec["shorts"], 1):
             # 확대 컷 기준점·시범 장면 (BR-294) — 은평 스타일 쇼츠는 영상 창 배치가 달라 그대로
             cuts = _rhythm(_quiet_edges(r["cuts"], wf, units, info.get("duration")), segs, st, every, caps, calm=not card)
@@ -2748,6 +2936,13 @@ def auto_sequences(name, info, style=None, kinds=("long", "shorts"), rec=None):
                 ep_cap_clear(cs, xt, bool(ep_lay.get("logo")))   # 말 자막은 전체 강좌 줄·로고 위로 (D-428 · D-472)
                 seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(ep_lay), master=dict(master),
                                      captionsOn=True, titles=[hook] + ([kt] if kt else []) + xt, shapes=shapes + xg))
+                continue
+            if sk_lay:  # 풋살사관학교 스킨 (BR-321 · BR-322): 흰 둥근 상자 주황 큰 제목 · 그 아래 흰 주제 줄 · 말 자막은 영상 창 아래 끝 바로 위
+                cs = skin_caption(cs, sk_win["bottom"])
+                kt = {"id": _nid(), "text": r["topic"], "plan": "topic"} if r.get("topic") else None
+                shapes = skin_card(hook, kt, length, sk_win)
+                seqs.append(_new_seq(_short_name(i, r), "shorts", items, captionStyle=cs, layout=dict(sk_lay), master=dict(master),
+                                     captionsOn=True, titles=[hook] + ([kt] if kt else []), shapes=shapes))
                 continue
             W, H = frame_size("shorts")
             tb = text_box(hook["text"], hook["style"], W, H)
@@ -5842,6 +6037,8 @@ def _xmeml(proj, W, H, fps, stem, t_lo=0.0, t_hi=None, overlay=None, report=None
             _xsub(me, "name", str(mk.get("name") or ""))
             _xsub(me, "in", F(t - t_lo))
             _xsub(me, "out", -1)
+    if skin_on(proj) and skin_path(proj["layout"]["skin"]):   # 풋살사관학교 스킨 (BR-320 · 프리미어 XML 에는 안 들어감 → '빠진 것' 목록)
+        seen_bg.add(("skin", ""))
     rep.update(color=seen_color, anim=seen_anim, bg=sorted(seen_bg, key=str), clips=n)
     if hasattr(ET, "indent"):
         ET.indent(root, "  ")
@@ -5887,6 +6084,7 @@ def _xml_report(proj, rep, stem, fps, t_lo, t_hi, overlay=None, overlay_note=Non
         for bg, bar in rep["bg"]:
             rows.append("■ 흐린 배경이 빠져요\n  쇼츠 위아래의 흐린 배경 대신 검은 바탕이 보여요." if bg == "blur"
                         else "■ 위아래 띠 그림·로고가 빠져요\n  은평 스타일 띠 그림과 아래 띠 로고 대신 검은 바탕이 보여요." if bg == "pics"
+                        else "■ 풋살사관학교 스킨이 빠져요\n  위아래 칠판·캐릭터 그림 대신 검은 바탕이 보여요. 스킨 그림(PNG)을 영상 트랙 위(글자·도형 투명 영상 아래)에 직접 얹으면 같아져요." if bg == "skin"
                         else f"■ 위아래 띠 색({bar})이 빠져요\n  검은 바탕이 보여요.")
     if rep.get("color"):
         rows.append(f"■ 색 보정 {len(rep['color'])}개 클립이 빠져요\n  " + ", ".join(_tc(t, fps) for t in rep["color"][:12])
@@ -6490,6 +6688,16 @@ def _build_segment(seq, media, W, H, fps, f0, f1, trans, tmp, k_seg):
         comp = exact(out)
     if comp is None:
         comp = base()
+    skin = skin_path((seq.get("layout") or {}).get("skin")) if skin_on(seq) else None
+    if skin:
+        # 풋살사관학교 스킨 (BR-320 · D-521): 영상 트랙(V1~V3 · 박스 바탕 · 전환·빈 곳 포함) 위 · 자막·타이틀·도형·전술 그림(ASS) 아래에 화면 전체로 —
+        # 한 장 그림을 한 번만 읽어 화면 크기로 줄이고(4K 도) 투명 그대로(rgba) n 프레임으로 늘려 겹침 · 겹친 뒤는 다시 yuv420p
+        idx, sk, ko = len(inputs), lab("q"), lab("o")
+        inputs.append(["-loop", "1", "-framerate", "1", "-t", f"{dur + 1.5:.3f}", "-f", "image2", "-pattern_type", "none", "-i", str(skin)])
+        fc.append(f"[{idx}:v]setpts=PTS-STARTPTS,scale={W}:{H}:flags=lanczos,format=rgba,fps={fps},tpad=stop_mode=clone:stop_duration={dur + 1:.3f},"
+                  f"trim=end_frame={n},setsar=1[{sk}]")
+        fc.append(f"[{comp}][{sk}]overlay=x=0:y=0:format=auto,format=yuv420p[{ko}]")
+        comp = ko
     final = lab("v")
     # 자막·타이틀·도형 (구간 시작 프레임만큼 밀어서 같은 ASS 사용) — 시각 단위를 1/fps 로 맞추고 정수 프레임만큼 밂
     # (예전 'PTS+시작초/TB' 는 7.3333*30=219.999 를 버림해 자막이 한 프레임 일찍 나오는 구간이 있었음)
@@ -7395,6 +7603,8 @@ def export(name, proj, opts, log):
         series_apply(name, proj)
     except OSError as e:
         log(f"  시리즈 번호를 저장하지 못해서 이름표 글 그대로 내보내요 · {e}")
+    if skin_on(proj) and not skin_path(proj["layout"]["skin"]):   # 스킨 그림이 없어졌으면 스킨 없이 (멈추지 않음 · BR-320)
+        log("  스킨 그림을 찾지 못해서 스킨 없이 내보내요 · 스타일 화면에서 스킨을 다시 골라 편집실 템플릿 '풋살사관학교 스킨'을 눌러 주세요")
     stem = _export_stem(name, proj, fmt)
     outputs = []
     total = seq_total(proj)

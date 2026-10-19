@@ -87,6 +87,7 @@
   .autoset .pic { display: flex; align-items: center; gap: 8px; }
   .autoset .pic img { height: 40px; max-width: 120px; object-fit: contain; border-radius: 6px; background: #1F4FD1; }
   .autoset .pic img.band { width: 120px; object-fit: cover; }
+  .autoset .pic img.skin { width: 54px; height: 96px; background: #2a2a2a; }  /* 풋살사관학교 스킨 (9:16 · 가운데 투명) */
   .autoset .pic .btn { padding: 5px 10px; font-size: 12px; }
   .autoset .epfont { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0 22px; font-size: 13px; font-weight: 600; }
   .autoset .epfont .btn { padding: 5px 10px; font-size: 12px; }
@@ -1023,8 +1024,11 @@
         <p>자동으로 만드는 쇼츠의 처음 2.5초에 '영상 주제 + 이 쇼츠 포인트'를 한 줄로 띄워요 (예: 퍼스트 터치 레슨 · 포인트 2). 소리·길이는 그대로예요. 편집실에서 글자를 고치거나 옮기거나 지울 수 있어요. 끄면 다음에 만드는 쇼츠부터 넣지 않아요.</p>
         <label style="display:block;margin-top:12px" title="자동으로 고르는 쇼츠 후보(가편집·재미있게 자동 편집·끝까지 자동으로·올리기 키트)의 길이">쇼츠 길이 <select class="sel" id="shortsLen"><option value="">지금처럼 (20~55초)</option><option value="loop">한 동작 (10~20초)</option><option value="point">기술 하나 (30~60초)</option><option value="explain">설명 (60~120초)</option><option value="ref">레퍼런스 쇼츠 길이에 맞추기</option></select></label>
         <p>한 동작: 동작 하나를 짧게 보여 주는 반복 재생용 쇼츠예요. 기술 하나: 기술 한 개를 설명하고 보여 줘요. 설명: 1~2분으로 자세히 알려 줘요. <span id="shortsLenSay"></span> 고르면 다음에 고르는 쇼츠 후보부터 바뀌어요 (이미 만든 편집본은 그대로예요). 롱폼은 그대로예요.</p>
-        <label style="display:block;margin-top:12px" title="자동으로 만드는 쇼츠(가편집·재미있게 자동 편집·끝까지 자동으로)의 화면 모양">쇼츠 화면 배치 <select class="sel" id="shortsLayout"><option value="">지금처럼</option><option value="eunpyeong">은평 스타일 (파란 띠 · 흰 상자 제목)</option></select></label>
+        <label style="display:block;margin-top:12px" title="자동으로 만드는 쇼츠(가편집·재미있게 자동 편집·끝까지 자동으로)의 화면 모양">쇼츠 화면 배치 <select class="sel" id="shortsLayout"><option value="">지금처럼</option><option value="eunpyeong">은평 스타일 (파란 띠 · 흰 상자 제목)</option><option value="academy">풋살사관학교 스킨 (초록 칠판 · 내 채널 스킨)</option></select></label>
         <p>은평 스타일: 위아래를 파란 띠로 채우고 가운데에 영상을 크게 둬요. 위 띠의 흰 상자에 큰 제목을 처음부터 끝까지 띄우고, 그 아래에 작은 흰 글씨로 주제 한 줄을 적어요. 말 자막은 아래 띠에 나와요. 띠 색은 편집실 '박스 색'에서 바꿀 수 있어요 (아래 '띠에 그림 깔기'를 켜 두면 그림에 가려 안 보이고, 끄거나 그림을 못 읽을 때 이 색이 나와요). 고르면 다음에 만드는 쇼츠부터 바뀌어요 (이미 만든 편집본은 그대로예요). 편집실 템플릿 '은평 스타일'로 지금 편집본에도 바로 쓸 수 있어요.</p>
+        <p>풋살사관학교 스킨: 내 채널 스킨 그림(위 초록 칠판 · 아래 캐릭터와 채널 이름)을 화면 전체에 얹고, 가운데 투명한 칸에 영상을 꽉 차게 둬요. 위 칠판의 흰 상자에 주황 큰 제목을, 그 아래에 흰 글씨로 주제 한 줄을 처음부터 끝까지 띄우고, 말 자막은 영상 칸 아래쪽에 나와요. 고르면 다음에 만드는 쇼츠부터 바뀌어요 (이미 만든 편집본은 그대로예요). 편집실 템플릿 '풋살사관학교 스킨'으로 지금 편집본에도 바로 쓸 수 있어요.</p>
+        <div class="pics" id="skinRow"><div class="pic"><img class="skin" id="skinImg" alt="스킨"><button class="btn" id="skinPick">스킨 바꾸기</button><button class="btn" id="skinReset" hidden>처음 스킨으로</button></div><input type="file" id="skinFile" accept="image/png" hidden></div>
+        <p>'스킨 바꾸기'로 가운데가 투명하게 비어 있는 9:16 그림(PNG · 20MB 까지)을 고르면 그 스킨을 써요. 영상은 투명한 칸에 맞춰 커져요. '처음 스킨으로'를 누르면 앱에 들어 있는 풋살사관학교 스킨으로 돌아가요.</p>
         <div class="pics" id="cardPics">
           <div class="pic"><label title="은평 스타일 쇼츠의 위아래 띠를 이 그림으로 채워요"><input type="checkbox" id="cardBand" checked> 띠에 그림 깔기</label><img class="band" id="cardBandImg" alt="띠 그림"><button class="btn" id="cardBandPick">그림 바꾸기</button><button class="btn" id="cardBandReset" hidden>처음 그림으로</button></div>
           <div class="pic"><label title="은평 스타일 쇼츠의 아래 띠 가운데에 로고를 크게 넣어요"><input type="checkbox" id="cardLogo" checked> 아래 띠에 로고 넣기</label><img id="cardLogoImg" alt="로고"><button class="btn" id="cardLogoPick">그림 바꾸기</button><button class="btn" id="cardLogoReset" hidden>처음 그림으로</button></div>
@@ -2292,6 +2296,28 @@ function cardPicsUi(cp) {
     rd.readAsDataURL(f);
   };
 }
+// 풋살사관학교 스킨 (BR-324): 지금 스킨 보기 · 스킨 바꾸기(PC 에서 PNG 고르기 → 서버가 9:16·가운데 투명한 영상 칸을 확인해 작업 폴더에 복사) · 처음 스킨으로
+function skinUi(sk) {
+  if (!sk || !$("skinImg")) return;
+  const show = c => { $("skinImg").src = "/api/style/skin?f=" + encodeURIComponent(c.ref || "academy.png"); $("skinReset").hidden = !c.file; };
+  show(sk);
+  const say = "다음에 만드는 스킨 쇼츠와 편집실 템플릿 '풋살사관학교 스킨'부터 바뀌어요 (이미 만든 편집본은 그대로예요)";
+  const done = r => { if (r && r.ok) { show(r); return true; } if (!(r && r.error)) toast("스킨을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); return false; };
+  $("skinReset").onclick = async () => { const r = await api("/api/style/skin", { reset: true }).catch(() => ({})); if (done(r)) toast("처음 스킨으로 돌렸어요 · " + say); };
+  $("skinPick").onclick = () => { const fi = $("skinFile"); fi.value = ""; fi.click(); };
+  $("skinFile").onchange = () => {
+    const fi = $("skinFile"), f = fi.files[0]; if (!f) return;
+    if (f.size > CARD_PIC_MAX) return toast("그림 파일이 너무 커요 · 20MB 보다 작은 그림을 골라 주세요");
+    const rd = new FileReader();
+    rd.onerror = () => toast("그림 파일을 읽지 못했어요 · 다른 그림을 골라 주세요");
+    rd.onload = async () => {
+      const r = await api("/api/style/skin", { data: String(rd.result || "") }).catch(() => ({}));
+      if (done(r)) toast("스킨을 바꿨어요 · " + say);
+      fi.value = "";
+    };
+    rd.readAsDataURL(f);
+  };
+}
 // 은평 스타일 글꼴 줄 (BR-310~BR-313): 찾은 KFA 글꼴 이름 · 못 찾으면 한 줄 안내 · 글꼴 파일 고르기(서버가 확인해 작업 폴더에 복사) · 처음으로(고른 파일 안 씀)
 const CARD_FONT_MAX = 40 << 20;  // epfont.FONT_MAX 와 같음
 let cardFontWait = null;
@@ -2356,13 +2382,15 @@ async function loadStyles() {
   }
   const slc = $("shortsLayout");  // 쇼츠 화면 배치 (BR-240 · 기본 지금처럼)
   if (slc) {
-    slc.value = j.shortsLayout === "eunpyeong" ? "eunpyeong" : "";
+    let was = ["eunpyeong", "academy"].includes(j.shortsLayout) ? j.shortsLayout : "";
+    slc.value = was;
     slc.onchange = async () => {
-      const want = slc.value, was = want ? "" : "eunpyeong";
+      const want = slc.value;
       slc.disabled = true;
       const r = await api("/api/style/shorts_layout", { layout: want }).catch(() => ({}));
       slc.disabled = false;
-      if (r.ok) toast(r.layout ? "다음에 만드는 쇼츠부터 은평 스타일(파란 띠 · 흰 상자 제목)로 만들어요" : "쇼츠를 지금처럼 만들어요 (이미 만든 편집본은 그대로예요)");
+      if (r.ok) { was = r.layout; toast(r.layout === "academy" ? "다음에 만드는 쇼츠부터 풋살사관학교 스킨(초록 칠판 · 내 채널 스킨)으로 만들어요"
+        : r.layout ? "다음에 만드는 쇼츠부터 은평 스타일(파란 띠 · 흰 상자 제목)로 만들어요" : "쇼츠를 지금처럼 만들어요 (이미 만든 편집본은 그대로예요)"); }
       else { slc.value = was; toast(r.error || "설정을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"); }
     };
   }
@@ -2382,6 +2410,7 @@ async function loadStyles() {
   }
   cardPicsUi(j.cardPics);
   cardFontUi(j.cardFont);
+  skinUi(j.skin);
   $("styleEmpty").style.display = list.length ? "none" : "block"; state.styles = list.map(s => s.name);
   const pos = { bottom: "아래", middle: "가운데", top: "위" }, open = {};
   document.querySelectorAll(".styles .st details.fold[open]").forEach(d => (open[d.closest(".st").dataset.sname + "|" + d.dataset.fold] = 1));  // 다시 그려도 펼친 칸은 그대로

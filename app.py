@@ -755,10 +755,11 @@ class Handler(BaseHTTPRequestHandler):
             act = thumbstyle.editor_view().get("active")
             return self._send(200, {"styles": style.list_styles(), "thumbActive": act["name"] if act else "", "rough": style.rough_default() or "",
                                     "shortsTopic": style.shorts_topic_on(), "shortsLayout": style.shorts_layout(), "shortsLen": style.shorts_len_state(),
-                                    "cardExtras": style.card_extras(), "cardPics": style.card_pics(), "cardFont": style.card_font_state()})
+                                    "cardExtras": style.card_extras(), "cardPics": style.card_pics(), "cardFont": style.card_font_state(),
+                                    "skin": style.skin_state()})
         if u.path == "/api/style/shorts_topic":  # '쇼츠 첫머리에 주제 한 줄 넣기' 지금 값 (편집실 '새 쇼츠 편집본으로 추가'가 누를 때 다시 봄 · BR-120)
             return self._send(200, {"on": style.shorts_topic_on()})
-        if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · BR-240)
+        if u.path == "/api/style/shorts_layout":  # '쇼츠 화면 배치' 지금 값 ('' 지금처럼 · eunpyeong 은평 스타일 · academy 풋살사관학교 스킨 · BR-240 · BR-320)
             return self._send(200, {"layout": style.shorts_layout()})
         if u.path == "/api/style/shorts_len":  # '쇼츠 길이' 지금 값 ('' 지금처럼 20~55초 · loop · point · explain · ref · BR-291)
             return self._send(200, style.shorts_len_state())
@@ -766,6 +767,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, style.card_extras())
         if u.path == "/api/style/card_pic":  # 은평 스타일 띠 그림·로고 그림 (편집실 미리보기·스타일 화면 · 실은 그림 또는 작업 폴더의 바꾼 그림 · BR-280 · BR-281)
             p = editor.ep_pic_path((q.get("f") or [""])[0])
+            if not p:
+                return self._send(404, {"error": "not found"})
+            return self._file(p, "image/png")
+        if u.path == "/api/style/skin":  # 풋살사관학교 스킨 그림 (편집실 미리보기·스타일 화면 · 실은 스킨 또는 작업 폴더의 바꾼 스킨 · BR-320 · BR-324)
+            p = style.skin_path((q.get("f") or [""])[0])
             if not p:
                 return self._send(404, {"error": "not found"})
             return self._file(p, "image/png")
@@ -914,6 +920,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "epx": dict(style.card_extras(), next=style.series_peek(),   # 은평 스타일 덧붙임 설정 · 다음 시리즈 번호 (BR-245)
                                                     pics=style.card_pic_refs(),   # 템플릿 '은평 스타일'이 넣을 띠 그림·로고 (켠 것만 · BR-280 · BR-281)
                                                     font=epfont.public(editor.ep_font(wait=False)),   # 은평 스타일 글꼴 (이름·폭 표·파일 주소 · 못 찾으면 null · BR-311)
+                                                    skin=editor.skin_info(),   # 템플릿 '풋살사관학교 스킨'이 넣을 스킨 이름·영상 창·화면 구성 (못 읽으면 null · BR-325)
                                                     fontChecking=epfont.checking())})   # 아직 찾는 중 → 편집실이 끝나면 다시 받음 (/api/style/card_font?full=1)
             except Exception as e:
                 studiolog.trace(e)
@@ -1173,6 +1180,16 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"은평 스타일 그림을 저장하지 못했어요 · {e}")
                 return self._send(500, {"ok": False, "error": "그림을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
             log(f"은평 스타일 {'띠 그림을' if b.get('kind') == 'band' else '로고를'} 바꿨어요 · {v[b.get('kind') + 'File']}")
+            return self._send(200, dict(v, ok=True))
+        if path == "/api/style/skin":  # 스타일 화면 '스킨 바꾸기'(data URL · 확인해 작업 폴더에 복사) · '처음 스킨으로'(reset · BR-324)
+            try:
+                v = style.reset_skin() if b.get("reset") is True else style.save_skin(b.get("data"))
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+            except OSError as e:
+                log(f"풋살사관학교 스킨을 저장하지 못했어요 · {e}")
+                return self._send(500, {"ok": False, "error": "스킨을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요"})
+            log("풋살사관학교 스킨을 처음 스킨으로 돌렸어요" if b.get("reset") is True else f"풋살사관학교 스킨을 바꿨어요 · {v['file']}")
             return self._send(200, dict(v, ok=True))
         if path == "/api/style/card_font":  # 스타일 화면 '글꼴 파일 고르기'(data URL · 확인해 작업 폴더에 복사) · '처음으로'(reset · BR-312)
             try:

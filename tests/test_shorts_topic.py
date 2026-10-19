@@ -505,7 +505,7 @@ const msgS = () => ({{ format: "shorts", name: "MSG 후보 A · 담백 레슨형
         for under in (True, False):
             got = run_js(self.msg_short(under) + """
 out = {};
-for (const name of Object.keys(TEMPLATES).filter(k => k !== "은평 스타일")) {  // (은평 스타일은 큰 제목 아래 사실 줄 · tests.test_eunpyeong)
+for (const name of Object.keys(TEMPLATES).filter(k => k !== "은평 스타일" && k !== "풋살사관학교 스킨")) {  // (은평 스타일·스킨은 큰 제목 아래 사실(주제) 줄 · tests.test_eunpyeong · tests.test_academy_skin)
   S = msgS(); TEMPLATES[name]();
   const kt = S.titles.find(t => t.id === "kt"), hk = S.titles.find(t => t.id === "hk");
   out[name] = { k: txtBox(kt.text, kt.style, 1080, 1920), h: txtBox(hk.text, hk.style, 1080, 1920), kx: [kt.style.x, kt.style.align], hx: [hk.style.x, hk.style.align],

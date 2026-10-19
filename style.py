@@ -22,6 +22,7 @@ import re
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import core
 import plan
@@ -1168,8 +1169,9 @@ def set_shorts_topic(on):
     return bool(on)
 
 
-# 쇼츠 화면 배치 (BR-240 · D-420): '' = 지금처럼(가편집 검은 박스 · MSG 흐린 배경) · "eunpyeong" = 은평 스타일(파란 띠 + 흰 상자 제목)
-SHORTS_LAYOUTS = ("", "eunpyeong")
+# 쇼츠 화면 배치 (BR-240 · D-420 · BR-320 · D-520): '' = 지금처럼(가편집 검은 박스 · MSG 흐린 배경) · "eunpyeong" = 은평 스타일(파란 띠 + 흰 상자 제목) ·
+# "academy" = 풋살사관학교 스킨(초록 칠판 그림을 화면 전체에 얹음 · 소유자 채널 스킨)
+SHORTS_LAYOUTS = ("", "eunpyeong", "academy")
 
 
 def _shorts_layout_file():
@@ -1412,6 +1414,173 @@ def save_card_pic(kind, data):
     cur = card_pics()
     cur[kind], cur[kind + "File"] = True, name
     return _save_card_pics(cur)
+
+
+# 풋살사관학교 스킨 (BR-320~BR-325 · D-520~D-524): 쇼츠 화면 전체에 얹는 9:16 그림 (위 칠판 띠 · 아래 캐릭터·채널 이름 띠 · 가운데는 투명 = 영상 창)
+# 그림은 앱과 함께 실은 것(skins/academy.png · 출처 skins/NOTICE.md) · '스킨 바꾸기'로 고른 그림은 작업 폴더 styles/설정/스킨/ 에 내용 지문 이름으로 복사
+SKIN_SHIP = "academy.png"      # 앱 폴더 skins/ 의 기본 스킨 (editor.SKIN_DIR)
+SKIN_ASPECT_TOL = 0.03         # 9:16 에서 이만큼(비율)까지 벗어난 그림은 받음
+SKIN_WIN_MIN = 0.30            # 투명한 영상 창(가장 긴 이어진 줄)이 그림 높이의 이만큼은 돼야 함
+SKIN_MIN_W = 360               # 이보다 좁은 그림은 받지 않음 (화소 · 1080 폭 쇼츠에 세 배 넘게 키우면 흐림)
+SKIN_ROW_HOLE = 0.5            # 한 줄에서 가로 10%~90% 칸의 이 비율 넘게 투명(알파 255 아님)하면 영상 창 줄
+_SKIN_NAME = re.compile(r"skin_[0-9a-f]{12}\.png")   # 바꾼 스킨 이름 (내용 지문 · 같은 그림은 같은 이름)
+_SKIN_BAD = "가운데가 투명하게 비어 있는 9:16 그림(PNG)을 골라 주세요"
+
+
+def _skin_file():
+    return STYLES / ROUGH_DIR_NAME / "쇼츠 스킨.json"
+
+
+def skin_dir():
+    """'스킨 바꾸기'로 고른 그림을 두는 곳 (작업 폴더)."""
+    return STYLES / ROUGH_DIR_NAME / "스킨"
+
+
+def skin_ship_dir():
+    """앱과 함께 싣는 스킨 폴더 (앱 폴더 skins/)."""
+    return core.APP_DIR / "skins"
+
+
+def skin_state():
+    """{"file": 바꾼 스킨 이름('' = 앱과 함께 실은 스킨), "ref": 지금 쓰는 스킨 이름} — 파일이 없거나 못 읽거나 바꾼 스킨이 없어졌으면 실은 스킨."""
+    try:
+        d = json.loads(_skin_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    f = d.get("file") if isinstance(d, dict) else None
+    f = f if isinstance(f, str) and _SKIN_NAME.fullmatch(f) and (skin_dir() / f).is_file() else ""
+    return {"file": f, "ref": f or SKIN_SHIP}
+
+
+def skin_ref():
+    """풋살사관학교 스킨 편집본 화면 구성(layout.skin)에 넣을 스킨 이름 (editor.skin_path 로 찾음)."""
+    return skin_state()["ref"]
+
+
+def skin_path(ref):
+    """layout.skin 의 스킨 이름 → 파일 (앱과 함께 실은 academy.png · 작업 폴더의 바꾼 스킨) · 이상한 이름·없는 파일은 None."""
+    if not isinstance(ref, str) or not ref or Path(ref).name != ref or "\\" in ref or ref.startswith("."):
+        return None
+    if ref == SKIN_SHIP:
+        p = skin_ship_dir() / ref
+    elif _SKIN_NAME.fullmatch(ref):
+        p = skin_dir() / ref
+    else:
+        return None
+    return p if p.is_file() else None
+
+
+def skin_window_of(im):
+    """스킨 그림(PIL) → 영상 창 (위 줄, 아래 줄 다음) 화소 · 없으면 None.
+    줄마다 가로 10%~90% 칸 가운데 SKIN_ROW_HOLE 넘게 알파 < 255 인 줄을 창 줄로 보고 가장 긴 이어진 줄들 → [위, 아래)."""
+    if "A" not in im.getbands():
+        return None
+    import numpy as np
+    a = np.asarray(im.getchannel("A"))
+    h, w = a.shape
+    x0, x1 = int(w * 0.1), max(int(w * 0.1) + 1, int(w * 0.9))
+    rows = (a[:, x0:x1] < 255).mean(axis=1) > SKIN_ROW_HOLE
+    best, start = None, None
+    for y, on in enumerate(list(rows) + [False]):
+        if on and start is None:
+            start = y
+        elif not on and start is not None:
+            if best is None or y - start > best[1] - best[0]:
+                best = (start, y)
+            start = None
+    return best
+
+
+_SKIN_WIN = {}   # (경로, 고친 시각, 크기) → 창 {top, bottom, w, h} (내보내기·편집실을 열 때마다 다시 재지 않게)
+
+
+def skin_window(p):
+    """스킨 파일 → {"top": 위 끝, "bottom": 아래 끝 (화면 높이 비율 · [위, 아래)), "w", "h"(그림 크기)} · 못 읽거나 창이 없으면 None."""
+    try:
+        st = Path(p).stat()
+    except (OSError, TypeError):
+        return None
+    k = (str(p), st.st_mtime_ns, st.st_size)
+    if k not in _SKIN_WIN:
+        try:
+            from PIL import Image
+            with Image.open(p) as im:
+                im.load()
+                win = skin_window_of(im)
+                size = im.size
+        except Exception:  # noqa: BLE001 — 깨진 그림은 창이 없는 것으로
+            win, size = None, (0, 0)
+        if len(_SKIN_WIN) > 16:
+            _SKIN_WIN.clear()
+        _SKIN_WIN[k] = {"top": win[0] / size[1], "bottom": win[1] / size[1], "w": size[0], "h": size[1]} if win else None
+    v = _SKIN_WIN[k]
+    return dict(v) if v else None
+
+
+def skin_png(raw):
+    """고른 스킨(바이트) 확인 → 저장할 PNG 바이트 (휴대폰 사진 회전 정보 적용 · 긴 변 CARD_PIC_SIDE 까지 · 투명 그대로).
+    그림이 아니거나·9:16 에서 3% 넘게 벗어나거나·너무 작거나·가운데 투명한 영상 창(높이 30% 이상)이 없으면 ValueError (화면에 그대로 보이는 문장)."""
+    if len(raw) > CARD_PIC_MAX:
+        raise ValueError(f"그림 파일이 너무 커요 ({len(raw) >> 20}MB) · {CARD_PIC_MAX >> 20}MB 보다 작은 그림을 골라 주세요")
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as im0:
+            im0.verify()   # 잘린 파일·그림이 아닌 파일
+        im = Image.open(io.BytesIO(raw))
+        im = ImageOps.exif_transpose(im)
+        im.load()
+    except Exception as e:  # noqa: BLE001 — PIL 은 꼴마다 다른 예외를 냄
+        raise ValueError("그림 파일을 읽지 못했어요 · " + _SKIN_BAD) from e
+    w, h = im.size
+    if abs((w / max(1, h)) / (9 / 16) - 1) > SKIN_ASPECT_TOL:
+        raise ValueError(f"세로 9:16 그림이 아니에요 ({w}×{h}) · {_SKIN_BAD}")
+    if w < SKIN_MIN_W:
+        raise ValueError(f"그림이 너무 작아요 ({w}×{h}) · 1080×1920 크기의 그림이 좋아요")
+    alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+    if not alpha:
+        raise ValueError(f"투명한 곳이 없는 그림이에요 · {_SKIN_BAD}")
+    im = im.convert("RGBA")
+    if max(im.size) > CARD_PIC_SIDE:
+        im.thumbnail((CARD_PIC_SIDE, CARD_PIC_SIDE), Image.LANCZOS)
+    win = skin_window_of(im)
+    if not win or (win[1] - win[0]) < SKIN_WIN_MIN * im.size[1]:
+        raise ValueError(f"영상이 보일 투명한 칸이 없거나 너무 작아요 · {_SKIN_BAD}")
+    b = io.BytesIO()
+    im.save(b, "PNG", optimize=True)
+    return b.getvalue()
+
+
+def _save_skin(cur):
+    f = _skin_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    updater.write_atomic(f, json.dumps({"file": cur["file"], "set": time.strftime("%Y-%m-%d %H:%M")}, ensure_ascii=False))
+    return skin_state()
+
+
+def save_skin(data):
+    """'스킨 바꾸기': 고른 그림(data URL 또는 바이트)을 확인해 작업 폴더에 PNG 로 복사하고 그 스킨을 씀 → 바뀐 skin_state().
+    이미 만든 편집본은 예전 스킨 이름을 가리키므로 예전 스킨 파일은 지우지 않는다."""
+    if isinstance(data, str):
+        if not data.startswith("data:") or "," not in data:
+            raise ValueError("그림 파일을 읽지 못했어요 · " + _SKIN_BAD)
+        try:
+            data = base64.b64decode(data.split(",", 1)[1], validate=False)
+        except ValueError as e:
+            raise ValueError("그림 파일을 읽지 못했어요 · " + _SKIN_BAD) from e
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("그림 파일을 읽지 못했어요 · " + _SKIN_BAD)
+    png = skin_png(bytes(data))
+    name = f"skin_{hashlib.sha256(png).hexdigest()[:12]}.png"
+    p = skin_dir() / name
+    if not p.is_file():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        updater.write_atomic(p, png)
+    return _save_skin({"file": name})
+
+
+def reset_skin():
+    """'처음 스킨으로': 앱과 함께 실은 스킨으로 (바꾼 스킨 파일은 남김) → 바뀐 skin_state()."""
+    return _save_skin({"file": ""})
 
 
 # 은평 스타일 글꼴 (BR-310~BR-313 · D-500~D-505): KFA 글꼴은 앱에 싣지 않음 — '글꼴 파일 고르기'로 고른 파일은 확인해 작업 폴더
