@@ -3318,7 +3318,8 @@ class _Build:
         self.fixed = set()  # 자리를 옮기지 않는 글자 id (은평 스타일 큰 제목·사실 줄 · 스킨 큰 제목·주제 줄)
         self.skin = None   # 풋살사관학교 스킨 영상 창 {top, bottom} (BR-323 · 화면 구성은 B.lay · 위·아래 띠는 글자 자리 정리에서 피함)
         self.skin_faces = None   # 스킨: 얼굴 따라가기가 본 얼굴 {원본 시각: 상자들} (MSG 글자가 얼굴을 피함 · editor.skin_screen_faces · D-538)
-        self.skin_rep = {}   # 스킨: 얼굴 모델을 못 썼는지 (noFace → 편집본 skinNoFace · '확인할 것')
+        self.skin_rep = {}   # 스킨: 얼굴·공 모델을 못 썼는지 (noFace·noBall → 편집본 skinNoFace·skinNoBall · '확인할 것') · 나눈 클립 (split · D-539)
+        self.cap_lift = []   # 스킨: 말 자막을 공 위로 올릴 원본 구간 (editor.skin_cap_lifts · 편집본 capLift · D-539)
 
     def clip(self, a, b, speed=1.0, fx=None, nocaps=False, mute=False, vol_db=0.0, main=False, color=None):
         v, au = editor._pair(a, b, start=round(self.pos, 4))
@@ -4121,8 +4122,11 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
             B.shape(0.0, y, 1.0, LETTERBOX, "#000000", 0.0, total, 1.0, 0, "검은 띠 (영화 화면)")["full"] = True
     if B.skin:   # 스킨: 화면 좌우는 얼굴·공을 따라 · 세로 원본은 위아래도 · 확대 기준점은 창 좌표로 (BR-326 · BR-328 · 전술 그림·글자 자리를 셈하기 전에)
         B.skin_faces = editor.skin_reframe(name, B.items, B.lay, info=info, speech=[(w[0], w[1]) for w in words], report=B.skin_rep)
+        _skin_split_refs(B)
     caps_tl = editor.timeline_captions({"items": B.items, "captions": caps, "format": fmt}) if st["captions"].get("on", True) else []
     lay_cap = editor.skin_caption(_caption_style(st, fmt, cap_y), B.skin["bottom"]) if B.skin else _caption_style(st, fmt, cap_y)   # 스킨: 실제 말 자막(96 · D-529)을 피함
+    if B.skin:   # 차기 직전 공이 말 자막 줄에 있으면 그동안 말 자막을 공 위로 (편집본 capLift · 글자 자리 정리도 올린 자막을 피함 · D-539)
+        B.cap_lift = editor.skin_cap_lifts(name, B.items, {"format": "shorts", "layout": B.lay, "info": info}, lay_cap)
     layout_titles(B, caps_tl, lay_cap, total, face_box(sig), moms if intensity != "담백" else (), words, intensity in VITAL_LEVELS)
     if fmt == "long":
         govern(B, intensity, fc, total, moms, words, sig.get("cuts") or (), st, knobs.get("protect", False))
@@ -4166,6 +4170,10 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     seq["auto"] = "msg"
     if B.skin and B.skin_rep.get("noFace"):   # 얼굴 모델을 못 써 창을 얼굴에 맞추지 못함 → 내보낸 뒤 검수 '확인할 것' (D-538)
         seq["skinNoFace"] = True
+    if B.skin and B.skin_rep.get("noBall"):   # 공 찾기 모델을 못 써 시범 장면에서 공을 못 따라감 → '확인할 것' (D-539)
+        seq["skinNoBall"] = True
+    if B.skin and getattr(B, "cap_lift", None):   # 차기 직전 공이 말 자막 줄에 있으면 그동안 말 자막을 공 위로 (편집본 capLift · D-539)
+        seq["capLift"] = B.cap_lift
     if B.card or B.skin:  # 은평 스타일·스킨 큰 제목·사실(주제) 줄·흰 상자는 편집본 끝까지 (끝에 남는 효과음·배경음악 꼬리까지 · BR-241 · BR-321)
         end = round(editor.seq_total(seq), 3)
         for x in [t for t in B.titles if t["id"] in B.fixed] + [g for g in B.shapes if g.get("plan") in ("card", "series")]:
@@ -4504,6 +4512,13 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
     sx0, sy0, sx1, sy1 = SAFE * W, SAFE * H, (1 - SAFE) * W, (1 - SAFE) * H
     cboxes = [(c["start"], c["end"], text_box(c["text"], cap_style, W, H)) for c in caps_tl or ()]
     band = (min(b[1] for _, _, b in cboxes), max(b[3] for _, _, b in cboxes)) if cboxes else None
+    lifted = []   # 스킨: 공 위로 올린 말 자막 (그 시간 그 자리도 피함 · editor.skin_cap_lift · D-539)
+    if getattr(B, "skin", None) and getattr(B, "cap_lift", None):
+        lq = {"format": "shorts", "layout": getattr(B, "lay", None) or {}, "items": B.items, "capLift": B.cap_lift}
+        for c in caps_tl or ():
+            ly = editor.skin_cap_lift(lq, c["start"], c["end"])
+            if ly is not None:
+                lifted.append((c["start"], c["end"], text_box(c["text"], dict(cap_style, y=ly), W, H)))
     kind_of = {}
     for e in B.events:
         for tid in (e.get("refs") or {}).get("titles") or []:
@@ -4545,6 +4560,8 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
         if sk_faces and kind_of.get(t["id"]) not in FACE_FREE:
             for tt in (a + 0.2, (a + b) / 2, b - 0.2):
                 fsk += [[x * W, y * H, (x + w) * W, (y + h) * H] for x, y, w, h in editor.skin_screen_faces(B.items, tt, sk_seq, sk_faces, W, H) or ()]
+            if kind_of.get(t["id"]) == "score":   # 점수판(최종 결과도)은 소유자 '틀린 개수' 자리(창 맨 위 줄 오른쪽)에 — 얼굴 상자 위 1/4(이마·머리카락)은 덮어도 됨
+                fsk = [[f[0], f[1] + SKIN_SCORE_BROW * (f[3] - f[1]), f[2], f[3]] for f in fsk]   # (예전: 긴 '최종 결과'가 이마에 걸려 말 자막 바로 위로 내려감 · 검토 look r2 · D-539)
         avoid_face = (fpx is not None or bool(fsk)) and kind_of.get(t["id"]) not in FACE_FREE
 
         def free(y, a, b, face_ok=False, x=None):
@@ -4557,29 +4574,16 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
                 return False
             if on_caps and min(bx[3], band[1]) - max(bx[1], band[0]) > 0:
                 return False
+            if any(min(b, l_b) - max(a, l_a) > 0.02 and _overlap(bx, lb) > 0 for l_a, l_b, lb in lifted):
+                return False
             same = [(p_a, p_b, pb) for p_a, p_b, pb in placed if min(b, p_b) - max(a, p_a) > 1e-3]
             if len(same) >= 2 and any(sum(1 for q_a, q_b, _ in same if q_a <= m < q_b) >= 2 for m in [a] + [x for q in same for x in (q[0], q[1]) if a <= x < b]):
                 return False  # 화면 글자는 한꺼번에 2개까지
             return not any(_overlap(bx, pb) > 0.05 for p_a, p_b, pb in same)
         ys = [y0] + [round(y0 + d * sg, 3) for d in (0.07, 0.14, 0.21, 0.28, 0.35, 0.42, 0.5) for sg in ((-1, 1) if y0 >= 0.5 else (1, -1))]
         y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b)), None)
-        if y is None and fsk:   # 스킨: 위아래로 피할 곳이 없으면(창 높이를 거의 채운 얼굴) 얼굴 옆으로 · 그래도 안 되면 글자를 조금 줄여 옆으로
-            size0 = float(st.get("size") or 50)   # (skin_emph_placer 의 '머리 옆'과 같은 뜻 · 0.85·0.7 배까지 · D-538)
-            for k in (1.0, 0.85, 0.7):
-                st["size"] = size0 if k == 1.0 else max(24, int(size0 * k))
-                bk = text_box(t["text"], st, W, H)
-                bw0, c0 = bk[2] - bk[0], (bk[0] + bk[2]) / 2
-                xs = sorted({round(c / W, 4) for f in fsk for c in (f[0] - editor.TXT_GAP * W - bw0 / 2, f[2] + editor.TXT_GAP * W + bw0 / 2)
-                             if sx0 <= c - bw0 / 2 and c + bw0 / 2 <= sx1}, key=lambda c: abs(c * W - c0))
-                for xx in xs:
-                    y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b, x=xx)), None)
-                    if y is not None:
-                        st["x"] = xx
-                        break
-                if y is not None:
-                    break
-            if y is None:
-                st["size"] = size0
+        if y is None and fsk:   # 스킨: 위아래로 피할 곳이 없으면(창 높이를 거의 채운 얼굴) 얼굴 옆으로 · 창 맨 위 줄·말 자막 바로 위 줄 · 반응 글자는 같은 뜻 짧은 글 ·
+            y = _skin_dodge(B, t, st, fsk, ys, free, a, b, kind_of.get(t["id"]), band, W, H, (sx0, sx1))   # 그래도 안 되면 조금 줄여서 (D-538 · D-539)
         if y is None and avoid_face:  # 얼굴을 피할 자리가 없으면 가리더라도
             y = next((yy for yy in ys if 0.0 < yy <= 1.0 and free(yy, a, b, True)), None)
         if y is None:  # 자리가 없으면 앞 글자가 사라진 뒤로 늦춤 (남는 시간이 MIN_TEXT 넘을 때만)
@@ -4642,6 +4646,91 @@ def layout_titles(B, caps_tl, cap_style, total, face=None, moms=(), words=(), vi
         ok = {id(e) for e in keep} | saved
         B.events = [e for e in B.events if id(e) in ok]
     return gone
+
+
+SKIN_SCORE_BROW = 0.25  # 스킨 점수판이 덮어도 되는 얼굴 상자 위쪽 몫 (이마·머리카락 · 눈은 아래 3/4 · D-539)
+SKIN_TEXT_MIN = 60      # 스킨 MSG 글자를 얼굴을 피하려고 줄일 때 한도 (속마음·상황 글자 70 → 49 로 줄어 휴대폰에서 안 읽혔음 · 검토 edit r2 · D-539)
+SKIN_SHRINK = (0.85, 0.7, 0.6)   # 얼굴 옆에도 안 들어갈 때 줄이는 배율 (차례대로 · SKIN_TEXT_MIN 밑은 안 씀)
+
+
+def _skin_dodge(B, t, st, fsk, ys, free, a, b, kind, band, W, H, safe):
+    """스킨 MSG 글자가 얼굴(fsk · 화면 화소)을 피할 자리 (layout_titles · 위아래로 피할 곳이 없을 때 · D-538 · D-539) — 차례대로:
+    ① 같은 크기로 얼굴 옆(왼·오른) ② 영상 창 맨 위 줄(상황 자막 줄)·말 자막 바로 위 줄 (원래 가로 자리 · 얼굴 옆) ③ 반응 글자(fx)는 같은 뜻 글 가운데 더 짧은 것
+    (FX_TEXTS 같은 묶음 · '나이스!!' → '굿!' · '깔끔하게 골!' → '골인!' · 사건 글도 바꿈) ④ SKIN_SHRINK 배율로 줄여서(SKIN_TEXT_MIN 까지 · 반응 글자는 0.6 배까지)
+    → 글 아래 끝 y (st 의 x·size·글은 그 자리로) | None (모두 안 되면 처음 글·크기 그대로 · 부른 쪽이 얼굴 위라도 띄움 · I-535)."""
+    size0, text0, x0 = float(st.get("size") or 50), t["text"], st.get("x")
+    win = getattr(B, "skin", None) or {}
+    sx0, sx1 = safe
+
+    def rows():   # 창 맨 위 줄 · 말 자막 바로 위 줄 (글 아래 끝 y)
+        bh = text_box(t["text"], dict(st, y=0.5), W, H)
+        out = []
+        if win.get("top") is not None:
+            out.append(math.ceil((float(win["top"]) + editor.TXT_GAP + (0.5 * H - bh[1]) / H) * 1000 - 1e-6) / 1000)
+        lo = band[0] if band else (float(win["bottom"]) * H if win.get("bottom") is not None else None)
+        if lo is not None:
+            out.append(math.floor(((lo - editor.TXT_GAP * H) - (bh[3] - 0.5 * H)) / H * 1000 + 1e-6) / 1000)
+        return out
+
+    def sides():
+        bk = text_box(t["text"], st, W, H)
+        bw0, c0 = bk[2] - bk[0], (bk[0] + bk[2]) / 2
+        return sorted({round(c / W, 4) for f in fsk for c in (f[0] - editor.TXT_GAP * W - bw0 / 2, f[2] + editor.TXT_GAP * W + bw0 / 2)
+                       if sx0 <= c - bw0 / 2 and c + bw0 / 2 <= sx1}, key=lambda c: abs(c * W - c0))
+
+    def at(first):   # 이 글·크기로: (first 면 원래 가로 자리 위아래는 이미 봄) 원래 가로 자리 → 창 맨 위·말 자막 위 줄 → 얼굴 옆
+        st["x"] = x0
+        cand = ([] if first else list(ys)) + rows()
+        y = next((yy for yy in cand if 0.0 < yy <= 1.0 and free(yy, a, b)), None)
+        if y is not None:
+            return y
+        for xx in sides():
+            y = next((yy for yy in list(ys) + rows() if 0.0 < yy <= 1.0 and free(yy, a, b, x=xx)), None)
+            if y is not None:
+                st["x"] = xx
+                return y
+        st["x"] = x0
+        return None
+    y = at(True)
+    if y is not None:
+        return y
+    words = [text0]
+    if kind == "fx":   # 반응 글자: 같은 뜻 글 가운데 더 짧은 것 (짧은 것부터)
+        font = st.get("font")
+        same = lambda u, v: str(u).replace("…", "...") == str(v).replace("…", "...")  # noqa: E731 — ('아깝다…' = 글꼴에 맞춘 '아깝다...')
+        grp = next((g for g in FX_TEXTS.values() if any(same(glyph_safe(w, font), text0) for w in g)), ())
+        w0 = text_box(text0, st, W, H)
+        alts = sorted({glyph_safe(w, font) for w in grp if not same(glyph_safe(w, font), text0)}, key=lambda w: text_box(w, st, W, H)[2] - text_box(w, st, W, H)[0])
+        for w in [w for w in alts if text_box(w, st, W, H)[2] - text_box(w, st, W, H)[0] < w0[2] - w0[0]]:
+            t["text"] = w
+            y = at(False)
+            if y is not None:
+                _retext(B, t["id"], text0, w)
+                return y
+            words.append(w)
+        t["text"] = text0
+    floor = size0 * min(SKIN_SHRINK) if kind == "fx" else SKIN_TEXT_MIN
+    for k in SKIN_SHRINK:
+        z = int(size0 * k)
+        if z < floor - 1e-6:
+            break
+        st["size"] = z
+        for w in words:
+            t["text"] = w
+            y = at(False)
+            if y is not None:
+                if w != text0:
+                    _retext(B, t["id"], text0, w)
+                return y
+    st["size"], st["x"], t["text"] = size0, x0, text0
+    return None
+
+
+def _retext(B, tid, old, new):
+    """글자(tid)를 다른 글로 바꾼 것을 그 사건 글에도 (MSG 목록이 화면 글자와 같게)."""
+    for e in B.events:
+        if tid in ((e.get("refs") or {}).get("titles") or []) and (e.get("text") == old or str(e.get("text") or "").replace("…", "...") == old.replace("…", "...")):
+            e["text"] = new
 
 
 def _join_recap(B, picked):
@@ -4825,12 +4914,19 @@ def _shorts_intro(B, hook, short_r, vt, topic_on, looks, st, cap_y, fmt, caps):
         if B.card:  # 은평 스타일: 흰 상자 안 한 줄 큰 제목 · 처음부터 끝까지 (BR-241)
             hk = B.title(" ".join(htxt.split()), 0.0, B.pos, editor.ep_title_style(" ".join(htxt.split())))
         elif B.skin:  # 풋살사관학교 스킨: 흰 둥근 상자 안 한 줄 주황 큰 제목 · 처음부터 끝까지 · 80 밑으로 줄어야 하면 앞 구절·포인트 말·영상 주제로 (BR-321 · D-531)
+            raw = htxt if main else str(hook or htxt)
             htxt = editor.skin_headline(htxt, [point.get("phrase") if isinstance(point, dict) else None, vt])
             hk = B.title(htxt, 0.0, B.pos, editor.skin_title_style(htxt))
         else:
             hk = B.title(htxt, 0.0, SHORTS_HOOK_SEC, hlook)
         kick = editor.topic_line(vt, point, htxt) if topic_on else ""
-        kt = (_card_fact(B, kick, hk) if B.card or B.skin else _topic_kicker(B, kick, hk, st, cap_y, fmt)) if kick else None
+        if B.skin and topic_on:   # 스킨 주제 줄: 흰 상자보다 넓지 않은 글 · 묻는 말 훅을 다른 글로 바꿨으면 그 뒤 물음 구절 먼저 (editor.skin_topic_fit · D-539)
+            alts = [editor.skin_hook_tail(raw, htxt)] + editor.topic_lines(vt, point, htxt)
+            alts = [a for a in alts if a and len(re.sub(r"\s", "", a)) <= editor.TOPIC_MAX + 2]
+            kick = alts[0] if alts else ""
+            kt = _card_fact(B, kick, hk, alts) if kick else None
+        else:
+            kt = (_card_fact(B, kick, hk) if B.card or B.skin else _topic_kicker(B, kick, hk, st, cap_y, fmt)) if kick else None
         if kt or not need:
             return hk, kt, (hk["text"] if main else "")
         B.titles.remove(hk)
@@ -4847,6 +4943,32 @@ def _drop_said_order(B, hk, kt):
     return len(dup)
 
 
+def _skin_split_refs(B):
+    """스킨 세로 원본 위아래 맞춤이 나눈 클립(editor._skin_split · report split {예전 id: [새 id]} · 나눈 조각을 또 나누면 이어서)을 사건 refs·본편 목록·
+    나가는 전환이 이어받음 — MSG 목록 [빼기]가 나뉜 뒤 조각까지 함께 빼고, 나가는 전환은 마지막 조각에서 (_split_main 과 같음 · D-539)."""
+    sp = B.skin_rep.pop("split", None) if isinstance(getattr(B, "skin_rep", None), dict) else None
+    if not sp:
+        return
+
+    def all_of(x):
+        out = [x]
+        for y in sp.get(x, []):
+            out += all_of(y)
+        return out
+    for e in B.events:
+        r = e.get("refs") or {}
+        if r.get("items"):
+            r["items"] = [y for x in r["items"] for y in all_of(x)]
+    for tr in B.trans:
+        if tr.get("a") in sp:
+            tr["a"] = all_of(tr["a"])[-1]
+    byid = {x["id"]: x for x in B.items}
+    main = []
+    for x in B.main:
+        main += [byid.get(y, x) for y in all_of(x["id"]) if y == x["id"] or (byid.get(y) or {}).get("track") == "V1"]
+    B.main[:] = main
+
+
 def _skin_row(top, look):
     """스킨 영상 창 맨 위 줄 — 글 상자(text_box · 상자 여백 포함) 위 끝이 영상 창 위 끝(top) + TXT_GAP 이 되는 글 아래 끝 y (셋째 자리 올림 · BR-323)."""
     W, H = 1080, 1920
@@ -4858,14 +4980,20 @@ TOPIC_KICK = (64, 56)   # MSG 쇼츠 주제 줄 글자 크기 (큰 것부터 · 
 EP_ROW = 0.27   # 은평 스타일 쇼츠: 상황 자막·'다시 보기 ▶'·점수판 줄 (글 아래 끝 · 사실 줄 0.195 아래 · 영상 창 위 끝 0.28 위 · BR-242)
 
 
-def _card_fact(B, text, hk):
+def _card_fact(B, text, hk, alts=None):
     """은평 스타일 사실 줄 (BR-241): 흰 상자 큰 제목(hk) 아래 작은 흰 글씨 한 줄 · 큰 제목과 같은 때(끝까지) · 주제 줄(plan topic) —
-    길면(editor.TOPIC_MAX + 2 넘음) None (큰 제목만). 스킨(B.skin)이면 큰 흰 주제 줄 (editor.skin_topic_style · BR-321)."""
+    길면(editor.TOPIC_MAX + 2 넘음) None (큰 제목만). 스킨(B.skin)이면 큰 흰 주제 줄 (editor.skin_topic_style · BR-321) ·
+    alts(스킨 · 차례대로 후보): 흰 상자보다 넓지 않은 것 (editor.skin_topic_fit · D-539)."""
     if len(re.sub(r"\s", "", text)) > editor.TOPIC_MAX + 2:
         return None
     if getattr(B, "skin", None):
         text = " ".join(text.split())
-    look = editor.skin_topic_style(text, B.skin["top"], hk["style"].get("size")) if getattr(B, "skin", None) else dict(editor.EP_FACT)   # (스킨: 큰 제목보다 크지 않게 · D-531)
+    if getattr(B, "skin", None) and alts:
+        text, look = editor.skin_topic_fit(alts, hk, B.skin["top"])
+        if not text:
+            return None
+    else:
+        look = editor.skin_topic_style(text, B.skin["top"], hk["style"].get("size")) if getattr(B, "skin", None) else dict(editor.EP_FACT)   # (스킨: 큰 제목보다 크지 않게 · D-531)
     kt = B.title(text, 0.0, float(hk["dur"]), look)
     kt["plan"], kt["under"] = "topic", hk["id"]
     return kt

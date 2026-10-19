@@ -9,6 +9,7 @@
 미리보기 영상 칸이 찢어진 종이 홈까지 덮음 · 흰 상자 = 미리보기 글 폭 + 양옆 14 · 화면 좌우 얼굴 따라가기(rfk) 미리보기 = 서버 셈 · 다른 템플릿은 스킨을 지움 ·
 템플릿 '풋살사관학교 스킨'은 서버 값 ·
 시퀀스 탭 스킨 안내는 화면 구성(풀샷 자르기·박스·블러)에 맞는 칸만 말함 · 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 ·
+주제 줄 글을 길게 고쳐도 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539) ·
 '새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
 import json
 import os
@@ -170,7 +171,9 @@ try:
                 and top["style"] == editor.skin_title_style(top["text"]) \
                 and len(box) == 1 and box[0]["radius"] == 17 and not any(t.get("plan") in ("series", "longline") for t in q["titles"])
             for kt in [t for t in q["titles"] if t.get("plan") == "topic"]:
-                good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"], top["style"]["size"])
+                good = good and kt["style"] == editor.skin_topic_style(kt["text"], info["top"], kt["style"]["size"]) and kt["style"]["size"] <= top["style"]["size"] \
+                    and (editor.skin_hug_w(kt["text"], kt["style"]) <= box[0]["w"] * 1080 * editor.SKIN_TOPIC_BOX + 1e-6   # (흰 상자보다 넓지 않은 글 · D-539 ·
+                         or kt["style"] == editor.skin_topic_style(kt["text"], info["top"], top["style"]["size"]))       #  맞는 글이 없으면 예전 셈)
         check("가편집 쇼츠: 화면 구성 = 서버 skin_layout · 큰 제목·주제 줄·흰 상자·말 자막(0.717 · 흰 Black 96 · 테두리 10 · 상자 없음) = 서버 값 · 은평 덧붙임 없음", good,
               json.dumps([{"lay": q["lay"], "cap": {k_: q["cap"].get(k_) for k_ in ("y", "weight", "size", "strokeW", "bgOn", "effect")}} for q in sq], ensure_ascii=False)[:400])
         q0 = sq[0]
@@ -310,6 +313,40 @@ try:
         pg.locator("#frame").screenshot(path=str(SHOTS / "e3b_title_edit.png"))
         ev("undo()")
         W(800)
+
+        # ---- 4c-2. 주제 줄(두 번째 줄)을 길게 고쳐도 한 줄 · 흰 상자 아래 (검토 robust r2: 두 줄로 바뀌어 위로 늘며 흰 상자·큰 제목을 덮음 · D-539) ----
+        # (주제 줄이 있는 가편집 쇼츠 — 첫 쇼츠는 큰 제목이 영상 주제라 주제 줄이 없을 수 있음)
+        qk = ev("(() => { const q = P.sequences.find(q => q.format === 'shorts' && skinTop(q) && q.titles.some(x => x.plan === 'topic' && topicUnder(x, q.titles) === skinTop(q))); return q ? q.id : null; })()")
+        kid = None
+        if qk:
+            ev(f"switchSeq('{qk}')")
+            W(1000)
+            ev("seek(1.0)")
+            W(1200)
+            kid = ev("(() => { const t = skinTop(S), k = t && S.titles.find(x => x.plan === 'topic' && topicUnder(x, S.titles) === t); return k ? k.id : null; })()")
+        LONG_T = "퍼스트 터치 레슨 두 번째 포인트 디딤발 방향"
+        e5 = None
+        if kid:
+            ev(f"selectOverlay('title', '{kid}')")
+            W(600)
+            pg.locator("#pTitleText").fill(LONG_T)
+            pg.locator("#pTitleText").dispatch_event("input")
+            pg.locator("#pTitleText").blur()
+            W(1200)
+            e5 = ev(f"""(() => {{ const k = S.titles.find(x => x.id === '{kid}'), t = skinTop(S), g = S.shapes.find(x => x.plan === 'card'), F = $('frame').getBoundingClientRect(), ky = 1920 / F.height;
+                const el = ovEls['t' + k.id], r = el && el.getBoundingClientRect();
+                return {{ text: k.text, st: k.style, big: t.style.size, box: {{ y: g.y, h: g.h }}, el: r && {{ top: (r.top - F.top) * ky, bottom: (r.bottom - F.top) * ky, h: r.height * ky }} }}; }})()""")
+            pg.locator("#frame").screenshot(path=str(SHOTS / "e3c_topic_edit.png"))
+            ev("undo()")
+            W(800)
+        if qk:
+            ev(f"switchSeq('{q0['id']}')")
+            W(1000)
+        want_k = editor.skin_topic_style(LONG_T, info["top"], e5["big"]) if e5 else None
+        check("주제 줄 글을 길게 고치기 → 글자 크기·자리 = 서버 skin_topic_style(새 글) · 미리보기 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539)",
+              e5 and e5["text"] == LONG_T and (e5["st"]["size"], e5["st"]["y"]) == (want_k["size"], want_k["y"]) and e5["el"]
+              and e5["el"]["h"] < 1.6 * e5["st"]["size"] and e5["el"]["top"] >= (e5["box"]["y"] + e5["box"]["h"]) * 1920 - 2 and e5["el"]["bottom"] <= info["top"] * 1920 + 2,
+              json.dumps({"seq": qk, "e5": e5}, ensure_ascii=False)[:400])
 
         # ---- 4d. '새 쇼츠 편집본으로 추가' (스킨 바탕) — KFA 글꼴을 찾는 중이어도 기다리지 않음 (검토: 은평 스타일 바탕만 기다림) ----
         pg.click('[data-lt="rec"]')
