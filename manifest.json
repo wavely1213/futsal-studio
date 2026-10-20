@@ -1,6 +1,8 @@
 {
   "version": "2.26.1",
   "notes": "스킨 쇼츠: 긴 큰 제목은 흰 상자 두 줄(아래 줄도 읽히는 크기) · 스킨 말 자막은 늘 흰 글씨(노래방 노란색 없음) · 예전 긴 제목 편집본도 열면 두 줄로",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/9887a905c1f585cf9c4b16607d810917453c7c57.zip",
+  "commit": "9887a905c1f585cf9c4b16607d810917453c7c57",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "724330cb83d2f640076e16edae7fa2b3fb6416a0f7650e08d5c7d072c5c5b66f",
