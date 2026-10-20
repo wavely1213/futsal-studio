@@ -1,6 +1,8 @@
 {
   "version": "2.26.0",
   "notes": "풋살사관학교 스킨 쇼츠: 스타일 화면 '쇼츠 화면 배치'에 내 채널 스킨(초록 칠판·찢어진 종이·캐릭터) · 가편집·재미있게 자동 편집·끝까지 자동으로가 스킨 안으로 편집(얼굴·공 따라가기 · 흰 상자 주황 제목 · 흰 굵은 말 자막) · 편집실 템플릿 · 스킨 바꾸기",
+  "zip": "https://github.com/wavely1213/futsal-studio/archive/e524acf4a8541eae6e0b6168398e44922a5c64a2.zip",
+  "commit": "e524acf4a8541eae6e0b6168398e44922a5c64a2",
   "files": {
     ".gitignore": "c839a86974b2d13bf0d85c7e3339c87cfaff73727cd5682f46cd26fbb2863710",
     "AGENTS.md": "cbd2154da1873c7377aae259f90a86c7e180d77904f8faa6ec03dc63f5c590b8",
