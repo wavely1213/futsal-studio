@@ -4068,11 +4068,18 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
     topic_line = opening = ""
     if shorts_hook and B.pos > 3.0:
         hk, kt, opening = _shorts_intro(B, hook, short_r, rec.get("videoTopic") or "", editor.shorts_topic_on(), looks, st, cap_y, fmt, caps)
+        box = None
+        if B.skin:  # 풋살사관학교 스킨: 큰 제목 밑 흰 둥근 상자 (폭은 큰 제목에 맞춤) · 두 줄 큰 제목이면 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면
+            box = editor.skin_box(hk, B.pos)   # 주제 줄을 줄이고 그래도 안 되면 이 쇼츠에서만 빼고 studio.log 에 까닭 (D-540)
+            gone = editor.skin_stack(hk, box, [kt] if kt else [], B.skin["top"])
+            if gone:
+                editor.skin_gone_note(hk, gone)
+                B.titles.remove(kt)
+                kt = None
         topic_line = kt["text"] if kt else ""
         k_h = _sfx_at(B, 0.0, pal.get("title", "짠"), None, "hook", why="쇼츠 첫 장면 큰 글자", title=hk["id"], must=True)
         refs = {"titles": [hk["id"]] + ([kt["id"]] if kt else []), "sfx": [k_h]}
         if B.skin:  # 풋살사관학교 스킨: 큰 제목 밑 흰 둥근 상자 (도형 · 끝까지 · 폭은 큰 제목에 맞춤) — 큰 제목·주제 줄은 글자 자리 정리에서 옮기지 않음
-            box = editor.skin_box(hk, B.pos)
             B.shapes.append(box)
             refs["shapes"] = [box["id"]]
             B.fixed |= set(refs["titles"])
@@ -4913,7 +4920,7 @@ def _shorts_intro(B, hook, short_r, vt, topic_on, looks, st, cap_y, fmt, caps):
                 htxt = _short_text(hook, lim)
         if B.card:  # 은평 스타일: 흰 상자 안 한 줄 큰 제목 · 처음부터 끝까지 (BR-241)
             hk = B.title(" ".join(htxt.split()), 0.0, B.pos, editor.ep_title_style(" ".join(htxt.split())))
-        elif B.skin:  # 풋살사관학교 스킨: 흰 둥근 상자 안 한 줄 주황 큰 제목 · 처음부터 끝까지 · 80 밑으로 줄어야 하면 앞 구절·포인트 말·영상 주제로 (BR-321 · D-531)
+        elif B.skin:  # 풋살사관학교 스킨: 흰 둥근 상자 안 주황 큰 제목 · 처음부터 끝까지 · 한 줄로 80 밑으로 줄어야 하면 앞 구절·포인트 말·영상 주제로 (BR-321 · D-531) · 고른 글이 그래도 72 밑이면 두 줄 (D-540)
             raw = htxt if main else str(hook or htxt)
             htxt = editor.skin_headline(htxt, [point.get("phrase") if isinstance(point, dict) else None, vt])
             hk = B.title(htxt, 0.0, B.pos, editor.skin_title_style(htxt))

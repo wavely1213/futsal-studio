@@ -9,8 +9,8 @@
 미리보기 영상 칸이 찢어진 종이 홈까지 덮음 · 흰 상자 = 미리보기 글 폭 + 양옆 14 · 화면 좌우 얼굴 따라가기(rfk) 미리보기 = 서버 셈 · 다른 템플릿은 스킨을 지움 ·
 템플릿 '풋살사관학교 스킨'은 서버 값 ·
 시퀀스 탭 스킨 안내는 화면 구성(풀샷 자르기·박스·블러)에 맞는 칸만 말함 · 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 ·
-주제 줄 글을 길게 고쳐도 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539) ·
-'새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
+주제 줄 글을 길게 고쳐도 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539) · 큰 제목을 33글자로 고치면 흰 상자 두 줄(56 · 서버 셈 · 안 겹침 · 미리보기 = 내보내기 · D-540) ·
+MSG 쇼츠 하이텐션형(노래방) 스킨 쇼츠도 말 자막은 흰 글씨 (미리보기·내보내기 · D-541) · '새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
 import json
 import os
 import shutil
@@ -293,7 +293,7 @@ try:
         tid = ev("skinTop(S).id")
         ev(f"selectOverlay('title', '{tid}')")
         W(600)
-        LONG = "트래핑 꿀팁 세 가지 알려줄게요"
+        LONG = "트래핑 꿀팁 두 가지 정리"   # (한 줄 72 · 72 밑으로 줄어야 하는 글은 두 줄 — 4c-3)
         pg.locator("#pTitleText").fill(LONG)
         pg.locator("#pTitleText").dispatch_event("input")
         pg.locator("#pTitleText").blur()
@@ -339,14 +339,88 @@ try:
             pg.locator("#frame").screenshot(path=str(SHOTS / "e3c_topic_edit.png"))
             ev("undo()")
             W(800)
-        if qk:
-            ev(f"switchSeq('{q0['id']}')")
-            W(1000)
         want_k = editor.skin_topic_style(LONG_T, info["top"], e5["big"]) if e5 else None
         check("주제 줄 글을 길게 고치기 → 글자 크기·자리 = 서버 skin_topic_style(새 글) · 미리보기 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539)",
               e5 and e5["text"] == LONG_T and (e5["st"]["size"], e5["st"]["y"]) == (want_k["size"], want_k["y"]) and e5["el"]
               and e5["el"]["h"] < 1.6 * e5["st"]["size"] and e5["el"]["top"] >= (e5["box"]["y"] + e5["box"]["h"]) * 1920 - 2 and e5["el"]["bottom"] <= info["top"] * 1920 + 2,
               json.dumps({"seq": qk, "e5": e5}, ensure_ascii=False)[:400])
+
+        # ---- 4c-3. 큰 제목을 33글자로 고치면 흰 상자 두 줄 (소유자 2026-10-20 '흰 상자를 두 줄로' · I-537 · D-540 · 예전: 한 줄을 지키려고 28) ----
+        # (주제 줄이 있는 쇼츠에서 — 상자·큰 제목·주제 줄이 서로·영상 창과 안 겹치는지)
+        T33 = "패스하고 그 자리에 서 있으면 왜 안될까요? 끝까지 보세요!"
+        ev(f"switchSeq('{qk or q0['id']}')")
+        W(1000)
+        ev("seek(1.0)")
+        W(1200)
+        bid = ev("skinTop(S).id")
+        ev(f"selectOverlay('title', '{bid}')")
+        W(600)
+        pg.locator("#pTitleText").fill(T33)
+        pg.locator("#pTitleText").dispatch_event("input")
+        pg.locator("#pTitleText").blur()
+        W(1500)
+        e6 = ev(f"""(() => {{ const t = S.titles.find(x => x.id === '{bid}'), g = S.shapes.find(x => x.plan === 'card'), F = $('frame').getBoundingClientRect(), ky = 1920 / F.height, kx = 1080 / F.width;
+            const k = S.titles.find(x => x.plan === 'topic' && topicUnder(x, S.titles) === t);
+            const rc = el => {{ const r = el && el.getBoundingClientRect(); return r && {{ top: (r.top - F.top) * ky, bottom: (r.bottom - F.top) * ky, left: (r.left - F.left) * kx, right: (r.right - F.left) * kx }}; }};
+            const el = ovEls['t' + t.id];
+            return {{ text: t.text, st: t.style, box: {{ x: g.x, y: g.y, w: g.w, h: g.h }}, k: k && {{ text: k.text, st: k.style, el: rc(ovEls['t' + k.id]) }}, el: rc(el), shown: el && el.textContent }}; }})()""")
+        ev("selX = null; if (window.selI) selI.clear(); renderTimeline(); frameDirty = true")   # (고른 표시 테두리·손잡이 없이)
+        W(800)
+        pv6 = SHOTS / "e3d_long_title.png"
+        pg.locator("#frame").screenshot(path=str(pv6))
+        want6 = editor.skin_title_style(T33)
+        top6 = {"text": T33, "style": dict(want6)}
+        g6 = {}
+        editor.skin_box_fit(top6, g6)
+        kt6 = None
+        if e6["k"]:   # 서버 셈 (주제 줄은 고치기 전 모양 그대로 · 큰 제목 크기에 맞춤 = skinTopicStyle · 그다음 skin_stack)
+            kt6 = {"text": e6["k"]["text"], "plan": "topic", "style": editor.skin_topic_style(e6["k"]["text"], info["top"], want6["size"])}
+        editor.skin_stack(top6, g6, [kt6] if kt6 else [], info["top"], drop=False)
+        b6 = e6["box"]
+        by0, by1, wtop = b6["y"] * 1920, (b6["y"] + b6["h"]) * 1920, info["top"] * 1920
+        el6 = e6["el"] or {}
+        ok_k = True
+        if e6["k"]:
+            ke = e6["k"]["el"] or {}
+            ok_k = (e6["k"]["st"]["size"], e6["k"]["st"]["y"]) == (kt6["style"]["size"], kt6["style"]["y"]) and ke \
+                and ke["top"] >= by1 - editor.SKIN_TOPIC_TUCK * e6["k"]["st"]["size"] - 2 and ke["bottom"] <= wtop - 2
+        check("큰 제목을 33글자로 고치기 → 두 줄 56(예전 28 한 줄) = 서버 skin_title_style · 흰 상자 두 줄 높이(넓은 줄에 맞춤 · 서버 skin_stack) · 미리보기 큰 제목은 상자 안 두 줄 · "
+              "주제 줄은 상자 아래 · 모두 영상 창 위 (안 겹침)",
+              len(T33) == 33 and e6["text"] == T33 and e6["st"]["size"] == 56 and e6["st"].get("lines") == 2 and e6["st"]["size"] == want6["size"]
+              and e6["st"]["y"] == top6["style"]["y"] and (b6["x"], b6["w"], b6["y"], b6["h"]) == (g6["x"], g6["w"], g6["y"], g6["h"]) and b6["h"] > editor.SKIN_BOX["h"]
+              and el6 and el6["top"] >= by0 - 2 and el6["bottom"] <= by1 + 2 and el6["left"] >= b6["x"] * 1080 - 2 and el6["right"] <= (b6["x"] + b6["w"]) * 1080 + 2
+              and (el6["bottom"] - el6["top"]) > 1.8 * 1.25 * 56 and "\n" in (e6["shown"] or "") and by1 < wtop - 10 and ok_k,
+              json.dumps({"seq": qk, "st": {k: e6["st"].get(k) for k in ("size", "lines", "y")}, "box": b6, "want": g6, "el": el6, "k": e6["k"] and {"st": {k: e6["k"]["st"][k] for k in ("size", "y")}, "el": e6["k"]["el"]}},
+                         ensure_ascii=False)[:600])
+        # 미리보기 = 내보낸 장면 (큰 제목 주황 두 덩이가 같은 자리 · 흰 상자 안)
+        proj6 = ev("({...JSON.parse(JSON.stringify(S)), captions: P.captions, info: P.info, source: NAME, media: P.media})")
+        before = set(os.listdir(WORK / "out"))
+        api("/api/edit/export", {"name": N1, "project": proj6, "opts": {"preset": "youtube", "range": [0, 2], "video": True, "srt": False, "xml": False, "hw": False}})
+        wait_job(600)
+        mp4 = sorted([f for f in os.listdir(WORK / "out") if f.endswith(".mp4") and f not in before])
+        fr6 = SHOTS / "e3d_long_title_export.png"
+        subprocess.run([ff, "-v", "error", "-y", "-ss", "1.0", "-i", str(WORK / "out" / mp4[-1]), "-frames:v", "1", str(fr6)], check=True)
+        a6 = np.asarray(Image.open(fr6).convert("RGB")).astype(int)
+        p6 = np.asarray(Image.open(pv6).convert("RGB").resize((a6.shape[1], a6.shape[0]), Image.LANCZOS)).astype(int)
+
+        def bands(img):   # 흰 상자 줄(위아래 30화소 더) 안 주황 글자 덩이 (10줄 넘는 것 · 미리보기 흰 글자 가장자리의 색 번짐은 빼려고 한 줄에 9화소 넘게)
+            r0 = max(0, int(by0) - 30)
+            o = (np.abs(img[r0:int(by1) + 30] - (0xCE, 0x4F, 0x2F)).max(axis=2) < 60).sum(axis=1)
+            rows = np.where(o > 8)[0] + r0
+            if not len(rows):
+                return []
+            cut = np.where(np.diff(rows) > 6)[0]
+            return [[int(r[0]), int(r[-1])] for r in np.split(rows, cut + 1) if r[-1] - r[0] >= 10]
+        bx6, bp6 = bands(a6), bands(p6)
+        check("큰 제목 두 줄: 내보낸 장면도 주황 두 덩이 · 흰 상자 안 · 미리보기와 같은 자리(줄마다 ±12화소)",
+              len(bx6) == 2 and len(bp6) == 2 and bx6[0][0] >= by0 and bx6[1][1] <= by1 and all(abs(x[0] - y[0]) <= 12 and abs(x[1] - y[1]) <= 12 for x, y in zip(bx6, bp6)),
+              f"내보내기 {bx6} · 미리보기 {bp6} · 상자 {by0:.0f}~{by1:.0f}")
+        Image.fromarray(np.concatenate([p6[:560], a6[:560]], axis=1).astype(np.uint8)).save(SHOTS / "e3d_long_title_preview_vs_export.png")
+        ev("undo()")
+        W(800)
+        if qk:
+            ev(f"switchSeq('{q0['id']}')")
+            W(1000)
 
         # ---- 4d. '새 쇼츠 편집본으로 추가' (스킨 바탕) — KFA 글꼴을 찾는 중이어도 기다리지 않음 (검토: 은평 스타일 바탕만 기다림) ----
         pg.click('[data-lt="rec"]')
@@ -370,6 +444,47 @@ try:
         check("'새 쇼츠 편집본으로 추가'(스킨 바탕 · KFA 글꼴을 찾는 중): 기다리지 않고 바로 스킨 편집본 (화면 구성 = 서버 · 흰 상자 하나 · 말 자막 0.717)",
               base_skin and nq["n"] == n0 + 1 and dt < 5 and nq["lay"] == info["layout"] and nq["card"] == 1 and nq["cap"] == editor.skin_cap_y(info["bottom"])
               and nq["top"] and nq["top"]["fill"] == "#CE4F2F", f"{dt:.1f}초 · " + json.dumps({k: v for k, v in nq.items() if k != "top"}, ensure_ascii=False)[:300])
+
+        # ---- 4e. MSG '쇼츠 하이텐션형'(노래방) 스킨 쇼츠 — 말 자막은 흰 글씨 (소유자 2026-10-20 '스킨은 늘 흰 글씨' · I-530 · D-541) ----
+        r = api("/api/edit/msg", {"name": N1, "styles": [{"kind": "preset", "name": "쇼츠 하이텐션형"}], "intensity": "듬뿍", "kinds": ["shorts"]})
+        st7 = wait_job(1500)
+        if st7.get("resultBig"):
+            st7 = api("/api/state?since=999999&result=1")
+        res7 = st7.get("result") or {}
+        nm = 0
+        if r.get("ok") and res7.get("sequences"):
+            ev(f"msgAdd({json.dumps(res7, ensure_ascii=False)})")
+            W(1500)
+            nm = len(res7["sequences"])
+        e7 = ev("""(() => { const c = capsTL().find(c => c.trk === 'C1' && c.e - c.s > 0.6 && c.s > 3); return { cs: S.captionStyle, lay: S.layout, msg: !!S.msg, c: c && { s: c.s, e: c.e, text: c.text } }; })()""")
+        e7c = None
+        if e7.get("c"):
+            tc = (e7["c"]["s"] + e7["c"]["e"]) / 2
+            ev(f"seek({tc})")
+            W(2000)
+            e7c = ev("""(() => { const els = [...document.querySelectorAll('#ov .txt')].filter(el => el._pick && el._pick.k === 'caption');
+                return els.map(el => ({ color: getComputedStyle(el).color, spans: [...el.querySelectorAll('span')].map(s => getComputedStyle(s).color), text: el.textContent })); })()""")
+            pg.locator("#frame").screenshot(path=str(SHOTS / "e5_msg_karaoke_preview.png"))
+            proj7 = ev("({...JSON.parse(JSON.stringify(S)), captions: P.captions, info: P.info, source: NAME, media: P.media})")
+            before = set(os.listdir(WORK / "out"))
+            a0 = max(0.0, tc - 1.0)
+            api("/api/edit/export", {"name": N1, "project": proj7, "opts": {"preset": "youtube", "range": [a0, a0 + 2.0], "video": True, "srt": False, "xml": False, "hw": False}})
+            wait_job(900)
+            mp4 = sorted([f for f in os.listdir(WORK / "out") if f.endswith(".mp4") and f not in before])
+            fr7 = SHOTS / "e5_msg_karaoke_export.png"
+            subprocess.run([ff, "-v", "error", "-y", "-ss", str(tc - a0), "-i", str(WORK / "out" / mp4[-1]), "-frames:v", "1", str(fr7)], check=True)
+            a7 = np.asarray(Image.open(fr7).convert("RGB")).astype(int)
+            cy = editor.skin_cap_y(info["bottom"]) * a7.shape[0]
+            band = a7[int(cy - 1.4 * 96):int(cy) + 4, 30:1050]
+            white = int((band.min(axis=2) > 225).sum())
+            yellow = int(((band[..., 0] > 200) & (band[..., 1] > 170) & (band[..., 2] < 90)).sum())
+        else:
+            white = yellow = -1
+        check("MSG 쇼츠 하이텐션형(노래방) 스킨 쇼츠: 말 자막 모양은 흰 글씨 '바로'(노래방 아님) · 미리보기 말 자막 흰색(노란 낱말 없음) · 내보낸 말 자막 줄에 흰 글씨 있고 노란 글씨 없음",
+              nm >= 1 and e7["msg"] and "skin" in e7["lay"] and e7["cs"]["effect"] == "none" and e7["cs"]["fill"] == "#FFFFFF" and e7c
+              and all(x["color"] == "rgb(255, 255, 255)" and all(sc == "rgb(255, 255, 255)" for sc in x["spans"]) for x in e7c)
+              and white > 400 and yellow < 30,
+              json.dumps({"n": nm, "cs": {k: e7["cs"].get(k) for k in ("effect", "fill", "highlight")}, "c": e7.get("c"), "pv": e7c, "white": white, "yellow": yellow}, ensure_ascii=False)[:500])
 
         # ---- 5. 바꾼 스킨으로 템플릿 (편집실을 다시 열 때 설정을 읽음) ----
         import base64  # noqa: E402

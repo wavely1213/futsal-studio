@@ -1957,6 +1957,13 @@ SKIN_PAD = 14          # 흰 상자 안 글 양옆 여백 (화소 · 1080 기준
 SKIN_SIZES = (96, 88, 80, 72, 64, 56, 48)        # 큰 제목 글자 크기 (한 줄로 화면 폭 90% - 양옆 여백 안에 들어가는 가장 큰 것 · 48 에도 안 들어가면 더 작게 · D-531)
 SKIN_TITLE_FLOOR = 24  # 손으로 고친 아주 긴 큰 제목도 한 줄로 — 48 에도 안 들어가면 들어가는 크기까지 줄임 (이보다 작게는 안 줄이고 그 크기로 · D-531)
 SKIN_AUTO_MIN = 80     # 가편집·MSG 가 만드는 큰 제목은 한 줄로 이 크기 이상 (안 들어가면 앞 구절·포인트 말·영상 주제로 · skin_headline · D-531)
+# 긴 큰 제목은 흰 상자를 두 줄로 (소유자 2026-10-20 '흰 상자를 두 줄로' · I-537 · D-540 · editor.html SKIN.TWO_* 와 같은 값) — 한 줄 크기가 TWO_BELOW 밑이면
+# 띄어쓰기에서 두 줄(폭이 가장 고르게)로 나눠 TWO_SIZES 중 두 줄 모두 드는 가장 큰 크기 (56 에도 안 들면 들어가는 크기까지 · SKIN_TITLE_FLOOR 까지) ·
+# 흰 상자는 넓은 줄에 맞추고 두 줄 높이로 · 위 끝은 0.0922 그대로 두되 그 아래 주제 줄 글자 위에 안 들면 위로 늘림 (skin_stack)
+SKIN_TWO_BELOW = 72
+SKIN_TWO_SIZES = (96, 88, 80, 72, 64, 56)
+SKIN_BOX_TOP_MIN = 0.04   # 두 줄 흰 상자 위 끝이 올라갈 수 있는 끝 (화면 비율 · 77화소 · 위 띠 X·O 표시는 상자 양옆 밖)
+SKIN_TOPIC_TUCK = 0.15    # 주제 줄 글 상자 위 끝이 흰 상자 아래로 들어가도 되는 만큼 (주제 줄 글자 크기 비율 · 글자 위 빈 곳 · 내보낸 글자는 상자 아래 끝에서 약 0.04 × 크기 아래)
 SKIN_TOPIC_SIZES = (96, 88, 80, 72, 64, 56, 48)  # 주제 줄 글자 크기 (한 줄로 화면 폭 90% 안 가장 큰 것 · 큰 제목보다 크지 않게 · 소유자 쇼츠 약 97 · D-532)
 SKIN_BOX = {"y": 0.0922, "h": 0.0625}            # 흰 상자 위 끝·높이 (화면 비율 · 소유자 쇼츠에서 잰 177~297화소)
 SKIN_BOX_MAX = 0.74    # 흰 상자 가장 넓게 (화면 폭 비율 · 위 칠판 띠 양옆 점선 원호(x 107~129 · 967~990화소)를 덮지 않게 x 140~940 · 예전 0.9 · D-538)
@@ -2092,18 +2099,127 @@ def skin_on(seq):
     return (seq or {}).get("format") == "shorts" and bool(((seq or {}).get("layout") or {}).get("skin"))
 
 
-def skin_title_style(text):
-    """스킨 큰 제목 모양 — 한 줄로 (화면 폭 90% - 양옆 SKIN_PAD) 안에 들어가는 가장 큰 글자 (SKIN_SIZES · 48 에도 안 들어가면 들어가는 크기까지 줄임 ·
-    SKIN_TITLE_FLOOR 까지 · 줄을 바꾸지 않음 hug · D-531) · 흰 상자 세로 가운데 (y = 글 아래 끝) · Pretendard Black 폭 (은평 글꼴 고정은 쓰지 않음 ·
-    editor.html skinTitleStyle). 예전: 48 에서 멈춰 긴 글은 libass 가 두 줄로 바꿔 한 줄 높이 흰 상자 위아래로 넘침 (검토)."""
-    W, H = frame_size("shorts")
+def _skin_title_size(rows, sizes):
+    """큰 제목 글 줄(rows)이 모두 한 줄로 (화면 폭 74% - 양옆 SKIN_PAD) 안에 들어가는 가장 큰 크기 (sizes 차례 · 넉넉한 어림 _text_w) · 하나도 안 들면
+    들어가는 크기까지 줄임 (sizes 의 가장 작은 것 이하 · SKIN_TITLE_FLOOR 까지) — editor.html skinTitleSize 와 같은 셈."""
+    W, _ = frame_size("shorts")
     room = SKIN_BOX_MAX * W - 2 * SKIN_PAD
     with ep_font_scope(False):
-        size = next((z for z in SKIN_SIZES if _text_w(text, dict(SKIN_TITLE, size=z)) <= room), None)
+        size = next((z for z in sizes if max(_text_w(r, dict(SKIN_TITLE, size=z)) for r in rows) <= room), None)
         if size is None:
-            per = _text_w(text, dict(SKIN_TITLE, size=1, strokeW=0))
-            size = max(SKIN_TITLE_FLOOR, min(SKIN_SIZES[-1], math.floor(room / per))) if per > 0 else SKIN_SIZES[-1]
+            per = max(_text_w(r, dict(SKIN_TITLE, size=1, strokeW=0)) for r in rows)
+            size = max(SKIN_TITLE_FLOOR, min(sizes[-1], math.floor(room / per))) if per > 0 else sizes[-1]
+    return size
+
+
+def skin_title_one(text):
+    """스킨 큰 제목 한 줄 모양 — 한 줄로 (화면 폭 74% - 양옆 SKIN_PAD) 안에 들어가는 가장 큰 글자 (SKIN_SIZES · 48 에도 안 들어가면 들어가는 크기까지 줄임 ·
+    SKIN_TITLE_FLOOR 까지 · 줄을 바꾸지 않음 hug · D-531) · 흰 상자 세로 가운데 (y = 글 아래 끝) · Pretendard Black 폭 (은평 글꼴 고정은 쓰지 않음 ·
+    editor.html skinTitleOne). 예전: 48 에서 멈춰 긴 글은 libass 가 두 줄로 바꿔 한 줄 높이 흰 상자 위아래로 넘침 (검토). 72 밑이면 두 줄은 skin_title_style."""
+    _, H = frame_size("shorts")
+    size = _skin_title_size([text], SKIN_SIZES)
     return dict(SKIN_TITLE, size=size, y=round(SKIN_BOX["y"] + SKIN_BOX["h"] / 2 + TXT_LINE * size / 2 / H, 4))
+
+
+_SKIN_TAIL = re.compile(r"^[?!.,…~·)\]」』’”'\"]+$")   # 문장 부호만인 낱말 ('?' '!' …) — 앞 낱말에 붙여 줄 앞에 혼자 오지 않게
+_SKIN_BIND = re.compile(r"^[가-힣]$")   # 한 글자 낱말('세 가지'·'그 자리'·'한 번'·'서 있으면'·'왜 안될까요') — 뒤 낱말과 떼어 그 뒤에서 줄을 바꾸지 않음
+
+
+def skin_title_split(text):
+    """긴 큰 제목 → 두 줄 [윗줄, 아랫줄] (BR-321 · D-540) — 소유자가 줄바꿈 하나로 두 줄을 쳤으면 그대로 · 아니면 띄어쓰기에서만 나눔(낱말 안에서는 안 나눔 ·
+    '?'·'!' 처럼 문장 부호만인 낱말은 앞 낱말에 붙임 · 한 글자 낱말('세'·'그'·'한'·'서'·'왜') 바로 뒤에서는 안 나눔 — 그런 곳뿐이면 그래도 나눔) · 두 줄 폭(넉넉한 어림)이
+    가장 고른 곳(= 가운데에 가장 가까운 띄어쓰기 · 같으면 앞쪽) · 못 나누면(낱말 하나) None · editor.html skinTitleSplit 과 같은 셈.
+    예: '트래핑 꿀팁 세 가지 / 알려줄게요' · '패스하고 그 자리에 / 서 있으면 왜 안될까요?'."""
+    raw = str(text or "").replace("\r", "")
+    parts = [" ".join(p.split()) for p in raw.split("\n") if p.strip()]
+    if len(parts) == 2:
+        return parts
+    toks = []
+    for w in raw.split():
+        if toks and _SKIN_TAIL.match(w):
+            toks[-1] += " " + w
+        else:
+            toks.append(w)
+    if len(toks) < 2:
+        return None
+    unit = dict(SKIN_TITLE, size=1, strokeW=0)
+    best = None
+    cuts = [i for i in range(1, len(toks)) if not _SKIN_BIND.match(toks[i - 1])] or list(range(1, len(toks)))
+    with ep_font_scope(False):
+        for i in cuts:
+            a, b = " ".join(toks[:i]), " ".join(toks[i:])
+            d = abs(_text_w(a, unit) - _text_w(b, unit))
+            if best is None or d < best[0] - 1e-9:
+                best = (d, [a, b])
+    return best[1]
+
+
+def skin_title_rows(text, st):
+    """그려지는 큰 제목 줄 — 모양에 lines 2 (두 줄 큰 제목 · D-540)면 skin_title_split · 아니면 글 그대로 한 덩이 (스킨이 아닌 글자·한 줄 큰 제목은 예전 그대로)."""
+    if (st or {}).get("lines") == 2:
+        rows = skin_title_split(text)
+        if rows:
+            return rows
+    return [str(text or "")]
+
+
+def skin_title_text(text, st):
+    """내보내기·미리보기에 그리는 큰 제목 글 (두 줄 큰 제목은 나눈 곳에 줄바꿈 · editor.html skinTitleText)."""
+    return "\n".join(skin_title_rows(text, st))
+
+
+def _r4(x):
+    """넷째 자리 반올림 — editor.html Math.round(x * 1e4) / 1e4 와 같은 값 (파이썬 round 는 0.5 를 짝수 쪽·이진 값으로 반올림해 가끔 다름)."""
+    return math.floor(x * 10000 + 0.5) / 10000
+
+
+def skin_box_h(size, n=1):
+    """흰 상자 높이 (화면 비율) — 한 줄은 소유자 쇼츠 0.0625 그대로 · 두 줄은 글 상자 두 줄 높이(2 × 1.25 × 글자 크기 · 0.0625 보다 작게는 안 함 · D-540 ·
+    editor.html skinBoxH)."""
+    _, H = frame_size("shorts")
+    return SKIN_BOX["h"] if n < 2 else _r4(max(SKIN_BOX["h"], n * TXT_LINE * float(size) / H))
+
+
+def skin_title_y(box_y, box_h, size, n=1):
+    """큰 제목 글 아래 끝 y — 흰 상자 세로 가운데 (n 줄 글 상자 높이 n × 1.25 × 크기 · editor.html skinTitleY)."""
+    _, H = frame_size("shorts")
+    return _r4(float(box_y) + float(box_h) / 2 + n * TXT_LINE * float(size) / 2 / H)
+
+
+def skin_title_style(text):
+    """스킨 큰 제목 모양 (BR-321) — 한 줄로 SKIN_TWO_BELOW(72) 이상이면 한 줄(skin_title_one · 예전 그대로) · 아니면 두 줄(skin_title_split · 소유자 2026-10-20 ·
+    I-537 · D-540): SKIN_TWO_SIZES(96→56) 중 두 줄 모두 들어가는 가장 큰 크기 · 56 에도 안 들면 들어가는 크기까지(SKIN_TITLE_FLOOR 까지) · lines 2 ·
+    y 는 흰 상자 위 끝이 0.0922 일 때 두 줄 상자 가운데 (주제 줄 자리에 따라 skin_stack 이 상자를 위로 옮기며 다시 맞춤). 소유자가 줄바꿈으로 두 줄을 쳤으면
+    한 줄로 들어가도 두 줄 · 나눌 띄어쓰기가 없거나 두 줄이 한 줄보다 크지 않으면 한 줄 그대로 — editor.html skinTitleStyle 과 같은 셈.
+    예전: 늘 한 줄 — 33글자 제목은 28 까지 줄어 휴대폰에서 안 읽힘 (I-537)."""
+    one = skin_title_one(text)
+    forced = len([p for p in str(text or "").replace("\r", "").split("\n") if p.strip()]) >= 2
+    if one["size"] >= SKIN_TWO_BELOW and not forced:
+        return one
+    rows = skin_title_split(text)
+    if not rows:
+        return one
+    size = _skin_title_size(rows, SKIN_TWO_SIZES)
+    if size <= one["size"] and not forced:
+        return one
+    bh = skin_box_h(size, 2)
+    return dict(SKIN_TITLE, size=size, lines=2, y=skin_title_y(SKIN_BOX["y"], bh, size, 2))
+
+
+def skin_title_wrap(t):
+    """손댄 크기의 스킨 큰 제목 (편집실 크기 칸·글 · 내보내기 skin_text_guard) — 그 크기로 한 줄이 (화면 폭 74% - 양옆 SKIN_PAD) 안이면 한 줄,
+    아니면 두 줄로 나눌 수 있으면 두 줄 (크기는 그대로 · 흰 상자가 두 줄로 · D-540) — t["style"] 을 고침 · 두 줄인지 돌려줌 (editor.html skinTitleWrap)."""
+    W, _ = frame_size("shorts")
+    st = t["style"]
+    room = SKIN_BOX_MAX * W - 2 * SKIN_PAD
+    with ep_font_scope(False):
+        fits = _text_w(t["text"], st) <= room
+    two = (not fits or len([p for p in str(t["text"] or "").replace("\r", "").split("\n") if p.strip()]) >= 2) and bool(skin_title_split(t["text"]))
+    if two:
+        st["lines"] = 2
+    else:
+        st.pop("lines", None)
+    return two
 
 
 def _cut_words(text, lim):
@@ -2124,8 +2240,8 @@ def skin_headline(text, alts=()):
     if not t:
         return t
 
-    def ok(x):
-        return bool(x) and skin_title_style(x)["size"] >= SKIN_AUTO_MIN
+    def ok(x):   # (한 줄 크기로 · 두 줄은 고른 글이 그래도 안 들 때만 skin_title_style 이 · D-540)
+        return bool(x) and skin_title_one(x)["size"] >= SKIN_AUTO_MIN
     if ok(t):
         return t
     head = re.split(r"[,.?!…]", t)[0].strip()
@@ -2137,7 +2253,7 @@ def skin_headline(text, alts=()):
         c = _cut_words(t, lim)
         if ok(c) and len(_norm(c)) >= 4:
             return c
-    return max([t] + cands, key=lambda x: skin_title_style(x)["size"])
+    return max([t] + cands, key=lambda x: skin_title_one(x)["size"])
 
 
 def skin_hug_w(text, st):
@@ -2149,9 +2265,9 @@ def skin_hug_w(text, st):
 
 
 def skin_box_fit(t, g):
-    """흰 상자 폭을 큰 제목(t)에 맞춤 (가운데 · 양옆 SKIN_PAD · 가장 넓게 SKIN_BOX_MAX · 글 폭은 skin_hug_w · editor.html skinBoxFit)."""
+    """흰 상자 폭을 큰 제목(t)에 맞춤 (가운데 · 양옆 SKIN_PAD · 가장 넓게 SKIN_BOX_MAX · 글 폭은 skin_hug_w · 두 줄 큰 제목은 넓은 줄 · D-540 · editor.html skinBoxFit)."""
     W, _ = frame_size("shorts")
-    w = min(SKIN_BOX_MAX, (skin_hug_w(t["text"], t["style"]) + 2 * SKIN_PAD) / W)
+    w = min(SKIN_BOX_MAX, (max(skin_hug_w(r, t["style"]) for r in skin_title_rows(t["text"], t["style"])) + 2 * SKIN_PAD) / W)
     g["w"], g["x"] = round(w, 4), round(0.5 - w / 2, 4)
 
 
@@ -2160,6 +2276,8 @@ def skin_box(top, length):
     g = {"id": _nid(), "name": "제목 상자", "x": round(0.5 - SKIN_BOX_MAX / 2, 4), "y": SKIN_BOX["y"], "w": SKIN_BOX_MAX, "h": SKIN_BOX["h"], "color": "#FFFFFF",
          "opacity": 1.0, "radius": SKIN_RADIUS, "start": 0.0, "dur": round(float(length), 3), "full": True, "plan": "card"}
     skin_box_fit(top, g)
+    if (top["style"] or {}).get("lines") == 2:   # 두 줄 큰 제목: 두 줄 높이 (세로 자리는 주제 줄과 함께 skin_stack · D-540)
+        g["h"] = skin_box_h(top["style"]["size"], len(skin_title_rows(top["text"], top["style"])))
     return g
 
 
@@ -2233,12 +2351,127 @@ def skin_one_line(text, st, room=None):
     return z
 
 
+def skin_topic_auto(k, text, win_top):
+    """주제 줄 k 의 크기·자리가 글 text 의 skin_topic_style 그대로인지 (어떤 큰 제목 크기로든 · 손대지 않은 것 · editor.html skinTopicAuto)."""
+    st = k.get("style") or {}
+    for m in range(SKIN_TITLE_FLOOR, 97):
+        s = skin_topic_style(text, win_top, m)
+        if s["size"] == st.get("size") and s["y"] == st.get("y"):
+            return True
+    return False
+
+
+def skin_stack(top, g, kts=(), win_top=None, drop=True):
+    """흰 상자 높이·세로 자리와 두 줄 큰 제목 세로 자리 · 그 아래 주제 줄 (BR-321 · D-540 · editor.html skinStack 과 같은 셈) —
+    한 줄 큰 제목: 상자는 늘 0.0922·0.0625 (예전 그대로 · 큰 제목·주제 줄은 안 건드림).
+    두 줄 큰 제목: 상자 높이는 두 줄(skin_box_h) · 위 끝은 0.0922 그대로 두되 상자 아래 끝이 주제 줄(자리 그대로) 글 상자 위 끝 + SKIN_TOPIC_TUCK × 주제 줄 크기
+    (글자 바로 위 · 주제 줄이 없으면 영상 창 위 끝 - TXT_GAP) 위에 안 들면 위로 늘림(SKIN_BOX_TOP_MIN 까지) → 그래도 안 들면 손대지 않은 주제 줄(skin_topic_auto)을
+    한 단계씩 줄이고(SKIN_TOPIC_SIZES · 48 까지 · 자리는 그 크기의 skin_topic_style) → 그래도 안 들면 drop 이면 그 주제 줄을 뺌(뺀 것을 돌려줌 · 부른 쪽이 편집본에서
+    지우고 까닭을 기록) · drop 이 아니면(편집실에서 글을 치는 중) 상자를 SKIN_BOX_TOP_MIN 에 둠. 큰 제목은 상자 세로 가운데. kts: 큰 제목 아래 주제 줄들 (고침)."""
+    _, H = frame_size("shorts")
+    st = top["style"]
+    n = len(skin_title_rows(top["text"], st)) if st.get("lines") == 2 else 1
+    if n < 2:
+        g["y"], g["h"] = SKIN_BOX["y"], SKIN_BOX["h"]
+        return []
+    z = float(st.get("size") or 0)
+    bh = skin_box_h(z, n)
+    win_top = float(win_top)
+    keep, out = [k for k in kts if k], []
+
+    def lim(k):   # 이 주제 줄 위에서 상자 아래 끝이 갈 수 있는 끝 (글 상자 위 끝 + 글자 위 빈 곳)
+        return float(k["style"]["y"]) - (TXT_LINE - SKIN_TOPIC_TUCK) * float(k["style"]["size"]) / H
+    while True:
+        bottom = min([lim(k) for k in keep] + [win_top - TXT_GAP])
+        y = math.floor(min(SKIN_BOX["y"], bottom - bh) * 10000 + 1e-6) / 10000
+        if y >= SKIN_BOX_TOP_MIN - 1e-9 or not keep:
+            break
+        k = min(keep, key=lim)   # 상자에 가장 가까운 주제 줄부터
+        smaller = [s for s in SKIN_TOPIC_SIZES if s < float(k["style"]["size"])]
+        if smaller and skin_topic_auto(k, k["text"], win_top):
+            s = skin_topic_style(k["text"], win_top, smaller[0])
+            k["style"] = dict(k["style"], size=s["size"], y=s["y"])
+            continue
+        if not drop:
+            break
+        keep.remove(k)
+        out.append(k)
+    y = max(SKIN_BOX_TOP_MIN, y)
+    g["y"], g["h"] = y, bh
+    top["style"] = dict(st, y=skin_title_y(y, bh, z, n))
+    return out
+
+
+def skin_big(q):
+    """스킨 편집본의 큰 제목 (흰 상자가 있을 때 · editor.html skinTop 과 같은 고르기: 맨 앞에서 시작하는 가장 긴 타이틀 · 주제 줄·은평 이름표·강좌 줄 말고) · 아니면 None."""
+    if not skin_on(q) or not any(g.get("plan") == "card" for g in q.get("shapes") or []):
+        return None
+    c = [t for t in q.get("titles") or [] if t.get("plan") not in ("topic", "series", "longline") and float(t.get("start") or 0) < 0.05]
+    return max(c, key=lambda t: float(t.get("dur") or 0), default=None)
+
+
+def _skin_under(t, titles):
+    """주제 줄 t 가 맞춘 큰 제목 (editor.html topicUnder 와 같은 고르기 · under id → 그 시각을 덮는 가장 긴 타이틀)."""
+    k = next((x for x in titles if x.get("id") == t.get("under") and x.get("plan") != "topic"), None)
+    if k is not None:
+        return k
+    s, e = float(t.get("start") or 0), float(t.get("start") or 0) + float(t.get("dur") or 0)
+    c = [x for x in titles if x.get("plan") not in ("topic", "series", "longline") and float(x.get("start") or 0) <= (e if t.get("swap") else s) + 0.05
+         and float(x.get("start") or 0) + float(x.get("dur") or 0) >= e - 0.05]
+    return max(c, key=lambda x: float(x.get("dur") or 0), default=None)
+
+
+def skin_title_fix(q, win_top, drop=True):
+    """스킨 편집본의 큰 제목을 지금 규칙으로 (편집실이 열 때 editor.html skinGuard · 내보내기 skin_text_guard · D-540) — 두 줄이 아닌 큰 제목이
+    손대지 않은 예전 한 줄 모양(skin_title_one 그대로)이면 skin_title_style(72 밑이면 두 줄) · 손댄 크기면 그 크기로 한 줄에 안 들 때만 두 줄(skin_title_wrap) →
+    두 줄이 되면 흰 상자 폭·높이·자리와 주제 줄(skin_stack)도. q 를 고침 · 뺀 주제 줄 목록 | None(그대로)."""
+    big = skin_big(q)
+    if big is None or (big.get("style") or {}).get("lines") == 2 or not big.get("style"):
+        return None
+    st = big["style"]
+    a = skin_title_one(str(big.get("text") or ""))
+    t2 = dict(big, style=dict(st))
+    if st.get("size") == a["size"] and st.get("y") == a["y"]:   # 손대지 않은 한 줄 (예전 v2.26.0 셈 그대로 · 33글자면 28 · I-537)
+        b = skin_title_style(t2["text"])
+        if b.get("lines") != 2:
+            return None
+        t2["style"].update(size=b["size"], y=b["y"], lines=2)
+    elif not skin_title_wrap(t2):
+        return None
+    titles = q["titles"]
+    ks = [t for t in titles if t.get("plan") == "topic" and _skin_under(t, titles) is big]
+    g = next(g for g in q["shapes"] if g.get("plan") == "card")
+    skin_box_fit(t2, g)
+    gone = skin_stack(t2, g, ks, win_top, drop=drop)
+    big["style"] = t2["style"]
+    if gone:
+        q["titles"] = [t for t in titles if not any(t is k for k in gone)]
+    return gone
+
+
+def skin_gone_note(top, gone):
+    """두 줄 큰 제목 아래 자리가 없어 뺀 주제 줄 → studio.log 한 줄 (D-540 · 소유자: 그 쇼츠에서만 빼고 까닭을 남김)."""
+    for k in gone or ():
+        studiolog.write(f"스킨 쇼츠: 큰 제목 '{top.get('text')}'이 두 줄이라 그 아래에 둘째 줄 '{k.get('text')}'을 넣을 자리가 없어 이 쇼츠에서는 뺐어요 "
+                        f"(영상 창이 아주 위에 있는 스킨 · 둘째 줄을 {SKIN_TOPIC_SIZES[-1]}까지 줄여도 흰 상자와 겹침)")
+
+
 def skin_text_guard(proj):
     """내보내기·지금 화면 그림(ASS) 직전: 스킨 편집본의 주제 줄(plan topic)이 한 줄로 화면 폭 90% 에 안 들어가면 한 줄 크기로 (skin_one_line ·
-    편집실 skinRefit 이 고친 글에 맞추지만, 손댄 크기·다른 길로 고친 글도 두 줄로 바뀌어 흰 상자 위를 덮지 않게 · D-539) — 스킨이 아니면 그대로 (같은 바이트)."""
+    편집실 skinRefit 이 고친 글에 맞추지만, 손댄 크기·다른 길로 고친 글도 두 줄로 바뀌어 흰 상자 위를 덮지 않게 · D-539) · 큰 제목은 지금 규칙으로
+    (예전에 한 줄로 아주 작게 줄인 긴 큰 제목은 두 줄 · 흰 상자도 · skin_title_fix · 편집실도 열 때 같은 셈 · D-540) — 편집본은 그대로 · 스킨이 아니면 그대로 (같은 바이트)."""
     if not skin_on(proj):
         return proj
     out, hit = [], False
+    big = skin_big(proj)
+    win = skin_window((proj.get("layout") or {}).get("skin")) if big is not None else None
+    if win and (big.get("style") or {}).get("lines") != 2:
+        q = dict(proj, titles=[dict(t, style=dict(t["style"])) if isinstance(t.get("style"), dict) else dict(t) for t in proj.get("titles") or []],
+                 shapes=[dict(g) for g in proj.get("shapes") or []])
+        gone = skin_title_fix(q, win["top"])
+        if gone is not None:
+            skin_gone_note(skin_big(q) or {}, gone)
+            proj, hit = q, True
     for t in proj.get("titles") or []:
         st = t.get("style") or {}
         if t.get("plan") == "topic" and st.get("size"):
@@ -2255,18 +2488,22 @@ def skin_cap_y(bottom):
 
 
 def skin_caption(cs, bottom):
-    """스킨 말 자막: 소유자 쇼츠 모양(SKIN_CAP · 흰 Black 96 · 검은 테두리 10 · 상자 없음 · 실제 글자 폭으로 한 줄 셈 hug) · 나타나기는 배운 스타일 그대로 ·
+    """스킨 말 자막: 소유자 쇼츠 모양(SKIN_CAP · 흰 Black 96 · 검은 테두리 10 · 상자 없음 · 실제 글자 폭으로 한 줄 셈 hug) · 늘 흰 글씨 — 노래방(말한 낱말을
+    강조 색으로 칠함)은 '바로'(none)로 (소유자 2026-10-20 '스킨은 늘 흰 글씨' · I-530 · D-541) · 그 밖의 나타나기(튀어나오기 등)는 배운 스타일 그대로 ·
     아래 끝은 영상 창 아래 끝 바로 위 (배운 자막 자리와 상관없이 · editor.html skinCard 와 같은 값)."""
     c = dict(cs)
     c.update(SKIN_CAP, y=skin_cap_y(bottom))
+    if c.get("effect") == "karaoke":
+        c["effect"] = "none"
     return c
 
 
 def skin_card(top, kt, length, win, alts=(), vt="", point=None):
-    """가편집 쇼츠를 풋살사관학교 스킨으로: 위 큰 제목(top)은 한 줄·흰 상자 안·처음부터 끝까지 (80 밑으로 줄어야 하는 긴 글은 skin_headline 이
-    앞 구절·alts(포인트 말·영상 주제)로), 주제 줄(kt · 없어도 됨)은 그 아래 흰 줄 (큰 제목보다 크지 않게 · 큰 제목과 같은 글이면 뺌 · 바꿔 끼우기 없음 · 끝까지) ·
-    주제 줄 글은 흰 상자보다 넓지 않은 것(skin_topic_fit: 묻는 말 훅을 다른 글로 바꿨으면 그 뒤 물음 구절 → kt 글 → 영상 주제 vt·포인트 point 로 다시 셈한
-    topic_lines · D-539) · win: 영상 창 {top, bottom} → (더할 도형 [흰 상자], 주제 줄 — 뺐으면 None)."""
+    """가편집 쇼츠를 풋살사관학교 스킨으로: 위 큰 제목(top)은 흰 상자 안·처음부터 끝까지 (한 줄로 80 밑으로 줄어야 하는 긴 글은 skin_headline 이
+    앞 구절·alts(포인트 말·영상 주제)로 · 고른 글이 그래도 72 밑이면 두 줄 · D-540), 주제 줄(kt · 없어도 됨)은 그 아래 흰 줄 (큰 제목보다 크지 않게 · 큰 제목과
+    같은 글이면 뺌 · 바꿔 끼우기 없음 · 끝까지) · 주제 줄 글은 흰 상자보다 넓지 않은 것(skin_topic_fit: 묻는 말 훅을 다른 글로 바꿨으면 그 뒤 물음 구절 → kt 글 →
+    영상 주제 vt·포인트 point 로 다시 셈한 topic_lines · D-539) · 두 줄 큰 제목이면 흰 상자·주제 줄 자리는 skin_stack (자리가 없으면 주제 줄을 빼고 studio.log 에) ·
+    win: 영상 창 {top, bottom} → (더할 도형 [흰 상자], 주제 줄 — 뺐으면 None)."""
     hook = top.get("text")
     top["text"] = skin_headline(hook, alts)
     top["start"], top["dur"] = 0.0, round(float(length), 2)
@@ -2279,7 +2516,12 @@ def skin_card(top, kt, length, win, alts=(), vt="", point=None):
             kt = None
         else:
             kt.update(text=text, start=0.0, dur=round(float(length), 2), style=st, under=top.get("id"))
-    return [skin_box(top, length)], kt
+    box = skin_box(top, length)
+    gone = skin_stack(top, box, [kt] if kt else [], win["top"])   # 두 줄 큰 제목: 흰 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면 줄이고 그래도 안 되면 뺌 (D-540)
+    if gone:
+        skin_gone_note(top, gone)
+        kt = None
+    return [box], kt
 
 
 def skin_bands(lay, W, H):
@@ -6409,7 +6651,8 @@ def _build_ass(proj, W, H, fps, frame_grid):
         else:
             for t in proj["titles"]:
                 if track_of(t, "T", ids) == tid and t["start"] < tl_total:
-                    event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), t["text"], layer=layer)
+                    tx = skin_title_text(t["text"], t["style"]) if t["style"].get("hug") == "skin" and t["style"].get("lines") == 2 else t["text"]   # 두 줄 스킨 큰 제목 (D-540)
+                    event(f"T{t['id']}", t["style"], t["start"], min(tl_total, t["start"] + t["dur"]), tx, layer=layer)
     return "\n".join(lines) + "\n"
 
 
