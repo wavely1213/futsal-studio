@@ -10,6 +10,7 @@
 템플릿 '풋살사관학교 스킨'은 서버 값 ·
 시퀀스 탭 스킨 안내는 화면 구성(풀샷 자르기·박스·블러)에 맞는 칸만 말함 · 큰 제목 글을 고치면 글자 크기·흰 상자가 따라옴 ·
 주제 줄 글을 길게 고쳐도 한 줄 · 흰 상자 아래 · 영상 창 위 (D-539) · 큰 제목을 33글자로 고치면 흰 상자 두 줄(56 · 서버 셈 · 안 겹침 · 미리보기 = 내보내기 · D-540) ·
+예전(v2.26.0) 한 줄 28 큰 제목 편집본을 열면 두 줄 53 · 둘째 줄도 48 · 바로 저장 · 다시 열면 알림 없음 (D-540 검토) ·
 MSG 쇼츠 하이텐션형(노래방) 스킨 쇼츠도 말 자막은 흰 글씨 (미리보기·내보내기 · D-541) · '새 쇼츠 편집본으로 추가'는 스킨 바탕이면 KFA 글꼴 찾기를 안 기다림 · 바꾼 스킨으로 템플릿 · JS 오류 0."""
 import json
 import os
@@ -375,7 +376,7 @@ try:
         kt6 = None
         if e6["k"]:   # 서버 셈 (주제 줄은 고치기 전 모양 그대로 · 큰 제목 크기에 맞춤 = skinTopicStyle · 그다음 skin_stack)
             kt6 = {"text": e6["k"]["text"], "plan": "topic", "style": editor.skin_topic_style(e6["k"]["text"], info["top"], want6["size"])}
-        editor.skin_stack(top6, g6, [kt6] if kt6 else [], info["top"], drop=False)
+        editor.skin_stack(top6, g6, [kt6] if kt6 else [], info["top"], drop=False, cover=info["coverTop"])
         b6 = e6["box"]
         by0, by1, wtop = b6["y"] * 1920, (b6["y"] + b6["h"]) * 1920, info["top"] * 1920
         el6 = e6["el"] or {}
@@ -485,6 +486,57 @@ try:
               and all(x["color"] == "rgb(255, 255, 255)" and all(sc == "rgb(255, 255, 255)" for sc in x["spans"]) for x in e7c)
               and white > 400 and yellow < 30,
               json.dumps({"n": nm, "cs": {k: e7["cs"].get(k) for k in ("effect", "fill", "highlight")}, "c": e7.get("c"), "pv": e7c, "white": white, "yellow": yellow}, ensure_ascii=False)[:500])
+
+        # ---- 4f. 예전(v2.26.0) 긴 큰 제목 편집본(한 줄 28 · 둘째 줄도 28)을 열면 두 줄 · 둘째 줄도 새 크기 · 바로 저장 · 되돌리기 · 다시 열면 알림 없음 ----
+        # (검토: 열 때마다 알림 · 프로젝트 파일은 28 그대로 · 둘째 줄은 28 그대로 남아 큰 두 줄 밑에 아주 작은 줄)
+        LONG_O = "패스하고 그 자리에 서 있으면 왜 안될까요 끝까지 보면 알게 돼요"
+        sid = qk or q0["id"]
+        PJ = WORK / "projects" / (N1[:-4] + ".json")
+        ev(f"""(() => {{ const q = P.sequences.find(x => x.id === '{sid}'), b = skinTop(q); b.text = {json.dumps(LONG_O, ensure_ascii=False)}; b.style = skinTitleOne(b.text);
+            const g = q.shapes.find(x => x.plan === 'card'); g.y = SKIN.BOX.y; g.h = SKIN.BOX.h; skinBoxFit(b, g);
+            for (const k of skinTopics(q, b)) {{ const s = skinTopicStyle(k.text, SKX.top, b.style.size); k.style.size = s.size; k.style.y = s.y; }}
+            P.active = '{sid}'; }})()""")
+        ev("saveNow()")
+        W(800)
+
+        def disk_seq():
+            return next(x for x in json.loads(PJ.read_text(encoding="utf-8"))["sequences"] if x["id"] == sid)
+        old_q = disk_seq()
+        want_q = json.loads(json.dumps(old_q))
+        want_gone = editor.skin_title_fix(want_q, info["top"], cover=info["coverTop"])
+
+        def reopen():
+            pg.goto(f"http://127.0.0.1:{PORT}/editor?name={urllib.request.quote(N1)}")
+            pg.wait_for_function("document.getElementById('saved') && document.getElementById('saved').textContent.includes('자동 저장')", timeout=300000)
+            seen = []
+            for _ in range(16):
+                t_ = ev("$('toast').classList.contains('show') ? $('toast').textContent : ''")
+                if t_ and t_ not in seen:
+                    seen.append(t_)
+                W(250)
+            W(1500)
+            return seen
+        seen1 = reopen()
+        e8 = ev(f"""(() => {{ const q = P.sequences.find(x => x.id === '{sid}'); return {{ titles: q.titles, shapes: q.shapes, hist: hist.length ? hist[hist.length - 1].label : null, dirty }}; }})()""")
+        d8 = disk_seq()
+        ob = editor.skin_big(old_q)
+        ok_old = ob["style"]["size"] == 28 and all(t_["style"]["size"] == 28 for t_ in old_q["titles"] if t_.get("plan") == "topic")
+        nb, nk = editor.skin_big(want_q), [t_ for t_ in want_q["titles"] if t_.get("plan") == "topic"]
+        ev("seek(1.0)")
+        W(1500)
+        pg.locator("#frame").screenshot(path=str(SHOTS / "e6_open_old_long_title.png"))
+        check("예전(v2.26.0) 한 줄 28 큰 제목 편집본을 열면: 두 줄 53 · 둘째 줄도 새 크기(48 · 28 아님) = 서버 skin_title_fix · 알림 · 되돌리기 기록 · 프로젝트 파일에 바로 저장",
+              ok_old and want_gone == [] and (nb["style"]["size"], nb["style"].get("lines")) == (53, 2) and nk and all(k["style"]["size"] == 48 for k in nk)
+              and (e8["titles"], e8["shapes"]) == (want_q["titles"], want_q["shapes"]) and any("긴 큰 제목을 흰 상자 두 줄로 바꿨어요" in x for x in seen1)
+              and e8["hist"] == "긴 큰 제목 두 줄로" and (d8["titles"], d8["shapes"]) == (want_q["titles"], want_q["shapes"]),
+              json.dumps({"toasts": seen1, "hist": e8["hist"], "old": [ob["style"]["size"]] + [t_["style"]["size"] for t_ in old_q["titles"] if t_.get("plan") == "topic"],
+                          "new": [nb["style"]["size"], nb["style"].get("lines")] + [k["style"]["size"] for k in nk],
+                          "disk": [editor.skin_big(d8)["style"]["size"], editor.skin_big(d8)["style"].get("lines")]}, ensure_ascii=False)[:500])
+        seen2 = reopen()
+        d9 = disk_seq()
+        check("다시 열면 '두 줄로 바꿨어요' 알림 없음 · 프로젝트 파일 그대로",
+              not any("두 줄로 바꿨어요" in x for x in seen2) and (d9["titles"], d9["shapes"]) == (d8["titles"], d8["shapes"]) and ev("hist.length") == 0,
+              json.dumps({"toasts": seen2}, ensure_ascii=False))
 
         # ---- 5. 바꾼 스킨으로 템플릿 (편집실을 다시 열 때 설정을 읽음) ----
         import base64  # noqa: E402

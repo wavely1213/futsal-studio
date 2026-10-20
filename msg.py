@@ -4071,7 +4071,7 @@ def _compile_once(name, info, sig, segs, moms, st, intensity, fmt, seed, label, 
         box = None
         if B.skin:  # 풋살사관학교 스킨: 큰 제목 밑 흰 둥근 상자 (폭은 큰 제목에 맞춤) · 두 줄 큰 제목이면 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면
             box = editor.skin_box(hk, B.pos)   # 주제 줄을 줄이고 그래도 안 되면 이 쇼츠에서만 빼고 studio.log 에 까닭 (D-540)
-            gone = editor.skin_stack(hk, box, [kt] if kt else [], B.skin["top"])
+            gone = editor.skin_stack(hk, box, [kt] if kt else [], B.skin["top"], cover=B.skin.get("coverTop"))
             if gone:
                 editor.skin_gone_note(hk, gone)
                 B.titles.remove(kt)

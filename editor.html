@@ -4921,8 +4921,10 @@ function skinTitleOne(text) {  // 한 줄로 (화면 폭 74% - 양옆 PAD) 안�
   return { ...SKIN.TITLE, size, y: Math.round((SKIN.BOX.y + SKIN.BOX.h / 2 + TOPIC.LINE * size / 2 / 1920) * 1e4) / 1e4 };
 }
 // 긴 큰 제목 → 두 줄 [윗줄, 아랫줄] (editor.py skin_title_split 과 같은 셈 · D-540): 소유자가 줄바꿈 하나로 두 줄을 쳤으면 그대로 · 아니면 띄어쓰기에서만
-// ('?'·'!' 처럼 문장 부호만인 낱말은 앞 낱말에 붙임 · 한 글자 낱말 '세'·'그'·'서' 뒤에서는 안 나눔 — 그런 곳뿐이면 그래도) · 두 줄 폭이 가장 고른 곳 (같으면 앞쪽) · 못 나누면 null
-const SKIN_TAIL = /^[?!.,…~·)\]」』’”'"]+$/, SKIN_BIND = /^[가-힣]$/;
+// ('?'·'!' 처럼 문장 부호만인 낱말은 앞 낱말에 붙임 · 한 글자 낱말 '세'·'그'·'서' 뒤 · 숫자와 세는 말('3 가지') 사이 · 기대는 한 글자 말('법'·'수'·'것'·'때') 앞에서는
+// 안 나눔(skinCutOk = editor.py _skin_cut_ok) — 그런 곳뿐이면 그래도) · 두 줄 폭이 가장 고른 곳 (같으면 앞쪽) · 못 나누면 null
+const SKIN_TAIL = /^[?!.,…~·)\]」』’”'"]+$/, SKIN_BIND = /^[가-힣]$/, SKIN_NUM = /^[0-9]+$/, SKIN_DEP = /^(법|수|것|거|게|건|걸|번|개|때|줄|데|뿐|듯|채|척|분|명|살|등|점|리|뻔|셈)[?!.,…~·)\]」』’”'"]*( |$)/;
+const skinCutOk = (a, b) => !((SKIN_BIND.test(a) && !SKIN_DEP.test(a)) || (SKIN_NUM.test(a) && /^[가-힣]/.test(b)) || SKIN_DEP.test(b));  // (기대는 말 '법'·'수' 뒤는 됨)
 function skinTitleSplit(text) {
   const raw = String(text ?? "").replace(/\r/g, ""), one = x => x.split(/\s+/).filter(Boolean).join(" ");
   const parts = raw.split("\n").filter(p => p.trim()).map(one);
@@ -4931,7 +4933,7 @@ function skinTitleSplit(text) {
   for (const w of raw.split(/\s+/).filter(Boolean)) { if (toks.length && SKIN_TAIL.test(w)) toks[toks.length - 1] += " " + w; else toks.push(w); }
   if (toks.length < 2) return null;
   const unit = { ...SKIN.TITLE, size: 1, strokeW: 0 };
-  let cuts = []; for (let i = 1; i < toks.length; i++) if (!SKIN_BIND.test(toks[i - 1])) cuts.push(i);
+  let cuts = []; for (let i = 1; i < toks.length; i++) if (skinCutOk(toks[i - 1], toks[i])) cuts.push(i);
   if (!cuts.length) cuts = toks.slice(1).map((_, i) => i + 1);
   let best = null;
   for (const i of cuts) { const a = toks.slice(0, i).join(" "), b = toks.slice(i).join(" "), d = Math.abs(textW(a, unit, null) - textW(b, unit, null)); if (!best || d < best[0] - 1e-9) best = [d, [a, b]]; }
@@ -4953,12 +4955,18 @@ function skinTitleStyle(text) {
   if (size <= one.size && !forced) return one;
   return { ...SKIN.TITLE, size, lines: 2, y: skinTitleY(SKIN.BOX.y, skinBoxH(size, 2), size, 2) };
 }
-// 손댄 크기의 큰 제목: 그 크기로 한 줄이 안 들면 두 줄 (크기는 그대로 · editor.py skin_title_wrap) → 두 줄인지
+// 손댄 크기의 큰 제목: 그 크기로 한 줄이 안 들면 두 줄 (크기는 그대로 · 그 크기로 두 줄도 안 들면 두 줄이 드는 크기까지 줄임 · editor.py skin_title_wrap) → 두 줄인지
 function skinTitleWrap(t) {
-  const fits = textW(t.text, t.style, null) <= SKIN.BOX_MAX * 1080 - 2 * SKIN.PAD;
-  const two = (!fits || skinNLines(t.text) >= 2) && !!skinTitleSplit(t.text);
-  if (two) t.style.lines = 2; else delete t.style.lines;
-  return two;
+  const room = SKIN.BOX_MAX * 1080 - 2 * SKIN.PAD, fits = textW(t.text, t.style, null) <= room;
+  const rows = !fits || skinNLines(t.text) >= 2 ? skinTitleSplit(t.text) : null;
+  if (!rows) { delete t.style.lines; return false; }
+  t.style.lines = 2;
+  const z = +t.style.size || 0;
+  if (Math.max(...rows.map(r => textW(r, t.style, null))) > room) {
+    let zs = SKIN.TWO_SIZES.filter(s => s < z); if (!zs.length) zs = [Math.max(SKIN.FLOOR, Math.floor(z))];
+    const nz = skinTitleSize(rows, zs); if (nz < z) t.style.size = nz;
+  }
+  return true;
 }
 // 큰 제목(t)이 글 text 의 skinTitleStyle 그대로인지 (크기·줄 수 · 세로 자리는 그 모양 그대로이거나 지금 흰 상자 g 의 가운데 · 손대지 않은 것)
 function skinTitleAuto(t, text, g) {
@@ -4969,21 +4977,26 @@ function skinBoxFit(t, g) {  // 흰 상자 폭을 큰 제목에 맞춤 (가운�
   const w = Math.min(SKIN.BOX_MAX, (Math.max(...skinTitleRows(t.text, t.style).map(r => textW(r, t.style, SKIN_HUG))) + 2 * SKIN.PAD) / 1080);
   g.w = Math.round(w * 1e4) / 1e4; g.x = Math.round((0.5 - w / 2) * 1e4) / 1e4;
 }
-// 흰 상자 높이·세로 자리 · 두 줄 큰 제목 세로 자리 · 그 아래 주제 줄 (editor.py skin_stack 과 같은 셈 · BR-321 · D-540) — 한 줄이면 상자는 늘 0.0922·0.0625 ·
-// 두 줄이면 상자를 두 줄 높이로 · 위 끝은 0.0922 그대로 두되 주제 줄 글자 위에 안 들면 위로(BOX_TOP_MIN 까지) → 손대지 않은 주제 줄을 한 단계씩 줄임(48 까지) →
-// 그래도 안 들면 drop 이면 뺌(뺀 주제 줄 목록 · 부른 쪽이 지움) · 아니면 상자를 BOX_TOP_MIN 에 · 큰 제목은 상자 세로 가운데
-function skinStack(t, g, ks, top, drop) {
+// 흰 상자 높이·세로 자리 · 두 줄 큰 제목 세로 자리 · 그 아래 주제 줄 (editor.py skin_stack 과 같은 셈 · BR-321 · D-540) — 한 줄이면 아무것도 안 건드림(소유자가 옮긴 상자도 ·
+// 두 줄 → 한 줄은 skinRefit 이 상자를 0.0922·0.0625 로) · 두 줄이면 상자를 두 줄 높이로 · 위 끝은 0.0922 그대로 두되 주제 줄 글자 위 · 영상 창 위 끝 - GAP ·
+// 찢어진 종이 위 끝(cover = SKX.coverTop) - GAP 위에 안 들면 위로(BOX_TOP_MIN 까지) → 주제 줄을 한 단계씩 줄임(48 까지 · 손대지 않은 줄은 자리도 그 크기의 skinTopicStyle ·
+// 손댄 줄은 자리 그대로 크기만) → 그래도 안 들면 drop 이면 뺌(뺀 주제 줄 목록 · 부른 쪽이 지움) · 아니면 상자를 BOX_TOP_MIN 에 · 큰 제목은 상자 세로 가운데
+function skinStack(t, g, ks, top, drop, cover) {
   const st = t.style, n = st.lines === 2 ? skinTitleRows(t.text, st).length : 1;
-  if (n < 2) { g.y = SKIN.BOX.y; g.h = SKIN.BOX.h; return []; }
+  if (n < 2) return [];
   const z = +st.size || 0, bh = skinBoxH(z, n), keep = (ks || []).filter(Boolean), out = [];
   const lim = k => +k.style.y - (TOPIC.LINE - SKIN.TOPIC_TUCK) * +k.style.size / 1920;  // 이 주제 줄 위에서 상자 아래 끝이 갈 수 있는 끝
+  const floor = (cover == null ? +top : Math.min(+top, +cover)) - TOPIC.GAP;
   let y;
   for (;;) {
-    const bottom = Math.min(...keep.map(lim), +top - TOPIC.GAP);
+    const bottom = Math.min(...keep.map(lim), floor);
     y = Math.floor(Math.min(SKIN.BOX.y, bottom - bh) * 1e4 + 1e-6) / 1e4;
     if (y >= SKIN.BOX_TOP_MIN - 1e-9 || !keep.length) break;
     const k = keep.reduce((a, b) => lim(b) < lim(a) ? b : a), smaller = SKIN.TOPIC_SIZES.filter(s => s < +k.style.size);
-    if (smaller.length && skinTopicAuto(k, k.text, top)) { const s = skinTopicStyle(k.text, top, smaller[0]); k.style.size = s.size; k.style.y = s.y; continue; }
+    if (smaller.length) {
+      if (skinTopicAuto(k, k.text, top)) { const s = skinTopicStyle(k.text, top, smaller[0]); k.style.size = s.size; k.style.y = s.y; } else k.style.size = smaller[0];
+      continue;
+    }
     if (!drop) break;
     keep.splice(keep.indexOf(k), 1); out.push(k);
   }
@@ -4993,16 +5006,18 @@ function skinStack(t, g, ks, top, drop) {
 }
 const skinTopics = (q, t) => q.titles.filter(x => x.plan === "topic" && topicUnder(x, q.titles) === t);  // 큰 제목 t 아래 주제 줄들
 // 스킨 편집본의 큰 제목을 지금 규칙으로 (편집실을 열 때 · editor.py skin_title_fix = 내보내기 skin_text_guard 와 같은 셈 · D-540): 두 줄이 아닌 큰 제목이
-// 손대지 않은 예전 한 줄 모양이면 skinTitleStyle(72 밑이면 두 줄) · 손댄 크기면 그 크기로 한 줄에 안 들 때만 두 줄 → 흰 상자·주제 줄도 · 뺀 주제 줄 목록 | null
-function skinGuard(q, top) {
+// 손대지 않은 예전 한 줄 모양이면 skinTitleStyle(72 밑이면 두 줄) · 손댄 크기면 그 크기로 한 줄에 안 들 때만 두 줄 → 손대지 않은 주제 줄은 새 큰 제목 크기에 맞춤
+// (skinRefit 과 같음 · 예전 28 한 줄 큰 제목 밑 28 주제 줄도) · 흰 상자·주제 줄 자리(skinStack · cover: 찢어진 종이 위 끝)도 · 뺀 주제 줄 목록 | null
+function skinGuard(q, top, cover) {
   const big = skinTop(q);
   if (!big || !big.style || big.style.lines === 2 || top == null) return null;
   const a = skinTitleOne(big.text), st = big.style, t2 = { ...big, style: { ...st } };
   if (+st.size === a.size && +st.y === a.y) { const b = skinTitleStyle(t2.text); if (b.lines !== 2) return null; Object.assign(t2.style, { size: b.size, y: b.y, lines: 2 }); }
   else if (!skinTitleWrap(t2)) return null;
-  const ks = skinTopics(q, big), g = q.shapes.find(x => x.plan === "card");
+  const ks = skinTopics(q, big).filter(k => k.style), g = q.shapes.find(x => x.plan === "card");
+  for (const k of ks) if (skinTopicAuto(k, k.text, top)) { const s = skinTopicStyle(k.text, top, +t2.style.size); k.style.size = s.size; k.style.y = s.y; }
   skinBoxFit(t2, g);
-  const gone = skinStack(t2, g, ks, top, true);
+  const gone = skinStack(t2, g, ks, top, true, cover);
   big.style = t2.style;
   if (gone.length) q.titles = q.titles.filter(x => !gone.includes(x));
   return gone;
@@ -5048,7 +5063,7 @@ function skinCard(q, L) {
   if (g) Object.assign(g, bx); else (q.shapes = q.shapes || []).push(g = { id: nid(), name: "제목 상자", ...bx, plan: "card" });
   skinBoxFit(top, g);
   // 두 줄 큰 제목: 흰 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면 줄이고 그래도 안 되면 뺌 (editor.py skin_card·skin_stack · D-540)
-  const gone = skinStack(top, g, topics, k.top, true);
+  const gone = skinStack(top, g, topics, k.top, true, k.coverTop);
   if (gone.length) { q.titles = q.titles.filter(x => !gone.includes(x)); toast(`제목이 두 줄이라 그 아래 둘째 줄('${gone[0].text}')을 넣을 자리가 없어 뺐어요`); }
   return true;
 }
@@ -5057,14 +5072,14 @@ const skinTop = q => skinOn(q) && (q.shapes || []).some(g => g.plan === "card") 
 // 스킨 큰 제목(t)의 글·크기를 고치면 흰 상자 폭을 다시 글에 맞춤 (BR-321 · D-527) — 글을 고칠 때(old = 고치기 전 글) 글자 크기·세로 자리를 손대지 않았으면
 // (= 고치기 전 글의 skinTitleStyle 그대로) 새 글에 맞는 크기·자리로 · 손댄 크기는 그대로 두고 상자만 맞춤
 function skinRefit(q, t, old) {
-  const big = skinTop(q), top = SKX && SKX.top, box = (q.shapes || []).find(g => g.plan === "card");
+  const big = skinTop(q), top = SKX && SKX.top, cover = SKX && SKX.coverTop, box = (q.shapes || []).find(g => g.plan === "card");
   // 큰 제목 아래 주제 줄 글·크기를 고침 (D-539 · 예전: 큰 제목만 맞춰 긴 주제 줄이 두 줄로 바뀌어 위로 늘며 흰 상자·큰 제목을 덮음 · 검토 robust r2) —
   // 손대지 않은 것(고치기 전 글의 skinTopicStyle 그대로)은 새 글의 skinTopicStyle(큰 제목보다 크지 않게) · 손댄 크기는 한 줄에 들 만큼만 줄임 ·
   // 두 줄 큰 제목이면 흰 상자 자리·이 주제 줄 크기도 다시 (skinStack · 글을 치는 중이라 주제 줄은 빼지 않음 · D-540)
   if (t && big && t !== big && t.plan === "topic" && topicUnder(t, q.titles) === big) {
     if (old != null && top != null && skinTopicAuto(t, old, top)) { const s = skinTopicStyle(t.text, top, +big.style.size); t.style.size = s.size; t.style.y = s.y; }
     else t.style.size = skinOneLine(t.text, t.style);
-    if (top != null) skinStack(big, box, skinTopics(q, big), top, false);
+    if (top != null) skinStack(big, box, skinTopics(q, big), top, false, cover);
     return true;
   }
   if (!t || t !== big) return false;
@@ -5073,13 +5088,15 @@ function skinRefit(q, t, old) {
   const was2 = t.style.lines === 2;
   if (old != null && skinTitleAuto(t, old, box)) { const b = skinTitleStyle(t.text); t.style.size = b.size; t.style.y = b.y; if (b.lines === 2) t.style.lines = 2; else delete t.style.lines; }
   else if (!skinTitleWrap(t) && was2) t.style.y = skinTitleY(SKIN.BOX.y, SKIN.BOX.h, +t.style.size, 1);  // (두 줄 → 한 줄: 한 줄 상자 가운데로)
+  // 두 줄 → 한 줄이면 흰 상자도 한 줄 자리·높이로 (한 줄 그대로면 상자 자리는 안 건드림 — 소유자가 옮긴 상자도 · v2.26.0 그대로 · 검토)
+  if (was2 && t.style.lines !== 2 && box) { box.y = SKIN.BOX.y; box.h = SKIN.BOX.h; }
   skinBoxFit(t, box);
   // 그 아래 주제 줄도 새 큰 제목 크기에 맞춤 — 손대지 않은 것(어떤 큰 제목 크기의 skinTopicStyle 그대로)만 · 주제 줄이 큰 제목보다 커지지 않게
   // (예전: 큰 제목만 48 로 줄고 주제 줄은 96 그대로 · 검토 robust r1 · D-531 · D-538) · 두 줄이면 흰 상자 높이·자리와 함께 (skinStack)
   if (top != null) {
     const ks = skinTopics(q, t);
     for (const k of ks) if (skinTopicAuto(k, k.text, top)) { const s = skinTopicStyle(k.text, top, +t.style.size); k.style.size = s.size; k.style.y = s.y; }
-    skinStack(t, box, ks, top, false);
+    skinStack(t, box, ks, top, false, cover);
   }
   return true;
 }
@@ -8387,12 +8404,27 @@ $("cfForce").onclick = async () => { $("cfModal").classList.remove("show"); conf
   const j = await r.json();
   if (!r.ok) { $("saved").textContent = j.error || "열지 못했어요"; return; }
   P = j.project; P.sequences.forEach(ensureSeq); signFresh();
+  // 예전(v2.26.0)에 한 줄로 아주 작게 줄인 스킨 큰 제목은 두 줄로 — 내보내기 skin_text_guard 와 같은 셈이라 미리보기 = 내보내기 (D-540 · I-537) ·
+  // 고친 것은 바로 저장(다시 열 때 또 알리지 않게 · MSG 후보·키트도 고친 제목) · Ctrl+Z 로 되돌림 · 지문(signFresh)이 맞던 '(새로 찾음)' 편집본(방금 지문을 남긴 것 포함)은
+  // 고친 내용으로 다시 지문 (고친 것으로 보지 않게 · 예전: 열 때마다 알림 · 저장 안 됨 · 지문과 어긋남 · 검토 D-543)
+  const gfx = { n: 0, gone: [], before: null }, skx0 = (j.epx && j.epx.skin) || null;
+  if (skx0) {
+    const before = JSON.stringify(P);
+    for (const q of P.sequences) {
+      if (!skinOn(q)) continue;
+      const same = !!q.fsig && q.fsig === seqSig(q), r = skinGuard(q, skx0.top, skx0.coverTop);
+      if (r) { gfx.n++; gfx.gone.push(...r.map(k => k.text)); if (same) q.fsig = seqSig(q); }
+    }
+    if (gfx.n) gfx.before = before;
+  }
   const wantSeq = new URLSearchParams(location.search).get("seq");  // 스튜디오 '끝까지 자동으로' 결과에서 그 편집본으로 바로 열기
   if (wantSeq && P.sequences.some(q => q.id === wantSeq)) P.active = wantSeq;
   bindS(); EVENTS = j.events || []; REC = j.recommend; REV = P.rev || 0; EPX = j.epx || null; EPF = (EPX && EPX.font) || null; epFontLoad(); epFontReady(); SKX = (EPX && EPX.skin) || null;
-  // 예전(v2.26.0)에 한 줄로 아주 작게 줄인 스킨 큰 제목은 두 줄로 — 내보내기 skin_text_guard 와 같은 셈이라 미리보기 = 내보내기 (D-540 · I-537)
-  if (SKX) { let gone = 0, fixed = 0; for (const q of P.sequences) { const r = skinOn(q) ? skinGuard(q, SKX.top) : null; if (r) { fixed++; gone += r.length; } }
-    if (fixed) setTimeout(() => toast(gone ? "긴 큰 제목을 두 줄로 바꿨어요 · 둘째 줄을 넣을 자리가 없어 뺀 쇼츠가 있어요" : "긴 큰 제목을 흰 상자 두 줄로 바꿨어요"), 900); }
+  if (gfx.n) {
+    pushHist("긴 큰 제목 두 줄로", gfx.before); scheduleSave();
+    setTimeout(() => toast(gfx.gone.length ? `긴 큰 제목을 흰 상자 두 줄로 바꿨어요 · 그 아래 둘째 줄('${gfx.gone[0]}')은 넣을 자리가 없어 뺐어요 (되돌리기 Ctrl+Z)`
+      : "긴 큰 제목을 흰 상자 두 줄로 바꿨어요"), 900);
+  }
   if (j.recovered) setTimeout(() => toast(`프로젝트 파일이 손상돼서 ${j.recovered}(으)로 열었어요`), 800);
   for (const m of P.media) MED[m.id] = m;
   WAVES.main = j.waveform; THUMBS.main = j.thumbs;

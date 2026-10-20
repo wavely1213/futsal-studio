@@ -2091,7 +2091,8 @@ def skin_info(info=None):
     if not lay:
         return None
     win = skin_window(lay["skin"])
-    return {"ref": lay["skin"], "top": win["top"], "bottom": win["bottom"], "layout": lay}   # (창은 반올림하지 않음 · 가편집 셈과 같은 값)
+    # (창은 반올림하지 않음 · 가편집 셈과 같은 값 · coverTop: 찢어진 종이 위 끝 — 두 줄 흰 상자가 종이를 덮지 않게 skinStack · D-540)
+    return {"ref": lay["skin"], "top": win["top"], "bottom": win["bottom"], "coverTop": win["coverTop"], "layout": lay}
 
 
 def skin_on(seq):
@@ -2123,13 +2124,23 @@ def skin_title_one(text):
 
 _SKIN_TAIL = re.compile(r"^[?!.,…~·)\]」』’”'\"]+$")   # 문장 부호만인 낱말 ('?' '!' …) — 앞 낱말에 붙여 줄 앞에 혼자 오지 않게
 _SKIN_BIND = re.compile(r"^[가-힣]$")   # 한 글자 낱말('세 가지'·'그 자리'·'한 번'·'서 있으면'·'왜 안될까요') — 뒤 낱말과 떼어 그 뒤에서 줄을 바꾸지 않음
+_SKIN_NUM = re.compile(r"^[0-9]+$")    # 숫자만인 낱말('3 가지'·'5 번') — 뒤 한글 낱말(세는 말)과 떼어 그 사이에서 줄을 바꾸지 않음 (검토: '올리는 3 / 가지 방법')
+# 앞 낱말에 기대는 한 글자 말('잘하는 법'·'할 수'·'아는 것'·'볼 때'·'주의할 점'·'중요한 건' · 문장 부호가 붙어도) — 그 앞에서 줄을 바꾸지 않음 (검토: '드리블 잘하는 / 법 (초보자용)')
+_SKIN_DEP = re.compile(r"^(법|수|것|거|게|건|걸|번|개|때|줄|데|뿐|듯|채|척|분|명|살|등|점|리|뻔|셈)[?!.,…~·)\]」』’”'\"]*( |$)")
+
+
+def _skin_cut_ok(a, b):
+    """큰 제목 낱말 a 와 b 사이에서 줄을 바꿔도 되는지 (skin_title_split · editor.html skinCutOk 와 같은 셈) — 한 글자 낱말 뒤(기대는 말 '법'·'수' 뒤는 됨 ·
+    '잘하는 법 / (초보자용)') · 숫자만인 낱말과 그 뒤 한글 낱말 사이 · 앞 낱말에 기대는 한 글자 말 앞에서는 안 바꿈."""
+    return not ((_SKIN_BIND.match(a) and not _SKIN_DEP.match(a)) or (_SKIN_NUM.match(a) and re.match(r"[가-힣]", b)) or _SKIN_DEP.match(b))
 
 
 def skin_title_split(text):
     """긴 큰 제목 → 두 줄 [윗줄, 아랫줄] (BR-321 · D-540) — 소유자가 줄바꿈 하나로 두 줄을 쳤으면 그대로 · 아니면 띄어쓰기에서만 나눔(낱말 안에서는 안 나눔 ·
-    '?'·'!' 처럼 문장 부호만인 낱말은 앞 낱말에 붙임 · 한 글자 낱말('세'·'그'·'한'·'서'·'왜') 바로 뒤에서는 안 나눔 — 그런 곳뿐이면 그래도 나눔) · 두 줄 폭(넉넉한 어림)이
-    가장 고른 곳(= 가운데에 가장 가까운 띄어쓰기 · 같으면 앞쪽) · 못 나누면(낱말 하나) None · editor.html skinTitleSplit 과 같은 셈.
-    예: '트래핑 꿀팁 세 가지 / 알려줄게요' · '패스하고 그 자리에 / 서 있으면 왜 안될까요?'."""
+    '?'·'!' 처럼 문장 부호만인 낱말은 앞 낱말에 붙임 · 한 글자 낱말('세'·'그'·'한'·'서'·'왜') 바로 뒤 · 숫자와 세는 말('3 가지') 사이 · 기대는 한 글자 말('법'·'수'·'것'·'때')
+    앞에서는 안 나눔(_skin_cut_ok) — 그런 곳뿐이면 그래도 나눔) · 두 줄 폭(넉넉한 어림)이 가장 고른 곳(= 가운데에 가장 가까운 띄어쓰기 · 같으면 앞쪽) ·
+    못 나누면(낱말 하나) None · editor.html skinTitleSplit 과 같은 셈.
+    예: '트래핑 꿀팁 / 세 가지 알려줄게요' · '패스하고 그 자리에 / 서 있으면 왜 안될까요?' · '슈팅 정확도 올리는 / 3 가지 방법 알려드림 2026'."""
     raw = str(text or "").replace("\r", "")
     parts = [" ".join(p.split()) for p in raw.split("\n") if p.strip()]
     if len(parts) == 2:
@@ -2144,7 +2155,7 @@ def skin_title_split(text):
         return None
     unit = dict(SKIN_TITLE, size=1, strokeW=0)
     best = None
-    cuts = [i for i in range(1, len(toks)) if not _SKIN_BIND.match(toks[i - 1])] or list(range(1, len(toks)))
+    cuts = [i for i in range(1, len(toks)) if _skin_cut_ok(toks[i - 1], toks[i])] or list(range(1, len(toks)))
     with ep_font_scope(False):
         for i in cuts:
             a, b = " ".join(toks[:i]), " ".join(toks[i:])
@@ -2208,18 +2219,27 @@ def skin_title_style(text):
 
 def skin_title_wrap(t):
     """손댄 크기의 스킨 큰 제목 (편집실 크기 칸·글 · 내보내기 skin_text_guard) — 그 크기로 한 줄이 (화면 폭 74% - 양옆 SKIN_PAD) 안이면 한 줄,
-    아니면 두 줄로 나눌 수 있으면 두 줄 (크기는 그대로 · 흰 상자가 두 줄로 · D-540) — t["style"] 을 고침 · 두 줄인지 돌려줌 (editor.html skinTitleWrap)."""
+    아니면 두 줄로 나눌 수 있으면 두 줄 (크기는 그대로 · 흰 상자가 두 줄로 · D-540) — 그 크기로는 두 줄도 안 들면 두 줄이 드는 크기까지 줄임
+    (SKIN_TWO_SIZES 중 손댄 크기보다 작은 것 · 그 밑은 들어가는 크기까지 · 예전: 96 그대로 두 줄이 흰 상자 양옆 밖으로 넘침 · 검토) —
+    t["style"] 을 고침 · 두 줄인지 돌려줌 (editor.html skinTitleWrap)."""
     W, _ = frame_size("shorts")
     st = t["style"]
     room = SKIN_BOX_MAX * W - 2 * SKIN_PAD
     with ep_font_scope(False):
         fits = _text_w(t["text"], st) <= room
-    two = (not fits or len([p for p in str(t["text"] or "").replace("\r", "").split("\n") if p.strip()]) >= 2) and bool(skin_title_split(t["text"]))
-    if two:
-        st["lines"] = 2
-    else:
+    rows = skin_title_split(t["text"]) if not fits or len([p for p in str(t["text"] or "").replace("\r", "").split("\n") if p.strip()]) >= 2 else None
+    if not rows:
         st.pop("lines", None)
-    return two
+        return False
+    st["lines"] = 2
+    z = float(st.get("size") or 0)
+    with ep_font_scope(False):
+        over = max(_text_w(r, st) for r in rows) > room
+    if over:
+        nz = _skin_title_size(rows, [s for s in SKIN_TWO_SIZES if s < z] or [max(SKIN_TITLE_FLOOR, math.floor(z))])
+        if nz < z:
+            st["size"] = nz
+    return True
 
 
 def _cut_words(text, lim):
@@ -2293,7 +2313,7 @@ def skin_topic_style(text, top, most=None):
         size = skin_one_line(text, dict(SKIN_TOPIC, size=sizes[-1]))
     y = SKIN_TOPIC_CY + TXT_LINE * size / 2 / H
     lim = math.floor((float(top) - SKIN_TOPIC_GAP) * 10000 + 1e-6) / 10000
-    return dict(SKIN_TOPIC, size=size, y=round(min(y, lim), 4))
+    return dict(SKIN_TOPIC, size=size, y=_r4(min(y, lim)))   # (_r4: editor.html Math.round 과 같은 값 · 예전 round 는 96 에서 0.2102 vs 0.2103 · 검토)
 
 
 SKIN_TOPIC_BOX = 1.15   # 주제 줄 한 줄 실제 글자 폭(SKIN_HUG)은 흰 상자 폭의 이만큼까지 (소유자 표지 '강원FC U12' 642화소 · 흰 상자 650 = 0.99 · D-539)
@@ -2319,7 +2339,8 @@ def skin_topic_fit(cands, top, win_top):
     소유자 표지는 두 번째 줄('강원FC U12')이 흰 상자보다 넓지 않아 흰 상자 주황 큰 제목이 가장 큼 → 후보(차례대로 · 큰 제목과 같은 글은 뺌) 중 한 줄 실제 글자 폭이
     흰 상자 폭 × SKIN_TOPIC_BOX 안에 SKIN_TOPIC_MIN 이상(큰 제목 크기 이하)으로 드는 첫 글과 그 크기 · 없으면 첫 글을 예전 셈(화면 폭 90%)으로 → (글, 모양) | (None, None)."""
     W, _ = frame_size("shorts")
-    box = min(SKIN_BOX_MAX * W, skin_hug_w(top["text"], top["style"]) + 2 * SKIN_PAD)
+    # (두 줄 큰 제목이면 흰 상자는 넓은 줄 폭 · skin_box_fit 과 같게 · 예전: 나누기 전 한 줄 폭이라 상자보다 1.28배 넓은 주제 줄도 골랐음 · 검토)
+    box = min(SKIN_BOX_MAX * W, max(skin_hug_w(r, top["style"]) for r in skin_title_rows(top["text"], top["style"])) + 2 * SKIN_PAD)
     most = float(top["style"].get("size") or SKIN_TOPIC_SIZES[0])
     cs, seen = [], {_norm(top["text"])}
     for c in cands:
@@ -2361,36 +2382,41 @@ def skin_topic_auto(k, text, win_top):
     return False
 
 
-def skin_stack(top, g, kts=(), win_top=None, drop=True):
+def skin_stack(top, g, kts=(), win_top=None, drop=True, cover=None):
     """흰 상자 높이·세로 자리와 두 줄 큰 제목 세로 자리 · 그 아래 주제 줄 (BR-321 · D-540 · editor.html skinStack 과 같은 셈) —
-    한 줄 큰 제목: 상자는 늘 0.0922·0.0625 (예전 그대로 · 큰 제목·주제 줄은 안 건드림).
+    한 줄 큰 제목: 아무것도 안 건드림 (상자 자리·크기는 그대로 · 소유자가 옮긴 상자도 · 예전 그대로 · 두 줄 → 한 줄은 편집실 skinRefit 이 상자를 0.0922·0.0625 로).
     두 줄 큰 제목: 상자 높이는 두 줄(skin_box_h) · 위 끝은 0.0922 그대로 두되 상자 아래 끝이 주제 줄(자리 그대로) 글 상자 위 끝 + SKIN_TOPIC_TUCK × 주제 줄 크기
-    (글자 바로 위 · 주제 줄이 없으면 영상 창 위 끝 - TXT_GAP) 위에 안 들면 위로 늘림(SKIN_BOX_TOP_MIN 까지) → 그래도 안 들면 손대지 않은 주제 줄(skin_topic_auto)을
-    한 단계씩 줄이고(SKIN_TOPIC_SIZES · 48 까지 · 자리는 그 크기의 skin_topic_style) → 그래도 안 들면 drop 이면 그 주제 줄을 뺌(뺀 것을 돌려줌 · 부른 쪽이 편집본에서
-    지우고 까닭을 기록) · drop 이 아니면(편집실에서 글을 치는 중) 상자를 SKIN_BOX_TOP_MIN 에 둠. 큰 제목은 상자 세로 가운데. kts: 큰 제목 아래 주제 줄들 (고침)."""
+    (글자 바로 위) · 영상 창 위 끝 - TXT_GAP · 찢어진 종이 위 끝(cover · 스킨 coverTop) - TXT_GAP 위에 안 들면 위로 늘림(SKIN_BOX_TOP_MIN 까지 · 예전: 주제 줄이 없으면
+    상자 아래 끝이 종이 봉우리를 덮음 · 검토) → 그래도 안 들면 주제 줄을 한 단계씩 줄이고(SKIN_TOPIC_SIZES · 48 까지 · 손대지 않은 줄(skin_topic_auto)은 자리도 그 크기의
+    skin_topic_style · 손댄 줄은 자리(글 아래 끝) 그대로 크기만 · 예전: 손댄 줄은 줄이지 않고 바로 뺌 · 검토) → 그래도 안 들면 drop 이면 그 주제 줄을 뺌(뺀 것을 돌려줌 ·
+    부른 쪽이 편집본에서 지우고 까닭을 기록) · drop 이 아니면(편집실에서 글을 치는 중) 상자를 SKIN_BOX_TOP_MIN 에 둠. 큰 제목은 상자 세로 가운데.
+    kts: 큰 제목 아래 주제 줄들 (고침)."""
     _, H = frame_size("shorts")
     st = top["style"]
     n = len(skin_title_rows(top["text"], st)) if st.get("lines") == 2 else 1
     if n < 2:
-        g["y"], g["h"] = SKIN_BOX["y"], SKIN_BOX["h"]
         return []
     z = float(st.get("size") or 0)
     bh = skin_box_h(z, n)
     win_top = float(win_top)
+    floor_ = (win_top if cover is None else min(win_top, float(cover))) - TXT_GAP
     keep, out = [k for k in kts if k], []
 
     def lim(k):   # 이 주제 줄 위에서 상자 아래 끝이 갈 수 있는 끝 (글 상자 위 끝 + 글자 위 빈 곳)
         return float(k["style"]["y"]) - (TXT_LINE - SKIN_TOPIC_TUCK) * float(k["style"]["size"]) / H
     while True:
-        bottom = min([lim(k) for k in keep] + [win_top - TXT_GAP])
+        bottom = min([lim(k) for k in keep] + [floor_])
         y = math.floor(min(SKIN_BOX["y"], bottom - bh) * 10000 + 1e-6) / 10000
         if y >= SKIN_BOX_TOP_MIN - 1e-9 or not keep:
             break
         k = min(keep, key=lim)   # 상자에 가장 가까운 주제 줄부터
         smaller = [s for s in SKIN_TOPIC_SIZES if s < float(k["style"]["size"])]
-        if smaller and skin_topic_auto(k, k["text"], win_top):
-            s = skin_topic_style(k["text"], win_top, smaller[0])
-            k["style"] = dict(k["style"], size=s["size"], y=s["y"])
+        if smaller:
+            if skin_topic_auto(k, k.get("text") or "", win_top):
+                s = skin_topic_style(k.get("text") or "", win_top, smaller[0])
+                k["style"] = dict(k["style"], size=s["size"], y=s["y"])
+            else:
+                k["style"] = dict(k["style"], size=smaller[0])
             continue
         if not drop:
             break
@@ -2421,10 +2447,11 @@ def _skin_under(t, titles):
     return max(c, key=lambda x: float(x.get("dur") or 0), default=None)
 
 
-def skin_title_fix(q, win_top, drop=True):
+def skin_title_fix(q, win_top, drop=True, cover=None):
     """스킨 편집본의 큰 제목을 지금 규칙으로 (편집실이 열 때 editor.html skinGuard · 내보내기 skin_text_guard · D-540) — 두 줄이 아닌 큰 제목이
     손대지 않은 예전 한 줄 모양(skin_title_one 그대로)이면 skin_title_style(72 밑이면 두 줄) · 손댄 크기면 그 크기로 한 줄에 안 들 때만 두 줄(skin_title_wrap) →
-    두 줄이 되면 흰 상자 폭·높이·자리와 주제 줄(skin_stack)도. q 를 고침 · 뺀 주제 줄 목록 | None(그대로)."""
+    두 줄이 되면 손대지 않은 주제 줄(skin_topic_auto)은 새 큰 제목 크기의 skin_topic_style 로(편집실 skinRefit 과 같음 · 예전: 28 한 줄 큰 제목 밑 28 주제 줄이
+    그대로 남음 · 검토) · 흰 상자 폭·높이·자리와 주제 줄(skin_stack · cover: 찢어진 종이 위 끝)도. q 를 고침 · 뺀 주제 줄 목록 | None(그대로)."""
     big = skin_big(q)
     if big is None or (big.get("style") or {}).get("lines") == 2 or not big.get("style"):
         return None
@@ -2439,10 +2466,14 @@ def skin_title_fix(q, win_top, drop=True):
     elif not skin_title_wrap(t2):
         return None
     titles = q["titles"]
-    ks = [t for t in titles if t.get("plan") == "topic" and _skin_under(t, titles) is big]
+    ks = [t for t in titles if t.get("plan") == "topic" and _skin_under(t, titles) is big and isinstance(t.get("style"), dict)]
+    for k in ks:
+        if skin_topic_auto(k, str(k.get("text") or ""), win_top):
+            s = skin_topic_style(str(k.get("text") or ""), win_top, t2["style"]["size"])
+            k["style"] = dict(k["style"], size=s["size"], y=s["y"])
     g = next(g for g in q["shapes"] if g.get("plan") == "card")
     skin_box_fit(t2, g)
-    gone = skin_stack(t2, g, ks, win_top, drop=drop)
+    gone = skin_stack(t2, g, ks, win_top, drop=drop, cover=cover)
     big["style"] = t2["style"]
     if gone:
         q["titles"] = [t for t in titles if not any(t is k for k in gone)]
@@ -2468,7 +2499,7 @@ def skin_text_guard(proj):
     if win and (big.get("style") or {}).get("lines") != 2:
         q = dict(proj, titles=[dict(t, style=dict(t["style"])) if isinstance(t.get("style"), dict) else dict(t) for t in proj.get("titles") or []],
                  shapes=[dict(g) for g in proj.get("shapes") or []])
-        gone = skin_title_fix(q, win["top"])
+        gone = skin_title_fix(q, win["top"], cover=win.get("coverTop"))
         if gone is not None:
             skin_gone_note(skin_big(q) or {}, gone)
             proj, hit = q, True
@@ -2517,7 +2548,7 @@ def skin_card(top, kt, length, win, alts=(), vt="", point=None):
         else:
             kt.update(text=text, start=0.0, dur=round(float(length), 2), style=st, under=top.get("id"))
     box = skin_box(top, length)
-    gone = skin_stack(top, box, [kt] if kt else [], win["top"])   # 두 줄 큰 제목: 흰 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면 줄이고 그래도 안 되면 뺌 (D-540)
+    gone = skin_stack(top, box, [kt] if kt else [], win["top"], cover=win.get("coverTop"))   # 두 줄 큰 제목: 흰 상자를 두 줄 높이로 · 주제 줄 자리가 모자라면 줄이고 그래도 안 되면 뺌 (D-540)
     if gone:
         skin_gone_note(top, gone)
         kt = None

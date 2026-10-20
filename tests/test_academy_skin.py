@@ -717,7 +717,7 @@ class RoughTest(WorkMixin, unittest.TestCase):
         """주제 줄: 한 줄로 90% 안 가장 큰 글자 · 창 위 끝이 높은 스킨이면 위로 · 말 자막: 창 아래 끝 - 0.04 (배운 자리와 상관없이)."""
         self.assertEqual(editor.skin_topic_style("강원FC U12", 417 / 1920)["size"], 96)                # 소유자 쇼츠 약 97 (D-532 · 예전 88)
         self.assertEqual(editor.skin_topic_style("강원FC U12", 417 / 1920)["y"], 0.2091)       # 0.179 + 반 줄이면 창 틈에 닿아 위로 (글자 301~386화소 = 소유자)
-        self.assertEqual(editor.skin_topic_style("강원FC U12", 0.3)["y"], round(0.179 + 1.25 * 96 / 2 / 1920, 4))
+        self.assertEqual(editor.skin_topic_style("강원FC U12", 0.3)["y"], 0.2103)   # 0.21025 → editor.html Math.round 과 같은 값 (예전 파이썬 round 0.2102 · 검토 · _r4)
         self.assertEqual(editor.skin_topic_style("강원FC U12", 417 / 1920, 72)["size"], 72)            # 큰 제목(72)보다 크지 않게 (D-531)
         long = editor.skin_topic_style("퍼스트 터치 레슨 · 포인트 3 · 디딤발 방향 정하기", 0.3)
         self.assertLess(long["size"], 88)
@@ -1798,7 +1798,15 @@ class TwoLineTitleTest(unittest.TestCase):
         self.assertIsNone(S_("가나다라마바사아자차카타파하"))                                                      # 낱말 하나는 안 나눔 (낱말 안에서 안 나눔)
         self.assertIsNone(S_(""))
         self.assertEqual(S_("왜 안 될까?"), ["왜 안", "될까?"])                                                  # 한 글자 낱말 뒤뿐이면 그래도 나눔
-        for t in ("트래핑 꿀팁 세 가지 알려줄게요", self.LONG, "퍼스트 터치 레슨 두 번째 포인트 디딤발 방향과 각도"):
+        # 숫자와 세는 말은 떼지 않음 · 앞 낱말에 기대는 한 글자 말('법'·'점'·'때') 앞에서는 안 나눔 (그 뒤는 됨) — 검토: '올리는 3 / 가지' · '잘하는 / 법'
+        self.assertEqual(S_("슈팅 정확도 올리는 3 가지 방법 알려드림 2026"), ["슈팅 정확도 올리는 3 가지", "방법 알려드림 2026"])
+        self.assertEqual(S_("드리블 잘하는 법 (초보자용) 꼭 보세요!!"), ["드리블 잘하는 법", "(초보자용) 꼭 보세요!!"])
+        self.assertEqual(S_("찰 때 주의할 점 세 가지만 기억하세요"), ["찰 때 주의할 점", "세 가지만 기억하세요"])
+        self.assertEqual(S_("하루 10 분 투자로 달라지는 볼터치 연습법"), ["하루 10 분 투자로", "달라지는 볼터치 연습법"])
+        self.assertEqual(S_("3 가지"), ["3", "가지"])                                                           # 그런 곳뿐이면 그래도 나눔
+        self.assertTrue(editor._skin_cut_ok("2026", "꼭") is False and editor._skin_cut_ok("U12", "첫") and editor._skin_cut_ok("법?", "(초보자용)"))
+        for t in ("트래핑 꿀팁 세 가지 알려줄게요", self.LONG, "퍼스트 터치 레슨 두 번째 포인트 디딤발 방향과 각도", "드리블 잘하는 법 (초보자용) 꼭 보세요!!",
+                  "슈팅 정확도 올리는 3 가지 방법 알려드림 2026"):
             a, b = S_(t)
             self.assertEqual(f"{a} {b}", " ".join(t.split()))                                                   # 글은 그대로 (띄어쓰기 하나에서만 나눔)
             # 두 줄 폭이 가장 고른 곳 (가운데에 가장 가까운 띄어쓰기) — 다른 곳(한 글자 낱말 뒤 빼고)은 더 고르지 않음
@@ -1807,7 +1815,7 @@ class TwoLineTitleTest(unittest.TestCase):
                 d = abs(editor._text_w(a, unit) - editor._text_w(b, unit))
                 ws = t.split()
                 for i in range(1, len(ws)):
-                    if len(ws[i - 1]) > 1:
+                    if editor._skin_cut_ok(ws[i - 1], ws[i]):
                         self.assertGreaterEqual(abs(editor._text_w(" ".join(ws[:i]), unit) - editor._text_w(" ".join(ws[i:]), unit)) + 1e-9, d, (t, i))
 
     def test_style_threshold(self):
@@ -1835,7 +1843,7 @@ class TwoLineTitleTest(unittest.TestCase):
 
     def test_box_and_stack(self):
         win = editor.skin_window("academy.png")
-        wt = win["top"]
+        wt, cv = win["top"], win["coverTop"]
         for t in ("트래핑 꿀팁 세 가지 알려줄게요", "패스하고 그 자리에 서 있으면 왜 안될까요?", self.LONG, "디딤발\n꿀팁"):
             st = editor.skin_title_style(t)
             z = st["size"]
@@ -1850,16 +1858,16 @@ class TwoLineTitleTest(unittest.TestCase):
                 kt = None if zt is None else {"id": "k", "text": "강원FC U12", "plan": "topic",
                                               "style": editor.skin_topic_style("강원FC U12", wt, min(zt, z))}
                 k0 = kt and dict(kt["style"])
-                self.assertEqual(editor.skin_stack(tt, gg, [kt] if kt else [], wt), [], (t, zt))
+                self.assertEqual(editor.skin_stack(tt, gg, [kt] if kt else [], wt, cover=cv), [], (t, zt))
                 y0, y1 = gg["y"], gg["y"] + gg["h"]
                 self.assertGreaterEqual(y0, editor.SKIN_BOX_TOP_MIN - 1e-9, (t, zt))
                 self.assertLessEqual(y0, editor.SKIN_BOX["y"], (t, zt))                                          # 위 끝은 0.0922 그대로이거나 위로
                 self.assertEqual(tt["style"]["y"], editor.skin_title_y(y0, gg["h"], z, 2))                       # 큰 제목은 상자 세로 가운데
                 tb = editor.text_box(editor.skin_title_text(t, tt["style"]), tt["style"], W, H)
                 self.assertAlmostEqual((tb[1] + tb[3]) / 2, y0 + gg["h"] / 2, places=3)
-                if kt is None:
-                    self.assertLessEqual(y1, wt - editor.TXT_GAP + 1e-4, t)                                     # 상자 + 주제 줄은 영상 창 위 끝 - 틈 위
-                    self.assertEqual(y0, min(editor.SKIN_BOX["y"], math.floor((wt - editor.TXT_GAP - gg["h"]) * 1e4 + 1e-6) / 1e4))
+                if kt is None:   # 주제 줄이 없으면 찢어진 종이 위 끝 - 틈 위 (영상 창 위 끝보다 위 · 검토: 종이 봉우리를 덮음)
+                    self.assertLessEqual(y1, cv - editor.TXT_GAP + 1e-4, t)
+                    self.assertEqual(y0, min(editor.SKIN_BOX["y"], math.floor((cv - editor.TXT_GAP - gg["h"]) * 1e4 + 1e-6) / 1e4))
                     continue
                 ks = kt["style"]
                 self.assertLessEqual(ks["size"], k0["size"])
@@ -1876,20 +1884,47 @@ class TwoLineTitleTest(unittest.TestCase):
         top = {"id": "t", "text": "디딤발\n꿀팁", "style": editor.skin_title_style("디딤발\n꿀팁")}
         g = editor.skin_box(top, 10)
         kt = {"id": "k", "text": "강원FC U12", "plan": "topic", "style": editor.skin_topic_style("강원FC U12", wt, 96)}
-        editor.skin_stack(top, g, [kt], wt)
+        editor.skin_stack(top, g, [kt], wt, cover=cv)
         self.assertEqual((round(g["y"] * H), round((g["y"] + g["h"]) * H), kt["style"]["size"]), (77, 317, 56))
         top = {"id": "t", "text": self.LONG, "style": editor.skin_title_style(self.LONG)}
         g = editor.skin_box(top, 10)
         kt = {"id": "k", "text": "강원FC U12", "plan": "topic", "style": editor.skin_topic_style("강원FC U12", wt, 53)}
-        editor.skin_stack(top, g, [kt], wt)
+        editor.skin_stack(top, g, [kt], wt, cover=cv)
         self.assertEqual((g["y"], kt["style"]["size"]), (editor.SKIN_BOX["y"], 48))
-        # 한 줄 큰 제목: 상자는 늘 0.0922 · 0.0625 (예전 그대로 · 큰 제목·주제 줄 안 건드림)
+        # 한 줄 큰 제목: 아무것도 안 건드림 (소유자가 옮긴·키운 상자도 그대로 · v2.26.0 그대로 · 검토: 글을 칠 때마다 0.0922·0.0625 로 돌아감)
         top = {"id": "t", "text": "선수 이름 맞추기", "style": editor.skin_title_style("선수 이름 맞추기")}
         g = dict(editor.skin_box(top, 10), y=0.05, h=0.2)
         kt = {"id": "k", "text": "강원FC U12", "plan": "topic", "style": editor.skin_topic_style("강원FC U12", wt, 96)}
         s0, k0 = dict(top["style"]), dict(kt["style"])
-        self.assertEqual(editor.skin_stack(top, g, [kt], wt), [])
-        self.assertEqual((g["y"], g["h"], top["style"], kt["style"]), (0.0922, 0.0625, s0, k0))
+        self.assertEqual(editor.skin_stack(top, g, [kt], wt, cover=cv), [])
+        self.assertEqual((g["y"], g["h"], top["style"], kt["style"]), (0.05, 0.2, s0, k0))
+
+    def test_box_above_torn_paper(self):
+        """검토 visual: 주제 줄이 없는 두 줄 큰 제목(88 · 96 · 13~18글자나 줄바꿈 두 줄)은 흰 상자 아래 끝이 영상 창 위 끝 - 틈(394화소)까지 내려와
+        찢어진 종이 봉우리(386화소~)를 덮었음 → 상자 아래 끝은 찢어진 종이 위 끝(skin coverTop · 385화소) - 틈 위 · 상자는 위로 늘어남 · 스킨 그림에서 상자 밑 줄은 칠판."""
+        from PIL import Image
+        import numpy as np
+        win = editor.skin_window("academy.png")
+        info = editor.skin_info()
+        self.assertEqual(info["coverTop"], win["coverTop"])                                                   # 편집실(SKX)도 같은 값
+        a = np.asarray(Image.open(SKIN).convert("RGBA")).astype(int)
+        for t, z in (("트래핑 꿀팁 세 가지 알려줄게요", 88), ("디딤발\n꿀팁", 96), ("⚽ 슈팅 꿀팁 세 가지 알려드릴게요 🔥🔥", 88)):
+            top = {"id": "t", "text": t, "style": editor.skin_title_style(t)}
+            self.assertEqual((top["style"]["size"], top["style"]["lines"]), (z, 2), t)
+            g = editor.skin_box(top, 10)
+            self.assertEqual(editor.skin_stack(top, g, [], win["top"], cover=win["coverTop"]), [])
+            y1 = round((g["y"] + g["h"]) * H)
+            self.assertLessEqual(y1, win["coverTop"] * H - editor.TXT_GAP * H + 1, t)
+            self.assertGreaterEqual(g["y"], editor.SKIN_BOX_TOP_MIN)
+            x0, x1 = round(g["x"] * W), round((g["x"] + g["w"]) * W)
+            paper = np.where((a[:, x0:x1, :3].min(axis=2) > 200).any(axis=1) & (np.arange(a.shape[0]) > 250))[0]
+            self.assertGreater(int(paper[0]), y1 + 10, (t, int(paper[0]), y1))                                 # 종이(흰 화소)는 상자 아래 10화소 넘게 밑
+            self.assertEqual(top["style"]["y"], editor.skin_title_y(g["y"], g["h"], z, 2))
+        # cover 없이(예전 셈 · 바꾼 스킨을 못 읽은 경우)는 영상 창 위 끝 - 틈까지
+        top = {"id": "t", "text": "디딤발\n꿀팁", "style": editor.skin_title_style("디딤발\n꿀팁")}
+        g = editor.skin_box(top, 10)
+        editor.skin_stack(top, g, [], win["top"])
+        self.assertEqual(round((g["y"] + g["h"]) * H), 394)
 
     def test_stack_drop(self):
         """영상 창이 아주 위에 있는 스킨(창 위 끝 0.14)이면 두 줄 상자 아래에 주제 줄 자리가 없음 → 48 까지 줄여도 안 되면 그 쇼츠에서만 뺌 (drop) ·
@@ -1911,7 +1946,24 @@ class TwoLineTitleTest(unittest.TestCase):
         top = {"id": "t", "text": "디딤발\n꿀팁", "style": editor.skin_title_style("디딤발\n꿀팁")}
         g = editor.skin_box(top, 10)
         self.assertEqual(editor.skin_stack(top, g, [kt], 0.2172, drop=False), [])
-        self.assertEqual(kt["style"]["size"], 50)
+        self.assertEqual(kt["style"]["size"], 50)                                                               # 자리가 있으면 손댄 크기 그대로
+        # 손댄 크기(80 · 자리는 47 일 때 그대로 0.1943)도 자리가 모자라면 빼기 전에 한 단계씩 줄임 (자리 = 글 아래 끝 그대로 · 검토: 바로 뺐음)
+        win = editor.skin_window("academy.png")
+        for drop in (True, False):
+            top = {"id": "t", "text": "트래핑 꿀팁 세 가지 알려줄게요 오늘은", "style": editor.skin_title_style("트래핑 꿀팁 세 가지 알려줄게요 오늘은")}
+            g = editor.skin_box(top, 10)
+            kt = {"id": "k", "text": "퍼스트 터치 레슨 · 포인트 3", "plan": "topic", "style": dict(editor.SKIN_TOPIC, size=80, y=0.1943)}
+            self.assertEqual(editor.skin_stack(top, g, [kt], win["top"], drop=drop, cover=win["coverTop"]), [])
+            self.assertEqual((top["style"]["size"], kt["style"]["size"], kt["style"]["y"]), (88, 64, 0.1943))
+            self.assertGreaterEqual(g["y"], editor.SKIN_BOX_TOP_MIN)
+            kb = editor.text_box(kt["text"], kt["style"], W, H)
+            self.assertLessEqual(g["y"] + g["h"], kb[1] + editor.SKIN_TOPIC_TUCK * 64 / H + 1e-4)
+        # 손으로 상자 안까지 끌어 올린 주제 줄(글 아래 끝 0.13)은 48 까지 줄여도 안 들어 뺌
+        top = {"id": "t", "text": "트래핑 꿀팁 세 가지 알려줄게요 오늘은", "style": editor.skin_title_style("트래핑 꿀팁 세 가지 알려줄게요 오늘은")}
+        g = editor.skin_box(top, 10)
+        kt = {"id": "k", "text": "퍼스트 터치 레슨 · 포인트 3", "plan": "topic", "style": dict(editor.SKIN_TOPIC, size=80, y=0.13)}
+        self.assertEqual(editor.skin_stack(top, g, [kt], win["top"], cover=win["coverTop"]), [kt])
+        self.assertEqual(kt["style"]["size"], 48)
         # 가편집(skin_card): 그 쇼츠에서만 뺐다고 studio.log 에 까닭 한 줄
         win = {"top": wt, "bottom": 0.76}
         with mock.patch.object(editor.studiolog, "write") as wr:
@@ -2002,6 +2054,17 @@ class TwoLineTitleTest(unittest.TestCase):
         self.assertEqual(big["style"]["y"], editor.skin_title_y(g["y"], g["h"], 53, 2))
         kb = editor.text_box(kt["text"], kt["style"], W, H)
         self.assertLessEqual(g["y"] + g["h"], kb[1] + editor.SKIN_TOPIC_TUCK * kt["style"]["size"] / H + 1e-4)
+        # 손대지 않은 주제 줄(예전 28)도 새 큰 제목 크기에 맞춤 = 편집실에서 새로 친 것과 같은 값 (검토: 두 줄 53 큰 제목 밑에 28 주제 줄이 남음)
+        fresh = editor.skin_topic_style(kt["text"], win["top"], 53)
+        self.assertEqual((kt["style"]["size"], kt["style"]["y"]), (fresh["size"], fresh["y"]))
+        self.assertEqual(kt["style"]["size"], 48)
+        self.assertEqual(q["titles"][1]["style"]["size"], 28)                                                 # (편집본은 그대로)
+        T33 = "패스하고 그 자리에 서 있으면 왜 안될까요? 끝까지 보세요!"
+        b33, k33 = editor.skin_text_guard(old(T33))["titles"]
+        self.assertEqual((b33["style"]["size"], b33["style"]["lines"], k33["style"]["size"]), (56, 2, 56))
+        self.assertEqual(k33["style"]["y"], editor.skin_topic_style("강원FC U12", win["top"], 56)["y"])
+        g33 = editor.skin_text_guard(old(T33))["shapes"][0]
+        self.assertLessEqual(g33["y"] + g33["h"], editor.text_box(k33["text"], k33["style"], W, H)[1] + editor.SKIN_TOPIC_TUCK * 56 / H + 1e-4)
         ass = editor.build_ass(out, W, H)
         self.assertIn("패스하고 그 자리에 서 있으면\\N왜 안될까요", ass)
         self.assertEqual(editor.build_ass(q, W, H), ass)                                                     # 내보내기는 고친 모양으로 (build_ass 안에서 guard)
@@ -2017,6 +2080,46 @@ class TwoLineTitleTest(unittest.TestCase):
         self.assertIs(editor.skin_text_guard(q5), q5)                                                      # 이미 두 줄
         q6 = dict(old(self.LONG), layout=dict(editor.BOX_LAYOUT))
         self.assertIs(editor.skin_text_guard(q6), q6)                                                      # 스킨이 아니면 그대로
+        # 손댄 크기 주제 줄(v2.26.0 에서 47 한 줄 큰 제목 밑 주제 줄을 80 으로 키움 · 자리는 그대로 0.1943): 두 줄 88 밑에 자리가 모자라면 빼기 전에 줄임 (64 · 검토: 바로 뺐음)
+        q7 = old("트래핑 꿀팁 세 가지 알려줄게요 오늘은", topic="퍼스트 터치 레슨 · 포인트 3")
+        q7["titles"][1]["style"] = dict(q7["titles"][1]["style"], size=80, y=0.1943)
+        with mock.patch.object(editor.studiolog, "write") as wr:
+            b7, k7 = editor.skin_text_guard(q7)["titles"]
+        self.assertEqual((b7["style"]["size"], b7["style"]["lines"], k7["style"]["size"], k7["style"]["y"]), (88, 2, 64, 0.1943))
+        self.assertEqual(wr.call_count, 0)
+
+    def test_wrap_shrinks_when_rows_overflow(self):
+        """검토: 손댄 크기(조금 옮긴 큰 제목 · 크기 칸 96)로 긴 글을 붙이면 skin_title_wrap 이 96 그대로 두 줄만 켜 두 줄 모두 흰 상자(74%) 밖으로 넘침 →
+        그 크기로 두 줄도 안 들면 두 줄이 드는 크기까지 줄임 (SKIN_TWO_SIZES 중 그보다 작은 것 · 그 밑은 들어가는 크기까지) · 들면 손댄 크기 그대로."""
+        T = "패스하고 그 자리에 서 있으면 왜 안될까요 정말 궁금해요"
+        room = editor.SKIN_BOX_MAX * W - 2 * editor.SKIN_PAD
+        self.assertEqual(editor.skin_title_style(T)["size"], 56)
+        for z, want in ((96, 56), (90, 56), (60, 60)):   # (60 은 두 줄이 들어 손댄 크기 그대로)
+            t = {"text": T, "style": dict(editor.SKIN_TITLE, size=z, y=0.15)}
+            self.assertTrue(editor.skin_title_wrap(t), z)
+            rows = editor.skin_title_rows(T, t["style"])
+            with editor.ep_font_scope(False):
+                self.assertLessEqual(max(editor._text_w(r, t["style"]) for r in rows), room + 1e-6, z)
+            self.assertEqual(t["style"]["size"], want, z)
+        t = {"text": "트래핑 꿀팁 세 가지 알려줄게요", "style": dict(editor.SKIN_TITLE, size=90)}
+        self.assertTrue(editor.skin_title_wrap(t))
+        self.assertEqual(t["style"]["size"], 90)                                                             # 90 으로 두 줄이 들면 그대로
+        t = {"text": "가" * 40 + " 나", "style": dict(editor.SKIN_TITLE, size=20)}
+        self.assertTrue(editor.skin_title_wrap(t))
+        self.assertEqual(t["style"]["size"], 20)                                                             # 이미 더 작은 손댄 크기는 키우지 않음
+
+    def test_topic_fit_uses_two_line_box(self):
+        """검토: 두 줄 큰 제목이면 skin_topic_fit 이 나누기 전 한 줄 폭(상자 가장 넓게 799화소)으로 '흰 상자 × 1.15'를 셈 → 실제 상자(넓은 줄)의 1.28배 주제 줄도 고름 →
+        이제 skin_box_fit 과 같은 넓은 줄 폭으로 · 고른 주제 줄은 실제 흰 상자 × 1.15 안 (D-539 · D-542)."""
+        win = editor.skin_window("academy.png")
+        T = "패스하고 그 자리에 서 있으면 왜 안될까요?"
+        top = {"id": "t", "text": T, "style": editor.skin_title_style(T)}
+        self.assertEqual((top["style"]["size"], top["style"]["lines"]), (72, 2))
+        g = editor.skin_box(top, 10)
+        cands = ["강원FC U12 첫 번째 훈련 영상", "퍼스트 터치 레슨 · 포인트 3", "강원FC U12"]
+        text, st = editor.skin_topic_fit(cands, top, win["top"])
+        self.assertLessEqual(editor.skin_hug_w(text, st), g["w"] * W * editor.SKIN_TOPIC_BOX + 1e-6, (text, st["size"]))
+        self.assertNotEqual((text, st["size"]), ("강원FC U12 첫 번째 훈련 영상", 72))                         # 예전에 고른 것 (상자의 1.28배)
 
 
 class WhiteCaptionTest(unittest.TestCase):
@@ -2135,7 +2238,7 @@ class SameAsBeforeTest(unittest.TestCase):
 @unittest.skipUnless(shutil.which("node"), "node 가 없어요")
 class EditorTemplateTest(unittest.TestCase):
     """editor.html 템플릿 '풋살사관학교 스킨'(skinCard · skinTitleStyle · skinTopicStyle · skinBoxFit · skinCapY)을 node 로 그대로 → 서버와 같은 값."""
-    EXTRA = ("newPair", "fullSeq", "winClip", "fitRect", "SKIN", "SKIN_HUG", "SKX", "skinTitleSize", "skinTitleOne", "SKIN_TAIL", "skinTitleSplit", "skinTitleRows",
+    EXTRA = ("newPair", "fullSeq", "winClip", "fitRect", "SKIN", "SKIN_HUG", "SKX", "skinTitleSize", "skinTitleOne", "SKIN_TAIL", "skinCutOk", "skinTitleSplit", "skinTitleRows",
              "skinTitleText", "skinBoxH", "skinTitleY", "skinNLines", "skinTitleStyle", "skinTitleWrap", "skinTitleAuto", "skinBoxFit", "skinStack", "skinTopics", "skinGuard",
              "skinTopicStyle", "skinCapY", "skinCard", "skinOn", "skinTop", "skinRefit", "skinOneLine", "skinTopicAuto")
 
@@ -2296,32 +2399,44 @@ S = rough(false); TEMPLATES["풋살사관학교 스킨"]();   // 큰 제목을 �
         wt0 = info["top"]
         texts = [TitleFitTest.LONG, "트래핑 꿀팁 세 가지 알려줄게요", "패스하고 그 자리에 서 있으면 왜 안될까요?", "디딤발\n꿀팁", "가" * 40, "수비수 둘을 한 번에 제치는 비법 공개 !",
                  "왜 안 될까?", "A B C D E F G H I J K L M N O P Q R", "‘왜’ 안될까요? (1/3) 끝까지 보세요 진짜로", "선수 이름 맞추기", "가 나\n다 라\n마바사아자차카타파하거너더러",
-                 "퍼스트 터치 레슨 두 번째 포인트 디딤발 방향과 각도", "가나다라마바사아자차카 타파하거너더러머버서어", ""]
-        cases = [(zt, wt, drop) for zt in (None, 96, 72, 48) for wt in (wt0, 0.14) for drop in (True, False)]
+                 "퍼스트 터치 레슨 두 번째 포인트 디딤발 방향과 각도", "가나다라마바사아자차카 타파하거너더러머버서어", "",
+                 "슈팅 정확도 올리는 3 가지 방법 알려드림 2026", "드리블 잘하는 법 (초보자용) 꼭 보세요!!", "찰 때 주의할 점 세 가지만 기억하세요", "3 가지", "법 수 것",
+                 "트래핑 꿀팁 세 가지 알려줄게요 오늘은", "⚽ 슈팅 꿀팁 세 가지 알려드릴게요 🔥🔥"]
+        cv0 = info["coverTop"]
+        # zt: 주제 줄 (None 없음 · 숫자 손대지 않은 크기 · 'h80' 손댄 크기 80 (자리 0.1943 그대로) · 'up' 손으로 상자 안까지 끌어 올림) · cover: 찢어진 종이 위 끝
+        cases = [(zt, wt, drop, cv) for zt in (None, 96, 72, 48, "h80", "up") for wt in (wt0, 0.14) for drop in (True, False) for cv in (None, cv0)]
+        wraps = [(t, z) for t in texts for z in (96, 90, 60, 40, 20)]
         got = self.run_js(f"""
-const T = {json.dumps(texts, ensure_ascii=False)}, C = {json.dumps(cases)};
-out = {{ split: T.map(skinTitleSplit), style: T.map(skinTitleStyle), one: T.map(skinTitleOne), stack: [] }};
-for (const text of T) for (const [zt, wt, drop] of C) {{
+const T = {json.dumps(texts, ensure_ascii=False)}, C = {json.dumps(cases)}, WR = {json.dumps(wraps, ensure_ascii=False)};
+out = {{ split: T.map(skinTitleSplit), style: T.map(skinTitleStyle), one: T.map(skinTitleOne), stack: [], wrap: [] }};
+for (const text of T) for (const [zt, wt, drop, cv] of C) {{
   const t = {{ text, style: skinTitleStyle(text) }}, g = {{ x: 0.13, y: 0.0922, w: 0.74, h: 0.0625 }};
   skinBoxFit(t, g);
-  const k = zt == null ? null : {{ text: "강원FC U12", plan: "topic", style: skinTopicStyle("강원FC U12", wt, Math.min(zt, t.style.size)) }};
-  const gone = skinStack(t, g, k ? [k] : [], wt, drop);
+  const ks = zt === "h80" ? {{ ...SKIN.TOPIC, size: 80, y: 0.1943 }} : zt === "up" ? {{ ...SKIN.TOPIC, size: 80, y: 0.13 }} : zt == null ? null : skinTopicStyle("강원FC U12", wt, Math.min(zt, t.style.size));
+  const k = ks && {{ text: "강원FC U12", plan: "topic", style: ks }};
+  const gone = skinStack(t, g, k ? [k] : [], wt, drop, cv);
   out.stack.push({{ t: t.style, g, k: k && k.style, gone: gone.length }});
-}}""")
+}}
+for (const [text, z] of WR) {{ const t = {{ text, style: {{ ...SKIN.TITLE, size: z, y: 0.15 }} }}; const two = skinTitleWrap(t); out.wrap.push([two, t.style]); }}""")
         for t, a, b, c in zip(texts, got["split"], got["style"], got["one"]):
             self.assertEqual(a, editor.skin_title_split(t), t)
             self.assertEqual(b, editor.skin_title_style(t), t)
             self.assertEqual(c, editor.skin_title_one(t), t)
         i = 0
         for text in texts:
-            for zt, wt, drop in cases:
+            for zt, wt, drop, cv in cases:
                 top = {"text": text, "style": editor.skin_title_style(text)}
                 g = {"x": 0.13, "y": 0.0922, "w": 0.74, "h": 0.0625}
                 editor.skin_box_fit(top, g)
-                k = None if zt is None else {"text": "강원FC U12", "plan": "topic", "style": editor.skin_topic_style("강원FC U12", wt, min(zt, top["style"]["size"]))}
-                gone = editor.skin_stack(top, g, [k] if k else [], wt, drop)
-                self.assertEqual(got["stack"][i], {"t": top["style"], "g": g, "k": k and k["style"], "gone": len(gone)}, (text, zt, wt, drop))
+                ks = dict(editor.SKIN_TOPIC, size=80, y=0.1943) if zt == "h80" else dict(editor.SKIN_TOPIC, size=80, y=0.13) if zt == "up" else \
+                    None if zt is None else editor.skin_topic_style("강원FC U12", wt, min(zt, top["style"]["size"]))
+                k = ks and {"text": "강원FC U12", "plan": "topic", "style": ks}
+                gone = editor.skin_stack(top, g, [k] if k else [], wt, drop, cover=cv)
+                self.assertEqual(got["stack"][i], {"t": top["style"], "g": g, "k": k and k["style"], "gone": len(gone)}, (text, zt, wt, drop, cv))
                 i += 1
+        for (text, z), (two, st) in zip(wraps, got["wrap"]):   # 손댄 크기 큰 제목 (skinTitleWrap = skin_title_wrap · 두 줄도 안 들면 줄임)
+            t = {"text": text, "style": dict(editor.SKIN_TITLE, size=z, y=0.15)}
+            self.assertEqual((two, st), (editor.skin_title_wrap(t), t["style"]), (text, z))
 
     def test_two_line_title_edit(self):
         """편집실 (I-537 실제 경우): 큰 제목을 아주 길게 치면 두 줄(53) · 흰 상자가 두 줄 높이 · 주제 줄은 상자 아래 · 다시 짧게 치면 한 줄·예전 상자 ·
@@ -2343,11 +2458,29 @@ old = big.text; big.text = "트래핑"; skinRefit(S, big, old); step();         
 old = big.text; big.text = "트래핑 꿀팁 세 가지 알려줄게요"; skinRefit(S, big, old); step();           // 2: 두 줄 88
 big.style.size = 90; skinRefit(S, big); step();                                                         // 3: 손댄 크기 90 → 그 크기로 두 줄
 big.style.size = 40; skinRefit(S, big); step();                                                         // 4: 40 → 한 줄에 듦 → 한 줄 상자 가운데
+// 5·6: 한 줄 큰 제목에서 소유자가 흰 상자를 옮기고 키움 → 큰 제목 글·주제 줄 글을 고쳐도 상자 자리·높이 그대로 (v2.26.0 그대로 · 검토: 0.0922·0.0625 로 돌아감)
+const M = rough(false); S = M; TEMPLATES["풋살사관학교 스킨"]();
+const mb = M.titles.find(t => t.id === "big"), mk = M.titles.find(t => t.id === "k"), mg = M.shapes.find(g => g.plan === "card"); mg.y = 0.11; mg.h = 0.07;
+old = mb.text; mb.text = "트래핑 꿀팁!"; skinRefit(M, mb, old); out.moved = [cp(mg)];
+old = mk.text; mk.text = "강원FC U12"; skinRefit(M, mk, old); out.moved.push(cp(mg));
+mb.style.size = 80; skinRefit(M, mb); out.moved.push(cp(mg));
+// 7: 큰 제목을 조금 옮긴 뒤(손댄 것) 긴 글을 붙임 → 두 줄이 흰 상자 안에 들게 크기를 줄임 (검토: 96 그대로 두 줄이 상자 밖)
+const D = rough(false); S = D; TEMPLATES["풋살사관학교 스킨"]();
+const db = D.titles.find(t => t.id === "big"); db.style.y = +db.style.y + 0.003; old = db.text; db.text = "패스하고 그 자리에 서 있으면 왜 안될까요 정말 궁금해요"; skinRefit(D, db, old);
+out.nudge = {{ t: cp(db.style), g: cp(D.shapes.find(g => g.plan === "card")), rows: skinTitleRows(db.text, db.style).map(r => textW(r, db.style, null)) }};
+S = M;
 const L = rough(false); L.titles[0].text = LONG; L.captionStyle.effect = "karaoke"; L.captionStyle.highlight = "#FFD400";
 S = L; TEMPLATES["풋살사관학교 스킨"](); out.tpl = cp(S);                                              // 템플릿: 긴 제목 → 두 줄 · 노래방 → 바로
 const O = rough(false); S = O; TEMPLATES["풋살사관학교 스킨"]();                                        // 열 때: 예전 한 줄 28 큰 제목 (v2.26.0)
 const ob = O.titles.find(t => t.id === "big"); ob.text = LONG; ob.style = skinTitleOne(LONG); O.titles.find(t => t.id === "k").style = skinTopicStyle("퍼스트 터치 레슨 · 포인트 3", SKX.top, 28);
-skinBoxFit(ob, O.shapes.find(g => g.plan === "card")); out.old = cp(O); out.guard = skinGuard(O, SKX.top); out.fixed = cp(O); out.again = skinGuard(O, SKX.top);""")
+skinBoxFit(ob, O.shapes.find(g => g.plan === "card")); out.old = cp(O); out.guard = skinGuard(O, SKX.top, SKX.coverTop); out.fixed = cp(O); out.again = skinGuard(O, SKX.top, SKX.coverTop);
+// 열 때: 손댄 주제 줄(80 · v2.26.0 에서 47 한 줄 큰 제목 밑) → 빼지 않고 줄임 · 주제 줄 없는 두 줄 88 → 흰 상자는 찢어진 종이 위
+const Q = rough(false); S = Q; TEMPLATES["풋살사관학교 스킨"]();
+const qb = Q.titles.find(t => t.id === "big"); qb.text = "트래핑 꿀팁 세 가지 알려줄게요 오늘은"; qb.style = skinTitleOne(qb.text); skinBoxFit(qb, Q.shapes.find(g => g.plan === "card"));
+Object.assign(Q.titles.find(t => t.id === "k").style, {{ size: 80, y: 0.1943 }}); out.oldQ = cp(Q); out.guardQ = skinGuard(Q, SKX.top, SKX.coverTop).length; out.fixedQ = cp(Q);
+const R = rough(false); S = R; TEMPLATES["풋살사관학교 스킨"](); R.titles = R.titles.filter(t => t.id !== "k");
+const rb = R.titles.find(t => t.id === "big"); rb.text = "트래핑 꿀팁 세 가지 알려줄게요"; rb.style = skinTitleOne(rb.text); skinBoxFit(rb, R.shapes.find(g => g.plan === "card"));
+out.oldR = cp(R); skinGuard(R, SKX.top, SKX.coverTop); out.fixedR = cp(R);""")
         def py(text, style, ktext, kstyle, drop=False):
             top = {"text": text, "style": dict(style)}
             g = {}
@@ -2379,6 +2512,11 @@ skinBoxFit(ob, O.shapes.find(g => g.plan === "card")); out.old = cp(O); out.guar
         self.assertEqual((s3["t"]["size"], s3["t"]["lines"]), (90, 2))
         self.assertEqual((s4["t"]["size"], s4["t"].get("lines"), s4["t"]["y"]), (40, None, editor.skin_title_y(0.0922, 0.0625, 40, 1)))
         self.assertEqual((s4["g"]["y"], s4["g"]["h"]), (0.0922, 0.0625))
+        self.assertEqual([(g_["y"], g_["h"]) for g_ in got["moved"]], [(0.11, 0.07)] * 3)                  # 옮긴 상자 그대로 (한 줄 큰 제목)
+        nd = got["nudge"]
+        self.assertEqual(nd["t"]["lines"], 2)
+        self.assertLessEqual(max(nd["rows"]), editor.SKIN_BOX_MAX * W - 2 * editor.SKIN_PAD + 1e-6)         # 두 줄 모두 흰 상자 안
+        self.assertEqual(nd["t"]["size"], 56)
         tpl = got["tpl"]
         tb = next(t for t in tpl["titles"] if t["id"] == "big")
         tk = next(t for t in tpl["titles"] if t["id"] == "k")
@@ -2389,14 +2527,32 @@ skinBoxFit(ob, O.shapes.find(g => g.plan === "card")); out.old = cp(O); out.guar
         old = got["old"]                                                                                    # 열 때 = 내보내기 (skin_title_fix)
         self.assertEqual(old["titles"][0]["style"]["size"], 28)
         q = json.loads(json.dumps(old))
-        gone = editor.skin_title_fix(q, info["top"])
+        gone = editor.skin_title_fix(q, info["top"], cover=info["coverTop"])
         self.assertEqual(got["guard"], gone)
         fx = got["fixed"]
         self.assertEqual((fx["titles"], fx["shapes"]), (q["titles"], q["shapes"]))
         self.assertEqual((fx["titles"][0]["style"]["size"], fx["titles"][0]["style"]["lines"]), (53, 2))
+        fk = next(t for t in fx["titles"] if t["id"] == "k")                                                # 주제 줄(28)도 새 큰 제목 크기에 (검토 · = 편집실에서 새로 친 것)
+        self.assertEqual((fk["style"]["size"], fk["style"]["y"]), (48, editor.skin_topic_style(fk["text"], wt, 53)["y"]))
+        self.assertEqual((fk["style"]["size"], fk["style"]["y"]), (s0["k"]["size"], s0["k"]["y"]))
         self.assertIsNone(got["again"])                                                                     # 두 번 해도 그대로
+        q = json.loads(json.dumps(got["oldQ"]))
+        self.assertEqual(len(editor.skin_title_fix(q, info["top"], cover=info["coverTop"])), got["guardQ"])
+        self.assertEqual((got["fixedQ"]["titles"], got["fixedQ"]["shapes"]), (q["titles"], q["shapes"]))
+        qk = next(t for t in q["titles"] if t["id"] == "k")
+        self.assertEqual((got["guardQ"], qk["style"]["size"], qk["style"]["y"]), (0, 64, 0.1943))          # 손댄 주제 줄은 빼지 않고 줄임
+        q = json.loads(json.dumps(got["oldR"]))
+        editor.skin_title_fix(q, info["top"], cover=info["coverTop"])
+        self.assertEqual((got["fixedR"]["titles"], got["fixedR"]["shapes"]), (q["titles"], q["shapes"]))
+        rg = q["shapes"][0]
+        self.assertEqual((q["titles"][0]["style"]["size"], q["titles"][0]["style"]["lines"]), (88, 2))
+        self.assertLessEqual(rg["y"] + rg["h"], info["coverTop"] - editor.TXT_GAP + 1e-4)                    # 주제 줄 없는 두 줄 상자는 찢어진 종이 위
         src = (ROOT / "editor.html").read_text(encoding="utf-8")
-        self.assertIn("const r = skinOn(q) ? skinGuard(q, SKX.top) : null;", src)                          # 편집실을 열 때
+        self.assertIn("r = skinGuard(q, skx0.top, skx0.coverTop);", src)                                      # 편집실을 열 때 (지문 signFresh 바로 뒤 · 화면에 묶기 전)
+        self.assertIn('pushHist("긴 큰 제목 두 줄로", gfx.before); scheduleSave();', src)                     # 고치면 바로 저장 · 되돌리기
+        i0, i1 = src.index("P.sequences.forEach(ensureSeq); signFresh();"), src.index("r = skinGuard(q, skx0.top, skx0.coverTop);")
+        self.assertTrue(i0 < i1 < src.index("bindS(); EVENTS = j.events"))
+        self.assertIn("if (same) q.fsig = seqSig(q);", src)                                                    # 지문이 맞던 '(새로 찾음)'은 고친 내용으로 다시 지문
         self.assertIn('text: g.style.hug === "skin" && g.style.lines === 2 ? skinTitleText(g.text, g.style) : g.text', src)   # 미리보기는 나눈 두 줄
 
     def test_topic_edit_stays_one_line(self):
